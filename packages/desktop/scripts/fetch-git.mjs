@@ -23,7 +23,7 @@ if (TARGET_OS !== 'win32') {
   process.exit(0)
 }
 
-if (TARGET_ARCH !== 'x64') {
+if (!['x64', 'arm64'].includes(TARGET_ARCH)) {
   console.error(`Unsupported Git for Windows target: ${TARGET_OS}-${TARGET_ARCH}`)
   process.exit(1)
 }
@@ -47,12 +47,13 @@ async function latestMinGitUrl() {
     throw new Error(`GitHub API returned ${response.status}`)
   }
   const release = await response.json()
+  const assetPattern = TARGET_ARCH === 'arm64' ? /^MinGit-[\d.]+-arm64\.zip$/ : /^MinGit-[\d.]+-64-bit\.zip$/
   const asset = release.assets?.find(candidate =>
     typeof candidate?.name === 'string'
-    && /^MinGit-.*-64-bit\.zip$/.test(candidate.name)
+    && assetPattern.test(candidate.name)
     && typeof candidate.browser_download_url === 'string',
   )
-  if (!asset) throw new Error('Could not find MinGit 64-bit zip in latest Git for Windows release')
+  if (!asset) throw new Error(`Could not find MinGit ${TARGET_ARCH} zip in latest Git for Windows release`)
   return asset.browser_download_url
 }
 

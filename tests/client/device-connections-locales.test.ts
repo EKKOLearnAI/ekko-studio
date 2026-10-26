@@ -8,6 +8,7 @@ import ja from '../../packages/client/src/i18n/locales/ja'
 import ko from '../../packages/client/src/i18n/locales/ko'
 import pt from '../../packages/client/src/i18n/locales/pt'
 import ru from '../../packages/client/src/i18n/locales/ru'
+import tr from '../../packages/client/src/i18n/locales/tr'
 import zhTW from '../../packages/client/src/i18n/locales/zh-TW'
 import zh from '../../packages/client/src/i18n/locales/zh'
 
@@ -30,7 +31,6 @@ const requiredPaths = [
   'connections.title',
   'connections.tabs.app',
   'connections.tabs.mcu',
-  'connections.tabs.devices',
   'connections.app.subtitle',
   'connections.app.scanToAdd',
   'connections.app.purchaseAccess',
@@ -87,7 +87,6 @@ const requiredPaths = [
   'connections.app.loadFailed',
   'mcuDevices.subtitle',
   'mcuDevices.refresh',
-  'devices.subtitle',
 ]
 
 function getPath(messages: Record<string, unknown>, path: string): unknown {
@@ -97,6 +96,14 @@ function getPath(messages: Record<string, unknown>, path: string): unknown {
 }
 
 describe('Device connections locale coverage', () => {
+  it('defines remote device messages in every locale, including Turkish', () => {
+    for (const [locale, messages] of Object.entries({ ...localeMessages, tr })) {
+      for (const key of Object.keys(en.remoteDevices)) {
+        expect(getPath(messages, `remoteDevices.${key}`), `${locale} missing remoteDevices.${key}`).toEqual(expect.any(String))
+      }
+    }
+  })
+
   it('defines every new device connections message directly in every locale', () => {
     for (const [locale, messages] of Object.entries(localeMessages)) {
       for (const path of requiredPaths) {

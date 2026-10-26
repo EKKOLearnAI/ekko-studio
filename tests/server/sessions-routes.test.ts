@@ -16,6 +16,8 @@ const importHermesSessionMock = vi.fn(async (ctx: any) => { ctx.body = { session
 const searchMock = vi.fn(async (ctx: any) => { ctx.body = { results: [{ id: 'search-1' }] } })
 const getMock = vi.fn(async (ctx: any) => { ctx.body = { session: { id: ctx.params.id } } })
 const getContextMock = vi.fn(async (ctx: any) => { ctx.body = { session_id: ctx.params.id, messages: [] } })
+const getTasksMock = vi.fn(async (ctx: any) => { ctx.body = { session_id: ctx.params.id, revision: 0, updated_at: 0, tasks: [] } })
+const listTasksMock = vi.fn(async (ctx: any) => { ctx.body = { tasks: [], total: 0, has_more: false } })
 const removeMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
 const renameMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
 const archiveMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
@@ -48,6 +50,8 @@ const renameWorkspaceFileMock = vi.fn(async (ctx: any) => { ctx.body = { ok: tru
 const copyWorkspaceFileMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
 
 vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => ({
+  messageSelection: vi.fn(async (ctx: any) => { ctx.body = { groups: [], historyRevision: 0 } }),
+  deleteMessages: vi.fn(async (ctx: any) => { ctx.body = { deleted: 1, deletedGroups: 1, messageIds: [1], historyRevision: 1 } }),
   listConversations: listConversationsMock,
   getConversationMessages: getConversationMessagesMock,
   getConversationMessagesPaginated: getConversationMessagesPaginatedMock,
@@ -64,6 +68,9 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   search: searchMock,
   get: getMock,
   getContext: getContextMock,
+  getTasks: getTasksMock,
+  updateTaskStatus: vi.fn(),
+  listTasks: listTasksMock,
   remove: removeMock,
   batchRemove: batchRemoveMock,
   rename: renameMock,
@@ -82,6 +89,8 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   usageBatch: usageBatchMock,
   usageSingle: usageSingleMock,
   usageStats: usageStatsMock,
+  usagePricing: vi.fn(),
+  updateUsagePricing: vi.fn(),
   contextLength: contextLengthMock,
   exportSession: exportSessionMock,
   listWorkspaceRunChanges: listWorkspaceRunChangesMock,
@@ -116,6 +125,7 @@ describe('session routes', () => {
     searchMock.mockClear()
     getMock.mockClear()
     getContextMock.mockClear()
+    getTasksMock.mockClear()
     removeMock.mockClear()
     renameMock.mockClear()
     archiveMock.mockClear()
@@ -163,6 +173,8 @@ describe('session routes', () => {
       '/api/studio/usage/stats',
       '/api/studio/sessions/context-length',
       '/api/studio/sessions/:id/context',
+      '/api/studio/sessions/:id/tasks',
+      '/api/studio/session-tasks',
       '/api/studio/sessions/:id/workspace-run-changes',
       '/api/studio/sessions/:id/workspace-run-changes/:changeId/files/:fileId',
       '/api/studio/sessions/:id/workspace-files/list',
@@ -267,6 +279,21 @@ describe('session routes', () => {
 
     expect(getContextMock).toHaveBeenCalledWith(ctx)
     expect(ctx.body).toEqual({ session_id: 'session-1', messages: [] })
+  })
+
+  it('delegates session goal reads to the tasks controller', async () => {
+    const { sessionRoutes } = await import('../../packages/server/src/modules/studio/routes/sessions')
+    const layer = sessionRoutes.stack.find((entry: any) =>
+      entry.path === '/api/studio/sessions/:id/tasks' && entry.methods.includes('GET'),
+    )
+    const ctx: any = { query: {}, body: null, params: { id: 'session-1' } }
+
+    await layer.stack[0](ctx)
+
+    expect(getTasksMock).toHaveBeenCalledWith(ctx)
+    expect(getMock).not.toHaveBeenCalled()
+    expect(getContextMock).not.toHaveBeenCalled()
+    expect(ctx.body).toEqual({ session_id: 'session-1', revision: 0, updated_at: 0, tasks: [] })
   })
 
   it('delegates workspace folder routes to the controller', async () => {

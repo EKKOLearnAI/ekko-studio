@@ -182,4 +182,18 @@ describe('usage store analytics adapter', () => {
     expect(store.stats?.period_days).toBe(7)
     expect(store.totalSessions).toBe(7)
   })
+
+  it('forwards combined filters and clears stale statistics on a failed selection', async () => {
+    usageApiMock.fetchUsageStats.mockResolvedValueOnce(emptyStats(5, 30))
+    const { useUsageStore } = await import('@/stores/hermes/usage')
+    const store = useUsageStore()
+    await store.loadSessions(30)
+    expect(store.totalSessions).toBe(5)
+    usageApiMock.fetchUsageStats.mockRejectedValueOnce(new Error('offline'))
+    await store.loadSessions(7, { model: 'gpt-5', agent: 'codex', account: 'unassigned' })
+    expect(usageApiMock.fetchUsageStats).toHaveBeenLastCalledWith(7, { model: 'gpt-5', agent: 'codex', account: 'unassigned' })
+    expect(store.stats).toBeNull()
+    expect(store.loadError).toBe(true)
+    expect(store.isLoading).toBe(false)
+  })
 })

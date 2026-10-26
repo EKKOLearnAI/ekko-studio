@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { basename, join } from 'path'
+import { basename, join, resolve } from 'path'
 
 const listConversationSummariesFromDbMock = vi.fn()
 const getConversationDetailFromDbMock = vi.fn()
@@ -14,10 +14,12 @@ const getSessionDetailFromDbWithProfileMock = vi.fn()
 const getExactSessionDetailFromDbWithProfileMock = vi.fn()
 const getUsageStatsFromDbMock = vi.fn()
 const getSessionMock = vi.fn()
+const validateCodingAgentModelEffortMock = vi.fn()
 const deleteHermesSessionForProfileMock = vi.fn()
 const localListSessionsMock = vi.fn()
 const localCountSessionsMock = vi.fn()
 const localGetSessionDetailMock = vi.fn()
+const localGetSessionDetailPaginatedMock = vi.fn()
 const localSearchSessionsMock = vi.fn()
 const localDeleteSessionMock = vi.fn()
 const localRenameSessionMock = vi.fn()
@@ -39,16 +41,22 @@ const getGroupChatServerMock = vi.fn()
 const getLocalUsageStatsMock = vi.fn()
 const getRecordedUsageSessionIdsMock = vi.fn()
 const getActiveProfileNameMock = vi.fn()
+const getHermesModelContextLengthMock = vi.fn()
 const loggerWarnMock = vi.fn()
 const getCompressionSnapshotMock = vi.fn()
 const buildDbExportHistoryMock = vi.fn()
 const listUserProfilesMock = vi.fn()
+const listSessionTaskItemsMock = vi.fn(() => ({ tasks: [], total: 0, has_more: false }))
+const setSessionTaskStatusMock = vi.fn()
 const readConfigYamlForProfileMock = vi.fn()
 const bridgeSwitchSessionModelMock = vi.fn()
 const bridgeGetRuntimeStateMock = vi.fn()
 const emitSessionSettingsUpdatedMock = vi.fn()
 const getChatRunServerMock = vi.fn()
 const agentStatusMocks = vi.hoisted(() => ({ hermesAvailable: true }))
+vi.mock('../../packages/server/src/modules/studio/repositories/session-message-deletion', () => ({
+  getMessageSelectionGroups: vi.fn(() => []),
+}))
 const codingAgentRunManagerMock = vi.hoisted(() => ({
   stop: vi.fn(),
 }))
@@ -101,6 +109,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
   countSessions: localCountSessionsMock,
   searchSessions: localSearchSessionsMock,
   getSessionDetail: localGetSessionDetailMock,
+  getSessionDetailPaginated: localGetSessionDetailPaginatedMock,
   deleteSession: localDeleteSessionMock,
   renameSession: localRenameSessionMock,
   setSessionArchived: localSetSessionArchivedMock,
@@ -135,7 +144,13 @@ vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () 
   getUsage: vi.fn(),
   getUsageBatch: vi.fn(),
   getLocalUsageStats: getLocalUsageStatsMock,
+  getUnpricedHermesUsageSessions: vi.fn(() => []),
   getRecordedUsageSessionIds: getRecordedUsageSessionIdsMock,
+}))
+
+vi.mock('../../packages/server/src/modules/studio/repositories/usage-accounts', () => ({
+  getSessionUsageAccounts: vi.fn(() => ({})),
+  getUsageAccountOptions: vi.fn(() => [{ id: '1', username: 'ekko' }]),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/routes/group-chat', () => ({
@@ -221,7 +236,7 @@ vi.mock('../../packages/server/src/modules/studio/services/context-compressor/ex
 vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime', () => ({
   deleteHermesSessionForProfile: deleteHermesSessionForProfileMock,
   getHermesCliSession: getSessionMock,
-  getHermesModelContextLength: vi.fn(),
+  getHermesModelContextLength: getHermesModelContextLengthMock,
   getHermesSessionDetail: getSessionDetailFromDbMock,
   getHermesSessionDetailForProfile: getSessionDetailFromDbWithProfileMock,
   getHermesSessionDetailPaginatedForProfile: vi.fn(),
@@ -241,6 +256,17 @@ vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime',
   },
   stopCodingAgentSessionRun: codingAgentRunManagerMock.stop,
   invalidateCodingAgentSessionRuntime: invalidateCodingAgentSessionRuntimeMock,
+  validateCodingAgentModelEffort: validateCodingAgentModelEffortMock,
+}))
+
+vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({
+  getSessionTaskPlans: vi.fn(() => []),
+}))
+vi.mock('../../packages/server/src/modules/studio/services/session-tasks', () => ({
+  getSessionTasks: (sessionId: string) => ({ session_id: sessionId, revision: 0, updated_at: 0, tasks: [] }),
+  listSessionTaskItems: listSessionTaskItemsMock,
+  setSessionTaskStatus: setSessionTaskStatusMock,
+  SessionTasksError: class extends Error { constructor(message: string, public status = 400) { super(message) } },
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/agent-status-registry', () => ({
@@ -248,6 +274,107 @@ vi.mock('../../packages/server/src/modules/studio/public/agent-status-registry',
 }))
 
 describe('session conversations controller', () => {
+  it('authorizes manual task changes against the session profile and rejects run credentials', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    getSessionMock.mockReturnValue({ id: 's1', profile: 'research', source: 'coding_agent' })
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'research' }])
+    const body = { status: 'closed', expected_updated_at: 123 }
+    const context = (): any => ({ params: { id: 's1', taskId: 't1' }, query: { profile: 'research' },
+      state: { user: { id: 3, role: 'user' } }, request: { body } })
+    setSessionTaskStatusMock.mockReturnValue({ revision: 2, tasks: [{ id: 't1', status: 'closed' }] })
+    const ctx = context()
+    mod.updateTaskStatus(ctx)
+    expect(setSessionTaskStatusMock).toHaveBeenLastCalledWith('s1', 'research', 't1', body)
+    expect(ctx.body.tasks[0].status).toBe('closed')
+    setSessionTaskStatusMock.mockClear()
+    const wrong = context(); wrong.query.profile = 'other'
+    mod.updateTaskStatus(wrong)
+    expect(wrong.status).toBe(404)
+    const run = context(); run.get = () => 'run-context'
+    mod.updateTaskStatus(run)
+    expect(run.status).toBe(403)
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'other' }])
+    const forbidden = context()
+    mod.updateTaskStatus(forbidden)
+    expect(forbidden.status).toBe(403)
+    getSessionMock.mockReturnValue(null)
+    const missing = context()
+    mod.updateTaskStatus(missing)
+    expect(missing.status).toBe(404)
+    expect(setSessionTaskStatusMock).not.toHaveBeenCalled()
+  })
+
+  it('preserves manual task conflict errors and supports the closed filter', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const { SessionTasksError } = await import('../../packages/server/src/modules/studio/services/session-tasks')
+    getSessionMock.mockReturnValue({ id: 's1', profile: 'research' })
+    setSessionTaskStatusMock.mockImplementationOnce(() => { throw new SessionTasksError('Task changed', 409) })
+    const ctx: any = { params: { id: 's1', taskId: 't1' }, query: {}, state: {}, request: { body: {} } }
+    mod.updateTaskStatus(ctx)
+    expect(ctx.status).toBe(409)
+    expect(ctx.body).toEqual({ error: 'Task changed' })
+    const list: any = { query: { status: 'closed' }, state: {} }
+    mod.listTasks(list)
+    expect(listSessionTaskItemsMock).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'closed' }))
+  })
+  it('restricts task pages to existing account profiles before pagination, including explicit filters', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'travel' }, { profile_name: 'deleted-profile' }])
+    const ctx = { query: { profile: '', status: 'open', search: ' export ', offset: '50', limit: '50' }, state: { user: { id: 3, role: 'user' } } } as any
+    mod.listTasks(ctx)
+    expect(listSessionTaskItemsMock).toHaveBeenLastCalledWith(expect.objectContaining({ profiles: ['travel'],
+      status: 'open', search: 'export', offset: 50, limit: 50, order: 'newest' }))
+    expect(ctx.body).toEqual({ tasks: [], total: 0, has_more: false })
+    ctx.query.profile = 'default'
+    mod.listTasks(ctx)
+    expect(listSessionTaskItemsMock).toHaveBeenLastCalledWith(expect.objectContaining({ profiles: [] }))
+    ctx.state.user.role = 'super_admin'
+    ctx.query.profile = ''
+    mod.listTasks(ctx)
+    expect(listSessionTaskItemsMock).toHaveBeenLastCalledWith(expect.objectContaining({ profiles: ['default', 'travel'] }))
+    ctx.get = (name: string) => name === 'x-studio-run-context' ? 'turn' : ''
+    ctx.state.profile = { name: 'travel' }
+    mod.listTasks(ctx)
+    expect(listSessionTaskItemsMock).toHaveBeenLastCalledWith(expect.objectContaining({ profiles: ['travel'] }))
+  })
+
+  it.each([{ profile: ['default', 'travel'] }, { status: 'pending' }, { order: 'anything' }, { limit: '101' }, { offset: '-1' }, { offset: '9007199254740992' }, { search: ['a', 'b'] }])('rejects malformed task list queries: %j', async query => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx = { query, state: {} } as any
+    mod.listTasks(ctx)
+    expect(ctx.status).toBe(400)
+  })
+  it('reads the durable goal ledger only for an existing accessible session', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    getSessionMock.mockReturnValue({ id: 's1', profile: 'research' })
+    const context = () => ({ params: { id: 's1' }, query: {}, state: {} }) as any
+    const ok = context()
+    mod.getTasks(ok)
+    expect(ok.body).toEqual({ session_id: 's1', revision: 0, updated_at: 0, tasks: [] })
+    const wrong = context(); wrong.query.profile = 'other'
+    mod.getTasks(wrong)
+    expect(wrong.status).toBe(404)
+    const forbidden = context(); forbidden.state.user = { id: 3, role: 'user' }
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'other' }])
+    mod.getTasks(forbidden)
+    expect(forbidden.status).toBe(403)
+    getSessionMock.mockReturnValue(null)
+    const missing = context()
+    mod.getTasks(missing)
+    expect(missing.status).toBe(404)
+  })
+  it('forwards the optional model endpoint to context resolution without changing legacy requests', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    getHermesModelContextLengthMock.mockReturnValue(202800)
+    const ctx: any = { query: { profile: 'coding', provider: 'custom:glm', model: 'glm-5.3', base_url: 'https://api.z.ai/api/coding/paas/v4' } }
+    await mod.contextLength(ctx)
+    expect(getHermesModelContextLengthMock).toHaveBeenLastCalledWith({
+      profile: 'coding', provider: 'custom:glm', model: 'glm-5.3', baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    })
+    expect(ctx.body).toEqual({ context_length: 202800 })
+    await mod.contextLength({ query: { profile: 'default', model: 'glm-5.3', base_url: ['untrusted'] } })
+    expect(getHermesModelContextLengthMock).toHaveBeenLastCalledWith({ profile: 'default', model: 'glm-5.3', provider: undefined, baseUrl: undefined })
+  })
   beforeEach(() => {
     vi.resetModules()
     agentStatusMocks.hermesAvailable = true
@@ -314,6 +441,7 @@ describe('session conversations controller', () => {
     getCompressionSnapshotMock.mockReset()
     buildDbExportHistoryMock.mockReset()
     listUserProfilesMock.mockReset()
+    setSessionTaskStatusMock.mockReset()
     listUserProfilesMock.mockReturnValue([])
     readConfigYamlForProfileMock.mockReset()
     readConfigYamlForProfileMock.mockResolvedValue({ model: { default: 'gpt-default', provider: 'openai' } })
@@ -322,6 +450,70 @@ describe('session conversations controller', () => {
     bridgeGetRuntimeStateMock.mockReturnValue({ ready: false, running: false, endpoint: 'ipc:///tmp/hermes-agent-bridge.sock' })
     codingAgentRunManagerMock.stop.mockReset()
     invalidateCodingAgentSessionRuntimeMock.mockReset()
+  })
+
+  it('validates message deletion IDs, profile scope and supported agents before calling the runtime', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const removeMessages = vi.fn(async () => ({ deleted: 2 }))
+    getChatRunServerMock.mockReturnValue({ deleteSessionMessages: removeMessages })
+    const localSession = { id: 's', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', history_revision: 2 }
+    const { getSession } = await import('../../packages/server/src/modules/studio/public/sessions')
+    vi.mocked(getSession).mockReturnValue(localSession as any)
+    const context = (body: any = { messageIds: [2, 2], historyRevision: 2 }) => ({
+      params: { id: 's' }, query: {}, state: {}, request: { body },
+    }) as any
+    for (const body of [{}, { messageIds: [], historyRevision: 2 }, { messageIds: ['2'], historyRevision: 2 }, { messageIds: [2], historyRevision: -1 }]) {
+      const ctx = context(body)
+      await mod.deleteMessages(ctx)
+      expect(ctx.status).toBe(400)
+    }
+    const shared = context(); shared.state.sessionShare = {}
+    await mod.deleteMessages(shared)
+    expect(shared.status).toBe(403)
+    const wrongProfile = context(); wrongProfile.query.profile = 'other'
+    await mod.deleteMessages(wrongProfile)
+    expect(wrongProfile.status).toBe(404)
+    const forbidden = context(); forbidden.state.user = { id: 3, role: 'user' }
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'other' }])
+    await mod.deleteMessages(forbidden)
+    expect(forbidden.status).toBe(403)
+    vi.mocked(getSession).mockReturnValue({ ...localSession, source: 'coding_agent', agent: 'codex' } as any)
+    const coding = context()
+    await mod.deleteMessages(coding)
+    expect(coding.status).toBe(400)
+    expect(removeMessages).not.toHaveBeenCalled()
+    vi.mocked(getSession).mockReturnValue(localSession as any)
+    const ok = context()
+    await mod.deleteMessages(ok)
+    expect(removeMessages).toHaveBeenCalledWith('s', [2], 2)
+    expect(ok.body).toEqual({ deleted: 2 })
+  })
+
+  it('checks runtime activity before exposing selectable message identities', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const { getSession, getMessageSelectionGroups } = await import('../../packages/server/src/modules/studio/public/sessions')
+    vi.mocked(getSession).mockReturnValue({ id: 's', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', history_revision: 0 } as any)
+    const assertEditable = vi.fn().mockRejectedValueOnce(Object.assign(new Error('running'), { status: 409 })).mockResolvedValue(undefined)
+    getChatRunServerMock.mockReturnValue({ assertSessionMessagesEditable: assertEditable })
+    const ctx = { params: { id: 's' }, query: {}, state: {} } as any
+    await expect(mod.messageSelection(ctx)).rejects.toMatchObject({ status: 409 })
+    expect(ctx.body).toBeUndefined()
+    await mod.messageSelection(ctx)
+    expect(assertEditable).toHaveBeenCalledWith('s')
+    expect(ctx.body).toEqual({ groups: getMessageSelectionGroups('s'), historyRevision: 0 })
+  })
+
+  it('returns shared session agent and workspace metadata without account secrets', async () => {
+    localGetSessionDetailPaginatedMock.mockReturnValue({
+      session: { id: 'shared', profile: 'default', source: 'coding_agent', agent: 'codex', agent_mode: 'scoped', coding_agent_id: 'codex', workspace: '/project', api_key: 'private', parent_title: 'private parent' },
+      messages: [], total: 0, offset: 0, limit: 1, hasMore: false,
+    })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'shared' }, query: { limit: '1' }, state: { sessionShare: {} } }
+    await mod.getConversationMessagesPaginated(ctx)
+    expect(ctx.body.session).toMatchObject({ agent: 'codex', coding_agent_id: 'codex', agent_mode: 'scoped', workspace: '/project' })
+    expect(ctx.body.session).not.toHaveProperty('api_key')
+    expect(ctx.body.session.parent_title).toBeUndefined()
   })
 
   it('lists conversations from the local session store', async () => {
@@ -511,7 +703,7 @@ describe('session conversations controller', () => {
 
       expect(listCtx.status).toBeUndefined()
       expect(listCtx.body.path).toBe('project')
-      expect(listCtx.body.absolutePath).toBe(join(workspace, 'project'))
+      expect(listCtx.body.absolutePath).toBe(resolve(workspace, 'project'))
       expect(listCtx.body.entries).toEqual([
         expect.objectContaining({ name: 'notes.md', path: 'project/notes.md', isDir: false }),
       ])
@@ -940,6 +1132,7 @@ describe('session conversations controller', () => {
         cost_status: '',
         preview: '',
       },
+      { id: 'desktop-session', profile: 'default', source: 'desktop' },
       {
         id: 'secret-session',
         profile: 'secret',
@@ -976,12 +1169,12 @@ describe('session conversations controller', () => {
     await mod.list(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 2000, {
-      sources: ['api_server', 'cli', 'coding_agent', 'global_agent'],
+      sources: ['api_server', 'cli', 'desktop', 'builtin_agent', 'coding_agent', 'global_agent'],
       profiles: ['default', 'travel'],
       includeArchived: false,
       excludeSessionIds: [],
     })
-    expect(ctx.body.sessions.map((session: any) => session.id)).toEqual(['default-session', 'travel-session'])
+    expect(ctx.body.sessions.map((session: any) => session.id)).toEqual(['default-session', 'travel-session', 'desktop-session'])
   })
 
   it('filters the single-chat session list when profile is explicitly provided', async () => {
@@ -996,7 +1189,7 @@ describe('session conversations controller', () => {
     await mod.list(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith('travel', undefined, 2000, {
-      sources: ['api_server', 'cli', 'coding_agent', 'global_agent'],
+      sources: ['api_server', 'cli', 'desktop', 'builtin_agent', 'coding_agent', 'global_agent'],
       profiles: undefined,
       includeArchived: false,
       excludeSessionIds: [],
@@ -1413,6 +1606,44 @@ describe('session conversations controller', () => {
     ])
   })
 
+  it('separates native history groups and cursors without changing legacy summaries', async () => {
+    const { historySessionSource } = await import('../../packages/server/src/modules/studio/contracts/history-source')
+    const rows = [
+      { id: 'code-1', source: 'coding_agent', agent: 'codex', last_active: 10 },
+      { id: 'code-2', source: 'coding_agent', agent: 'claude', last_active: 9 },
+      { id: 'ekko-1', source: 'coding_agent', agent: 'ekko-agent', last_active: 8 },
+      { id: 'ekko-2', source: 'cli', agent: 'ekko', last_active: 7 },
+      { id: 'ekko-3', source: 'coding_agent', agent: 'ekko_agent', last_active: 6, is_archived: 1, is_pinned: 1 },
+    ].map(row => ({ profile: 'travel', started_at: row.last_active, ...row }))
+    localListSessionsMock.mockImplementation((_profile, source, limit, options = {}) => rows
+      .filter(row => (!source || row.source === source)
+        && (!options.historySource || historySessionSource(row) === options.historySource)
+        && (!options.pinned || row.is_pinned)
+        && (!options.includeSessionIds || options.includeSessionIds.includes(row.id)))
+      .slice(0, limit))
+    listSessionSummaryGroupsMock.mockResolvedValue({ groups: [], included: [] })
+    listSessionSummariesMock.mockResolvedValue([])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const grouped: any = { query: { profile: 'travel', limit: '2', agent_groups: '1', include: 'ekko-3' }, state: {}, body: null }
+    await mod.listHermesSessionGroups(grouped)
+    expect(grouped.body.groups).toEqual([
+      expect.objectContaining({ source: 'coding_agent', hasMore: false, sessions: [expect.objectContaining({ id: 'code-1' }), expect.objectContaining({ id: 'code-2' })] }),
+      expect.objectContaining({ source: 'builtin_agent', hasMore: true, sessions: [expect.objectContaining({ id: 'ekko-1', source: 'coding_agent' }), expect.objectContaining({ id: 'ekko-2', source: 'cli' })] }),
+    ])
+    expect(grouped.body.included).toEqual([expect.objectContaining({ id: 'ekko-3', agent: 'ekko_agent', source: 'coding_agent', is_pinned: 1 })])
+    const page: any = { query: { profile: 'travel', source: 'builtin_agent', limit: '2', offset: '2', agent_groups: '1' }, state: {}, body: null }
+    await mod.listHermesSessions(page)
+    expect(page.body).toMatchObject({ sessions: [expect.objectContaining({ id: 'ekko-3', source: 'coding_agent', is_archived: 1 })], hasMore: false, offset: 2, limit: 2 })
+    expect(listSessionSummariesMock).not.toHaveBeenCalled()
+    const coding: any = { query: { profile: 'travel', source: 'coding_agent', limit: '1', offset: '1', agent_groups: '1' }, state: {}, body: null }
+    await mod.listHermesSessions(coding)
+    expect(coding.body).toMatchObject({ sessions: [expect.objectContaining({ id: 'code-2' })], hasMore: false })
+    const legacy: any = { query: { profile: 'travel', limit: '10' }, state: {}, body: null }
+    await mod.listHermesSessionGroups(legacy)
+    expect(legacy.body.groups.some((group: any) => group.source === 'builtin_agent')).toBe(false)
+    expect(legacy.body.groups.find((group: any) => group.source === 'coding_agent').sessions.map((row: any) => row.id)).toEqual(['code-1', 'code-2', 'ekko-1', 'ekko-3'])
+  })
+
   it('archives an existing accessible session', async () => {
     getSessionMock.mockReturnValue({ id: 'session-1', profile: 'default', source: 'cli' })
     localSetSessionArchivedMock.mockReturnValue(true)
@@ -1626,6 +1857,7 @@ describe('session conversations controller', () => {
     localSearchSessionsMock.mockReturnValue([
       { id: 'global-1', profile: 'default', source: 'global_agent' },
       { id: 'chat-1', profile: 'default', source: 'cli' },
+      { id: 'desktop-1', profile: 'travel', source: 'desktop' },
     ])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
@@ -1637,7 +1869,7 @@ describe('session conversations controller', () => {
     await mod.search(ctx)
 
     expect(localSearchSessionsMock).toHaveBeenCalledWith(undefined, 'docker', 10, {
-      sources: ['api_server', 'cli', 'coding_agent', 'global_agent'],
+      sources: ['api_server', 'cli', 'desktop', 'builtin_agent', 'coding_agent', 'global_agent'],
       profiles: ['default', 'travel'],
       includeArchived: false,
       excludeSessionIds: [],
@@ -1645,6 +1877,7 @@ describe('session conversations controller', () => {
     expect(ctx.body.results).toEqual([
       expect.objectContaining({ id: 'global-1', source: 'global_agent' }),
       expect.objectContaining({ id: 'chat-1', source: 'cli' }),
+      expect.objectContaining({ id: 'desktop-1', source: 'desktop' }),
     ])
   })
 
@@ -1952,12 +2185,12 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { days: '2' }, body: null }
+    const ctx: any = { query: { days: '2', profile: 'default' }, body: null }
     await mod.usageStats(ctx)
 
-    expect(getLocalUsageStatsMock).toHaveBeenCalledWith('default', 2)
+    expect(getLocalUsageStatsMock).toHaveBeenCalledWith('default', 2, { origin: 'internal' })
     expect(getRecordedUsageSessionIdsMock).toHaveBeenCalledWith('default')
-    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(2, undefined, 'default', ['local-session'])
+    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(2, undefined, 'default', ['local-session'], [], { origin: 'internal' })
     expect(ctx.body).toMatchObject({
       total_input_tokens: 30,
       total_output_tokens: 15,
@@ -2007,9 +2240,9 @@ describe('session conversations controller', () => {
     const ctx: any = { query: { days: '2' }, state: { profile: { name: 'research' } }, body: null }
     await mod.usageStats(ctx)
 
-    expect(getLocalUsageStatsMock).toHaveBeenCalledWith('research', 2)
+    expect(getLocalUsageStatsMock).toHaveBeenCalledWith('research', 2, { origin: 'internal' })
     expect(getRecordedUsageSessionIdsMock).toHaveBeenCalledWith('research')
-    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(2, undefined, 'research', [])
+    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(2, undefined, 'research', [], [], { origin: 'internal' })
     expect(ctx.body).toMatchObject({
       total_input_tokens: 12,
       total_output_tokens: 6,
@@ -2053,12 +2286,199 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { days: '2' }, body: null }
+    const ctx: any = { query: { days: '2', profile: 'default' }, body: null }
     await mod.usageStats(ctx)
 
     expect(ctx.body.model_usage).toEqual([
       { model: '', input_tokens: 5, output_tokens: 2, cache_read_tokens: 3, cache_write_tokens: 1, reasoning_tokens: 0, sessions: 2 },
     ])
+  })
+
+  it('passes intersecting usage filters to both ledgers and merges period-scoped options', async () => {
+    getLocalUsageStatsMock.mockReturnValue({ ...getLocalUsageStatsMock(), filter_options: { models: ['one'], agents: ['codex'] } })
+    getUsageStatsFromDbMock.mockResolvedValue({ ...getLocalUsageStatsMock(), filter_options: { models: ['two'], agents: ['hermes'] } })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { days: '7', profile: 'default', model: ' one ', agent: 'codex', account: 'unassigned' }, body: null }
+    await mod.usageStats(ctx)
+    expect(getLocalUsageStatsMock).toHaveBeenLastCalledWith('default', 7, { origin: 'internal', model: 'one', agent: 'codex', account: 'unassigned', sessionAccounts: {} })
+    expect(getUsageStatsFromDbMock).toHaveBeenLastCalledWith(7, undefined, 'default', [], [], { origin: 'internal', model: 'one', agent: 'codex', account: 'unassigned', sessionAccounts: {} })
+    expect(ctx.body.filter_options).toEqual({ models: ['one', 'two'], agents: ['codex', 'hermes'], accounts: [{ id: '1', username: 'ekko' }] })
+    expect(ctx.body.account_attribution_available).toBe(true)
+  })
+
+  it('rejects invalid Studio account IDs', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { account: 'invented-account' }, body: null }
+    await mod.usageStats(ctx)
+    expect(ctx.status).toBe(400)
+    expect(getLocalUsageStatsMock).not.toHaveBeenCalled()
+    expect(getUsageStatsFromDbMock).not.toHaveBeenCalled()
+  })
+
+  it('accepts Studio user IDs and applies ownership separately in each accessible Profile', async () => {
+    const { getSessionUsageAccounts, getUsageAccountOptions } = await import('../../packages/server/src/modules/studio/repositories/usage-accounts')
+    vi.mocked(getSessionUsageAccounts).mockImplementation(profile => profile === 'travel' ? { travelSession: '1' } : { defaultSession: '1' })
+    try {
+      const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+      const ctx: any = { query: { account: '1', period: 'today', time_zone: 'Asia/Shanghai' }, body: null,
+        state: { user: { id: 9, role: 'admin' } } }
+      listUserProfilesMock.mockReturnValue([{ profile_name: 'travel' }])
+      await mod.usageStats(ctx)
+      expect(getLocalUsageStatsMock).toHaveBeenCalledOnce()
+      expect(getLocalUsageStatsMock).toHaveBeenCalledWith('travel', 1, expect.objectContaining({ account: '1', sessionAccounts: { travelSession: '1' }, today: expect.any(Object) }))
+      expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(1, undefined, 'travel', [], [], expect.objectContaining({ account: '1', sessionAccounts: { travelSession: '1' } }))
+      expect(getUsageAccountOptions).toHaveBeenLastCalledWith(['travel'])
+      expect(ctx.body.filter_options.accounts).toEqual([{ id: '1', username: 'ekko' }])
+    } finally {
+      vi.mocked(getSessionUsageAccounts).mockImplementation(() => ({}))
+    }
+  })
+
+  it('defaults to all Profiles and merges metrics while keeping local exclusions within each Profile', async () => {
+    const date = new Date().toISOString().slice(0, 10)
+    const base = getLocalUsageStatsMock()
+    getLocalUsageStatsMock.mockClear()
+    const ledger = (input: number, cost: number, source: 'reported' | 'estimated' | 'unknown', agent = 'codex') => {
+      const cost_coverage = { reported: 0, estimated: 0, unknown: 0, [source]: 1 }
+      const tokens = { input_tokens: input, output_tokens: input / 10, cache_read_tokens: input / 2, cache_write_tokens: 0, reasoning_tokens: 0, sessions: 1 }
+      return { ...base, ...tokens, cost, cost_coverage, total_api_calls: 1,
+        by_model: [{ model: 'shared-model', ...tokens }], by_agent: [{ agent, ...tokens }],
+        by_day: [{ date, ...tokens, errors: 0, cost, cost_coverage }],
+        filter_options: { models: ['shared-model'], agents: [agent] } }
+    }
+    getLocalUsageStatsMock.mockImplementation(profile => profile === 'default' ? ledger(100, 0.02, 'reported') : ledger(200, 0.03, 'estimated'))
+    getRecordedUsageSessionIdsMock.mockImplementation(profile => profile === 'default' ? ['default-local'] : ['travel-local'])
+    getUsageStatsFromDbMock.mockImplementation((_days, _now, profile) => Promise.resolve(
+      profile === 'default' ? ledger(10, 0, 'unknown', 'hermes') : ledger(20, 0.04, 'reported', 'hermes'),
+    ))
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { days: '7', profile: '' }, body: null }
+    await mod.usageStats(ctx)
+    expect(getLocalUsageStatsMock.mock.calls.map(call => call[0])).toEqual(['default', 'travel'])
+    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(7, undefined, 'default', ['default-local'], [], { origin: 'internal' })
+    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(7, undefined, 'travel', ['travel-local'], [], { origin: 'internal' })
+    expect(ctx.body).toMatchObject({ total_input_tokens: 330, total_output_tokens: 33, total_cache_read_tokens: 165,
+      total_sessions: 4, total_api_calls: 4, cost_coverage: { reported: 2, estimated: 1, unknown: 1 } })
+    expect(ctx.body.total_cost).toBeCloseTo(0.09)
+    expect(ctx.body.model_usage).toEqual([expect.objectContaining({ model: 'shared-model', input_tokens: 330, sessions: 4 })])
+    expect(ctx.body.agent_usage).toEqual([expect.objectContaining({ agent: 'codex', input_tokens: 300 }), expect.objectContaining({ agent: 'hermes', input_tokens: 30 })])
+    expect(ctx.body.daily_usage.find((day: any) => day.date === date)).toMatchObject({ input_tokens: 330, sessions: 4, cost_coverage: { reported: 2, estimated: 1, unknown: 1 } })
+    expect(ctx.body.filter_options).toEqual({ models: ['shared-model'], agents: ['codex', 'hermes'], accounts: [{ id: '1', username: 'ekko' }] })
+  })
+
+  it('retains the partial first UTC day in rolling-window charts so they reconcile with totals', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-12T04:00:00Z'))
+    try {
+      const base = getLocalUsageStatsMock()
+      const ledger = (date: string, input: number, cost: number) => {
+        const cost_coverage = { reported: 1, estimated: 0, unknown: 0 }
+        const tokens = { input_tokens: input, output_tokens: 20, cache_read_tokens: 300, cache_write_tokens: 5, sessions: 1 }
+        return { ...base, ...tokens, cost, cost_coverage,
+          by_day: [{ date, ...tokens, errors: 0, cost, cost_coverage }] }
+      }
+      getLocalUsageStatsMock.mockReturnValue(ledger('2026-09-12', 100, 0.02))
+      getUsageStatsFromDbMock.mockResolvedValue(ledger('2026-09-13', 200, 0.03))
+      const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+      const ctx: any = { query: { days: '30', profile: 'default' }, body: null }
+      await mod.usageStats(ctx)
+      const rows = ctx.body.daily_usage
+      expect(rows[0]).toMatchObject({ date: '2026-09-12', input_tokens: 100, cost: 0.02, cost_coverage: { reported: 1, estimated: 0, unknown: 0 } })
+      expect(rows.at(-1).date).toBe('2026-10-12')
+      expect(rows).toHaveLength(31)
+      for (const key of ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens']) {
+        expect(rows.reduce((sum: number, row: any) => sum + row[key], 0)).toBe(ctx.body[`total_${key}`])
+      }
+      expect(rows.reduce((sum: number, row: any) => sum + row.cost, 0)).toBeCloseTo(ctx.body.total_cost)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('limits all-Profile usage to assigned Profiles for an administrator', async () => {
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'travel' }])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { profile: '' }, state: { user: { id: 7, role: 'admin' } }, body: null }
+    await mod.usageStats(ctx)
+    expect(getLocalUsageStatsMock.mock.calls.map(call => call[0])).toEqual(['travel'])
+    expect(getUsageStatsFromDbMock).toHaveBeenCalledOnce()
+    expect(getUsageStatsFromDbMock).toHaveBeenCalledWith(30, undefined, 'travel', [], [], { origin: 'internal' })
+  })
+
+  it('returns empty usage without reading a Profile when the administrator has no assigned Profiles', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: {}, state: { user: { id: 7, role: 'admin' } }, body: null }
+    await mod.usageStats(ctx)
+    expect(getLocalUsageStatsMock).not.toHaveBeenCalled()
+    expect(getUsageStatsFromDbMock).not.toHaveBeenCalled()
+    expect(ctx.body).toMatchObject({ total_input_tokens: 0, total_sessions: 0, total_cost: 0, model_usage: [] })
+  })
+
+  it('rejects a usage filter for a Profile outside the administrator assignment', async () => {
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'travel' }])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { profile: 'default' }, state: { user: { id: 7, role: 'admin' } }, body: null }
+    await mod.usageStats(ctx)
+    expect(ctx.status).toBe(403)
+    expect(getLocalUsageStatsMock).not.toHaveBeenCalled()
+    expect(getUsageStatsFromDbMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps other Profiles and local usage available when one Profile has no Hermes history DB', async () => {
+    const base = getLocalUsageStatsMock()
+    getLocalUsageStatsMock.mockImplementation(profile => ({ ...base, input_tokens: profile === 'default' ? 100 : 200, sessions: 1 }))
+    getUsageStatsFromDbMock.mockImplementation((_days, _now, profile) => profile === 'default'
+      ? Promise.reject(new Error('missing state.db')) : Promise.resolve({ ...base, input_tokens: 50, sessions: 1 }))
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: {}, body: null }
+    await mod.usageStats(ctx)
+    expect(ctx.body).toMatchObject({ total_input_tokens: 350, total_sessions: 3 })
+    expect(getUsageStatsFromDbMock).toHaveBeenCalledTimes(2)
+    expect(loggerWarnMock).toHaveBeenCalledOnce()
+  })
+
+  it('uses browser-local today consistently across both ledgers and the daily report', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-10T20:00:00Z'))
+    try {
+      const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+      const ctx: any = { query: { days: '1', profile: 'default', period: 'today', time_zone: 'Asia/Shanghai', account: 'unassigned' }, body: null }
+      await mod.usageStats(ctx)
+      const selection = { origin: 'internal', account: 'unassigned', sessionAccounts: {}, today: { startMs: Date.parse('2026-10-10T16:00:00Z'), endMs: Date.parse('2026-10-10T20:00:00Z'), date: '2026-10-11' } }
+      expect(getLocalUsageStatsMock).toHaveBeenLastCalledWith('default', 1, selection)
+      expect(getUsageStatsFromDbMock).toHaveBeenLastCalledWith(1, undefined, 'default', [], [], selection)
+      expect(ctx.body.period_days).toBe(1)
+      expect(ctx.body.daily_usage).toEqual([expect.objectContaining({ date: '2026-10-11' })])
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('rejects an invalid timezone for today before querying usage', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { period: 'today', time_zone: 'invalid-zone' }, body: null }
+    await mod.usageStats(ctx)
+    expect(ctx.status).toBe(400)
+    expect(getLocalUsageStatsMock).not.toHaveBeenCalled()
+    expect(getUsageStatsFromDbMock).not.toHaveBeenCalled()
+  })
+
+  it('only reads the external ledger for API usage, never importing native Hermes history', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { profile: 'default', origin: 'external' }, body: null }
+    await mod.usageStats(ctx)
+    expect(getLocalUsageStatsMock).toHaveBeenCalledWith('default', 30, expect.objectContaining({ origin: 'external' }))
+    expect(getUsageStatsFromDbMock).not.toHaveBeenCalled()
+    expect(getRecordedUsageSessionIdsMock).not.toHaveBeenCalled()
+    expect(ctx.body.origin).toBe('external')
+  })
+
+  it('rejects an unknown usage origin instead of mixing the two categories', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { origin: 'all' }, body: null }
+    await mod.usageStats(ctx)
+    expect(ctx.status).toBe(400)
+    expect(getLocalUsageStatsMock).not.toHaveBeenCalled()
+    expect(getUsageStatsFromDbMock).not.toHaveBeenCalled()
   })
 
   it('sets a session model and provider in the local session store', async () => {
@@ -2077,7 +2497,7 @@ describe('session conversations controller', () => {
       model: 'grok-4',
       provider: 'xai',
       reasoning_effort: '',
-      workspace: '/tmp/hermes-test/default/workspace',
+      workspace: join('/tmp/hermes-test/default', 'workspace'),
     })
     expect(emitSessionSettingsUpdatedMock).toHaveBeenCalledWith('session-1', {
       model: 'grok-4',
@@ -2113,7 +2533,7 @@ describe('session conversations controller', () => {
       model: 'claude-sonnet-4-6',
       provider: 'claude-oauth',
       reasoning_effort: '',
-      workspace: '/tmp/hermes-test/travel/workspace',
+      workspace: join('/tmp/hermes-test/travel', 'workspace'),
     })
     expect(bridgeSwitchSessionModelMock).toHaveBeenCalledWith(
       'session-1',
@@ -2189,6 +2609,57 @@ describe('session conversations controller', () => {
     } as any)
 
     expect(invalidateCodingAgentSessionRuntimeMock).toHaveBeenCalledWith('grok-session')
+  })
+
+  it('saves and broadcasts a global native effort and model together', async () => {
+    getSessionMock.mockReturnValue({ id: 'cursor-session', profile: 'default', agent: 'cursor', agent_mode: 'global', model: 'native-high' })
+    validateCodingAgentModelEffortMock.mockResolvedValue(undefined)
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'cursor-session' }, request: { body: { reasoningEffort: 'low', model: 'native-low' } } }
+    await mod.setReasoningEffort(ctx)
+    expect(validateCodingAgentModelEffortMock).toHaveBeenCalledWith('cursor', 'native-high', 'native-low', 'low')
+    expect(localUpdateSessionMock).toHaveBeenCalledWith('cursor-session', { model: 'native-low', reasoning_effort: 'low' })
+    expect(emitSessionSettingsUpdatedMock).toHaveBeenCalledWith('cursor-session', { model: 'native-low', reasoning_effort: 'low' })
+    expect(ctx.body).toEqual({ ok: true, model: 'native-low', reasoning_effort: 'low' })
+  })
+
+  it('does not persist either field when native variant validation fails', async () => {
+    getSessionMock.mockReturnValue({ id: 'agy-session', agent: 'antigravity', agent_mode: 'global', model: 'gemini-pro-high' })
+    validateCodingAgentModelEffortMock.mockRejectedValueOnce(Object.assign(new Error('Invalid native variant'), { status: 400 }))
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    await expect(mod.setReasoningEffort({ params: { id: 'agy-session' }, request: { body: { reasoningEffort: 'medium', model: 'gemini-pro-medium' } } })).rejects.toThrow('Invalid native variant')
+    expect(localUpdateSessionMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects a coupled native model change in scoped mode', async () => {
+    getSessionMock.mockReturnValue({ id: 'cursor-scoped', agent: 'cursor', agent_mode: 'scoped', model: 'native-high' })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'cursor-scoped' }, request: { body: { reasoningEffort: 'low', model: 'native-low' } } }
+    await mod.setReasoningEffort(ctx)
+    expect(ctx.status).toBe(400)
+    expect(localUpdateSessionMock).not.toHaveBeenCalled()
+  })
+
+  it.each(['remove', 'batchRemove', 'archive'] as const)('publishes cleanup after successful %s and never after a rejected mutation', async action => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+    getSessionMock.mockReturnValue({id: 'unread-chat', profile: 'default', user_id: '7', source: 'coding_agent'})
+    localDeleteSessionMock.mockReturnValue(true)
+    localSetSessionArchivedMock.mockReturnValue(true)
+    const received: any[] = []
+    const stop = businessEvents.subscribe('test-session-cleanup', event => { received.push(event) })
+    const ctx: any = {params: {id: 'unread-chat'}, request: {body: {ids: ['unread-chat']}}, body: null}
+    try {
+      await mod[action](ctx)
+      expect(received).toHaveLength(1)
+      expect(received[0]).toMatchObject({type: 'chat.session.removed', profile: 'default',
+        subject: {session_id: 'unread-chat'}, payload: {owner_user_id: 7, reason: action === 'archive' ? 'archived' : 'deleted'}})
+      received.length = 0
+      localDeleteSessionMock.mockReturnValue(false)
+      localSetSessionArchivedMock.mockReturnValue(false)
+      await mod[action](ctx)
+      expect(received).toEqual([])
+    } finally {stop()}
   })
 
   it('deletes a current-profile Hermes history session even when no local Web UI session exists', async () => {

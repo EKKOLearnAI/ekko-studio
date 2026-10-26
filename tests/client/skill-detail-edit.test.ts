@@ -33,6 +33,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('naive-ui', () => ({
+  NSpin: defineComponent({ template: '<div><slot name="icon" /></div>' }),
   useMessage: () => mockMessage,
 }))
 

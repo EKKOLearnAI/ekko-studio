@@ -2,8 +2,8 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const firmwareSources = [
-  'packages/esp32-c3/v1/src/main.cpp',
-  'packages/esp32-c3/v2/src/main.cpp',
+  'packages/mcu/esp32-c3/v1/src/main.cpp',
+  'packages/mcu/esp32-c3/v2/src/main.cpp',
 ]
 
 function readFirmwareSources(): string[] {

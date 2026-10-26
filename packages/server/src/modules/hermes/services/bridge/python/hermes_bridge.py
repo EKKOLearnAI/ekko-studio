@@ -84,6 +84,7 @@ _POOL_PATCH_NAMES = (
     "_install_execute_code_approval_memory_patch",
     "_jsonable",
     "_load_cfg",
+    "_load_disabled_toolsets",
     "_load_enabled_toolsets",
     "_load_reasoning_config",
     "_load_service_tier",
@@ -269,9 +270,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     _set_path_env(args.agent_root, args.hermes_home)
-    _ensure_agent_imports()
     if args.worker_profile:
         _set_worker_profile_env(str(args.worker_profile or "default"))
+    _ensure_agent_imports()
+    if args.worker_profile:
+        _refresh_worker_profile_env()
         _log_worker_startup_context(str(args.worker_profile or "default"))
         BridgeServer(args.endpoint).serve_forever()
     else:

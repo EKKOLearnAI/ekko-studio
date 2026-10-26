@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { readFileSync } from 'fs'
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import chatPanelSource from '@/components/hermes/chat/ChatPanel.vue?raw'
+import sessionSearchSource from '@/components/hermes/chat/SessionSearchModal.vue?raw'
+import subagentStreamSource from '@/components/hermes/chat/SubagentStreamPanel.vue?raw'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -38,12 +40,12 @@ describe('chat text direction follows the conversation, not the interface', () =
   // tests/client/chat-panel-session-click.test.ts already does — mounting
   // either one drags in the whole chat surface.
   it('marks the session title in the chat header', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = chatPanelSource
     expect(source).toContain('<span class="header-session-title" dir="auto">{{ headerTitle }}</span>')
   })
 
   it('marks the title and snippet of a search result', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/SessionSearchModal.vue', 'utf8')
+    const source = sessionSearchSource
     expect(source).toContain('<span class="result-title" dir="auto">')
     expect(source).toContain('<div class="result-snippet" dir="auto">')
     // The static headline above the results belongs to the interface.
@@ -51,7 +53,7 @@ describe('chat text direction follows the conversation, not the interface', () =
   })
 
   it('marks the goal a subagent was given', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/SubagentStreamPanel.vue', 'utf8')
+    const source = subagentStreamSource
     expect(source).toContain('<div class="subagent-stream-title" dir="auto">')
   })
 })

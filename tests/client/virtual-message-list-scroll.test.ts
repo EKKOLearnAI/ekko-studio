@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, nextTick } from 'vue'
+import { defineComponent, h, nextTick } from 'vue'
 
 const dynamicScrollToBottomMock = vi.hoisted(() => vi.fn())
 const dynamicScrollToPositionMock = vi.hoisted(() => vi.fn())
 const dynamicScrollToItemMock = vi.hoisted(() => vi.fn())
+const dynamicGetItemSizeMock = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-virtual-scroller', () => ({
   DynamicScroller: defineComponent({
@@ -19,6 +20,7 @@ vi.mock('vue-virtual-scroller', () => ({
         scrollToBottom: dynamicScrollToBottomMock,
         scrollToPosition: dynamicScrollToPositionMock,
         scrollToItem: dynamicScrollToItemMock,
+        getItemSize: dynamicGetItemSizeMock,
       })
     },
     template: `
@@ -68,6 +70,7 @@ describe('VirtualMessageList scroll behavior', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    dynamicGetItemSizeMock.mockReturnValue(0)
     rafCallbacks = []
     resizeCallbacks = []
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -115,6 +118,144 @@ describe('VirtualMessageList scroll behavior', () => {
 
     expect(dynamicScrollToBottomMock).not.toHaveBeenCalled()
     expect(scroller.element.scrollTop).toBe(120)
+  })
+
+  it.each(['scrollToMessage', 'scrollToAnchor'])('lets %s override pending bottom scrolling', async (method) => {
+    const wrapper = mount(VirtualMessageList, { props: { messages: [{ id: 'hit' }] } })
+    await nextTick()
+    setScrollerMetrics(wrapper.get<HTMLElement>('.virtual-message-list').element, {
+      scrollHeight: 2000, clientHeight: 400, scrollTop: 800,
+    })
+    ;(wrapper.vm as any).scrollToBottom({ frames: 5, keepAliveMs: 1200 })
+    ;(wrapper.vm as any)[method]('hit', 'anchor-hit')
+    await nextTick()
+    rafCallbacks.splice(0).forEach(callback => callback(performance.now()))
+    resizeCallbacks.forEach(callback => callback([], {} as ResizeObserver))
+    rafCallbacks.splice(0).forEach(callback => callback(performance.now()))
+    expect(dynamicScrollToBottomMock).not.toHaveBeenCalled()
+    expect(dynamicScrollToItemMock).toHaveBeenCalled()
+    expect((wrapper.vm as any).shouldAutoFollowBottom()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([true, false])('waits for rendered target and quiet geometry (virtualized: %s)', async virtualized => {
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const wrapper = mount(VirtualMessageList, {
+      attachTo: document.body,
+      props: { messages: [{ id: 'hit' }], virtualized },
+      slots: { item: '<div id="message-hit">hit</div>' },
+    })
+    await nextTick()
+    const scroller = wrapper.get<HTMLElement>('.virtual-message-list').element
+    setScrollerMetrics(scroller, { scrollHeight: 2000, clientHeight: 400, scrollTop: 500 })
+    vi.spyOn(scroller, 'getBoundingClientRect').mockImplementation(() => elementRect(0, 400))
+    let targetHeight = 0
+    let targetOffset = 600
+    vi.spyOn(wrapper.get<HTMLElement>('#message-hit').element, 'getBoundingClientRect')
+      .mockImplementation(() => elementRect(targetOffset - scroller.scrollTop, targetOffset - scroller.scrollTop + targetHeight))
+    let processed = 0
+    const frame = async (time: number) => {
+      now = time
+      const end = rafCallbacks.length
+      while (processed < end) rafCallbacks[processed++](now)
+      await nextTick()
+    }
+    const settled = vi.fn()
+    const positioning = wrapper.vm.scrollToMessage('hit').then(settled)
+    await nextTick()
+    await frame(0)
+    await frame(300)
+    expect(settled).not.toHaveBeenCalled() // Zero-sized DOM isn't rendered yet.
+
+    targetHeight = 80
+    await frame(316)
+    await frame(516)
+    expect(settled).not.toHaveBeenCalled()
+    targetOffset += 120 // A preceding row finishes rendering.
+    await frame(532)
+    await frame(732)
+    expect(settled).not.toHaveBeenCalled()
+    await frame(800)
+    await positioning
+    expect(settled).toHaveBeenCalledWith(true)
+    const scrollTop = scroller.scrollTop
+    await frame(1200)
+    expect(scroller.scrollTop).toBe(scrollTop)
+    wrapper.unmount()
+    clock.mockRestore()
+  })
+
+  it('keeps the rendered window still until boundary rows finish measuring', async () => {
+    let now = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    let boundarySize = 92
+    dynamicGetItemSizeMock.mockImplementation(item => item.id === 'boundary' ? boundarySize : 80)
+    const wrapper = mount(VirtualMessageList, {
+      attachTo: document.body,
+      props: { messages: [{ id: 'boundary' }, { id: 'hit' }] },
+      slots: { item: ({ message }) => h('div', { id: `message-${message.id}` }, message.id) },
+    })
+    await nextTick()
+    const scroller = wrapper.get<HTMLElement>('.virtual-message-list').element
+    setScrollerMetrics(scroller, { scrollHeight: 2000, clientHeight: 400, scrollTop: 500 })
+    vi.spyOn(scroller, 'getBoundingClientRect').mockImplementation(() => elementRect(0, 400))
+    vi.spyOn(wrapper.get<HTMLElement>('[data-message-id="boundary"]').element, 'getBoundingClientRect')
+      .mockImplementation(() => elementRect(0, 239))
+    vi.spyOn(wrapper.get<HTMLElement>('[data-message-id="hit"]').element, 'getBoundingClientRect')
+      .mockImplementation(() => elementRect(600 - scroller.scrollTop, 680 - scroller.scrollTop))
+    vi.spyOn(wrapper.get<HTMLElement>('#message-hit').element, 'getBoundingClientRect')
+      .mockImplementation(() => elementRect(600 - scroller.scrollTop, 680 - scroller.scrollTop))
+    let processed = 0
+    const frame = async (time: number) => {
+      now = time
+      const end = rafCallbacks.length
+      while (processed < end) rafCallbacks[processed++](now)
+      await nextTick()
+    }
+    const settled = vi.fn()
+    const positioning = wrapper.vm.scrollToMessage('hit').then(settled)
+    await nextTick()
+    await frame(0)
+    await frame(300)
+    expect(scroller.scrollTop).toBe(500)
+    expect(settled).not.toHaveBeenCalled()
+
+    boundarySize = 239
+    await frame(316)
+    expect(scroller.scrollTop).toBe(440)
+    await frame(600)
+    await positioning
+    expect(settled).toHaveBeenCalledWith(true)
+    wrapper.unmount()
+    clock.mockRestore()
+  })
+
+  it('resolves superseded, removed and unmounted anchor requests without leaving pending work', async () => {
+    const wrapper = mount(VirtualMessageList, { props: { messages: [{ id: 'first' }, { id: 'second' }] } })
+    await nextTick()
+    const first = wrapper.vm.scrollToMessage('first')
+    const second = wrapper.vm.scrollToMessage('second')
+    await expect(first).resolves.toBe(false)
+    await wrapper.setProps({ messages: [{ id: 'first' }] })
+    await expect(second).resolves.toBe(false)
+    const last = wrapper.vm.scrollToMessage('first')
+    wrapper.unmount()
+    await expect(last).resolves.toBe(false)
+  })
+
+  it('times out if a target never renders, stopping all alignment retries', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(VirtualMessageList, { props: { messages: [{ id: 'missing-dom' }] } })
+    const positioning = wrapper.vm.scrollToMessage('missing-dom')
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(5000)
+    await expect(positioning).resolves.toBe(false)
+    dynamicScrollToItemMock.mockClear()
+    rafCallbacks.forEach(callback => callback(performance.now()))
+    expect(dynamicScrollToItemMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('locks auto-follow as soon as the user scrolls upward during streaming', async () => {

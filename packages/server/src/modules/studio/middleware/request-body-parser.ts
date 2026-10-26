@@ -30,7 +30,7 @@ export function createCodexProxyRequestBodyParser(isAuthorized: (ctx: Context) =
     parsedMethods: ['POST'],
   })
   return async (ctx: Context, next: Next) => {
-    if (ctx.method !== 'POST' || !/^\/api\/codex-proxy\/[^/]+\/v1\/responses$/.test(ctx.path)) {
+    if (ctx.method !== 'POST' || !/^\/api\/codex-proxy\/[^/]+\/(?:v1\/responses|gemini\/v1beta\/models\/[^/]+)$/.test(ctx.path)) {
       return next()
     }
     if (!isAuthorized(ctx)) {

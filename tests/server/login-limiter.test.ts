@@ -90,7 +90,19 @@ describe('login limiter', () => {
     expect(limiter.checkToken(ip)).toEqual({ allowed: true })
   })
 
-  it('keeps password locks authoritative for protected API and pairing attempts', async () => {
+  it('ignores historical device-pairing locks while retaining password and token protections', async () => {
+    const limiter = await loadLimiter()
+    const { readFile } = await import('fs/promises')
+    vi.mocked(readFile).mockResolvedValueOnce(JSON.stringify({
+      pairingIpMap: { '192.0.2.30': { failures: 10, lockedUntil: Date.now() + 60_000 } },
+    }))
+    await limiter.initLoginLimiter()
+    expect(limiter.checkToken('192.0.2.30')).toEqual({ allowed: true })
+    expect(limiter.checkPassword('192.0.2.30')).toEqual({ allowed: true })
+    expect(limiter.getLockedIps()).toEqual([])
+  })
+
+  it('keeps password locks authoritative for protected API attempts', async () => {
     const limiter = await loadLimiter()
     const ip = '192.0.2.22'
 
@@ -101,54 +113,6 @@ describe('login limiter', () => {
 
     expect(limiter.checkPassword(ip)).toEqual({ allowed: false, status: 429 })
     expect(limiter.checkToken(ip)).toEqual({ allowed: false, status: 429 })
-    expect(limiter.checkPairing(ip)).toEqual({ allowed: false, status: 429 })
   })
 
-  it('locks pairing attempts and clears stale failure records after the window', async () => {
-    const limiter = await loadLimiter()
-    const ip = '192.0.2.30'
-
-    limiter.recordPairingFailure(ip)
-    expect(limiter.checkPairing(ip)).toEqual({ allowed: true })
-
-    vi.advanceTimersByTime(16 * 60_000)
-
-    expect(limiter.checkPairing(ip)).toEqual({ allowed: true })
-    expect(limiter.getLockedIps()).toEqual([])
-  })
-
-  it('locks pairing attempts on the tenth failed attempt from the same IP', async () => {
-    const limiter = await loadLimiter()
-    const ip = '192.0.2.40'
-
-    for (let i = 0; i < 9; i++) {
-      expect(limiter.checkPairing(ip)).toEqual({ allowed: true })
-      limiter.recordPairingFailure(ip)
-    }
-
-    expect(limiter.checkPairing(ip)).toEqual({ allowed: true })
-    limiter.recordPairingFailure(ip)
-
-    expect(limiter.checkPairing(ip)).toEqual({ allowed: false, status: 429 })
-    expect(limiter.getLockedIps()).toEqual([
-      expect.objectContaining({ ip, type: 'pairing', failures: 10 }),
-    ])
-  })
-
-  it('allows password login to recover an IP locked only by pairing failures', async () => {
-    const limiter = await loadLimiter()
-    const ip = '192.0.2.41'
-
-    for (let i = 0; i < 10; i++) {
-      expect(limiter.checkPairing(ip)).toEqual({ allowed: true })
-      limiter.recordPairingFailure(ip)
-    }
-
-    expect(limiter.checkPairing(ip)).toEqual({ allowed: false, status: 429 })
-    expect(limiter.checkPassword(ip)).toEqual({ allowed: true })
-    limiter.recordPasswordSuccess(ip)
-
-    expect(limiter.getLockedIps()).toEqual([])
-    expect(limiter.checkPairing(ip)).toEqual({ allowed: true })
-  })
 })

@@ -14,6 +14,25 @@ describe('api docs controller', () => {
     expect(ctx.set).toHaveBeenCalledWith('Cache-Control', 'no-store')
     expect(ctx.body.openapi).toBe('3.0.3')
     expect(ctx.body.paths['/api/openapi.json']).toBeTruthy()
+    const providerCatalog = ctx.body.paths['/api/hermes/provider-models'].get
+    expect(providerCatalog.parameters).toContainEqual(expect.objectContaining({ name: 'provider', in: 'query', required: true }))
+    expect(providerCatalog.responses['200'].content['application/json'].schema.required).toContain('visible_models')
+    for (const operation of [
+      ctx.body.paths['/api/hermes/config/providers'].post,
+      ctx.body.paths['/api/hermes/config/providers/{poolKey}'].put,
+    ]) {
+      expect(operation.requestBody.content['application/json'].schema.properties.api_mode).toMatchObject({
+        type: 'string',
+        nullable: true,
+        enum: ['chat_completions', 'codex_responses', 'anthropic_messages', 'bedrock_converse', 'codex_app_server', null],
+      })
+    }
+    expect(ctx.body.paths['/api/coding-agents/models'].get.parameters).toEqual([
+      expect.objectContaining({ name: 'agent', in: 'query', required: false }),
+      expect.objectContaining({ name: 'refresh', in: 'query', schema: { type: 'boolean', default: false } }),
+    ])
+    expect(ctx.body.paths['/api/coding-agents/models'].get.responses['200'].content['application/json'].schema.properties.agents.items.properties.status.enum)
+      .toContain('auth_required')
     expect(ctx.body.paths['/api/auth/login'].post.requestBody.content['application/json'].schema.required).toEqual([
       'password',
       'username',
@@ -30,7 +49,14 @@ describe('api docs controller', () => {
     )
     expect(
       ctx.body.paths['/api/studio/chat-run/runs'].post.requestBody.content['application/json'].schema.properties.source.enum,
-    ).toEqual(['cli', 'coding_agent', 'global_agent'])
+    ).toEqual(['cli', 'builtin_agent', 'coding_agent', 'global_agent', 'workflow', 'group_chat'])
+    for (const path of ['/api/studio/sessions/hermes', '/api/studio/sessions/hermes/groups']) {
+      expect(ctx.body.paths[path].get.parameters).toContainEqual(expect.objectContaining({
+        name: 'agent_groups', in: 'query', required: false,
+        schema: { type: 'string', enum: ['0', '1'], default: '0' },
+      }))
+    }
+    expect(ctx.body.paths['/api/studio/sessions/hermes'].get.parameters.find((parameter: any) => parameter.name === 'source').schema).toEqual({ type: 'string' })
 
     for (const path of [
       '/api/studio/update/preview/prepare',

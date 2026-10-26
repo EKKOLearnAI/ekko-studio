@@ -63,8 +63,8 @@ const configured = computed(() => {
 @use '@/styles/variables' as *;
 
 .platform-card {
-  background-color: $bg-card;
-  border: 1px solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
   margin-bottom: 12px;
   overflow: hidden;
@@ -78,7 +78,7 @@ const configured = computed(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   cursor: pointer;
   user-select: none;
 
@@ -90,7 +90,7 @@ const configured = computed(() => {
 .platform-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .platform-icon {
@@ -101,13 +101,13 @@ const configured = computed(() => {
 }
 
 .platform-name {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 500;
   color: $text-primary;
 }
 
 .expand-icon {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   transition: transform 0.2s;
 
@@ -121,12 +121,12 @@ const configured = computed(() => {
 }
 
 .platform-card-body {
-  padding: 0 16px 12px;
-  border-top: 1px solid $border-light;
+  padding: 0 calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
 }
 
 .exclusive-alert {
   margin: 12px 0 4px;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 </style>

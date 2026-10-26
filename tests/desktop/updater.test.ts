@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isWindowsUpdaterLockError, pendingUpdateDirectories } from '../../packages/desktop/src/main/updater-helpers'
 
@@ -11,16 +11,18 @@ describe('desktop updater helpers', () => {
   })
 
   it('includes local and roaming pending update cache directories', async () => {
+    const local = 'C:\\Users\\A\\AppData\\Local'
+    const roaming = 'C:\\Users\\A\\AppData\\Roaming'
     expect(pendingUpdateDirectories({
-      appDataPath: 'C:\\Users\\A\\AppData\\Roaming',
-      localAppData: 'C:\\Users\\A\\AppData\\Local',
+      appDataPath: roaming,
+      localAppData: local,
       appName: 'Ekko Studio',
     })).toEqual(expect.arrayContaining([
-      'C:\\Users\\A\\AppData\\Local/Ekko Studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Local/ekko-studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Local/Hermes Studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Local/hermes-studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Roaming/hermes-studio-updater/pending',
+      join(local, 'Ekko Studio-updater', 'pending'),
+      join(local, 'ekko-studio-updater', 'pending'),
+      join(local, 'Hermes Studio-updater', 'pending'),
+      join(local, 'hermes-studio-updater', 'pending'),
+      join(roaming, 'hermes-studio-updater', 'pending'),
     ]))
   })
 
@@ -31,9 +33,10 @@ describe('desktop updater helpers', () => {
     expect(mainSource).toContain('checkForDesktopUpdates(true)')
     expect(updaterSource).toContain('checkForDesktopUpdates(false)')
     expect(updaterSource).toContain('autoUpdater.autoDownload = false')
-    expect(updaterSource).toContain('autoUpdater.autoInstallOnAppQuit = true')
+    expect(updaterSource).not.toContain('autoUpdater.autoInstallOnAppQuit = true')
+    expect(updaterSource).toContain('autoUpdater.autoInstallOnAppQuit = false')
     expect(updaterSource).toContain("buttons: [t('update.download'), t('update.later')]")
-    expect(updaterSource).toContain('if (response === 0) {\n    await autoUpdater.downloadUpdate()')
+    expect(updaterSource).toContain('if (response === 0) downloadDesktopUpdate()')
     expect(updaterSource).not.toContain('setInterval(')
   })
 
@@ -43,14 +46,14 @@ describe('desktop updater helpers', () => {
 
     expect(mainSource).toContain('async function prepareAppShutdown(): Promise<void>')
     expect(mainSource).toContain('await stopWebUiServer().catch(() => undefined)')
-    expect(mainSource).toContain('initAutoUpdater({ beforeQuitAndInstall: prepareAppShutdown })')
+    expect(mainSource).toContain('beforeQuitAndInstall: prepareAppShutdown,')
     expect(mainSource).toContain('try {\n      await prepareAppShutdown()\n    } finally {\n      appLifecycle.finalizeExit(0)')
 
     const prepareCurrentInstance = updaterSource.indexOf('await options.beforeQuitAndInstall?.()')
-    const stopOtherInstances = updaterSource.indexOf('await stopOtherWindowsAppInstances()', prepareCurrentInstance)
-    const startInstaller = updaterSource.indexOf('autoUpdater.quitAndInstall()', stopOtherInstances)
+    const startInstaller = updaterSource.indexOf('autoUpdater.quitAndInstall()', prepareCurrentInstance)
+    expect(updaterSource).not.toContain('await stopOtherWindowsAppInstances()')
+    expect(updaterSource).toContain('await options.acquireInstall?.(info.version)')
     expect(prepareCurrentInstance).toBeGreaterThan(-1)
-    expect(stopOtherInstances).toBeGreaterThan(prepareCurrentInstance)
-    expect(startInstaller).toBeGreaterThan(stopOtherInstances)
+    expect(startInstaller).toBeGreaterThan(prepareCurrentInstance)
   })
 })

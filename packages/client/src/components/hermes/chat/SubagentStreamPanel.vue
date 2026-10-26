@@ -278,7 +278,7 @@ onBeforeUnmount(stopElapsedTimer)
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  background: $bg-main-surface;
+  background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .subagent-stream-header {
@@ -286,13 +286,13 @@ onBeforeUnmount(stopElapsedTimer)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   width: 100%;
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 8px 16px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 }
 
 .subagent-stream-heading {
@@ -303,9 +303,9 @@ onBeforeUnmount(stopElapsedTimer)
 .subagent-stream-kicker {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
 }
 
@@ -324,50 +324,50 @@ onBeforeUnmount(stopElapsedTimer)
 
 .subagent-task-position {
   color: $text-muted;
-  font-family: $font-code;
+  font-family: var(--font-code, $font-code);
   font-weight: 400;
 }
 
 .subagent-stream-title {
   margin-top: 6px;
   color: $text-primary;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
-  line-height: 1.45;
+  line-height: var(--line-height, 1.45);
   overflow-wrap: anywhere;
 }
 
 .subagent-stream-metrics {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   margin-top: 8px;
 
   span {
-    padding: 2px 7px;
+    padding: calc(2px * var(--spacing-scale, 1)) calc(7px * var(--spacing-scale, 1));
     border-radius: 999px;
     background: rgba(var(--accent-primary-rgb), 0.07);
     color: $text-muted;
-    font-family: $font-code;
-    font-size: 10px;
+    font-family: var(--font-code, $font-code);
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   }
 }
 
 .subagent-header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   flex: 0 0 auto;
   min-width: 0;
 }
 
 .subagent-status {
   max-width: min(160px, 28vw);
-  padding: 3px 8px;
+  padding: calc(3px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
   border-radius: 999px;
   color: $text-secondary;
   background: rgba(var(--accent-primary-rgb), 0.08);
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -423,7 +423,7 @@ onBeforeUnmount(stopElapsedTimer)
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: $bg-main-surface;
+  background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .subagent-empty {
@@ -432,30 +432,30 @@ onBeforeUnmount(stopElapsedTimer)
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .subagent-run-indicator {
   flex: 0 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   width: 100%;
   max-width: 100%;
   min-width: 0;
   max-height: min(48%, 420px);
   overflow-y: auto;
   box-sizing: border-box;
-  padding: 4px 20px 18px;
-  background: $bg-main-surface;
+  padding: calc(4px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1)) calc(18px * var(--spacing-scale, 1));
+  background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .subagent-live-tools {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   width: 100%;
   max-width: 520px;
   min-width: 0;
@@ -464,15 +464,15 @@ onBeforeUnmount(stopElapsedTimer)
 .subagent-live-tool {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: 3px 8px;
+  padding: calc(3px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
   background: rgba(0, 0, 0, 0.03);
   color: $text-secondary;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
   .dark & {
     background: rgba(255, 255, 255, 0.06);
@@ -531,7 +531,7 @@ onBeforeUnmount(stopElapsedTimer)
 
 @media (max-width: $breakpoint-mobile) {
   .subagent-stream-header {
-    padding: 8px 12px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   }
 
   .subagent-status {
@@ -543,7 +543,7 @@ onBeforeUnmount(stopElapsedTimer)
   }
 
   .subagent-run-indicator {
-    padding-inline: 12px;
+    padding-inline: calc(12px * var(--spacing-scale, 1));
     max-height: 55%;
   }
 }

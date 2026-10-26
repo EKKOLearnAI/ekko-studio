@@ -78,6 +78,109 @@ describe('run chat abort goal handling', () => {
     calcAndUpdateUsageMock.mockResolvedValue({ inputTokens: 0, outputTokens: 0 })
   })
 
+  it('acknowledges automatic wake claims on Stop instead of dequeuing or releasing them', async () => {
+    const { handleAbort, markAbortCompleted } = await import('../../packages/server/src/modules/studio/services/chat-run/abort')
+    const { nsp, socket } = makeHarness()
+    const state: any = {
+      messages: [], events: [], isWorking: true, source: 'cli', profile: 'work', runId: 'r',
+      queue: [{ queue_id: 'wake', input: 'continue', autonomous: true, backgroundDelegationId: 'd', backgroundClaimId: 'c' }],
+    }
+    const sessions = new Map([['session-1', state]])
+    const run = vi.fn()
+    const bridge = {
+      interrupt: vi.fn(async () => ({ synced: true })), goalPause: vi.fn(),
+      // A slow acknowledgement must not delay marking/interruption of the
+      // active run, otherwise a completion can start another turn first.
+      completeBackgroundNotification: vi.fn(() => new Promise(() => {})), releaseBackgroundNotification: vi.fn(),
+    }
+    await handleAbort(nsp as any, socket as any, 'session-1', sessions, bridge, run)
+    await markAbortCompleted(nsp as any, socket as any, 'session-1', 'r', sessions, run)
+    expect(state.backgroundWakeStopped).toBe(true)
+    expect(state.queue).toEqual([])
+    expect(bridge.completeBackgroundNotification).toHaveBeenCalledWith('session-1', 'work', 'd', 'c')
+    expect(bridge.releaseBackgroundNotification).not.toHaveBeenCalled()
+    expect(bridge.interrupt).toHaveBeenCalledOnce()
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('completes an abort once and waits for bridge cleanup before dequeuing', async () => {
+    const { handleAbort, markAbortCompleted } = await import('../../packages/server/src/modules/studio/services/chat-run/abort')
+    const { emit, nsp, socket } = makeHarness()
+    const state = {
+      messages: [], isWorking: true, events: [], source: 'cli', profile: 'default',
+      runId: 'old-run', activeRunMarker: 'old-marker',
+      queue: [{ queue_id: 'next', input: 'next', source: 'cli' }],
+    } as any
+    const sessionMap = new Map([['session-1', state]])
+    const runQueuedItem = vi.fn(() => Object.assign(state, {
+      isWorking: true, isAborting: false, runId: 'new-run', activeRunMarker: 'new-marker',
+    }))
+    let terminalCompletion: Promise<void> | undefined
+    const bridge = {
+      interrupt: vi.fn(async () => {
+        terminalCompletion = markAbortCompleted(nsp as any, socket as any, 'session-1', 'old-run', sessionMap, runQueuedItem)
+        await Promise.resolve()
+        expect(runQueuedItem).not.toHaveBeenCalled()
+        return { synced: false }
+      }),
+      goalPause: vi.fn(), destroy: vi.fn(async () => {
+        await Promise.resolve()
+        expect(state.runId).toBe('old-run')
+        expect(runQueuedItem).not.toHaveBeenCalled()
+      }),
+    }
+    await handleAbort(nsp as any, socket as any, 'session-1', sessionMap, bridge, runQueuedItem)
+    await terminalCompletion
+    await markAbortCompleted(nsp as any, socket as any, 'session-1', 'old-run', sessionMap, runQueuedItem)
+
+    expect(state).toMatchObject({ isWorking: true, runId: 'new-run', activeRunMarker: 'new-marker' })
+    expect(runQueuedItem).toHaveBeenCalledTimes(1)
+    expect(emit.mock.calls.filter(([event]) => event === 'abort.completed')).toHaveLength(1)
+    expect(bridge.destroy).toHaveBeenCalledTimes(1)
+    expect(bridge.goalPause).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledWith('abort.completed', expect.objectContaining({ synced: false }))
+    expect(emit).toHaveBeenCalledWith('run.queued', expect.objectContaining({
+      session_id: 'session-1', queue_length: 0, dequeued_queue_id: 'next',
+    }))
+  })
+
+  it('claims abort completion before accounting and rechecks the generation afterwards', async () => {
+    const { markAbortCompleted } = await import('../../packages/server/src/modules/studio/services/chat-run/abort')
+    const { emit, nsp, socket } = makeHarness()
+    let release!: () => void
+    const accounting = new Promise<void>(resolve => { release = resolve })
+    calcAndUpdateUsageMock.mockImplementationOnce(() => accounting)
+    const state = {
+      messages: [], events: [], queue: [], isWorking: true, isAborting: true,
+      runId: 'old-run', activeRunMarker: 'old-marker',
+    } as any
+    const sessionMap = new Map([['session-1', state]])
+    const runQueuedItem = vi.fn()
+    const completion = markAbortCompleted(nsp as any, socket as any, 'session-1', 'old-run', sessionMap, runQueuedItem)
+    await markAbortCompleted(nsp as any, socket as any, 'session-1', 'old-run', sessionMap, runQueuedItem)
+    expect(calcAndUpdateUsageMock).toHaveBeenCalledTimes(1)
+    Object.assign(state, { isWorking: true, isAborting: false, runId: 'new-run', activeRunMarker: 'new-marker' })
+    release()
+    await completion
+    expect(state).toMatchObject({ isWorking: true, runId: 'new-run', activeRunMarker: 'new-marker' })
+    expect(emit.mock.calls.some(([event]) => event === 'abort.completed')).toBe(false)
+    expect(runQueuedItem).not.toHaveBeenCalled()
+  })
+
+  it.each(['builtin_agent', 'group_chat', 'workflow', 'global_agent'])('aborts native Ekko on %s without calling Hermes', async source => {
+    const { handleAbort } = await import('../../packages/server/src/modules/studio/services/chat-run/abort')
+    const { nsp, socket } = makeHarness()
+    const controller = new AbortController()
+    const state = { messages: [], isWorking: true, events: [], queue: [], source, webhookAgent: 'ekko', runId: 'native-run', abortController: controller } as any
+    const sessionMap = new Map([['session-1', state]])
+    const bridge = { interrupt: vi.fn(), goalPause: vi.fn() }
+    await handleAbort(nsp as any, socket as any, 'session-1', sessionMap, bridge, vi.fn())
+    expect(controller.signal.aborted).toBe(true)
+    expect(bridge.interrupt).not.toHaveBeenCalled()
+    expect(state.source).toBe(source)
+    expect(state.isWorking).toBe(false)
+  })
+
   it('aborts detached Ekko background tasks after the parent run has finished', async () => {
     ekkoBackgroundMock.has.mockReturnValue(true)
     ekkoBackgroundMock.abort.mockResolvedValue(1)

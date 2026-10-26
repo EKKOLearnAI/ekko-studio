@@ -12,6 +12,7 @@ Ekko Agent, Hermes Agent, and coding agents for chat, coding, and workflows.
 | Server | `packages/server/src` | HTTP API, auth, Socket.IO, SQLite stores, file access, Hermes runtime integration. |
 | Ekko Agent | `packages/ekko-agent` | Canonical Ekko runtime, profile facade, providers, tools, memory, skills, conversations, and package API. |
 | Desktop | `packages/desktop` | Electron shell, local Web UI server bootstrap, updater, bundled Python/Hermes runtime. |
+| MCU | `packages/mcu` | ESP32-C3 source projects and release firmware; board-specific ESP32-S3 firmware. |
 | Tests | `tests` | Vitest unit/integration tests and Playwright browser tests. |
 | CI | `.github/workflows` | Build, e2e, lockfile, Docker, and desktop release automation. |
 
@@ -82,6 +83,9 @@ Desktop packaging is intentionally split:
   marking the release as GitHub latest.
 - Manual dispatches run full desktop artifact packaging in `.github/workflows/desktop-release.yml`.
 - `.github/workflows/desktop-manual-build.yml` builds one desktop target for targeted repairs or re-runs.
+- Windows x64 and ARM64 use native runners and separate updater manifests
+  (`latest.yml` and `latest-arm64.yml`). See `packages/desktop/WINDOWS-ARM64.md`
+  for native speech staging and runtime acceptance.
 - Each release matrix target uploads only the artifact globs for its own platform.
 - A successful full desktop release marks the target GitHub Release as latest after all desktop artifacts
   and the merged macOS updater manifest have been uploaded.
@@ -96,6 +100,13 @@ Hermes runtime assets are built separately by
 `.github/workflows/desktop-runtime.yml`. `packages/desktop/scripts/runtime-config.mjs`
 pins an upstream Hermes version, Git ref, and full commit; version overrides
 must supply the ref and commit together.
+
+For releases that declare placeholder package metadata (`0.0.0`), the runtime
+requires the matching `v<version>` source tag and uses upstream's install-stamp
+writer without changing tracked files. Installation and relocation checks read
+the canonical Hermes identity. Manual dispatches can override `python_version`
+and `python_build_tag` together; Hermes 0.22.2 uses Python 3.14.7 from the
+python-build-standalone `20260901` release.
 
 The portable Node.js included in runtime assets is pinned independently from
 the GitHub Actions runner. Manual runtime dispatches take a target release tag;

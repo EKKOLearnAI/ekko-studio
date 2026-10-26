@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   getCompatibleCustomProviders,
   normalizeCustomProviderEntry,
 } from '../../packages/server/src/modules/studio/contracts/provider-compat'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('normalizeCustomProviderEntry', () => {
   it('returns null for non-objects', () => {
@@ -118,9 +122,94 @@ describe('normalizeCustomProviderEntry', () => {
     expect(result?.context_length).toBeUndefined()
     expect(result?.rate_limit_delay).toBeUndefined()
   })
+
+  it.each([true, false])('preserves the boolean models_discovered marker (%s)', (discovered) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = normalizeCustomProviderEntry({
+      name: 'discovered-provider',
+      base_url: 'https://example.com',
+      models_discovered: discovered,
+    })
+    expect(result?.models_discovered).toBe(discovered)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('ignores a non-boolean models_discovered marker', () => {
+    const result = normalizeCustomProviderEntry({
+      name: 'invalid-discovery-marker',
+      base_url: 'https://example.com',
+      models_discovered: 'true',
+    })
+    expect(result?.models_discovered).toBeUndefined()
+  })
+
+  it.each(['custom_providers', 'providers'] as const)('warns once for repeated unknown keys in %s', (source) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const entry = {
+      name: `warning-${source}`,
+      base_url: 'https://example.com',
+      unknown_b: 'private-value',
+      unknown_a: true,
+    }
+    const providerKey = source === 'providers' ? 'warning-dict-key' : ''
+    normalizeCustomProviderEntry(entry, providerKey, source)
+    // Repeated YAML reads produce new objects and may reorder keys.
+    normalizeCustomProviderEntry({
+      unknown_a: true,
+      unknown_b: 'private-value',
+      name: entry.name,
+      base_url: entry.base_url,
+    }, providerKey, source)
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(
+      `[config-helpers] ${source}.${providerKey || entry.name}: unknown config keys ignored: unknown_a, unknown_b`,
+    )
+  })
+
+  it('still warns for another provider, endpoint, or set of unknown keys', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const entry = { name: 'warning-identity', base_url: 'https://example.com', unknown_a: true }
+    normalizeCustomProviderEntry(entry)
+    normalizeCustomProviderEntry({ ...entry, name: 'warning-other-identity' })
+    normalizeCustomProviderEntry({ ...entry, base_url: 'https://other.example.com' })
+    normalizeCustomProviderEntry({ ...entry, unknown_b: true })
+
+    expect(warn).toHaveBeenCalledTimes(4)
+  })
 })
 
 describe('getCompatibleCustomProviders', () => {
+  it('reads Hermes-discovered model catalogs from both schemas without warnings', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const config = {
+      custom_providers: [{
+        name: 'discovered-legacy',
+        base_url: 'https://legacy.example.com',
+        models: { 'legacy-model': { context_length: 8192 } },
+        models_discovered: true,
+      }],
+      providers: {
+        'discovered-modern': {
+          base_url: 'https://modern.example.com',
+          models: { 'modern-model': {} },
+          models_discovered: true,
+        },
+      },
+    }
+    const original = structuredClone(config)
+    const providers = getCompatibleCustomProviders(config)
+    getCompatibleCustomProviders(structuredClone(config))
+
+    expect(providers.map(p => p.models_discovered)).toEqual([true, true])
+    expect(providers.map(p => p.models)).toEqual([
+      { 'legacy-model': { context_length: 8192 } },
+      { 'modern-model': {} },
+    ])
+    expect(warn).not.toHaveBeenCalled()
+    expect(config).toEqual(original)
+  })
+
   it('returns an empty array for non-config inputs', () => {
     expect(getCompatibleCustomProviders(null)).toEqual([])
     expect(getCompatibleCustomProviders(undefined)).toEqual([])

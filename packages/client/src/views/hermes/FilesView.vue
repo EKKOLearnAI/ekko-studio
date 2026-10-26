@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDialog } from 'naive-ui'
@@ -85,25 +87,34 @@ async function ensureProfilesLoaded() {
   }
 }
 
+const initializing = ref(true)
+let loadGeneration = 0
+
 async function loadFromRoute() {
-  await ensureProfilesLoaded()
+  const generation = ++loadGeneration
+  initializing.value = true
+  try {
+    await ensureProfilesLoaded()
 
-  const profile = scopedProfile.value
-  const filePath = routeFilePath.value
-  const directoryPath = filePath
-    ? parentDir(filePath)
-    : (firstQueryString(route.query.path) || '')
+    const profile = scopedProfile.value
+    const filePath = routeFilePath.value
+    const directoryPath = filePath
+      ? parentDir(filePath)
+      : (firstQueryString(route.query.path) || '')
 
-  if (!isProfileConfigEditor.value) {
-    await filesStore.fetchEntries(directoryPath, {
-      profile,
-      workspaceSessionId: null,
-      workspaceRoomId: null,
-    })
-  }
+    if (!isProfileConfigEditor.value) {
+      await filesStore.fetchEntries(directoryPath, {
+        profile,
+        workspaceSessionId: null,
+        workspaceRoomId: null,
+      })
+    }
 
-  if (filePath) {
-    await filesStore.openEditor(filePath, { profile })
+    if (filePath) {
+      await filesStore.openEditor(filePath, { profile })
+    }
+  } finally {
+    if (generation === loadGeneration) initializing.value = false
   }
 }
 
@@ -136,14 +147,16 @@ watch(
 </script>
 
 <template>
-  <div class="files-view" :class="{ 'profile-config-editor-view': isProfileConfigEditor }">
+  <PageLoading :show="initializing" class="files-view" :class="{ 'profile-config-editor-view': isProfileConfigEditor }">
     <template v-if="isProfileConfigEditor">
+      <PageHeader>
       <div class="profile-config-editor-header">
         <div class="profile-config-title">
           <span class="profile-config-eyebrow">{{ t('profiles.editConfig') }}</span>
           <span class="profile-config-file">{{ profileConfigTitle }}</span>
         </div>
       </div>
+      </PageHeader>
       <div class="profile-config-editor-content">
         <FileEditor v-if="filesStore.editingFile" :custom-close="closeProfileConfigEditor" />
       </div>
@@ -154,11 +167,13 @@ watch(
         <FileTree :profile="scopedProfile" />
       </div>
       <div class="files-main-panel">
+        <PageHeader>
         <FileToolbar
           @show-new-file="handleShowNewFile"
           @show-new-folder="handleShowNewFolder"
           @show-upload="showUpload = true"
         />
+        </PageHeader>
         <FileBreadcrumb />
         <div class="files-content">
           <FileEditor v-if="filesStore.editingFile" />
@@ -178,7 +193,7 @@ watch(
       :entry="renameEntry"
       :target-path="renameTargetPath"
     />
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -198,26 +213,26 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 16px;
-  border-bottom: 1px solid $border-color;
-  background-color: $bg-card;
+  gap: calc(16px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
 }
 
 .profile-config-title {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 }
 
 .profile-config-eyebrow {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
 }
 
 .profile-config-file {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
   overflow: hidden;
@@ -235,7 +250,7 @@ watch(
   width: 240px;
   min-width: 180px;
   max-width: 400px;
-  border-inline-end: 1px solid $border-color;
+  border-inline-end: var(--border-width, 1px) solid $border-color;
   overflow-y: auto;
   flex-shrink: 0;
 }
@@ -264,7 +279,7 @@ watch(
     max-width: none;
     height: 200px;
     border-inline-end: none;
-    border-bottom: 1px solid $border-color;
+    border-bottom: var(--border-width, 1px) solid $border-color;
   }
 }
 </style>

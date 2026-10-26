@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { BrowserProfileCreateInput, BrowserProfileUpdateInput, BrowserProxyMode, DesktopBrowserProfile } from './browser-types'
+import { MAX_BROWSER_TABS } from './browser-types'
 
 interface BrowserProfilesDocument {
   schema: 1
@@ -26,7 +27,7 @@ function safeName(input: string): string {
 }
 
 function safeProxyMode(input: unknown): BrowserProxyMode {
-  return input === 'system' || input === 'fixed_servers' ? input : 'direct'
+  return input === 'direct' || input === 'system' || input === 'fixed_servers' ? input : 'system'
 }
 
 function safeProxyRules(input: unknown, mode: BrowserProxyMode): string {
@@ -120,7 +121,16 @@ export class BrowserProfileStore {
 
   async setTabs(profileId: string, tabs: string[]): Promise<void> {
     const profile = this.requireProfile(profileId)
-    profile.tabs = tabs.slice(0, 8).map(url => String(url || 'about:blank'))
+    profile.tabs = tabs.slice(-MAX_BROWSER_TABS).map(url => String(url || 'about:blank'))
+    await this.persist()
+  }
+
+  async rememberDownloadDirectory(profileId: string, directory: string): Promise<void> {
+    if (!isAbsolute(directory)) return
+    const profile = this.requireProfile(profileId)
+    const normalized = resolve(directory)
+    if (profile.lastDownloadDirectory === normalized) return
+    profile.lastDownloadDirectory = normalized
     await this.persist()
   }
 
@@ -173,6 +183,8 @@ export class BrowserProfileStore {
             rootPath,
             sessionPath: join(rootPath, 'data'),
             downloadPath: join(rootPath, 'download'),
+            lastDownloadDirectory: typeof profile.lastDownloadDirectory === 'string' && isAbsolute(profile.lastDownloadDirectory)
+              ? resolve(profile.lastDownloadDirectory) : undefined,
             proxyMode,
             proxyRules: safeProxyRules(profile.proxyRules, proxyMode),
             tabs: Array.isArray(profile.tabs) ? profile.tabs : ['about:blank'],
@@ -195,7 +207,7 @@ export class BrowserProfileStore {
         rootPath: join(this.root, 'profiles', id),
         sessionPath: join(this.root, 'profiles', id, 'data'),
         downloadPath: join(this.root, 'profiles', id, 'download'),
-        proxyMode: 'direct',
+        proxyMode: 'system',
         proxyRules: '',
         askBeforeDownload: true,
         downloadConflictPolicy: 'uniquify',

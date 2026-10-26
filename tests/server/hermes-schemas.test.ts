@@ -20,8 +20,36 @@ describe('Hermes schema initialization', () => {
     vi.resetModules()
   })
 
+  it('migrates only Ekko direct-chat identity and preserves history and other surfaces', async () => {
+    const { initAllHermesTables, SESSIONS_TABLE, MESSAGES_TABLE } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    const directSources = ['cli', 'api_server', 'coding_agent', 'builtin_agent']
+    const sources = [...directSources, 'group_chat', 'workflow', 'global_agent']
+    const aliases = ['ekko', 'ekko-agent', ' EKKO_AGENT ']
+    const agents = [...aliases, 'codex', 'hermes']
+    const insert = db.prepare(`INSERT INTO ${SESSIONS_TABLE}
+      (id, source, agent, profile, title, model, provider, workspace, is_archived, is_pinned, started_at, last_active, input_tokens, output_tokens)
+      VALUES (?, ?, ?, 'travel', 'Keep title', 'model', 'provider', '/tmp/workspace', 1, 1, 100, 200, 123, 45)`)
+    for (const source of sources) {
+      for (const agent of agents) {
+        const id = `${source}-${agent}`
+        insert.run(id, source, agent)
+        db.prepare(`INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, timestamp) VALUES (?, 'user', 'Keep message', 100)`).run(id)
+      }
+    }
+    const before = db.prepare(`SELECT * FROM ${SESSIONS_TABLE} ORDER BY id`).all()
+    const messagesBefore = db.prepare(`SELECT * FROM ${MESSAGES_TABLE} ORDER BY id`).all()
+    initAllHermesTables()
+    const expected = before.map((row: any) => directSources.includes(row.source) && aliases.includes(row.agent)
+      ? { ...row, source: 'builtin_agent', agent: 'ekko-agent' } : row)
+    expect(db.prepare(`SELECT * FROM ${SESSIONS_TABLE} ORDER BY id`).all()).toEqual(expected)
+    expect(db.prepare(`SELECT * FROM ${MESSAGES_TABLE} ORDER BY id`).all()).toEqual(messagesBefore)
+    initAllHermesTables()
+    expect(db.prepare(`SELECT * FROM ${SESSIONS_TABLE} ORDER BY id`).all()).toEqual(expected)
+  })
+
   it('initializes all tables with correct schemas', async () => {
-    const { initAllHermesTables, USAGE_TABLE, SESSIONS_TABLE, SESSION_CATEGORIES_TABLE, MESSAGES_TABLE, GC_ROOMS_TABLE, GC_MESSAGES_TABLE, GC_ROOM_AGENTS_TABLE, USERS_TABLE, USER_PROFILES_TABLE, SOCIAL_MESSAGE_ACCOUNTS_TABLE, SOCIAL_MESSAGE_RUNTIME_STATES_TABLE, DEVICES_TABLE, MCU_DEVICES_TABLE } =
+    const { initAllHermesTables, USAGE_TABLE, SESSIONS_TABLE, SESSION_CATEGORIES_TABLE, MESSAGES_TABLE, GC_ROOMS_TABLE, GC_MESSAGES_TABLE, GC_ROOM_AGENTS_TABLE, USERS_TABLE, USER_PROFILES_TABLE, SOCIAL_MESSAGE_ACCOUNTS_TABLE, SOCIAL_MESSAGE_RUNTIME_STATES_TABLE, MCU_DEVICES_TABLE } =
       await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
 
     expect(() => initAllHermesTables()).not.toThrow()
@@ -39,7 +67,7 @@ describe('Hermes schema initialization', () => {
     expect(tables.map(t => t.name)).toContain(USER_PROFILES_TABLE)
     expect(tables.map(t => t.name)).toContain(SOCIAL_MESSAGE_ACCOUNTS_TABLE)
     expect(tables.map(t => t.name)).toContain(SOCIAL_MESSAGE_RUNTIME_STATES_TABLE)
-    expect(tables.map(t => t.name)).toContain(DEVICES_TABLE)
+    expect(tables.map(t => t.name)).not.toContain('devices')
     expect(tables.map(t => t.name)).toContain(MCU_DEVICES_TABLE)
 
     // Verify USAGE_TABLE structure
@@ -92,17 +120,45 @@ describe('Hermes schema initialization', () => {
     const groupMessageCols = db.prepare(`PRAGMA table_info("${GC_MESSAGES_TABLE}")`).all() as Array<{ name: string }>
     expect(groupMessageCols.some(c => c.name === 'run_id')).toBe(true)
 
-    const deviceCols = db.prepare(`PRAGMA table_info("${DEVICES_TABLE}")`).all() as Array<{ name: string }>
-    expect(deviceCols.some(c => c.name === 'id')).toBe(true)
-    expect(deviceCols.some(c => c.name === 'status')).toBe(true)
-    expect(deviceCols.some(c => c.name === 'device_public_key')).toBe(true)
-
     const mcuDeviceCols = db.prepare(`PRAGMA table_info("${MCU_DEVICES_TABLE}")`).all() as Array<{ name: string }>
     expect(mcuDeviceCols.some(c => c.name === 'id')).toBe(true)
     expect(mcuDeviceCols.some(c => c.name === 'name')).toBe(true)
     expect(mcuDeviceCols.some(c => c.name === 'device_code')).toBe(true)
     expect(mcuDeviceCols.some(c => c.name === 'is_official')).toBe(true)
     expect(mcuDeviceCols.some(c => c.name === 'created_at')).toBe(true)
+  })
+
+  it.each(['session_tasks', '"session_tasks"'])('upgrades the legacy %s status constraint while preserving rows, extra columns, indexes and triggers', async tableName => {
+    const { initAllHermesTables, SESSION_TASKS_SCHEMA } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    db.exec('DROP TABLE session_tasks')
+    const legacy = { ...SESSION_TASKS_SCHEMA, status: "TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'completed'))", extra_tag: 'TEXT' }
+    db.exec(`CREATE TABLE ${tableName} (${Object.entries(legacy).map(([column, definition]) => `"${column}" ${definition}`).join(', ')})`)
+    db.exec("CREATE INDEX custom_task_title ON session_tasks(title)")
+    db.exec("CREATE TABLE task_audit (task_id TEXT, status TEXT)")
+    db.exec('CREATE TRIGGER task_status_audit AFTER UPDATE OF status ON session_tasks BEGIN INSERT INTO task_audit VALUES (new.id, new.status); END')
+    db.exec("INSERT INTO session_tasks VALUES ('task', 'chat', 'Keep task', 'Keep summary', 'completed', 5, 7, 'Verified', 100, 200, 200, 'custom')")
+    const before = db.prepare('SELECT * FROM session_tasks').all()
+    initAllHermesTables()
+    expect(db.prepare('SELECT * FROM session_tasks').all()).toEqual(before)
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'custom_task_title'").get()).toBeTruthy()
+    db.exec("UPDATE session_tasks SET status = 'closed' WHERE id = 'task'")
+    expect(db.prepare('SELECT * FROM task_audit').all()).toEqual([{ task_id: 'task', status: 'closed' }])
+    expect(() => db.exec("UPDATE session_tasks SET status = 'invalid' WHERE id = 'task'")).toThrow('CHECK')
+    initAllHermesTables()
+    expect(db.prepare('SELECT * FROM session_tasks').get()).toMatchObject({ ...before[0], status: 'closed' })
+    db.exec("UPDATE session_tasks SET status = 'open' WHERE id = 'task'")
+    expect(db.prepare('SELECT * FROM task_audit').all()).toHaveLength(2)
+  })
+
+  it('leaves historical LAN device records intact when upgrading', async () => {
+    db.exec("CREATE TABLE devices (id TEXT PRIMARY KEY, computer_name TEXT)")
+    db.prepare('INSERT INTO devices (id, computer_name) VALUES (?, ?)').run('legacy-device', 'Old computer')
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    expect(db.prepare('SELECT * FROM devices').all()).toEqual([
+      { id: 'legacy-device', computer_name: 'Old computer' },
+    ])
   })
 
   it('preserves existing data when adding safe schema columns', async () => {
@@ -179,7 +235,7 @@ describe('Hermes schema initialization', () => {
     expect(columns.some(column => column.name === 'reasoning_effort')).toBe(true)
     expect(columns.some(column => column.name === 'push_enabled')).toBe(true)
     expect(db.prepare(`SELECT push_enabled FROM "${SESSIONS_TABLE}" WHERE id = ?`).get('legacy-session'))
-      .toEqual({ push_enabled: 0 })
+      .toEqual({ push_enabled: 1 })
     const indexes = db.prepare(`PRAGMA index_list("${SESSIONS_TABLE}")`).all() as Array<{ name: string }>
     expect(indexes.some(index => index.name === 'idx_sessions_category_id')).toBe(true)
   })

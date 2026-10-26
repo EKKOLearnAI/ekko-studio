@@ -8,6 +8,7 @@ interface StdioMcpServerConfig {
   args: string[]
   env: Record<string, string>
   supportsParallelToolCalls: boolean
+  requestTimeoutMs?: number
 }
 
 interface StreamableHttpMcpServerConfig {
@@ -15,6 +16,7 @@ interface StreamableHttpMcpServerConfig {
   url: string
   headers: Record<string, string>
   supportsParallelToolCalls: boolean
+  requestTimeoutMs?: number
 }
 
 type McpServerConfig = StdioMcpServerConfig | StreamableHttpMcpServerConfig
@@ -43,6 +45,8 @@ function normalizeServerType(value: unknown): string {
 function normalizeServerConfig(value: unknown): McpServerConfig | null {
   if (!isRecord(value) || value.enabled === false) return null
   const supportsParallelToolCalls = value.supports_parallel_tool_calls === true
+  const requestTimeoutMs = typeof value.requestTimeoutMs === 'number'
+    && Number.isInteger(value.requestTimeoutMs) && value.requestTimeoutMs > 0 ? value.requestTimeoutMs : undefined
   const configuredType = normalizeServerType(value.type)
   const command = typeof value.command === 'string' ? value.command.trim() : ''
   const rawUrl = typeof value.url === 'string' ? value.url.trim() : ''
@@ -57,6 +61,7 @@ function normalizeServerConfig(value: unknown): McpServerConfig | null {
         url: url.toString(),
         headers: normalizeStringRecord(value.headers),
         supportsParallelToolCalls,
+        requestTimeoutMs,
       }
     } catch {
       return null
@@ -71,6 +76,7 @@ function normalizeServerConfig(value: unknown): McpServerConfig | null {
     args: Array.isArray(value.args) ? value.args.map(arg => String(arg)) : [],
     env: normalizeProcessEnv(value.env),
     supportsParallelToolCalls,
+    requestTimeoutMs,
   }
 }
 
@@ -125,6 +131,7 @@ function responseDataWithoutImagePayloads(value: unknown): unknown {
 }
 
 class McpClientSession {
+  private disposed = false
   private client: Client | null = null
   private transport: McpClientTransport | null = null
   private initialized: Promise<void> | null = null
@@ -140,7 +147,7 @@ class McpClientSession {
   async callTool(name: string, input: Record<string, unknown>, timeoutMs: number): Promise<AgentToolResult> {
     try {
       const client = await this.ensureConnected(timeoutMs)
-      const result = await client.callTool({ name, arguments: input }, { timeout: timeoutMs })
+      const result = await client.callTool({ name, arguments: input }, { timeout: this.server.requestTimeoutMs ?? timeoutMs })
       const content = responseContentToText(result)
       return {
         ok: result.isError !== true,
@@ -156,6 +163,7 @@ class McpClientSession {
   }
 
   dispose(): void {
+    this.disposed = true
     const client = this.client
     const transport = this.transport
     this.client = null
@@ -174,6 +182,7 @@ class McpClientSession {
   }
 
   private async ensureConnected(timeoutMs: number): Promise<Client> {
+    if (this.disposed) throw new Error('MCP connection scope has ended')
     if (!this.client) {
       const client = new Client({ name: 'ekko-agent', version: '0.1.0' })
       const transport = this.server.type === 'streamable_http'
@@ -201,6 +210,7 @@ class McpClientSession {
       })
     }
     await this.initialized
+    if (this.disposed) throw new Error('MCP connection scope has ended')
     return this.client!
   }
 }
@@ -310,16 +320,30 @@ function stableNameHash(value: string): string {
 }
 
 export function createMcpToolProvider(): AgentToolProvider {
-  const sessions = new Map<string, McpClientSession>()
+  const sharedSessions = new Map<string, McpClientSession>()
+  const scopedSessions = new WeakMap<AbortSignal, Map<string, McpClientSession>>()
   return {
     id: 'mcp',
     async listTools(context?: AgentToolContext): Promise<AgentTool[]> {
+      const scope = context?.mcpSessionSignal
+      scope?.throwIfAborted()
+      let sessions = scope ? scopedSessions.get(scope) : sharedSessions
+      if (!sessions) {
+        sessions = new Map()
+        scopedSessions.set(scope!, sessions)
+        const owned = sessions
+        scope!.addEventListener('abort', () => {
+          for (const session of owned.values()) session.dispose()
+          owned.clear()
+        }, { once: true })
+      }
       const timeoutMs = context?.timeoutMs || DEFAULT_MCP_TIMEOUT_MS
       const tools: AgentTool[] = []
       const usedNames = new Set<string>()
       const configuredServerNames = new Set<string>()
 
       for (const [serverName, rawConfig] of Object.entries(context?.mcpServers || {})) {
+        scope?.throwIfAborted()
         const server = normalizeServerConfig(rawConfig)
         if (!server) continue
         configuredServerNames.add(serverName)
@@ -334,6 +358,7 @@ export function createMcpToolProvider(): AgentToolProvider {
         try {
           const remoteTools = (await session.listTools(timeoutMs))
             .filter(tool => !!tool?.name)
+          scope?.throwIfAborted()
           const requiresProxy = remoteTools.some(tool => {
             const name = String(tool.name)
             return !modelSafeToolName(name) || usedNames.has(name)
@@ -363,6 +388,7 @@ export function createMcpToolProvider(): AgentToolProvider {
             ))
           }
         } catch {
+          scope?.throwIfAborted()
           // A broken MCP server should not prevent the rest of the agent run.
         }
       }

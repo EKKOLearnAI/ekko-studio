@@ -12,6 +12,7 @@ import { transcodeToPcmS16le } from '../services/voice/stt/audio-convert'
 import { decodeMcuImaAdpcm, encodeMcuImaAdpcm } from '../services/voice/mcu/adpcm'
 import { MCU_TTS_SAMPLE_RATE, mcuPromptText, mcuPromptUrl } from '../services/voice/mcu/prompts'
 import { createMcuSpeechSegmenter, normalizeMcuSpeechText } from '../services/global-agent/mcu-speech-segmenter'
+import { bindMcuWebhookEvents } from '../services/global-agent/mcu-webhook-events'
 import {
   mcuChatRunFields,
   normalizeMcuAgentRuntime,
@@ -996,6 +997,7 @@ export class GlobalAgentServer {
       logger.info('[global-agent] replaced existing client id=%s old_socket=%s new_socket=%s', clientId, existing.id, socket.id)
     }
     this.clients.set(clientId, socket)
+    bindMcuWebhookEvents(socket)
     for (const [sessionId, queue] of this.pendingMcuBackgroundSpeech.entries()) {
       if (queue.some(item => item.options.clientId === clientId)) void this.flushMcuBackgroundSpeech(sessionId)
     }

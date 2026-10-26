@@ -1,24 +1,26 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 
-const { isDark, isComic, toggleBrightness, toggleStyle } = useTheme()
+const { brightness, toggleBrightness, presetBusy } = useTheme()
+const message = useMessage()
+const { t } = useI18n()
+const modeLabel = computed(() => t(({ system: 'theme.modeSystem', light: 'theme.modeLight', dark: 'theme.modeDark' })[brightness.value]))
+async function toggle() {
+  try { await toggleBrightness() } catch { message.error(t('theme.saveFailed')) }
+}
 </script>
 
 <template>
   <div class="theme-switch-container" style="display: flex; gap: 4px; align-items: center;">
-    <button class="theme-switch" :title="isComic ? 'Ink style' : 'Comic style'" @click="toggleStyle">
-      <!-- Palette icon for comic toggle -->
-      <svg v-if="isComic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
+    <button class="theme-switch" :title="modeLabel" :aria-label="`${t('theme.mode')}: ${modeLabel}`" :data-theme-preference="brightness" :disabled="presetBusy" @click="toggle">
+      <svg v-if="brightness === 'system'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="13" rx="2" />
+        <path d="M8 21h8M12 17v4" />
       </svg>
-      <!-- Sparkle icon for ink mode -->
-      <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 3l1.5 5.5L19 10l-5.5 1.5L12 17l-1.5-5.5L5 10l5.5-1.5L12 3z" />
-      </svg>
-    </button>
-    <button class="theme-switch" :title="isDark ? 'Light mode' : 'Dark mode'" @click="toggleBrightness">
-      <!-- Sun icon (shown in dark mode) -->
-      <svg v-if="isDark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <svg v-else-if="brightness === 'light'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="5" />
         <line x1="12" y1="1" x2="12" y2="3" />
         <line x1="12" y1="21" x2="12" y2="23" />
@@ -29,7 +31,7 @@ const { isDark, isComic, toggleBrightness, toggleStyle } = useTheme()
         <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
         <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
       </svg>
-      <!-- Moon icon (shown in light mode) -->
+
       <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
       </svg>
@@ -46,7 +48,7 @@ const { isDark, isComic, toggleBrightness, toggleStyle } = useTheme()
   height: 28px;
   border: none;
   background: transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-component, 4px);
   cursor: pointer;
   color: var(--text-muted);
   transition: color 0.15s ease, background-color 0.15s ease;

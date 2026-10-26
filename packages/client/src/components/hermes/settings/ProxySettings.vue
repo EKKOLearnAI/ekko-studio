@@ -77,13 +77,13 @@ async function save() {
 
 .section-title {
   margin: 0 0 6px;
-  font-size: 18px;
+  font-size: calc(var(--font-size-base, 14px) * 18 / 14);
 }
 
 .section-hint {
   margin: 0 0 16px;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .input-lg {
@@ -99,7 +99,7 @@ async function save() {
 .settings-actions {
   display: flex;
   justify-content: flex-end;
-  padding-top: 16px;
+  padding-top: calc(16px * var(--spacing-scale, 1));
 }
 
 @media (max-width: $breakpoint-mobile) {

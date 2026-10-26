@@ -1,0 +1,105 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { webUiHome } from './paths'
+
+export const REMOTE_SERVER_URL_ENV = 'EKKO_STUDIO_DESKTOP_SERVER_URL'
+export const REMOTE_SERVER_SETTINGS_NAME = 'desktop-remote-server.json'
+
+const DEFAULT_REMOTE_READY_TIMEOUT_MS = 300_000
+const REMOTE_READY_POLL_INTERVAL_MS = 500
+const REMOTE_READY_REQUEST_TIMEOUT_MS = 300_000
+
+export function desktopPreloadArguments(kind: 'main' | 'pet' | 'chat', remoteMode: boolean): string[] {
+  return [
+    ...(kind === 'main' ? [] : [`--hermes-window-kind=${kind}`]),
+    ...(remoteMode ? ['--hermes-remote-mode'] : []),
+  ]
+}
+
+// Remote mode points every desktop window at an already-running Web UI
+// deployment (for example a Docker container) instead of spawning the bundled
+// local server. Accept scheme + host + optional base path; drop query/hash and
+// trailing slashes so window route builders can append `/#/...` safely.
+export function normalizeRemoteServerUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+  if (!parsed.hostname) return null
+  const basePath = parsed.pathname.replace(/\/+$/, '')
+  return `${parsed.origin}${basePath}`
+}
+
+export function remoteServerUrlFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  return normalizeRemoteServerUrl(env[REMOTE_SERVER_URL_ENV])
+}
+
+export function remoteServerUrlFromSettings(home: string = webUiHome()): string | null {
+  let raw: string
+  try {
+    raw = readFileSync(join(home, REMOTE_SERVER_SETTINGS_NAME), 'utf8')
+  } catch {
+    return null
+  }
+  try {
+    const data = JSON.parse(raw) as { serverUrl?: unknown }
+    return normalizeRemoteServerUrl(data?.serverUrl)
+  } catch {
+    return null
+  }
+}
+
+// The environment variable wins over the settings file so automated launches
+// can override a stored preference. An empty or invalid value in either source
+// silently falls back to the other, and to local mode when both are unusable.
+export function resolveRemoteServerUrl(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = webUiHome(),
+): string | null {
+  if (env.EKKO_STUDIO_DEVICE_INSTANCE && Object.hasOwn(env, REMOTE_SERVER_URL_ENV)) return remoteServerUrlFromEnv(env)
+  return remoteServerUrlFromEnv(env) ?? remoteServerUrlFromSettings(home)
+}
+
+export function remoteReadyTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.EKKO_STUDIO_DESKTOP_REMOTE_READY_TIMEOUT_MS)
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_REMOTE_READY_TIMEOUT_MS
+}
+
+export function requireRemoteServerRootUrl(serverUrl: string): void {
+  // Client API, Socket.IO and asset URLs are rooted at /. Reject a deployment
+  // prefix instead of silently sending its requests to another root service.
+  if (new URL(serverUrl).pathname !== '/') {
+    throw new Error('REMOTE_DEVICE_UNSUPPORTED_PATH: Use a Studio server at the root of a domain or port (for example https://studio.example.com). Subpath deployments are not supported.')
+  }
+}
+
+export async function waitForRemoteServerReady(serverUrl: string, timeoutMs: number): Promise<void> {
+  requireRemoteServerRootUrl(serverUrl)
+  const deadline = Date.now() + timeoutMs
+  const healthUrl = `${serverUrl}/health/ready`
+  let lastFailure = 'no response'
+  while (Date.now() < deadline) {
+    try {
+      const requestTimeout = Math.min(REMOTE_READY_REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now()))
+      const res = await fetch(healthUrl, { signal: AbortSignal.timeout(requestTimeout), redirect: 'error', cache: 'no-store' })
+      if (res.ok) {
+        const data = await res.json().catch(() => null) as { status?: unknown } | null
+        if (data?.status === 'ready') return
+        lastFailure = 'Expected a ready Studio server at /health/ready'
+      } else {
+        lastFailure = `HTTP ${res.status}`
+      }
+    } catch (err) {
+      lastFailure = err instanceof Error ? err.message : String(err)
+    }
+    const remaining = deadline - Date.now()
+    if (remaining > 0) await new Promise(resolveDelay => setTimeout(resolveDelay, Math.min(REMOTE_READY_POLL_INTERVAL_MS, remaining)))
+  }
+  throw new Error(`Remote server ${serverUrl} did not become ready within ${timeoutMs}ms (${lastFailure})`)
+}

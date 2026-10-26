@@ -6,6 +6,8 @@
 
 :root {
   --font-size-base: 14px;
+  --studio-drawer-width: min(520px, 100vw);
+  --studio-workspace-picker-width: min(520px, calc(100vw - 32px));
 
   // Backgrounds
   --bg-primary: #fafafa;
@@ -20,6 +22,12 @@
   --bg-sidebar-surface-rgb: var(--bg-card-rgb);
   --bg-main-surface: var(--bg-card);
   --bg-main-surface-rgb: var(--bg-card-rgb);
+
+  // Custom backgrounds: frame, contextual sidebar, then the foreground page.
+  --glass-chrome-bg: rgba(var(--bg-primary-rgb), 0.6);
+  --glass-sidebar-bg: rgba(var(--bg-sidebar-surface-rgb), 0.78);
+  --glass-content-bg: rgba(var(--bg-main-surface-rgb), 0.86);
+  --glass-divider-color: rgba(var(--text-primary-rgb), 0.1);
 
   // Borders
   --border-color: #e0e0e0;
@@ -91,6 +99,9 @@
   --bg-sidebar-surface-rgb: var(--bg-primary-rgb);
   --bg-main-surface: var(--bg-primary);
   --bg-main-surface-rgb: var(--bg-primary-rgb);
+
+  --glass-chrome-bg: rgba(var(--bg-primary-rgb), 0.9);
+  --glass-content-bg: rgba(var(--bg-card-rgb), 0.82);
 
   // Borders
   --border-color: #3a3a3a;
@@ -210,16 +221,23 @@ $font-ui: var(--font-ui, 'Inter', system-ui, -apple-system, sans-serif);
 $font-code: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
 
 // Layout
-$sidebar-width: 240px;
+$navigation-rail-width: 64px;
+$sidebar-width: var(--studio-sidebar-width, 240px);
 $sidebar-collapsed-width: 64px;
 $header-height: 60px;
 $breakpoint-mobile: 768px;
 
 // Radius
-$radius-sm: 6px;
-$radius-md: 8px;
-$radius-lg: 8px;
+$radius-sm: var(--radius-sm, 6px);
+$radius-md: var(--radius-md, 8px);
+$radius-lg: var(--radius-lg, 8px);
 
 // Transition
 $transition-fast: 0.15s ease;
 $transition-normal: 0.25s ease;
+
+@media (max-width: $breakpoint-mobile) {
+  :root {
+    --studio-drawer-width: 100vw;
+  }
+}

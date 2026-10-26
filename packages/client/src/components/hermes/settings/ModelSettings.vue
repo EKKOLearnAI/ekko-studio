@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { NSpin, NInput, NButton, NEmpty, useMessage } from 'naive-ui'
 import { ref, onMounted } from 'vue'
-import { NInput, NButton, NSpin, NEmpty, useMessage } from 'naive-ui'
+
 import { useModelsStore } from '@/stores/hermes/models'
 import { updateProvider } from '@/api/hermes/system'
 import { useI18n } from 'vue-i18n'
@@ -62,6 +64,8 @@ async function handleSaveCustom(providerKey: string) {
     savingKey.value = null
   }
 }
+
+usePageLoadingTask(() => modelsStore.loading)
 </script>
 
 <template>
@@ -135,15 +139,15 @@ async function handleSaveCustom(providerKey: string) {
 }
 
 .empty-hint {
-  padding: 40px 0;
+  padding: calc(40px * var(--spacing-scale, 1)) 0;
 }
 
 .provider-section {
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   margin-bottom: 14px;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
 }
 
 .provider-header {
@@ -154,16 +158,16 @@ async function handleSaveCustom(providerKey: string) {
 }
 
 .provider-name {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
   margin: 0;
 }
 
 .type-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  padding: calc(2px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 10px);
   font-weight: 500;
 
   &.builtin {
@@ -180,13 +184,13 @@ async function handleSaveCustom(providerKey: string) {
 .provider-fields {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .field-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 
   .n-input {
     flex: 1;

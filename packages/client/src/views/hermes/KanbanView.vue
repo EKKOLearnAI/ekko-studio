@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderActionOverflow from '@/components/layout/HeaderActionOverflow.vue'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { NButton, NSelect, NSpin, NModal, NInput, NTooltip, useDialog, useMessage } from 'naive-ui'
+import { NButton, NSelect, NModal, NInput, NTooltip, useDialog, useMessage } from 'naive-ui'
 import { VueFlow, type Node } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -178,20 +181,26 @@ watch(() => route.query.board, async () => {
   await applyBoardSelection(routeBoard(), false)
 })
 
+const initializing = ref(true)
+
 onMounted(async () => {
-  await Promise.all([
-    kanbanStore.fetchBoards(),
-    kanbanStore.fetchCapabilities(),
-    profilesStore.profiles.length === 0 ? profilesStore.fetchProfiles() : Promise.resolve(),
-  ])
-  await applyBoardSelection(routeBoard(), true, true)
-  kanbanStore.startEventStream()
-  routeReady.value = true
-  refreshTimer.value = setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      void Promise.all([kanbanStore.fetchBoards(), kanbanStore.fetchTasks(true), kanbanStore.fetchStats()])
-    }
-  }, 15000)
+  try {
+    await Promise.all([
+      kanbanStore.fetchBoards(),
+      kanbanStore.fetchCapabilities(),
+      profilesStore.profiles.length === 0 ? profilesStore.fetchProfiles() : Promise.resolve(),
+    ])
+    await applyBoardSelection(routeBoard(), true, true)
+    kanbanStore.startEventStream()
+    routeReady.value = true
+    refreshTimer.value = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void Promise.all([kanbanStore.fetchBoards(), kanbanStore.fetchTasks(true), kanbanStore.fetchStats()])
+      }
+    }, 15000)
+  } finally {
+    initializing.value = false
+  }
 })
 
 onUnmounted(() => {
@@ -291,7 +300,8 @@ async function handleDispatch() {
 </script>
 
 <template>
-  <div class="kanban-view">
+  <PageLoading :show="initializing || (kanbanStore.loading && kanbanStore.tasks.length === 0)" class="kanban-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('kanban.title') }}</h2>
       <div class="header-actions">
@@ -300,44 +310,46 @@ async function handleDispatch() {
           :options="boardOptions"
           :loading="kanbanStore.boardsLoading"
           size="small"
-          style="width: 260px;"
+          class="board-select"
         />
-        <NButton size="small" :loading="boardActionLoading" @click="showCreateBoardForm = true">
-          {{ t('common.add') }}
-        </NButton>
-        <NTooltip trigger="hover" :disabled="kanbanStore.selectedBoard !== DEFAULT_KANBAN_BOARD">
-          <template #trigger>
-            <span class="archive-board-trigger">
-              <NButton
-                size="small"
-                secondary
-                :disabled="kanbanStore.selectedBoard === DEFAULT_KANBAN_BOARD"
-                :loading="boardActionLoading"
-                @click="handleArchiveSelectedBoard"
-              >
-                {{ t('kanban.board.archive') }}
-              </NButton>
-            </span>
-          </template>
-          {{ t('kanban.board.defaultArchiveUnavailable') }}
-        </NTooltip>
-        <NButton size="small" secondary :loading="boardActionLoading" @click="handleDispatch">
-          {{ t('kanban.action.dispatch') }}
-        </NButton>
-        <NSelect
-          v-model:value="filterStatusValue"
-          :options="statusFilterOptions"
-          size="small"
-          style="width: 150px;"
-          @update:value="handleApplyFilter"
-        />
-        <NSelect
-          v-model:value="filterAssigneeValue"
-          :options="assigneeFilterOptions"
-          size="small"
-          style="width: 170px;"
-          @update:value="handleApplyFilter"
-        />
+        <HeaderActionOverflow :label="t('chat.more')" :breakpoint="1100">
+          <NButton size="small" :loading="boardActionLoading" @click="showCreateBoardForm = true">
+            {{ t('common.add') }}
+          </NButton>
+          <NTooltip trigger="hover" :disabled="kanbanStore.selectedBoard !== DEFAULT_KANBAN_BOARD">
+            <template #trigger>
+              <span class="archive-board-trigger">
+                <NButton
+                  size="small"
+                  secondary
+                  :disabled="kanbanStore.selectedBoard === DEFAULT_KANBAN_BOARD"
+                  :loading="boardActionLoading"
+                  @click="handleArchiveSelectedBoard"
+                >
+                  {{ t('kanban.board.archive') }}
+                </NButton>
+              </span>
+            </template>
+            {{ t('kanban.board.defaultArchiveUnavailable') }}
+          </NTooltip>
+          <NButton size="small" secondary :loading="boardActionLoading" @click="handleDispatch">
+            {{ t('kanban.action.dispatch') }}
+          </NButton>
+          <NSelect
+            v-model:value="filterStatusValue"
+            :options="statusFilterOptions"
+            size="small"
+            style="width: 150px;"
+            @update:value="handleApplyFilter"
+          />
+          <NSelect
+            v-model:value="filterAssigneeValue"
+            :options="assigneeFilterOptions"
+            size="small"
+            style="width: 170px;"
+            @update:value="handleApplyFilter"
+          />
+        </HeaderActionOverflow>
         <NButton type="primary" size="small" @click="showCreateForm = true">
           <template #icon>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -346,6 +358,7 @@ async function handleDispatch() {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <!-- Stats bar -->
     <div v-if="kanbanStore.stats" class="stats-bar">
@@ -375,10 +388,7 @@ async function handleDispatch() {
     </div>
 
     <!-- Board -->
-    <NSpin
-      class="kanban-board-spin"
-      :show="kanbanStore.loading && kanbanStore.tasks.length === 0"
-    >
+    <div class="kanban-board-spin">
       <div class="kanban-canvas">
         <VueFlow
           :key="kanbanCanvasKey"
@@ -424,7 +434,7 @@ async function handleDispatch() {
           <Controls />
         </VueFlow>
       </div>
-    </NSpin>
+    </div>
 
     <!-- Task detail drawer -->
     <KanbanTaskDrawer
@@ -452,14 +462,14 @@ async function handleDispatch() {
       @close="showCreateForm = false"
       @created="handleTaskCreated"
     />
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .kanban-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -471,16 +481,25 @@ async function handleDispatch() {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
+}
+
+.board-select {
+  width: 260px;
+  min-width: 96px;
+}
+
+@container studio-page-header (max-width: 700px) {
+  .board-select { width: 140px; }
 }
 
 .stats-bar {
   display: flex;
-  gap: 4px;
-  padding: 8px 20px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  border-bottom: 1px solid $border-light;
+  border-bottom: var(--border-width, 1px) solid $border-light;
   flex-shrink: 0;
   flex-wrap: nowrap;
   scrollbar-width: none;
@@ -520,11 +539,11 @@ async function handleDispatch() {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 5px;
-  padding: 5px 8px;
+  gap: calc(5px * var(--spacing-scale, 1));
+  padding: calc(5px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
-  font-size: 12px;
-  border: 1px solid transparent;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  border: var(--border-width, 1px) solid transparent;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -575,25 +594,17 @@ async function handleDispatch() {
   min-height: 0;
   overflow: hidden;
 
-  :deep(.n-spin-container),
-  :deep(.n-spin-content) {
-    height: 100%;
-    min-height: 0;
-  }
-
-  :deep(.n-spin-content) {
-    display: flex;
-    flex-direction: column;
-  }
+  display: flex;
+  flex-direction: column;
 }
 
 .column-header {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   min-height: 43px;
-  padding: 10px 11px;
-  border-bottom: 1px solid $border-light;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(11px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
   color: $text-primary;
   font-weight: 600;
 }
@@ -609,7 +620,7 @@ async function handleDispatch() {
 .column-title {
   min-width: 0;
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: calc(var(--font-size-base, 14px) * 12.5 / 14);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -617,13 +628,13 @@ async function handleDispatch() {
 .column-count {
   min-width: 22px;
   margin-inline-start: auto;
-  padding: 2px 6px;
-  border: 1px solid $border-light;
+  padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-light;
   border-radius: 999px;
   color: $text-muted;
-  font-size: 10.5px;
+  font-size: calc(var(--font-size-base, 14px) * 10.5 / 14);
   font-weight: 500;
-  line-height: 1.2;
+  line-height: var(--line-height, 1.2);
   text-align: center;
 }
 
@@ -645,21 +656,21 @@ async function handleDispatch() {
   }
 
   :deep(.vue-flow__minimap) {
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-md;
-    background: $bg-card;
+    background: var(--theme-card-bg, $bg-card);
   }
 
   :deep(.vue-flow__controls) {
     overflow: hidden;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-md;
     box-shadow: none;
   }
 
   :deep(.vue-flow__controls-button) {
     border-bottom-color: $border-light;
-    background: $bg-card;
+    background: var(--theme-card-bg, $bg-card);
     color: $text-primary;
   }
 }
@@ -672,7 +683,7 @@ async function handleDispatch() {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid $border-light;
+  border: var(--border-width, 1px) solid $border-light;
   border-radius: $radius-md;
   background: color-mix(in srgb, $bg-secondary 66%, $bg-card);
 }
@@ -681,9 +692,9 @@ async function handleDispatch() {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-height: 0;
-  padding: 9px;
+  padding: calc(9px * var(--spacing-scale, 1));
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -696,28 +707,28 @@ async function handleDispatch() {
   justify-content: center;
   flex: 1;
   min-height: 72px;
-  border: 1px dashed $border-light;
+  border: var(--border-width, 1px) dashed $border-light;
   border-radius: $radius-sm;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .board-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 @media (max-width: $breakpoint-mobile) {
   .page-header {
-    padding: 16px 12px 16px 52px;
+    padding: calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) 52px;
     position: sticky;
     top: 0;
     z-index: 20;
     flex-direction: column;
     align-items: flex-start;
     background: $bg-primary;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
   }
 
   .header-actions {
@@ -726,8 +737,8 @@ async function handleDispatch() {
   }
 
   .stats-bar {
-    gap: 6px;
-    padding-inline: 12px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding-inline: calc(12px * var(--spacing-scale, 1));
   }
 
   .kanban-flow {

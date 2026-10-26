@@ -11,7 +11,7 @@ export function openCodeSessionHeaders(
   const providerId = provider?.replace(/^custom[:_]/, '').toLowerCase()
   if (
     hostname !== 'opencode.ai' && !hostname.endsWith('.opencode.ai') &&
-    !['opencode', 'opencode-go', 'opencode-zen', 'opencode-free'].includes(providerId || '')
+    !['opencode', 'opencode-go', 'opencode-zen'].includes(providerId || '')
   ) return {}
 
   return {

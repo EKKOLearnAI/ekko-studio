@@ -11,6 +11,8 @@ export interface AppConnection {
   device_model: string
   connection_type: AppConnectionType
   user_id: number
+  push_enabled?: boolean
+  can_manage_push?: boolean
   cloud_user_id: number
   username: string
   token_expires_at: number
@@ -84,5 +86,11 @@ export async function createCloudAppAuthorization(
 export async function deleteAppConnection(id: number): Promise<{ success: boolean; notified: number }> {
   return request<{ success: boolean; notified: number }>(`/api/app-connections/${id}`, {
     method: 'DELETE',
+  })
+}
+
+export async function updateAppConnectionPush(id: number, enabled: boolean): Promise<{ success: boolean; push_enabled: boolean }> {
+  return request(`/api/studio/app-connections/${id}/push`, {
+    method: 'PATCH', body: JSON.stringify({ push_enabled: enabled }),
   })
 }

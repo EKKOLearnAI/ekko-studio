@@ -98,10 +98,20 @@ async function waitForRun(page: Page, index = 0) {
 
 test('route session id wins over shared active-session localStorage', async ({ page }) => {
   const api = await setupChatPage(page)
+  await page.addInitScript(() => {
+    const observer = new MutationObserver(() => {
+      const bubble = document.querySelector('.message.user .message-bubble')
+      if (!bubble) return
+      ;(window as any).__PW_INITIAL_CHAT_BUBBLE_TEXT__ = bubble.textContent?.trim()
+      observer.disconnect()
+    })
+    observer.observe(document, { childList: true, subtree: true })
+  })
 
   await page.goto('/#/hermes/session/session-a')
 
   await expect(page.getByText('Alpha route content')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__PW_INITIAL_CHAT_BUBBLE_TEXT__)).toBe('Alpha route content')
   await expect(page.getByText('Beta route content')).toHaveCount(0)
   await expect(page).toHaveURL(/#\/hermes\/session\/session-a$/)
   expect(api.unexpectedRequests).toEqual([])

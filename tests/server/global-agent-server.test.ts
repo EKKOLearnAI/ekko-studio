@@ -234,6 +234,8 @@ describe('GlobalAgentServer', () => {
     nsp.__handlers.get('connection')?.(socket)
 
     expect(server.getClientIds()).toEqual(['local-global-agent'])
+    expect(socket.__handlers.has('mcu.events.subscribe')).toBe(true)
+    expect(socket.__handlers.has('mcu.events.unsubscribe')).toBe(true)
 
     const response = await server.httpRequest({
       id: 'req-1',
@@ -270,6 +272,8 @@ describe('GlobalAgentServer', () => {
       nsp.__middleware[0](frontendSocket, (err?: Error) => err ? reject(err) : resolve())
     })
     nsp.__handlers.get('connection')?.(frontendSocket)
+
+    expect(frontendSocket.__handlers.has('mcu.events.subscribe')).toBe(false)
 
     const httpAck = vi.fn()
     frontendSocket.__handlers.get('http.request')?.({

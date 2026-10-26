@@ -1,6 +1,9 @@
+import { CloudModelUsageOutbox } from './model-api-usage'
+import { CloudModelApiSessions } from './model-api'
 import { randomUUID } from 'crypto'
 import { io, type Socket } from 'socket.io-client'
 import { config } from '../../public/config'
+import { P2PRelaySessions } from './p2p'
 import {
   assignLegacyCloudAppConnectionUser,
   listAppConnections,
@@ -36,6 +39,8 @@ const ALLOWED_REQUEST_HEADERS = new Set([
   'range',
   'x-hermes-profile',
   'x-request-id',
+  'x-app-access-token',
+  'x-session-share-token',
   'x-group-agent-request-secret',
   'x-expected-sha256',
 ])
@@ -228,6 +233,7 @@ export class AppRelayClient {
   private readonly bridges = new Map<string, LocalSocketBridge>()
   private readonly relayUrl: string
   private readonly localBaseUrl: string
+  private readonly p2p: P2PRelaySessions
   private readonly fetchImpl: typeof fetch
   private pairingCode = ''
   private pairingExpiresAt = 0
@@ -241,6 +247,9 @@ export class AppRelayClient {
   private readonly downloadSessions = new RelayDownloadSessions()
   private preconnectionExpired = false
   private cloudMediaMaxBytes = DEFAULT_CLOUD_MEDIA_MAX_BYTES
+  private cloudSupportsModelApi = false
+  private readonly modelApiUsage: CloudModelUsageOutbox
+  private readonly modelApiSessions: CloudModelApiSessions
   private cloudSupportsChunkedDownloads = false
 
   constructor(private readonly options: Required<Omit<StartAppRelayClientOptions, 'connectionId' | 'machineInfo'>> & {
@@ -248,7 +257,14 @@ export class AppRelayClient {
   }) {
     this.relayUrl = resolveAppRelayUrl(options.relayUrl)
     this.localBaseUrl = options.localBaseUrl.replace(/\/$/, '')
+    this.p2p = new P2PRelaySessions(this.localBaseUrl)
     this.fetchImpl = options.fetchImpl
+    this.modelApiUsage = new CloudModelUsageOutbox((value, done) => {
+      if (!this.socket?.connected || !this.cloudSupportsModelApi) return false
+      this.socket.timeout(4000).emit('model-api.usage', value, (error: Error | null, response: { ok?: boolean } = {}) => done(!error && response.ok === true))
+      return true
+    })
+    this.modelApiSessions = new CloudModelApiSessions(this.localBaseUrl, this.fetchImpl, value => this.modelApiUsage.report(value))
   }
 
   start(): void {
@@ -299,6 +315,7 @@ export class AppRelayClient {
       this.rememberPairing(payload)
       this.applyRelayLimits(payload)
       this.applyRelayCapabilities(payload)
+      this.modelApiUsage.flush()
     })
     this.socket.on('relay.limits.updated', (payload: Record<string, unknown> = {}) => {
       this.applyRelayLimits(payload)
@@ -334,11 +351,30 @@ export class AppRelayClient {
       this.pendingPreconnections.clear()
       this.preconnectionExpired = true
     })
+    this.socket.on('model-api.authorize', (request: Record<string, unknown>, ack?: (response: unknown) => void) => {
+      try { ack?.(this.modelApiSessions.authorize(request)) }
+      catch { ack?.({ ok: false, status: 403, error: 'cloud_model_access_denied' }) }
+    })
+    this.socket.on('model-api.open', (request: Record<string, unknown>, ack?: (response: unknown) => void) => {
+      void this.modelApiSessions.open(request).then(response => ack?.(response)).catch(() => ack?.({ ok: false, error: 'model_api_unavailable' }))
+    })
+    this.socket.on('model-api.read', (request: Record<string, unknown>, ack?: (response: unknown) => void) => {
+      void this.modelApiSessions.read(String(request?.id || '')).then(response => ack?.(response))
+    })
+    this.socket.on('model-api.cancel', (request: Record<string, unknown>, ack?: (response: unknown) => void) => {
+      this.modelApiSessions.cancel(String(request?.id || ''))
+      ack?.({ ok: true })
+    })
     this.socket.on('app.http.request', (request: AppRelayHttpRequest, ack?: (response: AppRelayHttpResponse) => void) => {
       void this.handleHttpRequest(request)
         .then(response => ack?.(response))
         .catch(err => ack?.(httpError(request?.id, 'relay_internal_error', err instanceof Error ? err.message : String(err), 500)))
     })
+    this.socket.on('app.p2p.offer', (request: Record<string, any>, ack?: (response: unknown) => void) => {
+      void this.p2p.offer(request.owner, request).then(response => ack?.(response)).catch(() => ack?.({ ok: false, error: 'p2p_unavailable' }))
+    })
+    this.socket.on('app.p2p.keepalive', (request: Record<string, any>, ack?: (response: unknown) => void) => { ack?.(this.p2p.keepalive(request.owner)) })
+    this.socket.on('app.p2p.close', (request: Record<string, any>, ack?: (response: unknown) => void) => { ack?.(this.p2p.close(request.owner)) })
     this.socket.on('app.http.download.chunk', (
       request: AppRelayHttpDownloadRequest = {},
       ack?: (response: AppRelayHttpDownloadResponse) => void,
@@ -366,6 +402,7 @@ export class AppRelayClient {
   }
 
   stop(): void {
+    this.modelApiUsage.stop()
     this.closeLocalBridges()
     this.clearRelaySessionState()
     this.socket?.disconnect()
@@ -395,6 +432,17 @@ export class AppRelayClient {
       pairingCode: this.pairingExpiresAt > Math.floor(Date.now() / 1000) ? this.pairingCode : '',
       pairingExpiresAt: this.pairingExpiresAt,
     }
+  }
+
+  requestModelApiLink(studioUserId: number, action: 'get' | 'create' | 'rotate' | 'revoke'): Promise<Record<string, unknown>> {
+    if (!this.socket?.connected || !this.cloudSupportsModelApi) return Promise.resolve({ available: false, urls: null, reason: 'cloud_link_unavailable' })
+    const socket = this.socket
+    return new Promise((resolve, reject) => {
+      socket.timeout(8000).emit('model-api.link', { studioUserId, action }, (error: Error | null, response: Record<string, unknown> = {}) => {
+        if (error) { reject(new Error('cloud_link_unavailable')); return }
+        resolve(response.ok === true ? { ...response, available: true } : { available: false, urls: null, reason: String(response.error || 'cloud_link_unavailable') })
+      })
+    })
   }
 
   requestPairingCode(timeoutMs = 5000): Promise<{ pairingCode: string; expiresAt: number }> {
@@ -720,6 +768,9 @@ export class AppRelayClient {
   }
 
   private clearRelaySessionState(): void {
+    this.p2p.closeAll()
+    this.modelApiSessions.cancelAll()
+    this.cloudSupportsModelApi = false
     this.downloadSessions.cancelAll()
     this.cloudSupportsChunkedDownloads = false
     this.pendingPreconnections.clear()
@@ -738,6 +789,7 @@ export class AppRelayClient {
   private applyRelayCapabilities(payload: Record<string, unknown>): void {
     const capabilities = Array.isArray(payload.capabilities) ? payload.capabilities : []
     this.cloudSupportsChunkedDownloads = capabilities.includes('http.download.chunked')
+    this.cloudSupportsModelApi = capabilities.includes('model-api.cloud.v3')
   }
 
   private async readHttpDownloadChunk(

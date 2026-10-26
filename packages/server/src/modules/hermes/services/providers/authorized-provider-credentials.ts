@@ -361,6 +361,18 @@ async function locateAuthSnapshot(
   return snapshotFromAuth(defaultPath, defaultAuth, provider, dependencies.env || process.env)
 }
 
+/** Read the runtime-selected auth store without refreshing or persisting credentials. */
+export async function readAuthorizedProviderStoredAuth(
+  profile: string,
+  provider: string,
+  dependencies: ResolverDependencies = {},
+): Promise<JsonRecord | null> {
+  const normalizedProvider = clean(provider).toLowerCase() as AuthorizedProvider
+  if (!isAuthorizedRuntimeProvider(normalizedProvider)) return null
+  const snapshot = await locateAuthSnapshot(clean(profile) || 'default', normalizedProvider, dependencies)
+  return snapshot?.auth || null
+}
+
 function scopes(value: unknown): Set<string> {
   const parts = Array.isArray(value) ? value : clean(value).replace(/,/g, ' ').split(/\s+/)
   return new Set(parts.map(item => clean(item)).filter(Boolean))

@@ -149,7 +149,7 @@ function nodeProps({ option }: { option: TreeOption }) {
 }
 
 const treeThemeOverrides = {
-  fontSize: '13px',
+  fontSize: 'calc(var(--font-size-base, 14px) * 13 / 14)',
   nodeHeight: '24px',
   nodeWrapperPadding: '0',
   nodeBorderRadius: '0',
@@ -211,18 +211,18 @@ watch(() => filesStore.entries, async () => {
 @use '@/styles/variables' as *;
 
 .file-tree {
-  padding: 0 4px 8px;
+  padding: 0 calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
 }
 
 .tree-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   min-height: 24px;
-  padding: 0 6px;
+  padding: 0 calc(6px * var(--spacing-scale, 1));
   cursor: pointer;
   border-radius: 0;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
   color: $text-primary;
 
@@ -304,8 +304,8 @@ watch(() => filesStore.entries, async () => {
   flex: 0 0 auto;
   min-width: 14px;
   margin-inline-start: 8px;
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   text-align: center;
 }

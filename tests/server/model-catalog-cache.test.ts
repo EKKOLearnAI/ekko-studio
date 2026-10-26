@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
 
 const {
   mockReadFile,
@@ -36,7 +37,8 @@ vi.mock('../../packages/server/src/modules/studio/public/config', () => ({
   config: { appHome: '/app-home' },
 }))
 
-vi.mock('../../packages/server/src/modules/studio/contracts/providers', () => ({
+vi.mock('../../packages/server/src/modules/studio/contracts/providers', async importOriginal => ({
+  ...await importOriginal<typeof import('../../packages/server/src/modules/studio/contracts/providers')>(),
   PROVIDER_PRESETS: [
     {
       value: 'openrouter',
@@ -160,8 +162,8 @@ describe('model catalog cache', () => {
     mockGlobalFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) })
     vi.stubGlobal('fetch', mockGlobalFetch)
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === '/hermes/default/.env') return 'OPENROUTER_API_KEY=default-openrouter\n'
-      if (path === '/hermes/team/.env') {
+      if (path === join('/hermes/default', '.env')) return 'OPENROUTER_API_KEY=default-openrouter\n'
+      if (path === join('/hermes/team', '.env')) {
         return [
           'OPENROUTER_API_KEY=team-openrouter',
           'DEEPSEEK_API_KEY=team-deepseek',
@@ -183,6 +185,24 @@ describe('model catalog cache', () => {
         ],
       }
     })
+  })
+
+  it('curates live MiniMax discoveries without modifying cached history', async () => {
+    const { providerModelCatalogKey, resolveProviderCatalogModels } = await import(
+      '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
+    )
+    for (const provider of ['minimax', 'custom:minimax']) {
+      const baseUrl = 'https://api.minimax.io/anthropic/v1'
+      const entry = {
+        provider, label: 'MiniMax', base_url: baseUrl, source: 'live' as const,
+        models: ['MiniMax-M2.7', 'MiniMax-M3'], unavailable_models: ['MiniMax-M2.5'],
+        updated_at: '2026-10-20T00:00:00.000Z',
+      }
+      const cache = { version: 1 as const, updated_at: entry.updated_at, providers: { [providerModelCatalogKey(provider, baseUrl)]: entry } }
+      expect(resolveProviderCatalogModels(cache, provider, baseUrl, [])).toEqual(['MiniMax-M3.1-Flash', 'MiniMax-M3'])
+      expect(entry.models).toEqual(['MiniMax-M2.7', 'MiniMax-M3'])
+      expect(entry.unavailable_models).toEqual(['MiniMax-M2.5'])
+    }
   })
 
   it('resolves cached catalogs by source and authoritative manifest presence', async () => {
@@ -416,8 +436,8 @@ describe('model catalog cache', () => {
       return { provider, ...credentials[provider] }
     })
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === '/hermes/default/.env') return ''
-      if (path === '/hermes/default/auth.json') {
+      if (path === join('/hermes/default', '.env')) return ''
+      if (path === join('/hermes/default', 'auth.json')) {
         return JSON.stringify({
           providers: {
             'openai-codex': { tokens: { access_token: 'codex-token' } },
@@ -518,8 +538,8 @@ describe('model catalog cache', () => {
     mockListProfileNamesFromDisk.mockReturnValue(['default'])
     mockReadConfigYamlForProfile.mockResolvedValue({})
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === '/hermes/default/.env') return ''
-      if (path === '/hermes/default/auth.json') {
+      if (path === join('/hermes/default', '.env')) return ''
+      if (path === join('/hermes/default', 'auth.json')) {
         return JSON.stringify({
           providers: {
             'minimax-oauth': {

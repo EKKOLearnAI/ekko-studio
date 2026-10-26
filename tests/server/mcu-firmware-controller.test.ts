@@ -20,6 +20,76 @@ afterEach(async () => {
 })
 
 describe('MCU firmware controller', () => {
+  describe.each(['development', 'production'] as const)('%s firmware downloads', environment => {
+    it.each(['v1', 'v2'] as const)('serves matching %s manifest and firmware bytes', async version => {
+      tempRoot = await makeTempRoot()
+      process.chdir(tempRoot)
+      vi.stubEnv('NODE_ENV', environment)
+
+      const firmware = Buffer.from(`${environment}-${version}`)
+      const firmwareDir = environment === 'production'
+        ? `dist/mcu/${version}`
+        : `packages/mcu/esp32-c3/${version}/.pio/build/esp32-c3-devkitm-1`
+      await mkdir(path.join(tempRoot, firmwareDir), { recursive: true })
+      await writeFile(path.join(tempRoot, firmwareDir, 'firmware.bin'), firmware)
+      const ctrl = await import('../../packages/server/src/modules/studio/controllers/mcu-firmware')
+      const manifestCtx = makeCtx({ version })
+      const downloadCtx = makeCtx({ version })
+
+      await ctrl.manifest(manifestCtx)
+      await ctrl.download(downloadCtx)
+
+      const sha256 = createHash('sha256').update(firmware).digest('hex')
+      const md5 = createHash('md5').update(firmware).digest('hex')
+      expect(manifestCtx.status).toBe(200)
+      expect(manifestCtx.body).toMatchObject({
+        channel: environment,
+        firmwareVersion: version,
+        url: `/api/studio/mcu/firmware/${version}/firmware.bin`,
+        size: firmware.length,
+        sha256,
+        md5,
+      })
+      expect(downloadCtx.status).toBe(200)
+      expect(downloadCtx.set).toHaveBeenCalledWith('X-MCU-Firmware-Version', version)
+      expect(downloadCtx.set).toHaveBeenCalledWith('Content-Length', String(firmware.length))
+      expect(downloadCtx.set).toHaveBeenCalledWith('X-Firmware-SHA256', sha256)
+      expect(downloadCtx.set).toHaveBeenCalledWith('X-Firmware-MD5', md5)
+      const chunks: Buffer[] = []
+      for await (const chunk of downloadCtx.body) chunks.push(chunk)
+      expect(Buffer.concat(chunks)).toEqual(firmware)
+    })
+  })
+
+  it('keeps legacy downloads on v1 with the original dist fallback', async () => {
+    tempRoot = await makeTempRoot()
+    process.chdir(tempRoot)
+    vi.stubEnv('NODE_ENV', 'production')
+
+    const firmware = Buffer.from('legacy-v1-fallback')
+    await writeFile(path.join(tempRoot, 'dist/mcu/firmware.bin'), firmware)
+    await writeFile(path.join(tempRoot, 'dist/mcu/v2/firmware.bin'), Buffer.from('v2-only'))
+    const ctrl = await import('../../packages/server/src/modules/studio/controllers/mcu-firmware')
+    const manifestCtx = makeCtx({ version: 'v2' })
+    const downloadCtx = makeCtx({ version: 'v2' })
+
+    await ctrl.legacyManifest(manifestCtx)
+    await ctrl.legacyDownload(downloadCtx)
+
+    expect(manifestCtx.status).toBe(200)
+    expect(manifestCtx.body).toMatchObject({
+      firmwareVersion: 'v1',
+      url: '/api/studio/mcu/firmware/v1/firmware.bin',
+      sha256: createHash('sha256').update(firmware).digest('hex'),
+    })
+    expect(downloadCtx.status).toBe(200)
+    expect(downloadCtx.set).toHaveBeenCalledWith('X-Legacy-Firmware-Route', '/api/studio/mcu/firmware.bin')
+    expect(downloadCtx.set).toHaveBeenCalledWith('X-MCU-Firmware-Version', 'v1')
+    const chunks: Buffer[] = []
+    for await (const chunk of downloadCtx.body) chunks.push(chunk)
+    expect(Buffer.concat(chunks)).toEqual(firmware)
+  })
+
   it('serves a version-isolated v1 manifest', async () => {
     tempRoot = await makeTempRoot()
     process.chdir(tempRoot)

@@ -6,6 +6,7 @@ import type { Session } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
+import PinIcon from '@/components/common/PinIcon.vue'
 import { formatTimestampMs } from '@/shared/session-display'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 import { resolveSessionNavigation } from './session-list-item-navigation'
@@ -124,11 +125,7 @@ onUnmounted(() => {
       <span class="session-item-title-row">
         <span class="session-item-title-main">
           <span v-if="pinned" class="session-item-pin" aria-hidden="true">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 17v5" />
-              <path d="M5 8l14 0" />
-              <path d="M8 3l8 0 0 5 3 5-14 0 3-5z" />
-            </svg>
+            <PinIcon width="13" height="13" filled />
           </span>
           <span v-if="completedUnread" class="session-item-unread-dot" aria-hidden="true" />
           <span class="session-item-title" dir="auto">
@@ -202,7 +199,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 8px 10px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border: none;
   background: none;
   border-radius: var(--radius-sm);
@@ -233,7 +230,7 @@ onUnmounted(() => {
   background: rgba(var(--accent-primary-rgb), 0.12);
   color: var(--text-primary);
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: var(--radius-component, 6px);
 }
 
 .session-item.active .session-item-title {
@@ -265,14 +262,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .session-item-title-main {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -281,7 +278,7 @@ onUnmounted(() => {
   display: block;
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -306,7 +303,7 @@ onUnmounted(() => {
 
 .session-item-time {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: var(--text-muted);
 }
 
@@ -322,12 +319,12 @@ onUnmounted(() => {
   flex-shrink: 0;
   opacity: 0;
   pointer-events: none;
-  padding: 2px;
+  padding: calc(2px * var(--spacing-scale, 1));
   border: none;
   background: none;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
   transition: all var(--transition-fast);
 }
 
@@ -346,7 +343,7 @@ onUnmounted(() => {
 .session-item-profile {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: calc(5px * var(--spacing-scale, 1));
   flex: 0 1 auto;
   min-width: 0;
 }
@@ -360,8 +357,8 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   color: var(--text-muted);
 }
 
@@ -370,12 +367,12 @@ onUnmounted(() => {
   min-width: 0;
   max-width: 45%;
   overflow: hidden;
-  padding: 1px 6px;
-  border-radius: 4px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 4px);
   background: rgba(127, 127, 127, 0.12);
   color: var(--text-muted);
-  font-size: 10px;
-  line-height: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -384,23 +381,23 @@ onUnmounted(() => {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
-  border: 1px solid rgba(180, 35, 24, 0.35);
+  border: var(--border-width, 1px) solid rgba(180, 35, 24, 0.35);
   border-radius: 50%;
   background: rgba(220, 38, 38, 0.1);
   color: #b42318;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 700;
-  line-height: 14px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 14 / 14));
   cursor: pointer;
 }
 
 .session-item-agent-row {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   min-width: 0;
   margin-top: 3px;
-  padding: 3px 0;
+  padding: calc(3px * var(--spacing-scale, 1)) 0;
 }
 
 .session-item-agent-logo-wrap {
@@ -433,7 +430,7 @@ onUnmounted(() => {
   width: 18px;
   height: 18px;
   box-sizing: border-box;
-  border: 1px solid #fff;
+  border: var(--border-width, 1px) solid #fff;
   border-radius: inherit;
   object-fit: cover;
 }

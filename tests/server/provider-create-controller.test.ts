@@ -46,6 +46,32 @@ describe('providers controller create', () => {
     hermesHome = ''
   })
 
+  it.each(['legacy', 'dict'])('refuses to overwrite a %s provider when create_only is requested', async schema => {
+    const entry = { name: 'example-relay', base_url: 'https://keep.example/v1', api_key: 'keep-key', model: 'keep-model' }
+    writeFileSync(join(hermesHome, 'config.yaml'), YAML.dump({
+      model: { default: 'keep-model', provider: 'custom:example-relay' },
+      ...(schema === 'legacy' ? { custom_providers: [entry] } : { providers: { 'example-relay': entry } }),
+    }))
+    const before = readFileSync(join(hermesHome, 'config.yaml'), 'utf8')
+    const { create } = await loadProvidersController()
+    const ctx = makeCtx({ name: 'Example Relay', base_url: 'https://new.example/v1', api_key: 'new-key', model: 'new-model', create_only: true })
+    await create(ctx)
+    expect(ctx.status).toBe(409)
+    expect(readFileSync(join(hermesHome, 'config.yaml'), 'utf8')).toBe(before)
+    expect(readFileSync(join(hermesHome, '.env'), 'utf8')).toBe('')
+  })
+
+  it('allows a fresh create-only import scoped to a named profile', async () => {
+    mkdirSync(join(hermesHome, 'profiles', 'research'), { recursive: true })
+    writeFileSync(join(hermesHome, 'profiles', 'research', 'config.yaml'), 'model: {}\n')
+    const before = readFileSync(join(hermesHome, 'config.yaml'), 'utf8')
+    const { create } = await loadProvidersController()
+    const ctx = makeCtx({ name: 'Example Relay', base_url: 'https://relay.example/v1', api_key: 'fixture-key', model: 'example-model', create_only: true }, 'research')
+    await create(ctx)
+    expect(ctx.status).toBe(200)
+    expect(readYaml(join(hermesHome, 'profiles', 'research', 'config.yaml')).custom_providers[0].name).toBe('example-relay')
+    expect(readFileSync(join(hermesHome, 'config.yaml'), 'utf8')).toBe(before)
+  })
   it('does not persist a built-in provider base URL when it matches the preset default', async () => {
     const { create } = await loadProvidersController()
     const ctx = makeCtx({
@@ -64,22 +90,36 @@ describe('providers controller create', () => {
     expect(envAfter).not.toContain('DEEPSEEK_BASE_URL')
   })
 
-  it('selects native OpenCode Free without writing credentials or a custom provider', async () => {
+  it('omits the protocol for automatic custom connections even when their name matches a preset', async () => {
     const { create } = await loadProvidersController()
-    const ctx = makeCtx({ name: 'OpenCode Free', providerKey: 'opencode-free', model: 'mimo-v2.5-free', api_key: '' })
+    const ctx = makeCtx({ name: 'anthropic', base_url: 'https://relay.example/v1', api_key: 'fixture-key', model: 'model-a', api_mode: null, create_only: true })
     await create(ctx)
-    expect(ctx.body).toEqual({ success: true })
-    expect(readYaml(join(hermesHome, 'config.yaml'))).toEqual({ model: { provider: 'opencode-free', default: 'mimo-v2.5-free' } })
-    expect(readFileSync(join(hermesHome, '.env'), 'utf-8')).toBe('')
+    expect(ctx.status).toBe(200)
+    const entry = readYaml(join(hermesHome, 'config.yaml')).custom_providers[0]
+    expect(entry).toMatchObject({ name: 'anthropic', base_url: 'https://relay.example/v1' })
+    expect(entry).not.toHaveProperty('api_mode')
   })
 
-  it('rejects a paid model under OpenCode Free without changing the current config', async () => {
+  it.each(['deepseek', 'opencode-zen', 'opencode-go'])('does not persist catalog protocol metadata when adding %s', async provider => {
+    const { create } = await loadProvidersController()
+    const ctx = makeCtx({ name: provider, providerKey: provider, api_key: 'test-key', model: 'dynamic-model' })
+    await create(ctx)
+    expect(ctx.body).toEqual({ success: true })
+    const saved = readYaml(join(hermesHome, 'config.yaml'))
+    expect(saved.model).toEqual({ default: 'dynamic-model', provider })
+    expect(saved.custom_providers).toBeUndefined()
+    expect(JSON.stringify(saved)).not.toContain('api_mode')
+  })
+
+  it.each(['', 'stale-key'])('rejects retired OpenCode Free without changing configuration (key: %s)', async apiKey => {
     const { create } = await loadProvidersController()
     const before = readFileSync(join(hermesHome, 'config.yaml'), 'utf-8')
-    const ctx = makeCtx({ name: 'OpenCode Free', providerKey: 'opencode-free', model: 'claude-opus-4-8', api_key: '' })
+    const ctx = makeCtx({ name: 'OpenCode Free', providerKey: 'opencode-free', base_url: 'https://opencode.ai/zen/v1', model: 'mimo-v2.5-free', api_key: apiKey })
     await create(ctx)
     expect(ctx.status).toBe(400)
+    expect(ctx.body).toEqual({ error: expect.stringContaining('OpenCode Free is no longer supported') })
     expect(readFileSync(join(hermesHome, 'config.yaml'), 'utf-8')).toBe(before)
+    expect(readFileSync(join(hermesHome, '.env'), 'utf-8')).toBe('')
   })
 
   it('persists a built-in provider base URL when it differs from the preset default', async () => {

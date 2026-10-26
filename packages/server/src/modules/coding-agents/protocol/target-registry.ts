@@ -1,4 +1,4 @@
-import { OPENCODE_FREE_PROVIDER, openCodeFreeRuntime } from '../../studio/contracts/opencode-free'
+import { assertProviderAvailable } from '../../studio/contracts/providers'
 import { randomBytes } from 'crypto'
 import type { AgentApiMode } from './types'
 
@@ -35,13 +35,13 @@ export class AgentTargetRegistry<T extends AgentTargetInput> {
   constructor(private readonly keyParts: (input: NormalizedAgentTargetInput<T>) => string[]) {}
 
   register(input: T, persisted?: { token?: string }): RegisteredAgentTarget<T> {
+    assertProviderAvailable(input.provider)
     const normalized = {
       ...input,
       provider: input.provider.trim(),
       model: input.model.trim(),
       baseUrl: input.baseUrl.trim().replace(/\/+$/, ''),
       apiMode: input.apiMode || 'chat_completions',
-      ...(input.provider.trim() === OPENCODE_FREE_PROVIDER ? openCodeFreeRuntime(input.model.trim()) : {}),
     } as NormalizedAgentTargetInput<T>
     const key = JSON.stringify(this.keyParts(normalized))
     const existing = this.targets.get(key)

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   connectGroupChatClient,
@@ -20,6 +21,29 @@ describe('group chat authoritative execution queue', () => {
 
   afterEach(() => {
     harness?.cleanup()
+  })
+
+  it.each([false, true])('checks the current message hash in the auto-routing transaction (edited=%s)', edited => {
+    const storage = harness.groupServer.getStorage()
+    storage.addRoomMember('room-1', 'human-1', 'Owner', '', '')
+    const message = { id: 'auto-message', roomId: 'room-1', senderId: 'human-1', senderName: 'Owner',
+      content: 'Analyze logs', mentions: [], timestamp: Date.now(), role: 'user' }
+    storage.saveMessageAndRefreshRoom(message as any)
+    const messageHash = createHash('sha256').update(JSON.stringify({ id: message.id, roomId: message.roomId,
+      senderId: message.senderId, content: message.content, mentions: message.mentions, timestamp: message.timestamp })).digest('hex')
+    storage.saveMessageRoutingContext({ messageId: message.id, roomId: message.roomId, messageHash, requesterMemberId: message.senderId })
+    if (edited) storage.saveMessageAndRefreshRoom({ ...message, content: 'Cancel this task' } as any)
+    const result = storage.claimAndEnqueueAutoRouting({ messageId: message.id, roomId: message.roomId, messageHash,
+      candidateHash: 'candidates', configHash: 'config', targetAgentId: 'agent-worker', targetAgentName: 'Worker',
+      mode: 'auto', status: 'suggested', queueId: null, confidence: .99, handoffComplete: true, loopDetected: false,
+      createdAt: Date.now(), updatedAt: Date.now() }, message.senderId, message.content)
+    if (edited) {
+      expect(result).toBeNull()
+      expect(storage.listQueuedExecutionItems(message.roomId)).toHaveLength(0)
+    } else {
+      expect(result).toMatchObject({ status: 'queued', messageId: message.id })
+      expect(storage.listQueuedExecutionItems(message.roomId)).toHaveLength(1)
+    }
   })
 
   it('atomically retracts queued work and its message after commit for every connected client', async () => {

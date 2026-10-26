@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NAlert, NButton, NIcon, useMessage } from 'naive-ui'
 import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
-import { NAlert, NButton, NIcon, NSpin, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
@@ -399,20 +400,20 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 }
 
 .preview-file-info,
 .preview-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .preview-filename {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -421,25 +422,25 @@ onBeforeUnmount(() => {
 
 .preview-size {
   flex: none;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .preview-location {
   flex: none;
-  padding: 1px 6px;
-  border: 1px solid rgba(var(--accent-primary-rgb), 0.24);
+  padding: calc(1px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.24);
   border-radius: 999px;
   color: var(--accent-primary);
   background: rgba(var(--accent-primary-rgb), 0.08);
-  font-family: $font-code;
-  font-size: 11px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .preview-content {
   flex: 1;
   overflow: auto;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   display: flex;
   justify-content: center;
   width: 100%;
@@ -483,9 +484,9 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   overflow: auto;
-  font-family: $font-code;
-  font-size: 13px;
-  line-height: 1.55;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, 1.55);
   scrollbar-width: none;
 
   // Let long rows contribute to the scroller's horizontal overflow.
@@ -508,8 +509,8 @@ onBeforeUnmount(() => {
   grid-template-columns: 52px minmax(max-content, 1fr);
   min-width: max-content;
   height: 20px;
-  border-radius: 3px;
-  line-height: 20px;
+  border-radius: var(--radius-component, 3px);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 20 / 14));
   white-space: pre;
 }
 
@@ -521,7 +522,7 @@ onBeforeUnmount(() => {
 .preview-source-line-number {
   position: sticky;
   left: 0;
-  padding-inline: 8px 12px;
+  padding-inline: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   color: $text-muted;
   background: $bg-secondary;
   text-align: end;
@@ -534,7 +535,7 @@ onBeforeUnmount(() => {
 }
 
 .preview-source-line-text {
-  padding-inline: 12px;
+  padding-inline: calc(12px * var(--spacing-scale, 1));
   color: $text-primary;
   font: inherit;
 }

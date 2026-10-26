@@ -40,6 +40,15 @@ afterAll(async () => {
 })
 
 describe('group Agent presets', () => {
+  it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('preserves %s preset scoped model where supported', async agent => {
+    const { normalizeGroupAgentPresetInput, validateGroupAgentPresetCapability } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-presets')
+    const preset = normalizeGroupAgentPresetInput({ agent, agentMode: 'scoped', profile: 'research', name: agent,
+      provider: 'custom:test', model: 'test-model', apiMode: 'codex_responses', reasoningEffort: 'high' })
+    expect(preset).toMatchObject(agent === 'qoder' ? { agent, agentMode: 'global', provider: '', model: '', apiMode: '', reasoningEffort: '' } : { agent, agentMode: 'scoped', provider: 'custom:test', model: 'test-model', apiMode: 'codex_responses', reasoningEffort: 'high' })
+    expect(() => validateGroupAgentPresetCapability(preset, [{ provider: 'custom:test', models: ['test-model'], api_mode: 'chat_completions' }])).not.toThrow()
+    if (agent !== 'qoder') expect(() => validateGroupAgentPresetCapability(preset, [])).toThrow()
+  })
+
   it('returns an application conflict for owner-scoped duplicate names without leaking SQLite details', async () => {
     const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const controller = await import('../../packages/server/src/modules/studio/controllers/group-agent-presets')
@@ -182,7 +191,7 @@ describe('group Agent presets', () => {
     }])).toThrow(/unavailable/i)
   })
 
-  it('normalizes global CLI presets without persisting scoped model configuration', async () => {
+  it('preserves native model and effort in global CLI presets', async () => {
     const {
       normalizeGroupAgentPresetInput,
       validateGroupAgentPresetCapability,
@@ -193,7 +202,7 @@ describe('group Agent presets', () => {
       agentMode: 'global',
       profile: 'research',
       provider: 'must-not-persist',
-      model: 'must-not-persist',
+      model: 'native-selected-model',
       apiMode: 'chat_completions',
       reasoningEffort: 'high',
       name: 'Global Reviewer',
@@ -204,9 +213,9 @@ describe('group Agent presets', () => {
       agent: 'codex',
       agentMode: 'global',
       provider: '',
-      model: '',
+      model: 'native-selected-model',
       apiMode: '',
-      reasoningEffort: '',
+      reasoningEffort: 'high',
     })
     expect(() => validateGroupAgentPresetCapability(preset, [])).not.toThrow()
     expect(() => normalizeGroupAgentPresetInput({
@@ -214,6 +223,33 @@ describe('group Agent presets', () => {
       agent: 'ekko',
       name: 'Invalid Global Ekko',
     })).toThrow(/global mode is only available/i)
+  })
+
+  it.each([
+    { agent: 'codex', effort: 'ultra' },
+    { agent: 'kimi', effort: 'off' },
+    { agent: 'kimi', effort: 'on' },
+  ])('round-trips global $agent effort $effort and native defaults without Studio bindings', async ({ agent, effort }) => {
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const controller = await import('../../packages/server/src/modules/studio/controllers/group-agent-presets')
+    const { updateAgentStatus } = await import('../../packages/server/src/modules/studio/public/agent-status-registry')
+    updateAgentStatus(agent as 'codex' | 'kimi', { installed: true, source: 'user-cli', path: `/test/${agent}` })
+    initAllStores()
+    modelGroups.value = []
+    const user = { id: 910, role: 'admin', profiles: ['research'] }
+    const input = { agent, agentMode: 'global', profile: 'research', name: `Global native ${agent} ${effort}`,
+      model: 'native-review', reasoningEffort: effort, provider: 'discard', apiMode: 'codex_responses' }
+    const created: any = { state: { user }, request: { body: input } }
+    await controller.create(created)
+    expect(created.status).toBe(201)
+    expect(created.body.preset).toMatchObject({ model: 'native-review', reasoningEffort: effort, provider: '', apiMode: '' })
+    const listed: any = { state: { user } }
+    await controller.list(listed)
+    expect(listed.body.presets).toContainEqual(expect.objectContaining({ model: 'native-review', reasoningEffort: effort, available: true }))
+    const updated: any = { state: { user }, params: { presetId: created.body.preset.id },
+      request: { body: { ...input, model: '', reasoningEffort: '' } } }
+    await controller.update(updated)
+    expect(updated.body.preset).toMatchObject({ model: '', reasoningEffort: '', provider: '', apiMode: '' })
   })
 
   it('marks presets unavailable when their Agent is not installed', async () => {
@@ -355,5 +391,67 @@ describe('group Agent presets', () => {
     expect(listCtx.body.presets).toEqual([
       expect.objectContaining({ id: presetId, available: false, validationError: expect.stringContaining('unavailable') }),
     ])
+  })
+
+  it('keeps the stashed launch mode on a saved Cursor preset and clears it when the preset leaves Cursor', async () => {
+    const { updateAgentStatus } = await import('../../packages/server/src/modules/studio/public/agent-status-registry')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const controller = await import('../../packages/server/src/modules/studio/controllers/group-agent-presets')
+    initAllStores()
+    modelGroups.value = [{ provider: 'openai', models: ['gpt-test'] }]
+    updateAgentStatus('cursor', {
+      installed: true,
+      source: 'user-cli',
+      path: 'agent',
+    })
+    updateAgentStatus('codex', {
+      installed: true,
+      source: 'user-cli',
+      path: '/usr/local/bin/codex',
+    })
+    const user = { id: 77, role: 'admin', profiles: ['research'] }
+    const createCtx: any = {
+      state: { user },
+      request: { body: {
+        agent: 'cursor',
+        agentMode: 'global',
+        priorAgentMode: 'global',
+        profile: 'research',
+        name: 'Cursor Reviewer',
+        description: '',
+        avatar: '',
+      } },
+    }
+    await controller.create(createCtx)
+    expect(createCtx.status).toBe(201)
+    expect(createCtx.body.preset).toMatchObject({
+      agent: 'cursor',
+      agentMode: 'global',
+      priorAgentMode: 'global',
+    })
+
+    await expect(controller.resolveGroupAgentPresetForApplication(user, createCtx.body.preset.id))
+      .resolves.toMatchObject({ priorAgentMode: 'global' })
+
+    const updateCtx: any = {
+      state: { user },
+      params: { presetId: createCtx.body.preset.id },
+      request: { body: {
+        agent: 'codex',
+        agentMode: 'scoped',
+        profile: 'research',
+        provider: 'openai',
+        model: 'gpt-test',
+        apiMode: 'codex_responses',
+        name: 'Cursor Reviewer',
+        description: '',
+        avatar: '',
+      } },
+    }
+    await controller.update(updateCtx)
+    expect(updateCtx.body.preset).toMatchObject({
+      agent: 'codex',
+      priorAgentMode: '',
+    })
   })
 })

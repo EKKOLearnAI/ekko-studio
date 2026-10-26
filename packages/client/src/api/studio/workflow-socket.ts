@@ -1,3 +1,4 @@
+import { socketEndpoint } from '@/utils/deployment-url'
 import { io, type Socket } from 'socket.io-client'
 import { getActiveProfileName, getApiKey, getBaseUrlValue } from '../client'
 import type { WorkflowRecord, WorkflowRunRecord } from './workflows'
@@ -46,7 +47,8 @@ export function connectWorkflowSocket(profile?: string | null): Socket {
   }
 
   socketProfile = nextProfile
-  socket = io(`${getBaseUrlValue()}/workflow`, {
+  socket = io(socketEndpoint(getBaseUrlValue(), '/workflow').url, {
+    path: socketEndpoint(getBaseUrlValue(), '/workflow').path,
     auth: { token: getApiKey() },
     query: { profile: nextProfile },
     transports: ['websocket', 'polling'],

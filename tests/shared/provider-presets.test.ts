@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   PROVIDER_PRESETS as SERVER_PROVIDER_PRESETS,
   buildProviderModelMap as buildServerProviderModelMap,
+  resolveProviderCatalogApiMode,
+  resolveProviderConnectionApiMode,
 } from '../../packages/server/src/modules/studio/contracts/providers'
 import { PROVIDER_ENV_MAP } from '../../packages/server/src/modules/hermes/services/profiles/config'
 
@@ -132,8 +134,6 @@ const EXPECTED_SYNCED_PROVIDER_MODELS = {
     'mimo-v2-pro',
     'mimo-v2-omni',
     'minimax-m3',
-    'minimax-m2.7',
-    'minimax-m2.5',
     'deepseek-v4-pro',
     'deepseek-v4-flash',
     'qwen3.7-max',
@@ -200,9 +200,8 @@ const EXPECTED_SYNCED_PROVIDER_MODELS = {
     'gemini-3.5-flash',
     'gemini-3.1-pro',
     'gemini-3-flash',
+    'minimax-m3.1-flash-free',
     'minimax-m3',
-    'minimax-m2.7',
-    'minimax-m2.5',
     'glm-5.2',
     'glm-5.1',
     'glm-5',
@@ -228,6 +227,82 @@ function modelsForProvider(providerPresets: Array<{ value: string; models: strin
 }
 
 describe('provider presets', () => {
+  it.each([
+    ['https://opencode.ai/zen/v1', 'gpt-next', 'codex_responses'],
+    ['https://opencode.ai/zen/v1/', 'claude-next', 'anthropic_messages'],
+    ['https://opencode.ai/zen/v1', 'claude/claude-opus-5.5', 'anthropic_messages'],
+    ['https://opencode.ai/zen/v1', 'openai/gpt-6.1-sol', 'codex_responses'],
+    ['https://opencode.ai/zen/go/v1', 'channel/minimax/minimax-next', 'anthropic_messages'],
+    ['https://opencode.ai/zen/go', 'minimax-next', 'anthropic_messages'],
+    ['https://opencode.ai/zen', 'minimax-next', 'chat_completions'],
+    ['https://openrouter.ai/api/v1', 'claude-next', 'chat_completions'],
+    ['https://openrouter.ai/api/v1', 'claude/claude-opus-5.5', 'chat_completions'],
+    ['https://api.anthropic.com/v1', 'claude-next', 'anthropic_messages'],
+    ['https://api.apikey.fan/v1', 'gpt-next', 'codex_responses'],
+    ['https://api.apikey.fan', 'claude-next', 'anthropic_messages'],
+  ])('matches a custom connection at %s for %s', (baseUrl, model, expected) => {
+    expect(resolveProviderConnectionApiMode('custom:gateway', baseUrl, model)).toBe(expected)
+  })
+
+  it.each([
+    'https://unknown.example/v1',
+    'https://opencode.ai.unknown.example/zen/v1',
+    'https://unknown.example/opencode.ai/zen/v1',
+    'https://opencode.ai/unrecognized/v1',
+    'https://api.openai.com/v1?route=custom',
+    'not a URL',
+  ])('leaves an unrecognized connection %s for manual selection', baseUrl => {
+    expect(resolveProviderConnectionApiMode('custom:opencode-zen', baseUrl, 'gpt-next')).toBeUndefined()
+    expect(resolveProviderConnectionApiMode('custom:opencode-zen', baseUrl, 'openai/gpt-6.1-sol')).toBeUndefined()
+  })
+
+  it.each(['opencode-zen', 'opencode-go', 'copilot'])('matches the final model ID segment for %s', provider => {
+    for (const model of ['claude-opus-5.5', 'gpt-6.1-sol', 'gpt-5-mini', 'qwen-next', 'minimax-next']) {
+      const expected = resolveProviderCatalogApiMode(provider, model)
+      expect(resolveProviderCatalogApiMode(provider, `vendor/${model}`)).toBe(expected)
+      expect(resolveProviderCatalogApiMode(provider, ` channel/vendor/${model.toUpperCase()} `)).toBe(expected)
+    }
+    for (const model of ['/', 'vendor/', 'channel/vendor/ ']) {
+      expect(resolveProviderCatalogApiMode(provider, model)).toBeUndefined()
+    }
+  })
+
+  it.each(['opencode-zen', 'opencode-go'])('matches Hermes dynamic model routing for %s', provider => {
+    for (const model of ['gpt-new-version', 'grok-new-version', 'muse-spark-new']) {
+      expect(resolveProviderCatalogApiMode(provider, model)).toBe('codex_responses')
+    }
+    for (const model of ['claude-next', 'qwen-next', 'union-alpha-next']) {
+      expect(resolveProviderCatalogApiMode(provider, model)).toBe('anthropic_messages')
+    }
+    for (const model of ['gemini-next', 'glm-next', 'kimi-next', 'deepseek-next', 'mimo-next', 'unlisted-model']) {
+      expect(resolveProviderCatalogApiMode(provider, model)).toBe('chat_completions')
+    }
+    expect(resolveProviderCatalogApiMode(provider, 'minimax-next')).toBe(provider === 'opencode-go' ? 'anthropic_messages' : 'chat_completions')
+    expect(resolveProviderCatalogApiMode(provider, ` ${provider}/GPT-NEXT `)).toBe('codex_responses')
+    expect(resolveProviderCatalogApiMode(provider)).toBeUndefined()
+    expect(resolveProviderCatalogApiMode(`custom:${provider}`, 'gpt-next')).toBeUndefined()
+  })
+
+  it('keeps Copilot GPT-5-mini and Claude on chat, and GPT-5+ on Responses like Hermes', () => {
+    for (const model of ['gpt-5-mini', 'gpt-5-mini-preview', 'gpt-4.1', 'claude-sonnet-4.6']) {
+      expect(resolveProviderCatalogApiMode('copilot', model)).toBe('chat_completions')
+    }
+    for (const model of ['gpt-5.4-mini', 'gpt-5.5', 'gpt-6-sol']) {
+      expect(resolveProviderCatalogApiMode('copilot', model)).toBe('codex_responses')
+    }
+  })
+
+  it('explicitly declares protocol metadata for each built-in without inventing a single protocol for mixed catalogs', () => {
+    for (const preset of SERVER_PROVIDER_PRESETS) {
+      expect(['chat_completions', 'codex_responses', 'anthropic_messages', 'per_model']).toContain(preset.catalog_api_mode)
+    }
+    for (const provider of ['opencode-zen', 'opencode-go', 'copilot']) {
+      const preset = SERVER_PROVIDER_PRESETS.find(p => p.value === provider)
+      expect(preset?.catalog_api_mode).toBe('per_model')
+      expect(preset?.api_mode).toBeUndefined()
+    }
+  })
+
   it('keeps every built-in provider preset registered in the env map', () => {
     const missingMappings = SERVER_PROVIDER_PRESETS
       .filter(candidate => candidate.builtin)
@@ -290,6 +365,7 @@ describe('provider presets', () => {
     const preset = SERVER_PROVIDER_PRESETS.find(candidate => candidate.value === GLM_CODING_PLAN_PROVIDER)
     expect(preset?.base_url).toBe('https://open.bigmodel.cn/api/coding/paas/v4')
     expect(preset?.api_mode).toBeUndefined()
+    expect(preset?.catalog_api_mode).toBe('chat_completions')
     expect(PROVIDER_ENV_MAP[GLM_CODING_PLAN_PROVIDER]).toEqual({ api_key_env: 'GLM_API_KEY', base_url_env: '' })
     expect(modelsForProvider(SERVER_PROVIDER_PRESETS, GLM_CODING_PLAN_PROVIDER)).toEqual([
       'glm-5.2',
@@ -313,22 +389,13 @@ describe('provider presets', () => {
     expect(modelsForProvider(SERVER_PROVIDER_PRESETS, STEPFUN_PROVIDER)).toContain('step-3.7-flash')
   })
 
-  it('keeps MiniMax M3 first while retaining currently supported M2.x Anthropic models', () => {
+  it('recommends MiniMax M3.1 Flash before M3 for direct API keys', () => {
     expect(PROVIDER_ENV_MAP[MINIMAX_PROVIDER]).toEqual({ api_key_env: 'MINIMAX_API_KEY', base_url_env: 'MINIMAX_BASE_URL' })
     expect(PROVIDER_ENV_MAP[MINIMAX_CN_PROVIDER]).toEqual({ api_key_env: 'MINIMAX_CN_API_KEY', base_url_env: 'MINIMAX_CN_BASE_URL' })
 
     for (const provider of [MINIMAX_PROVIDER, MINIMAX_CN_PROVIDER]) {
       const models = modelsForProvider(SERVER_PROVIDER_PRESETS, provider)
-      expect(models[0]).toBe('MiniMax-M3')
-      expect(models).toEqual(expect.arrayContaining([
-        'MiniMax-M2.7',
-        'MiniMax-M2.7-highspeed',
-        'MiniMax-M2.5',
-        'MiniMax-M2.5-highspeed',
-        'MiniMax-M2.1',
-        'MiniMax-M2.1-highspeed',
-        'MiniMax-M2',
-      ]))
+      expect(models).toEqual(['MiniMax-M3.1-Flash', 'MiniMax-M3'])
     }
   })
 
@@ -341,8 +408,6 @@ describe('provider presets', () => {
     })
     expect(modelsForProvider(SERVER_PROVIDER_PRESETS, MINIMAX_OAUTH_PROVIDER)).toEqual([
       'MiniMax-M3',
-      'MiniMax-M2.7',
-      'MiniMax-M2.7-highspeed',
     ])
   })
 

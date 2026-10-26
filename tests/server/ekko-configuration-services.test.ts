@@ -48,6 +48,14 @@ afterEach(async () => {
 })
 
 describe('Ekko configuration services', () => {
+  it('persists desktop controls without accepting driver arguments or environment overrides', () => {
+    const saved = updateEkkoSettings({ tools: { computerUse: {
+      enabled: false, timeoutMs: 20_000,
+      args: ['--dangerously-bypass-approvals'], env: { CUA_DRIVER_PERMISSION_MODE: 'unrestricted' },
+    } } }, setup)
+    expect(saved.config.tools.computerUse).toEqual({ enabled: false, timeoutMs: 20_000 })
+    expect(getEkkoSettings(setup).config.tools.computerUse).toEqual(saved.config.tools.computerUse)
+  })
   it('updates user-facing settings without exposing or overwriting internal config state', () => {
     setup.config.setModelProvider('acme', {
       type: 'openai-compatible',

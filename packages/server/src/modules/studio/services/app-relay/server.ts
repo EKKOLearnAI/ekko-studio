@@ -1,9 +1,11 @@
 import type { Server as SocketIoServer, Socket } from 'socket.io'
+import { createHash } from 'crypto'
 import { io as createClientSocket, type Socket as ClientSocket } from 'socket.io-client'
 import { authenticateUserToken, inspectAppUserToken } from '../../middleware/auth'
 import { config } from '../../public/config'
 import { logger } from '../../public/logging'
 import { getDeviceId } from '../../public/system-info'
+import { P2PRelaySessions } from './p2p'
 import type { AppConnectionType } from '../../repositories/app-connections-store'
 import {
   inspectAppEntitlementToken,
@@ -34,6 +36,15 @@ const MAX_MEDIA_REQUEST_TIMEOUT_MS = 5 * 60 * 1000
 const MAX_REQUEST_BODY_BYTES = 20 * 1024 * 1024
 const MAX_RESPONSE_BODY_BYTES = 20 * 1024 * 1024
 
+// App device codes identify a phone installation and never expire, so they are
+// shortened to a stable fingerprint before they reach a log line. The same
+// treatment as the cloud audit log: SHA-256, truncated for readability.
+function fingerprintDeviceCode(value: string): string {
+  const normalized = String(value || '').trim()
+  if (!normalized) return ''
+  return createHash('sha256').update(normalized).digest('hex').slice(0, 16)
+}
+
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'])
 const ALLOWED_REQUEST_HEADERS = new Set([
   'accept',
@@ -45,6 +56,8 @@ const ALLOWED_REQUEST_HEADERS = new Set([
   'range',
   'x-hermes-profile',
   'x-request-id',
+  'x-app-access-token',
+  'x-session-share-token',
 ])
 const ALLOWED_CHAT_RUN_CLIENT_EVENTS = new Set([
   'app.events.subscribe',
@@ -149,6 +162,7 @@ export class LocalAppRelayServer {
   private readonly downloadSessions = new RelayDownloadSessions()
   private readonly localBaseUrl: string
   private readonly fetchImpl: typeof fetch
+  private readonly p2p: P2PRelaySessions
   private readonly configuredMachineId: string
   private readonly entitlementRequired: boolean
   private readonly verifyEntitlementToken: (token: string) => AppEntitlementClaims | null
@@ -161,6 +175,7 @@ export class LocalAppRelayServer {
     this.localBaseUrl = (options.localBaseUrl || `http://127.0.0.1:${config.port}`).replace(/\/$/, '')
     this.configuredMachineId = String(options.machineId || '').trim()
     this.fetchImpl = options.fetchImpl || fetch
+    this.p2p = new P2PRelaySessions(this.localBaseUrl)
     this.entitlementRequired = options.entitlementRequired ?? config.appRelay.entitlementRequired
     this.verifyEntitlementToken = options.verifyEntitlementToken || verifyAppEntitlementToken
     this.inspectEntitlementToken = options.inspectEntitlementToken
@@ -177,6 +192,16 @@ export class LocalAppRelayServer {
     this.initialized = true
     this.namespace.use(async (socket, next) => {
       try {
+        // Every rejection below is a terminal answer to the App. Emit one line so
+        // an operator can tell "the server refused this device" apart from
+        // "the socket never arrived", which the App reports identically.
+        const rejectSocket = (reason: string, details: Record<string, unknown> = {}): void => {
+          logger.warn(
+            { reason, connectionType: 'lan', ...details },
+            '[app-relay:lan] socket rejected',
+          )
+          next(new Error(reason))
+        }
         const auth = socket.handshake.auth || {}
         const role = String(auth.role || '').trim().toLowerCase()
         const machineId = normalizeIdentifier(auth.machineId || auth.machine_id || auth.instanceId)
@@ -190,7 +215,11 @@ export class LocalAppRelayServer {
           || '',
         ).trim()
         if (role !== 'app' || !machineId || machineId !== localMachineId) {
-          next(new Error('app_relay_unauthorized'))
+          rejectSocket('app_relay_unauthorized', {
+            stage: 'handshake',
+            role,
+            machineMatched: Boolean(machineId) && machineId === localMachineId,
+          })
           return
         }
         const declaredDeviceCode = normalizeIdentifier(auth.deviceCode || auth.device_code)
@@ -205,32 +234,57 @@ export class LocalAppRelayServer {
             entitlementInspection.claims.plan,
             Math.max(0, entitlementInspection.claims.expiresAt - entitlementInspection.claims.issuedAt),
           )
-          next(new Error('app_entitlement_expired'))
+          rejectSocket('app_entitlement_expired', {
+            stage: 'entitlement',
+            deviceCode: fingerprintDeviceCode(declaredDeviceCode),
+            cloudUserId: declaredCloudUserId || undefined,
+          })
           return
         }
         if (entitlementToken && !entitlement) {
           this.recordEntitlementFailure('app_entitlement_invalid', declaredDeviceCode, declaredCloudUserId, '')
-          next(new Error('app_entitlement_invalid'))
+          rejectSocket('app_entitlement_invalid', {
+            stage: 'entitlement',
+            deviceCode: fingerprintDeviceCode(declaredDeviceCode),
+            cloudUserId: declaredCloudUserId || undefined,
+          })
           return
         }
         if (this.entitlementRequired && !entitlement) {
           this.recordEntitlementFailure('app_entitlement_required', declaredDeviceCode, declaredCloudUserId, '')
-          next(new Error('app_entitlement_required'))
+          rejectSocket('app_entitlement_required', {
+            stage: 'entitlement',
+            deviceCode: fingerprintDeviceCode(declaredDeviceCode),
+            cloudUserId: declaredCloudUserId || undefined,
+          })
           return
         }
         if (entitlement && (!declaredDeviceCode || declaredDeviceCode !== entitlement.deviceCode)) {
           this.recordEntitlementFailure('app_entitlement_device_mismatch', declaredDeviceCode, declaredCloudUserId, entitlement.plan)
-          next(new Error('app_entitlement_device_mismatch'))
+          rejectSocket('app_entitlement_device_mismatch', {
+            stage: 'entitlement',
+            deviceCode: fingerprintDeviceCode(declaredDeviceCode),
+            cloudUserId: declaredCloudUserId || undefined,
+          })
           return
         }
         if (entitlement && declaredCloudUserId && declaredCloudUserId !== entitlement.userId) {
           this.recordEntitlementFailure('app_entitlement_account_mismatch', declaredDeviceCode, declaredCloudUserId, entitlement.plan)
-          next(new Error('app_entitlement_account_mismatch'))
+          rejectSocket('app_entitlement_account_mismatch', {
+            stage: 'entitlement',
+            deviceCode: fingerprintDeviceCode(declaredDeviceCode),
+            cloudUserId: declaredCloudUserId || undefined,
+          })
           return
         }
         const appToken = token ? await inspectAppUserToken(token) : null
         if (appToken?.status === 'revoked') {
-          next(new Error('app_connection_deleted'))
+          rejectSocket('app_connection_deleted', {
+            stage: 'app_token',
+            deviceCode: fingerprintDeviceCode(appToken.deviceCode),
+            appConnectionType: appToken.connectionType,
+            tokenStatus: 'revoked',
+          })
           return
         }
         const user = appToken?.status === 'active' && appToken.user
@@ -239,12 +293,21 @@ export class LocalAppRelayServer {
             ? await authenticateUserToken(token)
             : null
         if (token && !user) {
-          next(new Error('app_relay_unauthorized'))
+          rejectSocket('app_relay_unauthorized', {
+            stage: 'app_token',
+            tokenKind: appToken ? 'app_token' : 'unknown',
+            tokenStatus: appToken?.status ?? 'none',
+            deviceCode: fingerprintDeviceCode(declaredDeviceCode),
+          })
           return
         }
         if (entitlement && appToken?.status === 'active' && appToken.deviceCode !== entitlement.deviceCode) {
           this.recordEntitlementFailure('app_entitlement_device_mismatch', declaredDeviceCode, declaredCloudUserId, entitlement.plan)
-          next(new Error('app_entitlement_device_mismatch'))
+          rejectSocket('app_entitlement_device_mismatch', {
+            stage: 'entitlement',
+            deviceCode: fingerprintDeviceCode(appToken.deviceCode),
+            cloudUserId: declaredCloudUserId || undefined,
+          })
           return
         }
         socket.data.appRelayRole = 'app'
@@ -312,10 +375,32 @@ export class LocalAppRelayServer {
       role: 'app',
       machineId,
       hostConnected: true,
-      capabilities: ['http.request', 'http.download.chunked', 'socket.chat-run', 'socket.group-chat', 'socket.workflow', 'app.entitlement'],
+      capabilities: ['http.request', 'http.download.chunked', 'socket.chat-run', 'socket.group-chat', 'socket.workflow', 'app.entitlement', 'p2p.direct.v1'],
     })
     if (socket.data.localUserToken) this.scheduleTokenExpiry(socket)
     if (socket.data.appEntitlement) this.scheduleEntitlementExpiry(socket)
+
+    socket.on('p2p.offer', (request: Record<string, any> = {}, ack?: (response: unknown) => void) => {
+      void (async () => {
+        if (!await this.authorized(socket)) return { ok: false, error: 'p2p_unauthorized' }
+        const now = Date.now()
+        if (now - Number(socket.data.p2pLastOffer || 0) < 5000) return { ok: false, error: 'p2p_rate_limited' }
+        socket.data.p2pLastOffer = now
+        return this.p2p.offer(socket.id, { type: request.type, sdp: request.sdp, auth: {
+          role: 'app', machineId: socket.data.machineId, token: socket.data.localUserToken,
+          deviceCode: socket.data.appDeviceCode,
+          cloudUserId: socket.data.appCloudUserId,
+          entitlementToken: socket.handshake.auth.entitlementToken,
+        } })
+      })().then(response => ack?.(response)).catch(() => ack?.({ ok: false, error: 'p2p_unavailable' }))
+    })
+    socket.on('p2p.keepalive', (_request: unknown, ack?: (response: unknown) => void) => {
+      void this.authorized(socket).then(ok => {
+        if (!ok) { this.p2p.close(socket.id); ack?.({ ok: false }); return }
+        ack?.(this.p2p.keepalive(socket.id))
+      })
+    })
+    socket.on('p2p.close', (_request: unknown, ack?: (response: unknown) => void) => { ack?.(this.p2p.close(socket.id)) })
 
     socket.on('http.request', (request: AppRelayHttpRequest = {}, ack?: (response: AppRelayHttpResponse) => void) => {
       void this.handleHttpRequest(socket, request).then(response => ack?.(response))
@@ -344,6 +429,7 @@ export class LocalAppRelayServer {
       ack?.(this.closeSocket(socket, request))
     })
     socket.on('disconnect', () => {
+      this.p2p.close(socket.id)
       this.appSockets.delete(socket.id)
       this.downloadSessions.cancelOwner(socket.id)
       this.closeOwnerBridges(socket.id)

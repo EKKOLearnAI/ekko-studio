@@ -31,6 +31,7 @@ export interface DesktopBrowserProfile {
   rootPath: string
   sessionPath: string
   downloadPath: string
+  lastDownloadDirectory?: string
   proxyMode: 'direct' | 'system' | 'fixed_servers'
   proxyRules: string
   askBeforeDownload: boolean
@@ -46,6 +47,7 @@ export interface DesktopBrowserDownload {
   fileName: string
   sourceUrl: string
   savePath?: string
+  fileAvailable?: boolean
   receivedBytes: number
   totalBytes: number
   state: 'blocked' | 'progressing' | 'completed' | 'cancelled' | 'interrupted'
@@ -81,6 +83,10 @@ export interface DesktopBrowserSelection {
 }
 
 export interface DesktopBrowserBridge {
+  setColorScheme?: (scheme: 'light' | 'dark') => Promise<void>
+  onRemoteControlState?: (callback: (enabled: boolean) => void) => (() => void)
+  setRemoteControl?: (enable: boolean) => Promise<boolean>
+  remoteRequest?: (body: Record<string, unknown>) => Promise<unknown>
   getState: () => Promise<DesktopBrowserState>
   setViewport: (bounds: DesktopWindowBounds, visible: boolean) => Promise<DesktopBrowserState>
   createTab: (url?: string, activate?: boolean) => Promise<DesktopBrowserTab>
@@ -108,6 +114,8 @@ export interface DesktopBrowserBridge {
   }) => Promise<DesktopBrowserProfile>
   deleteProfile: (profileId: string) => Promise<DesktopBrowserState>
   clearProfileData: (profileId: string, kind: 'cache' | 'site-data' | 'permission-audit') => Promise<DesktopBrowserState>
+  refreshDownloads?: () => Promise<DesktopBrowserState>
+  downloadAction?: (downloadId: string, action: 'open' | 'reveal' | 'remove' | 'trash') => Promise<DesktopBrowserState>
   cancelDownload: (downloadId: string) => Promise<DesktopBrowserState>
   takeOver: (tabId: string) => Promise<boolean>
   annotate: (tabId: string, mode: 'element' | 'region') => Promise<DesktopBrowserSelection>
@@ -120,7 +128,91 @@ export interface DesktopBrowserBridge {
   onStateChange: (callback: (state: DesktopBrowserState) => void) => () => void
 }
 
+export interface DesktopUpdateState {
+  revision: number
+  status: 'idle' | 'downloading' | 'cancelling' | 'cancelled' | 'preparing' | 'downloaded' | 'error' | 'installing'
+  version: string
+  percent: number | null
+  transferred: number
+  total: number
+  bytesPerSecond: number
+}
+
+export interface DesktopUpdaterBridge {
+  getState: () => Promise<DesktopUpdateState>
+  cancel: () => Promise<DesktopUpdateState>
+  download: () => Promise<DesktopUpdateState>
+  install: () => Promise<DesktopUpdateState>
+  onStateChange: (callback: (state: DesktopUpdateState) => void) => () => void
+}
+
+export interface DesktopScreenshotShortcutState {
+  accelerator: string
+  hideWindows: boolean
+  registered: boolean
+  error: '' | 'invalid' | 'conflict' | 'saveFailed' | 'hideUnavailable'
+}
+
+export interface DesktopScreenshotShortcutBridge {
+  getState: () => Promise<DesktopScreenshotShortcutState>
+  save: (config: { accelerator: string; hideWindows: boolean }) => Promise<DesktopScreenshotShortcutState>
+  setTarget: (targetId: string, active: boolean | null) => Promise<boolean>
+  setEditing: (targetId: string, editing: boolean) => Promise<DesktopScreenshotShortcutState>
+  onTrigger: (callback: (request: { targetId: string; hideWindows: boolean }) => void) => () => void
+  onStateChange: (callback: (state: DesktopScreenshotShortcutState) => void) => () => void
+}
+
+export type DesktopComputerUsePermission = 'accessibility' | 'screenRecording'
+export type DesktopComputerUsePermissionStatus = 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown'
+export type DesktopComputerUsePermissions = { supported: false } | {
+  supported: true
+  accessibility: DesktopComputerUsePermissionStatus
+  screenRecording: DesktopComputerUsePermissionStatus
+}
+
+export interface DesktopRemoteDevice {
+  id: string
+  name: string
+  serverUrl: string
+}
+
+export interface DesktopRemoteDevicesState {
+  devices: DesktopRemoteDevice[]
+  activeDeviceId: string | null
+  activeServerUrl: string | null
+}
+
+export interface DesktopRemoteDevicesBridge {
+  list: () => Promise<DesktopRemoteDevicesState>
+  add: (input: { name: string; serverUrl: string }) => Promise<DesktopRemoteDevicesState>
+  remove: (id: string) => Promise<DesktopRemoteDevicesState>
+  switchTo: (id: string | null) => Promise<void>
+  returnLocal: () => Promise<void>
+}
+
 export interface HermesDesktopBridge {
+  remoteDevices?: DesktopRemoteDevicesBridge
+  computerUsePermissions?: {
+    claimReminder?: () => Promise<DesktopComputerUsePermissions | null>
+    getStatus: () => Promise<DesktopComputerUsePermissions>
+    request: (permission: DesktopComputerUsePermission) => Promise<void>
+  }
+  messageContextMenu?: {
+    show: (request: { label: string; enabled: boolean; hasSelection: boolean }) => Promise<'select-messages' | null>
+    close: () => Promise<void>
+  }
+  screenshot?: {
+    shortcut?: DesktopScreenshotShortcutBridge
+    getCapabilities?: () => Promise<{
+      capture: 'electron' | 'portal-screenshot' | 'unavailable'
+      presentation: 'desktop-overlay' | 'image-editor'
+      hideWindows: boolean
+      regionSelection: 'studio' | 'system-or-studio'
+    }>
+    captureRegion: (request: { requestId: string; hideWindows?: boolean; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }) => Promise<{ dataUrl: string; width: number; height: number } | null>
+    cancel: (requestId: string) => Promise<boolean>
+  }
+  updater?: DesktopUpdaterBridge
   getToken: () => Promise<string>
   ensureAuth?: () => Promise<boolean>
   retryBootstrap: (source?: 'cf' | 'github') => Promise<void>
@@ -139,6 +231,7 @@ export interface HermesDesktopBridge {
   browser?: DesktopBrowserBridge
   platform: string
   isDesktop: boolean
+  remoteMode?: boolean
   windowKind?: 'main' | 'pet' | 'chat'
 }
 

@@ -1,6 +1,10 @@
 import { randomUUID } from 'crypto'
 import { businessEvents } from './business-events'
 import { ensureBusinessConsumers } from './business-consumers'
+import { acceptTaskPlanRevision, taskPlanWebhookSnapshot } from './task-plan'
+import { sessionTaskWebhookContent } from './session-task'
+import type { SessionTask, SessionTasksSnapshot } from '../../contracts/session-task'
+import { logger } from '../../public/logging'
 import {
   stableChatWebhookEventId,
   truncateChatWebhookContent,
@@ -22,6 +26,7 @@ export interface ObserveChatRunWebhookEventInput {
   roomId?: string
   workflowId?: string
   workflowNodeId?: string
+  pushTargetId?: string
 }
 
 function stringValue(value: unknown): string {
@@ -88,11 +93,16 @@ function occurredAt(value: unknown): string {
 
 export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInput): boolean {
   const payload = input.payload || {}
-  const mapping = input.event === 'tool.completed' && Boolean(payload.error)
+  const sessionId = stringValue(input.sessionId)
+  const plan = input.event === 'plan.updated' ? taskPlanWebhookSnapshot(payload, sessionId) : null
+  // Group cards publish only after their message snapshot has been persisted.
+  if (input.event === 'plan.updated' && (!plan || input.source === 'group_chat')) return false
+  const mapping: { type: ChatWebhookEventType; status: ChatWebhookLifecycleStatus } | undefined = plan
+    ? { type: input.source === 'workflow' ? 'workflow.plan.updated' : 'chat.plan.updated', status: 'updated' }
+    : input.event === 'tool.completed' && Boolean(payload.error)
     ? EVENT_MAPPING['tool.failed']
     : EVENT_MAPPING[input.event]
   if (!mapping) return false
-  const sessionId = stringValue(input.sessionId)
   if (!sessionId) return false
   const runId = identifierValue(payload.run_id) || identifierValue(payload.response_id)
   const queueId = identifierValue(payload.queue_id)
@@ -100,8 +110,10 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
   const toolCallId = identifierValue(payload.tool_call_id) || identifierValue(payload.call_id)
   const approvalId = identifierValue(payload.approval_id)
   const clarificationId = identifierValue(payload.clarify_id)
-  const occurrenceKey = approvalId || clarificationId || (input.event.startsWith('run.') ? runId || queueId || messageId : messageId || toolCallId || runId || queueId) || randomUUID()
-  const dedupeKey = `${mapping.type}:${sessionId}:${occurrenceKey}`
+  const occurrenceKey = plan ? `${plan.plan_id}:${plan.revision}` : approvalId || clarificationId || (input.event.startsWith('run.') ? runId || queueId || messageId : messageId || toolCallId || runId || queueId) || randomUUID()
+  // Coding-agent runtime IDs may persist across turns; mobile roots must not collapse.
+  const dedupeKey = plan ? `${mapping.type}:${input.profile || 'default'}:${sessionId}:${occurrenceKey}`
+    : `${mapping.type}:${sessionId}:${occurrenceKey}${input.pushTargetId ? `:${input.pushTargetId}` : ''}`
   const rawContent = input.event === 'run.completed'
     ? stringValue(payload.output)
     : input.event === 'message.created'
@@ -113,7 +125,7 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
   const event: ChatRunWebhookEvent = {
     id: stableChatWebhookEventId(dedupeKey),
     type: mapping.type,
-    occurred_at: occurredAt(payload.timestamp),
+    occurred_at: plan ? new Date(plan.updated_at).toISOString() : occurredAt(payload.timestamp),
     profile: input.profile || 'default',
     source: normalizeSource(input.source),
     agent: input.agent,
@@ -128,6 +140,7 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
       room_id: input.roomId || undefined,
       workflow_id: input.workflowId || undefined,
       workflow_node_id: input.workflowNodeId || undefined,
+      ...(plan ? { plan_id: plan.plan_id } : {}),
     },
     summary: {
       status: mapping.status,
@@ -151,11 +164,48 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
     content: content.text,
     content_truncated: content.truncated,
     content_role: input.event === 'message.created' ? role : input.event === 'run.completed' ? 'assistant' : undefined,
+    ...(plan ? { task_plan: plan } : {}),
   }
+  if (plan && !acceptTaskPlanRevision(`${mapping.type}:${event.profile}`, plan)) return false
   ensureBusinessConsumers()
   return businessEvents.publish({ schema_version: 1, id: event.id, type: event.type, occurred_at: event.occurred_at,
-    profile: event.profile.trim() || 'default', source: event.source, subject: event.subject, payload, chat: event })
+    profile: event.profile.trim() || 'default', source: event.source, subject: event.subject, payload, chat: event,
+    ...(input.pushTargetId ? { push_target_id: input.pushTargetId } : {}) })
 }
 
 export * from './dispatcher'
 export * from './envelope'
+
+/** Only persisted task creation and transitions into completed produce notifications. */
+export function publishSessionTaskEvents(input: {
+  profile: string; source: string; previous: SessionTask[]; snapshot: SessionTasksSnapshot
+}): void {
+  try {
+    const previous = new Map(input.previous.map(task => [task.id, task]))
+    const { session_id: sessionId, revision } = input.snapshot
+    const profile = input.profile.trim() || 'default'
+    const events: ChatRunWebhookEvent[] = []
+    for (const task of input.snapshot.tasks) {
+      const old = previous.get(task.id)
+      const types: Array<'chat.task.created' | 'chat.task.completed'> = []
+      if (!old) types.push('chat.task.created')
+      if (task.status === 'completed' && old?.status !== 'completed') types.push('chat.task.completed')
+      for (const type of types) events.push({
+        id: stableChatWebhookEventId(JSON.stringify([type, profile, sessionId, task.id, revision])),
+        type, occurred_at: new Date(task.updated_at).toISOString(), profile, source: normalizeSource(input.source),
+        subject: { session_id: sessionId, task_id: task.id },
+        summary: { status: type === 'chat.task.created' ? 'created' : 'completed' },
+        session_task: sessionTaskWebhookContent({ ...task, revision }, true),
+      })
+    }
+    if (!events.length) return
+    ensureBusinessConsumers()
+    for (const event of events) businessEvents.publish({
+      schema_version: 1, id: event.id, type: event.type, occurred_at: event.occurred_at,
+      profile, source: event.source, subject: event.subject, payload: {}, chat: event,
+    })
+  } catch {
+    // Notification failures must not invalidate the committed task write.
+    logger.warn('[session-tasks] Webhook event publication failed')
+  }
+}

@@ -11,7 +11,7 @@ Once a managed Runtime is ready, packaged Desktop installs managed command shims
 - `ekko-studio` opens the Desktop app.
 - `ekko-studio web ...` runs the bundled Web UI CLI.
 - `ekko-studio cli ...` runs the managed Hermes CLI after a Runtime is installed.
-- `ekko-studio-mcp [api|browser|devices|use]` starts one Studio MCP toolset.
+- `ekko-studio-mcp [api|browser|use]` starts one Studio MCP toolset.
 
 First validate the Desktop installation by launching the app, opening the Agents page, and confirming Ekko appears as built in. After a Runtime is ready, validate its installed shims with:
 
@@ -80,8 +80,8 @@ Do not use Desktop Runtime migration inside the container. Docker owns the runti
 Requirements: Git, Node.js 23 or newer, and npm.
 
 ```bash
-git clone https://github.com/EKKOLearnAI/hermes-studio.git
-cd hermes-studio
+git clone https://github.com/EKKOLearnAI/ekko-studio.git
+cd ekko-studio
 npm install
 npm run dev
 ```

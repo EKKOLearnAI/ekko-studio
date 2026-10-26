@@ -25,8 +25,8 @@ const DIST_FIRMWARE_PATHS: Record<FirmwareVersion, string> = {
   v2: resolve(process.cwd(), 'dist', 'mcu', 'v2', 'firmware.bin'),
 }
 const DEV_FIRMWARE_PATHS: Record<FirmwareVersion, string> = {
-  v1: resolve(process.cwd(), 'packages/esp32-c3/v1/.pio/build/esp32-c3-devkitm-1/firmware.bin'),
-  v2: resolve(process.cwd(), 'packages/esp32-c3/v2/.pio/build/esp32-c3-devkitm-1/firmware.bin'),
+  v1: resolve(process.cwd(), 'packages/mcu/esp32-c3/v1/.pio/build/esp32-c3-devkitm-1/firmware.bin'),
+  v2: resolve(process.cwd(), 'packages/mcu/esp32-c3/v2/.pio/build/esp32-c3-devkitm-1/firmware.bin'),
 }
 
 function firmwareVersionFromContext(ctx: Context): FirmwareVersion | null {

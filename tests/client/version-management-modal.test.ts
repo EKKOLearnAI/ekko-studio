@@ -16,11 +16,12 @@ const api = vi.hoisted(() => ({
 }))
 
 const selectRuntimeDirectory = vi.hoisted(() => vi.fn())
+const desktop = vi.hoisted(() => ({ remoteMode: false }))
 const message = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 
 vi.mock('@/api/hermes/runtime-versions', () => api)
 vi.mock('@/utils/desktop-bridge', () => ({
-  desktopBridge: () => ({ selectRuntimeDirectory }),
+  desktopBridge: () => ({ remoteMode: desktop.remoteMode, selectRuntimeDirectory }),
 }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -77,6 +78,7 @@ function runtimeStatus() {
 describe('VersionManagementModal Runtime storage selector', () => {
   afterEach(() => vi.useRealTimers())
   beforeEach(() => {
+    desktop.remoteMode = false
     useRuntimeRestartPrompt().clearRuntimeRestart()
     for (const mock of Object.values(api)) mock.mockReset()
     selectRuntimeDirectory.mockReset()
@@ -227,6 +229,18 @@ describe('VersionManagementModal Runtime storage selector', () => {
     expect(selectRuntimeDirectory).toHaveBeenCalledWith('/state/desktop-runtime')
     expect(api.selectRuntimeRoot).toHaveBeenCalledWith('/Volumes/HermesRuntime')
     expect(message.success).toHaveBeenCalledWith('runtimeVersions.runtimeDirectorySaved')
+  })
+
+  it('hides the local directory picker and reset when connected to a remote device', async () => {
+    desktop.remoteMode = true
+    const wrapper = mount(VersionManagementModal, { props: { show: false } })
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="select-runtime-directory"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="reset-runtime-directory"]').exists()).toBe(false)
+    expect(selectRuntimeDirectory).not.toHaveBeenCalled()
+    expect(api.selectRuntimeRoot).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('does not schedule migration when the desktop picker is canceled', async () => {

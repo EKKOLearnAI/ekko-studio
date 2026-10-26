@@ -1,8 +1,13 @@
 import { randomBytes } from 'crypto'
-import { mkdir, readFile, rename, unlink, writeFile } from 'fs/promises'
+import { mkdir, readFile, rename, rm, unlink, writeFile } from 'fs/promises'
 import { basename, join } from 'path'
+import { MAX_THEME_BACKGROUND_BYTES } from '../../../../../../shared/theme-archive'
 import { config } from '../../public/config'
 import {
+  assertActiveTheme,
+  getThemePreset,
+  isThemeBackgroundReferenced,
+  deleteThemePreset as deletePresetRecord,
   clearUserThemeBackground,
   getUserTheme,
   saveUserTheme,
@@ -18,8 +23,6 @@ export {
   toUserThemePayload,
   UserThemeValidationError,
 }
-
-export const MAX_THEME_BACKGROUND_BYTES = 10 * 1024 * 1024
 
 const THEME_ASSET_ROOT = join(config.appHome, 'theme-backgrounds')
 
@@ -86,79 +89,108 @@ export function sanitizeThemeBackgroundName(value: string): string {
   return (name || 'background').slice(0, 255)
 }
 
-export async function replaceThemeBackground(
+export async function stageThemeBackground(
   userIdValue: unknown,
   originalName: string,
   data: Buffer,
-): Promise<UserThemeRecord> {
+) {
   const userId = normalizeUserId(userIdValue)
   if (!data.length) throw new ThemeBackgroundValidationError('Background image is empty')
   if (data.length > MAX_THEME_BACKGROUND_BYTES) {
-    throw new ThemeBackgroundValidationError('Background image exceeds the 10 MB limit', 413)
+    throw new ThemeBackgroundValidationError('Background image exceeds the 30 MB limit', 413)
   }
   const imageType = detectImageType(data)
   if (!imageType) {
     throw new ThemeBackgroundValidationError('Use a PNG, JPEG, WebP, or GIF image', 415)
   }
 
-  const current = getUserTheme(userId)
   const directory = userThemeDirectory(userId)
   const filename = `${randomBytes(16).toString('hex')}${imageType.extension}`
   const finalPath = storedBackgroundPath(userId, filename)
   const temporaryPath = join(directory, `.${filename}.tmp`)
   await mkdir(directory, { recursive: true })
-  await writeFile(temporaryPath, data, { mode: 0o600 })
-  await rename(temporaryPath, finalPath)
+  try {
+    // Keep the original bytes so animated backgrounds retain frames and timing.
+    await writeFile(temporaryPath, data, { mode: 0o600, flag: 'wx' })
+    await rename(temporaryPath, finalPath)
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined)
+    throw error
+  }
+  return {
+    background: { filename, originalName: sanitizeThemeBackgroundName(originalName), mime: imageType.mime },
+    discard: () => unlink(finalPath).catch(() => undefined),
+  }
+}
+
+export async function replaceThemeBackground(
+  userIdValue: unknown,
+  originalName: string,
+  data: Buffer,
+  expectedId?: unknown,
+): Promise<UserThemeRecord> {
+  const userId = normalizeUserId(userIdValue)
+  assertActiveTheme(userId, expectedId)
+  const current = getUserTheme(userId)
+  const targetId = current.activePresetId
+  const staged = await stageThemeBackground(userId, originalName, data)
 
   try {
-    const saved = saveUserThemeBackground(userId, {
-      filename,
-      originalName: sanitizeThemeBackgroundName(originalName),
-      mime: imageType.mime,
-    })
-    if (current.backgroundFilename && current.backgroundFilename !== filename) {
-      await unlink(storedBackgroundPath(userId, current.backgroundFilename)).catch(() => undefined)
+    const saved = saveUserThemeBackground(userId, staged.background, targetId)
+    if (current.backgroundFilename && current.backgroundFilename !== staged.background.filename) {
+      await removeUnusedBackground(userId, current.backgroundFilename)
     }
     return saved
   } catch (error) {
-    await unlink(finalPath).catch(() => undefined)
+    await staged.discard()
     throw error
   }
 }
 
-export async function readThemeBackground(userIdValue: unknown): Promise<{
+export async function readThemeBackground(userIdValue: unknown, presetId?: unknown): Promise<{
   data: Buffer
   mime: string
   updatedAt: number
 } | null> {
   const userId = normalizeUserId(userIdValue)
-  const theme = getUserTheme(userId)
+  const theme = presetId === undefined ? getUserTheme(userId) : getThemePreset(userId, presetId)
   if (!theme.backgroundFilename || !theme.backgroundMime) return null
   try {
     return {
       data: await readFile(storedBackgroundPath(userId, theme.backgroundFilename)),
       mime: theme.backgroundMime,
-      updatedAt: theme.updatedAt,
+      updatedAt: theme.backgroundUpdatedAt,
     }
   } catch {
     return null
   }
 }
 
-export async function removeThemeBackground(userIdValue: unknown): Promise<UserThemeRecord> {
+export async function removeThemeBackground(userIdValue: unknown, expectedId?: unknown): Promise<UserThemeRecord> {
   const userId = normalizeUserId(userIdValue)
   const current = getUserTheme(userId)
-  const saved = clearUserThemeBackground(userId)
+  const saved = clearUserThemeBackground(userId, expectedId)
   if (current.backgroundFilename) {
-    await unlink(storedBackgroundPath(userId, current.backgroundFilename)).catch(() => undefined)
+    await removeUnusedBackground(userId, current.backgroundFilename)
   }
   return saved
 }
 
 export async function removeAllUserThemeAssets(userIdValue: unknown): Promise<void> {
   const userId = normalizeUserId(userIdValue)
-  const current = getUserTheme(userId)
-  if (current.backgroundFilename) {
-    await unlink(storedBackgroundPath(userId, current.backgroundFilename)).catch(() => undefined)
+  await rm(userThemeDirectory(userId), { recursive: true, force: true })
+}
+
+async function removeUnusedBackground(userId: number, filename: string) {
+  if (!isThemeBackgroundReferenced(userId, filename)) {
+    await unlink(storedBackgroundPath(userId, filename)).catch(() => undefined)
   }
 }
+
+export async function deleteThemePreset(userId: number, id: unknown) {
+  const { removed, ...result } = deletePresetRecord(userId, id)
+  if (removed.backgroundFilename) await removeUnusedBackground(userId, removed.backgroundFilename)
+  return result
+}
+
+export { listThemePresets, createThemePreset, renameThemePreset, activateThemePreset } from '../../repositories/user-theme-store'

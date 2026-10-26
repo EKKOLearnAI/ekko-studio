@@ -212,7 +212,7 @@ function handleDoubaoVoiceUpdate(value: string) {
 </script>
 
 <template>
-  <NDrawer :show="show" :width="400" @update:show="emit('close')">
+  <NDrawer :show="show" width="var(--studio-drawer-width)" @update:show="emit('close')">
     <NDrawerContent :title="connection?.label" closable>
       <NForm label-placement="top" v-if="connection">
         <NFormItem v-if="!connection.isBuiltin" :label="t('settings.voice.apiKey')">

@@ -14,6 +14,11 @@ const testState = vi.hoisted(() => {
       return this
     }
 
+    once(event: string, handler: (...args: any[]) => void) {
+      const wrapped = (...args: any[]) => { this.off(event, wrapped); handler(...args) }
+      return this.on(event, wrapped)
+    }
+
     off(event: string, handler: (...args: any[]) => void) {
       const handlers = this.handlers.get(event) || []
       this.handlers.set(event, handlers.filter(item => item !== handler))
@@ -56,7 +61,10 @@ vi.mock('child_process', () => ({
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../packages/server/src/modules/studio/repositories/session-store')>(),
   updateSessionStats: vi.fn(),
+  addMessage: vi.fn(),
 }))
+
+import { addMessage } from '../../packages/server/src/modules/studio/repositories/session-store'
 
 import {
   CodingAgentRunManager,
@@ -65,6 +73,7 @@ import {
 import '../../packages/server/src/bootstrap/coding-agent-adapters'
 
 const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+const windowsCmd = process.env.comspec || 'cmd.exe'
 
 function setPlatform(platform: NodeJS.Platform) {
   Object.defineProperty(process, 'platform', { value: platform })
@@ -80,6 +89,82 @@ afterEach(() => {
 })
 
 describe('coding agent Windows process launch', () => {
+  it('keeps persisted user message IDs in the live resume so task links can locate them', () => {
+    const manager = new CodingAgentRunManager()
+    const run: any = { id: 'task-run', runMarker: 'turn', launch: { sessionId: 'task-session' }, state: { messages: [{ id: 31 }] } }
+    vi.mocked(addMessage).mockReturnValueOnce(185866)
+    const id = (manager as any).addUserMessage(run, 'task request')
+    expect(id).toBe(185866)
+    expect(run.state.messages[1]).toMatchObject({ id, role: 'user', content: 'task request', runMarker: 'turn' })
+    manager.shutdown()
+  })
+  it('gives every submitted turn its own usage identity when the CLI process is reused', () => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(1000)
+    const manager = new CodingAgentRunManager()
+    const run: any = { id: 'persistent-cli', launch: { agentId: 'codex' }, state: {} }
+    vi.spyOn(manager, 'getBySession').mockReturnValue(run)
+    let messageId = 0
+    ;(manager as any).ensureDbSession = vi.fn()
+    ;(manager as any).addUserMessage = () => ++messageId
+    ;(manager as any).touch = vi.fn()
+    ;(manager as any).emitTerminalStatus = vi.fn()
+    ;(manager as any).startWorkspaceRunDiff = vi.fn()
+    ;(manager as any).startCodexExecTurn = vi.fn()
+    manager.send('s', 'first')
+    const firstId = run.usageRunId
+    clock.mockReturnValue(4000)
+    ;(manager as any).finishUsageTiming(run)
+    expect(run.usageDurationSeconds).toBe(3)
+    clock.mockReturnValue(12000)
+    manager.send('s', 'second')
+    expect(run.usageDurationSeconds).toBeUndefined()
+    clock.mockReturnValue(14000)
+    ;(manager as any).finishUsageTiming(run)
+    expect(run.usageDurationSeconds).toBe(2)
+    expect(run.id).toBe('persistent-cli')
+    expect(firstId).toBe('persistent-cli:turn:1')
+    expect(run.usageRunId).toBe('persistent-cli:turn:2')
+  })
+
+  it('Antigravity waits for the agent result and process close, not a model step, and fails on missing result', () => {
+    const manager = new CodingAgentRunManager()
+    ;(manager as any).handleClaudePrintResponseEvent = vi.fn()
+    ;(manager as any).appendCodexText = vi.fn()
+    ;(manager as any).recordNativeCliSessionId = vi.fn()
+    ;(manager as any).completeClaudePrintTurn = vi.fn((run: any, usage: unknown) => {
+      run.printCompleted = true
+      run.pendingChatCompletionEvent = 'run.completed'
+      run.pendingChatCompletionPayload = { usage }
+    })
+    ;(manager as any).emitAndMarkPrintChatRunCompletedAfterUsage = vi.fn()
+    ;(manager as any).failCodexExecTurn = vi.fn()
+    const run: any = {
+      id: 'antigravity-test', launch: {
+        agentId: 'antigravity', mode: 'global', profile: 'default', provider: 'global',
+        sessionId: 'agy-session', command: 'C:\\Tools\\agy.exe', args: [],
+        workspaceDir: process.cwd(), env: {},
+      }, state: { messages: [], events: [], queue: [] },
+      lastActiveAt: Date.now(), startedAt: Date.now(), exited: false,
+    }
+    ;(manager as any).startAntigravityPrintTurn(run, 'hello')
+    const child = testState.spawnCalls.at(-1)!.child
+    expect(child.stdin.end).toHaveBeenCalledWith(`${JSON.stringify({ event: 'user', message: { content: 'hello' } })}\n`)
+    expect(testState.spawnCalls.at(-1)!.args).not.toContain('hello')
+    child.stdout.emit('data', Buffer.from(JSON.stringify({ event: 'step_update', step_update: { step_type: 'agent_response', state: 'DONE', text_delta: 'answer' } }) + '\n'))
+    expect((manager as any).completeClaudePrintTurn).not.toHaveBeenCalled()
+    child.stdout.emit('data', Buffer.from(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'answer', usage: { input_tokens: 2 } } }) + '\n'))
+    expect((manager as any).completeClaudePrintTurn).toHaveBeenCalledOnce()
+    expect((manager as any).appendCodexText).toHaveBeenCalledTimes(1)
+    expect((manager as any).emitAndMarkPrintChatRunCompletedAfterUsage).not.toHaveBeenCalled()
+    child.emit('close', 0)
+    expect((manager as any).emitAndMarkPrintChatRunCompletedAfterUsage).toHaveBeenCalledOnce()
+    const missing: any = { ...run, printCompleted: false, pendingChatCompletionEvent: undefined, currentChild: undefined }
+    ;(manager as any).startAntigravityPrintTurn(missing, 'hello')
+    testState.spawnCalls.at(-1)!.child.emit('close', 0)
+    expect((manager as any).failCodexExecTurn).toHaveBeenCalledWith(missing, 'Antigravity exited without a terminal result event', undefined)
+    expect((manager as any).appendCodexText).toHaveBeenLastCalledWith(missing, 'Error: Antigravity exited without a terminal result event', true)
+  })
+
   it('keeps Grok prompts out of Windows command arguments and settles after process close', () => {
     const grokHome = mkdtempSync(join(tmpdir(), 'hermes-grok-windows-'))
     const originalDatabaseUrl = process.env.DATABASE_URL
@@ -525,7 +610,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-pi-1', prompt, { systemPrompt })
 
     const call = testState.spawnCalls[0]
-    expect(call.command).toBe('cmd.exe')
+    expect(call.command).toBe(windowsCmd)
     expect(call.args[3]).toContain('C:\\用户\\管理员\\AppData\\Roaming\\npm\\pi.cmd')
     expect(call.args[3]).toContain('C:\\用户\\会话^ 目录')
     expect(call.args[3]).not.toContain('超长中文内容')
@@ -979,7 +1064,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-1', groupInput, { systemPrompt: 'system prompt\nsecond line' })
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\Users\\Administrator\\AppData\\Roaming\\npm\\claude.cmd')
@@ -1037,7 +1122,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-codex-1', groupInput, { systemPrompt: 'system prompt\nsecond line' })
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\Users\\Administrator\\AppData\\Roaming\\npm\\codex.cmd')
@@ -1294,7 +1379,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-codex-unicode-1', 'test')
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\用户\\管理员\\AppData\\Roaming\\npm\\codex.cmd')
@@ -1330,7 +1415,7 @@ describe('coding agent Windows process launch', () => {
     manager.send('chat-session-codex-quoted-1', 'test')
 
     expect(testState.spawnCalls[0]).toMatchObject({
-      command: 'cmd.exe',
+      command: windowsCmd,
       args: expect.arrayContaining(['/d', '/s', '/c']),
     })
     expect(testState.spawnCalls[0].args[3]).toContain('C:\\nvm4w\\nodejs\\codex.cmd')

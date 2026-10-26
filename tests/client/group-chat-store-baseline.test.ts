@@ -58,6 +58,7 @@ const groupChatApiMock = vi.hoisted(() => {
     removeAgent: vi.fn(),
     cloneRoom: vi.fn(),
     deleteRoom: vi.fn(),
+    deleteGroupMessages: vi.fn(),
     clearRoomContext: vi.fn(),
     updateInviteCode: vi.fn(),
   }
@@ -182,6 +183,107 @@ describe('group chat store baseline lifecycle', () => {
       return groupChatApiMock.socket
     })
     groupChatApiMock.socket.disconnect.mockClear()
+  })
+
+  it('applies multi-delete once, preserves the room summary and ignores late deleted messages', async () => {
+    const store = await loadStore()
+    await store.connect()
+    store.currentRoomId = room.id
+    store.rooms = [{ ...room }]
+    store.messages = [userMessage(), userMessage({ id: 'kept', timestamp: 2 })]
+    store.totalMessages = 2
+    store.loadedMessageCount = 2
+    const summary = { roomId: room.id, summary: 'Keep summary', status: 'success', version: 1 } as any
+    store.roomSummaryStates.set(room.id, summary)
+    store.setMessageReference(room.id, { id: 'msg-1', role: 'user', content: 'hello' } as any)
+    const result = { roomId: room.id, messageIds: ['msg-1'], messageDeletionRevision: 1, messageCount: 1, totalTokens: 3, deletedGroups: 1 }
+    groupChatApiMock.deleteGroupMessages.mockResolvedValue(result)
+    emitSocket('messages_deleted', result)
+    await store.deleteMessages(room.id, ['msg-1'], 'revision')
+    emitSocket('message', userMessage())
+    expect(store.messages.map(message => message.id)).toEqual(['kept'])
+    expect(store.totalMessages).toBe(1)
+    expect(store.roomSummaryStates.get(room.id)).toEqual(summary)
+    expect(store.activeMessageReference).toBeNull()
+    expect(store.rooms[0].totalTokens).toBe(3)
+  })
+
+  it('does not resurrect deleted history from an older in-flight page', async () => {
+    const store = await loadStore()
+    await store.connect()
+    store.currentRoomId = room.id
+    store.messages = [userMessage({ id: 'latest' })]
+    store.hasMoreBefore = true
+    let resolve!: (value: any) => void
+    groupChatApiMock.getRoomDetail.mockReturnValue(new Promise(done => { resolve = done }))
+    const pending = store.loadOlderMessages()
+    emitSocket('messages_deleted', { roomId: room.id, messageIds: ['old'], messageDeletionRevision: 1, messageCount: 1, totalTokens: 3, deletedGroups: 1 })
+    resolve({ room, messages: [userMessage({ id: 'old' })], total: 2, hasMore: false })
+    expect(await pending).toBe(false)
+    expect(store.messages.map(message => message.id)).toEqual(['latest'])
+    expect(store.totalMessages).toBe(1)
+  })
+
+  it('keeps the current room intact when a deletion finishes in a different room', async () => {
+    const store = await loadStore()
+    await store.connect()
+    store.currentRoomId = room.id
+    let resolve!: (value: any) => void
+    groupChatApiMock.deleteGroupMessages.mockReturnValue(new Promise(done => { resolve = done }))
+    const pending = store.deleteMessages(room.id, ['msg-1'], 'revision')
+    store.currentRoomId = 'other-room'
+    store.messages = [userMessage({ roomId: 'other-room', id: 'other' })]
+    resolve({ roomId: room.id, messageIds: ['msg-1'], messageDeletionRevision: 1, messageCount: 0, totalTokens: 0, deletedGroups: 1 })
+    await pending
+    expect(store.messages.map(message => message.id)).toEqual(['other'])
+  })
+
+  it('drops cached older pages on reconnect when deletions were missed', async () => {
+    const store = await loadStore()
+    await store.connect()
+    store.currentRoomId = room.id
+    store.messages = [userMessage({ id: 'missed-deletion' }), userMessage({ id: 'kept' })]
+    groupChatApiMock.socket.emit.mockImplementation((event: string, _data: any, ack?: Function) => {
+      if (event === 'join') ack?.({ roomId: room.id, messageDeletionRevision: 1, messages: [userMessage({ id: 'kept' })], members: [], agents: [], total: 1, hasMore: false })
+      if (event === 'load_pending_approvals') ack?.({ pendingApprovals: [] })
+      if (event === 'load_room_agent_activities') ack?.({ activities: [] })
+    })
+    emitSocket('connect', undefined)
+    await vi.waitFor(() => expect(store.messages.map(message => message.id)).toEqual(['kept']))
+    expect(store.messageDeletionRevisions.get(room.id)).toBe(1)
+  })
+
+  it('does not retain a missed deletion when another deletion arrives before the reconnect acknowledgement', async () => {
+    const store = await loadStore()
+    await store.connect()
+    store.currentRoomId = room.id
+    store.messages = [userMessage({ id: 'missed' }), userMessage({ id: 'second' }), userMessage({ id: 'kept' })]
+    let acknowledge!: Function
+    groupChatApiMock.socket.emit.mockImplementation((event: string, _data: any, ack?: Function) => {
+      if (event === 'join') acknowledge = ack!
+    })
+    emitSocket('connect', undefined)
+    await vi.waitFor(() => expect(acknowledge).toBeTypeOf('function'))
+    emitSocket('messages_deleted', { roomId: room.id, messageIds: ['second'], messageDeletionRevision: 2, messageCount: 1, totalTokens: 3, deletedGroups: 1 })
+    emitSocket('message', userMessage({ id: 'new-live', timestamp: 9 }))
+    acknowledge({ roomId: room.id, messageDeletionRevision: 1, messages: [userMessage({ id: 'second' }), userMessage({ id: 'kept' })], members: [], agents: [], total: 2, hasMore: false })
+    await vi.waitFor(() => expect(store.messages.map(message => message.id).sort()).toEqual(['kept', 'new-live']))
+    expect(store.messageDeletionRevisions.get(room.id)).toBe(2)
+  })
+
+  it('keeps group usage cards visible when tool traces are hidden and updates their existing identity', async () => {
+    const store = await loadStore()
+    await store.connect()
+    store.currentRoomId = 'room-1'
+    const usage = { runId: 'group-run', assistantMessageId: 'reply', inputTokens: 1200, outputTokens: 200,
+      cacheReadTokens: 300, cacheHitRate: 0.25, costUsd: 0.0123, tokensPerSecond: 50, isEstimated: false }
+    const message = { id: 'usage', roomId: 'room-1', senderId: 'agent-1', senderName: 'Worker', role: 'tool',
+      tool_name: 'run_usage', tool_call_id: 'usage', run_id: 'group-run', timestamp: 2, content: JSON.stringify(usage) }
+    emitSocket('message', message)
+    expect(store.sortedMessages[0]).toMatchObject({ role: 'assistant', content: '', runUsage: { outputTokens: 200 } })
+    emitSocket('message', { ...message, content: JSON.stringify({ ...usage, outputTokens: 250 }) })
+    expect(store.sortedMessages).toHaveLength(1)
+    expect(store.sortedMessages[0].runUsage?.outputTokens).toBe(250)
   })
 
   it('connects with stored user data and registers realtime handlers', async () => {
@@ -1107,6 +1209,47 @@ describe('group chat store baseline lifecycle', () => {
 
     emitSocket('room_cleared', { roomId: 'room-1', totalTokens: 0 })
     expect(store.pendingApprovals.size).toBe(0)
+  })
+
+  it('keeps the cleared room Agent avatars after switching away and back', async () => {
+    const store = await loadStore()
+    const roster = [1, 2, 3].map(index => ({ ...agent, id: `agent-${index}`, name: `Worker ${index}`, avatar: JSON.stringify({ type: 'generated', seed: `worker-${index}` }) }))
+    groupChatApiMock.getRoomDetail.mockImplementation(async (id: string) => ({
+      room: { ...room, id }, messages: [], agents: id === room.id ? roster : [], members: [], total: 0, hasMore: false,
+    }))
+    groupChatApiMock.socket.emit.mockImplementation((event: string, data?: any, ack?: Function) => {
+      if (event === 'join') ack?.({ roomId: data.roomId, agents: data.roomId === room.id ? roster : [] })
+      return groupChatApiMock.socket
+    })
+    await store.connect()
+    await store.joinRoom(room.id)
+    const avatars = store.roomAgentsForRoom(room.id)
+    expect(avatars).toHaveLength(3)
+    await store.clearCurrentRoomContext()
+    expect(store.roomAgentsForRoom(room.id)).toEqual(avatars)
+    await store.joinRoom('room-2')
+    expect(store.roomAgentsForRoom(room.id)).toEqual(avatars)
+    await store.joinRoom(room.id)
+    expect(store.roomAgentsForRoom(room.id)).toEqual(avatars)
+    await store.joinRoom('room-2')
+    expect(store.roomAgentsForRoom(room.id)).toEqual(avatars)
+  })
+
+  it('applies a delayed clear response only to the room that was cleared', async () => {
+    const store = await loadStore()
+    store.rooms = [{ ...room, agents: [] }, { ...room, id: 'room-2', totalTokens: 20 }]
+    store.currentRoomId = room.id
+    let finish!: (value: any) => void
+    groupChatApiMock.clearRoomContext.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const clearing = store.clearCurrentRoomContext()
+    store.currentRoomId = 'room-2'
+    store.messages = [userMessage({ roomId: 'room-2', content: 'Keep this' })]
+    finish({ success: true, room: { ...room, totalTokens: 0 } })
+    await clearing
+    expect(store.messages[0]?.content).toBe('Keep this')
+    expect(store.rooms.map(item => item.id)).toEqual(['room-1', 'room-2'])
+    expect(store.rooms.find(item => item.id === room.id)?.totalTokens).toBe(0)
+    expect(store.rooms.find(item => item.id === 'room-2')?.totalTokens).toBe(20)
   })
 
   it('tracks live rolling-summary status by room', async () => {

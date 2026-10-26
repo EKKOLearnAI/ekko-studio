@@ -10,6 +10,17 @@ import {
 } from '../public/global-agent'
 import { createMcuDevice, deleteMcuDevice, getMcuDevice, listMcuDevices, updateMcuDeviceName, type McuDeviceRecord } from '../services/devices/mcu-devices'
 
+export async function mcuBackendInfoController(ctx: Context) {
+  ctx.set('Access-Control-Allow-Origin', '*')
+  ctx.body = {
+    ...await getPublicSystemInfo(),
+    http_port: config.port,
+    endpoint_kind: getLanEndpointKind(config.port),
+    relay_url: config.remoteRelay.url,
+    app_relay: { protocol: 'socket.io', namespace: '/app-relay', direct: true },
+  }
+}
+
 function normalizeDeviceCode(value: unknown): string {
   const normalized = String(value || '').trim()
   return normalized.length <= 255 ? normalized : ''

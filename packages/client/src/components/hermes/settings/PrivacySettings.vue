@@ -20,6 +20,9 @@ async function save(values: Record<string, any>) {
 
 <template>
   <section class="settings-section">
+    <SettingRow :label="t('settings.privacy.policy')">
+      <a href="https://github.com/EKKOLearnAI/ekko-studio/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">{{ t('settings.privacy.policy') }}</a>
+    </SettingRow>
     <SettingRow :label="t('settings.privacy.redactPii')" :hint="t('settings.privacy.redactPiiHint')">
       <NSwitch :value="settingsStore.privacy.redact_pii" @update:value="v => save({ redact_pii: v })" />
     </SettingRow>

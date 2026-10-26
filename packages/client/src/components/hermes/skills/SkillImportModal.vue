@@ -183,13 +183,13 @@ function handleClose() {
 
 .field-label {
   display: block;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
   margin-bottom: 4px;
 }
 
 .hint {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   margin: 6px 0 0;
 }
@@ -197,18 +197,18 @@ function handleClose() {
 .folder-picker {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
 .folder-info {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
 }
 
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

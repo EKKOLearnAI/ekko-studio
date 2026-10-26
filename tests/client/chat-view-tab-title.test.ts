@@ -3,11 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+vi.mock('naive-ui', () => ({ useMessage: () => ({ warning: vi.fn() }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 import ChatView from '@/views/hermes/ChatView.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore, type Session } from '@/stores/hermes/chat'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
+
+vi.mock('@/components/common/PageLoading.vue', () => ({
+  default: { props: ['show'], template: '<div><slot /></div>' },
+}))
 
 vi.mock('@/components/hermes/chat/ChatPanel.vue', () => ({
   default: {
@@ -40,6 +46,7 @@ vi.mock('@/api/studio/chat', () => ({
   onPeerUserMessage: vi.fn(() => vi.fn()),
   onSessionCommand: vi.fn(() => vi.fn()),
   onSessionTitleUpdated: vi.fn(() => vi.fn()),
+  onRunUsageUpdated: vi.fn(() => vi.fn()),
   onSessionWorkspaceUpdated: vi.fn(() => vi.fn()),
   onSessionSettingsUpdated: vi.fn(() => vi.fn()),
 }))

@@ -74,6 +74,12 @@ jobs:
                 "packages/desktop/release/*.exe.blockmap" \
                 "packages/desktop/release/latest*.yml"
               ;;
+            win32-arm64)
+              write_common_outputs "Windows arm64" "windows-11-arm" "--win nsis --arm64" "desktop-win32-arm64" \
+                "packages/desktop/release/*-arm64.exe" \
+                "packages/desktop/release/*-arm64.exe.blockmap" \
+                "packages/desktop/release/latest-arm64.yml"
+              ;;
             darwin-arm64)
               write_common_outputs "macOS arm64" "macos-26" "--mac dmg zip --arm64" "desktop-darwin-arm64" \
                 "packages/desktop/release/*.dmg" \
@@ -117,7 +123,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -141,8 +147,29 @@ jobs:
       - name: Verify image processing runtime
         run: npm run verify:sharp-runtime
 
+      - name: Build Windows ARM64 speech runtime
+        if: needs.validate.outputs.target_os == 'win32' && needs.validate.outputs.target_arch == 'arm64'
+        run: node packages/desktop/scripts/build-windows-arm64-speech.mjs
+
       - name: Install desktop dependencies
         run: npm ci --prefix packages/desktop --no-audit --no-fund
+
+      - name: Verify desktop updater download lifecycle
+        run: npm --prefix packages/desktop run test:updater
+
+      - name: Verify Windows screenshot overlay coverage
+        id: screenshot_geometry
+        if: needs.validate.outputs.target_os == 'win32'
+        run: node packages/desktop/scripts/verify-screenshot-overlay.cjs --output-dir=packages/desktop/screenshot-geometry
+
+      - name: Upload Windows screenshot geometry reports
+        if: always() && needs.validate.outputs.target_os == 'win32' && steps.screenshot_geometry.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-win32-${{ needs.validate.outputs.target_arch }}-screenshot-geometry
+          path: packages/desktop/screenshot-geometry/*.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Write runtime release metadata
         shell: bash

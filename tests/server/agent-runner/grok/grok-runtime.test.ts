@@ -3,7 +3,9 @@ import { mkdir } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { parse as parseToml } from 'smol-toml'
 import {
+  grokRuntimeSettingsConfig,
   grokSettingsConfig,
   grokUserMcpConfig,
   mergeGrokSettingsConfig,
@@ -146,6 +148,70 @@ describe('Grok runtime isolation', () => {
     expect(config).toContain('allowed_tools = [\n  "bash",\n  "read",\n]')
     expect(config).toContain('[[profiles]]\nname = "fast"')
     expect(config).toContain('[tools]\npreamble = """\nkeep this line\n[not a section]\n"""')
+  })
+
+  it('deduplicates inherited Grok table keys when scoped settings override global settings', () => {
+    const config = grokRuntimeSettingsConfig(
+      '[projects."/workspace"]\ntrust_level = "trusted"\nnotify = [\n  "global",\n]\n',
+      '[projects."/workspace"]\ntrust_level = "untrusted"\nnotify = [\n  "scoped",\n]\n',
+    )
+
+    expect(config.match(/trust_level\s*=/g)).toHaveLength(1)
+    expect(config.match(/notify\s*=/g)).toHaveLength(1)
+    expect(config).toContain('trust_level = "untrusted"')
+    expect(config).toContain('notify = [\n  "scoped",\n]')
+  })
+
+  it.each([
+    {
+      name: 'quoted multiline values',
+      source: '[tools]\n"preamble" = """\nmode=first\nmode=second\n"""',
+      expected: { tools: { preamble: 'mode=first\nmode=second\n' } },
+    },
+    {
+      name: 'literal keys and multiline literal strings',
+      source: "[tools]\n'preamble' = '''first\n\n[features]\nlast'''\n",
+      expected: { tools: { preamble: 'first\n\n[features]\nlast' } },
+    },
+    {
+      name: 'quoted multiline values containing a table header',
+      source: '[tools]\n"preamble" = """first line\n[cli]\nthis remains string content\n"""\n\n[cli]\ninstaller = "npm"',
+      expected: { tools: { preamble: 'first line\n[cli]\nthis remains string content\n' }, cli: { installer: 'npm' } },
+    },
+    {
+      name: 'multiline values in excluded provider tables',
+      source: '[model.original]\nname = """first line\n[custom]\ntext = "discarded"\n"""\n\n[cli]\ninstaller = "npm"',
+      expected: { cli: { installer: 'npm' } },
+    },
+    {
+      name: 'settings after an excluded top-level multiline value',
+      source: '"api_key" = """\n[custom]\ntext = "discarded"\n"""\nallowed_tools = ["bash"]',
+      expected: { allowed_tools: ['bash'] },
+    },
+  ])('preserves $name in scoped Grok configuration', async ({ source, expected }) => {
+    parseToml(source)
+    const rootDir = makeRoot()
+    await prepareScopedGrokRuntime({
+      rootDir, provider: 'custom-provider', model: 'custom-model', displayName: 'Custom Model',
+      proxyBaseUrl: 'http://127.0.0.1:8647/v1', contextWindow: 128_000, outputLimit: 8192,
+      reasoningEffort: '', systemPrompt: 'Studio instructions.', userInstructions: '',
+      settingsContent: source, managedMcpToml: '',
+    })
+    const parsed = parseToml(readFileSync(join(rootDir, 'config.toml'), 'utf-8'))
+    expect(parsed).toMatchObject(expected)
+    expect(parsed.custom).toBeUndefined()
+    expect(parsed.api_key).toBeUndefined()
+  })
+
+  it('merges equivalent quoted Grok keys without collapsing array-of-table instances', () => {
+    const config = grokRuntimeSettingsConfig(
+      '[tools]\n"preamble" = """global\nretired line"""\n"mode=value" = """first\nsecond"""\nnotify = ["global"]\n[[profiles]]\nname = "one"',
+      "[tools]\n'preamble' = '''scoped\nreplacement'''\n\"not\\u0069fy\" = [\n  \"scoped\", # ] is only a comment\n]\n[[profiles]]\nname = \"two\"",
+    )
+    expect(parseToml(config)).toEqual({
+      tools: { preamble: 'scoped\nreplacement', 'mode=value': 'first\nsecond', notify: ['scoped'] },
+      profiles: [{ name: 'one' }, { name: 'two' }],
+    })
   })
 
   it('copies global Grok skills into scoped runtimes', async () => {

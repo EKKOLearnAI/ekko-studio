@@ -160,8 +160,8 @@ function scrollToTarget(item: OutlineItem) {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background-color: $bg-main-surface;
-  border-inline-start: 1px solid $border-color;
+  background-color: var(--theme-content-bg, $bg-main-surface);
+  border-inline-start: var(--border-width, 1px) solid $border-color;
   width: 280px;
   flex-shrink: 0;
 
@@ -177,13 +177,13 @@ function scrollToTarget(item: OutlineItem) {
 }
 
 .outline-header {
-  padding: 16px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   flex-shrink: 0;
 }
 
 .outline-title {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
 }
@@ -191,7 +191,7 @@ function scrollToTarget(item: OutlineItem) {
 .outline-content {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: calc(12px * var(--spacing-scale, 1));
 }
 
 .outline-item {
@@ -211,26 +211,26 @@ function scrollToTarget(item: OutlineItem) {
 .user-question {
   background-color: $bg-secondary;
   color: $text-primary;
-  padding: 8px 12px;
-  border-radius: 8px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 8px);
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 
   .dark & {
-    background-color: $bg-input;
+    background-color: var(--theme-input-bg, $bg-input);
   }
 
   .q-label {
     font-weight: 600;
     flex-shrink: 0;
-    font-size: 13px;
-    line-height: 1.4;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+    line-height: var(--line-height, 1.4);
   }
 
   .q-text {
-    font-size: 13px;
-    line-height: 1.4;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+    line-height: var(--line-height, 1.4);
     word-break: break-word;
   }
 }
@@ -241,20 +241,20 @@ function scrollToTarget(item: OutlineItem) {
   }
 
   &.level-2 {
-    padding-inline-start: 12px;
+    padding-inline-start: calc(12px * var(--spacing-scale, 1));
   }
 
   &.level-3 {
-    padding-inline-start: 24px;
+    padding-inline-start: calc(24px * var(--spacing-scale, 1));
   }
 }
 
 .heading-item {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: 4px;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 4px);
   transition: background-color 0.15s ease;
 
   &:hover {
@@ -291,21 +291,21 @@ function scrollToTarget(item: OutlineItem) {
     }
     .heading-text {
       color: $text-muted;
-      font-size: 12px;
+      font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     }
   }
 }
 
 .heading-text {
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, 1.4);
   word-break: break-word;
 }
 
 .outline-empty {
   text-align: center;
   color: $text-muted;
-  font-size: 13px;
-  padding: 20px 0;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  padding: calc(20px * var(--spacing-scale, 1)) 0;
 }
 </style>

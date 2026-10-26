@@ -47,6 +47,36 @@ it('unsupported external installations cannot enable automatic updates',async()=
  await expect(policy.set('codex',true)).rejects.toThrow('not supported')
  await policy.tick();expect(policy.snapshot().codex.autoUpdateSupported).toBe(false);expect(adapter.install).not.toHaveBeenCalled()
 })
+it('skips unsupported agents in normal and forced background checks without blocking supported agents', async () => {
+  const { dir, adapter } = await setup()
+  const check = vi.fn(async (id: string) => ({
+    success: id !== 'cursor',
+    tool: { installed: true, version: '1' },
+    latestVersion: id === 'cursor' ? '' : '2',
+    updateAvailable: id !== 'cursor',
+    message: id === 'cursor' ? 'Cursor CLI updates are not managed by Studio' : '',
+  }))
+  const policy = new AgentUpdatePolicy(dir, {
+    ...adapter,
+    ids: () => ['cursor', 'codex'],
+    safelyManaged: id => id !== 'cursor',
+    check,
+  })
+
+  await policy.tick()
+  await policy.tick(true)
+
+  expect(check.mock.calls).toEqual([['codex'], ['codex']])
+  expect(policy.snapshot().cursor).toMatchObject({
+    autoUpdate: false,
+    autoUpdateSupported: false,
+    status: 'unknown',
+    checkedAt: '',
+  })
+  expect(policy.snapshot().cursor.error).toBeUndefined()
+  expect(policy.snapshot().codex.status).toBe('available')
+  expect(adapter.install).not.toHaveBeenCalled()
+})
 it('requires 60 continuous safe seconds and resets on short activity between polls',async()=>{
  vi.useFakeTimers()
  try {

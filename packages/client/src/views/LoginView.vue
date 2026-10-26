@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { setApiKey, clearApiKey, hasApiKey } from "@/api/client";
 import { fetchAuthStatus, loginWithPassword } from "@/api/studio/auth";
-import { isDesktopShell } from "@/utils/desktop-bridge";
+import { desktopBridge, isDesktopShell } from "@/utils/desktop-bridge";
 import { resolveLoginRedirect } from "@/utils/login-redirect";
 import { useTheme } from "@/composables/useTheme";
 
@@ -18,7 +19,7 @@ const password = ref("");
 const loading = ref(false);
 const errorMsg = ref("");
 const showLockResetHint = ref(false);
-const desktopShell = isDesktopShell();
+const desktopShell = isDesktopShell() && desktopBridge()?.remoteMode !== true;
 
 if (desktopShell) {
   // Desktop login is a recovery path. Drop stale JWTs before any background
@@ -72,7 +73,7 @@ async function handlePasswordLogin() {
   <div class="login-view">
     <div class="login-card">
       <div class="login-logo">
-        <img src="/logo.png" alt="Ekko Studio" width="80" height="80" />
+        <img :src="deploymentUrl('/logo.png')" alt="Ekko Studio" width="80" height="80" />
       </div>
       <h1 class="login-title">{{ t("login.title") }}</h1>
       <p class="login-desc">{{ t("login.description") }}</p>
@@ -129,13 +130,13 @@ async function handlePasswordLogin() {
   width: 480px;
   max-width: calc(100vw - 32px);
   padding: 56px;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-lg;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   text-align: center;
 
   @media (max-width: $breakpoint-mobile) {
-    padding: 32px 24px;
+    padding: calc(32px * var(--spacing-scale, 1)) calc(24px * var(--spacing-scale, 1));
   }
 }
 
@@ -148,44 +149,44 @@ async function handlePasswordLogin() {
 }
 
 .login-title {
-  font-size: 26px;
+  font-size: calc(var(--font-size-base, 14px) * 26 / 14);
   font-weight: 600;
   color: $text-primary;
   margin: 0 0 10px;
 }
 
 .login-desc {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   color: $text-muted;
   margin: 0 0 12px;
-  line-height: 1.6;
+  line-height: var(--line-height, 1.6);
 }
 
 .login-default-hint {
   margin: 0 0 28px;
-  font-family: $font-code;
-  font-size: 13px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
 }
 
 .login-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 }
 
 .login-input {
   width: 100%;
-  padding: 14px 16px;
-  border: 1px solid $border-color;
+  padding: calc(14px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   color: $text-primary;
-  background: $bg-input;
+  background: var(--theme-input-bg, $bg-input);
   outline: none;
   transition: border-color $transition-fast;
   box-sizing: border-box;
-  font-family: $font-code;
+  font-family: var(--font-code, $font-code);
 
   &::placeholder {
     color: $text-muted;
@@ -197,38 +198,38 @@ async function handlePasswordLogin() {
 }
 
 .login-error {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $error;
   text-align: start;
 }
 
 .login-lock-hint {
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--warning-rgb), 0.35);
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--warning-rgb), 0.35);
   border-radius: $radius-sm;
   background: rgba(var(--warning-rgb), 0.08);
   color: $text-secondary;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.5);
   text-align: start;
 
   code {
     display: block;
     margin-top: 4px;
     color: $text-primary;
-    font-family: $font-code;
+    font-family: var(--font-code, $font-code);
     word-break: break-all;
   }
 }
 
 .login-btn {
   width: 100%;
-  padding: 14px;
+  padding: calc(14px * var(--spacing-scale, 1));
   border: none;
   border-radius: $radius-sm;
   background: $text-primary;
   color: var(--text-on-accent);
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 500;
   cursor: pointer;
   transition: opacity $transition-fast;

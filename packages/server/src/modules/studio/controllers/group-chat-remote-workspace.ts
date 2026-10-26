@@ -10,6 +10,7 @@ import {
   uploadRemoteWorkspaceFile,
 } from '../services/group-chat/remote-workspace-files'
 import { resolveGroupWorkspacePath } from '../services/group-chat/workspace-files'
+import { normalizeDirectoryTarget } from '../services/workspace/directory'
 import { buildFileContentHeaders } from '../public/workspace-files'
 
 function bearerToken(ctx: Context): string {
@@ -27,7 +28,7 @@ function authorizedWorkspace(
   if (
     !room
     || Number(room.allowRemoteWorkspaceAccess || 0) !== 1
-    || String(room.workspace || '').trim() !== grant.workspace
+    || normalizeDirectoryTarget(String(room.workspace || '').trim()) !== grant.workspace
   ) {
     ctx.status = 403
     ctx.body = { error: 'Remote workspace access is disabled', code: 'permission_denied' }

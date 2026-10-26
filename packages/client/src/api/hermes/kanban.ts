@@ -282,7 +282,7 @@ export function buildKanbanEventsWebSocketUrl(opts?: KanbanBoardOptions): string
   const path = `/api/hermes/kanban/events?${params.toString()}`
 
   if (base) {
-    return `${websocketProtocol(base)}//${new URL(base).host}${path}`
+    return `${websocketProtocol(base)}//${new URL(base).host}${new URL(base).pathname.replace(/\/$/, '')}${path}`
   }
 
   const directDevPort = import.meta.env.VITE_HERMES_DIRECT_WS_PORT

@@ -122,4 +122,29 @@ describe('usage recorder', () => {
       isEstimated: false,
     })
   })
+
+  it('persists Cursor coding-agent usage as cursor, not claude_code', () => {
+    recordSessionUsage({
+      sessionId: 'session-cursor',
+      runId: 'run-cursor',
+      source: 'coding_agent',
+      agent: 'cursor',
+      usage: { input_tokens: 3, output_tokens: 1 },
+    })
+
+    expect(updateUsageMock).toHaveBeenCalledWith('session-cursor', expect.objectContaining({
+      source: 'coding_agent',
+      agent: 'cursor',
+    }))
+    expect(updateUsageMock.mock.calls[0][1].agent).not.toBe('claude_code')
+  })
+
+  it('notifies with normalized tokens and the same USD cost without exposing raw usage content', () => {
+    const onRecorded = vi.fn()
+    recordSessionUsage({ sessionId: '', source: 'model_api', agent: 'model_api', origin: 'external',
+      usage: { inputTokens: 12, outputTokens: 3, cacheReadTokens: 5, costUsd: 0.001, prompt: 'private prompt' }, onRecorded })
+    expect(onRecorded).toHaveBeenCalledExactlyOnceWith({ inputTokens: 12, outputTokens: 3, cacheReadTokens: 5, cacheWriteTokens: 0, reasoningTokens: 0, isEstimated: false, costUsd: 0.001, costSource: 'reported' })
+    expect(JSON.stringify(onRecorded.mock.calls)).not.toContain('private prompt')
+    expect(() => recordSessionUsage({ sessionId: '', source: 'model_api', agent: 'model_api', onRecorded: () => { throw new Error('report offline') } })).not.toThrow()
+  })
 })

@@ -3,6 +3,7 @@ const SOURCE_LABELS: Record<string, string> = {
   api_server: 'API Server',
   cli: 'CLI',
   coding_agent: 'Coding Agent',
+  builtin_agent: 'Built-in Agent',
   global_agent: 'Global Agent',
   discord: 'Discord',
   slack: 'Slack',

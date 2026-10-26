@@ -13,7 +13,10 @@ export const TOOL_RESULT_CONTEXT_TAIL_CHARS =
  */
 export function truncateToolResultForContext(content: string): string {
   if (content.length <= TOOL_RESULT_CONTEXT_LIMIT) return content
-  return content.slice(0, TOOL_RESULT_CONTEXT_HEAD_CHARS) +
-    TOOL_RESULT_CONTEXT_MARKER +
-    content.slice(-TOOL_RESULT_CONTEXT_TAIL_CHARS)
+  let headEnd = TOOL_RESULT_CONTEXT_HEAD_CHARS
+  let tailStart = content.length - TOOL_RESULT_CONTEXT_TAIL_CHARS
+  // A supplementary code point starting just before a cut would be split in half.
+  if ((content.codePointAt(headEnd - 1) ?? 0) > 0xffff) headEnd--
+  if ((content.codePointAt(tailStart - 1) ?? 0) > 0xffff) tailStart++
+  return content.slice(0, headEnd) + TOOL_RESULT_CONTEXT_MARKER + content.slice(tailStart)
 }

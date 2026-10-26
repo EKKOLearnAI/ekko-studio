@@ -6,6 +6,10 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+function bridgeWorkspace(profile = 'default'): string {
+  return join(`/tmp/hermes-bridge-final-context/${profile}`, 'workspace')
+}
+
 const getSystemPromptMock = vi.fn()
 const getSessionMock = vi.fn()
 const createSessionMock = vi.fn()
@@ -122,6 +126,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/workspace-di
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
   getProfileDir: (profile: string) => `/tmp/hermes-bridge-final-context/${profile || 'default'}`,
   saveEnvValueForProfile: saveEnvValueForProfileMock,
+  readConfigYamlForProfile: vi.fn(async () => ({})),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/auth', () => ({
@@ -224,7 +229,7 @@ describe('bridge run final context usage', () => {
       profile: 'research',
       model: 'claude-opus-4-6',
       provider: 'anthropic',
-      workspace: '/tmp/hermes-bridge-final-context/research/workspace',
+      workspace: bridgeWorkspace('research'),
     })
     resolveBridgeRunModelConfigMock.mockResolvedValueOnce({
       model: 'claude-opus-4-6',
@@ -304,7 +309,7 @@ describe('bridge run final context usage', () => {
       profile: 'default',
       model: 'gpt-test',
       provider: 'openai',
-      workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+      workspace: bridgeWorkspace(),
       ended_at: 1_770_000_000,
       end_reason: 'complete',
     })
@@ -373,7 +378,7 @@ describe('bridge run final context usage', () => {
       profile: 'default',
       model: 'gpt-test',
       provider: 'openai',
-      workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+      workspace: bridgeWorkspace(),
     })
     const emit = vi.fn()
     const nsp = makeNamespace(emit)
@@ -460,6 +465,8 @@ describe('bridge run final context usage', () => {
         const context = String(message).match(/context_id="([^"]+)"/)![1]
         expect(context).toBe(contexts.at(-1))
         expect(message).toContain('ekko-studio-interaction')
+        expect(message).toContain('<studio_session_tasks_context>')
+        expect(message).toContain('ekko_studio_list_session_tasks')
         expect(options.storage_message).toBe('Show the task card')
         const result = await call(context)
         expect(result.isError).not.toBe(true)
@@ -491,6 +498,58 @@ describe('bridge run final context usage', () => {
       http.closeAllConnections()
       await new Promise<void>(resolve => http.close(() => resolve()))
     }
+  })
+
+  it.each([
+    ['completed', 'usage'], ['completed', 'context'],
+    ['failed', 'usage'], ['failed', 'context'],
+  ])('keeps a newer run intact when old %s finalization awaits %s', async (terminal, stage) => {
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    const emit = vi.fn()
+    const state = makeState()
+    const sessionMap = new Map([['session-1', state]])
+    let entered!: () => void
+    let release!: () => void
+    const waiting = new Promise<void>(resolve => { entered = resolve })
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    if (stage === 'usage') {
+      calcAndUpdateUsageMock.mockImplementationOnce(async () => {
+        entered()
+        await blocked
+        return { inputTokens: 11, outputTokens: 7 }
+      })
+    } else {
+      buildDbSnapshotAwareHistoryMock.mockImplementationOnce(async () => {
+        entered()
+        await blocked
+        return [{ role: 'assistant', content: 'old output' }]
+      })
+    }
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'old-run', status: 'started' }),
+      contextEstimate: vi.fn().mockResolvedValue({ fixed_context_tokens: 10 }),
+      streamOutput: vi.fn(async function* () {
+        if (terminal === 'failed') throw new Error('old failure')
+        yield { run_id: 'old-run', done: true, status: 'complete', output: 'old output' }
+      }),
+    } as any
+    const dequeue = vi.fn()
+    const oldRun = handleBridgeRun(makeNamespace(emit), makeSocket(),
+      { input: 'hello', session_id: 'session-1' }, 'default', sessionMap, bridge, false, vi.fn(), dequeue)
+    await waiting
+    Object.assign(state, {
+      isWorking: true, isAborting: false, runId: 'new-run', activeRunMarker: 'new-marker',
+      bridgeRunPollMarker: 'new-marker', contextTokens: 777, events: [{ event: 'run.started' }],
+    })
+    release()
+    await oldRun
+    expect(state).toMatchObject({
+      isWorking: true, runId: 'new-run', activeRunMarker: 'new-marker',
+      bridgeRunPollMarker: 'new-marker', contextTokens: 777, events: [{ event: 'run.started' }],
+    })
+    expect(emit.mock.calls.some(([event]) => event === 'run.completed' || event === 'run.failed')).toBe(false)
+    expect(completeWorkspaceRunCheckpointMock).not.toHaveBeenCalled()
+    expect(dequeue).not.toHaveBeenCalled()
   })
 
   it('refreshes full context tokens when a bridge run completes', async () => {
@@ -534,7 +593,7 @@ describe('bridge run final context usage', () => {
       {
         model: 'gpt-test',
         provider: 'openai',
-        workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+        workspace: bridgeWorkspace(),
       },
     )
     expect(bridge.chat).toHaveBeenCalledWith(
@@ -750,6 +809,7 @@ describe('bridge run final context usage', () => {
           events: [{
             event: 'model.usage',
             api_request_id: 'request-1',
+            api_duration: 2.5,
             turn_id: 'turn-1',
             api_call_count: 1,
             model: 'moa-aggregator',
@@ -790,6 +850,8 @@ describe('bridge run final context usage', () => {
     }))
     expect(updateUsageMock).toHaveBeenCalledWith('session-1', expect.objectContaining({
       runId: 'run-1:api:request-1',
+      parentRunId: 'run-1',
+      apiDuration: 2.5,
       source: 'hermes',
       usageScope: 'model_call',
       apiCalls: 1,
@@ -1054,7 +1116,7 @@ describe('bridge run final context usage', () => {
     expect(createSessionMock).toHaveBeenCalledWith(expect.objectContaining({
       id: 'session-1',
       source: 'global_agent',
-      workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+      workspace: bridgeWorkspace(),
     }))
     expect(state.source).toBe('global_agent')
   })
@@ -1777,7 +1839,7 @@ describe('bridge run final context usage', () => {
       'default',
       expect.objectContaining({
         storage_message: '/plan build the feature',
-        workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+        workspace: bridgeWorkspace(),
       }),
     )
   })
@@ -1902,7 +1964,7 @@ describe('bridge run final context usage', () => {
       'default',
       expect.objectContaining({
         storage_message: '[IMPORTANT: expanded skill prompt]',
-        workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+        workspace: bridgeWorkspace(),
       }),
     )
   })

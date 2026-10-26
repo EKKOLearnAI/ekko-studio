@@ -43,6 +43,30 @@ describe('task plan persistence', () => {
     expect(listTaskPlansForPage('s1', [{ run_marker: 'r1' }], true)).toHaveLength(2)
   })
 
+  it('round-trips independent ids alongside existing mcp context-based ids', async () => {
+    const { saveTaskPlan, listTaskPlansForPage } = await import('../../packages/server/src/modules/studio/repositories/task-plan-store')
+    const { TaskPlanRuns } = await import('../../packages/server/src/modules/studio/services/task-plan-runs')
+    const old = { ...snapshot('s1', 'old-turn'), plan_id: 'mcp:legacy-context' }
+    saveTaskPlan(old)
+    const runs = new TaskPlanRuns(saveTaskPlan, vi.fn())
+    const context = runs.begin('s1', 'research', () => ({ isWorking: true, runId: 'new-turn' }))
+    const first = runs.update(context, 'research', { plan: snapshot().plan })
+    runs.update(context, 'research', { plan: snapshot().plan })
+    const plans = listTaskPlansForPage('s1', [{ run_marker: 'old-turn' }, { run_marker: 'new-turn' }])
+    expect(plans).toHaveLength(2)
+    expect(plans.find(p => p.run_id === 'old-turn')).toEqual(old)
+    expect(plans.find(p => p.run_id === 'new-turn')).toMatchObject({ plan_id: first.plan_id, revision: 2 })
+    expect(first.plan_id).not.toContain(context)
+    const { mergeTaskPlanMessages } = await import('../../packages/client/src/utils/task-plan')
+    const cards = mergeTaskPlanMessages([], plans, 's1')
+    expect(cards).toHaveLength(2)
+    const initialCard = mergeTaskPlanMessages([], [first], 's1')
+    const updatedCard = mergeTaskPlanMessages(initialCard, [plans.find(p => p.run_id === 'new-turn')!], 's1')
+    expect(updatedCard).toHaveLength(1)
+    expect(updatedCard[0].id).toBe(initialCard[0].id)
+    expect(updatedCard[0].taskPlan?.revision).toBe(2)
+  })
+
   it('recovers orphaned runs on restart while preserving completed steps', async () => {
     const { saveTaskPlan, listTaskPlansForPage, interruptOrphanedTaskPlans } = await import('../../packages/server/src/modules/studio/repositories/task-plan-store')
     saveTaskPlan(snapshot())

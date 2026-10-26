@@ -7,6 +7,7 @@ import { saveEnvValueForProfile } from '../../studio/public/profile-config'
 import { logger } from '../../studio/public/logging'
 import { safeFileStore } from '../../studio/public/safe-file-store'
 import { EXCLUSIVE_PLATFORM_CREDENTIAL_KEYS } from '../services/profiles/profile-credentials'
+import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 
 const PLATFORM_SECTIONS = new Set([
   'telegram', 'discord', 'slack', 'whatsapp', 'matrix',
@@ -419,7 +420,7 @@ async function writeHermesGatewayManagement(mode: unknown): Promise<'per_profile
 
 async function gatewayAutoRestartAllowed(): Promise<boolean> {
   if (gatewayAutostartDisabledByEnv()) return false
-  return normalizeGatewayAutoStartConfig((await readAppConfig()).gatewayAutoStart).enabled !== false
+  return normalizeGatewayAutoStartConfig((await readAppConfig()).gatewayAutoStart).enabled === true
 }
 
 export async function getConfig(ctx: any) {
@@ -511,7 +512,7 @@ export async function updateConfig(ctx: any) {
         if (writtenManagement) gatewayAutoStart.management = writtenManagement
         else gatewayAutoStart.management = previousGatewayAutoStart.management
         const body: Record<string, any> = { success: true, gatewayAutoStart }
-        if ('management' in values && gatewayAutoStart.enabled !== false && !gatewayAutostartDisabledByEnv()) {
+        if ('management' in values && gatewayAutoStart.enabled === true && !gatewayAutostartDisabledByEnv()) {
           const gatewayManagement = await reconcileGatewayManagementTransition(previousGatewayAutoStart, gatewayAutoStart)
           if (gatewayManagement.changed) body.gatewayManagement = gatewayManagement
         }
@@ -530,6 +531,7 @@ export async function updateConfig(ctx: any) {
         forceQuotes: true,
       },
     })
+    if ((section === 'compression' && 'threshold' in values) || section === 'model') invalidateProviderRuntime(profile)
 
     // Platform adapters run through Hermes gateway; restart it so channel
     // config changes (Feishu/Weixin/etc.) are applied.

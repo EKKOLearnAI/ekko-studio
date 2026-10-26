@@ -126,10 +126,10 @@ const MAX_VISIBLE_TOOLS = 20
 @use '@/styles/variables' as *;
 
 .mcp-card {
-  background-color: $bg-card;
-  border: 1px solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   transition: border-color $transition-fast;
 
   &:hover {
@@ -153,12 +153,12 @@ const MAX_VISIBLE_TOOLS = 20
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-bottom: 12px;
 }
 
 .server-name {
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 600;
   color: $text-primary;
   overflow: hidden;
@@ -171,14 +171,14 @@ const MAX_VISIBLE_TOOLS = 20
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .type-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  padding: calc(2px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 10px);
   font-weight: 500;
   white-space: nowrap;
 
@@ -216,7 +216,7 @@ const MAX_VISIBLE_TOOLS = 20
 .card-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin-bottom: 14px;
 }
 
@@ -226,7 +226,7 @@ const MAX_VISIBLE_TOOLS = 20
 
 .error-text {
   color: $error;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -240,19 +240,19 @@ const MAX_VISIBLE_TOOLS = 20
 }
 
 .info-label {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .info-value {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
 }
 
 .tools-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: calc(4px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
   height: 88px;
   overflow-y: auto;
   align-content: flex-start;
@@ -262,10 +262,10 @@ const MAX_VISIBLE_TOOLS = 20
   display: inline-flex;
   align-items: center;
   min-height: 22px;
-  font-size: 10px;
-  font-family: $font-code;
-  padding: 2px 6px;
-  border-radius: 3px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+  font-family: var(--font-code, $font-code);
+  padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 3px);
   background: rgba(var(--accent-primary-rgb), 0.08);
   color: $text-secondary;
   white-space: nowrap;
@@ -294,20 +294,20 @@ const MAX_VISIBLE_TOOLS = 20
 
 .muted {
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .card-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid $border-light;
-  padding-top: 10px;
+  border-top: var(--border-width, 1px) solid $border-light;
+  padding-top: calc(10px * var(--spacing-scale, 1));
 }
 
 .card-actions {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 </style>

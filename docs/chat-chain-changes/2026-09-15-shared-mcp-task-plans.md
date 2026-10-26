@@ -7,7 +7,8 @@ impact: Hermes and coding agents can publish task progress into the existing Stu
 
 ## Tool and transport
 
-The dedicated managed `ekko-studio-plan` MCP server directly exposes
+The dedicated managed `ekko-studio-interaction` MCP server (formerly
+`ekko-studio-plan`, still using the `plan` toolset) directly exposes
 `ekko_studio_update_plan`. It is absent from the `use` catalog. Agents with deferred
 tools search for this server/tool and use its exact provider-prefixed name. The tool posts to `/api/studio/task-plans/update` using the
 existing profile authentication. No extra MCP server or database table is needed.
@@ -28,12 +29,18 @@ provides that context, an optional explanation, and the full ordered plan:
 ```
 
 Plans allow 1–30 steps, unique stable ids, and at most one `in_progress` step.
+Both the shared MCP and Ekko's native planning prompt/tool require user-visible
+`step` and `explanation` text in the user's current conversation language, unless
+the user explicitly requests another language. Language follows the user's
+messages rather than injected instructions or tool output. IDs, field names and
+status values retain their protocol form. This is model guidance; stored text is
+not translated or rejected by a language detector.
 The service resolves session and history run marker itself; supplied session,
 run, revision, and execution-state fields cannot redirect or finish a plan.
-Contexts expire at the end of a turn and reject other profiles. Coding runtime
+Contexts expire at the end of a turn and reject other profiles. A context remains valid for repeated updates within its turn. New shared plans have a separate opaque `plan_id`, stable for that turn and unrelated to its `context_id`; it is never a replacement authorization context. Existing stored plan IDs remain valid history identifiers. Coding runtime
 ids can span turns, so snapshots use the response stream's per-turn history
 marker instead. Ekko continues using its native `update_plan` tool. Its managed
-MCP definitions never register `ekko-studio-plan` and set `HERMES_MCP_NATIVE_TASK_PLAN=1`, which excludes shared planning
+MCP definitions never register `ekko-studio-interaction` and set `HERMES_MCP_NATIVE_TASK_PLAN=1`, which excludes shared planning
 from tool discovery, descriptions, and direct/catalog calls. Existing managed
 definitions receive this flag during configuration synchronization.
 

@@ -1,3 +1,4 @@
+import { prepareSessionShareRun } from '../services/session-shares/access'
 import type { Context } from 'koa'
 import { randomUUID } from 'crypto'
 import { io, type Socket } from 'socket.io-client'
@@ -203,7 +204,12 @@ function needsGeneratedSessionId(payload: Record<string, unknown>): boolean {
 }
 
 export async function runOnce(ctx: Context) {
-  const body = (ctx.request.body || {}) as ChatRunPayload
+  let body = (ctx.request.body || {}) as ChatRunPayload
+  if (ctx.state.sessionShare) {
+    const prepared = { ...body }
+    prepareSessionShareRun(ctx.state.sessionShare, prepared)
+    body = { ...prepared, timeout_ms: body.timeout_ms, include_events: body.include_events }
+  }
   if (body.input == null) {
     ctx.status = 400
     ctx.body = { ok: false, error: 'input is required' }
@@ -215,7 +221,7 @@ export async function runOnce(ctx: Context) {
   const token = bearerToken(ctx)
   const profile = profileFrom(ctx, body)
   const payload: Record<string, unknown> = { ...userBody(body), profile }
-  const isCodingAgentRun = body.source === 'coding_agent' || body.coding_agent_id != null || body.agent_id != null
+  const isCodingAgentRun = body.source === 'builtin_agent' || body.source === 'coding_agent' || body.coding_agent_id != null || body.agent_id != null
   if (isCodingAgentRun) {
     try {
       const identity = await resolveModelExecutionIdentity({
@@ -248,7 +254,9 @@ export async function runOnce(ctx: Context) {
     let settled = false
 
     const socket: Socket = io(`${chatRunBaseUrl()}/chat-run`, {
-      auth: token ? { token } : {},
+      auth: ctx.state.sessionShare
+        ? { token: ctx.state.sessionShare.token, appAccessToken: ctx.state.sessionShare.appAccessToken }
+        : token ? { token } : {},
       query: { profile },
       transports: ['websocket', 'polling'],
       reconnection: false,

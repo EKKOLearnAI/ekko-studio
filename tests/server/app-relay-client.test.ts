@@ -54,6 +54,20 @@ describe('AppRelayClient', () => {
     vi.clearAllMocks()
   })
 
+  it('requires the v3 capability before managing cloud Model API links', async () => {
+    const { startAppRelayClient } = await import('../../packages/server/src/modules/studio/services/app-relay/client')
+    const client = startAppRelayClient({ relayUrl: 'https://relay.example', machineId: 'hwui_machine_1234567890', publicKey: 'key', localBaseUrl: 'http://127.0.0.1:8648', fetchImpl: vi.fn() as any })!
+    const socket = sockets[0]
+    socket.connected = true
+    socket.__handlers.get('relay.ready')({ capabilities: ['model-api.cloud.v1', 'http.request'] })
+    expect(await client.requestModelApiLink(7, 'create')).toMatchObject({ available: false })
+    expect(socket.emit).not.toHaveBeenCalledWith('model-api.link', expect.anything(), expect.anything())
+    socket.__handlers.get('relay.ready')({ capabilities: ['model-api.cloud.v3', 'http.request'] })
+    socket.emit.mockImplementation((event: string, _request: unknown, ack: Function) => { if (event === 'model-api.link') ack(null, { ok: true, urls: null }) })
+    expect(await client.requestModelApiLink(7, 'create')).toMatchObject({ available: true })
+    expect(socket.emit).toHaveBeenCalledWith('model-api.link', { studioUserId: 7, action: 'create' }, expect.any(Function))
+  })
+
   it('connects with a signed machine identity independent of the MCU relay', async () => {
     const { startAppRelayClient } = await import('../../packages/server/src/modules/studio/services/app-relay/client')
     const publicKey = '-----BEGIN PUBLIC KEY-----\nmachine-public-key\n-----END PUBLIC KEY-----\n'
@@ -238,6 +252,8 @@ describe('AppRelayClient', () => {
         authorization: 'Bearer local-user-token',
         'content-type': 'application/json',
         'if-match': '"revision-1"',
+        'x-app-access-token': 'cloud-account-token',
+        'x-session-share-token': 'session-invitation-token',
         host: 'untrusted.example.com',
       },
       body: { title: 'App session' },
@@ -254,6 +270,8 @@ describe('AppRelayClient', () => {
     )
     const headers = fetchImpl.mock.calls[0][1]?.headers as Headers
     expect(headers.get('authorization')).toBe('Bearer local-user-token')
+    expect(headers.get('x-app-access-token')).toBe('cloud-account-token')
+    expect(headers.get('x-session-share-token')).toBe('session-invitation-token')
     expect(headers.get('if-match')).toBe('"revision-1"')
     expect(headers.has('host')).toBe(false)
 

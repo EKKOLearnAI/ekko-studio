@@ -1,25 +1,17 @@
 import dgram from 'dgram'
 import { networkInterfaces } from 'os'
-import type { LanDeviceInfo, LanEndpointKind, PublicSystemInfo } from '../../contracts/devices'
+import type { LanEndpointKind, PublicSystemInfo } from '../../contracts/devices'
 import { config } from '../../public/config'
 import { logger } from '../../public/logging'
-import { deviceIdFromPublicKey, getPublicSystemInfo } from '../../public/system-info'
+import { getPublicSystemInfo } from '../../public/system-info'
 
-export type { LanDeviceInfo, LanEndpointKind } from '../../contracts/devices'
+export type { LanEndpointKind } from '../../contracts/devices'
 
 const DISCOVERY_VERSION = 1
 export const HERMES_DISCOVERY_PORT = 48640
 const DISCOVERY_PORT_OFFSET = 40_000
-const DEFAULT_HTTP_PORTS = [8648, 8748]
-const DEFAULT_SCAN_TIMEOUT_MS = 1000
 
 type DiscoverySocket = dgram.Socket
-
-export type LanDiscoveryState = {
-  scanning: boolean
-  last_scanned_at: string | null
-  devices: LanDeviceInfo[]
-}
 
 type DiscoveryRequest = {
   type?: string
@@ -41,13 +33,6 @@ type StartResponderOptions = {
   getSystemInfo?: () => Promise<PublicSystemInfo>
 }
 
-type ScanOptions = {
-  timeoutMs?: number
-  httpPorts?: number[]
-  targetAddresses?: string[]
-  includeSelf?: boolean
-}
-
 export type LanIPv4Interface = {
   name: string
   address: string
@@ -55,12 +40,6 @@ export type LanIPv4Interface = {
 }
 
 let responderSockets: DiscoverySocket[] = []
-let cache: LanDiscoveryState = {
-  scanning: false,
-  last_scanned_at: null,
-  devices: [],
-}
-let scanInFlight: Promise<LanDiscoveryState> | null = null
 let localInfoCache: { value: PublicSystemInfo; expiresAt: number } | null = null
 
 function envFlagDisabled(name: string): boolean {
@@ -70,13 +49,6 @@ function envFlagDisabled(name: string): boolean {
 
 export function isLanDiscoveryEnabled(): boolean {
   return !envFlagDisabled('HERMES_LAN_DISCOVERY_ENABLED')
-}
-
-function parsePortList(value: string | undefined): number[] {
-  return String(value || '')
-    .split(/[\s,]+/)
-    .map(item => Number.parseInt(item, 10))
-    .filter(port => Number.isInteger(port) && port > 0 && port <= 65535)
 }
 
 export function discoveryPortForHttpPort(httpPort: number): number {
@@ -103,24 +75,10 @@ export function getLanEndpointKind(httpPort: number, currentPort = config.port):
   return 'custom'
 }
 
-export function getDiscoveryHttpPorts(currentPort = config.port): number[] {
-  const configured = parsePortList(process.env.HERMES_LAN_DISCOVERY_HTTP_PORTS)
-  return [...new Set([...(configured.length ? configured : DEFAULT_HTTP_PORTS), currentPort])]
-}
-
 function ipv4ToInt(ip: string): number | null {
   const parts = ip.split('.').map(part => Number.parseInt(part, 10))
   if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return null
   return (((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3]) >>> 0
-}
-
-function intToIpv4(value: number): string {
-  return [
-    (value >>> 24) & 255,
-    (value >>> 16) & 255,
-    (value >>> 8) & 255,
-    value & 255,
-  ].join('.')
 }
 
 export function isPrivateOrLoopbackIPv4(ip: string): boolean {
@@ -145,20 +103,6 @@ function getIpv4Interfaces(): LanIPv4Interface[] {
   } catch {
     return []
   }
-}
-
-function getLocalIPv4Addresses(): Set<string> {
-  return new Set([
-    '127.0.0.1',
-    ...getIpv4Interfaces().map(iface => iface.address),
-  ])
-}
-
-function broadcastAddress(address: string, netmask: string): string | null {
-  const ip = ipv4ToInt(address)
-  const mask = ipv4ToInt(netmask)
-  if (ip === null || mask === null) return null
-  return intToIpv4((ip | (~mask >>> 0)) >>> 0)
 }
 
 function isLikelyVirtualInterface(name: string): boolean {
@@ -269,15 +213,6 @@ function normalizeAdvertisedOrigin(value: string, rejectLoopback = false): strin
   }
 }
 
-export function getDiscoveryTargetAddresses(): string[] {
-  const targets = new Set<string>(['255.255.255.255'])
-  for (const iface of getIpv4Interfaces()) {
-    const broadcast = broadcastAddress(iface.address, iface.netmask)
-    if (broadcast) targets.add(broadcast)
-  }
-  return [...targets]
-}
-
 async function getCachedLocalInfo(getSystemInfo: () => Promise<PublicSystemInfo>): Promise<PublicSystemInfo> {
   const now = Date.now()
   if (localInfoCache && localInfoCache.expiresAt > now) return localInfoCache.value
@@ -364,122 +299,7 @@ export function stopLanDiscoveryResponder(): void {
   responderSockets = []
 }
 
-function normalizeDevice(data: any, sourceAddress: string, responseMs: number, seenAt: string): LanDeviceInfo | null {
-  if (!data || data.type !== 'hermes.announce' || data.version !== DISCOVERY_VERSION) return null
-  const httpPort = Number(data.http_port)
-  if (!Number.isInteger(httpPort) || httpPort <= 0 || httpPort > 65535) return null
-  const deviceId = typeof data.device_id === 'string' && data.device_id ? data.device_id : ''
-  const devicePublicKey = typeof data.device_public_key === 'string' ? data.device_public_key : ''
-  if (!deviceId || !devicePublicKey || deviceIdFromPublicKey(devicePublicKey) !== deviceId) return null
-  const endpointKind = data.endpoint_kind === 'web' || data.endpoint_kind === 'desktop' || data.endpoint_kind === 'custom'
-    ? data.endpoint_kind
-    : getLanEndpointKind(httpPort)
-  const url = `http://${sourceAddress}:${httpPort}`
-  return {
-    id: deviceId,
-    device_id: deviceId,
-    device_public_key: devicePublicKey,
-    ip: sourceAddress,
-    http_port: httpPort,
-    endpoint_kind: endpointKind,
-    url,
-    computer_name: String(data.computer_name || ''),
-    os: {
-      type: String(data.os?.type || ''),
-      platform: String(data.os?.platform || '') as NodeJS.Platform,
-      release: String(data.os?.release || ''),
-      arch: String(data.os?.arch || ''),
-    },
-    hermes_agent_version: String(data.hermes_agent_version || ''),
-    hermes_web_ui_version: String(data.hermes_web_ui_version || ''),
-    response_ms: responseMs,
-    last_seen_at: seenAt,
-  }
-}
-
-function isSelfDevice(device: LanDeviceInfo, localAddresses: Set<string>): boolean {
-  return localAddresses.has(device.ip)
-}
-
-export function getLanDiscoveryCache(): LanDiscoveryState {
-  return {
-    scanning: cache.scanning,
-    last_scanned_at: cache.last_scanned_at,
-    devices: [...cache.devices],
-  }
-}
-
-export async function scanLanDevices(options: ScanOptions = {}): Promise<LanDiscoveryState> {
-  if (!isLanDiscoveryEnabled()) return getLanDiscoveryCache()
-  if (scanInFlight) return scanInFlight
-
-  const timeoutMs = Math.max(100, Math.min(options.timeoutMs || DEFAULT_SCAN_TIMEOUT_MS, 5000))
-  const httpPorts = [...new Set(options.httpPorts || getDiscoveryHttpPorts())]
-  const targetAddresses = options.targetAddresses || getDiscoveryTargetAddresses()
-  const localAddresses = getLocalIPv4Addresses()
-  const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-
-  cache = { ...cache, scanning: true }
-  const startedAt = Date.now()
-
-  scanInFlight = new Promise<LanDiscoveryState>((resolve) => {
-    const socket = dgram.createSocket('udp4')
-    const found = new Map<string, LanDeviceInfo>()
-
-    socket.on('message', (message, rinfo) => {
-      if (!isPrivateOrLoopbackIPv4(rinfo.address)) return
-      const data = parseJson(message)
-      if (data?.request_id && data.request_id !== requestId) return
-      const device = normalizeDevice(data, rinfo.address, Date.now() - startedAt, new Date().toISOString())
-      if (device && !options.includeSelf && isSelfDevice(device, localAddresses)) return
-      if (device) found.set(device.id, device)
-    })
-
-    socket.on('error', err => {
-      logger.warn(err, '[lan-discovery] UDP scan error')
-    })
-
-    socket.bind(0, '0.0.0.0', () => {
-      socket.setBroadcast(true)
-      const packet = Buffer.from(JSON.stringify({
-        type: 'hermes.discover',
-        version: DISCOVERY_VERSION,
-        request_id: requestId,
-      }))
-      for (const discoveryPort of discoveryPortsForHttpPorts(httpPorts)) {
-        for (const target of targetAddresses) {
-          socket.send(packet, discoveryPort, target)
-        }
-      }
-    })
-
-    setTimeout(() => {
-      try {
-        socket.close()
-      } catch {
-        // Ignore close races.
-      }
-      cache = {
-        scanning: false,
-        last_scanned_at: new Date().toISOString(),
-        devices: [...found.values()].sort((a, b) => a.id.localeCompare(b.id)),
-      }
-      resolve(getLanDiscoveryCache())
-    }, timeoutMs)
-  }).finally(() => {
-    scanInFlight = null
-  })
-
-  return scanInFlight
-}
-
 export function resetLanDiscoveryState(): void {
-  cache = {
-    scanning: false,
-    last_scanned_at: null,
-    devices: [],
-  }
-  scanInFlight = null
   localInfoCache = null
   stopLanDiscoveryResponder()
 }

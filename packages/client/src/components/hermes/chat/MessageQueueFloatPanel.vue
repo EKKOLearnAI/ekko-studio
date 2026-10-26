@@ -100,9 +100,9 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
   pointer-events: auto;
   align-self: flex-end;
   width: min(380px, 100%);
-  padding: 10px;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.22);
-  border-radius: 16px;
+  padding: calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.22);
+  border-radius: var(--radius-component, 16px);
   background: #ffffff;
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.14);
   backdrop-filter: blur(14px);
@@ -115,10 +115,10 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
 .queue-float-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 4px 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(2px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
 
   strong {
@@ -138,7 +138,7 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.28);
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.28);
   position: relative;
   animation: queue-spin 1.6s linear infinite;
 
@@ -157,7 +157,7 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
 .queue-float-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   max-height: 172px;
   overflow-y: auto;
 }
@@ -165,10 +165,10 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
 .queue-float-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-height: 34px;
-  padding: 7px 8px;
-  border-radius: 11px;
+  padding: calc(7px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 11px);
   background: rgba(255, 255, 255, 0.68);
   color: $text-primary;
 
@@ -181,11 +181,11 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
-  border-radius: 7px;
+  border-radius: var(--radius-component, 7px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: var(--accent-info);
   background: rgba(var(--accent-info-rgb), 0.12);
 }
@@ -196,7 +196,7 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 600;
   color: $text-secondary;
 }
@@ -207,7 +207,7 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .queue-insert,
@@ -216,7 +216,7 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-component, 8px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -258,13 +258,13 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
 
 @media (max-width: 640px) {
   .queue-float-panel {
-    padding: 7px;
-    border-radius: 14px;
+    padding: calc(7px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 14px);
   }
 
   .queue-float-header {
-    padding: 0 2px;
-    font-size: 11px;
+    padding: 0 calc(2px * var(--spacing-scale, 1));
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
     span:nth-child(2) {
       display: none;
@@ -289,18 +289,18 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
 
   .queue-float-item {
     min-height: 30px;
-    padding: 5px 6px;
+    padding: calc(5px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
   }
 
   .queue-index {
     width: 18px;
     height: 18px;
-    border-radius: 6px;
-    font-size: 10px;
+    border-radius: var(--radius-component, 6px);
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   }
 
   .queue-text {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   }
 
   .queue-insert,

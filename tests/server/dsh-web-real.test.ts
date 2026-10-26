@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { stringify } from 'yaml'
+import { parseDocument, stringify } from 'yaml'
+import { dshReleaseFixture } from '../fixtures/dsh-release'
 import { ProbeRpc } from '../fixtures/dsh-m0/rpc'
 import { dshInstallation } from '../../packages/server/src/modules/coding-agents/services/dsh/installation'
 import { describe, expect, it } from 'vitest'
@@ -28,7 +29,7 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
       responseFinished = false
       const released = new Promise<void>(resolve => { releaseStream = resolve })
       const item = { id: `msg_${id}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'DSH 测试通过', annotations: [] }] }
-      const response = { id, object: 'response', status: 'completed', model: 'studio-test', output: [item], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } }
+      const response = { id, object: 'response', status: 'completed', model: 'studio-test', output: [item], usage: { input_tokens: 30, output_tokens: 5, total_tokens: 35, input_tokens_details: { cached_tokens: 20 } } }
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       for (const event of [
         { type: 'response.created', response: { ...response, status: 'in_progress', output: [] } },
@@ -55,13 +56,26 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
       const workspace = join(root, 'workspace')
       await mkdir(workspace)
       await mkdir(join(root, 'empty-home'))
+      const release = await dshReleaseFixture(process.env.DSH_WEB_COMMAND!)
+      if (release.registry && mode === 'global') {
+        const profile = join(root, 'empty-home/profiles/web')
+        await mkdir(profile, { recursive: true })
+        await writeFile(join(profile, 'cordis.patch.yml'), stringify([
+          { id: 'agent-default-model', config: { provider: 'native-web', model: 'studio-test' } },
+          { id: 'llm-pi-ai', config: { providers: { 'native-web': { apiKeyEnv: DSH_API_KEY_ENV, api: 'openai-responses', baseURL: `http://127.0.0.1:${port}/v1`,
+            models: [{ id: 'studio-test', input: ['text'], contextWindow: 128000, maxTokens: 8192, reasoningEfforts: { high: 'high' } }] } } } },
+        ]))
+      }
       await writeFile(join(root, 'empty-home', 'settings.yaml'), mode === 'global' ? stringify({
         'agent-default-model': { provider: 'native-web', model: 'studio-test' },
         'llm-pi-ai': { providers: { 'native-web': { apiKeyEnv: DSH_API_KEY_ENV, api: 'openai-responses', baseURL: `http://127.0.0.1:${port}/v1`,
           models: [{ id: 'studio-test', input: ['text'], contextWindow: 128000, maxTokens: 8192, reasoningEfforts: { high: 'high' } }] } } },
       }) : '{}\n')
       const prepared = await prepareDshRuntime({ sourceHome: join(root, 'empty-home'), sharedSkills: join(root, 'shared-skills'),
-        installationCommand: process.env.DSH_WEB_COMMAND!, rootDir: home, systemPrompt: 'Answer briefly.', managedMcp: {}, model: mode === 'scoped' ? 'studio-test' : undefined, reasoningEffort: 'high', baseUrl: `http://127.0.0.1:${port}/v1` })
+        installationCommand: process.env.DSH_WEB_COMMAND!, rootDir: home, systemPrompt: 'Answer briefly.', managedMcp: {}, model: mode === 'scoped' ? 'studio-test' : undefined, reasoningEffort: 'high', baseUrl: `http://127.0.0.1:${port}/v1`,
+        ...(mode === 'scoped' ? { contextWindow: 128000, outputLimit: 8192,
+          contextPolicy: { contextWindow: 128000, outputLimit: 8192, threshold: 0.35, triggerTokens: 44800 } } : {}),
+      })
       let nativeSessionId = ''
       for (let round = 0; round < 2; round++) {
         const child = spawn(process.env.DSH_WEB_COMMAND!, prepared.args, {
@@ -73,6 +87,7 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
         let stderr = ''
         child.stderr?.on('data', chunk => { stderr += chunk.toString() })
         const updates: any[] = []
+        const usage: any[] = []
         let firstChunkBeforeCompletion = false
         let sawFirstChunk!: () => void
         const firstChunk = new Promise<void>(resolve => { sawFirstChunk = resolve })
@@ -83,7 +98,7 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
             firstChunkBeforeCompletion = !responseFinished
             sawFirstChunk()
           }
-        }, session: id => { nativeSessionId = id }, config: () => {} })
+        }, usage: event => usage.push(event), session: id => { nativeSessionId = id }, config: () => {} })
         try {
           const prompted = turn.prompt({ cwd: workspace, nativeSessionId: previousId || undefined,
             modelValue: mode === 'scoped' ? JSON.stringify([DSH_MODEL_PROVIDER, 'studio-test']) : undefined, reasoningEffort: 'high', text: `Test round ${round}`, images: [] })
@@ -100,6 +115,9 @@ describe.skipIf(process.env.DSH_WEB_REAL !== '1')('installed DSH Web profile ove
           expect(await prompted).toBe('end_turn')
           expect(updates.filter(update => update.sessionUpdate === 'agent_message_chunk').map(update => update.content.text).join('')).toBe('DSH 测试通过')
           expect((await exited)[0], stderr).toBe(0)
+          expect(usage).toHaveLength(1)
+          expect(usage[0]).toMatchObject({ model: 'studio-test', provider: mode === 'global' ? 'native-web' : DSH_MODEL_PROVIDER,
+            usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 20 }, sessionId: nativeSessionId })
           if (round) expect(nativeSessionId).toBe(previousId)
         } catch (error) { throw new Error(`${String(error)}\nDSH stderr: ${stderr}`) }
         finally { turn.dispose() }
@@ -137,20 +155,28 @@ it.skipIf(process.env.DSH_WEB_REAL !== '1')('runs a Web-installed bundle and cus
   const restoredOutside = join(root, 'restored-outside.txt')
   const children: ChildProcess[] = []
   const requests: any[] = []
+  const childRequests: any[] = []
   const steps: any[] = [
     { name: 'web_probe' },
     { name: 'write', args: { file_path: outside, content: 'outside sandbox' } },
     { name: 'bash', args: { description: 'Write a file outside the workspace', command: `printf shell-access > '${shellOutside.replaceAll("'", "'\"'\"'")}'` } },
     { name: 'subagent', args: { description: 'check inherited Web preset', prompt: 'CHILD_WEB_PRESET_PROBE' } },
-    { name: 'custom_preset_probe' },
-    { text: 'Child verified' },
     { name: 'restrict_policy' },
     { text: 'Parent verified' },
   ]
+  const childSteps: any[] = [{ name: 'custom_preset_probe' }, { text: 'Child verified' }]
+  let lateChildReply = false
   const server = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk
-    requests.push(JSON.parse(body))
-    const step = steps.shift()
+    const request = JSON.parse(body)
+    requests.push(request)
+    // Newer delegation returns immediately, so parent/child model calls can
+    // interleave and a late child completion can wake the parent once more.
+    const isChild = request.input.some((item: any) => item.role === 'user' && Array.isArray(item.content)
+      && item.content.some((part: any) => part.type === 'input_text' && part.text.startsWith('CHILD_WEB_PRESET_PROBE')))
+    if (isChild) childRequests.push(request)
+    let step = (isChild ? childSteps : steps).shift()
+    if (!step && !isChild && !lateChildReply) { lateChildReply = true; step = { text: 'Parent verified' } }
     if (!step) { res.writeHead(500); res.end('Unexpected model request'); return }
     const id = `resp_${requests.length}`
     const item: any = step.name
@@ -191,8 +217,8 @@ it.skipIf(process.env.DSH_WEB_REAL !== '1')('runs a Web-installed bundle and cus
       }
     `)
     // The actual native standard preset supplies delegation and filesystem tools.
-    const standard = join(require.resolve('@deepseek-ai/dsh-agent-presets/package.json'), '..', 'presets/standard/agent.cordis.yml')
-    await writeFile(join(preset, 'agent.cordis.yml'), (await readFile(standard, 'utf8')).replaceAll('backgroundMode: continuable', 'backgroundMode: one-shot'))
+    const release = await dshReleaseFixture(command)
+    await writeFile(join(preset, 'agent.cordis.yml'), release.standard.replaceAll('backgroundMode: continuable', 'backgroundMode: one-shot'))
     await writeFile(join(preset, 'agent.cordis.yml'), await readFile(join(preset, 'agent.cordis.yml'), 'utf8') + '\n- id: custom-preset-probe\n  name: ./preset.mjs\n')
     await writeFile(join(preset, 'preset.mjs'), `
       import { defineTool } from ${JSON.stringify(pathToFileURL(require.resolve('@deepseek-ai/dsh-tools')).href)};
@@ -204,6 +230,15 @@ it.skipIf(process.env.DSH_WEB_REAL !== '1')('runs a Web-installed bundle and cus
       }
     `)
     await writeFile(join(preset, 'preset.yml'), 'name: Custom Web preset\n')
+    if (release.registry) {
+      const patch = parseDocument(await readFile(join(profile, 'cordis.patch.yml'), 'utf8'), { logLevel: 'silent' })
+      const plugins = parseDocument(await readFile(join(preset, 'agent.cordis.yml'), 'utf8'), { logLevel: 'silent' })
+      plugins.setIn([Number((plugins.contents as any).items.length) - 1, 'name'], pathToFileURL(join(preset, 'preset.mjs')).href)
+      const declaration = parseDocument('- insert:\n    - id: preset-custom\n      name: "@deepseek-ai/dsh-agent-preset"\n      config:\n        id: custom\n        name: Custom Web preset\n        plugins: []\n')
+      declaration.setIn([0, 'insert', 0, 'config', 'plugins'], plugins.contents)
+      patch.add(declaration.get(0, true))
+      await writeFile(join(profile, 'cordis.patch.yml'), String(patch))
+    }
     const settings = 'agent-presets:\n  default: standard\npermission:\n  defaultPreset: workspace-write\n'
     await writeFile(join(sourceHome, 'settings.yaml'), settings)
     server.listen(0, '127.0.0.1'); await once(server, 'listening')
@@ -222,15 +257,22 @@ it.skipIf(process.env.DSH_WEB_REAL !== '1')('runs a Web-installed bundle and cus
     const { sessionId } = await rpc.request('session/new', { cwd: workspace, mcpServers: [], _meta: { agentPreset: 'custom' } })
     expect(await rpc.request('session/prompt', { sessionId, prompt: [{ type: 'text', text: 'Check Web plugin and child.' }] }, 40_000), rpc.stderr).toMatchObject({ stopReason: 'end_turn' })
     expect(await readFile(outside, 'utf8')).toBe('outside sandbox')
-    expect(await readFile(shellOutside, 'utf8')).toBe('shell-access')
+    expect(await readFile(shellOutside, 'utf8').catch(() => JSON.stringify(requests[3].input))).toBe('shell-access')
     expect(JSON.stringify(requests[1].input)).toContain('WEB_PROFILE_OVERRIDE')
     expect(requests.every(request => request.model === 'studio-test')).toBe(true)
-    expect(requests[4].tools.map((tool: any) => tool.name)).toContain('custom_preset_probe')
+    expect(childRequests).toHaveLength(2)
+    expect(childRequests[0].tools.map((tool: any) => tool.name)).toContain('custom_preset_probe')
     expect(JSON.stringify(requests[0])).toContain('CUSTOM_WEB_PRESET_SKILL')
-    expect(JSON.stringify(requests[5].input)).toContain('CUSTOM_PRESET_CHILD_TOOL')
+    expect(JSON.stringify(childRequests[1].input)).toContain('CUSTOM_PRESET_CHILD_TOOL')
     expect(rpc.notifications.some(message => message.method === 'session/request_permission')).toBe(false)
-    expect(JSON.stringify(requests[4].input)).toContain('CHILD_WEB_PRESET_PROBE')
     expect(steps).toEqual([])
+    expect(childSteps).toEqual([])
+    // Verify prompt completion itself persisted the turn, before close can flush.
+    const logs = await readdir(join(home, 'sessions'), { recursive: true })
+    const log = logs.find(path => path.includes(sessionId) && path.endsWith('.jsonl'))!
+    const persisted = await readFile(join(home, 'sessions', log), 'utf8')
+    expect(persisted).toContain('Parent verified')
+    expect(persisted.split('\n')[0], rpc.stderr).toContain('custom')
     await rpc.request('session/close', { sessionId }); const exited = once(rpc.child, 'close'); rpc.child.stdin!.end(); await exited
     // Another chat in the same Web profile sees its own selected tool set.
     const minimal = await start()
@@ -244,11 +286,8 @@ it.skipIf(process.env.DSH_WEB_REAL !== '1')('runs a Web-installed bundle and cus
     await minimal.request('session/close', { sessionId: minimalSession.sessionId })
     const minimalExit = once(minimal.child, 'close'); minimal.child.stdin!.end(); await minimalExit
     // A changed Web default must not silently change a restored session's tools.
-    const logs = await readdir(join(home, 'sessions'), { recursive: true })
-    const log = logs.find(path => path.includes(sessionId) && path.endsWith('.jsonl'))!
-    const persisted = await readFile(join(home, 'sessions', log), 'utf8')
-    expect(persisted.split('\n')[0], rpc.stderr + '\nSETTINGS: ' + await readFile(join(home, 'settings.yaml'), 'utf8')).toContain('custom')
     await writeFile(join(sourceHome, 'settings.yaml'), settings.replace('default: standard', 'default: minimal'))
+    if (release.registry) await writeFile(join(profile, 'cordis.patch.yml'), await readFile(join(profile, 'cordis.patch.yml'), 'utf8') + '\n- id: agent-preset-registry\n  config:\n    default: standard\n    selectedDefault: minimal\n')
     steps.push({ name: 'write', args: { file_path: restoredOutside, content: 'restored full access' } }, { text: 'Restored' })
     const restored = await start()
     await restored.request('session/resume', { sessionId, cwd: workspace, mcpServers: [] })

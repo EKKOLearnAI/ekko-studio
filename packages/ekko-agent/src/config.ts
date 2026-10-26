@@ -6,6 +6,7 @@ import type {
   ModelRequestStyle,
   OpenAIChatReasoningReplayFormat,
 } from './model/types'
+import { DEFAULT_EKKO_JEV_CONFIG, type EkkoJevConfig } from './jev/config'
 import {
   BUILTIN_MODEL_PROVIDER_PRESETS,
   type EkkoModelApiMode,
@@ -13,7 +14,7 @@ import {
   type EkkoModelProviderPreset,
 } from './model/provider-presets'
 
-export const EKKO_CONFIG_SCHEMA_VERSION = 9
+export const EKKO_CONFIG_SCHEMA_VERSION = 15
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 export const EKKO_CONFIG_FILE_NAME = 'config.json'
 
@@ -119,11 +120,17 @@ export interface EkkoCodeExecConfig {
   maxSourceBytes: number
 }
 
+export interface EkkoComputerUseConfig {
+  enabled: boolean
+  timeoutMs: number
+}
+
 export interface EkkoToolsConfig {
   enabled: boolean
   executionTimeoutMs: number
   approvals: EkkoToolApprovalConfig
   codeExec: EkkoCodeExecConfig
+  computerUse: EkkoComputerUseConfig
 }
 
 export interface EkkoMcpServerConfig {
@@ -201,6 +208,7 @@ export interface EkkoConfig {
   delegation: EkkoDelegationConfig
   compression: EkkoCompressionConfig
   memory: EkkoMemoryConfig
+  jev: EkkoJevConfig
   skills: EkkoSkillsConfig
   logging: EkkoLoggingConfig
   prompt: EkkoPromptConfig
@@ -215,9 +223,10 @@ export type EkkoConfigPatch = {
     providers?: Record<string, EkkoModelProviderSettings>
     authorizations?: Record<string, EkkoModelAuthorizationSettings>
   }
-  tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec'>> & {
+  tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec' | 'computerUse'>> & {
     approvals?: Partial<EkkoToolApprovalConfig>
     codeExec?: Partial<EkkoCodeExecConfig>
+    computerUse?: Partial<EkkoComputerUseConfig>
   }
   mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & {
     profiles?: Record<string, EkkoMcpProfileConfig>
@@ -225,6 +234,7 @@ export type EkkoConfigPatch = {
   delegation?: Partial<EkkoDelegationConfig>
   compression?: Partial<EkkoCompressionConfig>
   memory?: Partial<EkkoMemoryConfig>
+  jev?: Partial<EkkoJevConfig>
   skills?: Partial<Omit<EkkoSkillsConfig, 'profiles'>> & {
     profiles?: Record<string, Partial<EkkoSkillsProfileConfig>>
   }
@@ -259,6 +269,7 @@ export const DEFAULT_EKKO_CONFIG: EkkoConfig = {
   tools: {
     enabled: true,
     executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS,
+    computerUse: { enabled: true, timeoutMs: 30_000 },
     approvals: {
       enabled: true,
       timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS,
@@ -300,6 +311,7 @@ export const DEFAULT_EKKO_CONFIG: EkkoConfig = {
     reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL,
     profiles: {},
   },
+  jev: { ...DEFAULT_EKKO_JEV_CONFIG },
   logging: {
     maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES,
   },

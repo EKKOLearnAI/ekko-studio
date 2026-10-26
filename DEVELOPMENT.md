@@ -46,6 +46,9 @@ npm run build
 - Add user-facing strings to all locale files.
 - Keep component styles scoped with SCSS unless the style is intentionally global.
 - Match existing Naive UI patterns and avoid adding a new UI library.
+- Follow `docs/harness/frontend-ui.md` for theme ownership, wallpaper transparency,
+  scoped exceptions and browser verification. `npm run harness:check` rejects new
+  unowned backgrounds, literal colors and local Naive UI fill overrides.
 
 ## Server Rules
 

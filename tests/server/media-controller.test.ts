@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const originalWebUiHome = process.env.HERMES_WEB_UI_HOME
@@ -21,17 +21,58 @@ afterEach(() => {
 })
 
 describe('media controller', () => {
+  it.each(['apiKeyImageGenerate', 'miniMaxImageToVideo', 'grokImageToVideo'] as const)(
+    '%s rejects non-super-admin output paths before contacting a provider',
+    async handler => {
+      vi.doMock('../../packages/server/src/modules/studio/public/profile-config', () => ({
+        getActiveProfileName: () => 'default',
+        getProfileDir: () => '/tmp/unused-media-profile',
+        listProfileNamesFromDisk: () => ['default'],
+      }))
+      const controller = await import('../../packages/server/src/modules/studio/controllers/media')
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected provider request'))
+      try {
+        for (const role of ['user', 'admin']) {
+          for (const output_path of ['/tmp/outside-profile.png', '../outside-profile.png']) {
+            const ctx: any = {
+              state: { user: { role, profiles: ['default'] } }, query: {},
+              request: { body: { output_path } }, get: () => '', status: 200,
+            }
+            await controller[handler](ctx)
+            expect(ctx.status).toBe(403)
+            expect(ctx.body.code).toBe('media_output_path_forbidden')
+          }
+        }
+        expect(fetchSpy).not.toHaveBeenCalled()
+      } finally {
+        fetchSpy.mockRestore()
+      }
+    },
+  )
+
   it('uses Hermes Web UI media directory as the default generated video output path', async () => {
     process.env.HERMES_WEB_UI_HOME = '/tmp/hermes-web-ui-test-home'
     const { defaultImageOutputPath, defaultMediaOutputPath } = await import('../../packages/server/src/modules/studio/controllers/media')
+    const home = resolve('/tmp/hermes-web-ui-test-home')
 
-    expect(defaultMediaOutputPath('req_123')).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'req_123.mp4'))
-    expect(defaultMediaOutputPath('bad/request:id')).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'bad_request_id.mp4'))
-    expect(defaultImageOutputPath('img_123')).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'img_123.png'))
-    expect(defaultImageOutputPath('bad/request:id', 1)).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'bad_request_id-2.png'))
+    expect(defaultMediaOutputPath('req_123')).toBe(join(home, 'media', 'req_123.mp4'))
+    expect(defaultMediaOutputPath('bad/request:id')).toBe(join(home, 'media', 'bad_request_id.mp4'))
+    expect(defaultImageOutputPath('img_123')).toBe(join(home, 'media', 'img_123.png'))
+    expect(defaultImageOutputPath('bad/request:id', 1)).toBe(join(home, 'media', 'bad_request_id-2.png'))
   })
 
-  it('generates images through the requested configured custom provider', async () => {
+  it.each([
+    ['', '/v1'],
+    ['/', '/v1'],
+    ['/v1', '/v1'],
+    ['/proxy/v1/', '/proxy/v1'],
+    ['/api/v3/', '/api/v3'],
+    ['/api/paas/v4', '/api/paas/v4'],
+    ['/v1beta/openai', '/v1beta/openai'],
+    ['/proxy', '/proxy/v1'],
+    ['/proxy/', '/proxy/v1'],
+    ['/proxy/v3/images', '/proxy/v3/images/v1'],
+  ])('generates images with provider base path "%s" using API root "%s"', async (basePath, apiRoot) => {
     vi.stubEnv('AGNES_API_KEY', 'agnes-secret')
     vi.doMock('../../packages/server/src/modules/studio/public/profile-config', () => ({
       getActiveProfileName: () => 'default',
@@ -42,7 +83,7 @@ describe('media controller', () => {
       readConfigYamlForProfile: vi.fn(async () => ({
         custom_providers: [{
           name: 'agnes',
-          base_url: 'https://agnes.example/v1',
+          base_url: `https://agnes.example${basePath}`,
           api_key_env: 'AGNES_API_KEY',
           model: 'agnes-image-2.1-flash',
         }],
@@ -79,11 +120,11 @@ describe('media controller', () => {
         ok: true,
         mode: 'text',
         provider: 'agnes',
-        base_url: 'https://agnes.example/v1',
+        base_url: `https://agnes.example${basePath}`,
         profile: 'default',
       })
       expect(fetchMock).toHaveBeenCalledWith(
-        'https://agnes.example/v1/images/generations',
+        `https://agnes.example${apiRoot}/images/generations`,
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
@@ -113,7 +154,7 @@ describe('media controller', () => {
       readConfigYamlForProfile: vi.fn(async () => ({
         custom_providers: [{
           name: 'Studio Images',
-          base_url: 'https://images.example/v1',
+          base_url: 'https://images.example/api/v3',
           api_key_env: 'STUDIO_IMG_KEY',
         }],
         auxiliary: {
@@ -145,7 +186,7 @@ describe('media controller', () => {
 
       expect(ctx.status).toBe(200)
       expect(ctx.body).toMatchObject({ ok: true, provider: 'Studio Images' })
-      expect(String(fetchMock.mock.calls[0][0])).toBe('https://images.example/v1/images/generations')
+      expect(String(fetchMock.mock.calls[0][0])).toBe('https://images.example/api/v3/images/generations')
       expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)))
         .toMatchObject({ model: 'seedream-4' })
       expect(timeoutSpy).toHaveBeenCalledWith(42_000)
@@ -155,7 +196,10 @@ describe('media controller', () => {
     }
   })
 
-  it('routes Studio image-to-image and multipart edits through their configured tasks', async () => {
+  it.each([
+    ['/api/v3', '/api/paas/v4', '/api/v3', '/api/paas/v4'],
+    ['/proxy/', '/proxy/', '/proxy/v1', '/proxy/v1'],
+  ])('routes image-to-image and multipart edits through bases "%s" and "%s"', async (generationBase, editBase, generationRoot, editRoot) => {
     vi.stubEnv('GENERATION_IMG_KEY', 'generation-secret')
     vi.stubEnv('EDIT_IMG_KEY', 'edit-secret')
     vi.doMock('../../packages/server/src/modules/studio/public/profile-config', () => ({
@@ -168,12 +212,12 @@ describe('media controller', () => {
         custom_providers: [
           {
             name: 'Generation Images',
-            base_url: 'https://generation.example/v1',
+            base_url: `https://generation.example${generationBase}`,
             api_key_env: 'GENERATION_IMG_KEY',
           },
           {
             name: 'Edit Images',
-            base_url: 'https://edit.example/v1',
+            base_url: `https://edit.example${editBase}`,
             api_key_env: 'EDIT_IMG_KEY',
           },
         ],
@@ -221,7 +265,7 @@ describe('media controller', () => {
 
       expect(ctx.status).toBe(200)
       expect(ctx.body).toMatchObject({ ok: true, provider: 'Edit Images', mode: 'image' })
-      expect(String(fetchMock.mock.calls[0][0])).toBe('https://edit.example/v1/responses')
+      expect(String(fetchMock.mock.calls[0][0])).toBe(`https://edit.example${editRoot}/responses`)
       expect(fetchMock.mock.calls[0][1]).toMatchObject({
         headers: expect.objectContaining({ Authorization: 'Bearer edit-secret' }),
       })
@@ -252,7 +296,7 @@ describe('media controller', () => {
 
       expect(editCtx.status).toBe(200)
       expect(editCtx.body).toMatchObject({ ok: true, provider: 'Generation Images', mode: 'edit' })
-      expect(String(fetchMock.mock.calls[1][0])).toBe('https://generation.example/v1/images/edits')
+      expect(String(fetchMock.mock.calls[1][0])).toBe(`https://generation.example${generationRoot}/images/edits`)
       expect(fetchMock.mock.calls[1][1]).toMatchObject({
         headers: expect.objectContaining({ Authorization: 'Bearer generation-secret' }),
       })

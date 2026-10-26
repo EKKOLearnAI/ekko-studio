@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { materializeShellExecutable } from './helpers/windows-shell-executable'
 
 const originalHermesHome = process.env.HERMES_HOME
 const originalHermesAgentRoot = process.env.HERMES_AGENT_ROOT
@@ -26,7 +27,7 @@ async function configureFakeApprovalRuntime(lines: string[]) {
   await writeFile(fakePython, [...lines, ''].join('\n'), 'utf-8')
   await chmod(fakePython, 0o755)
   process.env.HERMES_AGENT_ROOT = agentRoot
-  process.env.HERMES_AGENT_CLI_PYTHON = fakePython
+  process.env.HERMES_AGENT_CLI_PYTHON = materializeShellExecutable(fakePython)
 }
 
 beforeEach(async () => {
@@ -142,7 +143,7 @@ describe('write gate service', () => {
       '',
     ].join('\n'), 'utf-8')
     await chmod(fakePython, 0o755)
-    process.env.HERMES_AGENT_CLI_PYTHON = fakePython
+    process.env.HERMES_AGENT_CLI_PYTHON = materializeShellExecutable(fakePython)
     process.env.HERMES_BIN = join(hermesHome, 'missing-hermes')
     delete process.env.HERMES_AGENT_ROOT
 

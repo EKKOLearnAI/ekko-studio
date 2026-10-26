@@ -1,9 +1,18 @@
 # Agent Bridge
 
-Optional backend-side bridge for talking to Hermes Agent by instantiating
+Backend-side bridge for talking to Hermes Agent by instantiating
 `run_agent.AIAgent` directly in a Python process.
 
-This is intentionally separate from the current Web UI chat path.
+Hermes chat, context estimation, and MCP management use this bridge. Plugin
+management uses a separate short-lived Python probe with the same interpreter
+resolver.
+
+Workers bind their profile home and environment before importing Hermes or its
+bootstrap. Bootstrap must finish before any socket reports ready, since Hermes
+upgrades can replace the interpreter and dependency environment. Configuration
+reads prefer Hermes' YAML adapter, with PyYAML support for older installations.
+Shutdown sends directly to the existing worker socket: the normal request path
+can start a worker and must not be used while stopping one.
 
 ## Python Service
 
@@ -154,3 +163,33 @@ platform identity:
 ```bash
 HERMES_AGENT_BRIDGE_PLATFORM=agent-bridge python packages/server/src/modules/hermes/services/bridge/python/hermes_bridge.py
 ```
+
+### Completed run usage
+
+The bridge `model.usage` hook supplies per-request token buckets and `api_duration`
+in seconds. Studio records each request once under its request identity, and also
+stores the parent run identity. At completion, `run_usage` contains that run's
+input (including cache reads/writes), output, cache-read tokens, cache hit rate, USD cost and
+weighted speed: total output tokens divided by total model request seconds.
+Model time includes first-token latency and excludes tools and user interaction.
+Coding Agent proxies time provider requests, including the first-token wait.
+Native CLI API durations are used when available. If any request duration is
+missing, Coding Agents estimate output tokens / (foreground turn time − tool
+execution time), persisting `run_duration_seconds` and `tool_duration_seconds`.
+The tool time is the union of complete native execution intervals; parallel and
+nested tools are counted once. Claude argument generation is excluded from tool
+time, and OpenCode uses the native tool timestamps. The UI labels this
+`speedSource: 'estimated'`: startup, network and other overhead still remain.
+Missing tool boundaries retain the whole-run average (`speedSource: 'run'`)
+instead of guessing a duration. A nonpositive remaining duration yields `null`.
+The turn timer resets on each send, even when the CLI process is reused, and
+freezes at completion. Unknown token counts or missing
+timing still yield `null`; partially missing prices also remain `null`.
+Each completed run is stored once in `run_usage`, keyed by `(session_id, run_id)`,
+with its exact assistant message ID and completion/update timestamps. History and
+resume read this table directly. Late usage or catalog prices update the stored
+summary. Cache hit rate is total cache-read tokens / total input tokens for the
+run (a fraction in [0, 1]); zero or unknown total input yields `null`. Cache writes
+count toward input, never toward hits. No legacy-table migration is needed.
+The UI displays this non-expandable card above the turn's file changes, after
+completion only. The thinking indicator carries no token speed.

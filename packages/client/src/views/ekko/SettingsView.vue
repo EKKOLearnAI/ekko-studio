@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
@@ -9,7 +11,6 @@ import {
   NInput,
   NInputNumber,
   NSelect,
-  NSpin,
   NSwitch,
   NTabPane,
   NTabs,
@@ -17,6 +18,7 @@ import {
 } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import SettingRow from '@/components/hermes/settings/SettingRow.vue'
+import ComputerUsePermissions from '@/components/ekko/ComputerUsePermissions.vue'
 import {
   fetchEkkoSettings,
   saveEkkoSettings,
@@ -29,7 +31,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
-const loading = ref(false)
+const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const activeTab = ref<SettingsTab>('runtime')
@@ -143,16 +145,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="ekko-settings-view">
+  <PageLoading :show="loading" class="ekko-settings-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('settings.title') }}</h2>
     </header>
+    </PageHeader>
 
     <div class="ekko-settings-content">
       <NAlert v-if="error" type="error" closable class="settings-error" @close="error = ''">
         {{ error }}
       </NAlert>
-      <NSpin :show="loading || saving" size="large" :description="t('common.loading')">
+      <div>
         <NTabs v-if="form" v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
           <NTabPane name="runtime" :tab="t('ekkoConfig.settingsRuntime')">
             <section class="settings-section">
@@ -238,6 +242,13 @@ onBeforeUnmount(() => {
               <SettingRow :label="t('ekkoConfig.permanentAllow')" :hint="t('ekkoConfig.allowlistHint')">
                 <NDynamicTags v-model:value="form.tools.approvals.permanentAllow" class="input-lg" @update:value="saveImmediateChange" />
               </SettingRow>
+              <SettingRow :label="t('ekkoConfig.computerUseEnabled')" :hint="t('ekkoConfig.computerUseHint')">
+                <NSwitch v-model:value="form.tools.computerUse.enabled" data-testid="computer-use-enabled" @update:value="saveImmediateChange" />
+              </SettingRow>
+              <ComputerUsePermissions v-if="activeTab === 'tools' && form.tools.enabled && form.tools.computerUse.enabled" />
+              <SettingRow :label="t('ekkoConfig.computerUseTimeoutMs')" :hint="t('ekkoConfig.timeoutHint')">
+                <NInputNumber v-model:value="form.tools.computerUse.timeoutMs" data-testid="computer-use-timeout" :min="1" :step="1000" size="small" class="input-sm" @update:value="value => value != null && saveDebouncedChange()" />
+              </SettingRow>
               <SettingRow :label="t('ekkoConfig.codeExecEnabled')" :hint="t('ekkoConfig.featureToggleHint')">
                 <NSwitch v-model:value="form.tools.codeExec.enabled" @update:value="saveImmediateChange" />
               </SettingRow>
@@ -308,16 +319,16 @@ onBeforeUnmount(() => {
             </section>
           </NTabPane>
         </NTabs>
-      </NSpin>
+      </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .ekko-settings-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -325,7 +336,7 @@ onBeforeUnmount(() => {
 .ekko-settings-content {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
 }
 
 .settings-error {

@@ -38,6 +38,24 @@ describe('workflow schedules', () => {
     expect(listWorkflowScheduleEvents(schedule.id).map(event => event.kind)).toEqual(['triggered'])
   })
 
+  it('passes the schedule owner as the run account without credential fields', async () => {
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflow } = await import('../../packages/server/src/modules/studio/repositories/workflow-store')
+    const { createWorkflowSchedule } = await import('../../packages/server/src/modules/studio/repositories/workflow-schedule-store')
+    const { createUser } = await import('../../packages/server/src/modules/studio/repositories/users-store')
+    const { WorkflowScheduleService } = await import('../../packages/server/src/modules/studio/services/workflow/schedule')
+    initAllStores()
+    const owner = createUser({ username: 'schedule-notification-owner', password: 'pw', profiles: ['default'] })!
+    const workflow = createWorkflow({ id: 'owned-schedule-workflow', name: 'Owned', nodes: [], edges: [] })
+    const now = Date.UTC(2026, 7, 8, 12, 0, 0)
+    createWorkflowSchedule({ workflow_id: workflow.id, profile: 'default', owner_user_id: owner.id, schedule: '* * * * *', timezone: 'UTC', next_run_at: now })
+    const runNow = vi.fn().mockResolvedValue({ run: { id: 'owned-run' } })
+    const service = new WorkflowScheduleService({ getWorkflow: () => workflow, runNow, validate: async () => {} })
+    await service.tick(now)
+    const input = runNow.mock.calls.find(call => call[0] === workflow.id)![1]
+    expect(input.user).toEqual({ id: owner.id, username: owner.username, role: owner.role })
+  })
+
   it('skips missed intervals and active workflows with durable audit evidence', async () => {
     const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const { createWorkflow } = await import('../../packages/server/src/modules/studio/repositories/workflow-store')

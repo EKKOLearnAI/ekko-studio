@@ -1,11 +1,6 @@
 import { openCodeSessionHeaders } from './opencode-session'
 import { openRouterAttributionHeaders } from './openrouter-attribution'
 import { logger } from './logging'
-import { OPENCODE_FREE_BASE_URL, isOpenCodeFreeModel } from '../contracts/opencode-free'
-
-export async function fetchOpenCodeFreeModels(): Promise<string[]> {
-  return (await fetchProviderModels(OPENCODE_FREE_BASE_URL, '')).filter(isOpenCodeFreeModel)
-}
 
 export async function fetchProviderModels(baseUrl: string, apiKey: string, freeOnly = false): Promise<string[]> {
   const base = baseUrl.replace(/\/+$/, '')

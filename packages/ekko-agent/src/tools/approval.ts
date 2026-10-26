@@ -7,6 +7,7 @@ import {
 } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { DEFAULT_TOOL_APPROVAL_TIMEOUT_MS } from '../config'
+import { computerUseApproval } from './computer-use/policy'
 import type {
   AgentToolApprovalChoice,
   AgentToolApprovalRequest,
@@ -264,6 +265,7 @@ export function toolApprovalRequirement(
   toolName: string,
   input: Record<string, unknown>,
 ): ToolApprovalRequirement | undefined {
+  if (toolName === 'computer_use') return computerUseApproval(input)
   if (toolName === 'ekko_repair_database' && input.strategy === 'rebuild') {
     return {
       key: 'ekko:database-rebuild',
@@ -368,7 +370,7 @@ function splitCommandLine(command: string): string[] {
     if (escaped) {
       current += character
       escaped = false
-    } else if (character === '\\') {
+    } else if (character === '\\' && process.platform !== 'win32') {
       escaped = true
     } else if (quote) {
       if (character === quote) quote = undefined

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pythonBuildEnvironment, pythonDependencyBuildArgs } from './python-build-env.mjs'
 // Install the checked-out Hermes Agent source into python/venv and prepare its
 // bundled browser and frontend assets. The Git checkout remains clean and is
 // retained so the upstream `hermes update` command can update it in place.
@@ -17,6 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { platform as osPlatform, arch as osArch, homedir as osHomedir, tmpdir } from 'node:os'
 import { hermesSource } from './runtime-config.mjs'
+import { hermesInstalledVersionScript } from './hermes-version.mjs'
 import { venvPythonPath } from './python-runtime-layout.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -110,12 +112,7 @@ function optionalRunInvocation(invocation, args, options = {}) {
 }
 
 function pythonBuildEnv() {
-  if (TARGET_OS !== 'darwin') return process.env
-
-  const env = { ...process.env }
-  if (!env.AR && existsSync('/usr/bin/ar')) env.AR = '/usr/bin/ar'
-  if (!env.RANLIB && existsSync('/usr/bin/ranlib')) env.RANLIB = '/usr/bin/ranlib'
-  return env
+  return pythonBuildEnvironment(process.env, TARGET_OS, TARGET_ARCH)
 }
 
 function installHermesPythonRuntime() {
@@ -154,6 +151,7 @@ function installHermesPythonRuntime() {
       '--require-hashes',
       '--no-deps',
       '--requirement', requirementsPath,
+      ...pythonDependencyBuildArgs(TARGET_OS, TARGET_ARCH),
     ], { cwd: PY_DIR, env })
 
     console.log('→ Installing Hermes source as a relocatable editable project')
@@ -541,15 +539,36 @@ buildHermesFrontends()
 run(pyBin, [
   '-c',
   [
-    'import importlib.metadata as metadata',
     'import importlib.util',
     'import mcp',
     'import tools.mcp_tool as t',
-    `assert metadata.version("hermes-agent") == ${JSON.stringify(HERMES_VERSION)}`,
     'assert t._MCP_AVAILABLE',
     'assert importlib.util.find_spec("websockets") is not None',
   ].join('; '),
 ])
+run(pyBin, ['-c', [
+  hermesInstalledVersionScript,
+  `assert version == ${JSON.stringify(HERMES_VERSION)}, version`,
+].join('\n')])
+
+if (TARGET_OS === 'win32' && TARGET_ARCH === 'arm64') {
+  run(pyBin, ['-c', [
+    'import platform',
+    'from winpty import PtyProcess',
+    'assert platform.machine().lower() in ("arm64", "aarch64"), platform.machine()',
+    'child = PtyProcess.spawn("cmd.exe /c echo ARM64_PTY_OK")',
+    'output = ""',
+    'try:',
+    '    while "ARM64_PTY_OK" not in output:',
+    '        output += child.read(4096)',
+    'except EOFError:',
+    '    pass',
+    'finally:',
+    '    child.close(force=True)',
+    'assert "ARM64_PTY_OK" in output, output',
+    'print("Native ARM64 Python and ConPTY smoke test passed")',
+  ].join('\n')], { timeout: 30_000 })
+}
 
 const hermesBin = TARGET_OS === 'win32'
   ? resolve(VENV_DIR, 'Scripts', 'hermes.cmd')

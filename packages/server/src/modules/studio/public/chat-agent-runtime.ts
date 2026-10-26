@@ -18,6 +18,7 @@ export type ChatModelRequest = any
 export type ChatModelResponse = any
 
 export interface ChatAgentRuntimeDependencies {
+  projectBrowserHistory?<T extends { role: string; content: unknown; name?: string | null; tool_name?: string | null }>(messages: T[], options?: { truncateOtherTools?: (content: string) => string }): T[]
   createPrimaryAgentBridge(options?: Record<string, unknown>): PrimaryAgentBridgeClient
   getPrimaryAgentBridgeManager(): any
   redactPrimaryAgentBridgeError(error: string | undefined, endpoint?: string, replacement?: string): string | undefined
@@ -37,6 +38,7 @@ export interface ChatAgentRuntimeDependencies {
   serializeEkkoAgentReasoningDetails(...args: any[]): any
   waitForEkkoToolApproval(...args: any[]): Promise<any>
   waitForEkkoClarification(...args: any[]): Promise<any>
+  getCodingAgentMcpServers(id: string, profile: string): Record<string, unknown>
   resolveEkkoMcpServers(...args: any[]): any
   resolveEkkoProviderRuntimeConfig(...args: any[]): Promise<any>
   createEkkoAuthorizedProviderFetch(...args: any[]): any
@@ -45,6 +47,11 @@ export interface ChatAgentRuntimeDependencies {
 }
 
 let dependencies: ChatAgentRuntimeDependencies | null = null
+
+export function projectChatBrowserHistory<T extends { role: string; content: unknown; name?: string | null; tool_name?: string | null }>(messages: T[], options?: { truncateOtherTools?: (content: string) => string }): T[] {
+  return dependencies?.projectBrowserHistory?.(messages, options) ?? messages.map(message => message.role === 'tool' && typeof message.content === 'string' && options?.truncateOtherTools
+    ? { ...message, content: options.truncateOtherTools(message.content) } : message)
+}
 
 export function configureChatAgentRuntime(next: ChatAgentRuntimeDependencies): void {
   dependencies = next
@@ -97,3 +104,5 @@ export const resolveChatEkkoProviderRuntimeConfig = (...args: any[]) => configur
 export const createChatEkkoAuthorizedProviderFetch = (...args: any[]) => configured().createEkkoAuthorizedProviderFetch(...args)
 export const respondToChatEkkoToolApproval = (...args: any[]) => configured().respondToEkkoToolApproval(...args)
 export const respondToChatEkkoClarification = (...args: any[]) => configured().respondToEkkoClarification(...args)
+
+export const getChatCodingAgentMcpServers = (id: string, profile: string) => configured().getCodingAgentMcpServers(id, profile)

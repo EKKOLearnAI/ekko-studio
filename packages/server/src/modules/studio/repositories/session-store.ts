@@ -3,10 +3,15 @@
  * Uses the same ensureTable/getDb pattern as usage-store.ts.
  */
 import { isSqliteAvailable, getDb } from '../infrastructure/database'
-import { TASK_PLANS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE, SESSION_CATEGORIES_TABLE } from '../infrastructure/database/schemas'
+import { TASK_PLANS_TABLE, SESSION_TASKS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE, SESSION_CATEGORIES_TABLE } from '../infrastructure/database/schemas'
 import { normalizeMessageContentForStorageRole } from './message-content'
 import { copyCompressionSnapshot } from './compression-snapshot'
 import { recordSkillUsageMessage } from './skill-usage-store'
+import { getRecordedSessionTokensBatch } from './usage-store'
+import { SESSION_PREVIEW_SQL, sessionDisplayTitle } from './session-display'
+import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
+import { BUILTIN_EKKO_AGENT_IDS, BUILTIN_HISTORY_SOURCES, isBuiltinEkkoAgent, normalizeSessionIdentity } from '../contracts/history-source'
+import { studioSessionAccount } from '../contracts/runs/usage'
 
 // Re-export types for compatibility with sessions-db.ts consumers
 export interface HermesSessionRow {
@@ -19,6 +24,7 @@ export interface HermesSessionRow {
   agent_session_id: string
   agent_native_session_id: string
   user_id: string | null
+  studio_user_id?: string | null
   model: string
   provider: string
   api_mode: string
@@ -48,6 +54,7 @@ export interface HermesSessionRow {
   workspace: string | null
   category_id: number | null
   history_revision: number
+  history_cleared_at?: number
   parent_title?: string | null
   parent_last_message?: string | null
   parent_last_message_role?: string | null
@@ -87,6 +94,7 @@ export interface SessionListOptions {
   profiles?: string[]
   includeArchived?: boolean
   excludeSessionIds?: string[]
+  historySource?: string
 }
 
 export type SessionSearchOptions = SessionListOptions
@@ -114,9 +122,25 @@ function parseToolCalls(value: unknown): any[] | null {
 }
 
 function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
+  return mapSessionRows([row])[0]
+}
+
+function mapSessionRows(rows: Record<string, unknown>[]): HermesSessionRow[] {
+  // Native Coding Agents' ledger owns token accounting. Stored counters can remain
+  // zero; using them would erase live usage on the next session-list poll.
+  const builtinIds = rows.filter(row => isBuiltinEkkoAgent(String(row.agent || '')) || row.source === 'builtin_agent').map(row => String(row.id))
+  const nativeIds = rows.filter(row => !isBuiltinEkkoAgent(String(row.agent || '')) && (row.source === 'coding_agent'
+    || (isAgentRuntime(row.agent) && agentFamilyForRuntime(row.agent) === 'coding')
+    || row.agent === 'claude' || row.agent === 'claude_code')).map(row => String(row.id))
+  const usage = nativeIds.length ? getRecordedSessionTokensBatch(nativeIds, 'coding_agent') : {}
+  Object.assign(usage, builtinIds.length ? getRecordedSessionTokensBatch(builtinIds, 'ekko_agent') : {})
+  return rows.map(row => mapStoredSessionRow({ ...row, ...usage[String(row.id)] }))
+}
+
+function mapStoredSessionRow(row: Record<string, unknown>): HermesSessionRow {
   const rawTitle = row.title != null ? String(row.title) : null
   const preview = String(row.preview || '')
-  const title = rawTitle || (preview ? (preview.length > 40 ? preview.slice(0, 40) + '...' : preview) : null)
+  const title = sessionDisplayTitle(rawTitle, preview)
   return {
     id: String(row.id || ''),
     profile: String(row.profile || 'default'),
@@ -127,6 +151,7 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     agent_session_id: String(row.agent_session_id || ''),
     agent_native_session_id: String(row.agent_native_session_id || ''),
     user_id: row.user_id != null ? String(row.user_id) : null,
+    studio_user_id: row.studio_user_id != null ? String(row.studio_user_id) : null,
     model: String(row.model || ''),
     provider: String(row.provider || ''),
     api_mode: String(row.api_mode || ''),
@@ -156,6 +181,7 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     workspace: row.workspace != null ? String(row.workspace) : null,
     category_id: row.category_id != null ? Number(row.category_id) : null,
     history_revision: Number(row.history_revision || 0),
+    history_cleared_at: Number(row.history_cleared_at || 0),
     parent_title: row.parent_title != null ? String(row.parent_title) : null,
     parent_last_message: row.parent_last_message != null ? String(row.parent_last_message) : null,
     parent_last_message_role: row.parent_last_message_role != null ? String(row.parent_last_message_role) : null,
@@ -196,6 +222,7 @@ export function createSession(data: {
   agent_session_id?: string
   agent_native_session_id?: string
   user_id?: string | number | null
+  studio_user_id?: string | number | null
   model?: string
   provider?: string
   api_mode?: string
@@ -207,14 +234,18 @@ export function createSession(data: {
   push_enabled?: boolean | number
 }): HermesSessionRow {
   const now = Math.floor(Date.now() / 1000)
-  const source = data.source || 'api_server'
-  const agent = data.agent || (source === 'cli' ? 'hermes' : '')
+  const { source, agent } = normalizeSessionIdentity({
+    source: data.source || 'api_server',
+    agent: data.agent || (data.source === 'builtin_agent' ? 'ekko-agent' : data.source === 'cli' ? 'hermes' : ''),
+  })
+  const studioUserId = studioSessionAccount({ ...data, source }) ?? null
   if (!isSqliteAvailable()) {
     return {
       id: data.id, profile: data.profile || 'default', source, agent,
       agent_mode: data.agent_mode || '',
       agent_preset: data.agent_preset || '',
       agent_session_id: data.agent_session_id || '', agent_native_session_id: data.agent_native_session_id || '',
+      studio_user_id: studioUserId,
       user_id: data.user_id == null ? null : String(data.user_id), model: data.model || '', provider: data.provider || '', api_mode: data.api_mode || '', reasoning_effort: data.reasoning_effort || '', title: data.title || null,
       parent_session_id: data.parent_session_id || null,
       fork_point_message_id: null,
@@ -222,15 +253,15 @@ export function createSession(data: {
       message_count: 0, tool_call_count: 0,
       input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0,
       billing_provider: null, estimated_cost_usd: 0, actual_cost_usd: null,
-      cost_status: '', preview: '', last_active: now, is_archived: 0, is_pinned: 0, push_enabled: data.push_enabled ? 1 : 0, workspace: data.workspace || null,
+      cost_status: '', preview: '', last_active: now, is_archived: 0, is_pinned: 0, push_enabled: data.push_enabled === false || data.push_enabled === 0 ? 0 : 1, workspace: data.workspace || null,
       category_id: data.category_id ?? null,
       history_revision: 0,
     }
   }
   const db = getDb()!
   db.prepare(
-    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_preset, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, push_enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_preset, agent_session_id, agent_native_session_id, user_id, studio_user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, push_enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     data.id,
     data.profile || 'default',
@@ -241,6 +272,7 @@ export function createSession(data: {
     data.agent_session_id || '',
     data.agent_native_session_id || '',
     data.user_id == null ? null : String(data.user_id),
+    studioUserId,
     data.model || '',
     data.provider || '',
     data.api_mode || '',
@@ -251,7 +283,7 @@ export function createSession(data: {
     now,
     data.workspace || null,
     data.category_id ?? null,
-    data.push_enabled ? 1 : 0,
+    data.push_enabled === false || data.push_enabled === 0 ? 0 : 1,
   )
   return getSession(data.id)!
 }
@@ -295,8 +327,10 @@ export function createBranchedSession(data: {
 }): HermesSessionRow | null {
   if (!isSqliteAvailable()) return null
   const db = getDb()!
-  const source = data.source || 'api_server'
-  const agent = data.agent || (source === 'cli' ? 'hermes' : '')
+  const { source, agent } = normalizeSessionIdentity({
+    source: data.source || 'api_server',
+    agent: data.agent || (data.source === 'builtin_agent' ? 'ekko-agent' : data.source === 'cli' ? 'hermes' : ''),
+  })
   const insertMessage = db.prepare(
     `INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, display_role, display_content, tool_call_id, tool_calls, tool_name, run_marker, timestamp, token_count, finish_reason, reasoning, reasoning_details, reasoning_content)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -438,6 +472,13 @@ export function getSessionMetadata(id: string): HermesSessionRow | null {
 export function updateSession(id: string, data: Partial<Omit<HermesSessionRow, 'id' | 'profile'>>): void {
   if (!isSqliteAvailable()) return
   const db = getDb()!
+  if (data.source !== undefined || data.agent !== undefined) {
+    const stored = db.prepare(`SELECT source, agent FROM ${SESSIONS_TABLE} WHERE id = ?`).get(id) as { source: string; agent: string } | undefined
+    if (stored) {
+      const identity = normalizeSessionIdentity({ source: data.source ?? stored.source, agent: data.agent ?? stored.agent })
+      data = { ...data, ...identity }
+    }
+  }
   const fields: string[] = []
   const values: any[] = []
   for (const [key, val] of Object.entries(data)) {
@@ -470,6 +511,7 @@ export function deleteSession(id: string): boolean {
   db.exec('BEGIN')
   try {
     db.prepare(`DELETE FROM ${TASK_PLANS_TABLE} WHERE session_id = ?`).run(id)
+    db.prepare(`DELETE FROM ${SESSION_TASKS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
     const result = db.prepare(`DELETE FROM ${SESSIONS_TABLE} WHERE id = ?`).run(id)
@@ -488,14 +530,18 @@ export function clearSessionMessages(id: string): number {
   try {
     const result = db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${TASK_PLANS_TABLE} WHERE session_id = ?`).run(id)
+    db.prepare(`DELETE FROM ${SESSION_TASKS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(
       `UPDATE ${SESSIONS_TABLE}
        SET history_revision = history_revision + 1,
+           task_summary_revision = task_summary_revision + 1,
+           task_summary_updated_at = 0,
+           history_cleared_at = ?,
            message_count = 0,
            last_active = started_at
        WHERE id = ?`,
-    ).run(id)
+    ).run(Date.now(), id)
     db.exec('COMMIT')
     return Number(result.changes)
   } catch (error) {
@@ -547,17 +593,7 @@ export function listSessions(
   const sql = `
     SELECT
       s.*,
-      COALESCE(
-        NULLIF(s.preview, ''),
-        (
-          SELECT SUBSTR(REPLACE(REPLACE(m.content, CHAR(10), ' '), CHAR(13), ' '), 1, 63)
-          FROM ${MESSAGES_TABLE} m
-          WHERE m.session_id = s.id AND m.role = 'user' AND m.content IS NOT NULL
-          ORDER BY m.timestamp, m.id
-          LIMIT 1
-        ),
-        ''
-      ) AS preview,
+      ${SESSION_PREVIEW_SQL} AS preview,
       p.title AS parent_title,
       (
         SELECT REPLACE(REPLACE(m.content, CHAR(10), ' '), CHAR(13), ' ')
@@ -582,13 +618,13 @@ export function listSessions(
     FROM ${SESSIONS_TABLE} s
     LEFT JOIN ${SESSIONS_TABLE} p ON p.id = s.parent_session_id
     WHERE ${filters.sql}
-    ORDER BY s.is_pinned DESC, s.last_active DESC, s.id DESC
+    ORDER BY ${options.historySource ? '' : 's.is_pinned DESC, '}s.last_active DESC, s.id DESC
     LIMIT ? OFFSET ?
   `
 
   const offset = Number.isSafeInteger(options.offset) && options.offset! > 0 ? options.offset! : 0
   const rows = db.prepare(sql).all(...filters.params, limit, offset) as Record<string, unknown>[]
-  return rows.map(mapSessionRow)
+  return mapSessionRows(rows)
 }
 
 export function countSessions(
@@ -655,6 +691,17 @@ function sessionFilterSql(
     clauses.push(`s.source IN (${sources.map(() => '?').join(', ')})`)
     params.push(...sources)
   }
+  if (options.historySource) {
+    // Apply the family filter before LIMIT/OFFSET, including historical aliases.
+    const builtin = `s.source IN (${BUILTIN_HISTORY_SOURCES.map(() => '?').join(', ')}) AND LOWER(TRIM(COALESCE(s.agent, ''))) IN (${BUILTIN_EKKO_AGENT_IDS.map(() => '?').join(', ')})`
+    if (options.historySource === 'builtin_agent') {
+      clauses.push(`(${builtin})`)
+    } else {
+      clauses.push(`s.source = ? AND NOT (${builtin})`)
+      params.push(options.historySource)
+    }
+    params.push(...BUILTIN_HISTORY_SOURCES, ...BUILTIN_EKKO_AGENT_IDS)
+  }
   if (options.includeArchived === false) {
     clauses.push('COALESCE(s.is_archived, 0) = 0')
   }
@@ -717,8 +764,7 @@ export function searchSessions(
        ORDER BY s.last_active DESC
        LIMIT ?`,
     ).all(...filters.params, limit) as Record<string, unknown>[]
-    return rows.map(row => {
-      const session = mapSessionRow(row)
+    return mapSessionRows(rows).map(session => {
       return { ...session, snippet: session.preview || '', matched_message_id: null, rank: 0 }
     })
   }
@@ -780,8 +826,9 @@ export function searchSessions(
      LIMIT 1`,
   )
 
-  return sessionRows.map(row => {
-    const session = mapSessionRow(row)
+  const sessions = mapSessionRows(sessionRows)
+  return sessionRows.map((row, index) => {
+    const session = sessions[index]
     let snippet = ''
     let matched_message_id: number | null = null
     const title = row.title != null ? String(row.title) : ''

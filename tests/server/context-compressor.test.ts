@@ -196,6 +196,17 @@ describe('ChatContextCompressor', () => {
     expect(bridgeRequestMock).toHaveBeenCalledTimes(1)
   })
 
+  it.each([false, true])('reports manual summarizer failure without replacing the snapshot (incremental=%s)', async incremental => {
+    const { ChatContextCompressor } = await import('../../packages/server/src/modules/studio/services/context-compressor')
+    getCompressionSnapshotMock.mockReturnValue(incremental ? { summary: 'old summary', lastMessageIndex: 0, messageCountAtTime: 1 } : null)
+    const compressor = new ChatContextCompressor({ config: { tailMessageCount: 10 } })
+    await expect(compressor.compress([
+      { role: 'user', content: 'old' }, { role: 'assistant', content: 'answer' }, { role: 'user', content: 'new' },
+    ], '', undefined, 'session-1', { profile: 'default', model: 'summary-model', provider: 'openrouter', force: true, allowHermesFallback: false })).rejects.toThrow('ekko summarizer failed')
+    expect(saveCompressionSnapshotMock).not.toHaveBeenCalled()
+    expect(bridgeRequestMock).not.toHaveBeenCalled()
+  })
+
   it('does not fall back to Hermes when the caller disables it', async () => {
     const { callSummarizer } = await import('../../packages/server/src/modules/studio/services/context-compressor')
     ekkoRuntimeRunMock.mockRejectedValueOnce(new Error('provider unavailable'))
@@ -861,6 +872,26 @@ describe('countTokens', () => {
     // never throws — so the guard must short-circuit to the heuristic instead
     // of calling encode(). 30k chars would be ~90k bytes => ~8.1B ops unguarded.
     const poison = '一'.repeat(30000)
+    const start = performance.now()
+    const tokens = countTokens(poison)
+    const elapsedMs = performance.now() - start
+    expect(tokens).toBeGreaterThan(0)
+    expect(elapsedMs).toBeLessThan(250)
+  })
+
+  it.each([
+    ['punctuation', '!'],
+    ['digits', '7'],
+    ['symbols', '*'],
+    ['whitespace', ' '],
+  ])('does not hang on a long contiguous %s run (quadratic BPE guard)', async (_label, ch) => {
+    const { countTokens } = await import('../../packages/server/src/modules/studio/services/context-compressor')
+    // pat_str merges contiguous digits, symbols, and whitespace into single
+    // pieces too, so non-letter runs are equally pathological. A real 64 KB
+    // run of '!' in a stored reasoning field cost ~188 s per encode() and
+    // wedged the server event loop; the guard must route it to the O(n)
+    // heuristic. 30k chars is safely past the 2000-run bound.
+    const poison = ch.repeat(30000)
     const start = performance.now()
     const tokens = countTokens(poison)
     const elapsedMs = performance.now() - start

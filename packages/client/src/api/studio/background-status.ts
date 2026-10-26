@@ -1,3 +1,4 @@
+import { socketEndpoint } from '@/utils/deployment-url'
 import { io } from 'socket.io-client'
 import { getApiKey, getBaseUrlValue } from '../client'
 import type { ChatRunTransport, ResumeSessionPayload, RunEvent } from './chat'
@@ -17,7 +18,8 @@ export function observeBackgroundStatus(
 ): () => void {
   let closed = false
   const namespace = transport === 'global-agent' ? '/global-agent' : '/chat-run'
-  const socket = io(`${getBaseUrlValue()}${namespace}`, {
+  const socket = io(socketEndpoint(getBaseUrlValue(), namespace).url, {
+    path: socketEndpoint(getBaseUrlValue(), namespace).path,
     auth: { token: getApiKey() },
     query: { profile },
     transports: ['websocket', 'polling'],

@@ -12,6 +12,11 @@ const mockCaptureViewportPosition = vi.hoisted(() => vi.fn())
 const mockRestoreViewportPosition = vi.hoisted(() => vi.fn())
 const mockIsNearBottom = vi.hoisted(() => vi.fn(() => true))
 
+vi.mock('naive-ui', async importOriginal => ({
+  ...await importOriginal<typeof import('naive-ui')>(),
+  useMessage: () => ({ error: vi.fn(), success: vi.fn() }),
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,
@@ -94,6 +99,8 @@ vi.mock('@/components/hermes/group-chat/GroupMessageItem.vue', () => ({
 import GroupMessageList from '@/components/hermes/group-chat/GroupMessageList.vue'
 import { useGroupChatStore } from '@/stores/hermes/group-chat'
 import { getRoomDetail } from '@/api/studio/group-chat'
+import { AGENT_OPTIONS } from '@/utils/agent-options'
+import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 
 function makeMessage(id: string): ChatMessage {
   return {
@@ -134,16 +141,10 @@ describe('GroupMessageList scroll behavior', () => {
     const wrapper = mount(GroupMessageList)
     const avatars = wrapper.findAll('.empty-agent-avatar img')
 
-    expect(avatars.map(avatar => avatar.attributes('alt'))).toEqual([
-      'Hermes',
-      'Ekko',
-      'Codex',
-      'Claude',
-      'Pi',
-      'Grok',
-      'OpenCode',
-      'DeepSeek Harness',
-    ])
+    expect(avatars.map(avatar => avatar.attributes('alt'))).toEqual(AGENT_OPTIONS.map(option => option.label))
+    expect(avatars.map(avatar => avatar.attributes('src'))).toEqual(
+      AGENT_OPTIONS.map(option => chatSessionAgentAvatar({ agent: option.value }).src),
+    )
     expect(wrapper.get('.empty-state p').text()).toBe('groupChat.emptyState')
     expect(wrapper.text()).not.toContain('chat.emptyState')
   })
@@ -287,6 +288,9 @@ describe('GroupMessageList scroll behavior', () => {
     await nextTick()
 
     expect(getRoomDetail).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.history-loader-spinner').exists()).toBe(true)
+    expect(wrapper.find('.studio-loading-logo').exists()).toBe(false)
+    expect(wrapper.get('.stub-group-message').text()).toBe(makeMessage('message-151').content)
     expect(getRoomDetail).toHaveBeenCalledWith('room-1', {
       before: 'message-151',
       limit: 150,
@@ -306,5 +310,6 @@ describe('GroupMessageList scroll behavior', () => {
     })
 
     expect(store.messages.map(message => message.id)).toEqual(['message-150', 'message-151'])
+    expect(wrapper.find('.history-loader-spinner').exists()).toBe(false)
   })
 })

@@ -1,3 +1,4 @@
+import { deploymentUrl } from '@/utils/deployment-url'
 import { request } from '../client'
 import type { UserThemeSettings } from './theme'
 
@@ -7,7 +8,7 @@ export interface AuthStatus {
 }
 
 export async function fetchAuthStatus(): Promise<AuthStatus> {
-  const res = await fetch('/api/auth/status')
+  const res = await fetch(deploymentUrl('/api/auth/status'))
   if (!res.ok) throw new Error('Failed to fetch auth status')
   return res.json()
 }
@@ -19,7 +20,7 @@ export interface LoginResponse {
 }
 
 export async function loginWithPassword(username: string, password: string): Promise<LoginResponse> {
-  const res = await fetch('/api/auth/login', {
+  const res = await fetch(deploymentUrl('/api/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),

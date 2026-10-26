@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NTag, NSpin, useMessage, useDialog } from 'naive-ui'
+import { NSpin, NButton, NTag, useMessage, useDialog } from 'naive-ui'
 import type { HermesProfile, HermesProfileDetail } from '@/api/hermes/profiles'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useI18n } from 'vue-i18n'
@@ -201,10 +201,10 @@ function handleEditConfig() {
 @use '@/styles/variables' as *;
 
 .profile-card {
-  background-color: $bg-card;
-  border: 1px solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   transition: border-color $transition-fast;
 
   &:hover {
@@ -220,19 +220,19 @@ function handleEditConfig() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   margin-bottom: 12px;
 }
 
 .profile-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .profile-name {
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 600;
   color: $text-primary;
   overflow: hidden;
@@ -245,18 +245,18 @@ function handleEditConfig() {
 .card-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   margin-bottom: 8px;
 }
 
 .card-detail-toggle {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 0;
+  gap: calc(4px * var(--spacing-scale, 1));
+  padding: calc(6px * var(--spacing-scale, 1)) 0;
   cursor: pointer;
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   user-select: none;
 
   &:hover {
@@ -273,8 +273,8 @@ function handleEditConfig() {
 }
 
 .card-detail {
-  padding: 8px 0;
-  border-top: 1px solid $border-light;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
+  border-top: var(--border-width, 1px) solid $border-light;
   margin-bottom: 8px;
 }
 
@@ -282,18 +282,18 @@ function handleEditConfig() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 2px 0;
+  padding: calc(2px * var(--spacing-scale, 1)) 0;
 }
 
 .info-label {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   flex-shrink: 0;
   margin-inline-end: 12px;
 }
 
 .info-value {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
   text-align: end;
   overflow: hidden;
@@ -302,8 +302,8 @@ function handleEditConfig() {
 }
 
 .mono {
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .detail-path {
@@ -312,9 +312,9 @@ function handleEditConfig() {
 
 .card-actions {
   display: flex;
-  gap: 8px;
-  border-top: 1px solid $border-light;
-  padding-top: 10px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
+  padding-top: calc(10px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 </style>

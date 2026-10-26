@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { basename, extname, join, relative, resolve, sep } from 'path'
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { logger } from '../../public/logging'
 import { saveWorkspaceRunChange, type SaveWorkspaceRunChangeInput, type WorkspaceRunChangeSummary } from '../../repositories/workspace-run-changes-store'
 
@@ -170,6 +170,7 @@ interface WorkspaceRunCheckpoint {
   startedAt: number
   files: Map<string, SnapshotFile>
   truncated: boolean
+  sharedDuringRun?: boolean
 }
 
 interface WorkspacePathScan {
@@ -192,6 +193,17 @@ interface SnapshotComparison {
 
 const checkpoints = new Map<string, WorkspaceRunCheckpoint>()
 
+function registerCheckpoint(key: string, checkpoint: WorkspaceRunCheckpoint): void {
+  for (const other of checkpoints.values()) {
+    if (other.sessionId !== checkpoint.sessionId
+      && (isPathInside(other.root, checkpoint.root) || isPathInside(checkpoint.root, other.root))) {
+      other.sharedDuringRun = true
+      checkpoint.sharedDuringRun = true
+    }
+  }
+  checkpoints.set(key, checkpoint)
+}
+
 function createRunChangeId(runId: string): string {
   return `run:${runId || 'unknown'}:${Date.now().toString(36)}:${randomUUID()}`
 }
@@ -206,7 +218,7 @@ function nowSeconds(): number {
 
 function isPathInside(parent: string, candidate: string): boolean {
   const rel = relative(parent, candidate)
-  return rel === '' || (!!rel && !rel.startsWith('..') && rel !== '..' && !rel.split(sep).includes('..'))
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
 }
 
 function runGit(cwd: string, args: string[], maxBuffer = 1024 * 1024): string {
@@ -584,7 +596,7 @@ export function startWorkspaceRunCheckpoint(args: {
     for (const relPath of status.paths) {
       files.set(relPath, snapshotPath(gitRoot, relPath))
     }
-    checkpoints.set(key, {
+    registerCheckpoint(key, {
       sessionId: args.sessionId,
       runId,
       changeId,
@@ -602,7 +614,7 @@ export function startWorkspaceRunCheckpoint(args: {
   if (!filesystemRoot) return
   const scan = scanFilesystemPaths(filesystemRoot)
   const snapshot = snapshotPaths(filesystemRoot, scan.paths, MAX_TOTAL_SNAPSHOT_BYTES)
-  checkpoints.set(key, {
+  registerCheckpoint(key, {
     sessionId: args.sessionId,
     runId,
     changeId,
@@ -637,6 +649,10 @@ export function completeWorkspaceRunCheckpointDraft(args: {
   const checkpoint = checkpoints.get(key)
   checkpoints.delete(key)
   if (!checkpoint) return null
+  // A directory snapshot contains no writer identity. Even the first run to
+  // finish can see another session's edits. Do not present an ambiguous shared
+  // workspace diff as this session's changes (or provide its undo controls).
+  if (checkpoint.sharedDuringRun) return null
 
   const status = checkpoint.kind === 'git'
     ? getGitStatusPaths(checkpoint.root)

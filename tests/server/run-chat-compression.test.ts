@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resolveCatalogModel } from '../../packages/server/src/modules/studio/services/models/model-metadata'
 
 const getSessionDetailMock = vi.fn()
 const getSessionMock = vi.fn()
 const getSessionContextMessagesMock = vi.fn()
 const getSessionContextMessageMock = vi.fn()
 const getCompressionSnapshotMock = vi.fn()
+const getUsageMock = vi.fn()
 const getModelContextLengthMock = vi.fn()
 const calcAndUpdateUsageMock = vi.fn()
 const estimateUsageTokensFromMessagesMock = vi.fn()
@@ -32,6 +34,10 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
 
 vi.mock('../../packages/server/src/modules/studio/repositories/compression-snapshot', () => ({
   getCompressionSnapshot: getCompressionSnapshotMock,
+}))
+
+vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () => ({
+  getUsage: getUsageMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/context-compressor', () => ({
@@ -84,6 +90,7 @@ describe('run chat compression trigger', () => {
     getSessionContextMessagesMock.mockReset()
     getSessionContextMessageMock.mockReset()
     getCompressionSnapshotMock.mockReset()
+    getUsageMock.mockReset()
     getModelContextLengthMock.mockReset()
     calcAndUpdateUsageMock.mockReset()
     estimateUsageTokensFromMessagesMock.mockReset()
@@ -109,6 +116,66 @@ describe('run chat compression trigger', () => {
     estimateUsageTokensFromMessagesMock.mockReturnValue({ inputTokens: 0, outputTokens: 0 })
     getCompressionSnapshotMock.mockReturnValue(null)
     readConfigYamlForProfileMock.mockResolvedValue({})
+  })
+
+  it('manual Ekko compression includes the latest turn and preserves configured token budgets', async () => {
+    getSessionDetailMock.mockReturnValue({ messages: [
+      { id: 1, role: 'user', content: 'latest question' },
+      { id: 2, role: 'assistant', content: 'latest answer' },
+    ] })
+    compressorCompressMock.mockResolvedValue({ messages: [{ role: 'user', content: 'summary' }], meta: {
+      totalMessages: 2, compressed: true, llmCompressed: true, summaryTokenEstimate: 1, verbatimCount: 0, compressedStartIndex: 1,
+    } })
+    const { forceCompressBridgeHistory } = await import('../../packages/server/src/modules/studio/services/chat-run/compression')
+    await forceCompressBridgeHistory('session-1', 'default', [], undefined, {
+      model: 'ekko-model', provider: 'openai', apiMode: 'responses', force: true, excludeLastUser: false, allowHermesFallback: false,
+    })
+    expect(compressorCompressMock).toHaveBeenCalledWith([
+      expect.objectContaining({ role: 'user', content: 'latest question' }),
+      expect.objectContaining({ role: 'assistant', content: 'latest answer' }),
+    ], '', undefined, 'session-1', expect.objectContaining({ model: 'ekko-model', provider: 'openai', apiMode: 'responses', force: true, allowHermesFallback: false }))
+    expect(compressorConstructorMock.mock.calls[0][0].config.triggerTokens).toBeGreaterThan(0)
+  })
+
+  const endpointCatalog = {
+    maker: { api: 'https://maker.test/v1', models: { shared: { canonical_model_id: 'maker/shared', limit: { context: 100_000 } } } },
+    relay: { api: 'https://relay.test/v1', models: { shared: { canonical_model_id: 'maker/shared', limit: { context: 500_000 } } } },
+  }
+  function useEndpointCatalog() {
+    getModelContextLengthMock.mockImplementation(input => resolveCatalogModel(endpointCatalog, input)?.model.limit?.context || 256_000)
+  }
+
+  it.each([
+    ['unknown', 'https://relay.test/v1', false],
+    ['maker', 'https://relay.test/v1', true],
+    ['unknown', '', true],
+  ])('uses the resolved window for automatic compression while retaining provider and URL-less fallbacks (%s, %s)', async (provider, upstream, shouldCompress) => {
+    useEndpointCatalog()
+    getSessionDetailMock.mockReturnValue({ messages: Array.from({ length: 10 }, (_, index) => ({
+      id: index + 1, role: index % 2 === 0 ? 'user' : 'assistant', content: `message ${index}`,
+    })) })
+    calcAndUpdateUsageMock.mockResolvedValue({ inputTokens: 70_000, outputTokens: 0 })
+    compressorCompressMock.mockResolvedValue({ messages: [{ role: 'user', content: 'summary' }], meta: {
+      totalMessages: 10, compressed: true, llmCompressed: true, summaryTokenEstimate: 1, verbatimCount: 0, compressedStartIndex: 0,
+    } })
+    const { buildCompressedHistory } = await import('../../packages/server/src/modules/studio/services/chat-run/compression')
+    const history = await buildCompressedHistory('session-1', 'default', upstream, undefined, vi.fn(), new Map(), { provider, model: 'shared' })
+    expect(compressorCompressMock.mock.calls.length > 0).toBe(shouldCompress)
+    expect(history).toHaveLength(shouldCompress ? 1 : 8)
+  })
+
+  it('uses the endpoint window for manual compression and preserves threshold, summary ratio and protected messages', async () => {
+    useEndpointCatalog()
+    getSessionDetailMock.mockReturnValue({ messages: [
+      { id: 1, role: 'user', content: 'question' }, { id: 2, role: 'assistant', content: 'answer' },
+    ] })
+    readConfigYamlForProfileMock.mockResolvedValue({ compression: { threshold: 0.25, target_ratio: 0.1, protect_first_n: 2, protect_last_n: 7 } })
+    compressorCompressMock.mockResolvedValue({ messages: [{ role: 'user', content: 'summary' }], meta: {
+      totalMessages: 2, compressed: true, llmCompressed: true, summaryTokenEstimate: 1, verbatimCount: 0, compressedStartIndex: 0,
+    } })
+    const { forceCompressBridgeHistory } = await import('../../packages/server/src/modules/studio/services/chat-run/compression')
+    await forceCompressBridgeHistory('session-1', 'default', [], undefined, { provider: 'unknown', model: 'shared', upstream: 'https://relay.test/v1', force: true, excludeLastUser: false, allowHermesFallback: false })
+    expect(compressorConstructorMock.mock.calls[0][0].config).toEqual({ triggerTokens: 125_000, summaryBudget: 50_000, headMessageCount: 2, tailMessageCount: 7 })
   })
 
   it('preserves empty assistant reasoning_content in bridge history', async () => {
@@ -714,6 +781,35 @@ describe('run chat compression trigger', () => {
       1_000,
       { inputTokens: 1_000, outputTokens: 0 },
     )
+  })
+
+  it('uses the latest real Hermes prompt size as a floor when it is newer than the snapshot', async () => {
+    const messages = Array.from({ length: 10 }, (_, index) => ({
+      id: index + 1,
+      session_id: 'session-1',
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: `message ${index}`,
+      timestamp: index + 1,
+    }))
+    getSessionDetailMock.mockReturnValue({ messages })
+    compressorCompressMock.mockResolvedValue({
+      messages: [{ role: 'user', content: 'compressed by real usage' }],
+      meta: { compressed: true, llmCompressed: true, totalMessages: 9, summaryTokenEstimate: 1, verbatimCount: 0, compressedStartIndex: 0 },
+    })
+    // Local estimate says 1k; the provider already reported 160k of prompt (input + cache) for this session.
+    getUsageMock.mockReturnValue({ input_tokens: 10_000, cache_read_tokens: 140_000, cache_write_tokens: 10_000, created_at: 2_000 })
+    const { buildCompressedHistory } = await import('../../packages/server/src/modules/studio/services/chat-run/compression')
+    const run = () => buildCompressedHistory('session-1', 'default', 'http://upstream', undefined, vi.fn(), new Map(), {}, vi.fn(async () => 1_000))
+
+    expect(await run()).toEqual([{ role: 'user', content: 'compressed by real usage' }])
+    expect(getUsageMock).toHaveBeenCalledWith('session-1', 'hermes')
+    expect(compressorCompressMock).toHaveBeenCalledTimes(1)
+
+    // Usage recorded before the latest compression snapshot describes the old, uncompressed context.
+    compressorCompressMock.mockClear()
+    getCompressionSnapshotMock.mockReturnValue({ summary: 'previous summary', lastMessageIndex: 4, messageCountAtTime: 5, compressedThroughMessageId: null, protectedHeadThroughMessageId: null, historyRevision: 0, updatedAt: 3_000 })
+    await run()
+    expect(compressorCompressMock).not.toHaveBeenCalled()
   })
 
   it('emits local context token usage when the local estimate is under threshold', async () => {

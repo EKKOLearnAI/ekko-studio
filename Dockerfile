@@ -1,7 +1,7 @@
 ARG BASE_IMAGE=nousresearch/hermes-agent:latest
 FROM ${BASE_IMAGE}
 
-ARG NODE_VERSION=24.15.0
+ARG NODE_VERSION=24.22.1
 
 USER root
 
@@ -41,11 +41,13 @@ ENV NODE_ENV=production
 ENV HOME=/home/agent
 ENV HERMES_HOME=/home/agent/.hermes
 ENV HERMES_WEB_UI_MANAGED_GATEWAY=1
+ENV STUDIO_P2P_UDP_PORT_RANGE=50000-50127
 # Keep runtime-installed coding agent CLIs in the existing Studio data volume.
 ENV NPM_CONFIG_PREFIX=/home/agent/.hermes-web-ui/coding-agent/npm
 ENV PATH=/home/agent/.hermes-web-ui/coding-agent/npm/bin:/opt/hermes/.venv/bin:$PATH
 
 EXPOSE 6060
+EXPOSE 50000-50127/udp
 
 # 强制覆盖基础镜像的默认启动脚本，让镜像本身具备独立运行的能力
 ENTRYPOINT ["/app/bin/start-studio-all.sh"]

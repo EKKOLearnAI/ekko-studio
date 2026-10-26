@@ -1,0 +1,95 @@
+import { isGlobalOnlyCodingAgent } from './agent-catalog'
+const KNOWN_CODING_AGENTS = new Set([
+  'claude',
+  'claude-code',
+  'codex',
+  'pi',
+  'grok',
+  'opencode',
+  'dsh',
+  'cursor', 'antigravity',
+  'qwen',
+  'kimi',
+  'codebuddy',
+  'qoder',
+  'copilot',
+  'zcode',
+
+])
+
+export function storedPriorAgentMode(value: unknown): 'scoped' | 'global' | undefined {
+  return value === 'global' || value === 'scoped' ? value : undefined
+}
+
+export function nextCodingAgentMode(input: {
+  previousAgent: string
+  nextAgent: string
+  agentMode: 'scoped' | 'global'
+  priorAgentMode?: 'scoped' | 'global'
+}): { agentMode: 'scoped' | 'global'; priorAgentMode?: 'scoped' | 'global' } {
+  if (!KNOWN_CODING_AGENTS.has(input.nextAgent)) {
+    return { agentMode: 'scoped', priorAgentMode: undefined }
+  }
+  if (input.previousAgent === input.nextAgent) {
+    return { agentMode: input.agentMode, priorAgentMode: input.priorAgentMode }
+  }
+  if (isGlobalOnlyCodingAgent(input.nextAgent)) {
+    return {
+      agentMode: 'global',
+      priorAgentMode: isGlobalOnlyCodingAgent(input.previousAgent) ? input.priorAgentMode : input.agentMode,
+    }
+  }
+  if (isGlobalOnlyCodingAgent(input.previousAgent)) {
+    return {
+      agentMode: input.priorAgentMode === 'global' ? 'global' : 'scoped',
+      priorAgentMode: undefined,
+    }
+  }
+  return { agentMode: input.agentMode, priorAgentMode: input.priorAgentMode }
+}
+
+export function submittedCodingAgentSelection<Agent extends string>(input: {
+  agent: Agent
+  agentMode: 'scoped' | 'global'
+  priorAgentMode?: 'scoped' | 'global'
+  provider: string
+  model: string
+  usesGlobal: boolean
+  nativeModel?: string
+}): {
+  agent: Agent
+  agentMode: 'scoped' | 'global'
+  priorAgentMode: '' | 'scoped' | 'global'
+  provider: string
+  model: string
+} {
+  return {
+    agent: input.agent,
+    agentMode: input.usesGlobal ? 'global' : 'scoped',
+    priorAgentMode: input.priorAgentMode || '',
+    provider: input.usesGlobal ? '' : input.provider,
+    model: input.usesGlobal ? input.nativeModel || '' : input.model,
+  }
+}
+
+export function workflowSavedAgentFields(data: {
+  agent: string
+  agentMode: 'scoped' | 'global'
+  priorAgentMode?: 'scoped' | 'global'
+  provider: string
+  model: string
+}): {
+  agent: string
+  agentMode: 'scoped' | 'global'
+  priorAgentMode?: 'scoped' | 'global'
+  provider: string
+  model: string
+} {
+  return {
+    agent: data.agent,
+    agentMode: isGlobalOnlyCodingAgent(data.agent) ? 'global' : data.agentMode,
+    priorAgentMode: storedPriorAgentMode(data.priorAgentMode),
+    provider: data.agentMode === 'global' || isGlobalOnlyCodingAgent(data.agent) ? '' : data.provider,
+    model: data.model,
+  }
+}

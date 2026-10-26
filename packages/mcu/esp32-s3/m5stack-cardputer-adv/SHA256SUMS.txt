@@ -1,0 +1,1 @@
+e753a1b04f22b249c962ad9fb304a5f193a6cd067bf41deedf6654eb0d8b2fb5  firmware/ekko-stock-lan-update-0x10000.bin

@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import { StringDecoder } from 'node:string_decoder'
 import type { CodingAgentImageInput } from '../../protocol/types'
 import { dshReasoningEffort } from './runtime-config'
-import { DSH_STREAM_METHOD } from './stream-plugin'
+import { DSH_STREAM_METHOD, DSH_USAGE_METHOD } from './stream-plugin'
+import { logger } from '../../../studio/public/logging'
 
 interface StreamedText { agent_message_chunk: string; agent_thought_chunk: string }
 
@@ -28,6 +29,7 @@ export class DshAcpTurn {
     update(update: any): void
     session(id: string): void
     config(options: any[]): void
+    usage?(event: any): void
     permissionRequired?: boolean
   }) {
     child.stdout?.on('data', (chunk: Buffer) => {
@@ -38,13 +40,25 @@ export class DshAcpTurn {
         while ((end = this.buffer.indexOf('\n')) >= 0) {
           const line = this.buffer.slice(0, end).trim()
           this.buffer = this.buffer.slice(end + 1)
-          if (line) this.receive(JSON.parse(line))
+          if (line) this.receiveLine(line)
         }
       } catch (error) { this.dispose(error instanceof Error ? error : new Error(String(error))) }
     })
     child.on('error', error => this.dispose(error))
     child.on('close', () => this.dispose(new Error('DSH ACP connection closed before the request completed')))
     child.stdin?.on('error', error => this.dispose(error))
+  }
+
+  // A valid ACP frame is always a JSON object, so any line not starting with '{'
+  // is dependency stdout noise (e.g. the MCP SDK's console.debug), not the
+  // protocol. Skip and warn instead of disposing the whole turn; only a line that
+  // looks like JSON but fails to parse is a real protocol break and stays fatal.
+  private receiveLine(line: string) {
+    if (!line.startsWith('{')) {
+      logger.warn({ line: line.slice(0, 500) }, '[dsh] skipping non-JSON line on ACP stdout')
+      return
+    }
+    this.receive(JSON.parse(line))
   }
 
   private write(message: unknown) {
@@ -72,7 +86,10 @@ export class DshAcpTurn {
   private receive(message: any) {
     if (this.closed) return
     if (message.method) {
-      if (message.method === 'session/update' && message.params?.sessionId === this.sessionId) {
+      if (message.method === DSH_USAGE_METHOD && this.sessionId) {
+        try { this.callbacks.usage?.(message.params) }
+        catch (err) { logger.warn({ err }, '[dsh] failed to record native usage') }
+      } else if (message.method === 'session/update' && message.params?.sessionId === this.sessionId) {
         this.receiveUpdate(message.params.update)
       } else if (message.method === DSH_STREAM_METHOD && message.params?.sessionId === this.sessionId) {
         this.receiveStream(message.params.frame)

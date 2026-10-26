@@ -3,6 +3,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import YAML from 'js-yaml'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { materializeFakePython } from './helpers/windows-fake-python'
 
 describe('Hermes plugin configuration', () => {
   const originalEnv = { ...process.env }
@@ -25,7 +26,7 @@ describe('Hermes plugin configuration', () => {
     const agentRoot = join(tempDir, 'agent')
     const venvBin = join(agentRoot, '.venv', 'bin')
     const hermesCliDir = join(agentRoot, 'hermes_cli')
-    const fakePython = join(venvBin, 'python')
+    let fakePython = join(venvBin, 'python')
     const fakeHermes = join(venvBin, 'hermes')
 
     mkdirSync(venvBin, { recursive: true })
@@ -38,6 +39,7 @@ describe('Hermes plugin configuration', () => {
       '',
     ].join('\n'))
     chmodSync(fakePython, 0o755)
+    fakePython = materializeFakePython(fakePython)
     writeFileSync(fakeHermes, `#!${fakePython}\n`)
     chmodSync(fakeHermes, 0o755)
 

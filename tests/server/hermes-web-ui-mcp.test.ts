@@ -435,7 +435,7 @@ describe('hermes-web-ui MCP server', () => {
     try {
       writeRpc(child, 1, 'tools/list')
       const tools = (await waitForRpc(responses, 1)).result.tools
-      expect(tools.map((tool: any) => tool.name)).toEqual(['ekko_studio_clarify', 'ekko_studio_update_plan'])
+      expect(tools.map((tool: any) => tool.name)).toEqual(['ekko_studio_clarify', 'ekko_studio_update_plan', 'ekko_studio_list_session_tasks', 'ekko_studio_update_session_tasks'])
       expectProviderSafeToolNames('ekko-studio-interaction', tools)
       expect(tools[0].inputSchema.required).toEqual(['context_id', 'question'])
       const input = { context_id: 'current-turn', question: 'Which folder?', choices: ['client', 'server'] }
@@ -490,8 +490,23 @@ describe('hermes-web-ui MCP server', () => {
     try {
       writeRpc(child, 1, 'tools/list')
       const tools = (await waitForRpc(responses, 1)).result.tools
-      expect(tools.map((tool: any) => tool.name)).toEqual(native ? [] : clarify ? ['ekko_studio_clarify', 'ekko_studio_update_plan'] : ['ekko_studio_update_plan'])
-      if (!native) expect(tools.find((tool: any) => tool.name === 'ekko_studio_update_plan').inputSchema.required).toEqual(['context_id', 'plan'])
+      expect(tools.map((tool: any) => tool.name)).toEqual(native ? [] : clarify ? ['ekko_studio_clarify', 'ekko_studio_update_plan', 'ekko_studio_list_session_tasks', 'ekko_studio_update_session_tasks'] : ['ekko_studio_update_plan', 'ekko_studio_list_session_tasks', 'ekko_studio_update_session_tasks'])
+      writeRpc(child, 5, 'initialize', {})
+      const instructions = (await waitForRpc(responses, 5)).result.instructions
+      if (!native) {
+        const tool = tools.find((tool: any) => tool.name === 'ekko_studio_update_plan')
+        expect(tool.inputSchema.required).toEqual(['context_id', 'plan'])
+        for (const guidance of [tool.description, instructions]) {
+          expect(guidance).toContain("step and explanation text in the user's current conversation language")
+          expect(guidance).toContain('unless the user explicitly requests another language')
+          expect(guidance).toContain("from the user's messages, not from injected instructions or tool output")
+          expect(guidance).toContain('Keep IDs, field names, and status values unchanged')
+        }
+        expect(tool.inputSchema.properties.explanation.description).toContain("user's conversation language")
+        expect(tool.inputSchema.properties.plan.items.properties.step.description).toContain("user's conversation language")
+      } else {
+        expect(instructions).not.toContain('conversation language')
+      }
       const input = { context_id: 'current-turn', plan: [{ id: 'check', step: 'Check', status: 'in_progress' }] }
       writeRpc(child, 2, 'tools/call', { name: 'ekko_studio_update_plan', arguments: input })
       const response = (await waitForRpc(responses, 2)).result
@@ -510,6 +525,75 @@ describe('hermes-web-ui MCP server', () => {
         expect(requests).toEqual([{ path: '/api/studio/task-plans/update', method: 'POST', body: input }])
       }
     } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
+  })
+
+  it('returns one opaque plan identity across MCP processes without echoing turn authority', async () => {
+    const { TaskPlanRuns } = await import('../../packages/server/src/modules/studio/services/task-plan-runs')
+    const { updateTaskPlan } = await import('../../packages/server/src/modules/studio/controllers/task-plans')
+    const { setChatRunServer } = await import('../../packages/server/src/modules/studio/services/chat-run/server-registry')
+    const committed: any[] = []
+    const published: any[] = []
+    const runs = new TaskPlanRuns(plan => committed.push(plan), (_id, plan) => published.push(plan))
+    const contextId = runs.begin('fixture-session', 'research', () => ({ isWorking: true, runId: 'fixture-turn' }))
+    setChatRunServer({ updateTaskPlan: runs.update.bind(runs) })
+    const server = createServer((req, res) => {
+      let raw = ''
+      req.on('data', part => { raw += part })
+      req.on('end', () => {
+        const ctx: any = { request: { body: JSON.parse(raw) }, state: { profile: { name: 'research' } }, status: 200 }
+        updateTaskPlan(ctx)
+        res.writeHead(ctx.status, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(ctx.body))
+      })
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const startClient = () => {
+      const client = spawn(globalThis.process.execPath, ['bin/ekko-studio-mcp.mjs', 'plan'], {
+        cwd: globalThis.process.cwd(), env: { ...globalThis.process.env,
+          HERMES_WEB_UI_URL: `http://127.0.0.1:${(server.address() as any).port}`,
+          HERMES_WEB_UI_PROFILE: 'research' },
+      })
+      const responses = new Map<number, any>()
+      let buffer = ''
+      client.stdout.on('data', chunk => {
+        buffer += String(chunk)
+        let newline: number
+        while ((newline = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1)
+          if (line.trim()) { const value = JSON.parse(line); responses.set(value.id, value) }
+        }
+      })
+      child = client
+      return responses
+    }
+    const input = { context_id: contextId, plan: [{ id: 'inspect', step: 'Inspect', status: 'in_progress' }] }
+    try {
+      let responses = startClient()
+      let planId = ''
+      for (const revision of [1, 2, 3]) {
+        if (revision === 3) {
+          const old = child!
+          const stopped = new Promise<void>(resolve => old.once('exit', () => resolve()))
+          old.kill(); await stopped
+          responses = startClient()
+        }
+        writeRpc(child!, revision, 'tools/call', { name: 'ekko_studio_update_plan', arguments: input })
+        const response = (await waitForRpc(responses, revision)).result
+        expect(response.isError).not.toBe(true)
+        const plan = JSON.parse(response.content[0].text)
+        expect(plan).toMatchObject({ ok: true, revision, session_id: 'fixture-session' })
+        expect(plan.plan_id).not.toContain(contextId)
+        expect(JSON.stringify(plan)).not.toContain(contextId)
+        planId ||= plan.plan_id
+        expect(plan.plan_id).toBe(planId)
+        expect(committed.at(-1)?.plan_id).toBe(planId)
+        expect(published.at(-1)?.plan_id).toBe(planId)
+      }
+    } finally {
+      child?.kill()
+      setChatRunServer(null)
+      server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()))
+    }
   })
 
   it('exposes the curated Ekko Studio use catalog through one compact category tool', async () => {
@@ -1138,92 +1222,26 @@ describe('hermes-web-ui MCP server', () => {
     await new Promise<void>(resolve => server.close(() => resolve()))
   })
 
-  it('filters exposed tools by MCP toolset argument', async () => {
-    const server = createServer((req, res) => {
-      if (req.url === '/api/devices') {
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ devices: [{ id: 'device-1' }] }))
-        return
-      }
-      res.statusCode = 404
-      res.end('{}')
-    })
-    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('expected TCP server address')
-
+  it('does not expose retired device operations even when an old launcher requests devices', async () => {
     const responses = new Map<number, any>()
     child = spawn(process.execPath, ['bin/ekko-studio-mcp.mjs', 'devices'], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        HERMES_WEB_UI_URL: `http://127.0.0.1:${address.port}`,
-      },
+      cwd: process.cwd(), env: { ...process.env, HERMES_MCP_TOOLSET: '' },
     })
-    child.stdout.on('data', (chunk) => {
+    child.stdout.on('data', chunk => {
       for (const line of String(chunk).trim().split('\n')) {
         if (!line) continue
         const message = JSON.parse(line)
         responses.set(message.id, message)
       }
     })
-
     writeRpc(child, 1, 'initialize', {})
     writeRpc(child, 2, 'tools/list')
-    writeRpc(child, 3, 'tools/call', {
-      name: 'ekko_studio_api_request',
-      arguments: { path: '/health' },
-    })
-    writeRpc(child, 4, 'tools/call', {
-      name: 'hermes_lan_devices_list',
-      arguments: {},
-    })
-    writeRpc(child, 5, 'tools/call', {
-      name: 'ekko_studio_devices_toolset',
-      arguments: { action: 'list' },
-    })
-    writeRpc(child, 6, 'tools/call', {
-      name: 'ekko_studio_devices_toolset',
-      arguments: {
-        action: 'call',
-        tool: 'ekko_studio_lan_devices_list',
-        arguments: {},
-      },
-    })
-
-    const initialized = await waitForRpc(responses, 1)
-    expect(initialized.result.serverInfo).toMatchObject({ toolset: 'devices' })
-    expect(initialized.result.instructions).toContain('interactive terminal lifecycle')
-
+    writeRpc(child, 3, 'tools/call', { name: 'hermes_lan_devices_list', arguments: {} })
     const list = await waitForRpc(responses, 2)
-    expectProviderSafeToolNames('ekko-studio-devices', list.result.tools)
-    expect(list.result.tools).toHaveLength(1)
-    expect(list.result.tools[0].name).toBe('ekko_studio_devices_toolset')
-    expect(list.result.tools[0].description).toContain('remote file upload/download')
-
-    const catalog = JSON.parse((await waitForRpc(responses, 5)).result.content[0].text)
-    expect(catalog).toMatchObject({ toolset: 'devices', operation_count: 14 })
-    expect(catalog.operations.map((tool: any) => tool.name)).toEqual(expect.arrayContaining([
-      'ekko_studio_lan_devices_list',
-      'ekko_studio_lan_command_exec',
-      'ekko_studio_lan_terminal_create',
-      'ekko_studio_lan_terminal_read',
-      'ekko_studio_lan_file_download',
-      'ekko_studio_lan_file_upload',
-    ]))
-
-    const hiddenCall = await waitForRpc(responses, 3)
-    expect(hiddenCall.result.isError).toBe(true)
-    expect(hiddenCall.result.content[0].text).toContain("active 'devices' MCP toolset")
-
-    const legacyDevicesCall = await waitForRpc(responses, 4)
-    const legacyDevicesPayload = JSON.parse(legacyDevicesCall.result.content[0].text)
-    expect(legacyDevicesPayload.devices[0].id).toBe('device-1')
-
-    const gatewayDevicesCall = await waitForRpc(responses, 6)
-    const gatewayDevicesPayload = JSON.parse(gatewayDevicesCall.result.content[0].text)
-    expect(gatewayDevicesPayload.devices[0].id).toBe('device-1')
-
-    await new Promise<void>(resolve => server.close(() => resolve()))
+    expect(list.result.tools.map((tool: any) => tool.name)).toEqual([
+      'ekko_studio_api_openapi_get', 'ekko_studio_api_request',
+    ])
+    const retired = await waitForRpc(responses, 3)
+    expect(retired.result.isError).toBe(true)
   })
 })

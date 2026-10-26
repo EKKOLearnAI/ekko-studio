@@ -56,7 +56,7 @@ describe('desktop browser security primitives', () => {
     expect(source).toContain('await this.flushProfileSession(this.requireProfile(this.activeProfileId))')
     expect(source).toContain('browserSession.flushStorageData()')
     expect(source).toContain('await browserSession.cookies.flushStore()')
-    expect(source).toContain('const browserSession = this.profileSession(profile)')
+    expect(source).toContain('const browserSession = await this.profileSession(profile)')
     expect(source).toContain('browserSession.isPersistent()')
     expect(source).toContain('browserSession.getStoragePath()')
     expect(source).toContain("browserSession.cookies.on('changed', listener)")
@@ -119,6 +119,18 @@ describe('desktop browser security primitives', () => {
     const document = JSON.parse(await readFile(join(stateRoot, 'profiles.json'), 'utf8'))
     expect(document.schema).toBe(1)
     if (process.platform !== 'win32') expect((await stat(join(stateRoot, 'profiles.json'))).mode & 0o077).toBe(0)
+  })
+
+  it('persists only the newest twelve tabs', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hermes-browser-tab-limit-'))
+    roots.push(root)
+    const store = new BrowserProfileStore(root)
+    await store.initialize()
+    const urls = Array.from({ length: 15 }, (_, index) => `https://example.com/${index}`)
+    await store.setTabs(store.active().id, urls)
+    const restarted = new BrowserProfileStore(root)
+    await restarted.initialize()
+    expect(restarted.active().tabs).toEqual(urls.slice(3))
   })
 
   it('persists an empty tab list after the final browser tab is closed', async () => {

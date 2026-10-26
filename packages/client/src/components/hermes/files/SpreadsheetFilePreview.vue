@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NAlert, NButton, NButtonGroup, NDataTable } from 'naive-ui'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NAlert, NButton, NButtonGroup, NDataTable, NSpin } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import { parseCsvPreview } from '@/utils/hermes/tabular-preview'
 
@@ -132,11 +133,11 @@ onBeforeUnmount(terminateWorker)
 </template>
 
 <style scoped lang="scss">
-.spreadsheet-preview { display: flex; flex-direction: column; width: 100%; min-height: 0; gap: 10px; }
-.spreadsheet-toolbar, .sheet-tabs { display: flex; gap: 6px; align-items: center; }
-.sheet-tabs { overflow-x: auto; padding-bottom: 2px; }
-.sheet-tabs-label { flex: 0 0 auto; font-size: 12px; color: var(--n-text-color-3); }
+.spreadsheet-preview { display: flex; flex-direction: column; width: 100%; min-height: 0; gap: calc(10px * var(--spacing-scale, 1)); }
+.spreadsheet-toolbar, .sheet-tabs { display: flex; gap: calc(6px * var(--spacing-scale, 1)); align-items: center; }
+.sheet-tabs { overflow-x: auto; padding-bottom: calc(2px * var(--spacing-scale, 1)); }
+.sheet-tabs-label { flex: 0 0 auto; font-size: calc(var(--font-size-base, 14px) * 12 / 14); color: var(--n-text-color-3); }
 .sheet-tabs :deep(.n-button) { border-radius: 999px; }
 .table-stage { min-height: 360px; }
-.source-view { flex: 1; overflow: auto; margin: 0; padding: 14px; border-radius: 6px; background: rgba(127, 127, 127, 0.08); white-space: pre-wrap; overflow-wrap: anywhere; }
+.source-view { flex: 1; overflow: auto; margin: 0; padding: calc(14px * var(--spacing-scale, 1)); border-radius: var(--radius-component, 6px); background: rgba(127, 127, 127, 0.08); white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>

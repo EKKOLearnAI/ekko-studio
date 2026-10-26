@@ -28,8 +28,8 @@ test('renders authenticated shell and navigates between key product routes', asy
   await returnLink.click()
   await expect(page).toHaveURL(/#\/studio\/agents$/)
 
-  const modelsButton = page.locator('.page-sidebar-nav').getByRole('button', { name: /^Models$/ })
-  await modelsButton.click()
+  const modelsLink = page.locator('.studio-navigation-rail').getByRole('link', { name: /^Models$/ })
+  await modelsLink.click()
   await expect(page).toHaveURL(/#\/hermes\/models$/)
   await expect(page.getByRole('heading', { name: 'Models', exact: true })).toBeVisible()
   await expect(page.getByText('test-model').first()).toBeVisible()

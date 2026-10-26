@@ -6,7 +6,7 @@ import { getStoredUsername } from '@/api/client'
 import FolderPicker from '@/components/hermes/chat/FolderPicker.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import { generateGroupChatInviteCode } from '@/utils/group-chat-invite-code'
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode } from '@/api/coding-agents'
 import type { RoomAgentInput, RoomSummaryConfig } from '@/api/studio/group-chat'
@@ -53,6 +53,10 @@ const summaryModelOptions = computed(() =>
         value: model,
     }))
 )
+const configuredSummaryApiMode = computed(() => configuredProviderApiMode(selectedSummaryProviderGroup.value, summaryModel.value))
+watch([configuredSummaryApiMode, () => summaryApiMode.value], ([mode]) => {
+  if (mode && summaryApiMode.value !== mode) summaryApiMode.value = mode
+}, { flush: 'sync' })
 const summaryApiModeOptions = computed(() => [
     { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
     { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
@@ -184,7 +188,7 @@ onMounted(() => {
                     :placeholder="t('groupChat.summaryModelPlaceholder')"
                 />
             </div>
-            <div class="form-group">
+            <div v-if="!configuredSummaryApiMode" class="form-group">
                 <label class="form-label">{{ t('groupChat.summaryApiMode') }}</label>
                 <NSelect v-model:value="summaryApiMode" :options="summaryApiModeOptions" />
             </div>
@@ -215,33 +219,33 @@ onMounted(() => {
 
 .form-label {
     display: block;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     font-weight: 500;
     color: $text-secondary;
     margin-bottom: 6px;
 }
 
 .form-hint {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     margin: 4px 0 0;
 }
 
 .code-row {
     display: flex;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     align-items: center;
 }
 
 .summary-section {
-    padding: 14px;
+    padding: calc(14px * var(--spacing-scale, 1));
     margin-bottom: 16px;
-    border: 1px solid $border-color;
-    border-radius: 10px;
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 10px);
 
     h4 {
         margin: 0;
-        font-size: 14px;
+        font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     }
 }
 

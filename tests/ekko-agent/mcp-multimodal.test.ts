@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { Client } from '@modelcontextprotocol/client'
 import { createMcpToolProvider } from '../../packages/ekko-agent/src/tools/mcp'
 import { toAnthropicMessagesPayload } from '../../packages/ekko-agent/src/model/providers/anthropic'
 import { toGeminiContentsPayload } from '../../packages/ekko-agent/src/model/providers/gemini'
@@ -33,6 +34,18 @@ const userImage: AgentMessage = {
 }
 
 describe('Ekko MCP multimodal results', () => {
+  it('uses a per-server response budget instead of a shorter general tool timeout', async () => {
+    const scope = new AbortController()
+    const provider = createMcpToolProvider()
+    const context = { mcpServers: { fake: { ...server, requestTimeoutMs: 300_000 } }, mcpSessionSignal: scope.signal, timeoutMs: 5_000 }
+    const tools = await provider.listTools(context)
+    const call = vi.spyOn(Client.prototype, 'callTool').mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] })
+    try {
+      await tools.find(tool => tool.definition.name === 'fake_pid')!.execute({}, context)
+      expect(call).toHaveBeenCalledWith({ name: 'fake_pid', arguments: {} }, { timeout: 300_000 })
+    } finally { call.mockRestore(); scope.abort() }
+  })
+
   it('reuses one MCP process and preserves image content blocks', async () => {
     const provider = createMcpToolProvider()
     const context = { mcpServers: { fake: server }, timeoutMs: 5000 }

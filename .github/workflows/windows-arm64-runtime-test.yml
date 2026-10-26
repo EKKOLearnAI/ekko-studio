@@ -1,0 +1,46 @@
+name: Test Windows ARM64 Runtime
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-arm64-runtime-test.yml"
+      - "packages/desktop/scripts/fetch-python.mjs"
+      - "packages/desktop/scripts/fetch-git.mjs"
+      - "packages/desktop/scripts/python-build-env.mjs"
+      - "packages/desktop/scripts/install-hermes.mjs"
+      - "packages/desktop/scripts/setup-windows-arm64-openssl.ps1"
+concurrency:
+  group: windows-arm64-runtime-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  runtime:
+    runs-on: windows-11-arm
+    timeout-minutes: 45
+    env:
+      TARGET_OS: win32
+      TARGET_ARCH: arm64
+      HERMES_SKIP_BROWSER_RUNTIME: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: astral-sh/setup-uv@v3
+      - run: npm ci --prefix packages/desktop --no-audit --no-fund
+      - name: Prepare ARM64 OpenSSL for locked Python dependencies
+        shell: pwsh
+        run: ./packages/desktop/scripts/setup-windows-arm64-openssl.ps1
+      - name: Prepare native runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm --prefix packages/desktop run prepare:runtime
+      - name: Package and verify runtime
+        run: npm --prefix packages/desktop run package:runtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-runtime
+          path: packages/desktop/release/runtime/*
+          if-no-files-found: error
+          retention-days: 7

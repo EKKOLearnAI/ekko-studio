@@ -50,7 +50,7 @@ onUnmounted(() => window.removeEventListener('keydown', handleKeydown))
   max-width: 90vw;
   max-height: 90vh;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: var(--radius-component, 6px);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
 }
 </style>

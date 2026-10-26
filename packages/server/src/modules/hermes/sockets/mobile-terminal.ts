@@ -1,3 +1,4 @@
+import { authenticateSessionShare, refreshSessionShare, sessionShareExecutionUser, socketShareToken, assertShareProfile, watchSessionShare, type SessionShareAccess } from '../../studio/public/session-shares'
 import { createHash } from 'crypto'
 import { accessSync, constants, statSync } from 'fs'
 import type { Server, Socket } from 'socket.io'
@@ -24,7 +25,17 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
       kill: () => killOwnedProcessTree(process.pid, () => process.kill()),
     }
   })
-  const credentials = new Map<string, string>()
+  const credentials = new Map<string, { token: string; share?: SessionShareAccess; dispose?: () => void }>()
+  const forgetCredentials = (owner: string) => { credentials.get(owner)?.dispose?.(); credentials.delete(owner) }
+  const closeOwner = (owner: string) => {
+    sessions.closeOwner(owner); forgetCredentials(owner)
+    for (const socket of nsp.sockets.values()) if (socket.data.terminalScope?.owner === owner) socket.disconnect(true)
+  }
+  const executionUser = async (token: string, share?: SessionShareAccess) => {
+    if (!share) return authenticateUserToken(token)
+    await refreshSessionShare(share, 'terminal')
+    return sessionShareExecutionUser(share)
+  }
   let closing = false
   let sweeping = false
   const timer = setInterval(() => {
@@ -32,13 +43,10 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
     sweeping = true
     void (async () => {
       sessions.sweep()
-      for (const [owner, token] of credentials) {
-        if (!sessions.hasOwner(owner)) { credentials.delete(owner); continue }
-        const user = await authenticateUserToken(token)
-        if (!canOpenTerminal(user)) {
-          sessions.closeOwner(owner); credentials.delete(owner)
-          for (const socket of nsp.sockets.values()) if (socket.data.terminalScope?.owner === owner) socket.disconnect(true)
-        }
+      for (const [owner, credential] of credentials) {
+        if (!sessions.hasOwner(owner)) { forgetCredentials(owner); continue }
+        const user = await executionUser(credential.token, credential.share).catch(() => null)
+        if (!canOpenTerminal(user)) closeOwner(owner)
       }
     })().catch(() => { /* Per-operation authorization still fails closed. */ }).finally(() => { sweeping = false })
   }, 15_000)
@@ -47,11 +55,18 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
   nsp.use((socket, next) => {
     void (async () => {
       const token = String(socket.handshake.auth?.token || '')
-      const user = await authenticateUserToken(token)
+      const shareToken = socketShareToken(socket.handshake.auth)
+      const share = shareToken ? await authenticateSessionShare(shareToken, String(socket.handshake.auth?.appAccessToken || '')) : undefined
+      const user = await executionUser(token, share)
       if (!user || !canOpenTerminal(user)) throw new Error('terminal_forbidden')
-      const profile = String(socket.handshake.query.profile || 'default')
+      if (share) assertShareProfile(share, socket.handshake.query.profile)
+      const profile = String(socket.handshake.query.profile || share?.share.profile || 'default')
       const source = String(socket.handshake.query.source || '')
       const sourceId = String(socket.handshake.query.sourceId || '')
+      if (share) {
+        if (source !== 'single' || sourceId !== share.share.session_id) throw new Error('terminal_invalid_context')
+        socket.data.sessionShare = share
+      }
       if (!['single', 'group'].includes(source) || !sourceId || sourceId.length > 200
         || !listProfileNamesFromDisk().includes(profile)) throw new Error('terminal_invalid_context')
       const context = { profile, source: source as TerminalContext['source'], sourceId }
@@ -59,7 +74,7 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
       if (!resolved || resolved.profile !== profile) throw new Error('terminal_invalid_context')
       socket.data.terminalContext = context
       socket.data.terminalScope = {
-        ...context, userId: user.id, owner: `${user.id}:${createHash('sha256').update(token).digest('hex')}`,
+        ...context, userId: user.id, owner: share ? `share:${share.share.id}:${share.actor.id}` : `${user.id}:${createHash('sha256').update(token).digest('hex')}`,
       } satisfies TerminalScope
       if (closing) throw new Error('terminal_unavailable')
       next()
@@ -70,6 +85,18 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
     const scope = socket.data.terminalScope as TerminalScope
     const context = socket.data.terminalContext as TerminalContext
     const token = String(socket.handshake.auth.token)
+    const share = socket.data.sessionShare as SessionShareAccess | undefined
+    // A refreshed App login may reconnect to the same PTY. Keep its current
+    // credential instead of letting an expired, detached bridge kill it.
+    if (share && credentials.has(scope.owner)) {
+      forgetCredentials(scope.owner)
+      credentials.set(scope.owner, { token, share, dispose: watchSessionShare(share, 'terminal', () => closeOwner(scope.owner)) })
+    }
+    const dispose = share ? watchSessionShare(share, 'terminal', () => {
+      const current = credentials.get(scope.owner)?.share
+      if (!current || current.appAccessToken === share.appAccessToken) closeOwner(scope.owner)
+      else socket.disconnect(true)
+    }) : undefined
     let queue = Promise.resolve()
     let pending = 0
     for (const operation of OPERATIONS) {
@@ -80,7 +107,7 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
         queue = queue.then(async () => {
           if (!socket.connected || closing) throw new Error('terminal_disconnected')
           if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('terminal_invalid_request')
-          const user = await authenticateUserToken(token)
+          const user = await executionUser(token, share).catch(() => null)
           if (!user || user.id !== scope.userId || !canOpenTerminal(user)) {
             sessions.closeOwner(scope.owner)
             throw new Error('terminal_forbidden')
@@ -101,7 +128,8 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
                 accessSync(cwd, constants.R_OK | constants.X_OK)
               } catch { throw new Error('terminal_invalid_directory') }
               const terminal = sessions.create(scope, payload.requestId, cwd, findShell(), payload.cols, payload.rows)
-              credentials.set(scope.owner, token)
+              if (!credentials.has(scope.owner)) credentials.set(scope.owner, { token, share,
+                dispose: share ? watchSessionShare(share, 'terminal', () => closeOwner(scope.owner)) : undefined })
               data = { terminal }; break
             }
             case 'attach': data = sessions.attach(scope, id, socket.id); break
@@ -126,13 +154,13 @@ export function setupMobileTerminal(io: Server, resolveContext: ContextResolver)
         }).finally(() => { pending-- })
       })
     }
-    socket.on('disconnect', () => sessions.detachWriter(socket.id))
+    socket.on('disconnect', () => { dispose?.(); sessions.detachWriter(socket.id) })
   })
 
   return {
     close() {
       closing = true; clearInterval(timer)
-      nsp.disconnectSockets(true); sessions.shutdown(); credentials.clear()
+      nsp.disconnectSockets(true); sessions.shutdown(); for (const owner of credentials.keys()) forgetCredentials(owner)
     },
   }
 }

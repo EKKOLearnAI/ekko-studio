@@ -61,6 +61,51 @@ afterEach(() => {
 })
 
 describe('provider editor service', () => {
+  it.each(['custom_providers', 'providers'])('clears every protocol alias for automatic %s connections', async source => {
+    const entry = {
+      name: 'mixed',
+      base_url: 'https://relay.example/v1',
+      api_mode: 'codex_responses',
+      transport: 'anthropic_messages',
+      apiMode: 'chat_completions',
+      model: 'gpt-test',
+    }
+    writeProfile('research', YAML.dump(source === 'providers'
+      ? { providers: { mixed: entry } }
+      : { custom_providers: [entry] }))
+    const { getProviderEditorDetail, updateProviderEditorDetail } = await loadEditor()
+    const before = await getProviderEditorDetail('research', 'custom:mixed')
+    const result = await updateProviderEditorDetail('research', 'custom:mixed', { api_mode: null }, before.revision)
+    const config = readYaml(join(profileDir('research'), 'config.yaml'))
+    const saved = source === 'providers' ? config.providers.mixed : config.custom_providers[0]
+    expect(saved).not.toHaveProperty('api_mode')
+    expect(saved).not.toHaveProperty('transport')
+    expect(saved).not.toHaveProperty('apiMode')
+    expect(saved).toMatchObject({ base_url: entry.base_url, model: entry.model })
+    expect(result.detail.api_mode).toBeUndefined()
+    expect(result.changed).toContain('api_mode')
+    const reloaded = await getProviderEditorDetail('research', 'custom:mixed')
+    expect(reloaded.api_mode).toBeUndefined()
+    const repeated = await updateProviderEditorDetail('research', 'custom:mixed', { api_mode: null }, reloaded.revision)
+    expect(repeated.changed).not.toContain('api_mode')
+    const fixed = await updateProviderEditorDetail('research', 'custom:mixed', { api_mode: 'anthropic_messages' }, repeated.detail.revision)
+    expect(fixed.detail.api_mode).toBe('anthropic_messages')
+  })
+
+  it('tests an automatic draft without reusing its saved fixed protocol', async () => {
+    writeProfile('research', YAML.dump({ custom_providers: [{
+      name: 'mixed', base_url: 'https://relay.example/v1', api_key: 'fixture-key', api_mode: 'anthropic_messages',
+    }] }))
+    const { testProviderEditorDraft } = await loadEditor()
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ data: [{ id: 'model-a' }] }))
+    vi.stubGlobal('fetch', fetchMock)
+    await testProviderEditorDraft('research', 'custom:mixed', { api_mode: null })
+    const headers = new Headers(fetchMock.mock.calls[0][1].headers)
+    expect(headers.get('authorization')).toBe('Bearer fixture-key')
+    expect(headers.has('x-api-key')).toBe(false)
+    expect(readYaml(join(profileDir('research'), 'config.yaml')).custom_providers[0].api_mode).toBe('anthropic_messages')
+  })
+
   it('keeps the OpenCode probe affinity header across same-origin redirects', async () => {
     const { fetchProviderCatalogForTest } = await loadEditor()
     const fetchMock = vi.fn()

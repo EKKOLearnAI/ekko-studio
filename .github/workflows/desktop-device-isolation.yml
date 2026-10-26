@@ -1,0 +1,48 @@
+name: Desktop device isolation
+on:
+  pull_request:
+    paths:
+      - 'packages/desktop/**'
+      - 'tests/desktop/**'
+      - 'tests/fixtures/desktop-resource-owner.cjs'
+      - '.github/workflows/desktop-device-isolation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-isolation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  device-processes:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts --include=dev --no-audit --no-fund
+      - run: npm ci --prefix packages/desktop --include=dev --no-audit --no-fund
+      - name: Cross-process ownership and crash recovery
+        run: >-
+          npx vitest run
+          tests/desktop/desktop-listening-message.test.ts
+          tests/desktop/desktop-resource-process.test.ts
+          tests/desktop/installation-coordinator.test.ts
+          tests/desktop/device-window-owner.test.ts
+          tests/desktop/device-instance.test.ts
+          tests/desktop/remote-devices.test.ts
+          tests/desktop/desktop-storage-bootstrap.test.ts
+          tests/desktop/desktop-device-storage.test.ts
+          tests/desktop/browser-profile-lease.test.ts
+          tests/desktop/browser-profile-directory.test.ts
+          tests/desktop/browser-download-history.test.ts
+          tests/desktop/browser-download-actions.test.ts
+          tests/desktop/webui-startup-diagnostics.test.ts
+          --maxWorkers=1 --testTimeout=30000
+      - name: Desktop build and updater lifecycle
+        run: npm --prefix packages/desktop run test:updater

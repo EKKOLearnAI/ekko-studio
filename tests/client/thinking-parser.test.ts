@@ -57,6 +57,28 @@ describe('parseThinking', () => {
     expect(r.hasThinking).toBe(false)
   })
 
+  it.each(['think', 'thinking', 'reasoning', 'THINKING'])('keeps an unclosed leading <%s> block out of the settled body', (tag) => {
+    const content = `\n\n <${tag}>private reasoning`
+    const streaming = parseThinking(content, { streaming: true })
+    expect(parseThinking(content, { streaming: false })).toEqual(streaming)
+    expect(streaming.body.trim()).toBe('')
+    expect(streaming.pending).toBe('private reasoning')
+    expect(streaming.hasThinking).toBe(true)
+  })
+
+  it('recognizes a settled tag-only leading block', () => {
+    expect(parseThinking('\n <thinking> ', { streaming: false })).toEqual({
+      segments: [], pending: ' ', body: '\n ', hasThinking: true,
+    })
+  })
+
+  it('preserves an unclosed thinking tag quoted in code', () => {
+    for (const content of ['`<thinking>example`', '```text\n<thinking>example\n```']) {
+      expect(parseThinking(content, { streaming: false }).body).toBe(content)
+      expect(parseThinking(content, { streaming: false }).hasThinking).toBe(false)
+    }
+  })
+
   it('combines closed segments with trailing pending (streaming)', () => {
     const r = parseThinking('<think>done</think>mid<thinking>now', { streaming: true })
     expect(r.segments).toEqual(['done'])

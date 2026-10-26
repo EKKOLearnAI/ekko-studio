@@ -30,6 +30,7 @@ const { mockIo, mockSocket, sockets, socketHandlers, mockWebSockets, MockWebSock
         socket.connected = false
       }),
     }
+    socket.volatile = socket
     return socket
   }
 
@@ -861,6 +862,69 @@ describe('outbound relay client', () => {
     })
     expect(localSocket.emit).toHaveBeenCalledWith('abort', { session_id: 'mcu-device-research-ekko' })
     expect(remoteSocket.emit).not.toHaveBeenCalledWith('audio.enqueue', expect.any(Object))
+  })
+
+  it('bridges MCU Webhook subscriptions and restores them after a local reconnect', async () => {
+    const { startOutboundRelayClient } = await import('../../packages/server/src/modules/studio/services/global-agent/outbound-relay-client')
+    startOutboundRelayClient({
+      relayUrl: 'https://relay.example.com', relayProtocol: 'mcu-socket.io', userToken: 'user-jwt',
+      localBaseUrl: 'http://127.0.0.1:8648',
+    })
+    const remote = connectRemoteSocket()
+    const local = socketForUrl('http://127.0.0.1:8648/global-agent')
+    const selection = { type: 'mcu.events.subscribe', schema_version: 1, profile: 'default', types: ['chat.task.completed'] }
+    emitRemote(remote, 'mcu.events.subscribe', selection)
+    expect(local.emit).not.toHaveBeenCalledWith('mcu.events.subscribe', expect.anything())
+    local.__handlers.get('connect')()
+    expect(local.emit).toHaveBeenCalledWith('mcu.events.subscribe', { ...selection, apiToken: 'user-jwt' })
+    local.emit.mockClear()
+    local.__handlers.get('disconnect')('transport close')
+    local.__handlers.get('connect')()
+    expect(local.emit).toHaveBeenCalledTimes(1)
+    expect(mockIo).toHaveBeenCalledTimes(2)
+
+    const envelope = { type: 'mcu.webhook.event', schema_version: 1, event: { type: 'chat.task.completed', id: 'task-event' } }
+    const subscribed = { type: 'mcu.events.subscribed', schema_version: 1, ok: true }
+    for (const handler of local.__anyHandlers) {
+      handler('mcu.events.subscribed', subscribed)
+      handler('mcu.webhook.event', envelope)
+    }
+    expect(remote.emit).toHaveBeenCalledWith('mcu.events.subscribed', subscribed)
+    expect(remote.emit).toHaveBeenCalledWith('mcu.webhook.event', envelope)
+
+    emitRemote(remote, 'mcu.events.unsubscribe', { type: 'mcu.events.unsubscribe' })
+    expect(local.emit).toHaveBeenCalledWith('mcu.events.unsubscribe', expect.objectContaining({ apiToken: 'user-jwt' }))
+    local.emit.mockClear()
+    local.__handlers.get('disconnect')('transport close')
+    local.__handlers.get('connect')()
+    expect(local.emit).not.toHaveBeenCalledWith('mcu.events.subscribe', expect.anything())
+  })
+
+  it('preserves the MCU subscriber identity across relay login and drops the old subscription', async () => {
+    const { startOutboundRelayClient } = await import('../../packages/server/src/modules/studio/services/global-agent/outbound-relay-client')
+    startOutboundRelayClient({
+      relayUrl: 'https://relay.example.com', relayProtocol: 'mcu-socket.io', userToken: 'user-jwt',
+      localBaseUrl: 'http://127.0.0.1:8648',
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ token: 'new-login-jwt' }), {
+        headers: { 'content-type': 'application/json' },
+      })),
+    })
+    const remote = connectRemoteSocket()
+    const local = socketForUrl('http://127.0.0.1:8648/global-agent')
+    local.__handlers.get('connect')()
+    emitRemote(remote, 'mcu.events.subscribe', { type: 'mcu.events.subscribe', schema_version: 1 })
+    await new Promise<void>(resolve => remote.__handlers.get('http.request')(
+      { id: 'login', method: 'POST', path: '/api/auth/mcu-login', body: {} }, () => resolve(),
+    ))
+    expect(local.disconnect).toHaveBeenCalledOnce()
+    emitRemote(remote, 'mcu.events.subscribe', { type: 'mcu.events.subscribe', schema_version: 1, apiToken: 'new-login-jwt' })
+    const replacement = sockets.at(-1)
+    expect(replacement).not.toBe(local)
+    replacement.__handlers.get('connect')()
+    expect(replacement.emit).toHaveBeenCalledWith('mcu.events.subscribe', expect.objectContaining({ apiToken: 'new-login-jwt' }))
+    remote.emit.mockClear()
+    for (const handler of local.__anyHandlers) handler('mcu.webhook.event', { type: 'mcu.webhook.event', event: { id: 'old-user' } })
+    expect(remote.emit).not.toHaveBeenCalledWith('mcu.webhook.event', expect.anything())
   })
 
   it('forwards an allowed HTTP request to the local Web UI server', async () => {

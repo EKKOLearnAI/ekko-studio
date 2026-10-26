@@ -5,12 +5,15 @@
 
 import { getSession } from '../../repositories/session-store'
 import { deleteCompressionSnapshot, getCompressionSnapshot } from '../../repositories/compression-snapshot'
+import { getUsage } from '../../repositories/usage-store'
 import { ChatContextCompressor, SUMMARY_PREFIX } from '../context-compressor'
 import { getModelContextLength } from '../../public/provider-runtime'
 import { readConfigYamlForProfile } from '../../public/profile-config'
+import { readCompressionPolicy } from '../../public/compression-policy'
 import { logger } from '../../public/logging'
 import { bridgeLogger } from '../../public/logging'
 import { calcAndUpdateUsage, estimateUsageTokensFromMessages, updateMessageContextTokenUsage } from './usage'
+import { readSessionStateFromDb } from './load-state'
 import {
   assembleCursorSnapshotHistory,
   buildDbHistory as queryDbHistory,
@@ -132,16 +135,6 @@ export async function buildDbSnapshotAwareHistory(
   return buildSnapshotAwareHistory(sessionId, profile, history, modelContext)
 }
 
-function clampRatio(value: unknown, fallback: number, min: number, max: number): number {
-  const n = typeof value === 'number' && Number.isFinite(value) ? value : fallback
-  return Math.min(max, Math.max(min, n))
-}
-
-function clampInt(value: unknown, fallback: number, min: number, max: number): number {
-  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback
-  return Math.min(max, Math.max(min, n))
-}
-
 function readDefaultModelContext(config: Record<string, any>, fallback: CompressionModelContext): CompressionModelContext {
   const modelConfig = config?.model
   if (typeof modelConfig === 'string') {
@@ -187,20 +180,10 @@ async function resolveCompressionModelContext(
 }
 
 async function getRunChatCompressionConfig(profile: string, contextLength: number): Promise<RunChatCompressionConfig> {
-  let raw: Record<string, any> = {}
-  try {
-    raw = (await readConfigYamlForProfile(profile))?.compression || {}
-  } catch (err) {
-    logger.warn(err, '[context-compress] failed to read compression config for profile %s, using defaults', profile)
-  }
-
-  const threshold = clampRatio(raw.threshold, 0.5, 0.05, 0.95)
-  const targetRatio = clampRatio(raw.target_ratio, 0.2, 0.01, 0.8)
-  const protectLastN = clampInt(raw.protect_last_n, 20, 0, 500)
-  const protectFirstN = clampInt(raw.protect_first_n, 3, 0, 100)
+  const { enabled, threshold, targetRatio, protectLastN, protectFirstN } = await readCompressionPolicy(profile)
 
   return {
-    enabled: raw.enabled !== false,
+    enabled,
     triggerTokens: Math.floor(contextLength * threshold),
     compressor: {
       triggerTokens: Math.floor(contextLength * threshold),
@@ -273,6 +256,7 @@ export async function buildCompressedHistory(
       profile,
       model: modelContext.model,
       provider: modelContext.provider,
+      baseUrl: upstream,
     })
     const compressionConfig = await getRunChatCompressionConfig(profile, contextLength)
     const triggerTokens = compressionConfig.triggerTokens
@@ -287,15 +271,24 @@ export async function buildCompressedHistory(
     const currentRunInputTokens = typeof currentInputTokens === 'number' && Number.isFinite(currentInputTokens) && currentInputTokens > 0
       ? Math.floor(currentInputTokens)
       : 0
+    // Exact prompt size the provider reported for this session's latest Hermes call since the last
+    // compression. The local cl100k estimate can undercount it badly, so it is a floor for the decision.
+    // Usage from before the last history clear (ms cutoff on the session) describes deleted history.
+    const contextStartMs = Math.max(snapshot?.updatedAt ?? 0, getSession(sessionId)?.history_cleared_at ?? 0)
+    const lastUsage = getUsage(sessionId, 'hermes')
+    const realPromptTokens = lastUsage && lastUsage.created_at > contextStartMs
+      ? lastUsage.input_tokens + lastUsage.cache_read_tokens + lastUsage.cache_write_tokens
+      : 0
     const estimateLocalContextTokens = async (messages: ChatMessage[], messageTokens: number) => {
       const localMessageTokens = Math.max(0, Math.floor(messageTokens))
+      const floor = messages.length > 0 ? realPromptTokens : 0
       try {
         const estimate = await contextTokenEstimator?.(messages, localMessageTokens)
-        if (typeof estimate === 'number' && Number.isFinite(estimate) && estimate > 0) return Math.floor(estimate)
+        if (typeof estimate === 'number' && Number.isFinite(estimate) && estimate > 0) return Math.max(Math.floor(estimate), floor)
       } catch (err) {
         logger.warn(err, '[context-compress] session=%s: fixed context token estimate failed; using message-only estimate', sessionId)
       }
-      return localMessageTokens
+      return Math.max(localMessageTokens, floor)
     }
     const emitContextUsage = (contextTokens: number) => {
       cState.contextTokens = contextTokens
@@ -486,6 +479,8 @@ export async function compressHistory(
       historyRevision: session?.history_revision ?? 0,
       workerKey: `${summarizerProfile}:compression:${sessionId}`,
       allowHermesFallback: modelContext.allowHermesFallback !== false,
+      // Only called after the caller's threshold check (which may use the provider floor) said compress.
+      overBudget: true,
     })
     const afterTokens = await calcAndUpdateUsage(sessionId, cState, emit, {
       truncateToolResultsForContext: true,
@@ -551,6 +546,8 @@ export async function compressHistory(
     replaceState(sessionMap, sessionId, 'compression.completed', failedMeta)
     logger.warn(err, '[chat-run-socket] compression failed for session %s, using assembled context', sessionId)
     emit('compression.completed', failedMeta)
+    // Nothing compressible remains while still over budget: callers must see the too-small error.
+    if (isContextWindowTooSmallError(err)) throw err
     return history
   }
 }
@@ -560,17 +557,28 @@ export async function forceCompressBridgeHistory(
   profile: string,
   _messages: ChatMessage[],
   beforeTokenOverride?: number | null,
+  options: CompressionModelContext & {
+    upstream?: string
+    apiKey?: string
+    apiMode?: string
+    excludeLastUser?: boolean
+    force?: boolean
+    /** Hermes measured the context over budget and requested this compression. */
+    overBudget?: boolean
+  } = {},
 ): Promise<BridgeCompressionResult> {
   const initialSnapshot = getCompressionSnapshot(sessionId)
   const session = getSession(sessionId)
+  const modelContext = { model: options.model || session?.model, provider: options.provider || session?.provider }
+  const historyOptions = { excludeLastUser: options.excludeLastUser ?? true }
   const history = initialSnapshot?.compressedThroughMessageId != null
     ? await buildDbSnapshotAwareHistory(
         sessionId,
         profile,
-        { excludeLastUser: true },
-        { model: session?.model, provider: session?.provider },
+        historyOptions,
+        modelContext,
       )
-    : await buildDbHistory(sessionId, { excludeLastUser: true })
+    : await buildDbHistory(sessionId, historyOptions)
 
   if (history.length === 0) {
     return {
@@ -587,9 +595,9 @@ export async function forceCompressBridgeHistory(
     }
   }
 
-  const upstream = ''
-  const apiKey = undefined
-  const contextLength = getModelContextLength({ profile, model: session?.model, provider: session?.provider })
+  const upstream = options.upstream || ''
+  const apiKey = options.apiKey
+  const contextLength = getModelContextLength({ profile, ...modelContext, baseUrl: upstream })
   const compressionConfig = await getRunChatCompressionConfig(session?.profile || profile, contextLength)
   const beforeUsage = initialSnapshot?.compressedThroughMessageId != null
     ? (() => {
@@ -613,17 +621,19 @@ export async function forceCompressBridgeHistory(
   const compressor = new ChatContextCompressor({ config: compressionConfig.compressor })
   const summarizerProfile = session?.profile || profile || 'default'
   const summarizerModelContext = await resolveCompressionModelContext(summarizerProfile, {
-    model: session?.model,
-    provider: session?.provider,
+    ...modelContext,
   })
   const result = await compressor.compress(history, upstream, apiKey, sessionId, {
     profile: summarizerProfile,
     model: summarizerModelContext.model,
     provider: summarizerModelContext.provider,
+    apiMode: options.apiMode,
     sessionId,
     historyRevision: session?.history_revision ?? 0,
     workerKey: `${summarizerProfile}:compression:${sessionId}`,
-    allowHermesFallback: true,
+    allowHermesFallback: options.allowHermesFallback !== false,
+    force: options.force,
+    overBudget: options.overBudget,
   })
   const compressedMessages = result.messages.map(m => {
     const msg: any = { role: m.role, content: m.content }
@@ -682,7 +692,12 @@ export async function forceCompressBridgeHistory(
 export function getOrCreateSession(sessionMap: Map<string, SessionState>, sessionId: string): SessionState {
   let state = sessionMap.get(sessionId)
   if (!state) {
-    state = { messages: [], isWorking: false, events: [], queue: [] }
+    // A deleted cache entry does not mean the conversation is new. Run setup
+    // calls this before the agent handler, so an empty placeholder would also
+    // bypass that handler's DB load and later replace history during resume.
+    state = getSession(sessionId)
+      ? readSessionStateFromDb(sessionId)
+      : { messages: [], isWorking: false, events: [], queue: [] }
     sessionMap.set(sessionId, state)
   }
   return state

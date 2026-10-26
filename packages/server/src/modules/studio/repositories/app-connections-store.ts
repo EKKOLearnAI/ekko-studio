@@ -15,6 +15,7 @@ export interface AppConnectionRecord {
   device_model: string
   connection_type: AppConnectionType
   user_id: number
+  push_enabled: number
   cloud_user_id: number
   token_hash: string
   token_expires_at: number
@@ -79,6 +80,7 @@ function connectionRowToRecord(row: StoredAppConnectionRow | Record<string, any>
     device_model: String(row.device_model || ''),
     connection_type: normalizeConnectionType(row.connection_type),
     user_id: Number(row.user_id || 0),
+    push_enabled: row.push_enabled === 0 || row.push_enabled === false ? 0 : 1,
     cloud_user_id: Number(row.cloud_user_id || 0),
     token_hash: String(row.token_hash || ''),
     token_expires_at: Number(row.token_expires_at || 0),
@@ -206,6 +208,7 @@ export function upsertAppConnection(input: {
       device_model: input.deviceModel,
       connection_type: input.connectionType,
       user_id: input.userId,
+      push_enabled: existing?.push_enabled ?? 1,
       cloud_user_id: cloudUserId,
       token_hash: tokenHash,
       token_expires_at: input.tokenExpiresAt,
@@ -268,6 +271,26 @@ export function listAppConnections(): AppConnectionRecord[] {
     `SELECT * FROM ${APP_CONNECTIONS_TABLE} WHERE revoked_at IS NULL ORDER BY updated_at DESC, id DESC`,
   ).all() as unknown as StoredAppConnectionRow[]
   return rows.map(connectionRowToRecord)
+}
+
+export function updateAppConnectionPushEnabled(id: number, enabled: boolean, now = epochSeconds()): AppConnectionRecord | null {
+  const connection = listAppConnections().find(row => row.id === id)
+  if (!connection) return null
+  const next = { ...connection, push_enabled: enabled ? 1 : 0, updated_at: now }
+  const db = getDb()
+  if (db) db.prepare(`UPDATE ${APP_CONNECTIONS_TABLE} SET push_enabled=?, updated_at=? WHERE id=? AND revoked_at IS NULL`)
+    .run(next.push_enabled, now, id)
+  else jsonSet(APP_CONNECTIONS_TABLE, String(id), next as any)
+  return next
+}
+
+/** Called after authentication; browser JWTs have no App device preference. */
+export function isAppConnectionPushEnabled(token: string): boolean {
+  if (!token) return true
+  const hash = hashAppCredential(token), db = getDb()
+  const row = db ? db.prepare(`SELECT push_enabled FROM ${APP_CONNECTIONS_TABLE} WHERE token_hash=?`).get(hash)
+    : Object.values(jsonGetAll(APP_CONNECTIONS_TABLE)).find(connection => connection.token_hash === hash)
+  return row?.push_enabled !== 0 && row?.push_enabled !== false
 }
 
 export function assignLegacyCloudAppConnectionUser(deviceCode: string, cloudUserId: number): boolean {

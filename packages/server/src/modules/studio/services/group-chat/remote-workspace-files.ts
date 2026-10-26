@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { Transform, type Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { isSensitivePath } from '../files/file-policy'
+import { ensureDirectory } from '../workspace/directory'
 import {
   groupWorkspaceRelativePath,
   resolveGroupWorkspacePath,
@@ -195,7 +196,7 @@ export async function uploadRemoteWorkspaceFile(
       throw workspaceError('File no longer exists', 409, 'workspace_conflict')
     }
 
-    await mkdir(dirname(target.fullPath), { recursive: true, mode: 0o700 })
+    await ensureDirectory(dirname(target.fullPath), { mode: 0o700 })
     const checked = await resolveGroupWorkspacePath(workspace, target.relativePath)
     const tempPath = resolve(dirname(checked.fullPath), `.${randomUUID()}.group-chat-upload`)
     const tempFile = await open(
@@ -307,7 +308,7 @@ export async function performRemoteWorkspaceAction(
         if (currentHash && expectedHash(input.expectedSha256) !== currentHash) {
           throw workspaceError('File changed since it was read', 409, 'workspace_conflict')
         }
-        await mkdir(dirname(target.fullPath), { recursive: true, mode: 0o700 })
+        await ensureDirectory(dirname(target.fullPath), { mode: 0o700 })
         const checked = await resolveGroupWorkspacePath(workspace, target.relativePath)
         const tempPath = resolve(dirname(checked.fullPath), `.${randomUUID()}.group-chat-write`)
         const tempFile = await open(tempPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY, 0o600)

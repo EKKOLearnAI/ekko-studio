@@ -65,7 +65,7 @@ const GroupMessageItemStub = defineComponent({
   props: {
     message: { type: Object, required: true },
   },
-  template: '<div class="message-stub" :data-message-id="message.id">{{ message.toolName || message.content }}</div>',
+  template: '<div class="message-stub" :data-message-id="message.id">{{ message.toolName || message.content }}<slot name="before-workspace-changes" /></div>',
 })
 
 function mountCard(message: ChatMessage) {
@@ -89,6 +89,24 @@ function mountCard(message: ChatMessage) {
 }
 
 describe('GroupAgentRunCard tool list', () => {
+  it('shows one shared usage card inside the completed reply bubble without a blank transcript row', async () => {
+    const usage = { runId: 'run-current', assistantMessageId: 'reply', inputTokens: 1200, outputTokens: 200,
+      cacheReadTokens: 300, cacheHitRate: 0.25, costUsd: 0.0123, tokensPerSecond: 50, isEstimated: false }
+    const items = [runItem({ id: 'reply', content: 'Done' }), runItem({ id: 'usage', runUsage: usage })]
+    const wrapper = mountCard(runMessage(items, true))
+    expect(wrapper.find('.run-usage-card').exists()).toBe(false)
+    await wrapper.setProps({ message: runMessage(items, false) })
+    expect(wrapper.findAll('.run-usage-card')).toHaveLength(1)
+    expect(wrapper.findAll('.run-transcript-item')).toHaveLength(1)
+    expect(wrapper.find('.run-card .run-transcript-item .run-usage-card').exists()).toBe(true)
+    expect(wrapper.get('.run-usage-card').text()).toContain('25.0%')
+    expect(wrapper.get('.run-usage-card').text()).toContain('$0.0123')
+    expect(wrapper.get('.run-usage-card').text()).toContain('50.0 tok/s')
+    await wrapper.setProps({ message: runMessage([items[1]], false) })
+    expect(wrapper.findAll('.run-usage-card')).toHaveLength(1)
+    expect(wrapper.find('.run-card .run-usage-only .run-usage-card').exists()).toBe(true)
+    expect(wrapper.find('.run-transcript').exists()).toBe(false)
+  })
   it('places the current Agent/Run tool calls newest-first before its transcript', () => {
     const wrapper = mountCard(runMessage([
       runItem({ id: 'current-tool-1', role: 'tool', toolName: 'read_file', toolStatus: 'done' }),

@@ -171,10 +171,10 @@ function handleCardClick(e: MouseEvent) {
 @use '@/styles/variables' as *;
 
 .job-card {
-  background-color: $bg-card;
-  border: 1px solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   transition: border-color $transition-fast;
   cursor: pointer;
 
@@ -196,7 +196,7 @@ function handleCardClick(e: MouseEvent) {
 }
 
 .job-name {
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 600;
   color: $text-primary;
   overflow: hidden;
@@ -206,9 +206,9 @@ function handleCardClick(e: MouseEvent) {
 }
 
 .status-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  padding: calc(2px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 10px);
   font-weight: 500;
 
   &.success {
@@ -235,7 +235,7 @@ function handleCardClick(e: MouseEvent) {
 .card-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   margin-bottom: 14px;
 }
 
@@ -246,18 +246,18 @@ function handleCardClick(e: MouseEvent) {
 }
 
 .info-label {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .info-value {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
 }
 
 .run-status {
   margin-inline-start: 6px;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 500;
 
   &.ok { color: $success; }
@@ -265,14 +265,14 @@ function handleCardClick(e: MouseEvent) {
 }
 
 .mono {
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .card-actions {
   display: flex;
-  gap: 4px;
-  border-top: 1px solid $border-light;
-  padding-top: 10px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
+  padding-top: calc(10px * var(--spacing-scale, 1));
 }
 </style>

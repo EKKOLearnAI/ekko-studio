@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NButton, NSpin, NEmpty, useMessage } from 'naive-ui'
+import { NSpin, NButton, NEmpty, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useFilesStore, isPreviewableFile, isTextFile } from '@/stores/hermes/files'
 import { downloadFile } from '@/api/studio/download'
@@ -138,22 +138,22 @@ async function handleDownload(entry: FileEntry) {
 @use '@/styles/variables' as *;
 
 .file-list {
-  padding: 8px 16px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
 }
 
 .file-list-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 72px 104px 60px;
   align-items: center;
-  column-gap: 8px;
+  column-gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .file-list-header {
-  padding: 6px 12px;
-  font-size: 12px;
+  padding: calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 500;
   color: $text-muted;
-  border-bottom: 1px solid $border-light;
+  border-bottom: var(--border-width, 1px) solid $border-light;
   margin-bottom: 4px;
   user-select: none;
 }
@@ -168,7 +168,7 @@ async function handleDownload(entry: FileEntry) {
 
 .sort-indicator {
   margin-inline-start: 2px;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .file-actions-placeholder {
@@ -176,10 +176,10 @@ async function handleDownload(entry: FileEntry) {
 }
 
 .file-list-row {
-  padding: 8px 12px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 
   &:hover {
     background-color: rgba(var(--accent-primary-rgb), 0.06);
@@ -193,7 +193,7 @@ async function handleDownload(entry: FileEntry) {
 .file-name {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
@@ -222,7 +222,7 @@ async function handleDownload(entry: FileEntry) {
   transition: opacity $transition-fast;
   display: flex;
   justify-content: flex-end;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 @media (max-width: $breakpoint-mobile) {

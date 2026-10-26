@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+enableAutoUnmount(afterEach)
 
 const routeMock = vi.hoisted(() => ({
   name: 'hermes.chat' as string,
@@ -37,15 +39,18 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
-vi.mock('@/composables/useTheme', () => ({
-  useTheme: () => ({
-    isDark: false,
-    isComic: false,
-    customization: { value: { fontSize: 14, textColor: null, accentColor: null } },
-    hasBackgroundImage: false,
-    syncThemeFromServer: vi.fn().mockResolvedValue(undefined),
-  }),
-}))
+vi.mock('@/composables/useTheme', async () => {
+  const { ref } = await import('vue')
+  return {
+    useTheme: () => ({
+      isDark: ref(false),
+      isComic: ref(false),
+      customization: ref({ fontSize: 14, textColor: null, accentColor: null }),
+      hasCustomBackground: ref(false),
+      syncThemeFromServer: vi.fn().mockResolvedValue(undefined),
+    }),
+  }
+})
 
 vi.mock('@/composables/useKeyboard', () => ({
   useKeyboard: vi.fn(),
@@ -89,6 +94,10 @@ vi.mock('@/components/layout/GlobalPendingActions.vue', () => ({
 
 vi.mock('@/components/layout/RuntimeRestartPrompt.vue', () => ({
   default: { name: 'RuntimeRestartPrompt', template: '<div class="runtime-restart-prompt-test" />' },
+}))
+
+vi.mock('@/components/layout/StudioAnnouncementPrompt.vue', () => ({
+  default: { name: 'StudioAnnouncementPrompt', template: '<div />' },
 }))
 
 vi.mock('@/components/hermes/chat/SessionSearchModal.vue', () => ({
@@ -193,23 +202,24 @@ describe('App web pet mounting', () => {
     expect(wrapper.findComponent({ name: 'DesktopTitleBar' }).exists()).toBe(false)
   })
 
-  it('mounts the standalone Windows control bar above main content', async () => {
+  it.each(['win32', 'linux'])('mounts the %s control bar above main content', async (platform) => {
     Object.defineProperty(window, 'hermesDesktop', {
       configurable: true,
-      value: { isDesktop: true, platform: 'win32' },
+      value: { isDesktop: true, platform },
     })
 
     const wrapper = mountApp()
     await flushPromises()
 
-    expect(wrapper.find('.app-shell').classes()).toContain('desktop-platform-win32')
+    expect(wrapper.find('.app-shell').classes()).toContain(`desktop-platform-${platform}`)
     expect(wrapper.findComponent({ name: 'DesktopTitleBar' }).exists()).toBe(true)
+    wrapper.unmount()
   })
 
-  it('expands the Windows control bar when a page-owned sidebar is collapsed', async () => {
+  it.each(['win32', 'linux'])('expands the %s control bar when a page-owned sidebar is collapsed', async (platform) => {
     Object.defineProperty(window, 'hermesDesktop', {
       configurable: true,
-      value: { isDesktop: true, platform: 'win32' },
+      value: { isDesktop: true, platform },
     })
     appStoreMock.pageSidebarExpanded = false
 
@@ -217,15 +227,16 @@ describe('App web pet mounting', () => {
     await flushPromises()
 
     expect(wrapper.findComponent({ name: 'DesktopTitleBar' }).props('leftOffset')).toBe(10)
+    wrapper.unmount()
   })
 
-  it('marks Windows desktop shell as maximized when the native window state changes', async () => {
+  it.each(['win32', 'linux'])('marks the %s shell as maximized when native window state changes', async (platform) => {
     let listener: ((state: { isMaximized: boolean }) => void) | undefined
     Object.defineProperty(window, 'hermesDesktop', {
       configurable: true,
       value: {
         isDesktop: true,
-        platform: 'win32',
+        platform,
         getWindowState: vi.fn().mockResolvedValue({ isMaximized: false }),
         onWindowStateChange: vi.fn((callback) => {
           listener = callback
@@ -242,6 +253,7 @@ describe('App web pet mounting', () => {
     await flushPromises()
 
     expect(wrapper.find('.app-shell').classes()).toContain('desktop-window-maximized')
+    wrapper.unmount()
   })
 
   it('does not duplicate the web pet on the dedicated desktop pet route', () => {

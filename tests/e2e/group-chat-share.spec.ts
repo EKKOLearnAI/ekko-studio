@@ -188,7 +188,8 @@ async function mockInviteApi(page: Page, valid = true, delayMs = 0) {
 
 test.describe('invite-only group chat share page', () => {
   test('folds group tool calls with the same summary used in single chat', async ({ page }) => {
-    await mockInviteSocket(page, null, 'Read the project files.', true)
+    const reply = 'Read the project files. ' + 'The tool summary should fill the existing message bubble. '.repeat(6)
+    await mockInviteSocket(page, null, reply, true)
     await mockInviteApi(page)
     await page.goto('/#/share/group-chat/ROOM1')
     await page.locator('#group-chat-guest-name input').fill('Visitor')
@@ -205,10 +206,24 @@ test.describe('invite-only group chat share page', () => {
     await expect(card.locator('.run-tool-list')).toBeVisible()
     await card.locator('.tool-line').click()
     await expect(card.locator('.tool-details')).toContainText('File contents')
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 })
+      await expect.poll(() => card.locator('.tool-run-card').evaluate(element => {
+        const summary = element.getBoundingClientRect()
+        const bubble = element.closest('.run-card')!.getBoundingClientRect()
+        const header = element.querySelector('.tool-run-header')!.getBoundingClientRect()
+        const list = element.querySelector('.run-tool-list')!.getBoundingClientRect()
+        const style = getComputedStyle(element)
+        const innerWidth = summary.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+        return Math.abs(summary.width - bubble.width) < 0.75
+          && Math.abs(header.width - innerWidth) < 0.75 && Math.abs(list.width - innerWidth) < 0.75
+          && element.scrollWidth <= element.clientWidth
+      }), { message: `Tool summary and expanded calls fill the bubble at ${width}px` }).toBe(true)
+    }
     await toggle.press('Enter')
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await expect(card.locator('.run-tool-list')).toHaveCount(0)
-    await expect(page.getByText('Read the project files.', { exact: true })).toBeVisible()
+    await expect(page.getByText(reply.trim(), { exact: true })).toBeVisible()
   })
 
   test('loads an Agent Markdown image through the room invite without filesystem API access', async ({ page }) => {
@@ -239,7 +254,7 @@ test.describe('invite-only group chat share page', () => {
     })
     await page.locator('#group-chat-guest-name input').fill('Visitor')
     await page.getByRole('button', { name: 'Enter room' }).click()
-    await expect(page.locator('.invite-loading')).toBeVisible()
+    await expect(page.locator('.shared-group-chat-view > .page-loading-overlay')).toBeVisible()
     await expect(page.locator('.invite-card')).toHaveCount(0)
     await expect(page.locator('.room-title-text')).toHaveText('Shared Planning Room')
     await expect(page.getByText('Welcome to the shared room')).toBeVisible()
@@ -320,6 +335,66 @@ const groupPlan = (revision: number, agent = 'worker') => ({
       { id: 'b', step: 'Verify results', status: 'pending' }] }),
 })
 
+const groupUsage = (agent = 'worker', outputTokens: number | null = 200) => ({
+  id: `usage-${agent}`, roomId: 'room-shared', senderId: `agent-${agent}`, senderName: agent,
+  role: 'tool', tool_name: 'run_usage', tool_call_id: `usage-${agent}`, run_id: 'shared-run', timestamp: 4,
+  content: JSON.stringify({ runId: 'shared-run', assistantMessageId: 'shared-message-2', inputTokens: 1200,
+    outputTokens, cacheReadTokens: 300, cacheHitRate: 0.25, costUsd: 0.0123, tokensPerSecond: 50,
+    speedSource: 'model', isEstimated: false }),
+})
+
+const usageWorkspaceDiff = {
+  id: 'usage-diff', roomId: 'room-shared', senderId: 'agent-worker', senderName: 'Worker',
+  role: 'tool', tool_name: 'workspace_diff', tool_call_id: 'workspace_diff:shared-run', run_id: 'shared-run', timestamp: 4,
+  content: JSON.stringify({ kind: 'workspace_diff', version: 1, room_id: 'room-shared', session_id: 'session-worker',
+    run_id: 'shared-run', parent_message_id: 'shared-message-2', status: 'completed', change_id: 'usage-change',
+    workspace_basename: 'studio', files_changed: 1, additions: 2, deletions: 1, truncated: false,
+    files: [{ id: 1, path: 'src/chat.ts', change_type: 'modified', additions: 2, deletions: 1,
+      patch: 'diff --git a/src/chat.ts b/src/chat.ts\n-old\n+new\n', binary: false, truncated: false }] }),
+}
+
+for (const theme of ['light', 'dark']) {
+  test(`group usage cards restore and update independently in ${theme} mode`, async ({ page }) => {
+    await page.addInitScript(theme => {
+      localStorage.setItem('hermes_brightness', theme)
+      localStorage.setItem('hermes_show_tool_calls', 'false')
+    }, theme)
+    await mockInviteSocket(page, null, 'Task output', false, [groupUsage(), usageWorkspaceDiff])
+    await mockInviteApi(page)
+    await page.goto('/#/share/group-chat/ROOM1')
+    await page.locator('#group-chat-guest-name input').fill('Visitor')
+    await page.getByRole('button', { name: 'Enter room' }).click()
+    const cards = page.locator('.run-usage-card')
+    const worker = page.locator('.group-agent-run').filter({ hasText: 'Task output' })
+    await expect(cards).toHaveCount(1)
+    await expect(cards).toContainText('1,200')
+    await expect(cards).toContainText('25.0%')
+    await expect(cards).toContainText('$0.0123')
+    await expect(cards).toContainText('50.0 tok/s')
+    await expect(worker.locator('.run-transcript-item')).toHaveCount(1)
+    await expect(worker.locator('.run-tools')).toHaveCount(0)
+    await expect(worker.locator('.run-card .msg-content .run-usage-card')).toHaveCount(1)
+    await expect(worker.locator('.run-card .msg-content .assistant-workspace-change')).toHaveCount(1)
+    await expect.poll(() => worker.locator('.run-usage-card').evaluate(element =>
+      element.nextElementSibling?.classList.contains('assistant-workspace-change'))).toBe(true)
+    await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupUsage('worker', 250))
+    await expect(worker.locator('.run-usage-card .run-usage-value').first()).toHaveText('250')
+    await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupUsage('reviewer', null))
+    await expect(cards).toHaveCount(2)
+    await expect(page.locator('.group-agent-run').filter({ hasText: 'reviewer' }).locator('.run-usage-value').first()).toHaveText('—')
+    for (const width of [1440, 390, 320]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect.poll(() => cards.evaluateAll(elements => elements.every(element => element.scrollWidth <= element.clientWidth))).toBe(true)
+      if (width === 390) await worker.locator('.run-column').screenshot({ path: `/tmp/studio-group-token-card-${theme}.png` })
+    }
+    await page.reload()
+    await page.locator('#group-chat-guest-name input').fill('Visitor')
+    await page.getByRole('button', { name: 'Enter room' }).click()
+    await expect(cards).toHaveCount(1)
+    await expect(cards.locator('.run-usage-value').first()).toHaveText('200')
+  })
+}
+
 test('group task cards survive history reload and live stale updates with tool traces hidden', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('hermes_show_tool_calls', 'false'))
   await mockInviteSocket(page, null, 'Task output', false, [groupPlan(2)])
@@ -335,6 +410,34 @@ test('group task cards survive history reload and live stale updates with tool t
   await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupPlan(1, 'reviewer'))
   await expect(cards).toHaveCount(2)
   await expect(page.locator('.group-agent-run').filter({ hasText: 'Task output' }).getByTestId('task-plan-card')).toHaveCount(1)
+  await page.evaluate(() => {
+    const state = (window as any).__PW_SHARED_GROUP_SOCKET__
+    state.socket.__trigger('message', { id: 'short-self', roomId: 'room-shared', senderId: state.options.auth.userId,
+      senderName: 'Visitor', role: 'user', content: 'OK', timestamp: 4 })
+  })
+  await expect(page.locator('.group-message.self .msg-content')).toContainText('OK')
+  for (const width of [1440, 1024, 769, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await expect.poll(() => cards.evaluateAll(elements => elements.every(element => {
+      const card = element.getBoundingClientRect()
+      const container = element.parentElement!.getBoundingClientRect()
+      const run = element.closest('.group-agent-run')!.getBoundingClientRect()
+      const column = element.closest('.run-column')!.getBoundingClientRect()
+      const expectedWidth = window.innerWidth <= 768 ? run.width : Math.min(500, run.width)
+      const gaps = [card.left - container.left, container.right - card.right,
+        card.top - container.top, container.bottom - card.bottom]
+      return gaps.every(gap => Math.abs(gap - 5) < 0.75)
+        && Math.abs(column.width - expectedWidth) < 0.75
+        && element.scrollWidth <= element.clientWidth
+    })), { message: `Task cards retain 5px gaps in 500px desktop or full-width mobile bubbles at ${width}px` }).toBe(true)
+    await expect.poll(() => page.locator('.group-message:not(.embedded) .msg-content').evaluateAll(elements =>
+      elements.every(element => {
+        const bubble = element.getBoundingClientRect()
+        const row = element.closest('.group-message')!.getBoundingClientRect()
+        const expectedWidth = window.innerWidth <= 768 ? row.width : Math.min(500, row.width)
+        return Math.abs(bubble.width - expectedWidth) < 0.75
+      })), { message: `Short user bubbles use 500px on desktop and fill the row on mobile at ${width}px` }).toBe(true)
+  }
   await cards.first().getByRole('button').click()
   await expect(cards.first().locator('ol')).toHaveCount(0)
   await page.reload()

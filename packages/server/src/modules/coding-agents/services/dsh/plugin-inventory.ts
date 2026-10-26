@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module'
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { isMap, isScalar, isSeq, parseDocument, type YAMLMap } from 'yaml'
@@ -6,6 +5,7 @@ import { DshPluginError } from './errors'
 import { dshInstallation, dshPackageDirectory } from './installation'
 import { createHash } from 'node:crypto'
 import { readDshPluginMetadata } from './plugin-metadata'
+import { readDshBundlePatches } from './bundle'
 
 export interface DshNativePluginEntry {
   entryId: string
@@ -53,10 +53,13 @@ function within(root: string, path: string) { const rel = relative(root, path); 
 /** Resolve the installed CLI's own dependency graph, not Studio's supplemental package list. */
 export async function readNativeDshPluginInventory(command: string, sourceHome: string) {
   const installation = await dshInstallation(command)
-  let packagePath: string
-  try { packagePath = createRequire(installation).resolve('@deepseek-ai/dsh-agent-presets/package.json') }
-  catch { throw new DshPluginError(422, 'DSH_CAPABILITY_UNSUPPORTED', 'This DSH installation does not expose native presets') }
-  const inventory = await readNativeDshPresetRoots(packagePath, sourceHome)
+  let legacyDirectory: string | undefined
+  try { legacyDirectory = await dshPackageDirectory('@deepseek-ai/dsh-agent-presets', [installation]) } catch (error) {
+    if (!(error instanceof DshPluginError) || error.code !== 'DSH_DEPENDENCY_UNAVAILABLE') throw error
+  }
+  const inventory = legacyDirectory
+    ? await readNativeDshPresetRoots(join(legacyDirectory, 'package.json'), sourceHome)
+    : await readDeclaredDshPresets(installation, sourceHome)
   const cache = new Map<string, ReturnType<typeof readDshPluginMetadata>>()
   await Promise.all(inventory.presets.flatMap(preset => preset.entries.map(async entry => {
     if (!cache.has(entry.moduleName)) cache.set(entry.moduleName, readDshPluginMetadata(entry.moduleName, [installation, join(sourceHome, 'profiles/web/package.json')]))
@@ -64,6 +67,60 @@ export async function readNativeDshPluginInventory(command: string, sourceHome: 
     if (metadata) { entry.title = metadata.title; entry.description = metadata.description }
   })))
   return { ...inventory, ...await readDshWebPackages(installation, sourceHome) }
+}
+
+/** New DSH releases declare presets in bundle/profile patches instead of a
+ * separate presets directory. Inspect YAML nodes without evaluating !!js. */
+async function readDeclaredDshPresets(installation: string, sourceHome: string) {
+  const profile = join(sourceHome, 'profiles/web/package.json')
+  let manifest: any = { dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } } }
+  try { manifest = JSON.parse(await readFile(profile, 'utf8')) } catch (error: any) { if (error.code !== 'ENOENT') throw error }
+  const layers: Array<{ path: string; content: string; trust: 'system' | 'user' }> = []
+  for (const name of manifest.dsh?.profile?.bundles || []) {
+    const directory = await dshPackageDirectory(name, [installation, profile])
+    layers.push(...(await readDshBundlePatches(directory)).map(layer => ({ ...layer, trust: name === '@deepseek-ai/dsh-base' || name === '@deepseek-ai/dsh-web-app' ? 'system' as const : 'user' as const })))
+  }
+  for (const path of [join(sourceHome, 'profiles/web/cordis.patch.yml'), join(sourceHome, 'cordis.patch.yml')]) {
+    try { layers.push({ path, content: await readFile(path, 'utf8'), trust: 'user' }) } catch (error: any) { if (error.code !== 'ENOENT') throw error }
+  }
+  const rows = new Map<string, { row: YAMLMap; path: string; trust: 'system' | 'user' }>()
+  for (const layer of layers) {
+    const doc = parseDocument(layer.content, { logLevel: 'silent' })
+    if (doc.errors.length || !isSeq(doc.contents)) throw new DshPluginError(422, 'DSH_COMPOSITION_UNREADABLE', 'Invalid DSH bundle or profile patch')
+    for (const patch of doc.contents.items) {
+      if (!isMap(patch)) continue
+      const insert = patch.get('insert', true)
+      if (isSeq(insert)) for (const row of insert.items) {
+        if (isMap(row) && typeof row.get('id') === 'string') rows.set(String(row.get('id')), { row: row.clone() as YAMLMap, path: layer.path, trust: layer.trust })
+      }
+      const target = typeof patch.get('id') === 'string' ? rows.get(String(patch.get('id'))) : undefined
+      if (target && (!patch.has('name') || patch.get('name') === target.row.get('name'))) {
+        for (const key of ['config', 'disabled']) if (patch.has(key)) target.row.set(key, patch.get(key, true))
+        target.path = layer.path; target.trust = layer.trust
+      }
+    }
+  }
+  const registry = [...rows.values()].find(({ row }) => row.get('name') === '@deepseek-ai/dsh-agent-preset-registry')
+  if (!registry) throw new DshPluginError(422, 'DSH_CAPABILITY_UNSUPPORTED', 'This DSH Web profile does not declare an Agent preset registry')
+  const defaultPreset = String(registry.row.getIn(['config', 'selectedDefault']) || registry.row.getIn(['config', 'default']) || 'standard')
+  const presets: Array<DshNativePreset & { order: number }> = []
+  for (const { row, path, trust } of rows.values()) {
+    if (row.get('name') !== '@deepseek-ai/dsh-agent-preset' || row.get('disabled') === true) continue
+    const config = row.get('config', true)
+    if (!isMap(config) || typeof config.get('id') !== 'string') continue
+    const id = String(config.get('id'))
+    const preset: DshNativePreset & { order: number } = { id, name: String(config.get('name') || id), description: String(config.get('description') || ''), trust,
+      sourcePath: path, isDefault: id === defaultPreset, entries: [], order: typeof config.get('order') === 'number' ? Number(config.get('order')) : Number.MAX_SAFE_INTEGER }
+    try {
+      const composition = parseDocument('[]')
+      composition.contents = config.get('plugins', true) as any
+      preset.entries = nativePluginEntries(String(composition))
+    } catch { preset.error = 'DSH_COMPOSITION_UNREADABLE' }
+    presets.push(preset)
+  }
+  presets.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+  return { source: 'native-presets' as const, sourceHome, packageVersion: String(JSON.parse(await readFile(installation, 'utf8')).version || ''), defaultPreset,
+    runtimeConnected: false as const, discovery: 'bundle-declarations' as const, presets: presets.map(({ order: _order, ...preset }) => preset) }
 }
 
 /** Package installation and preset composition are separate native inventories. */

@@ -1,6 +1,16 @@
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
+import { hermesStudioMcpCapabilities } from '../chat-run/studio-mcp'
+import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
+import { findPushRunLink, linkPushRun, type PushRunRef } from '../../repositories/run-push-store'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
 import type { TaskPlanSnapshot } from '../../contracts/task-plan'
 import { groupTaskPlanMessage } from './task-plan'
+import { groupRunUsageMessage } from './run-usage'
+import { completeRunUsage } from '../../repositories/run-usage-store'
+import { recordBridgeModelUsage } from '../usage/bridge-model-usage'
+import { groupRunUser } from './run-user'
+import { runMcpCredentials } from '../auth/run-mcp-credentials'
+import type { AuthenticatedUser } from '../../public/auth'
 import { io, Socket } from 'socket.io-client'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { getToken } from '../../public/auth'
@@ -21,7 +31,7 @@ import {
     discardWorkspaceRunCheckpoint,
     startWorkspaceRunCheckpoint,
 } from '../chat-run/workspace-diff-tracker'
-import type { ContentBlock } from '../chat-run/types'
+import type { ChatCodingAgentId, ContentBlock } from '../chat-run/types'
 import type { StoredMessage } from './types'
 import type { GroupRoomSummaryService, GroupRuntimeContext } from './room-summary'
 import {
@@ -38,7 +48,7 @@ export const GROUP_CHAT_AGENT_SOCKET_SECRET = randomBytes(32).toString('hex')
 
 export interface AgentConfig {
     agentId?: string
-    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     agentMode?: 'scoped' | 'global'
     profile: string
     provider?: string
@@ -106,7 +116,7 @@ export function mentionMessageToStoredContextMessage(roomId: string, msg: Mentio
 type GroupEstimateMessage = { role: 'user' | 'assistant'; content: string }
 export type GroupModelContext = { model: string; provider: string }
 export type GroupAgentSessionConfig = {
-    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     agentMode?: 'scoped' | 'global'
     provider?: string
     model?: string
@@ -235,7 +245,7 @@ export interface GroupAgentEventSink {
 
 export interface GroupAgentExecutor {
     readonly agentId: string
-    readonly agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+    readonly agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     readonly agentMode: 'scoped' | 'global'
     readonly profile: string
     readonly provider: string
@@ -294,7 +304,7 @@ export interface GroupChatRunService {
             workspace?: string | null
             source?: string
             session_source?: 'group_chat'
-            coding_agent_id?: 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'ekko-agent'
+            coding_agent_id?: ChatCodingAgentId
             mode?: 'scoped' | 'global'
             profile?: string
             reasoning_effort?: string
@@ -315,12 +325,16 @@ export interface GroupChatRunService {
             memory_default_write_scope?: Record<string, string>
         },
         options?: {
+            user?: AuthenticatedUser
+            groupRunIsCurrent?: () => boolean
+            pushRoot?: PushRunRef
             profile?: string
             timeoutMs?: number
             onEvent?: (event: string, payload: any) => void
         },
     ): Promise<{
         ok: boolean
+        run_id?: string
         output?: string | null
         reasoning?: string | null
         error?: string
@@ -339,7 +353,7 @@ export interface GroupChatRunService {
 
 export class AgentClient implements GroupAgentExecutor {
     readonly agentId: string
-    readonly agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
+    readonly agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     readonly agentMode: 'scoped' | 'global'
     readonly profile: string
     readonly provider: string
@@ -375,7 +389,9 @@ export class AgentClient implements GroupAgentExecutor {
     constructor(config: AgentConfig, handlers: AgentEventHandler = {}, eventSink: GroupAgentEventSink | null = null) {
         this.agentId = config.agentId || Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
         this.agent = config.agent || 'hermes'
-        this.agentMode = config.agentMode === 'global' && (this.agent === 'claude' || this.agent === 'codex' || this.agent === 'pi' || this.agent === 'grok' || (this.agent === 'opencode' || this.agent === 'dsh'))
+        this.agentMode = isGlobalOnlyCodingAgent(this.agent)
+            ? 'global'
+            : config.agentMode === 'global' && (this.agent === 'claude' || this.agent === 'codex' || this.agent === 'pi' || this.agent === 'grok' || (this.agent === 'antigravity' || isNativeCodingAgent(this.agent)) || (this.agent === 'opencode' || this.agent === 'dsh'))
             ? 'global'
             : 'scoped'
         this.profile = config.profile
@@ -1148,6 +1164,8 @@ export class AgentClient implements GroupAgentExecutor {
     ): Promise<void> {
         if (!this.chatRunService) throw new Error('Chat run service is not ready')
         const responseRunId = groupMessageId(roomId, this.profile, this.name)
+        const pushRoot = findPushRunLink('group_root', roomId, msg.handoffChainId || msg.messageId || '')
+        if (pushRoot) linkPushRun('group_runtime', roomId, responseRunId, pushRoot)
         const runMessageId = groupMessagePartId(responseRunId, 0)
         const sessionId = groupRuntimeSessionId(roomId, this.profile, this.name)
         this.activeSessions.set(roomId, sessionId)
@@ -1161,6 +1179,7 @@ export class AgentClient implements GroupAgentExecutor {
         let reasoningContent = ''
         let sawReasoningDelta = false
         let abortRequested = false
+        let runUsageReceived = false
         let workspaceRunState: WorkspaceDiffRunState | null = null
         let toolEventWrites = Promise.resolve()
         const isCurrent = () => this.replySessionIsCurrent(roomId, sessionId, interruptVersion)
@@ -1197,18 +1216,19 @@ export class AgentClient implements GroupAgentExecutor {
                         ? 'pi'
                         : this.agent === 'grok'
                             ? 'grok'
+                            : (this.agent === 'cursor' || this.agent === 'antigravity' || isNativeCodingAgent(this.agent))
+                                ? this.agent
                             : this.agent === 'dsh' ? 'dsh' : this.agent === 'opencode'
                                 ? 'opencode'
                                 : 'codex'
             const usesGlobalCodingAgent = this.agentMode === 'global' && codingAgentId !== 'ekko-agent'
             const groupSystemPrompt = this.groupSystemPrompt(roomId, msg)
+            const executionUser = groupRunUser(this.storage, roomId, this.profile, msg)
             const result = await this.chatRunService.runAndWait({
                 input: this.groupRuntimeInput(msg, runtimeContext),
                 session_id: sessionId,
-                ...(usesGlobalCodingAgent ? {} : {
-                    model: this.model || undefined,
-                    provider: this.provider || undefined,
-                }),
+                ...(this.model ? { model: this.model } : {}),
+                ...(usesGlobalCodingAgent ? {} : { provider: this.provider || undefined }),
                 ...(!usesGlobalCodingAgent && this.apiMode ? { apiMode: this.apiMode } : {}),
                 instructions: groupSystemPrompt,
                 group_system_prompt: groupSystemPrompt,
@@ -1221,7 +1241,7 @@ export class AgentClient implements GroupAgentExecutor {
                 mode: usesGlobalCodingAgent ? 'global' : 'scoped',
                 profile: this.profile,
                 ...(this.agentPreset ? { agent_preset: this.agentPreset } : {}),
-                ...(!usesGlobalCodingAgent && this.reasoningEffort
+                ...(this.reasoningEffort
                     ? { reasoning_effort: this.reasoningEffort }
                     : {}),
                 background_delegation_enabled: false,
@@ -1254,7 +1274,16 @@ export class AgentClient implements GroupAgentExecutor {
                     : {}),
             }, {
                 profile: this.profile,
+                user: executionUser,
+                groupRunIsCurrent: () => isCurrent() && (!executionUser
+                    || groupRunUser(this.storage, roomId, this.profile, msg)?.id === executionUser.id),
+                ...(pushRoot ? { pushRoot: { kind: pushRoot.kind, profile: pushRoot.profile, runId: pushRoot.run_id } } : {}),
                 onEvent: (event, payload = {}) => {
+                    if (payload.run_usage && ['run.completed', 'run.failed', 'abort.completed', 'run.usage.updated'].includes(event)
+                        && this.roomSessionIsCurrent(roomId, sessionId)) {
+                        runUsageReceived = true
+                        queueToolEventWrite(() => this.recordRunUsage(roomId, sessionId, responseRunId, runMessageId, payload.run_usage))
+                    }
                     // Keep the terminal card after a user interrupt, while still rejecting an old room session.
                     if (event === 'plan.updated' && payload.execution_state !== 'running' && this.roomSessionIsCurrent(roomId, sessionId)) {
                         queueToolEventWrite(() => this.recordTaskPlan(roomId, sessionId, responseRunId, payload))
@@ -1311,6 +1340,13 @@ export class AgentClient implements GroupAgentExecutor {
                     }
                 },
             })
+            // Internal cancellation settles runAndWait without forwarding its abort usage payload.
+            if (!runUsageReceived && result.run_id && this.roomSessionIsCurrent(roomId, sessionId)) {
+                queueToolEventWrite(async () => {
+                    const usage = completeRunUsage(sessionId, result.run_id!, runMessageId)
+                    await this.recordRunUsage(roomId, sessionId, responseRunId, runMessageId, usage)
+                })
+            }
             if (!isCurrent()) {
                 await toolEventWrites
                 await this.completePendingToolsForRun(roomId, sessionId, responseRunId)
@@ -1353,6 +1389,7 @@ export class AgentClient implements GroupAgentExecutor {
             endStream()
             reportStatus('ready')
         } finally {
+            await toolEventWrites
             try { endStream() } catch { /* stale room session */ }
             if (this.roomSessionIsCurrent(roomId, sessionId)) {
                 try { this.stopTyping(roomId) } catch { /* disconnected */ }
@@ -1376,6 +1413,8 @@ export class AgentClient implements GroupAgentExecutor {
             return
         }
         const runMessageId = groupMessageId(roomId, this.profile, this.name)
+        const pushRoot = findPushRunLink('group_root', roomId, msg.handoffChainId || msg.messageId || '')
+        if (pushRoot) linkPushRun('group_runtime', roomId, runMessageId, pushRoot)
         let partIndex = 0
         let streamMessageId = groupMessagePartId(runMessageId, partIndex)
         let currentContent = ''
@@ -1383,10 +1422,13 @@ export class AgentClient implements GroupAgentExecutor {
         let reasoningContent = ''
         let streamStarted = false
         let bridgeStarted = false
+        let bridgeRunId = ''
+        const runStartedAt = Date.now()
         let workspaceRunState: WorkspaceDiffRunState | null = null
         let activeSessionId = ''
         let activeReplyInterruptVersion = 0
         let groupPlan: ReturnType<NonNullable<GroupChatRunService['beginGroupTaskPlanRun']>> | undefined
+        let mcpContextId: string | undefined
         let planWrites = Promise.resolve()
         let planFailed = false
         let staleStartedRunStopped = false
@@ -1396,7 +1438,8 @@ export class AgentClient implements GroupAgentExecutor {
             this.startTyping(roomId)
 
             const conversationHistory = this.groupConversationHistory(runtimeContext)
-            let instructions = this.groupSystemPrompt(roomId, msg)
+            const mcpCapabilities = await hermesStudioMcpCapabilities(this.profile)
+            let instructions = [this.groupSystemPrompt(roomId, msg), studioMcpUsageGuidelines(mcpCapabilities)].filter(Boolean).join('\n\n')
             const bridge = createGroupPrimaryAgentBridge()
             const sessionId = groupRuntimeSessionId(roomId, this.profile, this.name)
             this.activeSessions.set(roomId, sessionId)
@@ -1464,9 +1507,16 @@ export class AgentClient implements GroupAgentExecutor {
                 : `${routedPrefix}\n\nOriginal message: ${stripMentionRoutingTokens(msg.content, this.name) || msg.content}`
             const runPrompt = 'When calling Hermes Web UI endpoints from tools or skills, include the current Hermes profile as the X-Hermes-Profile header if the endpoint supports profile-scoped behavior.'
             instructions = `${instructions}\n\n${runPrompt}`
-            groupPlan = this.chatRunService?.beginGroupTaskPlanRun?.(sessionId, this.profile, runMessageId,
+            groupPlan = mcpCapabilities.interaction ? this.chatRunService?.beginGroupTaskPlanRun?.(sessionId, this.profile, runMessageId,
                 () => this.replySessionIsCurrent(roomId, sessionId, replyInterruptVersion),
-                snapshot => { planWrites = planWrites.then(() => this.recordTaskPlan(roomId, sessionId, runMessageId, snapshot)).catch(error => { logger.warn(error, '[GroupChat] task plan delivery failed') }) })
+                snapshot => { planWrites = planWrites.then(() => this.recordTaskPlan(roomId, sessionId, runMessageId, snapshot)).catch(error => { logger.warn(error, '[GroupChat] task plan delivery failed') }) }) : undefined
+            if (groupPlan) {
+                mcpContextId = groupPlan.contextId
+                await runMcpCredentials.issue({
+                    sessionId, contextId: mcpContextId, profile: this.profile, roomId, agentId: this.agentId,
+                    isActive: () => this.replySessionIsCurrent(roomId, sessionId, replyInterruptVersion),
+                }, { contextLookup: true })
+            }
             const planInput = withTaskPlanTurnContext(input, groupPlan?.contextId)
             const bridgeInput: GroupPrimaryAgentBridgeMessage = isContentBlockArray(planInput)
                 ? await convertContentBlocksForAgent(planInput)
@@ -1495,6 +1545,7 @@ export class AgentClient implements GroupAgentExecutor {
                 },
             )
             bridgeStarted = true
+            bridgeRunId = started.run_id
             if (!this.replySessionIsCurrent(roomId, sessionId, replyInterruptVersion)) {
                 await stopStaleStartedRun?.()
                 return
@@ -1649,6 +1700,13 @@ export class AgentClient implements GroupAgentExecutor {
                 onStatus?.('ready', { runId: runMessageId })
             }
         } finally {
+            if (activeSessionId && mcpContextId) runMcpCredentials.revoke(activeSessionId, mcpContextId)
+            if (bridgeRunId && activeSessionId && this.roomSessionIsCurrent(roomId, activeSessionId)) {
+                try {
+                    const usage = completeRunUsage(activeSessionId, bridgeRunId, streamMessageId, (Date.now() - runStartedAt) / 1000)
+                    await this.recordRunUsage(roomId, activeSessionId, runMessageId, streamMessageId, usage)
+                } catch (error) { logger.warn(error, '[GroupChat] usage card delivery failed') }
+            }
             try {
                 groupPlan?.finish(!this.replySessionIsCurrent(roomId, activeSessionId, activeReplyInterruptVersion) ? 'interrupted' : planFailed ? 'failed' : 'ended')
                 await planWrites
@@ -1705,6 +1763,8 @@ export class AgentClient implements GroupAgentExecutor {
             const eventType = String((ev as any)?.event || '')
             if (eventType === 'bridge.context.ready') {
                 this.cacheBridgeContext(sessionId, ev as Record<string, unknown>, instructions, modelContext)
+            } else if (eventType === 'model.usage') {
+                recordBridgeModelUsage(sessionId, chunk.run_id, ev as Record<string, unknown>, this.profile, modelContext)
             } else if (eventType === 'tool.started') {
                 const toolReasoning = reasoning
                 const toolBaseId = await beforeToolStarted(toolReasoning)
@@ -1737,6 +1797,8 @@ export class AgentClient implements GroupAgentExecutor {
                 this.emitClarifyRequested(roomId, {
                     event: 'clarify.requested',
                     agentSessionId: sessionId,
+                    runId: responseRunId,
+                    runtimeRunId: String((ev as any).run_id || ''),
                     clarify_id: (ev as any).clarify_id,
                     question: (ev as any).question,
                     choices: Array.isArray((ev as any).choices) ? (ev as any).choices : null,
@@ -1761,6 +1823,11 @@ export class AgentClient implements GroupAgentExecutor {
             }
         }
         return reasoning
+    }
+
+    private async recordRunUsage(roomId: string, sessionId: string, runId: string, messageId: string, usage: unknown): Promise<void> {
+        const message = groupRunUsageMessage(roomId, sessionId, runId, messageId, usage)
+        if (message) await this.sendMessage(roomId, message.content, message.id, message.extra, sessionId)
     }
 
     private async recordTaskPlan(roomId: string, sessionId: string, runId: string, snapshot: unknown): Promise<void> {
@@ -2326,6 +2393,12 @@ export class AgentClients {
         return this.rooms.get(roomId)?.get(agentId)
     }
 
+    hasRoomWork(roomId: string): boolean {
+        return this.activeSessionIds(roomId).length > 0
+            || [...this._processingMentionQueues].some(key => this.mentionQueueRoomId(key) === roomId)
+            || [...this._mentionQueues].some(([key, queue]) => this.mentionQueueRoomId(key) === roomId && queue.length > 0)
+    }
+
     activeSessionIds(roomId: string): string[] {
         return this.getAgents(roomId)
             .map(agent => agent.getActiveSessionId(roomId))
@@ -2637,6 +2710,10 @@ export class AgentClients {
             name: String(agent.name || ''),
             description: String(agent.description || ''),
         }
+    }
+
+    getRoutingCandidates(roomId: string): Array<{ id: string; name: string; description: string }> {
+        return this.getConnectedAgents(roomId).map(agent => ({ id: agent.agentId, name: agent.name, description: agent.description || '' }))
     }
 
     /**

@@ -4,6 +4,8 @@ import { join, relative } from 'path'
 
 import { changelog } from '@/data/changelog'
 import { mergeMessagesWithFallback, supportedLocales } from '@/i18n/messages'
+import type { SupportedLocale } from '@/i18n/messages'
+import { languageOptions } from '@/i18n/language-options'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 import zhTW from '@/i18n/locales/zh-TW'
@@ -15,13 +17,14 @@ import de from '@/i18n/locales/de'
 import pt from '@/i18n/locales/pt'
 import ru from '@/i18n/locales/ru'
 import ar from '@/i18n/locales/ar'
+import tr from '@/i18n/locales/tr'
 import { createI18n } from 'vue-i18n'
 
 const SOURCE_ROOT = join(process.cwd(), 'packages/client/src')
 
 const allMessages: Record<string, Record<string, unknown>> = { en }
 
-const rawMessages: Record<string, Record<string, unknown>> = {
+const rawMessages: Record<SupportedLocale, Record<string, unknown>> = {
   en,
   zh,
   'zh-TW': zhTW,
@@ -33,9 +36,31 @@ const rawMessages: Record<string, Record<string, unknown>> = {
   pt,
   ru,
   ar,
+  tr,
 }
 
 const messages: Record<string, Record<string, unknown>> = {}
+
+it('covers every supported locale in raw fixtures and the language menu', () => {
+  expect(Object.keys(rawMessages).sort()).toEqual([...supportedLocales].sort())
+  expect(languageOptions.map(option => option.value).sort()).toEqual([...supportedLocales].sort())
+  expect(languageOptions.find(option => option.value === 'tr')?.label).toBe('Türkçe')
+})
+
+it('keeps Turkish message keys, interpolation and compilation consistent with English', () => {
+  const english = flattenLeafPaths(en)
+  const i18n = createI18n({ legacy: false, locale: 'tr', fallbackLocale: false, messages: { tr } })
+  for (const [key, value] of flattenLeafPaths(tr)) {
+    // Language names can identify the locale itself without an English counterpart.
+    if (key === 'language.tr') continue
+    expect(english.has(key), key).toBe(true)
+    expect(value.trim(), key).not.toBe('')
+    const names = interpolationNames(value)
+    expect(names, key).toEqual(interpolationNames(english.get(key)!))
+    const params = Object.fromEntries(names.map(name => [name, 'test']))
+    expect(() => i18n.global.t(key, params), key).not.toThrow()
+  }
+})
 
 it('defines task plan dynamic statuses and progress placeholders in every raw locale', () => {
   const keys = ['title', 'progress', 'pending', 'in_progress', 'completed', 'running', 'ended', 'interrupted', 'failed']
@@ -123,6 +148,33 @@ function flattenLeafPaths(value: unknown, prefix = ''): Map<string, string> {
 function interpolationNames(value: string): string[] {
   return [...value.matchAll(/\{([^}]+)\}/g)].map(match => match[1]).sort()
 }
+
+it('localizes all JEV messages and error codes without relying on English fallback', () => {
+  const expected = flattenLeafPaths(en.jev)
+  for (const locale of supportedLocales) {
+    const actual = flattenLeafPaths(rawMessages[locale].jev)
+    expect([...actual.keys()].sort(), locale).toEqual([...expected.keys()].sort())
+    const i18n = createI18n({ legacy: false, locale, messages: { [locale]: rawMessages[locale] } })
+    for (const [key, english] of expected) {
+      const value = actual.get(key)!
+      expect(value.trim(), `${locale}: jev.${key}`).not.toBe('')
+      expect(interpolationNames(value), `${locale}: jev.${key}`).toEqual(interpolationNames(english))
+      expect(() => i18n.global.t(`jev.${key}`, { model: 'jev-test', duration: '123' })).not.toThrow()
+      if (locale !== 'en') expect(value, `${locale}: jev.${key} copies English`).not.toBe(english)
+    }
+  }
+})
+
+it('does not expose locale-code placeholders in generated JEV copy', () => {
+  const guardedKeys = ['groupMessageRoutingEnabled', 'groupRoutingDisabled', 'groupRoutingReady', 'groupMessageRoutingMinConfidence', 'groupMessageRoutingMinConfidenceHint', 'groupMessageRoutingTimeout', 'groupMessageRoutingTimeoutHint', 'workflowQualityEnabled', 'workflowQualityDisabled', 'workflowQualityReady', 'workflowQualityMinConfidence', 'workflowQualityMinConfidenceHint', 'workflowQualityTimeout', 'workflowQualityTimeoutHint']
+  for (const locale of supportedLocales) {
+    const actual = flattenLeafPaths(rawMessages[locale].jev)
+    for (const key of guardedKeys) {
+      const value = actual.get(key)!
+      expect(value, `${locale}: jev.${key} starts with a locale-code placeholder`).not.toMatch(/^(?:zh(?:-TW)?|en|ja|ko|fr|es|de|pt|ru|ar|tr)\s+/i)
+    }
+  }
+})
 
 const SKILLS_USAGE_LOCALIZED_KEYS = [
   'sidebar.skillsUsage',

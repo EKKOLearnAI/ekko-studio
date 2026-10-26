@@ -46,6 +46,11 @@ test('collapses and restores the workspace file tree without closing the file vi
   await page.setViewportSize({ width: 1440, height: 900 })
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   await page.addInitScript(() => window.localStorage.setItem('hermes_locale', 'en'))
+  await page.addInitScript(id => {
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
+      [id]: { session_id: id, messages: [], isWorking: false, events: [] },
+    }
+  }, sessionId)
   const api = await mockHermesApi(page, { sessions: [session] })
 
   await page.route(`**/api/studio/sessions/${sessionId}/workspace-files/list**`, async route => {

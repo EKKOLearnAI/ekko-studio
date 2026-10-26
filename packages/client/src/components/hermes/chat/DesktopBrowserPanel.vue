@@ -1,8 +1,14 @@
 <script setup lang="ts">
+import BrowserDownloadRow from '@/components/hermes/BrowserDownloadRow.vue'
+import BrowserDownloadIcon from '@/components/hermes/BrowserDownloadIcon.vue'
+import BrowserDownloadHistory from '@/components/hermes/BrowserDownloadHistory.vue'
+import { useTheme } from '@/composables/useTheme'
+import { NSpin, NButton, NInput, NPopover, NSelect, useDialog, useMessage } from 'naive-ui'
+import { remoteBrowserOwnerState, remoteBrowserEnabled } from '@/composables/useRemoteBrowserRelay'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NInput, NPopover, NSelect, useDialog, useMessage } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
-import { desktopBridge, type DesktopBrowserDownload, type DesktopBrowserSelection, type DesktopBrowserState } from '@/utils/desktop-bridge'
+import { desktopBridge, type DesktopBrowserSelection, type DesktopBrowserState } from '@/utils/desktop-bridge'
 import type { BrowserAnnotationSubmission } from '@/utils/browser-annotation-submit'
 
 const props = withDefaults(defineProps<{
@@ -13,9 +19,26 @@ const props = withDefaults(defineProps<{
 })
 
 const { t } = useI18n()
+const historyOpen = ref(false)
+const downloadsOpen = ref(false)
+async function downloadsVisibility(value: boolean) {
+  downloadsOpen.value = value
+  if (value && bridge?.refreshDownloads) { try { applyState(await bridge.refreshDownloads()) } catch { /* Preserve last known state. */ } }
+}
+function fullDownloadHistory() {
+  downloadsOpen.value = false
+  historyOpen.value = true
+}
 const message = useMessage()
 const dialog = useDialog()
 const bridge = desktopBridge()?.browser
+const { isDark } = useTheme()
+let themeSyncQueue: Promise<void> = Promise.resolve()
+watch(isDark, dark => {
+  if (!bridge?.setColorScheme) return
+  themeSyncQueue = themeSyncQueue.catch(() => undefined).then(() => bridge.setColorScheme!(dark ? 'dark' : 'light'))
+  void themeSyncQueue.catch(error => { console.warn('[desktop-browser] theme sync failed', error) })
+}, { immediate: true })
 const EXTERNAL_OVERLAY_SELECTOR = [
   '[data-desktop-browser-overlay]',
   '.n-modal-mask',
@@ -86,10 +109,11 @@ const overlayCheckTimers = new Map<number, number>()
 
 const activeTab = computed(() => state.value?.tabs.find(tab => tab.id === state.value?.activeTabId))
 const profileOptions = computed(() => state.value?.profiles.map(profile => ({ label: profile.name, value: profile.id })) || [])
+const historyDownloads = computed(() => state.value?.downloads.filter(item => item.profileId === state.value?.activeProfileId) || [])
 const activeProfileDownloads = computed(() => state.value?.downloads
   .filter(item => item.profileId === state.value?.activeProfileId)
-  .slice(0, 20) || [])
-const activeDownloadCount = computed(() => activeProfileDownloads.value.filter(item => item.state === 'progressing').length)
+  .slice(0, 5) || [])
+const activeDownloadCount = computed(() => state.value?.downloads.filter(item => item.profileId === state.value?.activeProfileId && item.state === 'progressing').length || 0)
 const annotationCount = computed(() => annotations.value.length + (pendingAnnotation.value ? 1 : 0))
 const hasAnnotationSession = computed(() => annotationCount.value > 0)
 const annotationItems = computed(() => [
@@ -119,6 +143,7 @@ const annotationAnchorStyle = computed(() => {
 })
 
 watch(() => activeTab.value?.url, value => { address.value = value || '' }, { immediate: true })
+watch(historyOpen, () => { void nextTick(syncViewport) })
 watch(externalOverlayOpen, () => { void nextTick(syncViewport) })
 watch(() => props.visible, () => { void nextTick(syncViewport) })
 
@@ -129,7 +154,7 @@ function applyState(next: DesktopBrowserState): void {
 async function syncViewport(): Promise<void> {
   if (!bridge || !viewport.value) return
   const rect = viewport.value.getBoundingClientRect()
-  const visible = props.visible && !externalOverlayOpen.value && !pendingAnnotation.value
+  const visible = props.visible && !externalOverlayOpen.value && !historyOpen.value && !pendingAnnotation.value
     && rect.width > 0 && rect.height > 0 && document.visibilityState === 'visible'
   await bridge.setViewport({ x: rect.left, y: rect.top, width: rect.width, height: rect.height }, visible).catch(() => undefined)
 }
@@ -185,40 +210,6 @@ function switchProfile(profileId: string): void {
       onPositiveClick: () => applyProfile(true),
     })
   }).catch(error => message.error(error instanceof Error ? error.message : String(error)))
-}
-
-function cancelDownload(downloadId: string): void {
-  void run(async () => applyState(await bridge!.cancelDownload(downloadId)))
-}
-
-function formatBytes(input: number): string {
-  const bytes = Number.isFinite(input) ? Math.max(0, input) : 0
-  if (bytes < 1024) return `${Math.round(bytes)} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let value = bytes / 1024
-  let unit = units[0]
-  for (let index = 1; index < units.length && value >= 1024; index += 1) {
-    value /= 1024
-    unit = units[index]
-  }
-  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`
-}
-
-function downloadPercent(item: DesktopBrowserDownload): number | null {
-  if (item.totalBytes <= 0) return null
-  return Math.min(100, Math.max(0, Math.round(item.receivedBytes / item.totalBytes * 100)))
-}
-
-function downloadStateLabel(stateValue: DesktopBrowserDownload['state']): string {
-  return t(`browser.downloadState${stateValue[0].toUpperCase()}${stateValue.slice(1)}`)
-}
-
-function downloadSummary(item: DesktopBrowserDownload): string {
-  const percent = downloadPercent(item)
-  const transferred = item.totalBytes > 0
-    ? `${formatBytes(item.receivedBytes)} / ${formatBytes(item.totalBytes)}`
-    : formatBytes(item.receivedBytes)
-  return `${downloadStateLabel(item.state)}${percent === null ? '' : ` · ${percent}%`} · ${transferred}`
 }
 
 function createTab(): void {
@@ -480,7 +471,7 @@ onUnmounted(() => {
           <i v-if="tab.agentControl !== 'idle'" :title="tab.agentAction">●</i>
           <b @click="closeTab(tab.id, $event)">×</b>
         </button>
-        <button class="new-tab" :disabled="hasAnnotationSession || (state?.tabs.length || 0) >= (state?.maxTabs || 8)" @click="createTab">+</button>
+        <button class="new-tab" :disabled="hasAnnotationSession" @click="createTab">+</button>
       </div>
 
       <div class="toolbar">
@@ -521,6 +512,7 @@ onUnmounted(() => {
             <path d="M20 4v4h-4" />
           </svg>
         </button>
+        <span v-if="remoteBrowserEnabled && remoteBrowserOwnerState !== 'active'" class="remote-control-action" role="status" data-testid="browser-relay-owner">{{ t(`browser.remoteOwner${remoteBrowserOwnerState[0].toUpperCase()}${remoteBrowserOwnerState.slice(1)}`) }}</span>
         <NInput v-model:value="address" size="small" :placeholder="t('browser.addressPlaceholder')" :disabled="busy || hasAnnotationSession" @keydown.enter="navigate" />
         <NSelect
           class="profile-switcher"
@@ -533,7 +525,7 @@ onUnmounted(() => {
           data-testid="browser-profile-switcher"
           @update:value="switchProfile"
         />
-        <NPopover trigger="click" placement="bottom-end" :width="380">
+        <NPopover :show="downloadsOpen" trigger="click" placement="bottom-end" :width="380" @update:show="downloadsVisibility">
           <template #trigger>
             <button class="download-trigger" :title="t('browser.downloads')" :aria-label="t('browser.downloads')">
               <span aria-hidden="true">⇩</span>
@@ -541,17 +533,12 @@ onUnmounted(() => {
             </button>
           </template>
           <section class="download-popover" data-desktop-browser-overlay>
-            <header>{{ t('browser.downloads') }}</header>
-            <div v-if="!activeProfileDownloads.length" class="download-empty">{{ t('common.noData') }}</div>
-            <article v-for="item in activeProfileDownloads" :key="item.id" class="download-item">
-              <div class="download-item-heading">
-                <strong :title="item.fileName">{{ item.fileName }}</strong>
-                <NButton v-if="item.state === 'progressing'" size="tiny" text type="error" @click="cancelDownload(item.id)">{{ t('common.cancel') }}</NButton>
-              </div>
-              <progress v-if="item.state === 'progressing' && item.totalBytes > 0" :value="item.receivedBytes" :max="item.totalBytes" />
-              <progress v-else-if="item.state === 'progressing'" />
-              <span>{{ downloadSummary(item) }}</span>
-            </article>
+            <header><strong>{{ t('browser.recentDownloads') }}</strong><NButton quaternary circle size="small" :aria-label="t('common.close')" @click="downloadsOpen = false"><template #icon><BrowserDownloadIcon kind="close" /></template></NButton></header>
+            <div class="recent-download-list">
+              <div v-if="!activeProfileDownloads.length" class="download-empty">{{ t('common.noData') }}</div>
+              <BrowserDownloadRow v-for="item in activeProfileDownloads" :key="item.id" :item="item" compact @state="applyState" />
+            </div>
+            <footer><NButton text type="primary" @click="fullDownloadHistory">{{ t('browser.fullDownloadHistory') }} <span aria-hidden="true">↗</span></NButton></footer>
           </section>
         </NPopover>
       </div>
@@ -606,56 +593,62 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div v-show="!pendingAnnotation" ref="viewport" class="native-viewport">
+      <section v-if="historyOpen" class="panel-download-history" data-desktop-browser-overlay>
+        <header><strong>{{ t('browser.downloads') }}</strong><NButton quaternary circle size="small" :aria-label="t('common.close')" @click="historyOpen = false"><template #icon><BrowserDownloadIcon kind="close" /></template></NButton></header>
+        <BrowserDownloadHistory :items="historyDownloads" @state="applyState" />
+      </section>
+      <div v-show="!pendingAnnotation && !historyOpen" ref="viewport" class="native-viewport">
         <span v-if="loadError">{{ loadError }}</span>
-        <span v-else-if="!state">{{ t('common.loading') }}</span>
+        <NSpin v-else-if="!state" :description="t('common.loading')" />
       </div>
     </template>
   </section>
 </template>
 
 <style scoped lang="scss">
+.panel-download-history { flex: 1; min-height: 0; overflow: auto; padding: 16px; }
+.panel-download-history > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .browser-panel { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; color: var(--text-primary, #1a1a1a); }
-.tab-strip { height: 38px; flex: 0 0 38px; display: flex; align-items: flex-end; gap: 2px; padding: 4px 8px 0; overflow-x: auto; background: rgba(127,127,127,.06); }
-.tab { width: 190px; min-width: 100px; height: 34px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: inherit; display: flex; align-items: center; gap: 7px; padding: 0 9px; cursor: pointer; }
+.tab-strip { height: 38px; flex: 0 0 38px; display: flex; align-items: flex-end; gap: calc(2px * var(--spacing-scale, 1)); padding: 4px 8px 0; overflow-x: auto; background: rgba(127,127,127,.06); }
+.tab { width: 190px; min-width: 100px; height: 34px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: inherit; display: flex; align-items: center; gap: calc(7px * var(--spacing-scale, 1)); padding: 0 9px; cursor: pointer; }
 .tab.active { color: var(--text-primary, #1a1a1a); background: var(--bg-card, #fff); box-shadow: inset 0 0 0 1px var(--border-color, #e0e0e0); }
-.tab img { width: 16px; height: 16px; }.tab span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; }.tab i { color: #3b82f6; font-size: 9px; }.tab b { font: 18px/1 sans-serif; font-weight: 400; }
-.new-tab, .toolbar > button, .download-trigger { border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: 6px; }.new-tab { width: 34px; height: 34px; font-size: 20px; }.toolbar > button, .download-trigger { width: 30px; height: 30px; font-size: 18px; }.toolbar > button { display: inline-grid; place-items: center; padding: 0; }.toolbar > button:hover, .download-trigger:hover, .new-tab:hover { background: rgba(127,127,127,.15); }.toolbar > button:disabled { opacity: .35; }
-.toolbar { height: 46px; flex: 0 0 46px; padding: 7px 10px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 8px; }
+.tab img { width: 16px; height: 16px; }.tab span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; }.tab i { color: #3b82f6; font-size: calc(var(--font-size-base, 14px) * 9 / 14); }.tab b { font: 18px/1 sans-serif; font-weight: 400; }
+.new-tab, .toolbar > button, .download-trigger { border: 0; background: transparent; color: inherit; cursor: pointer; border-radius: var(--radius-component, 6px); }.new-tab { width: 34px; height: 34px; font-size: calc(var(--font-size-base, 14px) * 20 / 14); }.toolbar > button, .download-trigger { width: 30px; height: 30px; font-size: calc(var(--font-size-base, 14px) * 18 / 14); }.toolbar > button { display: inline-grid; place-items: center; padding: 0; }.toolbar > button:hover, .download-trigger:hover, .new-tab:hover { background: rgba(127,127,127,.15); }.toolbar > button:disabled { opacity: .35; }
+.toolbar { height: 46px; flex: 0 0 46px; padding: calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)); border-bottom: var(--border-width, 1px) solid var(--border-color); display: flex; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); }
 .toolbar-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.remote-control-action { flex: 0 0 auto; }
 .toolbar-stop-icon { fill: currentColor; stroke: none; }
 .profile-switcher { width: 136px; flex: 0 0 136px; }
 .download-trigger { position: relative; flex: 0 0 30px; padding: 0; }
-.download-trigger > b { position: absolute; top: -3px; right: -4px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: #ef4444; color: #fff; font: 10px/15px sans-serif; text-align: center; }
-.download-popover { max-height: min(420px, 65vh); overflow: auto; color: var(--text-primary, #1a1a1a); }
-.download-popover > header { position: sticky; top: 0; z-index: 1; padding: 2px 0 9px; border-bottom: 1px solid var(--border-color, #e5e7eb); background: var(--n-color, var(--bg-card)); font-size: 14px; font-weight: 600; }
-.download-item { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--border-color, #e5e7eb); }
-.download-item:last-child { border-bottom: 0; }
-.download-item-heading { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.download-item-heading > strong { min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.download-item progress { width: 100%; height: 5px; accent-color: #3b82f6; }
-.download-item > span, .download-empty { color: var(--text-color-3, #6b7280); font-size: 11px; }
-.download-empty { padding: 24px 8px; text-align: center; }
-.agent-banner, .crash-banner { min-height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 4px 12px; font-size: 12px; }
+.download-trigger > b { position: absolute; top: -3px; right: -4px; min-width: 15px; height: 15px; padding: 0 calc(3px * var(--spacing-scale, 1)); border-radius: var(--radius-component, 8px); background: #ef4444; color: #fff; font: 10px/15px sans-serif; text-align: center; }
+.download-popover { width: min(350px, calc(100vw - 48px)); color: var(--text-primary); }
+.download-popover > header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; font-size: 14px; }
+.recent-download-list { max-height: min(380px, 60vh); overflow: auto; }
+.recent-download-list :deep(.download-record) { border-top: var(--border-width, 1px) solid var(--border-color); }
+.download-popover > footer { padding-top: 12px; border-top: var(--border-width, 1px) solid var(--border-color); }
+.download-empty { padding: 24px 8px; text-align: center; color: var(--text-secondary); }
+
+.download-empty { padding: calc(24px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1)); text-align: center; }
+.agent-banner, .crash-banner { min-height: 34px; display: flex; align-items: center; justify-content: space-between; padding: calc(4px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
 .agent-banner { background: rgba(59,130,246,.12); color: #3b82f6; }.crash-banner { background: rgba(239,68,68,.12); color: #dc2626; }
-.annotation-session-bar { min-height: 38px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 10px; color: #2563eb; background: rgba(59,130,246,.1); font-size: 12px; }
-.annotation-session-bar > div { display: flex; gap: 6px; }
-.annotation-list { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: 6px; max-height: 90px; overflow-y: auto; padding: 6px 10px; border-bottom: 1px solid var(--border-color); }
-.annotation-item { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding-inline-start: 8px; border-radius: 6px; background: rgba(59,130,246,.1); color: inherit; font-size: 12px; }
+.annotation-session-bar { min-height: 38px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: calc(8px * var(--spacing-scale, 1)); padding: 4px 10px; color: #2563eb; background: rgba(59,130,246,.1); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
+.annotation-session-bar > div { display: flex; gap: calc(6px * var(--spacing-scale, 1)); }
+.annotation-list { display: flex; flex-wrap: wrap; flex-shrink: 0; gap: calc(6px * var(--spacing-scale, 1)); max-height: 90px; overflow-y: auto; padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)); border-bottom: var(--border-width, 1px) solid var(--border-color); }
+.annotation-item { display: inline-flex; align-items: center; gap: calc(4px * var(--spacing-scale, 1)); max-width: 100%; padding-inline-start: calc(8px * var(--spacing-scale, 1)); border-radius: var(--radius-component, 6px); background: rgba(59,130,246,.1); color: inherit; font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
 .annotation-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.annotation-item > button { flex-shrink: 0; width: 28px; height: 28px; border: 0; border-radius: 6px; color: inherit; background: transparent; cursor: pointer; font-size: 18px; }
+.annotation-item > button { flex-shrink: 0; width: 28px; height: 28px; border: 0; border-radius: var(--radius-component, 6px); color: inherit; background: transparent; cursor: pointer; font-size: calc(var(--font-size-base, 14px) * 18 / 14); }
 .annotation-item > button:hover { background: rgba(59,130,246,.15); }
 .annotation-item > button:disabled { cursor: default; opacity: .5; }
-.native-viewport { flex: 1; min-height: 100px; position: relative; display: grid; place-items: center; background: #fff; color: #777; }
-.annotation-editor { flex: 1; min-height: 0; overflow: auto; padding: 12px; background: var(--card-color, #fff); }
+.native-viewport { flex: 1; min-height: 100px; position: relative; display: grid; place-items: center; background: var(--theme-content-bg, var(--bg-primary)); color: var(--text-muted); }
+.annotation-editor { flex: 1; min-height: 0; overflow: auto; padding: calc(12px * var(--spacing-scale, 1)); background: var(--card-color, #fff); }
 .annotation-preview { position: relative; width: 100%; margin-bottom: 168px; line-height: 0; }
-.annotation-preview > img { display: block; width: 100%; height: auto; border: 1px solid var(--border-color); border-radius: 8px; background: #fff; box-sizing: border-box; }
-.annotation-popover { position: absolute; z-index: 2; left: clamp(8px, var(--annotation-left), calc(100% - 328px)); top: calc(var(--annotation-bottom) + 32px); width: min(320px, calc(100% - 16px)); padding: 10px; display: flex; flex-direction: column; gap: 8px; line-height: normal; color: #1f2937; color-scheme: light; border: 1px solid rgba(59,130,246,.45); border-radius: 10px; background: #fff; box-shadow: 0 8px 28px rgba(15,23,42,.22); box-sizing: border-box; }
+.annotation-preview > img { display: block; width: 100%; height: auto; border: var(--border-width, 1px) solid var(--border-color); border-radius: var(--radius-component, 8px); background: #fff; box-sizing: border-box; }
+.annotation-popover { position: absolute; z-index: 2; left: clamp(8px, var(--annotation-left), calc(100% - 328px)); top: calc(var(--annotation-bottom) + 32px); width: min(320px, calc(100% - 16px)); padding: calc(10px * var(--spacing-scale, 1)); display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); line-height: normal; color: var(--text-primary); color-scheme: inherit; border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), .45); border-radius: var(--radius-component, 10px); background: var(--theme-overlay-bg, var(--bg-card)); box-shadow: 0 8px 28px rgba(15,23,42,.22); box-sizing: border-box; }
 .annotation-popover.above { top: auto; bottom: calc(100% - var(--annotation-top) + 8px); }
-.annotation-popover > strong { color: #3b82f6; font-size: 12px; }
-.annotation-popover :deep(.annotation-note-input.n-input) { --n-color: #fff !important; --n-color-focus: #fff !important; --n-text-color: #1f2937 !important; --n-placeholder-color: #9ca3af !important; --n-border: 1px solid #d1d5db !important; --n-border-hover: 1px solid #60a5fa !important; --n-border-focus: 1px solid #3b82f6 !important; --n-box-shadow-focus: 0 0 0 2px rgba(59,130,246,.18) !important; }
-.annotation-popover :deep(.annotation-note-input .n-input__textarea-el) { color: #1f2937 !important; caret-color: #2563eb; }
-.annotation-popover :deep(.annotation-note-input .n-input__textarea-el::placeholder) { color: #9ca3af !important; }
-.annotation-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.unavailable { padding: 40px; text-align: center; color: var(--text-color-3); }
+.annotation-popover > strong { color: var(--accent-primary); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
+.annotation-popover :deep(.annotation-note-input.n-input) { --n-color: var(--theme-overlay-bg, var(--bg-card)) !important; --n-color-focus: var(--theme-overlay-bg, var(--bg-card)) !important; --n-text-color: var(--text-primary) !important; --n-placeholder-color: var(--text-muted) !important; --n-border: var(--border-width, 1px) solid var(--border-color) !important; --n-border-hover: 1px solid var(--accent-hover) !important; --n-border-focus: 1px solid var(--accent-primary) !important; --n-box-shadow-focus: 0 0 0 2px rgba(var(--accent-primary-rgb), .18) !important; }
+.annotation-popover :deep(.annotation-note-input .n-input__textarea-el) { color: var(--text-primary) !important; caret-color: var(--accent-primary); }
+.annotation-popover :deep(.annotation-note-input .n-input__textarea-el::placeholder) { color: var(--text-muted) !important; }
+.annotation-actions { display: flex; justify-content: flex-end; gap: calc(8px * var(--spacing-scale, 1)); }
+.unavailable { padding: calc(40px * var(--spacing-scale, 1)); text-align: center; color: var(--text-color-3); }
 </style>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { NDrawer, NDrawerContent, NButton, NSelect, NInput, NSpin, NModal, useDialog, useMessage } from 'naive-ui'
+import { NSpin, NDrawer, NDrawerContent, NButton, NSelect, NInput, NModal, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { request } from '@/api/client'
@@ -441,7 +441,7 @@ function handleNavigateTask(taskId: string) {
 </script>
 
 <template>
-  <NDrawer :show="!!taskId" :width="420" placement="right" @update:show="(v: boolean) => { if (!v) emit('close') }">
+  <NDrawer :show="!!taskId" width="var(--studio-drawer-width)" placement="right" @update:show="(v: boolean) => { if (!v) emit('close') }">
     <NDrawerContent :title="detail?.task.title || ''" closable>
       <NSpin :show="loading">
         <template v-if="detail">
@@ -673,11 +673,11 @@ function handleNavigateTask(taskId: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 9px 10px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(9px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   margin-top: 6px;
-  border: 1px solid $border-color;
-  border-radius: 6px;
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 6px);
   color: $text-primary;
   background: $bg-secondary;
   cursor: pointer;
@@ -698,11 +698,11 @@ function handleNavigateTask(taskId: string) {
 .attachment-size {
   flex: 0 0 auto;
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .section-title {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   color: $text-muted;
   text-transform: uppercase;
@@ -713,13 +713,13 @@ function handleNavigateTask(taskId: string) {
 .run-history-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .run-history-range {
   color: $text-muted;
-  font-family: $font-code;
-  font-size: 11px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 500;
   margin-inline-start: auto;
   text-transform: none;
@@ -727,18 +727,18 @@ function handleNavigateTask(taskId: string) {
 
 .run-history-controls {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .result-summary {
   cursor: pointer;
   border-radius: $radius-sm;
-  padding: 8px 10px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   background: rgba(var(--accent-primary-rgb), 0.04);
-  border: 1px solid $border-light;
-  font-size: 13px;
+  border: var(--border-width, 1px) solid $border-light;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
-  line-height: 1.5;
+  line-height: var(--line-height, 1.5);
   transition: border-color $transition-fast;
 
   &:hover { border-color: rgba(var(--accent-primary-rgb), 0.3); }
@@ -746,14 +746,14 @@ function handleNavigateTask(taskId: string) {
 
 .result-detail {
   margin-top: 10px;
-  padding: 10px;
+  padding: calc(10px * var(--spacing-scale, 1));
   background: rgba(var(--accent-primary-rgb), 0.02);
-  border: 1px solid $border-light;
+  border: var(--border-width, 1px) solid $border-light;
   border-radius: $radius-sm;
 }
 
 .meta-label {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 600;
   color: $text-muted;
   text-transform: uppercase;
@@ -769,16 +769,16 @@ function handleNavigateTask(taskId: string) {
   margin: 0;
 
   li {
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     color: $text-secondary;
-    padding: 2px 0;
+    padding: calc(2px * var(--spacing-scale, 1)) 0;
 
     code {
-      font-family: $font-code;
-      font-size: 11px;
+      font-family: var(--font-code, $font-code);
+      font-size: calc(var(--font-size-base, 14px) * 11 / 14);
       background: rgba(var(--accent-primary-rgb), 0.06);
-      padding: 1px 4px;
-      border-radius: 3px;
+      padding: calc(1px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1));
+      border-radius: var(--radius-component, 3px);
       word-break: break-all;
     }
   }
@@ -787,19 +787,19 @@ function handleNavigateTask(taskId: string) {
 .meta-kv {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .meta-kv-row {
   display: flex;
-  gap: 8px;
-  font-size: 12px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .meta-kv-key {
   color: $text-muted;
-  font-family: $font-code;
-  font-size: 11px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   min-width: 100px;
   flex-shrink: 0;
 }
@@ -819,7 +819,7 @@ function handleNavigateTask(taskId: string) {
 .messages-modal-body {
   max-height: 65vh;
   overflow: hidden;
-  padding: 4px 0;
+  padding: calc(4px * var(--spacing-scale, 1)) 0;
 
   :deep(.message-list) {
     max-height: 65vh;
@@ -832,37 +832,37 @@ function handleNavigateTask(taskId: string) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px solid $border-light;
+  padding: calc(6px * var(--spacing-scale, 1)) 0;
+  border-bottom: var(--border-width, 1px) solid $border-light;
 }
 
 .detail-label {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .detail-value {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-primary;
 }
 
 .task-id-value {
-  font-family: $font-code;
-  font-size: 11px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   background: rgba(var(--accent-primary-rgb), 0.06);
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 3px);
   user-select: all;
 }
 
 .task-link {
-  font-family: $font-code;
-  font-size: 11px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $accent-primary;
   cursor: pointer;
   background: rgba(var(--accent-primary-rgb), 0.06);
-  padding: 1px 5px;
-  border-radius: 3px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 3px);
   transition: background $transition-fast;
 
   &:hover {
@@ -876,8 +876,8 @@ function handleNavigateTask(taskId: string) {
 }
 
 .status-badge {
-  padding: 1px 8px;
-  border-radius: 4px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 4px);
   font-weight: 500;
 
   &.triage {
@@ -917,16 +917,16 @@ function handleNavigateTask(taskId: string) {
 }
 
 .detail-body {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
-  line-height: 1.6;
+  line-height: var(--line-height, 1.6);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .action-group {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin-bottom: 10px;
   flex-wrap: wrap;
 }
@@ -934,19 +934,19 @@ function handleNavigateTask(taskId: string) {
 .block-input,
 .complete-input {
   display: flex;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   flex: 1;
 }
 
 .assign-group {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .run-item,
 .comment-item {
-  padding: 8px 0;
-  border-bottom: 1px solid $border-light;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
+  border-bottom: var(--border-width, 1px) solid $border-light;
 
   &:last-child {
     border-bottom: none;
@@ -957,15 +957,15 @@ function handleNavigateTask(taskId: string) {
 .comment-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin-bottom: 4px;
 }
 
 .run-status {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 500;
-  padding: 1px 6px;
-  border-radius: 4px;
+  padding: calc(1px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 4px);
 
   &.running {
     background: rgba(var(--accent-primary-rgb), 0.12);
@@ -985,14 +985,14 @@ function handleNavigateTask(taskId: string) {
 
 .run-profile,
 .comment-author {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 500;
   color: $text-primary;
 }
 
 .run-time,
 .comment-time {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
   margin-inline-start: auto;
 }
@@ -1000,9 +1000,9 @@ function handleNavigateTask(taskId: string) {
 .run-summary,
 .run-error,
 .comment-body {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
-  line-height: 1.4;
+  line-height: var(--line-height, 1.4);
 }
 
 .run-error {
@@ -1012,18 +1012,18 @@ function handleNavigateTask(taskId: string) {
 .event-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 0;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(4px * var(--spacing-scale, 1)) 0;
 }
 
 .event-kind {
-  font-size: 11px;
-  font-family: $font-code;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  font-family: var(--font-code, $font-code);
   color: $accent-primary;
 }
 
 .event-time {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
   margin-inline-start: auto;
 }
@@ -1031,13 +1031,13 @@ function handleNavigateTask(taskId: string) {
 .session-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .session-item {
-  padding: 8px 10px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
-  border: 1px solid $border-light;
+  border: var(--border-width, 1px) solid $border-light;
   cursor: pointer;
   transition: border-color $transition-fast;
 
@@ -1045,7 +1045,7 @@ function handleNavigateTask(taskId: string) {
 }
 
 .session-title {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 500;
   color: $text-primary;
   margin-bottom: 4px;
@@ -1056,21 +1056,21 @@ function handleNavigateTask(taskId: string) {
 
 .session-meta {
   display: flex;
-  gap: 8px;
-  font-size: 11px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
 }
 
 .session-messages {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .recovery-group,
 .comment-input {
   display: flex;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin-top: 10px;
   flex-wrap: wrap;
 }
@@ -1088,22 +1088,22 @@ function handleNavigateTask(taskId: string) {
   margin: 10px 0 0;
   max-height: 240px;
   overflow: auto;
-  padding: 10px;
-  border: 1px solid $border-light;
+  padding: calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-light;
   border-radius: $radius-sm;
   background: rgba(var(--accent-primary-rgb), 0.03);
   color: $text-secondary;
-  font-family: $font-code;
-  font-size: 11px;
-  line-height: 1.45;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, 1.45);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .session-msg {
-  padding: 10px 12px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
-  border: 1px solid $border-light;
+  border: var(--border-width, 1px) solid $border-light;
 
   &.user {
     background: rgba(var(--accent-primary-rgb), 0.04);
@@ -1115,7 +1115,7 @@ function handleNavigateTask(taskId: string) {
 }
 
 .session-msg-role {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 600;
   color: $text-muted;
   text-transform: uppercase;
@@ -1123,9 +1123,9 @@ function handleNavigateTask(taskId: string) {
 }
 
 .session-msg-content {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
-  line-height: 1.5;
+  line-height: var(--line-height, 1.5);
 
   :deep(p) {
     margin: 0 0 8px;

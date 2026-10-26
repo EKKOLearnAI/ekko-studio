@@ -1,5 +1,7 @@
+import { deploymentUrl } from './deployment-url'
+
 export interface ChatAgentAvatar {
-  label: 'Hermes' | 'Ekko' | 'Claude' | 'Codex' | 'Pi' | 'Grok' | 'OpenCode' | 'DeepSeek Harness'
+  label: 'Hermes' | 'Ekko' | 'Claude' | 'Codex' | 'Pi' | 'Grok' | 'OpenCode' | 'DeepSeek Harness' | 'Cursor' | 'Antigravity' | 'Qwen Code' | 'Kimi Code' | 'CodeBuddy' | 'Qoder' | 'GitHub Copilot' | 'ZCode'
   src: string
 }
 
@@ -10,14 +12,22 @@ interface ChatAgentSessionIdentity {
 }
 
 const AGENT_AVATARS = {
-  hermes: { label: 'Hermes', src: '/coding-agents/hermes.png' },
-  'ekko-agent': { label: 'Ekko', src: '/coding-agents/ekko-agent.png' },
-  'claude-code': { label: 'Claude', src: '/coding-agents/claude-code.svg' },
-  codex: { label: 'Codex', src: '/coding-agents/codex-openai.png' },
-  pi: { label: 'Pi', src: '/coding-agents/pi.svg' },
-  grok: { label: 'Grok', src: '/coding-agents/grok.svg' },
-  opencode: { label: 'OpenCode', src: '/coding-agents/opencode.png' },
-  dsh: { label: 'DeepSeek Harness', src: '/coding-agents/deepseek.svg' },
+  hermes: { label: 'Hermes', src: deploymentUrl('/coding-agents/hermes.png') },
+  'ekko-agent': { label: 'Ekko', src: deploymentUrl('/coding-agents/ekko-agent.png') },
+  'claude-code': { label: 'Claude', src: deploymentUrl('/coding-agents/claude-code.svg') },
+  codex: { label: 'Codex', src: deploymentUrl('/coding-agents/codex-openai.png') },
+  pi: { label: 'Pi', src: deploymentUrl('/coding-agents/pi.svg') },
+  grok: { label: 'Grok', src: deploymentUrl('/coding-agents/grok.svg') },
+  opencode: { label: 'OpenCode', src: deploymentUrl('/coding-agents/opencode.png') },
+  dsh: { label: 'DeepSeek Harness', src: deploymentUrl('/coding-agents/deepseek.svg') },
+  cursor: { label: 'Cursor', src: deploymentUrl('/coding-agents/cursor-logo.png') },
+  qwen: { label: 'Qwen Code', src: deploymentUrl('/coding-agents/qwen-logo.svg') },
+  kimi: { label: 'Kimi Code', src: deploymentUrl('/coding-agents/kimi-logo.png') },
+  codebuddy: { label: 'CodeBuddy', src: deploymentUrl('/coding-agents/codebuddy-logo.svg') },
+  qoder: { label: 'Qoder', src: deploymentUrl('/coding-agents/qoder-logo.svg') },
+  copilot: { label: 'GitHub Copilot', src: deploymentUrl('/coding-agents/copilot-logo.svg') },
+  zcode: { label: 'ZCode', src: deploymentUrl('/coding-agents/zcode-logo.png') },
+  antigravity: { label: 'Antigravity', src: deploymentUrl('/coding-agents/antigravity.png') },
 } as const satisfies Record<string, ChatAgentAvatar>
 
 export function chatSessionAgentAvatar(session?: ChatAgentSessionIdentity | null): ChatAgentAvatar {
@@ -30,6 +40,14 @@ export function chatSessionAgentAvatar(session?: ChatAgentSessionIdentity | null
   if (runtime === 'grok') return AGENT_AVATARS.grok
   if (runtime === 'dsh') return AGENT_AVATARS.dsh
   if (runtime === 'opencode') return AGENT_AVATARS.opencode
+  if (runtime === 'antigravity') return AGENT_AVATARS.antigravity
+  if (runtime === 'qwen') return AGENT_AVATARS.qwen
+  if (runtime === 'kimi') return AGENT_AVATARS.kimi
+  if (runtime === 'codebuddy') return AGENT_AVATARS.codebuddy
+  if (runtime === 'qoder') return AGENT_AVATARS.qoder
+  if (runtime === 'copilot') return AGENT_AVATARS.copilot
+  if (runtime === 'zcode') return AGENT_AVATARS.zcode
+  if (runtime === 'cursor') return AGENT_AVATARS.cursor
   if (session?.source === 'coding_agent') return AGENT_AVATARS['claude-code']
   return AGENT_AVATARS.hermes
 }

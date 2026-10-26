@@ -61,6 +61,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/workflow-run-stor
 
 function ctx(overrides: Record<string, any> = {}) {
   return {
+    get: () => '',
     params: {},
     query: {},
     request: { body: {} },

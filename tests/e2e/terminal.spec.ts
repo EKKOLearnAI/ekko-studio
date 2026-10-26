@@ -1,6 +1,35 @@
 import { expect, test } from '@playwright/test'
 import { authenticate, mockHermesApi, mockTerminalWebSocket, TEST_ACCESS_KEY } from './fixtures'
 
+test('keeps a mounted terminal in sync with Studio brightness and preserves palette overrides', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' })
+  await authenticate(page)
+  await page.addInitScript(() => localStorage.setItem('hermes_brightness', 'light'))
+  await mockHermesApi(page)
+  await mockTerminalWebSocket(page)
+  await page.goto('/#/hermes/terminal')
+  await expect(page.locator('.terminal-header .n-select')).toContainText('Follow Studio theme')
+  await expect(page.locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(250, 250, 250)')
+  await page.locator('.page-sidebar-account-btn').click()
+  const brightness = page.locator('.sidebar-account-menu .theme-switch')
+  await expect(brightness).toHaveAttribute('data-theme-preference', 'light')
+  await brightness.click()
+  await expect(brightness).toHaveAttribute('data-theme-preference', 'dark')
+  await expect(page.locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(26, 26, 26)')
+  await page.keyboard.press('Escape')
+  await page.locator('.terminal-header .n-select').click()
+  await page.locator('.n-base-select-option:visible').getByText('Solarized Dark', { exact: true }).click()
+  await expect(page.locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(0, 43, 54)')
+  await page.locator('.page-sidebar-account-btn').click()
+  await brightness.click()
+  await expect(brightness).toHaveAttribute('data-theme-preference', 'system')
+  await expect(page.locator('html')).not.toHaveClass(/\bdark\b/)
+  // An explicit terminal palette must survive both shortcut and OS theme changes.
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+  await expect(page.locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(0, 43, 54)')
+})
+
 test('opens terminal websocket session and forwards user input', async ({ page }) => {
   await authenticate(page, TEST_ACCESS_KEY, 'research')
   const api = await mockHermesApi(page)

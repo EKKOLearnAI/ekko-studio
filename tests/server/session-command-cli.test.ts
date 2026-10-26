@@ -28,7 +28,7 @@ vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/compression', () => ({
   buildDbSnapshotAwareHistory: vi.fn(async () => []),
   forceCompressBridgeHistory: forceCompressBridgeHistoryMock,
-  getOrCreateSession: vi.fn(() => ({ messages: [], isWorking: false })),
+  getOrCreateSession: vi.fn((map, id) => map.get(id) || { messages: [], isWorking: false }),
   replaceState: vi.fn(),
 }))
 
@@ -128,5 +128,23 @@ describe('CLI-style session commands', () => {
     const payload = namespaceEmit.mock.calls.find(([event]: [string]) => event === 'session.command')?.[1]
     expect(payload.action).toBe('compress')
     expect(forceCompressBridgeHistoryMock).toHaveBeenCalled()
+  })
+
+  it.each([false, true])('holds history against deletion during manual compression and releases it after failure=%s', async fail => {
+    const state = { messages: [], isWorking: false, isCompressing: false, events: [], queue: [] }
+    let finish!: () => void
+    forceCompressBridgeHistoryMock.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      finish = () => fail ? reject(new Error('provider failed')) : resolve({
+        beforeMessages: 10, resultMessages: 3, beforeTokens: 1000, afterTokens: 400, compressed: true,
+      })
+    }))
+    const context = makeContext(state)
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
+    const pending = handleSessionCommand('session-1', parseSessionCommand('/compact')!, { ...context, profile: 'default' } as any)
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    expect(state.isCompressing).toBe(true)
+    finish()
+    await pending
+    expect(state.isCompressing).toBe(false)
   })
 })

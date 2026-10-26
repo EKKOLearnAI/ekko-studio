@@ -54,7 +54,7 @@ const BROWSER_PASSTHROUGH_ENV = [
 const browserToolDefinitions: AgentTool['definition'][] = [
   {
     name: 'browser_navigate',
-    description: 'Navigate to a URL in a browser session. Use this before other browser tools. Returns page metadata and a compact accessibility snapshot with refs.',
+    description: 'Navigate in the separate Agent browser environment. It does not share Ekko Studio built-in browser tabs or logins. For Studio built-in browser tasks prefer ekko_studio_browser_toolset when available. Returns page metadata and a compact accessibility snapshot with refs.',
     parameters: {
       type: 'object',
       properties: {
@@ -644,10 +644,19 @@ function browserSocketDir(sessionName: string): string {
   return path.join(shortTempDir(), `eab_${sessionName}`)
 }
 
+const BROWSER_SOCKET_DIR_LIMIT = 40
+const BROWSER_SOCKET_LEAF = 'eab_e_0123456789'
+
 function shortTempDir(): string {
   if (process.env.EKKO_AGENT_BROWSER_TMPDIR) return process.env.EKKO_AGENT_BROWSER_TMPDIR
   if (process.platform !== 'win32' && existsSync('/tmp')) return '/tmp'
-  return os.tmpdir()
+  const candidates = [
+    os.tmpdir(),
+    process.env.SystemRoot ? path.join(process.env.SystemRoot, 'Temp') : '',
+  ].filter(candidate => candidate.length > 0)
+  return candidates.find(candidate => (
+    existsSync(candidate) && path.join(candidate, BROWSER_SOCKET_LEAF).length < BROWSER_SOCKET_DIR_LIMIT
+  )) || os.tmpdir()
 }
 
 function shortHash(value: string): string {
