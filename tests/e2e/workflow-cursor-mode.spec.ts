@@ -23,10 +23,10 @@ for (const target of [
       }],
       workflowRuns: [],
     })
-    await page.route('**/api/agents/status', route => route.fulfill({ json: {
+    await page.route('**/api/agents/availability', route => route.fulfill({ json: {
       revision: 1, updatedAt: new Date().toISOString(),
       agents: ['hermes', 'ekko-agent', 'codex', 'cursor'].map(id => ({
-        id, installed: true, source: 'user-cli', path: `/test/${id}`, version: '1.0.0',
+        id, installed: true, available: true, source: 'user-cli', path: `/test/${id}`, version: '1.0.0',
       })),
     } }))
 

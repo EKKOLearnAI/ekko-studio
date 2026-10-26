@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   agentInstallationState,
+  isAgentAvailable,
   isAgentStatusAvailable,
   resolveAgentStatusId,
   type AgentAvailabilitySnapshot,
@@ -60,14 +61,33 @@ describe('Agent status availability', () => {
       revision: 2,
       updatedAt: new Date(0).toISOString(),
       agents: [
-        { id: 'hermes', installed: true, source: 'managed-runtime' },
+        { id: 'hermes', installed: true, source: 'managed-runtime', available: false },
       ],
     }
 
     expect(agentInstallationState(availability, 'hermes')).toBe('installed')
-    availability.agents[0] = { id: 'hermes', installed: false, source: 'not-installed' }
+    availability.agents[0] = { id: 'hermes', installed: false, source: 'not-installed', available: false }
     expect(agentInstallationState(availability, 'hermes')).toBe('not-installed')
     expect(agentInstallationState(null, 'hermes')).toBe('unknown')
     expect(agentInstallationState(snapshot(), 'opencode')).toBe('installed')
+  })
+})
+
+
+describe('Public execution eligibility', () => {
+  it('uses explicit server eligibility, aliases, and fails closed without it', () => {
+    const status: AgentAvailabilitySnapshot = { revision: 1, updatedAt: '', agents: [
+      { id: 'hermes', installed: true, source: 'user-cli', available: false },
+      { id: 'ekko-agent', installed: true, source: 'built-in', available: true },
+      { id: 'claude-code', installed: true, source: 'user-cli', available: true },
+    ] }
+    expect(isAgentAvailable(status, 'hermes')).toBe(false)
+    expect(isAgentAvailable(status, 'EKKO')).toBe(true)
+    expect(isAgentAvailable(status, 'claude')).toBe(true)
+    expect(isAgentAvailable(status, 'unknown')).toBe(false)
+    expect(isAgentAvailable(status, 'codex')).toBe(false)
+    expect(isAgentAvailable(null, 'ekko')).toBe(false)
+    delete (status.agents[1] as Partial<typeof status.agents[1]>).available
+    expect(isAgentAvailable(status, 'ekko')).toBe(false)
   })
 })

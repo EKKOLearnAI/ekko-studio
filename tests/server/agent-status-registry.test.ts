@@ -77,6 +77,7 @@ describe('Agent status registry', () => {
       id: 'hermes',
       installed: true,
       source: 'managed-runtime',
+      available: true,
     })
     expect(hermes).not.toHaveProperty('path')
     expect(hermes).not.toHaveProperty('version')

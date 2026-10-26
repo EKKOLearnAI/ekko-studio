@@ -35,6 +35,7 @@ export interface AgentStatusSnapshot {
 }
 
 export interface AgentAvailabilityRecord {
+  available: boolean
   id: AgentStatusId
   installed: boolean
   source: AgentStatusSource
@@ -232,6 +233,7 @@ export function getAgentAvailabilitySnapshot(): AgentAvailabilitySnapshot {
       return {
         id,
         installed: record.installed,
+        available: isAgentAvailable(id),
         source: record.source,
       }
     }),

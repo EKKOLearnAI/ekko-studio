@@ -16,8 +16,9 @@ for (const [agent, label] of [
         } }], edges: [], viewport: { x: 80, y: 80, zoom: .75 }, created_at: 1, updated_at: 1,
       }], workflowRuns: [],
     })
-    await page.route('**/api/agents/status', route => route.fulfill({ json: {
-      revision: 1, updatedAt: new Date().toISOString(), agents: [{ id: agent, installed: true,
+    await page.route('**/api/agents/status', route => route.fulfill({ status: 403, json: { error: 'Forbidden' } }))
+    await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+      revision: 1, updatedAt: new Date().toISOString(), agents: [{ id: agent, installed: true, available: true,
         source: 'user-cli', path: `/test/${agent}`, version: '1.0.0' }],
     } }))
     await page.goto('/#/hermes/workflow')

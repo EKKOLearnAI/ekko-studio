@@ -170,18 +170,18 @@ async function mockGroupChatApi(page: Page, offlinePresence = false, modelGroups
     if (pathname === '/health') return json({ status: 'ok' })
     if (pathname === '/api/auth/status') return json({ hasPasswordLogin: false, username: null })
     if (pathname === '/api/hermes/runtime-versions/jobs' && request.method() === 'GET') return json({ jobs: [] })
-    if (pathname === '/api/agents/status' && request.method() === 'GET') {
+    if (pathname === '/api/agents/availability' && request.method() === 'GET') {
       return json({
         revision: 1,
         updatedAt: '2026-01-01T00:00:00.000Z',
         agents: [
-          { id: 'hermes', name: 'Hermes', provider: 'Nous Research', kind: 'hermes', installed: true, version: '0.19.1', source: 'user-cli', path: '/usr/local/bin/hermes', error: '', installations: [] },
-          { id: 'ekko-agent', name: 'Ekko', provider: 'Ekko Studio', kind: 'built-in', installed: true, version: '0.7.0', source: 'built-in', path: '', error: '', installations: [] },
-          { id: 'claude-code', name: 'Claude', provider: 'Anthropic', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/claude', error: '', installations: [] },
-          { id: 'codex', name: 'Codex', provider: 'OpenAI', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/codex', error: '', installations: [] },
-          { id: 'pi', name: 'Pi', provider: 'Pi', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/pi', error: '', installations: [] },
-          { id: 'grok', name: 'Grok', provider: 'xAI', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/grok', error: '', installations: [] },
-          { id: 'dsh', name: 'DeepSeek Harness', provider: 'DeepSeek', kind: 'coding-agent', installed: true, version: '0.1.5-rc.1', source: 'user-cli', path: '/usr/local/bin/dsh', error: '', installations: [] },
+          { id: 'hermes', name: 'Hermes', provider: 'Nous Research', kind: 'hermes', installed: true, available: true, version: '0.19.1', source: 'user-cli', path: '/usr/local/bin/hermes', error: '', installations: [] },
+          { id: 'ekko-agent', name: 'Ekko', provider: 'Ekko Studio', kind: 'built-in', installed: true, available: true, version: '0.7.0', source: 'built-in', path: '', error: '', installations: [] },
+          { id: 'claude-code', name: 'Claude', provider: 'Anthropic', kind: 'coding-agent', installed: true, available: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/claude', error: '', installations: [] },
+          { id: 'codex', name: 'Codex', provider: 'OpenAI', kind: 'coding-agent', installed: true, available: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/codex', error: '', installations: [] },
+          { id: 'pi', name: 'Pi', provider: 'Pi', kind: 'coding-agent', installed: true, available: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/pi', error: '', installations: [] },
+          { id: 'grok', name: 'Grok', provider: 'xAI', kind: 'coding-agent', installed: true, available: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/grok', error: '', installations: [] },
+          { id: 'dsh', name: 'DeepSeek Harness', provider: 'DeepSeek', kind: 'coding-agent', installed: true, available: true, version: '0.1.5-rc.1', source: 'user-cli', path: '/usr/local/bin/dsh', error: '', installations: [] },
         ],
       })
     }
@@ -716,7 +716,7 @@ for (const editing of [false, true]) {
   }
 }
 
-for (const endpoint of ['/api/hermes/profiles', '/api/hermes/available-models', '/api/agents/status']) {
+for (const endpoint of ['/api/hermes/profiles', '/api/hermes/available-models', '/api/agents/availability']) {
   test(`opens the Agent drawer before ${endpoint} finishes and preserves a reopened edit`, async ({ page }) => {
     await setup(page, '/#/hermes/group-chat/room/room-alpha')
     await page.locator('.agent-avatar-rail-add').click()
@@ -813,7 +813,7 @@ test('keeps the Agent drawer closable when Agent status fails to load', async ({
   await expect(drawer.locator('.agent-form-loading')).toBeHidden()
   await drawer.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(drawer).toBeHidden()
-  await page.route('**/api/agents/status', route => route.fulfill({ status: 500, json: { error: 'Status unavailable' } }))
+  await page.route('**/api/agents/availability', route => route.fulfill({ status: 500, json: { error: 'Status unavailable' } }))
   await page.locator('.agent-avatar-rail-add').click()
   await expect(drawer).toBeVisible()
   await expect(drawer.locator('.agent-form-loading')).toBeHidden()
@@ -2093,12 +2093,12 @@ test.describe('group chat room deep links', () => {
 
 test('group-chat Agent picker only lists installed Agents in catalog order', async ({ page }) => {
   await setup(page, '/#/hermes/group-chat/room/room-alpha')
-  await page.route('**/api/agents/status', route => route.fulfill({ json: {
+  await page.route('**/api/agents/availability', route => route.fulfill({ json: {
     revision: 1, updatedAt: new Date().toISOString(), agents: [
-      { id: 'ekko-agent', installed: true, source: 'built-in', path: '', version: '' },
-      { id: 'claude-code', installed: false, source: 'not-installed', path: '', version: '' },
-      { id: 'codex', installed: true, source: 'user-cli', path: '/test/codex', version: '' },
-      { id: 'qwen', installed: true, source: 'user-cli', path: '/test/qwen', version: '' },
+      { id: 'ekko-agent', installed: true, available: true, source: 'built-in', path: '', version: '' },
+      { id: 'claude-code', installed: false, available: false, source: 'not-installed', path: '', version: '' },
+      { id: 'codex', installed: true, available: true, source: 'user-cli', path: '/test/codex', version: '' },
+      { id: 'qwen', installed: true, available: true, source: 'user-cli', path: '/test/qwen', version: '' },
     ],
   } }))
   await page.locator('.agent-avatar-rail-add').click()
@@ -2188,4 +2188,25 @@ test('group-chat applies a global native preset and uses edited effort instead o
   await expect.poll(() => api.addedAgents.length).toBe(1)
   expect(api.addedAgents[0].body).toMatchObject({ agentMode: 'global', model: 'native-review', reasoningEffort: 'low' })
   expect(api.addedAgents[0].body.presetId).toBeUndefined()
+})
+
+
+test('can select public available Agents while private status is denied', async ({ page }) => {
+  await setup(page, '/#/hermes/group-chat/room/room-alpha')
+  let privateRequests = 0
+  await page.route('**/api/agents/status', route => { privateRequests++; return route.fulfill({ status: 403, json: { error: 'Forbidden' } }) })
+  await page.route('**/api/agents/availability', route => route.fulfill({ json: {
+    revision: 2, updatedAt: '', agents: [
+      { id: 'hermes', installed: true, source: 'managed-runtime', available: false },
+      { id: 'ekko-agent', installed: true, source: 'built-in', available: true },
+      { id: 'codex', installed: true, source: 'user-cli', available: true },
+    ],
+  } }))
+  await page.locator('.agent-avatar-rail-add').click()
+  const drawer = page.locator('.n-drawer').filter({ hasText: 'Add Agent' })
+  await expect(drawer.locator('.agent-form-loading')).toBeHidden()
+  await drawer.locator('.n-select').first().click()
+  await expect.poll(async () => (await page.locator('.n-base-select-option__content:visible').allTextContents())
+    .map(label => label.split(' · ')[0])).toEqual(['Ekko', 'Codex'])
+  expect(privateRequests).toBe(0)
 })

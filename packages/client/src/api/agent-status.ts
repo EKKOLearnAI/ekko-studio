@@ -19,6 +19,7 @@ export interface AgentStatusSnapshot {
 }
 
 export interface AgentAvailabilityRecord {
+  available: boolean
   id: AgentStatusId
   installed: boolean
   source: AgentStatusSource
@@ -66,6 +67,15 @@ export function isAgentStatusAvailable(
   const status = snapshot?.agents.find(item => item.id === id)
   if (!status?.installed || status.source === 'not-installed') return false
   return id !== 'hermes' || Boolean(status.path)
+}
+
+/** Uses the server's execution eligibility without exposing local installation paths. */
+export function isAgentAvailable(
+  snapshot: AgentAvailabilitySnapshot | null | undefined,
+  agent: string,
+): boolean {
+  const id = resolveAgentStatusId(agent)
+  return Boolean(id && snapshot?.agents.find(item => item.id === id)?.available === true)
 }
 
 export function agentInstallationState(

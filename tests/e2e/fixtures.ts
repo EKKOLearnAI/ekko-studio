@@ -274,13 +274,13 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
         revision: 1,
         updatedAt: '2026-01-01T00:00:00.000Z',
         agents: [
-          { id: 'hermes', installed: true, source: 'user-cli' },
-          { id: 'ekko-agent', installed: true, source: 'built-in' },
-          { id: 'claude-code', installed: true, source: 'user-cli' },
-          { id: 'codex', installed: true, source: 'user-cli' },
-          { id: 'pi', installed: true, source: 'user-cli' },
-          { id: 'grok', installed: true, source: 'user-cli' },
-          { id: 'dsh', installed: true, source: 'user-cli' },
+          { id: 'hermes', installed: true, available: true, source: 'user-cli' },
+          { id: 'ekko-agent', installed: true, available: true, source: 'built-in' },
+          { id: 'claude-code', installed: true, available: true, source: 'user-cli' },
+          { id: 'codex', installed: true, available: true, source: 'user-cli' },
+          { id: 'pi', installed: true, available: true, source: 'user-cli' },
+          { id: 'grok', installed: true, available: true, source: 'user-cli' },
+          { id: 'dsh', installed: true, available: true, source: 'user-cli' },
         ],
       }))
       return
