@@ -3374,7 +3374,13 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const globalMcpConfig = globalMcpPath ? await safeReadFile(globalMcpPath) : ''
     const existingMcpConfig = existingMcpPath ? await safeReadFile(existingMcpPath) : ''
     await writeScopedFile('mcp', claudeMcpConfigJson(scope.profile, input.studioMcpTokenFile, globalMcpConfig, existingMcpConfig))
-    await writeScopedFile('prompt', hermesPromptDocument(scopedSystemPrompt))
+    // Settings isolation must not drop the user's global or scoped instructions.
+    const claudeInstructions = [
+      scopedSystemPrompt.trim(),
+      (await safeReadFile(getLiveConfigFileDefinition(tool.id, 'memory')?.absolutePath || ''))?.trim() || '',
+      (await safeReadFile(getScopedConfigFileDefinition(tool.id, 'memory', scope)?.absolutePath || ''))?.trim() || '',
+    ].filter((value, index, values) => value && values.indexOf(value) === index)
+    await writeScopedFile('prompt', hermesPromptDocument(claudeInstructions.join('\n\n')))
 
     const settingsPath = join(rootDir, 'settings.json')
     const mcpPath = join(rootDir, 'mcp.json')

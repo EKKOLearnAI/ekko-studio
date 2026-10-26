@@ -2154,6 +2154,56 @@ describe('coding agent launch preparation', () => {
     expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-use\][\s\S]*?tool_timeout_sec = 360/)
   })
 
+  it.each([
+    { name: 'global and scoped', global: 'Global user rule', scoped: 'Scoped user rule' },
+    { name: 'missing scoped', global: 'Global user rule', scoped: undefined },
+    { name: 'missing global', global: undefined, scoped: 'Scoped user rule' },
+    { name: 'both missing', global: undefined, scoped: undefined },
+    { name: 'blank files', global: '  \n', scoped: '\n' },
+    { name: 'duplicate content', global: 'Shared user rule\n', scoped: '  Shared user rule  ' },
+  ])('inherits Claude memory with $name while preserving settings isolation', async ({ global, scoped }) => {
+    const home = makeHome()
+    const globalPath = join(home, 'global-home', '.claude', 'CLAUDE.md')
+    const scopedPath = join(home, 'coding-agent', 'model', 'default', 'openrouter', 'claude-code', 'CLAUDE.md')
+    for (const [path, content] of [[globalPath, global], [scopedPath, scoped]] as const) {
+      if (content === undefined) continue
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, content)
+    }
+    const input = {
+      mode: 'scoped' as const,
+      profile: 'default',
+      provider: 'openrouter',
+      model: 'anthropic/claude-sonnet-4.6',
+      isolateSettings: true,
+      sessionId: 'memory-inheritance',
+      agentSessionId: 'memory-run',
+    }
+    const result = await prepareCodingAgentLaunch('claude-code', input)
+    const prompt = readFileSync(result.promptFile!, 'utf-8')
+    expect(prompt).toContain('<!-- BEGIN HERMES WEB UI PROMPT -->')
+    expect(prompt).toContain('Ekko Studio MCP usage')
+    const instructions = [...new Set([global?.trim(), scoped?.trim()].filter(Boolean))]
+    for (const instruction of instructions) {
+      expect(prompt.split(instruction!).length - 1).toBe(1)
+    }
+    if (global?.trim() && scoped?.trim() && global.trim() !== scoped.trim()) {
+      expect(prompt.indexOf(global.trim())).toBeLessThan(prompt.indexOf(scoped.trim()))
+    }
+    expect(result.args.slice(result.args.indexOf('--setting-sources'), result.args.indexOf('--setting-sources') + 2))
+      .toEqual(['--setting-sources', 'local'])
+    expect(result.args.slice(result.args.indexOf('--append-system-prompt-file'), result.args.indexOf('--append-system-prompt-file') + 2))
+      .toEqual(['--append-system-prompt-file', result.promptFile])
+    expectLauncherFragment(readFileSync(launcherFile(result.rootDir), 'utf-8'), '--setting-sources local')
+    // Re-preparing a run must not accumulate inherited instructions.
+    await prepareCodingAgentLaunch('claude-code', input)
+    expect(readFileSync(result.promptFile!, 'utf-8')).toBe(prompt)
+    for (const [path, content] of [[globalPath, global], [scopedPath, scoped]] as const) {
+      if (content === undefined) expect(existsSync(path)).toBe(false)
+      else expect(readFileSync(path, 'utf-8')).toBe(content)
+    }
+  })
+
   it('isolates Claude Code settings for hidden chat runs only', async () => {
     const home = makeHome()
 
