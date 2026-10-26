@@ -27,7 +27,7 @@ import { getCompatibleCustomProviders } from '../../studio/contracts/provider-co
 import { registerClaudeCodeProxyTarget } from './claude-code/proxy'
 import { registerCodexProxyTarget, restoreCodexProxyTarget } from './codex/proxy'
 import { compactCodexThread } from './codex/compact'
-import { hermesPromptDocument, writeManagedPromptFile } from './prompt-file'
+import { writeManagedPromptFile } from './prompt-file'
 import type { ApiMode, CodingAgentImageInput } from '../protocol/types'
 import { PROVIDER_PRESETS, assertProviderAvailable, isRetiredProvider } from '../../studio/contracts/providers'
 import { getModelContextLength, getModelRuntimeCapabilities } from '../../studio/public/provider-runtime'
@@ -3411,13 +3411,14 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const globalMcpConfig = globalMcpPath ? await safeReadFile(globalMcpPath) : ''
     const existingMcpConfig = existingMcpPath ? await safeReadFile(existingMcpPath) : ''
     await writeScopedFile('mcp', claudeMcpConfigJson(scope.profile, input.studioMcpTokenFile, globalMcpConfig, existingMcpConfig))
-    // Settings isolation must not drop the user's global or scoped instructions.
+    // User instructions must stay outside the block replaced before every Claude turn.
     const claudeInstructions = [
-      scopedSystemPrompt.trim(),
       (await safeReadFile(getLiveConfigFileDefinition(tool.id, 'memory')?.absolutePath || ''))?.trim() || '',
       (await safeReadFile(getScopedConfigFileDefinition(tool.id, 'memory', scope)?.absolutePath || ''))?.trim() || '',
     ].filter((value, index, values) => value && values.indexOf(value) === index)
-    await writeScopedFile('prompt', hermesPromptDocument(claudeInstructions.join('\n\n')))
+    const promptDefinition = getScopedConfigFileDefinition(tool.id, 'prompt', scope, rootDir)!
+    await writeManagedPromptFile(promptDefinition.absolutePath, scopedSystemPrompt, claudeInstructions.join('\n\n'))
+    files.push({ key: 'prompt', path: promptDefinition.path, absolutePath: promptDefinition.absolutePath })
 
     const settingsPath = join(rootDir, 'settings.json')
     const mcpPath = join(rootDir, 'mcp.json')
