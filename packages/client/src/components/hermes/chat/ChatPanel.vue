@@ -67,6 +67,7 @@ import SubagentStreamPanel from "./SubagentStreamPanel.vue";
 import { chatSessionAgentAvatar } from "@/utils/chat-agent-avatar";
 import { isHermesSession } from "@/utils/hermes/session-agent";
 import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./session-category-groups";
+import { buildSessionForkRows } from "./session-fork-rows";
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import { buildActiveSessionMenuOptions, buildSessionContextMenuOptions } from "./session-menu-options";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
@@ -629,6 +630,7 @@ const createCategorySubmitting = ref(false);
 const createCategoryInputRef = ref<InstanceType<typeof NInput> | null>(null);
 let sessionCategoriesLoadPromise: Promise<void> | null = null;
 const COLLAPSED_CATEGORIES_STORAGE_KEY = "hermes_chat_collapsed_categories";
+const COLLAPSED_FORK_SESSIONS_STORAGE_KEY = "hermes_chat_collapsed_fork_sessions";
 const RECENT_CATEGORY_REVEAL_SUPPRESSION_STORAGE_KEY = "hermes_chat_recent_category_reveal_suppression";
 const showRecentCountModal = ref(false);
 const recentCountDraft = ref(sessionBrowserPrefsStore.recentCount);
@@ -643,6 +645,17 @@ function loadCollapsedCategories(): Set<string> {
 }
 
 const collapsedCategories = ref<Set<string>>(loadCollapsedCategories());
+
+function loadCollapsedForkSessions(): Set<string> {
+  try {
+    const value = JSON.parse(localStorage.getItem(COLLAPSED_FORK_SESSIONS_STORAGE_KEY) || "[]");
+    return new Set(Array.isArray(value) ? value.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+const collapsedForkSessions = ref<Set<string>>(loadCollapsedForkSessions());
 
 function loadCategoryRevealSuppressedSessionId(): string | null {
   try {
@@ -682,6 +695,21 @@ function toggleCategoryGroup(key: string) {
   else next.add(key);
   collapsedCategories.value = next;
   persistCollapsedCategories();
+}
+
+function persistCollapsedForkSessions() {
+  localStorage.setItem(
+    COLLAPSED_FORK_SESSIONS_STORAGE_KEY,
+    JSON.stringify([...collapsedForkSessions.value]),
+  );
+}
+
+function toggleForkSessionChildren(sessionId: string) {
+  const next = new Set(collapsedForkSessions.value);
+  if (next.has(sessionId)) next.delete(sessionId);
+  else next.add(sessionId);
+  collapsedForkSessions.value = next;
+  persistCollapsedForkSessions();
 }
 async function handleProfileFilterChange(value: string | null) {
   chatStore.setSessionProfileFilter(value);
@@ -743,6 +771,19 @@ const categorizedSessions = computed(() => buildVisibleSessionCategoryGroups(
   unpinnedSessions.value,
   t("chat.uncategorized"),
 ));
+
+const pinnedSessionRows = computed(() => buildSessionForkRows(
+  pinnedSessions.value,
+  collapsedForkSessions.value,
+));
+const recentSessionRows = computed(() => buildSessionForkRows(
+  recentSessions.value.sessions,
+  collapsedForkSessions.value,
+));
+
+function sessionForkRowsFor(sessions: Session[]) {
+  return buildSessionForkRows(sessions, collapsedForkSessions.value);
+}
 
 function openRecentCountModal(event: MouseEvent) {
   event.stopPropagation();
@@ -2617,11 +2658,14 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             <span class="session-group-count">{{ pinnedSessions.length }}</span>
           </div>
           <SessionListItem
-            v-for="s in pinnedSessions"
+            v-for="({ session: s, depth, childSessionCount, childrenExpanded }) in pinnedSessionRows"
             :key="`pinned-${s.id}`"
             :session="s"
             :active="s.id === chatStore.activeSessionId"
             :pinned="true"
+            :fork-child="depth === 1"
+            :child-session-count="childSessionCount"
+            :children-expanded="childrenExpanded"
             :can-delete="
               s.id !== chatStore.activeSessionId ||
               chatStore.sessions.length > 1
@@ -2638,6 +2682,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             @contextmenu="handleContextMenu($event, s.id)"
             @delete="handleDeleteSession(s.id)"
             @toggle-select="toggleSessionSelection(s)"
+            @toggle-children="toggleForkSessionChildren(s.id)"
           />
         </template>
 
@@ -2674,11 +2719,14 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
           </div>
           <template v-if="!sessionBrowserPrefsStore.recentCollapsed">
             <SessionListItem
-              v-for="s in recentSessions.sessions"
+              v-for="({ session: s, depth, childSessionCount, childrenExpanded }) in recentSessionRows"
               :key="`recent-${s.id}`"
               :session="s"
               :active="s.id === chatStore.activeSessionId"
               :pinned="Boolean(s.isPinned)"
+              :fork-child="depth === 1"
+              :child-session-count="childSessionCount"
+              :children-expanded="childrenExpanded"
               :can-delete="s.id !== chatStore.activeSessionId || chatStore.sessions.length > 1"
               :streaming="chatStore.isSessionWorking(s.id)"
               :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
@@ -2693,6 +2741,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               @contextmenu="handleContextMenu($event, s.id)"
               @delete="handleDeleteSession(s.id)"
               @toggle-select="toggleSessionSelection(s)"
+              @toggle-children="toggleForkSessionChildren(s.id)"
             />
           </template>
         </template>
@@ -2755,11 +2804,14 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
           </div>
           <template v-if="!collapsedCategories.has(group.key)">
             <SessionListItem
-              v-for="s in group.sessions"
+              v-for="({ session: s, depth, childSessionCount, childrenExpanded }) in sessionForkRowsFor(group.sessions)"
               :key="s.id"
               :session="s"
               :active="s.id === chatStore.activeSessionId"
               :pinned="false"
+              :fork-child="depth === 1"
+              :child-session-count="childSessionCount"
+              :children-expanded="childrenExpanded"
               :can-delete="
                 s.id !== chatStore.activeSessionId ||
                 chatStore.sessions.length > 1
@@ -2776,6 +2828,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               @contextmenu="handleContextMenu($event, s.id)"
               @delete="handleDeleteSession(s.id)"
               @toggle-select="toggleSessionSelection(s)"
+              @toggle-children="toggleForkSessionChildren(s.id)"
             />
           </template>
         </template>

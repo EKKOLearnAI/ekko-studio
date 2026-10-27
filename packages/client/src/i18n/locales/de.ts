@@ -1187,6 +1187,7 @@ export default {
     contextEditFailed: 'Aktualisierung fehlgeschlagen',
     emptyState: 'Starten Sie eine Konversation mit Hermes Agent',
     emptyStateAgent: 'Starten Sie eine Konversation mit {agent}',
+    childSessions: 'Untergeordnete Sitzungen: {count}',
     viewOlderInHistory: 'Fruehere Nachrichten im Verlauf ansehen',
     scrollToBottom: 'Nach unten scrollen',
     outlineTitle: 'Konversationsübersicht',

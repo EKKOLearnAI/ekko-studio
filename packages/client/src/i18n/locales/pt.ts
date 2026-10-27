@@ -1187,6 +1187,7 @@ export default {
     contextEditFailed: 'Falha na atualização',
     emptyState: 'Inicie uma conversa com o Hermes Agent',
     emptyStateAgent: 'Inicie uma conversa com {agent}',
+    childSessions: 'Sessões secundárias: {count}',
     viewOlderInHistory: 'Ver mensagens anteriores no histórico',
     scrollToBottom: 'Rolar até o fim',
     outlineTitle: 'Esboço da conversa',

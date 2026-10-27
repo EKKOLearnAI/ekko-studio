@@ -497,6 +497,7 @@ export interface Session {
   cacheWriteTokens?: number
   contextTokens?: number
   endedAt?: number | null
+  endReason?: string | null
   parentSessionId?: string | null
   forkPointMessageId?: string | null
   parentTitle?: string | null
@@ -1223,6 +1224,7 @@ function mapHermesSession(s: SessionSummary): Session {
     cacheReadTokens: s.cache_read_tokens,
     cacheWriteTokens: s.cache_write_tokens,
     endedAt: s.ended_at != null ? Math.round(s.ended_at * 1000) : null,
+    endReason: s.end_reason || null,
     parentSessionId: s.parent_session_id || null,
     forkPointMessageId: (s as any).fork_point_message_id != null ? String((s as any).fork_point_message_id) : null,
     parentTitle: s.parent_title || null,

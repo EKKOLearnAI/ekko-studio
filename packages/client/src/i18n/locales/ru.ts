@@ -1115,6 +1115,7 @@ export default {
     emptyState: 'Начните диалог с Hermes Agent',
     viewOlderInHistory: 'Посмотреть более ранние сообщения в истории',
     scrollToBottom: 'Прокрутить вниз',
+    childSessions: 'Дочерние сеансы: {count}',
     cliEmptyState: 'Начните CLI-диалог',
     outlineTitle: 'План беседы',
     outlineEmpty: 'Нет содержимого беседы',
