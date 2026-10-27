@@ -41,6 +41,46 @@ function numberField(error: unknown, field: string): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+const MAX_CAUSE_DEPTH = 5
+
+/**
+ * `fetch` reports a transport failure as `TypeError('fetch failed')` and keeps the real
+ * transport code (`ECONNREFUSED`, `CERT_HAS_EXPIRED`, `UND_ERR_CONNECT_TIMEOUT`, ...) on
+ * `error.cause`, sometimes several levels deep. Classification therefore walks the cause
+ * chain instead of only reading the top-level error. The walk is depth-limited and
+ * cycle-safe so a self-referencing or very deep chain cannot hang the request path.
+ */
+function causeChain(error: unknown): unknown[] {
+  const chain: unknown[] = []
+  const seen = new Set<unknown>()
+  let node: unknown = error
+  while (chain.length < MAX_CAUSE_DEPTH && node !== null && node !== undefined && !seen.has(node)) {
+    seen.add(node)
+    chain.push(node)
+    node = typeof node === 'object' || typeof node === 'function' ? (node as { cause?: unknown }).cause : undefined
+  }
+  return chain
+}
+
+function chainHasName(chain: unknown[], name: string): boolean {
+  return chain.some(node => stringField(node, 'name') === name)
+}
+
+function chainHasCode(chain: unknown[], codes: Set<string>): boolean {
+  return chain.some(node => {
+    const code = stringField(node, 'code')
+    return code !== undefined && codes.has(code)
+  })
+}
+
+function chainStatus(chain: unknown[]): number | undefined {
+  for (const node of chain) {
+    const status = numberField(node, 'statusCode') ?? numberField(node, 'status')
+    if (status !== undefined) return status
+  }
+  return undefined
+}
+
 function timeoutMessage(context: ModelApiErrorContext): string {
   const limit = context.timeoutMs && context.timeoutMs > 0 ? `${Math.round(context.timeoutMs / 1000)}s` : 'the configured timeout'
   return `The model provider did not answer within ${limit}. Retry, or raise the model request timeout.`
@@ -62,23 +102,25 @@ function httpClassification(status: number, context: ModelApiErrorContext): Erro
  * Classify an upstream failure without echoing provider payloads, so callers can tell
  * a timeout, a bad credential, an unreachable host and a provider outage apart instead
  * of receiving one anonymous `502`. The raw error is logged by the caller.
+ *
+ * Checks run over the whole cause chain, so a nested transport cause is classified the
+ * same way as a top-level one and the match order below still decides which wins.
  */
 function classifyUpstreamError(error: unknown, context: ModelApiErrorContext): ErrorClassification {
-  const name = stringField(error, 'name')
-  const code = stringField(error, 'code')
-  const providerStatus = numberField(error, 'statusCode') ?? numberField(error, 'status')
+  const chain = causeChain(error)
   // AbortSignal.timeout() surfaces a TimeoutError; transports use the codes below.
-  if (name === 'TimeoutError' || (code !== undefined && TIMEOUT_CODES.has(code))) {
+  if (chainHasName(chain, 'TimeoutError') || chainHasCode(chain, TIMEOUT_CODES)) {
     return { status: 504, message: timeoutMessage(context), code: 'provider_timeout', param: null }
   }
+  const providerStatus = chainStatus(chain)
   if (providerStatus !== undefined && providerStatus >= 400) return httpClassification(providerStatus, context)
-  if (code !== undefined && TLS_CODES.has(code)) {
+  if (chainHasCode(chain, TLS_CODES)) {
     return { status: 502, message: 'The model provider TLS certificate could not be verified.', code: 'provider_tls_error', param: null }
   }
-  if (code !== undefined && UNREACHABLE_CODES.has(code)) {
+  if (chainHasCode(chain, UNREACHABLE_CODES)) {
     return { status: 502, message: 'The model provider could not be reached.', code: 'provider_unreachable', param: null }
   }
-  if (name === 'AbortError') {
+  if (chainHasName(chain, 'AbortError')) {
     return { status: 499, message: 'The request was cancelled before the model provider answered.', code: 'request_cancelled', param: null }
   }
   return { status: 502, message: PROVIDER_FAILED_MESSAGE, code: 'provider_request_failed', param: null }
