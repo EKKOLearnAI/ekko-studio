@@ -21,14 +21,16 @@ Use it as the SDK `api_key` or `Authorization: Bearer …`. No Profile header is
 needed. The API always aggregates the caller's accessible Provider configurations;
 UI selections and caller-supplied Profile selectors do not change that directory.
 
-Keys authenticate only `GET /models` and `POST /responses` below this API base URL.
+Keys authenticate only `GET /models`, `POST /responses` and
+`POST /chat/completions` below this API base URL.
 They cannot access Studio settings, key management, other proxies or WebSocket
 authentication. Each request rechecks the owner's active status and accessible
 Profiles. Revocation blocks new requests, without cancelling requests in progress.
 Keys remain valid until revoked. Account deletion or disabling also blocks them.
 
 The settings tab lists the account's keys with creation and last-use times. It
-provides the base URL, combined model IDs, a Python example and external usage.
+provides the base URL, combined model IDs, a Python example for either protocol
+(Chat Completions by default, Responses on request) and external usage.
 Switching the Models page's Profile does not create a separate key configuration.
 Edit a key to change its name or allowed models without rotating its secret.
 The next request uses the updated scope; requests already running continue.
@@ -77,9 +79,10 @@ cancellation. Costs are not reset by editing, refreshing or restarting Studio.
 
 ## Models and routing
 
-With a Model API key, `GET /models` lists only its allowed models, and
-`POST /responses` rejects other model IDs before contacting a provider. Both
-checks also enforce the owner’s current Profile permissions. Studio user JWTs
+With a Model API key, `GET /models` lists only its allowed models, and both
+inference endpoints (`POST /responses` and `POST /chat/completions`) reject other
+model IDs before contacting a provider. These checks also enforce the owner’s
+current Profile permissions. Studio user JWTs
 retain the complete account catalog used by the management UI.
 
 The list combines configured models from every accessible Profile (all Profiles
