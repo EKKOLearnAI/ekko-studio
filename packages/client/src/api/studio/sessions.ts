@@ -24,6 +24,7 @@ export interface SessionSummary {
   preview?: string
   started_at: number
   ended_at: number | null
+  end_reason?: string | null
   last_active?: number
   is_pinned?: number | boolean
   is_archived?: number | boolean

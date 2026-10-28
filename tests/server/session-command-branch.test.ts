@@ -268,7 +268,7 @@ describe('branch session command', () => {
 
   it('copies the parent real category once when forking', async () => {
     const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
-    const { nsp, socket } = makeSocketHarness()
+    const { nsp, socket, namespaceEmit } = makeSocketHarness()
     const sessionMap = new Map<string, any>([
       ['session-1', { messages: [], isWorking: false, events: [], queue: [] }],
     ])
@@ -279,6 +279,9 @@ describe('branch session command', () => {
     expect(createBranchedSessionMock).toHaveBeenCalledWith(expect.objectContaining({
       parent_session_id: 'session-1',
       category_id: 42,
+    }))
+    expect(namespaceEmit).toHaveBeenCalledWith('session.command', expect.objectContaining({
+      branchSession: expect.objectContaining({ categoryId: 42 }),
     }))
   })
 

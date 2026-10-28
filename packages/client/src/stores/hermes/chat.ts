@@ -497,6 +497,7 @@ export interface Session {
   cacheWriteTokens?: number
   contextTokens?: number
   endedAt?: number | null
+  endReason?: string | null
   parentSessionId?: string | null
   forkPointMessageId?: string | null
   parentTitle?: string | null
@@ -1223,6 +1224,7 @@ function mapHermesSession(s: SessionSummary): Session {
     cacheReadTokens: s.cache_read_tokens,
     cacheWriteTokens: s.cache_write_tokens,
     endedAt: s.ended_at != null ? Math.round(s.ended_at * 1000) : null,
+    endReason: s.end_reason || null,
     parentSessionId: s.parent_session_id || null,
     forkPointMessageId: (s as any).fork_point_message_id != null ? String((s as any).fork_point_message_id) : null,
     parentTitle: s.parent_title || null,
@@ -1931,6 +1933,12 @@ function createChatState(scopedSessionId?: string) {
           existing.updatedAt = fresh.updatedAt
           existing.lastActiveAt = fresh.lastActiveAt
           existing.endedAt = fresh.endedAt
+          existing.endReason = fresh.endReason
+          existing.parentSessionId = fresh.parentSessionId
+          existing.forkPointMessageId = fresh.forkPointMessageId
+          existing.parentTitle = fresh.parentTitle
+          existing.parentLastMessage = fresh.parentLastMessage
+          existing.parentLastMessageRole = fresh.parentLastMessageRole
           existing.model = fresh.model
           existing.provider = fresh.provider
           existing.apiMode = fresh.apiMode || existing.apiMode
@@ -3118,6 +3126,7 @@ function createChatState(scopedSessionId?: string) {
               ? branch.parentSessionId
               : typeof (evt as any).parentSessionId === 'string' ? (evt as any).parentSessionId : sid,
             forkPointMessageId: branch.forkPointMessageId != null ? String(branch.forkPointMessageId) : null,
+            categoryId: typeof branch.categoryId === 'number' ? branch.categoryId : null,
             parentTitle: typeof branch.parentTitle === 'string' ? branch.parentTitle : target?.title || null,
             parentLastMessage: typeof branch.parentLastMessage === 'string' ? branch.parentLastMessage : lastVisibleMessageContent(target?.messages),
             parentLastMessageRole: typeof branch.parentLastMessageRole === 'string' ? branch.parentLastMessageRole : lastVisibleMessageRole(target?.messages),

@@ -1204,6 +1204,7 @@ export default {
     viewOlderInHistory: 'عرض الرسائل الأقدم في السجل',
     scrollToBottom: 'التمرير إلى الأسفل',
     forkedFrom: 'متفرّعة من',
+    childSessions: 'الجلسات الفرعية: {count}',
     previousLastMessage: 'آخر رسالة سابقة',
     cliEmptyState: 'ابدأ جلسة محادثة CLI',
     outlineTitle: 'مخطط المحادثة',

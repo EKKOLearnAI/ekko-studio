@@ -118,6 +118,52 @@ describe('SessionListItem', () => {
     expect(wrapper.find('.session-item-category-tag').exists()).toBe(false)
   })
 
+  it('toggles fork children without opening the parent session', async () => {
+    const wrapper = mount(SessionListItem, {
+      props: {
+        session,
+        active: false,
+        pinned: false,
+        canDelete: true,
+        childSessionCount: 2,
+        childrenExpanded: true,
+        to: '/session/s1',
+      },
+      global: {
+        stubs: {
+          ProfileAvatar: true,
+        },
+      },
+    })
+
+    const toggle = wrapper.get('.session-item-children-toggle')
+    expect(toggle.text()).toBe('2')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    await toggle.trigger('click')
+    expect(wrapper.emitted('toggle-children')).toHaveLength(1)
+    expect(wrapper.emitted('select')).toBeUndefined()
+  })
+
+  it('marks nested fork rows with an indented branch affordance', () => {
+    const wrapper = mount(SessionListItem, {
+      props: {
+        session,
+        active: false,
+        pinned: false,
+        canDelete: true,
+        forkChild: true,
+      },
+      global: {
+        stubs: {
+          ProfileAvatar: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('.session-item').classes()).toContain('session-item--fork-child')
+    expect(wrapper.get('.session-item-fork-marker').text()).toBe('↳')
+  })
+
   it('does not select the row when clicking nested action controls', async () => {
     const wrapper = mount(SessionListItem, {
       props: {

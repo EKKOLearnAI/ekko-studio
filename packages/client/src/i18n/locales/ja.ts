@@ -1187,6 +1187,7 @@ export default {
     contextEditFailed: '更新に失敗しました',
     emptyState: 'Hermes Agent と会話を開始しましょう',
     emptyStateAgent: '{agent} と会話を開始しましょう',
+    childSessions: '子セッション: {count}',
     viewOlderInHistory: '以前のメッセージは履歴で表示',
     scrollToBottom: '一番下へ移動',
     outlineTitle: '会話アウトライン',

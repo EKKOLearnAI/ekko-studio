@@ -1211,6 +1211,7 @@ export default {
     viewOlderInHistory: 'View earlier messages in History',
     scrollToBottom: 'Scroll to bottom',
     forkedFrom: 'Forked from',
+    childSessions: 'Child sessions: {count}',
     previousLastMessage: 'Previous last message',
     cliEmptyState: 'Start a CLI chat session',
     outlineTitle: 'Conversation Outline',

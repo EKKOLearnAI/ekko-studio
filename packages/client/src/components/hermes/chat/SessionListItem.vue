@@ -22,10 +22,16 @@ const props = withDefaults(defineProps<{
   selected?: boolean
   showProfile?: boolean
   categoryLabel?: string
+  forkChild?: boolean
+  childSessionCount?: number
+  childrenExpanded?: boolean
   to?: string
   interceptModifiedNavigation?: boolean
 }>(), {
   showProfile: true,
+  forkChild: false,
+  childSessionCount: 0,
+  childrenExpanded: false,
 })
 
 const emit = defineEmits<{
@@ -33,6 +39,7 @@ const emit = defineEmits<{
   contextmenu: [event: MouseEvent]
   delete: []
   'toggle-select': []
+  'toggle-children': []
   'open-new': []
 }>()
 
@@ -108,7 +115,7 @@ onUnmounted(() => {
   <component
     :is="selectable || !to ? 'button' : 'a'"
     class="session-item"
-    :class="{ active, 'batch-mode': selectable, 'missing-models': profileModelsMissing }"
+    :class="{ active, 'batch-mode': selectable, 'missing-models': profileModelsMissing, 'session-item--fork-child': forkChild }"
     :aria-current="active ? 'page' : undefined"
     :href="!selectable ? to : undefined"
     :type="selectable || !to ? 'button' : undefined"
@@ -124,12 +131,46 @@ onUnmounted(() => {
     <div class="session-item-content">
       <span class="session-item-title-row">
         <span class="session-item-title-main">
+          <span v-if="forkChild" class="session-item-fork-marker" aria-hidden="true">↳</span>
           <span v-if="pinned" class="session-item-pin" aria-hidden="true">
             <PinIcon width="13" height="13" filled />
           </span>
           <span v-if="completedUnread" class="session-item-unread-dot" aria-hidden="true" />
           <span class="session-item-title" dir="auto">
             {{ session.title }}
+          </span>
+          <span
+            v-if="childSessionCount > 0"
+            class="session-item-children-toggle"
+            role="button"
+            tabindex="0"
+            :aria-expanded="childrenExpanded"
+            :aria-label="t('chat.childSessions', { count: childSessionCount })"
+            :title="t('chat.childSessions', { count: childSessionCount })"
+            @click.stop.prevent="emit('toggle-children')"
+            @keydown.enter.stop.prevent="emit('toggle-children')"
+            @keydown.space.stop.prevent="emit('toggle-children')"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="6" cy="5" r="2" />
+              <circle cx="18" cy="6" r="2" />
+              <circle cx="6" cy="19" r="2" />
+              <path d="M6 7v10M8 12h6a4 4 0 0 0 4-4" />
+            </svg>
+            <span>{{ childSessionCount }}</span>
+            <svg
+              width="9"
+              height="9"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              class="session-item-children-chevron"
+              :class="{ collapsed: !childrenExpanded }"
+              aria-hidden="true"
+            >
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
           </span>
           <NTooltip v-if="profileModelsMissing" trigger="click" placement="top">
             <template #trigger>
@@ -199,7 +240,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  padding: calc(7px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
   border: none;
   background: none;
   border-radius: var(--radius-sm);
@@ -209,6 +250,50 @@ onUnmounted(() => {
   color: var(--text-secondary);
   transition: all var(--transition-fast);
   margin-bottom: 2px;
+}
+
+.session-item--fork-child {
+  width: calc(100% - calc(14px * var(--spacing-scale, 1)));
+  margin-inline-start: calc(14px * var(--spacing-scale, 1));
+  padding-top: calc(5px * var(--spacing-scale, 1));
+  padding-bottom: calc(5px * var(--spacing-scale, 1));
+}
+
+.session-item-fork-marker {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: 1;
+}
+
+.session-item-children-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: calc(3px * var(--spacing-scale, 1));
+  padding: calc(1px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.2);
+  border-radius: var(--radius-component, 5px);
+  color: var(--accent-primary);
+  cursor: pointer;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+  line-height: calc(var(--font-size-base, 14px) * 14 / 14);
+}
+
+.session-item-children-toggle:hover,
+.session-item-children-toggle:focus-visible {
+  background: rgba(var(--accent-primary-rgb), 0.08);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.session-item-children-chevron {
+  transition: transform var(--transition-fast);
+  transform: rotate(90deg);
+}
+
+.session-item-children-chevron.collapsed {
+  transform: rotate(0deg);
 }
 
 .session-item:hover {
@@ -396,8 +481,8 @@ onUnmounted(() => {
   align-items: center;
   gap: calc(4px * var(--spacing-scale, 1));
   min-width: 0;
-  margin-top: 3px;
-  padding: calc(3px * var(--spacing-scale, 1)) 0;
+  margin-top: 2px;
+  padding: calc(2px * var(--spacing-scale, 1)) 0;
 }
 
 .session-item-agent-logo-wrap {

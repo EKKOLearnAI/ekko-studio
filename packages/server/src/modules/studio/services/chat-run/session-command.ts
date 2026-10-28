@@ -64,6 +64,7 @@ interface BranchSessionSummary {
   provider: string | null
   parentSessionId: string
   forkPointMessageId: string | null
+  categoryId: number | null
   parentTitle: string | null
   parentLastMessage: string | null
   parentLastMessageRole: string | null
@@ -1260,6 +1261,7 @@ function createBranchSession(parentSessionId: string, requestedTitle: string, ct
     provider: parent.provider || ctx.provider || null,
     parentSessionId,
     forkPointMessageId: persisted.fork_point_message_id || null,
+    categoryId: parent.category_id ?? null,
     parentTitle: parent.title || parent.preview || null,
     parentLastMessage: parentLast?.content || null,
     parentLastMessageRole: parentLast?.role || null,
