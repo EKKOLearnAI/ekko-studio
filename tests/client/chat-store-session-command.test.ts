@@ -74,6 +74,7 @@ vi.mock('@/utils/completion-sound', () => ({
 }))
 
 import { useChatStore, type Session } from '@/stores/hermes/chat'
+import { buildSessionForkRows } from '@/components/hermes/chat/session-fork-rows'
 import { fetchSessions, fetchSessionMessagesPage, deleteSessionMessages } from '@/api/studio/sessions'
 
 function makeSession(): Session {
@@ -213,6 +214,31 @@ describe('chat store session.command fanout', () => {
     }] as any)
     await store.refreshSessionListOnly('default')
     expect(store.activeSession).toMatchObject(expected)
+  })
+
+  it('updates fork lineage in place during background list sync', async () => {
+    const store = useChatStore()
+    const parent = { ...makeSession(), endReason: null }
+    const child = { ...makeSession(), id: 'child', parentSessionId: null, forkPointMessageId: null, categoryId: null }
+    const continuation = { ...makeSession(), id: 'continuation', parentSessionId: null, forkPointMessageId: null }
+    store.sessions = [parent, child, continuation]
+    store.activeSessionId = 'child'
+    store.activeSession = store.sessions[1]
+    vi.mocked(fetchSessions).mockResolvedValueOnce([
+      { id: parent.id, started_at: 1, last_active: 4, end_reason: 'compression' },
+      { id: child.id, started_at: 2, last_active: 3, parent_session_id: parent.id, fork_point_message_id: '42', category_id: 7 },
+      { id: continuation.id, started_at: 3, last_active: 2, parent_session_id: parent.id, fork_point_message_id: null },
+    ] as any).mockResolvedValueOnce([])
+
+    await store.refreshSessionListOnly('default')
+
+    expect(store.sessions.find(item => item.id === 'child')).toBe(store.activeSession)
+    expect(store.activeSession).toMatchObject({ parentSessionId: parent.id, forkPointMessageId: '42', categoryId: 7 })
+    expect(store.sessions.find(item => item.id === parent.id)?.endReason).toBe('compression')
+    expect(store.sessions.find(item => item.id === 'continuation')).toMatchObject({ parentSessionId: parent.id, forkPointMessageId: null })
+    expect(buildSessionForkRows(store.sessions, new Set()).map(row => [row.session.id, row.depth])).toEqual([
+      [parent.id, 0], ['child', 1], ['continuation', 0],
+    ])
   })
 
   it('keeps known counters when native usage is unavailable, while retaining the command result', () => {
@@ -792,6 +818,7 @@ describe('chat store session.command fanout', () => {
         provider: 'openai-codex',
         parentSessionId: 'session-1',
         forkPointMessageId: '2',
+        categoryId: 42,
         parentTitle: 'session',
         parentLastMessage: 'Previous answer',
         parentLastMessageRole: 'assistant',
@@ -813,6 +840,7 @@ describe('chat store session.command fanout', () => {
       provider: 'openai-codex',
       parentSessionId: 'session-1',
       forkPointMessageId: '2',
+      categoryId: 42,
       parentTitle: 'session',
       parentLastMessage: 'Previous answer',
       parentLastMessageRole: 'assistant',

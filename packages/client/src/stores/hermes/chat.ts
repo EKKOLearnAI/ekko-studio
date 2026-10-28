@@ -1933,6 +1933,12 @@ function createChatState(scopedSessionId?: string) {
           existing.updatedAt = fresh.updatedAt
           existing.lastActiveAt = fresh.lastActiveAt
           existing.endedAt = fresh.endedAt
+          existing.endReason = fresh.endReason
+          existing.parentSessionId = fresh.parentSessionId
+          existing.forkPointMessageId = fresh.forkPointMessageId
+          existing.parentTitle = fresh.parentTitle
+          existing.parentLastMessage = fresh.parentLastMessage
+          existing.parentLastMessageRole = fresh.parentLastMessageRole
           existing.model = fresh.model
           existing.provider = fresh.provider
           existing.apiMode = fresh.apiMode || existing.apiMode
@@ -3120,6 +3126,7 @@ function createChatState(scopedSessionId?: string) {
               ? branch.parentSessionId
               : typeof (evt as any).parentSessionId === 'string' ? (evt as any).parentSessionId : sid,
             forkPointMessageId: branch.forkPointMessageId != null ? String(branch.forkPointMessageId) : null,
+            categoryId: typeof branch.categoryId === 'number' ? branch.categoryId : null,
             parentTitle: typeof branch.parentTitle === 'string' ? branch.parentTitle : target?.title || null,
             parentLastMessage: typeof branch.parentLastMessage === 'string' ? branch.parentLastMessage : lastVisibleMessageContent(target?.messages),
             parentLastMessageRole: typeof branch.parentLastMessageRole === 'string' ? branch.parentLastMessageRole : lastVisibleMessageRole(target?.messages),

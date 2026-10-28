@@ -120,3 +120,52 @@ test('nests fork sessions and persists the parent collapse state', async ({ page
   await expect(page).toHaveURL(/\/hermes\/session\/child-new$/)
   await expect(newChild).toHaveClass(/active/)
 })
+
+test('places a new /fork in its parent category before a list refresh', async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  await page.addInitScript(() => {
+    localStorage.setItem('hermes_recent_sessions_collapsed_v1', 'true')
+  })
+  const sessions = [sessionSummary('root', 'Root conversation', 200)]
+  await mockHermesApi(page, { sessionCategories: [{ id: 1, name: 'Work' }], sessions })
+  await page.route('**/api/studio/sessions/conversations/*/messages/paginated*', route => {
+    const sessionId = route.request().url().match(/conversations\/([^/]+)\/messages/)?.[1] || ''
+    return route.fulfill({ json: {
+      session: sessionSummary(sessionId, sessionId, 300, 1),
+      messages: [], total: 0, offset: 0, limit: 150, hasMore: false,
+    } })
+  })
+  await mockChatSocket(page)
+  await page.addInitScript(() => {
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__ = {
+      root: { session_id: 'root', messages: [], isWorking: false, events: [] },
+      child: { session_id: 'child', messages: [], isWorking: false, events: [] },
+    }
+  })
+
+  await page.goto('/#/hermes/chat')
+  const sidebar = page.locator('.chat-panel > .session-list')
+  const parent = sidebar.locator('.session-item').filter({ hasText: 'Root conversation' })
+  await expect(parent).toBeVisible()
+  await page.evaluate(() => {
+    ;(window as any).__PW_CHAT_SOCKET__.latest.__trigger('session.command', {
+      event: 'session.command', session_id: 'root', command: 'fork', action: 'branch', ok: true,
+      parentSessionId: 'root', newSessionId: 'child', newSessionTitle: 'New fork',
+      branchSession: {
+        id: 'child', profile: 'research', source: 'cli', title: 'New fork',
+        parentSessionId: 'root', forkPointMessageId: '42', categoryId: 1,
+        createdAt: 300_000, updatedAt: 300_000, messageCount: 1,
+      },
+    })
+  })
+  const child = sidebar.locator('.session-item').filter({ hasText: 'New fork' })
+  await expect(child).toHaveClass(/session-item--fork-child/)
+  await expect(parent.locator('.session-item-children-toggle')).toHaveText('1')
+  await expect(sidebar.locator('.session-group-header').filter({ hasText: 'Work' }).locator('.session-group-count')).toHaveText('2')
+
+  sessions.unshift(sessionSummary('child', 'New fork', 300, 1, {
+    parent_session_id: 'root', fork_point_message_id: '42',
+  }))
+  await page.reload()
+  await expect(child).toHaveClass(/session-item--fork-child/)
+})
