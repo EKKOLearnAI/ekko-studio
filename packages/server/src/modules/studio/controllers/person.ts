@@ -1,3 +1,4 @@
+import { forgetPersonMemory } from '../services/person/memory'
 import type { Context } from 'koa'
 import { personError, personRevision, personText } from '../contracts/person'
 import { personSnapshot, configurePerson } from '../services/person/service'
@@ -6,7 +7,7 @@ import { personTaskChat, continuePersonTask } from '../services/person/task-chat
 import { applyPersonTask } from '../services/person/tasks'
 import { applyPersonSchedule } from '../services/person/schedules'
 import { replyPersonQuestion } from '../services/person/runner'
-import { changePersonMemory, listPersonTasks, taskPersonExecutions, personEvents } from '../services/person/service'
+import { listPersonTasks, taskPersonExecutions, personEvents } from '../services/person/service'
 import { personExecutionModelCatalog } from '../services/person/agents'
 import { clearPerson } from '../services/person/history'
 
@@ -36,7 +37,7 @@ export const executions = (ctx: Context) => handle(ctx, id => ({ executions: tas
 export const events = (ctx: Context) => handle(ctx, id => ({ events: personEvents(id, ctx.params.id, Math.max(0, Number(ctx.query.after) || 0)) }))
 export const schedules = (ctx: Context) => handle(ctx, (id, body) => applyPersonSchedule(id, body))
 export const answer = (ctx: Context) => handle(ctx, (id, body) => replyPersonQuestion(id, ctx.params.id, personRevision(body.expected_revision), personText(body.answer, 'answer', 4000)))
-export const memory = (ctx: Context) => handle(ctx, (id, body) => changePersonMemory(id, {
-  id: body.id ? personText(body.id, 'id', 100) : undefined, revision: body.id ? personRevision(body.expected_revision) : undefined,
-  content: body.forget === true ? undefined : personText(body.content, 'content', 2000), forget: body.forget === true, source: 'user',
-}))
+export const memory = (ctx: Context) => handle(ctx, (id, body) => {
+  if (body.forget !== true) throw personError('Save or correct memories through the Person conversation.')
+  return forgetPersonMemory(id, personText(body.id, 'id', 100), personRevision(body.expected_revision))
+})

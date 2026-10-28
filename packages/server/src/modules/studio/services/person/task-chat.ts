@@ -63,7 +63,8 @@ export async function continuePersonTask(userId: number, taskId: string, body: R
       .run(Date.now(), taskId)
     savePersonTaskOrigin(userId, taskId)
     const next = getPersonTask(userId, taskId)
-    return { task: { ...next, running: true }, execution: enqueuePersonExecution(next, null, input) }
+    const execution = enqueuePersonExecution(next, null, input)
+    return { task: { ...getPersonTask(userId, taskId), running: true }, execution }
   })
   personUpdated(userId)
   return result

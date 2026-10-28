@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 
 describe('single chat Agent avatars', () => {
+  it('names the personal assistant zhezhe while keeping task worker identities', () => {
+    expect(chatSessionAgentAvatar({ id: 'person-main-1', agent: 'ekko-agent' })).toEqual({
+      label: 'zhezhe',
+      src: '/coding-agents/person.jpg',
+    })
+    expect(chatSessionAgentAvatar({ id: 'person-task-1', agent: 'ekko-agent' })).toEqual({
+      label: 'Ekko',
+      src: '/coding-agents/ekko-agent.png',
+    })
+  })
+
   it('shows Ekko before the session loads while preserving legacy Hermes sessions', () => {
     for (const session of [null, undefined]) {
       expect(chatSessionAgentAvatar(session)).toEqual({

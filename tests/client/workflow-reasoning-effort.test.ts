@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_REASONING_EFFORTS, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 
 const read = (path: string) => readFileSync(path, 'utf8')
 const locales = ['de.ts', 'en.ts', 'es.ts', 'fr.ts', 'ja.ts', 'ko.ts', 'pt.ts', 'ru.ts', 'zh-TW.ts', 'zh.ts']
@@ -20,7 +20,7 @@ describe('workflow reasoning effort authoring contract', () => {
   })
 
   it('offers every canonical reasoning effort in every locale', () => {
-    expect(modelReasoningEfforts([], '', '')).toEqual(DEFAULT_REASONING_EFFORTS)
+    expect(modelReasoningEfforts([], '', '')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
     for (const locale of locales) {
       const text = read(`packages/client/src/i18n/locales/${locale}`)
       expect(text, locale).toMatch(/reasoningEffort:\s*\{/)

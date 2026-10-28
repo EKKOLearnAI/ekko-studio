@@ -6,7 +6,7 @@ import { getChatRunServer } from '../modules/studio/public/chat-run'
 import { createEkkoAuthorizedProviderFetch, resolveEkkoProviderRuntimeConfig } from '../modules/ekko/services/provider-runtime'
 import { createModelClient, resolveModelProviderConfigs } from '../../../ekko-agent/src'
 import { getCodingAgentModels } from '../modules/coding-agents/services'
-import { codingAgentRunManager } from '../modules/coding-agents/services/runtime/run-manager'
+import { executePersonTask, stopPersonTask } from './person-task-runtime'
 import { getAvailableModelConfigForProfile } from '../modules/hermes/controllers/models'
 
 configurePersonRuntime({
@@ -38,25 +38,7 @@ configurePersonRuntime({
     const catalog = result.agents[0]
     return { status: catalog?.status || 'unsupported', models: catalog?.models.filter(m => !m.hidden).map(m => ({ id: m.id, name: m.name, isDefault: m.isDefault, reasoningEffort: m.reasoningEffort, reasoningEfforts: m.reasoningEfforts })) || [] }
   },
-  async execute(input) {
-    const server = getChatRunServer()
-    if (!server) throw new Error('Chat runtime unavailable')
-    const abort = () => { void server.abortSession(input.sessionId, 'Person task stopped') }
-    input.signal.addEventListener('abort', abort, { once: true })
-    try {
-      if (input.signal.aborted) throw new Error('Cancelled')
-      const s = input.selection
-      const existing = codingAgentRunManager.getRunInfo(input.sessionId)
-      if (existing && existing.workspaceDir !== input.workspace) codingAgentRunManager.stop(input.sessionId, { reportClosed: false })
-      return await server.runAndWait({ session_id: input.sessionId, input: input.prompt, display_input: input.displayInput, profile: s.profile, workspace: input.workspace || undefined,
-        provider: s.provider || undefined, model: s.model, apiMode: s.apiMode, mode: s.mode, reasoning_effort: s.reasoningEffort,
-        source: s.runtime === 'hermes' ? 'api_server' : s.runtime === 'ekko' ? 'builtin_agent' : 'coding_agent',
-        ...(s.runtime !== 'hermes' ? { coding_agent_id: (s.runtime === 'ekko' ? 'ekko-agent' : s.runtime) as any } : {}),
-        memory_write_policy: 'explicit-only', memory_recall_scopes: [], memory_write_scopes: [],
-        instructions: 'This is a task delegated by Person. Ask clarifying questions normally: Person coordinates answers. Work only on the supplied goal and scope. Persist the deliverable or report and verification evidence as files in the supplied workspace and report their paths. Do not claim completion without checking results.',
-      }, { profile: s.profile, user: input.user, timeoutMs: 60 * 60_000, onEvent: input.onEvent })
-    } finally { input.signal.removeEventListener('abort', abort) }
-  },
+  execute: executePersonTask,
   async deliver(input) {
     const server = getChatRunServer()
     if (!server) throw new Error('Chat runtime unavailable')
@@ -65,8 +47,5 @@ configurePersonRuntime({
   async answer(sessionId, id, response, approval) {
     return await getChatRunServer()?.respondPersonInteraction(sessionId, id, response, approval) || false
   },
-  async stop(sessionId) {
-    await getChatRunServer()?.abortSession(sessionId, 'Person task stopped')
-    codingAgentRunManager.stop(sessionId, { reportClosed: false })
-  },
+  stop: stopPersonTask,
 })

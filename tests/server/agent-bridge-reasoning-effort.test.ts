@@ -265,7 +265,7 @@ print(json.dumps({
     }))
   })
 
-  it('omits reasoning_effort entirely when the option is not set', async () => {
+  it('defaults reasoning_effort to low when the option is not set', async () => {
     const { AgentBridgeClient } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
     const client = new AgentBridgeClient({ endpoint: 'tcp://127.0.0.1:1', connectRetryMs: 0, timeoutMs: 1 })
     const request = vi.spyOn(client, 'request').mockResolvedValue({
@@ -279,10 +279,10 @@ print(json.dumps({
 
     const call = request.mock.calls[0]?.[0] as Record<string, unknown> | undefined
     expect(call).toBeDefined()
-    expect(call).not.toHaveProperty('reasoning_effort')
+    expect(call).toHaveProperty('reasoning_effort', 'low')
   })
 
-  it('omits reasoning_effort when option is an empty string', async () => {
+  it('defaults reasoning_effort to low when option is an empty string', async () => {
     const { AgentBridgeClient } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
     const client = new AgentBridgeClient({ endpoint: 'tcp://127.0.0.1:1', connectRetryMs: 0, timeoutMs: 1 })
     const request = vi.spyOn(client, 'request').mockResolvedValue({
@@ -298,7 +298,7 @@ print(json.dumps({
 
     const call = request.mock.calls[0]?.[0] as Record<string, unknown> | undefined
     expect(call).toBeDefined()
-    expect(call).not.toHaveProperty('reasoning_effort')
+    expect(call).toHaveProperty('reasoning_effort', 'low')
   })
 
   it('keeps Agent Bridge on profile defaults without Workflow execution-policy plumbing', () => {

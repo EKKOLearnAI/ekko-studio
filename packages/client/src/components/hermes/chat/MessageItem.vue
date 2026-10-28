@@ -1036,6 +1036,7 @@ onBeforeUnmount(() => {
           <div v-if="message.role === 'assistant'" class="message-author assistant-message-author">
             <img
               class="msg-avatar"
+              :class="{ 'msg-avatar--person': assistantAgent.label === 'zhezhe' }"
               :src="assistantAgent.src"
               :alt="assistantAgent.label"
               draggable="false"
@@ -1386,6 +1387,7 @@ onBeforeUnmount(() => {
       border: var(--border-width, 1px) solid #fff;
       border-radius: 50%;
       object-fit: cover;
+      &--person { aspect-ratio: 1; border-radius: 4px; object-fit: cover; border: 0; }
     }
 
     .message-bubble {

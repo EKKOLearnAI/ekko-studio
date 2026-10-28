@@ -2,7 +2,7 @@ import { personError, personText } from '../../contracts/person'
 import type { PersonAgentPreset, PersonSelection } from '../../contracts/person'
 import { personSettings } from '../../repositories/person-store'
 import { getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
-import { effectivePersonSettings, personProfiles, validatePersonSelection, PERSON_REASONING_EFFORTS } from './catalog'
+import { personProfiles, validatePersonSelection, PERSON_REASONING_EFFORTS } from './catalog'
 import { isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { resolveProviderCatalogApiMode } from '../../contracts/providers'
 
@@ -36,15 +36,15 @@ export async function validatePersonAgents(userId: number, value: unknown): Prom
 }
 
 export async function personExecutionAgents(userId: number): Promise<PersonAgentPreset[]> {
-  const presets = personSettings(userId).settings.agents
-  if (presets.length) return presets
-  const { settings } = await effectivePersonSettings(userId)
-  if (!settings.model) throw personError('Choose a Person model first', 409)
-  return [{ id: 'default', name: 'Ekko Agent', description: 'General execution using the current Person model.',
-    selection: { ...settings.model, runtime: 'ekko', mode: 'scoped', reasoningEffort: settings.reasoningEffort } }]
+  return personSettings(userId).settings.agents
+}
+export function requirePersonAgents(userId: number): PersonAgentPreset[] {
+  const agents = personSettings(userId).settings.agents
+  if (!agents.length) throw personError('Configure at least one Agent preset in Person settings before chatting', 409)
+  return agents
 }
 export async function selectPersonExecutionAgent(userId: number, id?: unknown) {
-  const agents = await personExecutionAgents(userId)
+  const agents = requirePersonAgents(userId)
   const preset = id ? agents.find(agent => agent.id === id) : agents.length === 1 ? agents[0] : undefined
   if (!preset) throw personError('Choose one of the configured execution agents')
   await validatePersonSelection(userId, preset.selection)

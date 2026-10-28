@@ -3,6 +3,7 @@ export interface SystemPromptInput {
   runtimeInstructions?: string[]
   userSystemMessages?: string[]
   memoryContext?: string
+  toolExecutionGuidelinesEnabled?: boolean
   planningEnabled?: boolean
   sessionTasksEnabled?: boolean
   clarificationEnabled?: boolean
@@ -61,11 +62,13 @@ export function buildSystemPrompt(input: SystemPromptInput = {}): string {
   const sections: string[] = []
   sections.push(input.basePrompt?.trim() || DEFAULT_BASE_PROMPT)
   sections.push(EKKO_OUTPUT_FORMAT_GUIDELINES)
-  sections.push(EKKO_TOOL_EXECUTION_GUIDELINES)
-  sections.push(commandEnvironmentGuidelines(
-    input.context?.platform ?? process.platform,
-    input.context?.arch ?? process.arch,
-  ))
+  if (input.toolExecutionGuidelinesEnabled !== false) {
+    sections.push(EKKO_TOOL_EXECUTION_GUIDELINES)
+    sections.push(commandEnvironmentGuidelines(
+      input.context?.platform ?? process.platform,
+      input.context?.arch ?? process.arch,
+    ))
+  }
   if (input.planningEnabled) sections.push(`## Task Planning
 Use update_plan proactively for tasks with multiple meaningful steps. Skip planning for simple questions or one-step actions.
 Create a short plan before substantial work. Send the complete plan with stable step IDs on every update. Mark the current step in_progress and update completed steps promptly after verifying their outcome. At most one step is in_progress.

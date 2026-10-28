@@ -32,6 +32,7 @@ interface OpenAIResponsesPayload {
     name: string
     description?: string
     parameters?: Record<string, unknown>
+    strict: false
   }>
   tool_choice?: 'auto' | 'none' | 'required'
   stream?: boolean
@@ -478,6 +479,10 @@ function toOpenAIResponseTool(tool: AgentToolDefinition): NonNullable<OpenAIResp
     name: tool.name,
     description: tool.description,
     parameters: tool.parameters,
+    // Our schemas use optional fields and action-dependent requirements.
+    // Responses may normalize an omitted strict flag into all-required fields;
+    // preserve the declared contract, as in the other provider adapters.
+    strict: false,
   }
 }
 

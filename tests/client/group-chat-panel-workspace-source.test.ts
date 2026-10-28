@@ -539,7 +539,7 @@ describe('GroupChatPanel workspace save handling', () => {
     expect(selection).toContain("provider: input.usesGlobal ? '' : input.provider")
     expect(selection).toContain("model: input.usesGlobal ? input.nativeModel || '' : input.model")
     expect(source).toContain("apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value")
-    expect(source).toContain("reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value")
+    // Reasoning defaults and submitted values are covered by group-chat-reasoning-effort.spec.ts.
     for (const modelSource of [source, linkView]) {
       expect(modelSource).toContain(modelSource === source ? 'function handleAgentModelSelect(' : 'function handleAgentModelChange(model: string)')
       expect(modelSource).toContain("selectedAgentReasoningEffort.value = ''")

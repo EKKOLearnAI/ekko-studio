@@ -446,6 +446,7 @@ function makeSocket(url, options) {
   const listeners = new Map()
   const socket = {
     connected: true,
+    get volatile() { return this },
     url,
     options,
     on(event, handler) {
@@ -586,17 +587,22 @@ async function setup(page: Page, path: string, platform?: DesktopPlatform, offli
   return api
 }
 
+async function waitForGroupSocket(page: Page) {
+  // The navigation rail can connect Person presence before the group page initializes.
+  await page.waitForFunction(() => (window as any).__PW_GROUP_SOCKET__?.sockets?.some((socket: any) => String(socket.url).endsWith('/group-chat')))
+}
+
 async function triggerGroupSocket(page: Page, event: string, payload: unknown) {
-  await page.waitForFunction(() => Boolean((window as any).__PW_GROUP_SOCKET__?.sockets?.length))
+  await waitForGroupSocket(page)
   await page.evaluate(({ event, payload }) => {
-    const sockets = (window as any).__PW_GROUP_SOCKET__?.sockets || []
+    const sockets = ((window as any).__PW_GROUP_SOCKET__?.sockets || []).filter((socket: any) => String(socket.url).endsWith('/group-chat'))
     if (sockets.length === 0) throw new Error('Group chat socket is not connected')
     for (const socket of sockets) socket.__trigger(event, payload)
   }, { event, payload })
 }
 
 async function connectGroupSocket(page: Page) {
-  await page.waitForFunction(() => Boolean((window as any).__PW_GROUP_SOCKET__?.sockets?.length))
+  await waitForGroupSocket(page)
   await page.evaluate(() => {
     const state = (window as any).__PW_GROUP_SOCKET__
     for (const socket of state.sockets) {

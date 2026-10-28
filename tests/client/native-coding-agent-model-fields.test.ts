@@ -28,13 +28,13 @@ beforeEach(() => {
   })) }
 })
 describe('native model fields shared by group chat and workflow', () => {
-  it('shows one none option for an unset native effort without writing a selection', () => {
+  it('selects the lowest active native effort while retaining an explicit none option', () => {
     catalog.value = { status: 'ready', models: [{ id: 'native-model', isDefault: true, reasoningEfforts: ['none', 'high'] }] }
     const wrapper = mount(NativeCodingAgentModelFields, { props: { agent: 'codex', model: '', reasoningEffort: '', field: 'reasoning-effort', onChange } })
     const select = wrapper.findComponent({ name: 'NSelect' })
-    expect(select.props('value')).toBe('none')
+    expect(select.props('value')).toBe('high')
     expect(select.props('options').map((option: { value: string }) => option.value)).toEqual(['none', 'high'])
-    expect(onChange).not.toHaveBeenCalled()
+    expect(onChange).toHaveBeenCalledWith({ model: '', reasoningEffort: 'high' })
   })
 
   it('shows one family and changes strength together with the real native model ID', () => {

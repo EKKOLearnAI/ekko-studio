@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { NButton, NDrawer, NDrawerContent, NDropdown, NEmpty, NInput, NPagination, NSpin, useMessage } from 'naive-ui'
 import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
 import { fetchSessionTasks, updateSessionTaskStatus, type SessionTaskListItem, type SessionTaskStatus } from '@/api/studio/session-tasks'
-import { personRequest, type PersonTask } from '@/api/person'
+import { personRequest, personTaskCanStop, stopPersonTask, type PersonTask } from '@/api/person'
 import { onPersonUpdated } from '@/api/studio/chat'
 import { useTaskDrawerLayout } from './useTaskDrawerLayout'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
@@ -95,6 +95,17 @@ async function openSearch() {
   await nextTick()
   searchInput.value?.focus()
 }
+async function stopTask(task: TaskRow) {
+  const person = task.personTask
+  if (!person || !personTaskCanStop(person) || person.execution_state === 'stopping' || savingIds.value.has(task.id)) return
+  savingIds.value = new Set([...savingIds.value, task.id]); requestSequence++
+  try { await stopPersonTask(person) }
+  catch { if (!disposed) message.error(t('sessionTasks.updateFailed')) }
+  finally {
+    if (!disposed && props.show) await load(true)
+    const next = new Set(savingIds.value); next.delete(task.id); savingIds.value = next
+  }
+}
 function handleKeydown(event: KeyboardEvent) {
   if (props.show && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault()
@@ -116,7 +127,8 @@ function rowStatusOptions(task: TaskRow) {
 function rowStatus(task: TaskRow) {
   const person = task.personTask
   if (!person) return t(`sessionTasks.${task.status}`)
-  const state = person.running ? ['queued','starting','waiting_person','waiting_user','waiting_approval'].includes(person.execution_state) ? person.execution_state : 'running' : person.status
+  const state = person.running ? ['queued','starting','stopping','waiting_person','waiting_user','waiting_approval'].includes(person.execution_state) ? person.execution_state : 'running'
+    : person.status === 'open' && person.execution_state === 'interrupted' ? 'interrupted' : person.status
   return t(`person.states.${state}`)
 }
 function openTask(task: TaskRow) { if (task.personTask) emit('open-person-task', task.personTask) }
@@ -201,6 +213,9 @@ onUnmounted(() => {
               <td class="task-cell">
                 <a class="task-title" :role="task.personTask ? 'button' : undefined" :tabindex="task.personTask ? 0 : undefined" @click="openTask(task)" @keydown.enter="openTask(task)" @keydown.space.prevent="openTask(task)" :href="taskHref(task)" :aria-label="t('sessionTasks.openTask', { title: task.title })">{{ task.title }}</a>
                 <details class="task-description"><summary><span class="description-text">{{ task.summary }}</span><SessionTaskIcon name="chevron-down" :size="13" /></summary></details>
+                <NButton v-if="personTaskCanStop(task.personTask)" class="task-stop" size="tiny" :loading="savingIds.has(task.id)" :disabled="savingIds.has(task.id) || task.personTask?.execution_state === 'stopping'" @click="stopTask(task)">
+                  {{ t(task.personTask?.execution_state === 'stopping' ? 'person.states.stopping' : 'person.stopTask') }}
+                </NButton>
                 <div class="mobile-source">
                   <img :src="taskAvatar(task).src" alt="" />
                   <div class="mobile-source-info">
@@ -242,6 +257,7 @@ onUnmounted(() => {
 .task-list-scroll { flex: 1; min-height: 0; overflow: auto; }
 .task-list { width: 100%; table-layout: fixed; border-collapse: collapse; }
 .task-list--empty { height: 100%; }
+.task-stop { margin-top: 10px; }
 .source-col { width: 25%; }
 .status-col { width: 164px; }
 .time-col { width: 140px; }

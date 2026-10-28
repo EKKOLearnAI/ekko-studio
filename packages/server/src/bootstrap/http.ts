@@ -51,6 +51,7 @@ import { setupGlobalEkkoAgent } from './ekko'
 import { injectManagedEkkoMcpServers } from '../modules/ekko/services/mcp'
 import { WorkflowSocketServer } from '../modules/studio/sockets/workflow'
 import { PetStateSocketServer } from '../modules/studio/sockets/pet-state'
+import { PersonPresenceSocketServer } from '../modules/studio/sockets/person-presence'
 import { logger } from '../modules/studio/public/logging'
 import { createStaticCompressionMiddleware } from '../modules/studio/middleware/static-compression'
 import { getStaticCacheControl, SPA_ENTRY_CACHE_CONTROL } from '../modules/studio/middleware/static-cache'
@@ -628,6 +629,9 @@ export async function bootstrap() {
 
   petStateSocketServer = new PetStateSocketServer(activeGroupChatServer.getIO())
   petStateSocketServer.init()
+  const personPresenceServer = new PersonPresenceSocketServer(activeGroupChatServer.getIO())
+  personPresenceServer.init()
+  additionalShutdownSteps.push({ name: 'Person presence', close: () => personPresenceServer.close() })
   registerDesktopBrowserRelay(activeGroupChatServer.getIO())
 
   startGlobalAgentServer(activeGroupChatServer.getIO(), { localBaseUrl: loopbackBaseUrl })

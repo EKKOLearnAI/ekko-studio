@@ -1,6 +1,7 @@
+import { personMemories } from './memory'
 import { ensurePersonSession, personChatBusy } from './chat-agent'
 import { personError, personRevision, personText } from '../../contracts/person'
-import { personSettings, savePersonSettings, personMemories,
+import { personSettings, savePersonSettings,
   listPersonTasks, listPersonSchedules, personInteractions } from '../../repositories/person-store'
 import { effectivePersonSettings, personModelSelection, personUser, validatePersonSelection, PERSON_REASONING_EFFORTS } from './catalog'
 import { validatePersonAgents } from './agents'
@@ -13,12 +14,13 @@ export async function personSnapshot(userId: number) {
   personUser(userId)
   const session = await ensurePersonSession(userId)
   const busy = personChatBusy(userId)
-  return { ...session, tasks: listPersonTasks(userId), memories: personMemories(userId),
+  return { ...session, tasks: listPersonTasks(userId), memories: await personMemories(userId),
     schedules: listPersonSchedules(userId), interactions: personInteractions(userId), busy,
     history_revision: session.session.history_revision, can_clear: !busy && !personHasPendingWork(userId) }
 }
 export async function configurePerson(userId: number, input: Record<string, unknown>) {
   if (personChatBusy(userId)) throw personError('Wait for the current reply before changing settings', 409)
+  if (input.contextTokens !== undefined) throw personError('Context capacity follows the selected model; set compressionThreshold instead')
   const old = personSettings(userId)
   const settings = { ...old.settings }
   if (input.workspace !== undefined) {
@@ -42,7 +44,12 @@ export async function configurePerson(userId: number, input: Record<string, unkn
   settings.reasoningEffort = effective.settings.reasoningEffort
   if (input.timezone !== undefined) { settings.timezone = personText(input.timezone, 'timezone', 100); new Intl.DateTimeFormat('en-US', { timeZone: settings.timezone }) }
   if (input.agents !== undefined) settings.agents = await validatePersonAgents(userId, input.agents)
-  for (const [key, min, max] of [['maxSteps', 2, 30], ['contextTokens', 8000, 64000], ['maxConcurrentTasks', 1, 4]] as const) {
+  if (input.compressionThreshold !== undefined) {
+    const value = input.compressionThreshold
+    if (value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0.05 || value > 0.95)) throw personError('Invalid compressionThreshold')
+    settings.compressionThreshold = value as number | null
+  }
+  for (const [key, min, max] of [['maxSteps', 2, 30], ['maxConcurrentTasks', 1, 4]] as const) {
     if (input[key] !== undefined) {
       const value = input[key]
       if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) throw personError(`Invalid ${key}`)
@@ -56,4 +63,4 @@ export async function configurePerson(userId: number, input: Record<string, unkn
 }
 // Service facade for the thin HTTP controller.
 export { withPersonTaskReturns } from '../../repositories/person-return-store'
-export { changePersonMemory, listPersonTasks, taskPersonExecutions, personEvents } from '../../repositories/person-store'
+export { listPersonTasks, taskPersonExecutions, personEvents } from '../../repositories/person-store'

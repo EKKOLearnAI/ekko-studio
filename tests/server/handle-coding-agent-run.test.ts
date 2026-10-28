@@ -267,6 +267,7 @@ describe('handleCodingAgentRun', () => {
       mode: 'scoped',
       provider: 'deepseek',
       model: 'deepseek-v4-pro',
+      reasoningEffort: 'low',
     })
     expect(managerMock.stop).toHaveBeenCalledWith('session-1', { reportClosed: false })
     expect(startCodingAgentRunMock).toHaveBeenCalledWith('codex', expect.objectContaining({

@@ -12,7 +12,10 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/context-usag
 }))
 const ensureReadyMock = vi.hoisted(() => vi.fn())
 const ekkoBoundaryInterruptMock = vi.hoisted(() => vi.fn())
+const respondToEkkoToolApprovalMock = vi.hoisted(() => vi.fn(() => ({ handled: false, resolved: false })))
 const codingAgentRunManagerMock = vi.hoisted(() => ({
+  waitForSessionExit: vi.fn(async () => {}),
+  hasSession: vi.fn(() => false),
   interruptForQueueInsertion: vi.fn(),
   resolveApproval: vi.fn(() => ({ handled: false, resolved: false })),
   resolveClarification: vi.fn(() => ({ handled: false, resolved: false })),
@@ -93,7 +96,7 @@ vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', ()
   parseChatCodingAgentSessionCommand: sessionCommandMocks.parseSessionCommand,
   getChatEkkoAgent: vi.fn(() => ({ requestBoundaryInterrupt: ekkoBoundaryInterruptMock })),
   hasChatEkkoBackgroundTasks: vi.fn(() => false),
-  respondToChatEkkoToolApproval: vi.fn(() => ({ handled: false, resolved: false })),
+  respondToChatEkkoToolApproval: respondToEkkoToolApprovalMock,
   respondToChatEkkoClarification: vi.fn(() => ({ handled: false, resolved: false })),
 }))
 
@@ -173,6 +176,7 @@ function makeServerHarness() {
 describe('ChatRunSocket queued bridge runs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    respondToEkkoToolApprovalMock.mockReset().mockReturnValue({ handled: false, resolved: false })
     readSessionStateFromDbMock.mockImplementation(() => ({ messages: [], isWorking: false, events: [], queue: [] }))
     refreshContextUsageAfterDeletionMock.mockReturnValue(18_000)
     listWorkspaceRunChangesForAssistantMessagesMock.mockReset()
@@ -526,6 +530,29 @@ describe('ChatRunSocket queued bridge runs', () => {
     }))
   })
 
+  it.each(['socket', 'internal'])('rejects an unconfigured Person Agent before dispatch through the %s entry', async entry => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const sessions = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    const personStore = await import('../../packages/server/src/modules/studio/repositories/person-store')
+    const settings = vi.spyOn(personStore, 'personSettings').mockReturnValue({ settings: { agents: [] } } as any)
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    socket.data = { user: { id: 1, role: 'super_admin' } }
+    ;(server as any).onConnection(socket)
+    vi.mocked(sessions.getSession).mockReturnValueOnce({ id: 'person-main-1', studio_user_id: '1', profile: 'default' } as any)
+    const input = { session_id: 'person-main-1', input: 'Start a conversation', profile: 'default' }
+    try {
+      if (entry === 'socket') {
+        await handlers.get('run')!(input)
+        expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ error: expect.stringContaining('Configure at least one Agent preset') }))
+      } else {
+        await expect((server as any).handleRun(socket, input, 'default')).rejects.toThrow('Configure at least one Agent preset')
+      }
+      expect(handleBridgeRunMock).not.toHaveBeenCalled()
+      expect(handleCodingAgentRunMock).not.toHaveBeenCalled()
+    } finally { settings.mockRestore() }
+  })
+
   it('dispatches unknown slash bridge input through the normal bridge run path', async () => {
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { handlers, io, socket } = makeServerHarness()
@@ -641,6 +668,31 @@ describe('ChatRunSocket queued bridge runs', () => {
     })
   })
 
+  it('waits for the original handler and native process even after a terminal event releases runAndWait', async () => {
+    let unwind!: () => void, exit!: () => void
+    const handlerDone = new Promise<void>(resolve => { unwind = resolve })
+    const nativeDone = new Promise<void>(resolve => { exit = resolve })
+    handleBridgeRunMock.mockImplementationOnce(async (_nsp, _socket, data) => {
+      data.onEvent('run.failed', { error: 'Aborted' })
+      await handlerDone
+    })
+    codingAgentRunManagerMock.waitForSessionExit.mockReturnValueOnce(nativeDone)
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    expect(await server.runAndWait({ session_id: 'session-1', input: 'Work', source: 'workflow' })).toMatchObject({ ok: false })
+    let stopped = false
+    const stop = server.abortSession('session-1', 'Stopped', { waitForTermination: true }).then(() => { stopped = true })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(stopped).toBe(false)
+    unwind()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(stopped).toBe(false)
+    exit(); await stop
+    expect(stopped).toBe(true)
+    expect((server as any).runHandlers.size).toBe(0)
+  })
+
   it('auto-responds once to approvals only when runAndWait enables it', async () => {
     handleBridgeRunMock.mockImplementationOnce(async (_nsp, _socket, data) => {
       data.onEvent?.('approval.requested', {
@@ -648,6 +700,7 @@ describe('ChatRunSocket queued bridge runs', () => {
         approval_id: 'approval-1',
         choices: ['once', 'session', 'deny'],
       })
+      await vi.waitFor(() => expect(bridgeMock.approvalRespond).toHaveBeenCalledWith('approval-1', 'once'))
       data.onEvent?.('run.completed', {
         run_id: 'run-workflow-approval',
         output: 'approved',
@@ -674,6 +727,93 @@ describe('ChatRunSocket queued bridge runs', () => {
     expect(namespace.to).toHaveBeenCalledWith('session:session-1')
   })
 
+  it('resolves real Ekko approvals once, after the request is published, without invoking another runtime', async () => {
+    const { waitForEkkoToolApproval, respondToEkkoToolApproval } = await import('../../packages/server/src/modules/ekko/services/approvals')
+    respondToEkkoToolApprovalMock.mockImplementation(respondToEkkoToolApproval)
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, roomEmit } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    vi.spyOn(server as any, 'handleRun').mockImplementation(async (socket: any, data: any) => {
+      expect(socket.data.internalToolApprovalChoice).toBe('once')
+      const choice = await waitForEkkoToolApproval({
+        approvalId: 'ekko-auto-1', toolName: 'terminal_exec', key: 'terminal:delete',
+        command: 'rm -rf build', description: 'Delete generated build files',
+        choices: ['once', 'session', 'always', 'deny'], allowPermanent: true, timeoutMs: 1000,
+      }, {
+        sessionId: 'session-1',
+        onRequested: request => {
+          const payload = { approval_id: request.approvalId, choices: request.choices }
+          data.onEvent('approval.requested', payload)
+          roomEmit('approval.requested', payload)
+          data.onEvent('approval.requested', payload) // A replay must not approve twice.
+        },
+        onResolved: choice => roomEmit('approval.resolved', { approval_id: 'ekko-auto-1', choice }),
+      })
+      expect(choice).toBe('once')
+      data.onEvent('run.completed', { output: 'Approved by the task host' })
+    })
+    const result = await server.runAndWait({ session_id: 'session-1', input: 'Work', source: 'builtin_agent' }, { approvalChoice: 'once' })
+    expect(result.ok).toBe(true)
+    expect(respondToEkkoToolApprovalMock).toHaveBeenCalledExactlyOnceWith('session-1', 'ekko-auto-1', 'once')
+    expect(roomEmit.mock.calls[0][0]).toBe('approval.requested')
+    expect(roomEmit.mock.calls.slice(1).every(call => call[0] === 'approval.resolved')).toBe(true)
+    expect(codingAgentRunManagerMock.resolveApproval).not.toHaveBeenCalled()
+    expect(bridgeMock.approvalRespond).not.toHaveBeenCalled()
+    expect(respondToEkkoToolApproval('session-1', 'ekko-auto-1', 'once').handled).toBe(false)
+  })
+
+  it('keeps Coding Agent automatic approvals on their own runtime', async () => {
+    codingAgentRunManagerMock.resolveApproval.mockReturnValueOnce({ handled: true, resolved: true })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    vi.spyOn(server as any, 'handleRun').mockImplementation(async (_socket, data: any) => {
+      data.onEvent('approval.requested', { approval_id: 'coding-auto', choices: ['once', 'deny'] })
+      await vi.waitFor(() => expect(codingAgentRunManagerMock.resolveApproval).toHaveBeenCalledWith('session-1', 'coding-auto', 'once'))
+      data.onEvent('run.completed', { output: 'Done' })
+    })
+    expect((await server.runAndWait({ session_id: 'session-1', input: 'Work', source: 'coding_agent' }, { approvalChoice: 'once' })).ok).toBe(true)
+    expect(bridgeMock.approvalRespond).not.toHaveBeenCalled()
+  })
+
+  it.each(['unresolved', 'unsupported', 'error'])('stops a task when automatic approval is %s', async failure => {
+    respondToEkkoToolApprovalMock.mockImplementationOnce(() => {
+      if (failure === 'error') throw new Error('Approval transport failed')
+      return { handled: true, resolved: false }
+    })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const abort = vi.spyOn(server, 'abortSession').mockResolvedValue()
+    vi.spyOn(server as any, 'handleRun').mockImplementation(async (_socket, data: any) => {
+      data.onEvent('approval.requested', { approval_id: 'unavailable-approval', choices: failure === 'unsupported' ? ['deny'] : ['once', 'deny'] })
+    })
+    const result = await server.runAndWait({ session_id: 'session-1', input: 'Work' }, { approvalChoice: 'once' })
+    expect(result).toMatchObject({ ok: false, event: 'run.failed', error: expect.any(String) })
+    expect(abort).toHaveBeenCalledExactlyOnceWith('session-1', result.error)
+    expect(bridgeMock.approvalRespond).not.toHaveBeenCalled()
+  })
+
+  it.each(['terminal', 'stopping', 'aborted'])('does not approve a late request when the task is %s', async stopState => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    vi.spyOn(server as any, 'handleRun').mockImplementation(async (_socket, data: any) => {
+      data.onEvent('approval.requested', { approval_id: 'late-approval', choices: ['once', 'deny'] })
+      if (stopState !== 'terminal') {
+        const state = (server as any).sessionMap.get('session-1')
+        if (stopState === 'stopping') state.isAborting = true
+        else { state.abortController = new AbortController(); state.abortController.abort() }
+        await Promise.resolve()
+      }
+      data.onEvent('run.failed', { error: 'Aborted' })
+    })
+    expect((await server.runAndWait({ session_id: 'session-1', input: 'Work' }, { approvalChoice: 'once' })).ok).toBe(false)
+    expect(respondToEkkoToolApprovalMock).not.toHaveBeenCalled()
+    expect(codingAgentRunManagerMock.resolveApproval).not.toHaveBeenCalled()
+    expect(bridgeMock.approvalRespond).not.toHaveBeenCalled()
+  })
+
   it('does not auto-respond to approvals for normal runAndWait calls', async () => {
     handleBridgeRunMock.mockImplementationOnce(async (_nsp, _socket, data) => {
       data.onEvent?.('approval.requested', {
@@ -698,6 +838,8 @@ describe('ChatRunSocket queued bridge runs', () => {
     }, { profile: 'default' })
 
     expect(result.ok).toBe(true)
+    expect(respondToEkkoToolApprovalMock).not.toHaveBeenCalled()
+    expect(codingAgentRunManagerMock.resolveApproval).not.toHaveBeenCalled()
     expect(bridgeMock.approvalRespond).not.toHaveBeenCalled()
   })
 

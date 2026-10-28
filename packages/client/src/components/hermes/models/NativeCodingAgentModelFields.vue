@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { NButton, NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { CodingAgentId } from '@/api/coding-agents'
@@ -22,12 +22,17 @@ const effortOptions = computed(() => {
   const options = choices.value?.map(choice => ({ label: effortLabel(choice.effort), value: choice.effort }))
     || ['', ...(selected.value?.reasoningEfforts || [])].map(value => ({ label: effortLabel(value), value }))
   if (effort.value && !options.some(option => option.value === effort.value)) options.push({ label: effortLabel(effort.value), value: effort.value })
-  return agentReasoningEffortOptions(options, false)
+  return agentReasoningEffortOptions(options)
 })
 const canSelectEffort = computed(() => Boolean(selected.value?.reasoningEfforts?.length)
   && effortOptions.value.length > 1 && (!effort.value || (choices.value
     ? choices.value.some(choice => choice.effort === effort.value)
     : selected.value?.reasoningEfforts?.includes(effort.value))))
+watch([selected, effortOptions, () => props.reasoningEffort, () => props.disabled], () => {
+  if (props.disabled || !canSelectEffort.value || effort.value) return
+  const value = agentReasoningEffortValue('', effortOptions.value)
+  if (value) emit('change', selectNativeModelEffort(models.value, props.model, value))
+}, { immediate: true })
 const groups = computed(() => [{ provider: `native:${props.agent}`, label: catalog.value?.name || props.agent,
   base_url: '', api_key: '', models: ['', ...new Set(nativeModelFamilies(models.value).map(model => model.id))] }])
 function displayName(id: string) {

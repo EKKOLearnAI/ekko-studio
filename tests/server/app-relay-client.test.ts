@@ -614,6 +614,24 @@ describe('AppRelayClient', () => {
     )
   })
 
+  it('relays Person presence and activity while rejecting unrelated commands', async () => {
+    const { startAppRelayClient } = await import('../../packages/server/src/modules/studio/services/app-relay/client')
+    startAppRelayClient({ relayUrl: 'https://relay.example.com', machineId: 'hwui_machine_1234567890', publicKey: 'key', localBaseUrl: 'http://127.0.0.1:8648', fetchImpl: vi.fn() as any })
+    const remote = sockets[0]
+    const openAck = vi.fn()
+    remote.__handlers.get('app.socket.open')({ id: 'presence', namespace: '/person-presence', auth: { token: 'user-token' } }, openAck)
+    const local = sockets[1]
+    expect(local.__url).toBe('http://127.0.0.1:8648/person-presence')
+    expect(openAck).toHaveBeenCalledWith(expect.objectContaining({ ok: true }))
+    remote.__handlers.get('app.socket.event')({ id: 'presence', event: 'person.activity', payload: {} }, vi.fn())
+    expect(local.emit).toHaveBeenCalledWith('person.activity', {})
+    const denied = vi.fn()
+    remote.__handlers.get('app.socket.event')({ id: 'presence', event: 'run', payload: {} }, denied)
+    await vi.waitFor(() => expect(denied).toHaveBeenCalledWith(expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'event_not_allowed' }) })))
+    local.__onAny('person.presence', { state: 'sleeping' })
+    expect(remote.emit).toHaveBeenCalledWith('app.socket.event', expect.objectContaining({ event: 'person.presence', payload: { state: 'sleeping' } }))
+  })
+
   it('bridges the full-duplex /chat-run socket without using MCU events', async () => {
     const { startAppRelayClient } = await import('../../packages/server/src/modules/studio/services/app-relay/client')
     startAppRelayClient({

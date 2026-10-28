@@ -1,3 +1,4 @@
+import { studioModelReasoningEffort } from '../../public/model-reasoning-effort'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { codingAgentId } from './types'
@@ -104,7 +105,10 @@ export async function handleCodingAgentRun(
   const launchProvider = data.provider || (mode === 'scoped' ? storedSession?.provider || undefined : undefined)
   const launchModel = data.model ?? (storedSession?.model || undefined)
   const launchApiMode = data.apiMode || data.api_mode || (mode === 'scoped' ? storedSession?.api_mode || undefined : undefined)
-  const launchReasoningEffort = data.reasoning_effort ?? (storedSession?.reasoning_effort || undefined)
+  const selectedReasoningEffort = data.reasoning_effort ?? (storedSession?.reasoning_effort || undefined)
+  const launchReasoningEffort = mode === 'global' ? selectedReasoningEffort : studioModelReasoningEffort({
+    provider: launchProvider, model: launchModel, baseUrl: data.baseUrl || data.base_url, reasoningEffort: selectedReasoningEffort,
+  })
   const groupSystemPrompt = String(data.group_system_prompt || '').trim()
   const groupRoomId = String(data.group_room_id || '').trim()
   const groupAgentId = String(data.group_agent_id || '').trim()

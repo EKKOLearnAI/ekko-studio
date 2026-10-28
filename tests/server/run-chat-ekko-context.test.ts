@@ -182,6 +182,34 @@ function continuationContext(subagentId = 'child-background') {
 }
 
 describe('ekko-agent context usage events', () => {
+  it('approves parallel delegated tools without prompts and still coordinates real questions', async () => {
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap, events } = makeHarness()
+    ;(socket as any).data = { internalToolApprovalChoice: 'once' }
+    const verified = vi.fn()
+    agentRunMock.mockImplementationOnce(async (input: any) => {
+      input.onEvent({ type: 'run.started', runId: 'auto-tools', maxSteps: 3 })
+      const approve = (id: string, choices = ['once', 'deny']) => input.toolContext.requestToolApproval({
+        approvalId: id, toolName: 'terminal_exec', key: id, command: 'Remove generated output', description: 'Clean output', choices, timeoutMs: 1000,
+      })
+      expect(await Promise.all([approve('parallel-a'), approve('parallel-b')])).toEqual(['once', 'once'])
+      expect(events.some(e => e.event === 'approval.requested')).toBe(false)
+      const question = input.toolContext.requestUserClarification({ clarifyId: 'auto-question', question: 'Which report?', choices: ['Weekly'], timeoutMs: 1000 })
+      expect(events.some(e => e.event === 'clarify.requested')).toBe(true)
+      expect(respondToEkkoClarification('session-1', 'auto-question', 'Weekly').resolved).toBe(true)
+      expect(await question).toBe('Weekly')
+      expect(await approve('unsupported', ['deny'])).toBe('deny')
+      sessionMap.get('session-1').abortController.abort()
+      expect(await approve('cancelled')).toBe('deny')
+      verified()
+      return { runId: 'auto-tools', output: { role: 'assistant', content: 'Done' }, steps: [], messages: [], events: [] }
+    })
+    await handleEkkoAgentRun(nsp as any, socket as any, { session_id: 'session-1', input: 'Execute task', coding_agent_id: 'ekko-agent',
+      onEvent: (event, payload) => events.push({ event, payload }) }, 'default', sessionMap, vi.fn(() => false))
+    expect(agentRunMock).toHaveBeenCalledOnce()
+    expect(verified).toHaveBeenCalledOnce()
+  })
+
   it('runs Person through single-chat persistence, reasoning events and real clarification/approval callbacks', async () => {
     const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
     const { nsp, socket, sessionMap, events } = makeHarness()
@@ -211,7 +239,7 @@ describe('ekko-agent context usage events', () => {
     expect(sessionMap.get('person-main-7').ekkoBoundaryInterrupt).toBeUndefined()
     expect(createPersonChatAgentMock).toHaveBeenCalledWith(7, 'person-main-7')
     expect(getGlobalEkkoAgentMock).not.toHaveBeenCalled()
-    expect(buildCompressedHistoryMock).toHaveBeenCalled()
+    expect(buildCompressedHistoryMock).not.toHaveBeenCalled()
     expect(addMessageMock).toHaveBeenCalledWith(expect.objectContaining({ session_id: 'person-main-7', role: 'user', content: 'Prepare report' }))
     expect(addMessageMock).toHaveBeenCalledWith(expect.objectContaining({ session_id: 'person-main-7', role: 'assistant', content: 'Done' }))
     expect(events.map(e => e.event)).toContain('run.completed')
@@ -371,7 +399,7 @@ describe('ekko-agent context usage events', () => {
     expect(events.some(item => item.event === 'run.completed')).toBe(true)
   })
 
-  it('bridges Ekko tool approval requests through the existing chat events', async () => {
+  it.each([false, true])('keeps ordinary Ekko approvals interactive with client-supplied policy: %s', async forgedPolicy => {
     agentRunMock.mockImplementationOnce(async (input: any) => {
       input.onEvent({ type: 'run.started', runId: 'run-approval', maxSteps: 3 })
       const choicePromise = input.toolContext.requestToolApproval({
@@ -405,6 +433,7 @@ describe('ekko-agent context usage events', () => {
       session_id: 'session-1',
       input: 'remove the build directory',
       coding_agent_id: 'ekko-agent',
+      ...(forgedPolicy ? { internalToolApprovalChoice: 'once', approvalChoice: 'once' } : {}),
       onEvent: (event: string, payload: any) => events.push({ event, payload }),
     }, 'default', sessionMap, vi.fn(() => false))
 
@@ -794,7 +823,13 @@ describe('ekko-agent context usage events', () => {
     }))
   })
 
-  it('defaults to no reasoning when no effort is selected', async () => {
+  it.each((['builtin_agent', 'group_chat', 'workflow'] as const).flatMap(source => [
+    { source, metadata: undefined, expected: 'low', requested: '' },
+    { source, metadata: { reasoning_efforts: ['high', 'minimal', 'low'] }, expected: 'minimal', requested: '' },
+    { source, metadata: { reasoning_efforts: ['high', 'medium'] }, expected: 'medium', requested: '' },
+    { source, metadata: { reasoning: false }, expected: undefined, requested: '' },
+    { source, metadata: { reasoning_efforts: ['low', 'high', 'xhigh'] }, expected: 'xhigh', requested: 'xhigh' },
+  ]))('sends $expected for $source on the provider wire (requested $requested)', async ({ source, metadata, expected, requested }) => {
     const { AgentRuntime } = await import('../../packages/ekko-agent/src/runtime/runtime')
     const { OpenAIResponsesModelClient } = await import('../../packages/ekko-agent/src/model/providers/openai-responses')
     const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response(JSON.stringify({
@@ -815,26 +850,29 @@ describe('ekko-agent context usage events', () => {
 
     await handleEkkoAgentRun(nsp as any, socket as any, {
       session_id: 'session-1',
-      input: 'think carefully',
+      input: 'think carefully', source, reasoning_effort: requested,
+      model_groups: [{ provider: 'test-provider', models: ['ekko-test-model'], model_meta: metadata ? { 'ekko-test-model': metadata } : undefined }],
+      ...(source !== 'builtin_agent' ? { session_source: source } : {}),
       coding_agent_id: 'ekko-agent',
     }, 'default', sessionMap, vi.fn(() => false))
 
     expect(agentRunMock).toHaveBeenCalledWith(expect.objectContaining({
-      reasoningEffort: 'none',
+      reasoningEffort: expected,
       reasoningSummary: 'auto',
       modelDefaults: expect.objectContaining({
-        reasoningEffort: 'none',
+        reasoningEffort: expected,
         reasoningSummary: 'auto',
       }),
     }))
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
-    expect(body.reasoning).toEqual({ effort: 'none', summary: 'auto' })
+    expect(body.reasoning?.effort).toBe(expected)
+    if (!expected) expect(body.reasoning).not.toHaveProperty('effort')
   })
 
   it.each([
     { requested: undefined, expected: 'high' },
-    { requested: '', expected: 'none' },
+    { requested: '', expected: 'low' },
   ])('uses $expected when the stored effort is high and the request effort is $requested', async ({ requested, expected }) => {
     getSessionMock.mockReturnValue({ ...getSessionMock(), reasoning_effort: 'high' })
     agentRunMock.mockResolvedValueOnce({
@@ -849,6 +887,32 @@ describe('ekko-agent context usage events', () => {
     expect(agentRunMock).toHaveBeenCalledWith(expect.objectContaining({
       reasoningEffort: expected, modelDefaults: expect.objectContaining({ reasoningEffort: expected }),
     }))
+  })
+
+  it.each([
+    { sessionId: 'person-main-7', requested: 'xhigh', expected: 'xhigh' },
+    { sessionId: 'person-main-7', requested: '', expected: 'low' },
+    { sessionId: 'person-task-worker', requested: 'xhigh', expected: 'xhigh' },
+    { sessionId: 'person-task-worker', requested: '', expected: 'low' },
+  ])('preserves Person effort $requested for $sessionId on the provider wire', async ({ sessionId, requested, expected }) => {
+    const { AgentRuntime } = await import('../../packages/ekko-agent/src/runtime/runtime')
+    const { OpenAIResponsesModelClient } = await import('../../packages/ekko-agent/src/model/providers/openai-responses')
+    const fetchMock = vi.fn(async (_url: string | URL, _init?: RequestInit) => new Response(JSON.stringify({ output_text: 'done', status: 'completed' })))
+    const modelClient = new OpenAIResponsesModelClient({ id: 'test', type: 'openai', requestStyle: 'openai-responses',
+      baseUrl: 'https://model.example.test/v1', defaultModel: 'gpt-6.1-sol', capabilities: { streaming: false } }, { fetch: fetchMock })
+    const runtime = new AgentRuntime({ modelClient, toolsEnabled: false, skillsEnabled: false })
+    getSessionMock.mockReturnValue({ ...getSessionMock(), id: sessionId, studio_user_id: '7', reasoning_effort: 'xhigh' })
+    createPersonChatAgentMock.mockResolvedValue({ run: agentRunMock, estimateContext: agentEstimateContextMock, sessionWorkspaceDirectory: () => '/tmp/person-workspace' })
+    agentRunMock.mockImplementationOnce(input => runtime.run({ ...input, modelClient, onEvent: undefined }))
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap } = makeHarness()
+    ;(socket as any).data = { user: { id: 7 } }
+    await handleEkkoAgentRun(nsp as any, socket as any, {
+      session_id: sessionId, input: 'Think carefully', coding_agent_id: 'ekko-agent', reasoning_effort: requested,
+    }, 'default', sessionMap, vi.fn(() => false))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).reasoning?.effort).toBe(expected)
+    expect(agentRunMock.mock.calls[0][0].reasoningEffort).toBe(expected)
   })
 
   it('preserves an explicit request to disable reasoning', async () => {

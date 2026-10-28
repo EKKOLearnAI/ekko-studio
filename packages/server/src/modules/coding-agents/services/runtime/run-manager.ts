@@ -684,6 +684,7 @@ export function sanitizeCodingAgentTerminalOutput(value: string): string {
 export class CodingAgentRunManager {
   private runs = new Map<string, ManagedCodingAgentRun>()
   private sessionIndex = new Map<string, string>()
+  private sessionExits = new Map<string, { run: ManagedCodingAgentRun; promise: Promise<void> }>()
   private memoryExportChildren = new Set<ChildProcess>()
 
   constructor(private readonly idleMs = DEFAULT_IDLE_MS) {}
@@ -1036,6 +1037,25 @@ export class CodingAgentRunManager {
   getPiSessionState(sessionId: string): Promise<PiNativeSessionState> {
     const run = this.requirePiRpcRun(sessionId)
     return this.requestPiRpc<PiNativeSessionState>(run, { type: 'get_state' })
+  }
+
+  /** Observe before stopping: cleanup removes the run before its process exits. */
+  waitForSessionExit(sessionId: string): Promise<void> {
+    const pending = this.sessionExits.get(sessionId)
+    const run = this.getBySession(sessionId)
+    if (!run || pending?.run === run) return pending?.promise || Promise.resolve()
+    const exits: Promise<unknown>[] = pending ? [pending.promise] : []
+    const child = run.currentChild
+    if (child && child.exitCode == null && child.signalCode == null) {
+      exits.push(new Promise<void>(resolve => child.once('close', () => resolve())))
+    }
+    if (run.pty) exits.push(new Promise<void>(resolve => run.pty!.onExit(() => resolve())))
+    // There is deliberately no timeout that treats an unconfirmed stop as success.
+    const promise = Promise.all(exits).then(async () => { await run.nativeUsageCompletion }).finally(() => {
+      if (this.sessionExits.get(sessionId)?.promise === promise) this.sessionExits.delete(sessionId)
+    })
+    this.sessionExits.set(sessionId, { run, promise })
+    return promise
   }
 
   stop(sessionId: string, options: { reportClosed?: boolean } = {}): boolean {

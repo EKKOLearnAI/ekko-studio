@@ -28,6 +28,7 @@ import { useSessionSearch } from "@/composables/useSessionSearch";
 import { watchServerTtsSettingsHydration } from "@/composables/useTtsSettingsHydration";
 import { useAppStore } from "@/stores/hermes/app";
 import { useProfilesStore } from "@/stores/hermes/profiles";
+import { usePersonPresenceStore } from '@/stores/hermes/person-presence';
 import { isStoredSuperAdmin } from "@/api/client";
 import AuthEventListener from "@/components/auth/AuthEventListener.vue";
 import { desktopBridge } from "@/utils/desktop-bridge";
@@ -126,6 +127,10 @@ const isStandaloneChatPage = computed(
   () => route.meta?.standaloneChat === true,
 );
 const isInviteOnlyPage = computed(() => route.meta?.inviteOnly === true);
+const personPresence = usePersonPresenceStore();
+watch(() => !isLoginPage.value && !isInviteOnlyPage.value && route.name !== 'desktop.pet', enabled => {
+  if (enabled) personPresence.start(); else personPresence.stop();
+}, { immediate: true });
 const wideViewportQuery = window.matchMedia('(min-width: 769px)');
 const isWideViewport = ref(wideViewportQuery.matches);
 const viewportWidth = ref(window.innerWidth);
@@ -296,6 +301,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  personPresence.stop();
   window.removeEventListener('resize', handleViewportResize);
   wideViewportQuery.removeEventListener('change', handleWideViewportChange);
   stopWindowStateListener?.();

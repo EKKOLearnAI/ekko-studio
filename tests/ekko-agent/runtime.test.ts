@@ -2364,6 +2364,17 @@ describe('ekko-agent runtime', () => {
     expect(prompt).toContain('Do not invent drive letters or assume WSL is installed')
   })
 
+  it('allows a scoped host to omit execution guidance while retaining its prompt and memory', () => {
+    const prompt = buildSystemPrompt({ basePrompt: 'Person main', memoryContext: 'Remembered name: Ekko', toolExecutionGuidelinesEnabled: false })
+    expect(prompt).toContain('Person main')
+    expect(prompt).toContain('Remembered name: Ekko')
+    expect(prompt).toContain('## Image and File Output')
+    expect(prompt).not.toContain('terminal_exec')
+    expect(prompt).not.toContain('code_exec')
+    expect(prompt).not.toContain('## Command Environment')
+    expect(buildSystemPrompt()).toContain('Use terminal_exec for CLI commands')
+  })
+
   it('buildSystemPrompt injects macOS and Linux command rules independently', () => {
     const macPrompt = buildSystemPrompt({
       basePrompt: 'Base',

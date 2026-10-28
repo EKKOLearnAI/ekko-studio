@@ -1,3 +1,5 @@
+import type { MemoryService } from '../../../../../ekko-agent/src/memory/service'
+import type { MemoryRuntimeIdentity } from '../../../../../ekko-agent/src/memory/types'
 import type { AgentRuntimeRunInput, AgentRuntimeRunResult, AgentRuntimeContextEstimate, AgentRuntimeBoundaryInterruptRequest, AgentRuntimeBoundaryInterruptResult } from '../../../../../ekko-agent/src/runtime/types'
 import type { AgentMessage, AgentToolDefinition, ModelRequest, ModelResponse } from '../../../../../ekko-agent/src/model/types'
 import type { PersonSelection, PersonTaskOrigin } from '../contracts/person'
@@ -10,15 +12,20 @@ export interface PersonModelCall {
   tools: Array<AgentToolDefinition & { execute(input: Record<string, unknown>, origin?: PersonTaskOrigin): Promise<unknown> }>
   maxSteps: number
   contextTokens: number
+  compression?: { enabled: boolean; threshold: number }
   reasoningEffort?: ModelRequest['reasoningEffort']
   signal: AbortSignal
   beforeRequest?: () => void
   onEvent?: (event: unknown) => void
   onUsage?: (response: ModelResponse) => void
-  prepare?: (request: ModelRequest, summarize: (text: string) => Promise<string>) => Promise<ModelRequest>
+  onSummaryUsage?: (response: ModelResponse) => void
+  summaryCache?: { get(key: string): string | undefined; set(key: string, summary: string): void }
+  onPrepared?: (request: ModelRequest) => void
 }
-export interface PersonChatAgentOptions extends Pick<PersonModelCall, 'selection' | 'tools' | 'systemPrompt' | 'maxSteps' | 'contextTokens' | 'beforeRequest'> {
+export interface PersonChatAgentOptions extends Pick<PersonModelCall, 'selection' | 'tools' | 'systemPrompt' | 'maxSteps' | 'contextTokens' | 'compression' | 'beforeRequest' | 'summaryCache' | 'onSummaryUsage'> {
   workspace: string
+  memory?: { service: MemoryService; identity: MemoryRuntimeIdentity }
+  loadHistory?: (query: string) => AgentMessage[]
 }
 export interface PersonResultDelivery {
   user: AuthenticatedUser

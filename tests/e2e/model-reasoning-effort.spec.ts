@@ -3,10 +3,10 @@ import { authenticate, mockChatSocket, mockHermesApi, TEST_ACCESS_KEY, TEST_MODE
 import { selectNewChatAgent, selectNewChatLaunchMode, sendNewChatMessage } from './new-chat-helpers'
 
 for (const [name, provider, model, metadata, max] of [
-  ['GLM 5.3 advertised effort levels', 'glm', 'glm-5.3', { reasoning: true, reasoning_efforts: ['low', 'high', 'max'] }, 3],
-  ['custom DeepSeek Flash advertised effort levels', 'custom:api.apikey.fun', 'deepseek-flash', { reasoning: true, reasoning_efforts: ['none', 'low', 'high', 'max'] }, 4],
+  ['GLM 5.3 advertised effort levels', 'glm', 'glm-5.3', { reasoning: true, reasoning_efforts: ['low', 'high', 'max'] }, 2],
+  ['custom DeepSeek Flash advertised effort levels', 'custom:api.apikey.fun', 'deepseek-flash', { reasoning: true, reasoning_efforts: ['none', 'low', 'high', 'max'] }, 3],
   ['no reasoning support', 'test-provider', 'test-model', { reasoning: false, reasoning_efforts: [] }, 0],
-  ['unknown capabilities', 'test-provider', 'test-model', {}, 7],
+  ['unknown capabilities', 'test-provider', 'test-model', {}, 4],
 ] as const) {
   test(`chat uses ${name} from the selected model and forwards the chosen effort`, async ({ page }) => {
     await authenticate(page, TEST_ACCESS_KEY)
@@ -17,6 +17,7 @@ for (const [name, provider, model, metadata, max] of [
     await input.fill('Start a session')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.filter((item: any) => item.event === 'run').length || 0)).toBe(1)
+    expect(await page.evaluate(() => (window as any).__PW_CHAT_SOCKET__.emitted.find((item: any) => item.event === 'run').payload.reasoning_effort)).toBe(max ? 'low' : undefined)
     await page.evaluate(() => {
       const state = (window as any).__PW_CHAT_SOCKET__
       const run = state.emitted.find((item: any) => item.event === 'run').payload
@@ -53,7 +54,7 @@ async function chooseDraftMax(page: import('@playwright/test').Page) {
   const initialColor = await button.evaluate(element => getComputedStyle(element).color)
   await button.click()
   const slider = page.getByRole('slider')
-  await expect(slider).toHaveAttribute('aria-valuemax', '3')
+  await expect(slider).toHaveAttribute('aria-valuemax', '2')
   await slider.focus()
   for (let step = 0; step < 3; step++) await page.keyboard.press('ArrowRight')
   await expect(button).toHaveAttribute('aria-label', /max/i)
@@ -79,7 +80,7 @@ for (const agent of ['Ekko', 'Hermes', 'Codex']) test(`${agent} new-chat forward
   await selectNewChatAgent(page, agent)
   const draft = page.locator('.new-chat-page')
   await expect(draft.locator('.reasoning-effort-button')).toHaveAttribute('aria-label',
-    agent === 'Hermes' ? /default/i : /none/i)
+    /low/i)
   await expect(draft.locator('.new-chat-config-bar img, .new-chat-selected-agent')).toHaveCount(0)
   await chooseDraftMax(page)
   await sendNewChatMessage(page, 'Use my draft reasoning effort')
@@ -103,7 +104,6 @@ for (const agent of ['Ekko', 'Hermes', 'Codex']) test(`${agent} new-chat forward
     await page.locator('.reasoning-effort-button').click()
     await page.getByRole('slider').focus()
     for (let step = 0; step < 3; step++) await page.keyboard.press('ArrowLeft')
-    await page.keyboard.press('ArrowRight')
     await expect(page.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /low/i)
     await page.keyboard.press('Escape')
     await expect.poll(() => effortWrites.at(-1)).toEqual({ reasoningEffort: 'low' })
@@ -129,7 +129,7 @@ test('new-chat resets unsupported effort on a model switch and preserves the ori
   const models = page.locator('.model-cascader:visible')
   await expect(models.locator('.session-model-kind-field')).toHaveCount(0)
   await models.locator('.model-cascader-item').filter({ hasText: 'simple-model' }).click()
-  await expect(draft.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /default/i)
+  await expect(draft.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /none/i)
   await draft.locator('.reasoning-effort-button').click()
   await expect(page.getByRole('slider')).toHaveAttribute('aria-valuemax', '0')
   await expect(page.getByRole('slider')).toHaveAttribute('aria-disabled', 'true')

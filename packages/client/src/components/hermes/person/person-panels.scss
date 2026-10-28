@@ -1,0 +1,41 @@
+@use '@/styles/variables' as *;
+
+.person-panel { color: $text-primary; min-width: 0; }
+[data-theme-surface="card"] { background: $bg-card; }
+.panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin: 12px 0 30px; }
+.panel-heading h2 { margin: 0 0 8px; font-size: 25px; font-weight: 600; letter-spacing: -.5px; }
+.panel-heading p { margin: 0; max-width: 560px; color: $text-secondary; line-height: 1.8; font-size: 13px; }
+.panel-heading > .n-button { flex-shrink: 0; margin-top: 3px; }
+.panel-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.panel-count { font-size: 12px; color: $text-secondary; white-space: nowrap; }
+.panel-count strong { color: $text-primary; font-size: 15px; font-weight: 600; margin-inline-end: 6px; }
+.panel-search { max-width: 260px; }
+.panel-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.panel-tile { display: flex; flex-direction: column; min-width: 0; padding: 20px; border: 1px solid $border-light; border-radius: var(--radius-component, 12px); }
+.panel-tile h3 { font-size: 16px; line-height: 1.5; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
+.tile-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.tile-icon { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid $border-light; border-radius: var(--radius-component, 10px); color: $text-secondary; flex-shrink: 0; }
+.tile-meta { color: $text-muted; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.tile-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 16px; margin-top: auto; border-top: 1px solid $border-light; flex-wrap: wrap; }
+.tile-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.panel-editor { padding: 26px; margin-bottom: 24px; border: 1px solid $border-light; border-radius: var(--radius-component, 12px); }
+.editor-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.editor-heading h3 { font-size: 17px; font-weight: 600; margin: 0; }
+.editor-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.editor-fields label { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: 12px; color: $text-secondary; }
+.editor-fields .field-wide { grid-column: 1 / -1; }
+.editor-fields :deep(.n-date-picker), .editor-fields :deep(.n-time-picker) { width: 100%; }
+.editor-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 24px; margin-top: 24px; border-top: 1px solid $border-light; }
+.panel-empty { display: flex; align-items: center; flex-direction: column; justify-content: center; text-align: center; padding: 58px 24px; border: 1px dashed $border-color; border-radius: var(--radius-component, 12px); }
+.panel-empty h3 { font-size: 17px; margin: 20px 0 8px; font-weight: 500; }
+.panel-empty p { max-width: 440px; font-size: 13px; line-height: 1.8; color: $text-secondary; margin: 0; }
+.panel-empty > svg { color: $text-muted; }
+.panel-error { margin-bottom: 20px; }
+@media (max-width: 640px) {
+  .panel-heading { flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
+  .panel-heading h2 { font-size: 22px; }
+  .panel-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .panel-tile, .panel-editor { padding: 20px; }
+  .editor-fields { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .panel-search { max-width: 190px; }
+}

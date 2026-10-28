@@ -64,6 +64,10 @@ vi.mock('@/stores/hermes/profiles', () => ({
   useProfilesStore: () => profilesStoreMock,
 }))
 
+vi.mock('@/stores/hermes/person-presence', () => ({
+  usePersonPresenceStore: () => ({ start: vi.fn(), stop: vi.fn(), state: 'idle', avatarSrc: '/person/idle.gif' }),
+}))
+
 vi.mock('@/composables/useTtsSettingsHydration', () => ({
   watchServerTtsSettingsHydration: watchServerTtsSettingsHydrationMock,
 }))

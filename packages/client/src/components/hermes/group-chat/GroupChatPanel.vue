@@ -382,13 +382,13 @@ const pendingAgentPreset = computed(() =>
 )
 
 const agentReasoningEffortOptions = computed(() => reasoningOptions([
-    { label: t(selectedAgentType.value === 'hermes' ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'), value: '' },
+    { label: t('chat.reasoningEffort.options.none'), value: '' },
     ...modelReasoningEfforts(
       getAgentModelGroups(selectedProfile.value || ''),
       selectedAgentProvider.value,
       selectedAgentModel.value,
     ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
-], selectedAgentType.value === 'hermes'))
+]))
 const agentReasoningEffortValue = computed({
   get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
   set: (value: string) => { selectedAgentReasoningEffort.value = value },
@@ -1357,7 +1357,7 @@ function currentAgentPresetInput(): GroupAgentPresetInput | null {
         }),
         profile: selectedProfile.value,
         apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
-        reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
+        reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
         agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
         name: agentName.value.trim() || selectedProfile.value,
         description: agentDescription.value.trim(),
@@ -1741,7 +1741,7 @@ async function confirmAddAgent() {
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
@@ -1781,7 +1781,7 @@ async function confirmUpdateAgent() {
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,

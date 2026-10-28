@@ -224,6 +224,8 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 
 `AgentRuntime.run(input)` 的 `input` 字段包括：必填 `messages`；可选 `signal`、`systemPrompt`、`skills`、`maxSteps`、`maxModelRetries`、`toolFailureRecoveryThreshold`、兼容字段 `maxConsecutiveToolFailures`、`toolContext`、`model`、`temperature`、`maxTokens`、`reasoningEffort`、`reasoningSummary`、`metadata`、`modelClient`、`modelDefaults`、`contextKey`、`context`、`memoryEnabled`、`memoryInput`、`backgroundDelegationEnabled`、`logContext`、`onSkillReviewUsage`、`onEvent`。同一工具连续失败达到阈值时，runtime 注入纠错指令并继续运行，不会因该阈值终止。完整方法签名见文末自动清单。
 
+`toolExecutionGuidelinesEnabled` 默认为 true；没有执行工具的受限宿主可以设为 false，省略通用终端、代码执行及命令环境提示。它仅控制提示，不会授予或移除工具，普通 Ekko 对话保持默认行为。
+
 宿主提供 `listSessionTasks` / `updateSessionTasks` 回调时，主对话可维护跨轮 session 目标。仅记录有独立交付价值、需要持续跟进或用户明确要求跟踪的事项；简单问答、即时查询和没有长期追踪价值的一次性微调可跳过。同一目标的补充、纠错和执行约束复用已有 id。摘要用一两句话说明结果和遗留问题，验证依据放入 `completion_evidence`；读取后没有变化无需写入。读取状态包括 `open`、`completed` 和用户手动设置的 `closed`；模型写入仍只接受前两种状态。已关闭目标必须保持不变，由用户在任务列表中手动重开后才可继续更新。
 
 ## Profile `memory` 模块
@@ -2865,6 +2867,7 @@ export interface SystemPromptInput {
   runtimeInstructions?: string[]
   userSystemMessages?: string[]
   memoryContext?: string
+  toolExecutionGuidelinesEnabled?: boolean
   planningEnabled?: boolean
   sessionTasksEnabled?: boolean
   clarificationEnabled?: boolean
@@ -2953,6 +2956,7 @@ export interface AgentRuntimeRunInput {
   messages: AgentMessageInput[]
   signal?: AbortSignal
   systemPrompt?: string
+  toolExecutionGuidelinesEnabled?: boolean
   skills?: AgentSkill[]
   maxSteps?: number
   maxModelRetries?: number

@@ -1,7 +1,7 @@
 import { deploymentUrl } from './deployment-url'
 
 export interface ChatAgentAvatar {
-  label: 'Person' | 'Hermes' | 'Ekko' | 'Claude' | 'Codex' | 'Pi' | 'Grok' | 'OpenCode' | 'DeepSeek Harness' | 'Cursor' | 'Antigravity' | 'Qwen Code' | 'Kimi Code' | 'CodeBuddy' | 'Qoder' | 'GitHub Copilot' | 'ZCode'
+  label: 'zhezhe' | 'Hermes' | 'Ekko' | 'Claude' | 'Codex' | 'Pi' | 'Grok' | 'OpenCode' | 'DeepSeek Harness' | 'Cursor' | 'Antigravity' | 'Qwen Code' | 'Kimi Code' | 'CodeBuddy' | 'Qoder' | 'GitHub Copilot' | 'ZCode'
   src: string
 }
 
@@ -11,6 +11,16 @@ interface ChatAgentSessionIdentity {
   agent?: string
   codingAgentId?: string
 }
+
+export const PERSON_AVATAR = { label: 'zhezhe', src: deploymentUrl('/coding-agents/person.jpg') } as const satisfies ChatAgentAvatar
+export const PERSON_ANIMATIONS = {
+  idle: deploymentUrl('/person/idle.gif'),
+  thinking: deploymentUrl('/person/thinking.gif'),
+  searching: deploymentUrl('/person/searching.gif'),
+  done: deploymentUrl('/person/done.gif'),
+  error: deploymentUrl('/person/error.gif'),
+  sleeping: deploymentUrl('/person/sleeping.gif'),
+} as const
 
 const AGENT_AVATARS = {
   hermes: { label: 'Hermes', src: deploymentUrl('/coding-agents/hermes.png') },
@@ -33,7 +43,7 @@ const AGENT_AVATARS = {
 
 export function chatSessionAgentAvatar(session?: ChatAgentSessionIdentity | null): ChatAgentAvatar {
   if (!session) return AGENT_AVATARS['ekko-agent']
-  if (session.id?.startsWith('person-main-')) return { ...AGENT_AVATARS['ekko-agent'], label: 'Person' }
+  if (session.id?.startsWith('person-main-')) return PERSON_AVATAR
   const runtime = String(session?.codingAgentId || session?.agent || '').trim().toLowerCase()
   if (runtime === 'ekko-agent' || runtime === 'ekko_agent' || runtime === 'ekko') return AGENT_AVATARS['ekko-agent']
   if (runtime === 'claude' || runtime === 'claude-code') return AGENT_AVATARS['claude-code']

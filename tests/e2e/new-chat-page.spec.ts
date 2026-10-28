@@ -538,7 +538,7 @@ for (const choice of ['standard', 'custom', 'moa'] as const) test(`Hermes draft 
     await draft.locator('.reasoning-effort-button').click()
     await page.getByRole('slider').focus()
     await page.keyboard.press('ArrowRight')
-    await expect(draft.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /none/i)
+    await expect(draft.locator('.reasoning-effort-button')).toHaveAttribute('aria-label', /medium/i)
     await page.keyboard.press('Escape')
   }
   await draft.locator('.input-model-button').click()

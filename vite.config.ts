@@ -74,6 +74,8 @@ export default defineConfig({
       'vue-router',
       'pinia',
       'naive-ui',
+      // Worker-only imports must be ready before opening a workbook, without a page reload.
+      'read-excel-file/web-worker',
     ],
   },
   server: {

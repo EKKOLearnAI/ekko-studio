@@ -9,6 +9,13 @@ const readConfigYamlForProfileMock = vi.fn()
 const safeReadFileMock = vi.fn()
 const startRunMock = vi.fn()
 
+// Global defaults must follow fixture capabilities, independent of installed CLIs.
+vi.mock('../../packages/server/src/modules/coding-agents/services/models', () => ({
+  createCodingAgentModelDiscovery: () => async ({ agent }: { agent?: string } = {}) => ({
+    agents: agent === 'codex' ? [{ id: 'codex', status: 'available', models: [{ id: 'native-model', isDefault: true, reasoningEfforts: ['low', 'medium', 'high'] }] }] : [],
+  }),
+}))
+
 vi.doMock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   getSession: getSessionMock,
   updateSession: updateSessionMock,
@@ -411,7 +418,7 @@ describe('coding agent resumed session config', () => {
         HERMES_STUDIO_SESSION_ID: 'session-1',
         CODEX_HOME: expect.stringContaining(join('coding-agent', 'model', 'default', 'global', 'codex', 'runs')),
       }),
-      args: [],
+      args: ['-c', 'model_reasoning_effort="low"'],
       promptFile: expect.stringContaining(join('AGENTS.md')),
     }))
     expect(updateSessionMock).toHaveBeenCalledWith('session-1', expect.objectContaining({

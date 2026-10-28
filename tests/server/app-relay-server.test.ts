@@ -683,6 +683,26 @@ describe('LocalAppRelayServer', () => {
     expect(Array.from(secondAck.mock.calls[0][0].bodyBytes)).toEqual([4, 5])
   })
 
+  it('relays Person state with the authenticated App identity and limits writes to activity', async () => {
+    const namespace = createMockNamespace()
+    const { LocalAppRelayServer } = await import('../../packages/server/src/modules/studio/services/app-relay/server')
+    const server = new LocalAppRelayServer({ of: () => namespace } as any, { machineId: 'hwui_local_machine_1234567890', localBaseUrl: 'http://127.0.0.1:8748' })
+    server.init()
+    const app = createMockAppSocket('app-person', { role: 'app', token: 'local-user-token', machineId: 'hwui_local_machine_1234567890' })
+    await connectApp(namespace, app)
+    const ack = vi.fn()
+    app.__handlers.get('socket.open')({ id: 'presence', namespace: '/person-presence', auth: { token: 'forged' } }, ack)
+    await vi.waitFor(() => expect(ack).toHaveBeenCalledWith(expect.objectContaining({ ok: true })))
+    expect(clientSocketMocks.io).toHaveBeenCalledWith('http://127.0.0.1:8748/person-presence', expect.objectContaining({ auth: { token: 'local-user-token' } }))
+    const local = clientSocketMocks.sockets[0]
+    const activityAck = vi.fn()
+    app.__handlers.get('socket.event')({ id: 'presence', event: 'person.activity', payload: {} }, activityAck)
+    await vi.waitFor(() => expect(local.emit).toHaveBeenCalledWith('person.activity', {}))
+    const denied = vi.fn()
+    app.__handlers.get('socket.event')({ id: 'presence', event: 'run', payload: {} }, denied)
+    await vi.waitFor(() => expect(denied).toHaveBeenCalledWith(expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'event_not_allowed' }) })))
+  })
+
   it('bridges /chat-run directly with the same App socket events as the cloud relay', async () => {
     const namespace = createMockNamespace()
     const io = { of: vi.fn(() => namespace) }

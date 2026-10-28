@@ -1,3 +1,4 @@
+import { FALLBACK_REASONING_EFFORTS, resolveModelReasoningEffort } from '../../../../../../shared/reasoning-effort'
 import { findUserById, listUserProfiles, userCanAccessProfile } from '../../repositories/users-store'
 import { getActiveProfileName, listProfileNamesFromDisk } from '../../public/profile-config'
 import { getAgentAvailabilitySnapshot } from '../../public/agent-status-registry'
@@ -9,6 +10,8 @@ import { isAgentRuntime } from '../../contracts/agents/runtime'
 import { personError } from '../../contracts/person'
 import type { PersonSelection, PersonSettings } from '../../contracts/person'
 import { personSettings } from '../../repositories/person-store'
+import { readCompressionPolicy } from '../compression-policy'
+import { getModelContextLength } from '../../public/provider-runtime'
 
 export const PERSON_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
@@ -66,10 +69,13 @@ export async function effectivePersonSettings(userId: number, stored = personSet
   }
   const meta = model ? catalog?.groups.find(group => group.provider === model!.provider)?.model_meta?.[model.model] : undefined
   const reasoningEfforts = !model || meta?.reasoning === false ? []
-    : [...PERSON_REASONING_EFFORTS].filter(effort => meta?.reasoning_efforts === undefined || meta.reasoning_efforts.includes(effort))
-  const reasoningEffort = reasoningEfforts.includes(stored.settings.reasoningEffort as typeof PERSON_REASONING_EFFORTS[number]) ? stored.settings.reasoningEffort : ''
+    : [...PERSON_REASONING_EFFORTS].filter(effort => (meta?.reasoning_efforts ?? FALLBACK_REASONING_EFFORTS).includes(effort))
+  const reasoningEffort = resolveModelReasoningEffort(stored.settings.reasoningEffort, { reasoning_efforts: reasoningEfforts }) || ''
+  const policy = await readCompressionPolicy(profile)
+  const contextTokens = model ? getModelContextLength({ profile: model.profile, provider: model.provider, model: model.model }) : 0
   return { revision: stored.revision, settings: { ...stored.settings, model, reasoningEffort } as PersonSettings,
-    inherits_global_model: !stored.settings.model, reasoning_efforts: reasoningEfforts }
+    inherits_global_model: !stored.settings.model, reasoning_efforts: reasoningEfforts, contextTokens,
+    compression: { enabled: policy.enabled, threshold: stored.settings.compressionThreshold ?? policy.threshold, globalThreshold: policy.threshold } }
 }
 
 export async function personModelSelection(userId: number, input: Record<string, unknown>): Promise<PersonSelection> {

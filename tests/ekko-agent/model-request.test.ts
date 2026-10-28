@@ -31,6 +31,16 @@ const providerConfig: ModelProviderConfig = {
 }
 
 describe('ekko-agent model requests', () => {
+  it('keeps optional tool arguments optional in Responses instead of implicitly enabling strict mode', async () => {
+    const parameters = { type: 'object', properties: { query: { type: 'string' }, record_id: { type: 'integer' } }, required: ['query'], additionalProperties: false }
+    const fetchMock = vi.fn(async (_input: string | URL, _init?: RequestInit) => new Response(JSON.stringify({ output_text: 'done', status: 'completed' })))
+    const client = createModelClient({ id: 'openai', type: 'openai', requestStyle: 'openai-responses', defaultModel: 'test-model' }, { fetch: fetchMock })
+    await client.create({ messages: [{ role: 'user', content: 'Search records' }], tools: [{ name: 'search', parameters }] })
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.tools).toEqual([{ type: 'function', name: 'search', parameters, strict: false }])
+    expect(parameters.required).toEqual(['query'])
+  })
+
   it('preserves provider cost through chat and responses normalization', () => {
     expect(normalizeOpenAIChatResponse('test', { choices: [], usage: { prompt_tokens: 10, completion_tokens: 2, cost: 0.002 } }).usage).toMatchObject({ costUsd: 0.002 })
     expect(normalizeOpenAIResponsesResponse({ output: [], usage: { input_tokens: 10, output_tokens: 2, cost: 0 } }).usage).toMatchObject({ costUsd: 0 })

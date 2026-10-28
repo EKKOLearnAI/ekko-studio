@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import thinkingImage from '@/assets/thinking.gif'
 import type { ChatAgentAvatar } from '@/utils/chat-agent-avatar'
+import { PERSON_ANIMATIONS } from '@/utils/chat-agent-avatar'
 
 const props = withDefaults(defineProps<{
   reasoning?: string | null
@@ -15,6 +16,8 @@ const props = withDefaults(defineProps<{
   agent: () => ({ label: 'Hermes', src: deploymentUrl('/coding-agents/hermes.png') }),
 })
 const isEkko = computed(() => props.agent.label === 'Ekko')
+const isPerson = computed(() => props.agent.label === 'zhezhe')
+const avatarSrc = computed(() => isPerson.value ? PERSON_ANIMATIONS.thinking : isEkko.value ? thinkingImage : props.agent.src)
 
 const { t } = useI18n()
 const reasoningBody = ref<HTMLElement | null>(null)
@@ -74,8 +77,8 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   <div class="live-reasoning-status">
     <div class="thinking-status">
       <img
-        :key="isEkko ? thinkingImage : agent.src"
-        :src="isEkko ? thinkingImage : agent.src"
+        :key="avatarSrc"
+        :src="avatarSrc"
         data-agent-deployment-image="pending"
         @load="($event.target as HTMLImageElement).dataset.agentDeploymentImage = 'ready'"
         @error="($event.target as HTMLImageElement).dataset.agentDeploymentImage = 'error'"
@@ -83,7 +86,7 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
         aria-hidden="true"
         class="thinking-avatar"
         :data-agent-deployment-target="deploymentSessionId || ''"
-        :class="isEkko ? 'thinking-avatar--animated' : 'thinking-avatar--logo'"
+        :class="isPerson ? 'thinking-avatar--person' : isEkko ? 'thinking-avatar--animated' : 'thinking-avatar--logo'"
       >
       <div class="thinking-status-copy">
         <span class="thinking-status-label">{{ t('chat.thinkingInProgress') }}</span>
@@ -154,6 +157,8 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   object-fit: contain;
   background: #fff;
 }
+
+.thinking-avatar--person { aspect-ratio: 1; border-radius: 4px; object-fit: contain; }
 
 .thinking-status-copy {
   display: flex;

@@ -1,3 +1,5 @@
+import { lowestReasoningEffort } from '../../../../../shared/reasoning-effort'
+import { studioModelReasoningEffort } from '../../studio/public/model-reasoning-effort'
 import type { CodingAgentDefinition, CodingAgentConfigFileDefinition } from '../contracts/definition'
 import { TOOL_DEFINITIONS, CONFIG_FILE_DEFINITIONS } from './registry/definitions'
 import { createOpenCodeConfig, mergeOpenCodeSettingsConfig, openCodeSettingsConfig, opencodeMcpServerConfig, openCodeRuntimeEnv, OPENCODE_CONFIG_FILE, OPENCODE_DATABASE_FILE, OPENCODE_API_KEY_ENV, OPENCODE_PROVIDER_ID } from './opencode/config'
@@ -3056,12 +3058,25 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
   const mode = resolvedCodingAgentLaunchMode(tool.id, input.mode)
   if (mode === 'global') {
-    const model = String(input.model || '').trim()
-    const reasoningEffort = String(input.reasoningEffort || '').trim()
+    let model = String(input.model || '').trim()
+    let reasoningEffort = String(input.reasoningEffort || '').trim()
     const variant = ['cursor', 'antigravity'].includes(tool.id) ? nativeModelVariant(model) : undefined
     if (variant && reasoningEffort && variant.effort !== reasoningEffort) {
       throw Object.assign(new Error('Native model ID and reasoning effort must select the same variant'), { status: 400 })
     }
+    if (!reasoningEffort && !variant) {
+      const catalog = (await getCodingAgentModels({ agent: tool.id })).agents[0]
+      const selected = catalog?.models.find(entry => !entry.hidden && (model ? entry.id === model : entry.isDefault))
+      // Native CLIs have their own capabilities; never guess unsupported CLI flags.
+      reasoningEffort = lowestReasoningEffort(selected?.reasoningEfforts || []) || ''
+      if (selected?.modelFamily && reasoningEffort) {
+        const target = catalog.models.find(entry => !entry.hidden && entry.provider === selected.provider
+          && entry.modelFamily === selected.modelFamily && entry.reasoningEffort === reasoningEffort)
+        if (target) model = target.id
+        else reasoningEffort = ''
+      }
+    }
+    input = { ...input, model, reasoningEffort }
     const scope = normalizeConfigScope({ profile: input.profile, provider: 'global' })
     const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
     await mkdir(workspaceDir, { recursive: true })
@@ -3291,7 +3306,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const baseUrl = String(input.baseUrl || '').trim()
   const preset = PROVIDER_PRESETS.find(item => item.value === provider)
   const apiMode = normalizeLaunchApiMode(input.apiMode, preset?.api_mode || 'chat_completions')
-  const reasoningEffort = String(input.reasoningEffort || '').trim()
+  const reasoningEffort = studioModelReasoningEffort({ provider, model, baseUrl, reasoningEffort: input.reasoningEffort }) || ''
   const contextPolicy = await codingAgentContextPolicy({ profile: scope.profile, provider, model })
   const groupSystemPrompt = String(input.groupSystemPrompt || '').trim()
   const scopedSystemPrompt = tool.id === 'pi' && groupSystemPrompt

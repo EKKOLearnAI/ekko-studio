@@ -73,6 +73,7 @@ export const redactPrimaryAgentBridgeError = (
 ) => configured().redactPrimaryAgentBridgeError(error, endpoint, replacement)
 
 export const chatCodingAgentRunManager = {
+  waitForSessionExit: (...args: any[]) => configured().codingAgentRunManager.waitForSessionExit(...args),
   hasSession: (...args: any[]) => configured().codingAgentRunManager.hasSession(...args),
   stop: (...args: any[]) => configured().codingAgentRunManager.stop(...args),
   isSessionLaunchCompatible: (...args: any[]) => configured().codingAgentRunManager.isSessionLaunchCompatible(...args),

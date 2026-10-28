@@ -36,11 +36,13 @@ import { desktopBridge } from '@/utils/desktop-bridge';
 
 const props = withDefaults(defineProps<{
   userLabel?: string
+  hideToolCalls?: boolean
   approvalPortalToBody?: boolean
   scrollScope?: string
   selectionActionsTarget?: HTMLElement | null
 }>(), {
   approvalPortalToBody: false,
+  hideToolCalls: false,
   scrollScope: "chat",
   selectionActionsTarget: null,
 })
@@ -132,7 +134,7 @@ const currentToolCalls = computed(() => {
 });
 
 const visibleToolCalls = computed(() =>
-  currentToolCalls.value.filter((tool) => !!tool.toolName),
+  props.hideToolCalls ? [] : currentToolCalls.value.filter((tool) => !!tool.toolName),
 );
 
 const liveReasoningDetail = computed<{
@@ -233,6 +235,7 @@ const displayMessages = computed(() => {
   const currentToolIds = new Set(currentToolCalls.value.map((tool) => tool.id));
   const renderedMessages = messages
     .filter((m) => {
+      if (props.hideToolCalls && m.role === "tool") return false;
       if (m.id === chatStore.focusMessageId) return true;
       if (m.role === "tool") {
         return toolTraceVisible.value && !!m.toolName && !(isRunIndicatorActive.value && currentToolIds.has(m.id));
@@ -789,7 +792,7 @@ defineExpose({
     >
       <template #empty>
         <div class="empty-state">
-          <img :src="emptyState.logo" :alt="emptyState.alt" class="empty-logo" />
+          <img :src="emptyState.logo" :alt="emptyState.alt" class="empty-logo" :class="{ 'empty-logo--person': assistantAgent.label === 'zhezhe' }" />
           <p>{{ emptyState.text }}</p>
         </div>
       </template>
@@ -1743,7 +1746,9 @@ defineExpose({
   .empty-logo {
     width: 48px;
     height: 48px;
+    object-fit: contain;
     opacity: 0.25;
+    &--person { aspect-ratio: 1; border-radius: 4px; object-fit: cover; }
   }
 
   p {

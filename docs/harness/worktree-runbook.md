@@ -66,6 +66,9 @@ npm run test:e2e
 
 Prefer existing Playwright fixtures and mocked backend services. Add real-service
 requirements only when the behavior cannot be represented with mocks.
+Wait for the required Socket.IO namespace before injecting events, and send them
+only to that namespace. Navigation can connect Person presence before a page's
+own socket is ready.
 
 ## Cleanup
 

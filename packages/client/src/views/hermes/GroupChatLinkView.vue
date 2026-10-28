@@ -180,13 +180,13 @@ const agentApiModeOptions = computed(() => [
   { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
 const agentReasoningEffortOptions = computed(() => reasoningOptions([
-  { label: t(selectedAgentType.value === 'hermes' ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'), value: '' },
+  { label: t('chat.reasoningEffort.options.none'), value: '' },
   ...modelReasoningEfforts(
     getAgentModelGroups(selectedProfile.value),
     selectedAgentProvider.value,
     selectedAgentModel.value,
   ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
-], selectedAgentType.value === 'hermes'))
+]))
 const agentReasoningEffortValue = computed({
   get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
   set: (value: string) => { selectedAgentReasoningEffort.value = value },
@@ -220,7 +220,7 @@ const selectedAgent = computed<RemoteGroupAgentDescriptor | null>(() => {
     }),
     profile: selectedProfile.value,
     apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
-    reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
+    reasoningEffort: usesGlobalAgentMode.value ? '' : agentReasoningEffortValue.value,
     name: agentName.value.trim() || selectedProfile.value,
     description: agentDescription.value.trim(),
     avatar: agentAvatar.value ? JSON.stringify(agentAvatar.value) : '',

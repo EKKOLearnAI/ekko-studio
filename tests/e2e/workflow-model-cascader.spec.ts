@@ -85,7 +85,7 @@ for (const [agent, label] of [['ekko-agent', 'Ekko'], ['codex', 'Codex']]) {
     await expect(trigger).toBeFocused()
     await node.locator('.n-select').first().click()
     await page.locator('.n-base-select-option__content:visible').getByText(label, { exact: true }).click()
-    await expect(node.locator('.n-select[aria-label="Reasoning effort"]')).toContainText('None')
+    await expect(node.locator('.n-select[aria-label="Reasoning effort"]')).toContainText('Low')
     await expect(trigger).toContainText('test-model')
     await expect(node.getByText(/^OpenAI Chat Completions/)).toBeVisible()
     await trigger.click()

@@ -54,6 +54,12 @@ vi.mock('../../packages/server/src/modules/coding-agents/services/dsh/host', asy
   }) }
 })
 
+// Launch tests use advertised native capabilities without invoking installed CLIs.
+const nativeModelsMock = vi.hoisted(() => vi.fn(async () => ({ agents: [] as any[] })))
+vi.mock('../../packages/server/src/modules/coding-agents/services/models', () => ({
+  createCodingAgentModelDiscovery: () => nativeModelsMock,
+}))
+beforeEach(() => nativeModelsMock.mockResolvedValue({ agents: [] }))
 vi.mock('child_process', async original => {
   const actual = await original<typeof import('child_process')>()
   return { ...actual, spawn: vi.fn(actual.spawn) }
@@ -2559,7 +2565,7 @@ describe('coding agent launch preparation', () => {
 
     expect(result.rootDir).toBe(join(home, 'coding-agent', 'model', 'default', 'openrouter', 'codex'))
     expect(result.workspaceDir).toBe(join(home, 'coding-agent', 'workspace', 'default', 'openrouter'))
-    expect(result.args).toEqual(['--model', 'openai/gpt-oss-20b:free'])
+    expect(result.args).toEqual(['--model', 'openai/gpt-oss-20b:free', '-c', 'model_reasoning_effort="low"'])
     expect(result.env).toEqual({ CODEX_HOME: result.rootDir })
 
     const config = readFileSync(join(result.rootDir, 'config.toml'), 'utf-8')
@@ -4426,4 +4432,16 @@ it('retains the Anthropic BYOK client for scoped Copilot Claude models', async (
     COPILOT_PROVIDER_MODEL_ID: 'claude-sonnet-4-6', COPILOT_PROVIDER_WIRE_MODEL: 'claude-sonnet-4-6',
     COPILOT_PROVIDER_WIRE_API: '', COPILOT_PROVIDER_TRANSPORT: 'http' })
   expect(launch.env.COPILOT_PROVIDER_BASE_URL).toContain('/api/claude-code-proxy/')
+})
+
+
+it.each(['', 'xhigh'])('uses native advertised minimum without overriding explicit %s', async reasoningEffort => {
+  const home = makeHome()
+  nativeModelsMock.mockResolvedValue({ agents: [{ status: 'ready', models: [
+    { id: 'gpt-6.1-sol', isDefault: true, reasoningEfforts: ['high', 'low', 'xhigh'] },
+  ] }] })
+  const launch = await prepareCodingAgentLaunch('codex', { mode: 'global', model: 'gpt-6.1-sol',
+    workspace: join(home, 'workspace'), reasoningEffort })
+  expect(launch.reasoningEffort).toBe(reasoningEffort || 'low')
+  expect(launch.args).toContain(`model_reasoning_effort=${JSON.stringify(reasoningEffort || 'low')}`)
 })

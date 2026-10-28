@@ -158,6 +158,18 @@ describe('MessageList live reasoning', () => {
     wrapper.unmount()
   })
 
+  it('uses the supplied Person animation only for the Person main conversation', async () => {
+    const wrapper = mountMessageList([])
+    const chat = useChatStore()
+    chat.activeSession = { ...makeSession([]), id: 'person-main-1', agent: 'ekko-agent' }
+    await nextTick()
+    expect(wrapper.get('.thinking-avatar').attributes('src')).toBe('/person/thinking.gif')
+    chat.activeSession = { ...makeSession([]), id: 'person-task-1', agent: 'ekko-agent' }
+    await nextTick()
+    expect(wrapper.get('.thinking-avatar').attributes('src')).toContain('thinking.gif')
+    wrapper.unmount()
+  })
+
   it('renders live reasoning between the thinking animation and tool area instead of flashing a message bubble', async () => {
     const wrapper = mountMessageList([
       { id: 'user-1', role: 'user', content: 'Think about this', timestamp: 1 },

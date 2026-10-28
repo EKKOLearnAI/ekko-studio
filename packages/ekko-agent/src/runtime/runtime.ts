@@ -861,6 +861,7 @@ export class AgentRuntime {
       runtimeInstructions: this.currentRuntimeInstructions(),
       userSystemMessages,
       memoryContext,
+      toolExecutionGuidelinesEnabled: input.toolExecutionGuidelinesEnabled,
       planningEnabled: this.toolsEnabled && !!this.tools.get('update_plan'),
       sessionTasksEnabled: this.toolsEnabled && !!this.tools.get('list_session_tasks'),
       clarificationEnabled: this.toolsEnabled && !!this.tools.get('clarify'),

@@ -1,3 +1,4 @@
+import { studioModelReasoningEffort } from '../../public/model-reasoning-effort'
 import { personBackgroundPendingCount } from '../../repositories/person-store'
 import { isPersonSession, isPrivatePersonSession } from '../../contracts/person-session'
 import { createPersonChatAgent } from '../person/chat-agent'
@@ -135,10 +136,6 @@ function normalizeReasoningEffort(value: unknown): ModelReasoningEffort | undefi
   return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)
     ? effort as ModelReasoningEffort
     : undefined
-}
-
-function resolveReasoningEffort(value: unknown): ModelReasoningEffort {
-  return normalizeReasoningEffort(value) ?? 'none'
 }
 
 function parseJsonRecord(value: unknown): Record<string, unknown> | null {
@@ -499,7 +496,9 @@ export async function handleEkkoAgentRun(
   const apiMode = runtimeConfig.apiMode
   const apiKey = runtimeConfig.apiKey
   const persistedReasoningEffort = normalizeReasoningEffort(data.reasoning_effort ?? storedSession?.reasoning_effort)
-  const reasoningEffort = resolveReasoningEffort(persistedReasoningEffort)
+  const reasoningEffort = studioModelReasoningEffort({ ...modelConfig, baseUrl, reasoningEffort: persistedReasoningEffort,
+    metadata: data.model_groups?.find(group => group.provider === modelConfig.provider)?.model_meta?.[modelConfig.model],
+  }) as ModelReasoningEffort | undefined
   const agent = isPersonSession(sessionId) ? await createPersonChatAgent(Number(authenticatedUserId), sessionId) : getGlobalEkkoAgent(profile)
   state.ekkoBoundaryInterrupt = agent.requestBoundaryInterrupt
     ? (expectedRunId: string) => agent.requestBoundaryInterrupt({ sessionId, expectedRunId }) : undefined
@@ -1326,36 +1325,44 @@ export async function handleEkkoAgentRun(
       mcpSessionSignal: mcpLease.signal,
       timeoutMs: 120_000,
       signal: abortController.signal,
-      requestToolApproval: (request: AgentToolApprovalRequest) => waitForEkkoToolApproval(request, {
-        sessionId,
-        signal: abortController.signal,
-        onRequested: (pending: any) => {
-          const requestedAt = Date.now()
-          emit('approval.requested', {
-            event: 'approval.requested',
-            run_id: runId || turnId,
-            approval_id: pending.approvalId,
-            command: pending.command,
-            description: pending.description,
-            choices: pending.choices,
-            allow_permanent: pending.allowPermanent,
-            timeout_ms: pending.timeoutMs,
-            remaining_timeout_ms: pending.timeoutMs,
-            requested_at: requestedAt,
-            tool: pending.toolName,
-            permission_key: pending.key,
-          })
-        },
-        onResolved: (choice: any) => {
-          emit('approval.resolved', {
-            event: 'approval.resolved',
-            run_id: runId || turnId,
-            approval_id: request.approvalId,
-            choice,
-            resolved: true,
-          })
-        },
-      }),
+      requestToolApproval: (request: AgentToolApprovalRequest) => {
+        // Internal runAndWait policy lives on the server-owned socket, never in
+        // client run data. Resolve here so parallel tools need no interactive broker slot.
+        const automaticChoice = socket.data?.internalToolApprovalChoice
+        if (automaticChoice === 'once' || automaticChoice === 'session' || automaticChoice === 'always') {
+          return Promise.resolve(!abortController.signal.aborted && request.choices.includes(automaticChoice) ? automaticChoice : 'deny')
+        }
+        return waitForEkkoToolApproval(request, {
+          sessionId,
+          signal: abortController.signal,
+          onRequested: (pending: any) => {
+            const requestedAt = Date.now()
+            emit('approval.requested', {
+              event: 'approval.requested',
+              run_id: runId || turnId,
+              approval_id: pending.approvalId,
+              command: pending.command,
+              description: pending.description,
+              choices: pending.choices,
+              allow_permanent: pending.allowPermanent,
+              timeout_ms: pending.timeoutMs,
+              remaining_timeout_ms: pending.timeoutMs,
+              requested_at: requestedAt,
+              tool: pending.toolName,
+              permission_key: pending.key,
+            })
+          },
+          onResolved: (choice: any) => {
+            emit('approval.resolved', {
+              event: 'approval.resolved',
+              run_id: runId || turnId,
+              approval_id: request.approvalId,
+              choice,
+              resolved: true,
+            })
+          },
+        })
+      },
       requestUserClarification: (request: AgentClarificationRequest) => waitForEkkoClarification(request, {
         sessionId,
         runId: runId || turnId,
@@ -1401,7 +1408,7 @@ export async function handleEkkoAgentRun(
       )
     }
     let fixedContextEstimate: Promise<number> | undefined
-    const compressedHistory = callbackContext
+    const compressedHistory = callbackContext || isPersonSession(sessionId)
       ? []
       : data.context_compression_enabled === false ? [] : await buildCompressedHistory(
         sessionId,

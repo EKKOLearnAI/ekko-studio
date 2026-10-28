@@ -652,6 +652,18 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    const effortMatch = pathname.match(/^\/api\/studio\/sessions\/([^/]+)\/reasoning-effort$/)
+    if (effortMatch && request.method() === 'POST') {
+      const body = request.postDataJSON() as { reasoningEffort: string; model?: string }
+      const session = options.sessions?.find(item => item.id === decodeURIComponent(effortMatch[1]!))
+      if (session) {
+        session.reasoning_effort = body.reasoningEffort
+        if (body.model !== undefined) session.model = body.model
+      }
+      await route.fulfill(jsonResponse({ ok: true, reasoning_effort: body.reasoningEffort }))
+      return
+    }
+
     if (pathname === '/api/studio/sessions/context-length') {
       await route.fulfill(jsonResponse({ context_length: 256000 }))
       return
@@ -1166,6 +1178,7 @@ function makeSocket(url, options) {
     id: 'pw-socket-' + socketNumber,
     rooms: new Set(),
     connected: true,
+    get volatile() { return this },
     url,
     options,
     on(event, handler) {

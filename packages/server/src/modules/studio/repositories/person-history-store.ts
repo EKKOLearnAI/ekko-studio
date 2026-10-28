@@ -30,7 +30,8 @@ export function clearPersonHistory(userId: number, historyRevision: number) {
     const rows = personHistorySessions(userId)
     for (const { id } of rows) {
       for (const table of ['messages', TASK_PLANS_TABLE, 'session_tasks', COMPRESSION_SNAPSHOT_TABLE, RUN_USAGE_TABLE,
-        SESSION_UPLOADS_TABLE, WORKSPACE_RUN_CHANGE_FILES_TABLE, WORKSPACE_RUN_CHANGES_TABLE]) {
+        SESSION_UPLOADS_TABLE, WORKSPACE_RUN_CHANGE_FILES_TABLE, WORKSPACE_RUN_CHANGES_TABLE,
+        'person_context_chunks', 'person_context_summaries', 'person_context_progress']) {
         db.prepare(`DELETE FROM ${table} WHERE session_id=?`).run(id)
       }
       if (id !== mainId) db.prepare('DELETE FROM sessions WHERE id=?').run(id)

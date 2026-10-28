@@ -19350,8 +19350,8 @@
         "tags": [
           "Person"
         ],
-        "summary": "Create memory",
-        "description": "Studio user login required. Account isolation is enforced by the server. Mutations use current revisions; task and schedule operations require an idempotency key. Worker question answers are delivered through their original interactive runtime.",
+        "summary": "Delete Person memory",
+        "description": "Studio user login required. Permanently delete one account-owned memory card at its current revision. New memories and corrections are made through the Person conversation.",
         "operationId": "memory",
         "security": [
           {
@@ -19379,19 +19379,22 @@
                   "id": {
                     "type": "string"
                   },
-                  "content": {
-                    "type": "string",
-                    "maxLength": 2000
-                  },
                   "forget": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
                   },
                   "expected_revision": {
                     "type": "integer",
-                    "minimum": 0
+                    "minimum": 1
                   }
                 },
-                "required": []
+                "required": [
+                  "id",
+                  "forget",
+                  "expected_revision"
+                ]
               }
             }
           }
@@ -19652,10 +19655,12 @@
                     "minimum": 2,
                     "maximum": 30
                   },
-                  "contextTokens": {
-                    "type": "integer",
-                    "minimum": 8000,
-                    "maximum": 64000
+                  "compressionThreshold": {
+                    "type": "number",
+                    "nullable": true,
+                    "minimum": 0.05,
+                    "maximum": 0.95,
+                    "description": "Fraction of the current interaction model context window that triggers compression; null inherits the global threshold. Model capacity is resolved automatically."
                   },
                   "maxConcurrentTasks": {
                     "type": "integer",
@@ -19710,6 +19715,7 @@
                       "adopt",
                       "update",
                       "start",
+                      "stop",
                       "close",
                       "reopen"
                     ]
@@ -19725,12 +19731,16 @@
                   "task_id": {
                     "type": "string"
                   },
+                  "execution_id": {
+                    "type": "string",
+                    "description": "Required with task_id and expected_revision for stop; query the current execution first. Stops only this occurrence, keeping the goal and future schedules."
+                  },
                   "schedule_id": {
                     "type": "string"
                   },
                   "agent_id": {
                     "type": "string",
-                    "description": "Configured execution agent ID; omitted selects the sole preset or default Ekko Agent"
+                    "description": "Configured execution agent ID; omitted selects the sole saved preset. At least one preset is required."
                   },
                   "title": {
                     "type": "string",
