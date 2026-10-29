@@ -70,7 +70,9 @@ _SCHEMA = """CREATE TABLE IF NOT EXISTS cron_session_bindings (
 
 # Owner session generations declared by Studio with each bridge turn, in declaration order
 # (session id -> [(declared_at, generation or None)]). A producer started during a turn belongs to
-# the generation declared for that turn, even if a later turn declares a new one.
+# the generation declared for that turn, even if a later turn declares a new one. Repeated
+# declarations of an unchanged generation are coalesced into the first one, so only real
+# generation changes use the bounded history and ordinary turns never evict a live owner.
 _session_generations: dict[str, list[tuple[float, str | None]]] = {}
 _generation_lock = threading.Lock()
 _GENERATION_HISTORY_MAX = 32
@@ -79,7 +81,10 @@ _GENERATION_HISTORY_MAX = 32
 def set_session_generation(session_id: str, generation: str | None) -> None:
     with _generation_lock:
         history = _session_generations.setdefault(session_id, [])
-        history.append((time.time(), str(generation) if generation else None))
+        declared = str(generation) if generation else None
+        if history and history[-1][1] == declared:
+            return
+        history.append((time.time(), declared))
         del history[:-_GENERATION_HISTORY_MAX]
 
 
@@ -461,23 +466,12 @@ def drain_owned_completions(loaded_session_ids: set[str]) -> list[tuple[dict[str
 IMMEDIATE_EXIT_GRACE_SECONDS = 1.0
 
 
-def republish_missed_completions(loaded_session_ids: set[str], emitted_keys: set[str],
-                                 republished_keys: set[str], profile: str | None) -> int:
-    """Recover the immediate-exit race from live registry records.
-
-    The terminal tool flags ``notify_on_complete`` on the record after spawning, so a process
-    that exits first is finished without a completion event. An exited, flagged, unconsumed
-    record that was never emitted is republished once through the registry's own publisher;
-    any duplicate with the same producer key is dropped before it reaches Studio.
-    """
-    if not loaded_session_ids:
-        return 0
+def _unrecovered_exits(loaded_session_ids: set[str], emitted_keys: set[str], republished_keys: set[str],
+                       profile: str | None):
+    """Exited, flagged, unconsumed records of loaded sessions whose completion was never emitted."""
     from tools.process_registry import process_registry
-    publish = getattr(process_registry, "_publish_finished", None)
-    if not callable(publish):
-        return 0
-    now = time.time()
-    republished = 0
+    if not callable(getattr(process_registry, "_publish_finished", None)):
+        return
     for session_id in loaded_session_ids:
         try:
             entries = process_registry.list_sessions(session_key=session_id)
@@ -492,11 +486,29 @@ def republish_missed_completions(loaded_session_ids: set[str], emitted_keys: set
             key = process_producer_key(profile, {"session_id": proc.id, "started_at": proc.started_at})
             if key in emitted_keys or key in republished_keys or completion_consumed(proc.id):
                 continue
-            if now - float(getattr(proc, "exited_at", None) or now) < IMMEDIATE_EXIT_GRACE_SECONDS:
-                continue
-            republished_keys.add(key)
-            publish(proc, True)
-            republished += 1
+            yield session_id, proc, key
+
+
+def republish_missed_completions(loaded_session_ids: set[str], emitted_keys: set[str],
+                                 republished_keys: set[str], profile: str | None) -> int:
+    """Recover the immediate-exit race from live registry records.
+
+    The terminal tool flags ``notify_on_complete`` on the record after spawning, so a process
+    that exits first is finished without a completion event. An exited, flagged, unconsumed
+    record that was never emitted is republished once through the registry's own publisher;
+    any duplicate with the same producer key is dropped before it reaches Studio.
+    """
+    if not loaded_session_ids:
+        return 0
+    from tools.process_registry import process_registry
+    now = time.time()
+    republished = 0
+    for _session_id, proc, key in list(_unrecovered_exits(loaded_session_ids, emitted_keys, republished_keys, profile)):
+        if now - float(getattr(proc, "exited_at", None) or now) < IMMEDIATE_EXIT_GRACE_SECONDS:
+            continue
+        republished_keys.add(key)
+        process_registry._publish_finished(proc, True)
+        republished += 1
     return republished
 
 
@@ -506,8 +518,10 @@ def completion_consumed(process_id: str) -> bool:
     return bool(checker(process_id)) if callable(checker) else False
 
 
-def notify_pending_session_ids(loaded_session_ids: set[str]) -> list[str]:
-    """Loaded sessions with a live ``notify_on_complete`` process or a pending watcher."""
+def notify_pending_session_ids(loaded_session_ids: set[str], emitted_keys: set[str] = frozenset(),
+                               republished_keys: set[str] = frozenset(), profile: str | None = None) -> list[str]:
+    """Loaded sessions with a live ``notify_on_complete`` process, a pending watcher, or an
+    immediate exit still awaiting recovery (until it is republished, emitted or consumed)."""
     if not loaded_session_ids:
         return []
     try:
@@ -531,6 +545,8 @@ def notify_pending_session_ids(loaded_session_ids: set[str]) -> list[str]:
         proc = process_registry.get(str((watcher or {}).get("session_id") or ""))
         if proc is not None and not getattr(proc, "exited", False):
             pending.add(key)
+    for session_id, _proc, _key in _unrecovered_exits(loaded_session_ids, emitted_keys, republished_keys, profile):
+        pending.add(session_id)
     return sorted(pending)
 
 

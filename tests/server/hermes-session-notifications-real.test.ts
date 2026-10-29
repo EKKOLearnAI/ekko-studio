@@ -3,7 +3,7 @@ import { promisify } from 'node:util'
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 // Opt-in: runs against a real, read-only Hermes Agent checkout with isolated homes.
 //   HERMES_REAL_BRIDGE_E2E=1 HERMES_AGENT_ROOT=<checkout> npx vitest run tests/server/hermes-session-notifications-real.test.ts
@@ -171,6 +171,62 @@ describe.skipIf(!enabled)('real Hermes: terminal notify_on_complete adapter', { 
     const result = await runCase('settled_watchers')
     expect(result.settled_pending).toEqual([])
     expect(result.live_pending).toEqual(['sess-A'])
+  })
+
+  it('S3: a live process keeps its owner generation across more than 32 unchanged-owner turns; a reset still rejects', async () => {
+    const result = await runCase('process_owner_generation_long_lived')
+    expect(result.long_owner_generation).toBe('gen-long')
+    expect(result.long_current).toBe('gen-long')
+    // A true reset keeps the producer's original generation, which no longer matches the owner.
+    expect(result.reset_owner_generation).toBe('gen-before')
+    expect(result.reset_current).toBe('gen-after')
+  })
+
+  it('S5: an immediate exit keeps the real Studio poll gate open across the recovery grace, then lets it close', async () => {
+    const result = await runCase('immediate_exit_poll_gate')
+    const polls = result.polls as Array<{ pending: string[]; process_notifications: any[]; at: number }>
+    expect(polls[0].process_notifications).toEqual([])
+    expect(polls[0].at - result.exited_at).toBeLessThan(1)
+    const delivered = polls.findIndex(poll => poll.process_notifications.some(item => item.process_id === result.process_id))
+    expect(delivered).toBeGreaterThan(0)
+    expect(polls.slice(delivered + 1).every(poll => poll.process_notifications.length === 0)).toBe(true)
+
+    // Feed the real adapter results, shaped by the broker, through the production Studio poll gate.
+    vi.resetModules()
+    const chatRuntime = await import('../../packages/server/src/modules/studio/public/chat-agent-runtime')
+    vi.spyOn(chatRuntime, 'createPrimaryAgentBridge').mockReturnValue({} as any)
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const nsp: any = { use: vi.fn(), on: vi.fn(), to: vi.fn(() => ({ emit: vi.fn() })), adapter: { rooms: new Map() }, sockets: new Map() }
+    const server: any = new ChatRunSocket({ of: () => nsp } as any)
+    clearInterval(server.backgroundPollTimer)
+    clearInterval(server.cronObserveTimer)
+    server.backgroundRecoveryNeeded = false
+    server.backgroundActivityGraceUntil = 0
+    server.sessionMap.set('sess-A', { messages: [], isWorking: false, events: [], queue: [], processNotifyPending: true })
+    const scheduled: any[] = []
+    vi.spyOn(server, 'scheduleProcessNotification').mockImplementation(async (item: any) => { scheduled.push(item) })
+    const broker = (poll: (typeof polls)[number]) => ({ broker_id: 'b', pending_count: 0, sessions: [], notifications: [],
+      process_notifications: poll.process_notifications.map(item => ({ ...item, profile: 'default' })),
+      notify_pending: (poll.pending || []).map(sessionId => ({ profile: 'default', session_id: sessionId })) })
+    const gate: boolean[] = []
+    for (const poll of polls) {
+      server.backgroundBridge = { backgroundPoll: vi.fn(async () => broker(poll)) }
+      server.backgroundPollRetryAt = 0
+      await server.pollBackgroundWork()
+      gate.push(server.needsBackgroundPoll())
+    }
+    // Open on every poll before the recovered completion arrives; closed once it has been delivered.
+    expect(gate.slice(0, delivered)).toEqual(Array(delivered).fill(true))
+    expect(gate[gate.length - 1]).toBe(false)
+    expect(scheduled.map(item => item.process_id)).toEqual([result.process_id])
+  })
+
+  it('S5 controls: a consumed or notify-off immediate exit is not pending and never republished', async () => {
+    const result = await runCase('immediate_exit_pending_controls')
+    expect(result.consumed_pending).toEqual([])
+    expect(result.quiet_pending).toEqual([])
+    expect(result.later_pending).toEqual([])
+    expect(result.later_notifications).toEqual([])
   })
 
   it('routes completions only to the owning session', async () => {

@@ -341,5 +341,84 @@ def case_process_owner_generation():
     return {"owner_generation": item.get("owner_generation"), "profile_key": item.get("producer_key")}
 
 
+def case_process_owner_generation_long_lived():
+    """S3: a live process keeps its owner generation across more than 32 unchanged-owner turns."""
+    pool = _pool()
+    studio_session(generation="gen-long")
+    proc = json.loads(registry.dispatch("terminal", {"command": "sleep 3; printf long; exit 0", "background": True,
+                                                     "notify_on_complete": True}, task_id="task-sess-A"))
+    time.sleep(0.05)
+    for _ in range(40):  # every later turn in the same conversation declares the unchanged generation
+        sn.set_session_generation("sess-A", "gen-long")
+    # True reset control on another owner: one reset, then many turns under the new generation.
+    studio_session(session_id="sess-B", generation="gen-before")
+    old = json.loads(registry.dispatch("terminal", {"command": "sleep 3; printf old; exit 0", "background": True,
+                                                    "notify_on_complete": True}, task_id="task-sess-B"))
+    time.sleep(0.05)
+    for _ in range(40):
+        sn.set_session_generation("sess-B", "gen-after")
+    found = {}
+
+    def collect(polled):
+        for item in polled.get("process_notifications") or []:
+            found[item["process_id"]] = item
+        return proc["session_id"] in found and old["session_id"] in found
+
+    _poll_until(pool, ["sess-A", "sess-B"], collect)
+    return {"long_owner_generation": (found.get(proc["session_id"]) or {}).get("owner_generation"),
+            "long_current": sn.session_generation("sess-A"),
+            "reset_owner_generation": (found.get(old["session_id"]) or {}).get("owner_generation"),
+            "reset_current": sn.session_generation("sess-B")}
+
+
+def _exit_before_arming(session_id="sess-A", notify=True):
+    from tools.process_registry import process_registry
+    proc = process_registry.spawn_local(command="exit 0", cwd=os.getcwd(), task_id="task-" + session_id,
+                                        owner_task_id="task-" + session_id, session_key=session_id)
+    deadline = time.time() + 30
+    while not process_registry.get(proc.id).exited and time.time() < deadline:
+        time.sleep(0.05)
+    if notify:
+        proc.notify_on_complete = True  # the terminal tool flags the record after the process already exited
+    return proc
+
+
+def _poll_view(polled):
+    return {"pending": polled.get("notify_pending_session_ids"),
+            "process_notifications": polled.get("process_notifications") or [],
+            "at": time.time()}
+
+
+def case_immediate_exit_poll_gate():
+    """S5: pending stays reported while an immediate exit awaits recovery, then retires."""
+    pool = _pool()
+    proc = _exit_before_arming()
+    polls = [_poll_view(pool.poll_background(["sess-A"]))]  # inside the recovery grace
+    deadline = time.time() + 15
+    while time.time() < deadline and not polls[-1]["process_notifications"]:
+        time.sleep(0.2)
+        polls.append(_poll_view(pool.poll_background(["sess-A"])))
+    for _ in range(2):
+        polls.append(_poll_view(pool.poll_background(["sess-A"])))
+    return {"process_id": proc.id, "exited_at": proc.exited_at, "polls": polls}
+
+
+def case_immediate_exit_pending_controls():
+    """S5 controls: a consumed or notify-off immediate exit is never pending."""
+    pool = _pool()
+    consumed = _exit_before_arming()
+    studio_session()
+    registry.dispatch("process_manage", {"action": "wait", "session_id": consumed.id, "timeout": 5}, task_id="task-sess-A")
+    consumed_pending = pool.poll_background(["sess-A"]).get("notify_pending_session_ids")
+    quiet = _exit_before_arming(session_id="sess-B", notify=False)
+    quiet_pending = pool.poll_background(["sess-B"]).get("notify_pending_session_ids")
+    time.sleep(1.3)
+    later = pool.poll_background(["sess-A", "sess-B"])
+    return {"consumed_pending": consumed_pending, "quiet_pending": quiet_pending,
+            "later_pending": later.get("notify_pending_session_ids"),
+            "later_notifications": [item.get("process_id") for item in later.get("process_notifications") or []],
+            "ids": [consumed.id, quiet.id]}
+
+
 if __name__ == "__main__":
     print("RESULT " + json.dumps(globals()["case_" + sys.argv[1]](), default=str))

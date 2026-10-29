@@ -77,6 +77,8 @@ export interface QueuedRun {
   }
   /** Admitted machine event: owner fence re-checked at the final run seams. Internal only. */
   machineFence?: () => string | null
+  /** Run marker the admitted machine run owns the session under. Internal only. */
+  runMarker?: string
   onMachineDispatch?: () => void
   onMachineDiscard?: (reason: string) => void
   /** Internal admission check, never serialized or supplied by the client. */

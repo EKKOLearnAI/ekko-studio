@@ -98,6 +98,9 @@ function decide(body) {
   if (userText.includes('E2E_TERMINAL_FAIL')) return tool('terminal', { command: 'printf term-bad; exit 3', background: true, notify_on_complete: true })
   if (userText.includes('E2E_TERMINAL_SILENT')) return tool('terminal', { command: 'printf quiet; exit 0', background: true, notify_on_complete: false })
   if (userText.includes('E2E_TERMINAL_RESET')) return tool('terminal', { command: 'sleep 8; printf reset-proc; exit 0', background: true, notify_on_complete: true })
+  if (userText.includes('E2E_TERMINAL_HOLD')) {
+    return tool('terminal', { command: `while [ ! -f ${join(root, 'hold.flag')} ]; do sleep 0.2; done; printf held-proc; exit 0`, background: true, notify_on_complete: true })
+  }
   if (userText.includes('E2E_TERMINAL_WAIT')) return tool('terminal', { command: 'sleep 2; printf waited', background: true, notify_on_complete: true })
   return { text: 'OK' }
 }
@@ -328,6 +331,9 @@ async function main() {
     '  enabled: false',
     '',
   ].join('\n'))
+  // A second profile for the disjoint-profile user (same local fake model).
+  mkdirSync(join(dirs.hermes, 'profiles', 'other'), { recursive: true })
+  writeFileSync(join(dirs.hermes, 'profiles', 'other', 'config.yaml'), readFileSync(join(dirs.hermes, 'config.yaml'), 'utf-8'))
   const freePort = async () => {
     const probe = createServer()
     await new Promise(done => probe.listen(0, '127.0.0.1', done))
@@ -528,6 +534,60 @@ async function main() {
   record('R4 accepted notices disappear from history and attention after the real reset',
     !(afterReset.json?.messages || []).some(m => m.studio_notice) && noticeAttention.length === 0,
     { remaining: (afterReset.json?.messages || []).length })
+
+  // S3: a live notifying process outlives more than 32 ordinary turns of its unchanged owner.
+  const L = `e2e-l-${randomUUID().slice(0, 8)}`
+  const holdStart = machineTurns().length
+  await runTurn(actor, actorEvents, L, 'E2E_TERMINAL_HOLD keep running')
+  for (let turn = 1; turn <= 34; turn += 1) await runTurn(actor, actorEvents, L, `E2E_PLAIN turn ${turn}`)
+  writeFileSync(join(root, 'hold.flag'), 'go')
+  const heldTurn = await waitFor(() => machineTurns().slice(holdStart).find(r => JSON.stringify(r.messages).includes('held-proc')), 120_000, 'long-lived machine turn')
+  const heldHistory = heldTurn.messages.map(m => textOf(m.content)).join('\n')
+  await delay(3000)
+  const heldRows = studioRows("SELECT disposition FROM session_notifications WHERE kind='process_completion' AND session_id=?", L)
+  record('S3 completion after 34 unchanged-owner turns continues once with current history',
+    heldHistory.includes('E2E_PLAIN turn 34') && machineTurns().slice(holdStart).filter(r => JSON.stringify(r.messages).includes('held-proc')).length >= 1
+      && heldRows.length === 1 && heldRows[0].disposition === 'dispatched',
+    { dispositions: heldRows.map(row => row.disposition) })
+
+  // S6 premise: a chat socket without credentials is refused at the handshake (auth cannot be disabled).
+  const anonymous = io(`http://127.0.0.1:${port}/chat-run`, { query: { profile: 'default' }, transports: ['websocket'], reconnection: false })
+  const anonymousResult = await new Promise(resolve => {
+    anonymous.once('connect', () => resolve('connected'))
+    anonymous.once('connect_error', error => resolve(`refused:${error.message}`))
+    setTimeout(() => resolve('timeout'), 20_000)
+  })
+  anonymous.disconnect()
+  record('S6 a socket without credentials is refused, so no user-less chat recipient exists', anonymousResult === 'refused:Authentication failed', { result: anonymousResult })
+
+  // S1: a viewer who joined a session keeps no access after it is deleted and recreated under another profile.
+  const S = `e2e-s-${randomUUID().slice(0, 8)}`
+  const bobViewer = connect({ token: bobToken, profile: 'other' })
+  const bobViewerEvents = collect(bobViewer)
+  await waitFor(() => bobViewer.connected, 20_000, 'disjoint viewer socket')
+  const bobStart = bobViewerEvents.length
+  bobViewer.emit('run', { session_id: S, input: 'E2E_PLAIN hello from other profile', profile: 'other' })
+  await waitFor(() => bobViewerEvents.slice(bobStart).find(e => e.payload?.session_id === S && (e.event === 'run.completed' || e.event === 'run.failed')), 180_000, 'other-profile turn')
+  bobViewer.emit('resume', { session_id: S, profile: 'other' })
+  await delay(1000)
+  const deleted = await api(`/api/studio/sessions/${S}`, { method: 'DELETE' })
+  const watcher = connect()
+  const watcherEvents = collect(watcher)
+  await waitFor(() => watcher.connected, 20_000, 'off-focus admin socket')
+  const staleSince = bobViewerEvents.length
+  await runTurn(actor, actorEvents, S, 'E2E_SCHEDULE recreated under default')
+  const recreated = studioRows('SELECT profile FROM sessions WHERE id=?', S)
+  await waitFor(() => watcherEvents.find(e => e.event === 'session.notice' && e.payload?.session_id === S), 300_000, 'recreated-session notice')
+  await delay(3000)
+  const stalePayloads = JSON.stringify(bobViewerEvents.slice(staleSince).map(e => ({ event: e.event, payload: e.payload })))
+  record('S1 stale room member after delete and recreate under another profile receives no notice content or metadata',
+    deleted.status < 300 && recreated[0]?.profile === 'default'
+      && !bobViewerEvents.slice(staleSince).some(e => e.event === 'session.notice') && !stalePayloads.includes('CRON_EXACT_ANSWER_42'),
+    { delete_status: deleted.status, recreated_profile: recreated[0]?.profile, stale_events: [...new Set(bobViewerEvents.slice(staleSince).map(e => e.event))] })
+  record('S1 the authorized off-focus owner receives the recreated session notice exactly once',
+    watcherEvents.filter(e => e.event === 'session.notice' && e.payload?.session_id === S).length === 1)
+  bobViewer.disconnect()
+  watcher.disconnect()
   actor.disconnect()
 }
 

@@ -86,12 +86,19 @@ next-question context and attention (the attention rows are removed), while ordi
 turns and partial message deletion keep them. On each page a notice belongs to the
 interval between the next older stored row and the page's newest stored row (equal
 timestamps go to the older page), and `offset` keeps counting stored rows only, so the
-client advances by stored rows and no notice is skipped or repeated across pages.
+client advances by stored rows and no notice is skipped or repeated across pages. Both
+clients that page this API (the chat view and History) count stored rows only and keep a
+notice's `studio_notice` metadata, so History shows its attribution, the known error of a
+failed run without result text, and the status-only explanation.
 
-Live `session.notice` events go only to sockets in the session room (joined after the
-session read check) and to signed-in account sockets whose user can access the owning
-profile (person-private sessions: the session room only). Other users receive neither
-the content nor the metadata.
+Live `session.notice` events go to members of the session room and to signed-in account
+sockets, and every one of them is authorized again when the notice is published, with the
+read rules of `resume` applied to the session as it exists now: the user must be able to
+access its current profile (person-private sessions: their owner only; a share viewer: its
+shared session only). A socket that joined the room before the session was deleted or
+recreated under another profile receives neither the content nor the metadata. Studio
+login cannot be disabled (`isAuthEnabled()` is always true), so every ordinary chat
+socket carries a user; a socket without one is never a recipient.
 
 **Next-question context.** The block for the next intentional question holds at most
 three notices and 8000 characters in total, including framing and metadata. Job names
@@ -122,9 +129,13 @@ completions never reached Studio. Now `poll_background` does the following:
   of the same key are dropped.
 - It reports sessions with live `notify_on_complete` processes or pending watchers
   (`notify_pending`), which keeps Studio polling. A watcher whose process has exited and
-  been settled no longer counts, so idle polling stops.
+  been settled no longer counts, so idle polling stops. An immediate exit still waiting
+  for its one-second recovery grace counts until it is republished, emitted or consumed,
+  so Studio keeps polling long enough to recover it.
 - Each event carries the owner session generation that was current when the process
-  started (`owner_generation`).
+  started (`owner_generation`). The bridge keeps a short history of generation changes;
+  repeated declarations of an unchanged generation are coalesced, so any number of
+  ordinary turns keeps a live process's owner.
 
 Studio accepts the event once (`admitting`) and queues a typed `machineEvent` run behind
 any busy turn. Before queueing, after the awaited admission, and again at the final run
@@ -133,7 +144,10 @@ seam (before the user turn is stored and immediately before the model call) it c
 - the owner session still exists with the same profile (`owner_missing`);
 - its generation still equals the producer's (`owner_reset`; a missing generation fails
   closed);
-- the user has not pressed Stop (`owner_stopped`);
+- the user has not pressed Stop, and the run still owns the session: admission gives it a
+  run marker, and `/destroy`, Stop or a new turn that clears or replaces the marker ends
+  that ownership (`owner_stopped`), even though the generation is unchanged. A run that
+  lost ownership never claims or changes the session state of the run that replaced it;
 - Hermes has not seen the result consumed by `wait` or `log` since the drain
   (`process_notification_admit`). A plain `poll` is not consumption.
 

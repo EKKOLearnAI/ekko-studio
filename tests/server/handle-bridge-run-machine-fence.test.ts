@@ -130,22 +130,30 @@ function makeSockets() {
 }
 
 
-async function run(fence: () => string | null, hooks: { model?: () => void; history?: () => void } = {}) {
+interface RunContext { state: SessionState; sessionMap: Map<string, SessionState>; nsp: Namespace; socket: Socket; bridge: ReturnType<typeof makeBridge> }
+
+async function run(fence: () => string | null, hooks: { model?: (ctx: RunContext) => void | Promise<void>; history?: (ctx: RunContext) => void | Promise<void> } = {},
+  options: { runMarker?: string } = {}) {
+  // Production admission always hands a machine run the marker it owns the session under.
+  options = { runMarker: 'cli_run_machine', ...options }
   const bridge = makeBridge()
+  const { nsp, socket } = makeSockets()
+  // As admission leaves it: the session is claimed for this machine run under its own marker.
+  const state: SessionState = { messages: [], isWorking: true, events: [], queue: [], ...(options.runMarker ? { activeRunMarker: options.runMarker } : {}) }
+  const sessionMap = new Map([['session-1', state]])
+  const ctx: RunContext = { state, sessionMap, nsp, socket, bridge }
   // History building awaits the profile config after the machine turn is stored and before bridge.chat;
   // ownership changes during that await (only once a stored row exists).
   let changedAfterStore = false
   if (hooks.history) {
     const { readConfigYamlForProfile } = await import('../../packages/server/src/modules/studio/public/profile-config') as any
     readConfigYamlForProfile.mockImplementation(async () => {
-      if (mocks.rows.length && !changedAfterStore) { changedAfterStore = true; hooks.history!() }
+      if (mocks.rows.length && !changedAfterStore) { changedAfterStore = true; await hooks.history!(ctx) }
       return { compression: { enabled: false } }
     })
   }
   const { resolveBridgeRunModelConfig } = await import('../../packages/server/src/modules/studio/services/chat-run/model-config') as any
-  if (hooks.model) resolveBridgeRunModelConfig.mockImplementationOnce(async () => { hooks.model!(); return { model: 'gpt-test', provider: 'openai' } })
-  const { nsp, socket } = makeSockets()
-  const state: SessionState = { messages: [], isWorking: true, events: [], queue: [] }
+  if (hooks.model) resolveBridgeRunModelConfig.mockImplementationOnce(async () => { await hooks.model!(ctx); return { model: 'gpt-test', provider: 'openai' } })
   const onEvent = vi.fn()
   const dispatched = vi.fn()
   const discarded = vi.fn()
@@ -156,15 +164,16 @@ async function run(fence: () => string | null, hooks: { model?: () => void; hist
       session_id: 'session-1', input: '[IMPORTANT: Background process proc_1 completed normally (exit code 0).]',
       display_role: 'system', autonomous: true, onEvent,
       machine_fence: fence, on_machine_dispatch: dispatched, on_machine_discard: discarded,
+      ...(options.runMarker ? { run_marker: options.runMarker } : {}),
     } as any,
     'default',
-    new Map([['session-1', state]]),
+    sessionMap,
     bridge as unknown as PrimaryAgentBridgeClient,
     false,
     vi.fn(),
     vi.fn(),
   )
-  return { bridge, onEvent, dispatched, discarded, rows: mocks.rows, changedAfterStore }
+  return { bridge, onEvent, dispatched, discarded, rows: mocks.rows, changedAfterStore, state }
 }
 
 describe('machine event final dispatch fence', () => {
@@ -201,6 +210,66 @@ describe('machine event final dispatch fence', () => {
       expect(bridge.chat).not.toHaveBeenCalled()
       expect(dispatched).not.toHaveBeenCalled()
       expect(discarded).toHaveBeenCalledWith(reason)
+    }
+  })
+})
+
+describe('S4 the final fence requires the run to still own the session state and marker', () => {
+  beforeEach(() => {
+    mocks.rows = []
+    mocks.getSession.mockReturnValue({ id: 'session-1', profile: 'default', model: '', provider: '', history_revision: 0, workspace: '' })
+  })
+  afterEach(() => vi.clearAllMocks())
+
+  const destroy = async ({ sessionMap, nsp, socket }: RunContext) => {
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
+    await handleSessionCommand('session-1', parseSessionCommand('/destroy')!, { nsp: nsp as any, socket, sessionMap,
+      bridge: { interrupt: vi.fn(async () => ({ ok: true })), destroy: vi.fn(async () => ({ ok: true })), processNotification: vi.fn(async () => ({ ok: true })) } as any,
+      profile: 'default', runQueuedItem: vi.fn() })
+  }
+
+  it('positive control: the owning machine run dispatches once', async () => {
+    const { bridge, dispatched, discarded } = await run(() => null, {}, { runMarker: 'cli_run_machine' })
+    expect(bridge.chat).toHaveBeenCalledTimes(1)
+    expect(dispatched).toHaveBeenCalledTimes(1)
+    expect(discarded).not.toHaveBeenCalled()
+  })
+
+  it('/destroy during preparation after the machine turn is stored: no bridge.chat', async () => {
+    const { bridge, dispatched, discarded, state, changedAfterStore } = await run(() => null, { history: destroy }, { runMarker: 'cli_run_machine' })
+    expect(changedAfterStore).toBe(true)
+    expect(bridge.chat).not.toHaveBeenCalled()
+    expect(dispatched).not.toHaveBeenCalled()
+    expect(discarded).toHaveBeenCalledWith('owner_stopped')
+    expect(state.isWorking).toBe(false)
+    expect(state.activeRunMarker).toBeUndefined()
+  })
+
+  it('/destroy before the run claims the session: nothing stored, the destroyed state is not re-claimed', async () => {
+    const { bridge, discarded, state, rows } = await run(() => null, { model: destroy }, { runMarker: 'cli_run_machine' })
+    expect(bridge.chat).not.toHaveBeenCalled()
+    expect(discarded).toHaveBeenCalledWith('owner_stopped')
+    expect(rows.filter(row => row.display_role === 'system')).toHaveLength(0)
+    expect(state.isWorking).toBe(false)
+    expect(state.activeRunMarker).toBeUndefined()
+  })
+
+  it('Stop then a new intentional turn during preparation: no stale bridge.chat and the new turn is untouched', async () => {
+    const replace = ({ state }: RunContext) => {
+      // Stop finished the old run; the user's new turn now owns the session under its own marker.
+      state.isWorking = true
+      state.activeRunMarker = 'cli_run_replacement'
+      state.runId = 'run-replacement'
+    }
+    for (const hook of ['model', 'history'] as const) {
+      mocks.rows = []
+      const { bridge, dispatched, discarded, state } = await run(() => null, { [hook]: replace }, { runMarker: 'cli_run_machine' })
+      expect(bridge.chat).not.toHaveBeenCalled()
+      expect(dispatched).not.toHaveBeenCalled()
+      expect(discarded).toHaveBeenCalledWith('owner_stopped')
+      expect(state.isWorking).toBe(true)
+      expect(state.activeRunMarker).toBe('cli_run_replacement')
+      expect(state.runId).toBe('run-replacement')
     }
   })
 })

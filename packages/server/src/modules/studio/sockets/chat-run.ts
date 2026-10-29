@@ -1773,6 +1773,7 @@ export class ChatRunSocket {
       background_delegation_id?: string
       background_claim_id?: string
       autonomous?: boolean
+      run_marker?: string
       machine_fence?: () => string | null
       on_machine_dispatch?: () => void
       on_machine_discard?: (reason: string) => void
@@ -2318,14 +2319,14 @@ export class ChatRunSocket {
    * the owner is re-checked after the awaited RPC. Admission is not execution; the final run seam
    * marks the event dispatched.
    */
-  private async admitMachineEvent(next: QueuedRun): Promise<boolean> {
+  private async admitMachineEvent(next: QueuedRun, fence: () => SessionNotificationDisposition | null): Promise<boolean> {
     const event = next.machineEvent!
     const ref = { session_id: event.sessionId, profile: event.profile, producer_key: event.producerKey, claim_id: event.claimId }
-    let verdict: SessionNotificationDisposition | null = this.machineOwnerVerdict(event)
+    let verdict: SessionNotificationDisposition | null = fence()
     if (!verdict) {
       try {
         const admitted = await this.backgroundBridge.processNotification('admit', ref)
-        verdict = admitted.admitted ? this.machineOwnerVerdict(event) ?? 'admitted' : admitted.reason === 'consumed' ? 'consumed' : 'unknown'
+        verdict = admitted.admitted ? fence() ?? 'admitted' : admitted.reason === 'consumed' ? 'consumed' : 'unknown'
       } catch (err) {
         logger.warn(err, '[chat-run-socket] process completion admission check failed for %s', event.producerKey)
         verdict = 'unknown'
@@ -2358,27 +2359,45 @@ export class ChatRunSocket {
   }
 
   /**
-   * Live passive notice for authorized viewers only: the owner session room (joined after session
-   * read authorization) and off-focus account sockets whose user may access the notice's profile.
-   * Durable unread attention goes through the authorized session-state sync. No model turn.
+   * Live passive notice for authorized viewers only: members of the owner session room and
+   * off-focus account sockets. Every recipient, including a socket that joined the room earlier,
+   * is authorized again against the session as it exists now (a deleted or recreated session
+   * does not inherit its old room). Durable unread attention goes through the authorized
+   * session-state sync. No model turn.
    */
   private publishSessionNotice(record: SessionNotificationRecord) {
-    const payload = {
-      event: 'session.notice',
-      session_id: record.session_id,
-      profile: record.profile,
-      attention: record.attention_pending === 1,
-      message: noticeToMessage(record),
-    }
-    const recipients = new Set<string>(this.nsp.adapter.rooms.get(`session:${record.session_id}`) || [])
-    if (!isPrivatePersonSession(record.session_id)) {
-      for (const socketId of this.nsp.adapter.rooms.get('studio-account') || []) {
-        const user = this.nsp.sockets.get(socketId)?.data?.user as AuthenticatedUser | undefined
-        if (user && this.canAccessProfile(user, record.profile)) recipients.add(socketId)
+    const session = getSession(record.session_id)
+    if (session && (session.profile || 'default') === record.profile) {
+      const payload = {
+        event: 'session.notice',
+        session_id: record.session_id,
+        profile: record.profile,
+        attention: record.attention_pending === 1,
+        message: noticeToMessage(record),
+      }
+      const candidates = new Set<string>(this.nsp.adapter.rooms.get(`session:${record.session_id}`) || [])
+      if (!isPrivatePersonSession(record.session_id)) {
+        for (const socketId of this.nsp.adapter.rooms.get('studio-account') || []) candidates.add(socketId)
+      }
+      for (const socketId of candidates) {
+        const socket = this.nsp.sockets.get(socketId)
+        if (socket && this.noticeRecipientAllowed(socket, session)) socket.emit('session.notice', payload)
       }
     }
-    for (const socketId of recipients) this.nsp.sockets.get(socketId)?.emit('session.notice', payload)
     this.sessionStateSync.publish(record.session_id)
+  }
+
+  /** The read rules of `resume`, applied to one socket at publication time. */
+  private noticeRecipientAllowed(socket: Socket, session: NonNullable<ReturnType<typeof getSession>>): boolean {
+    const shared = socket.data?.sessionShare as SessionShareAccess | undefined
+    if (shared) return !isPrivatePersonSession(session.id) && shared.share.session_id === session.id
+    const user = socket.data?.user as AuthenticatedUser | undefined
+    if (!user) return false
+    if (isPersonSession(session.id)) return ownsPersonSession(user.id, session)
+    if (session.id.startsWith('person-task-')) {
+      try { ownedPersonTaskSession(user.id, session.id); return true } catch { return false }
+    }
+    return this.canAccessProfile(user, session.profile || 'default')
   }
 
   private needsBackgroundPoll(): boolean {
@@ -2945,24 +2964,35 @@ export class ChatRunSocket {
   private runQueuedItem(socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile = 'default') {
     if (next.machineEvent) {
       const event = next.machineEvent
-      // The run keeps a fence it checks again at its final seams (before the stored machine turn
-      // and immediately before bridge.chat), after every awaited preparation step.
+      // The run owns the session it was admitted to under its own run marker. Stop, /destroy or a
+      // new turn replaces or clears that marker; the fence then refuses even with an unchanged generation.
+      const state = this.sessionMap.get(sessionId)
+      const runMarker = `cli_run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+      if (state) state.activeRunMarker = runMarker
+      const owned = () => Boolean(state) && this.sessionMap.get(sessionId) === state
+        && state!.isWorking && !state!.isAborting && state!.activeRunMarker === runMarker
+      const fence = (): SessionNotificationDisposition | null => (owned() ? this.machineOwnerVerdict(event) : 'owner_stopped')
+      // The run keeps the fence and checks it again at its final seams (before the stored machine
+      // turn and immediately before bridge.chat), after every awaited preparation step.
       const admitted: QueuedRun = {
         ...next,
         machineEvent: undefined,
-        machineFence: () => this.machineOwnerVerdict(event),
+        runMarker,
+        machineFence: fence,
         onMachineDispatch: () => { transitionSessionNotification(event.notificationId, 'admitted', 'dispatched') },
         onMachineDiscard: (reason: string) => {
           transitionSessionNotification(event.notificationId, 'admitted', reason as SessionNotificationDisposition)
         },
       }
-      void this.admitMachineEvent(next).then(ok => {
+      void this.admitMachineEvent(next, fence).then(ok => {
         if (ok) {
           this.runQueuedItem(socket, sessionId, admitted, fallbackProfile)
           return
         }
-        const state = this.sessionMap.get(sessionId)
-        if (state) state.isWorking = false
+        // Only release a session this run still owns; a destroyed or replaced owner is left alone.
+        if (!owned()) return
+        state!.isWorking = false
+        state!.activeRunMarker = undefined
         this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
       })
       return
@@ -3070,6 +3100,7 @@ export class ChatRunSocket {
       reasoning_effort: next.reasoningEffort,
       background_delegation_id: next.backgroundDelegationId,
       background_claim_id: next.backgroundClaimId,
+      run_marker: next.runMarker,
       machine_fence: next.machineFence,
       on_machine_dispatch: next.onMachineDispatch,
       on_machine_discard: next.onMachineDiscard,

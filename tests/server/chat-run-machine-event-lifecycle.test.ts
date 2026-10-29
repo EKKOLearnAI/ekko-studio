@@ -130,6 +130,76 @@ describe('R2 owner rechecked after awaited admission', () => {
   })
 })
 
+describe('S4 run ownership captured at admission', () => {
+  function gatedAdmission(bridge: any) {
+    let release!: () => void
+    bridge.processNotification.mockImplementation(async (action: string) => {
+      if (action === 'admit') {
+        await new Promise<void>(resolve => { release = resolve })
+        return { admitted: true }
+      }
+      return { ok: true }
+    })
+    return () => release()
+  }
+
+  it('/destroy while the admission RPC is pending: no dispatch and the destroyed state is left alone', async () => {
+    const { server, nsp, bridge, handleRun } = makeServer()
+    const { sid, generation } = ownedSession()
+    const release = gatedAdmission(bridge)
+    const event = notification(sid, generation)
+    await server.scheduleProcessNotification(event)
+    await flush()
+    const state = server.sessionMap.get(sid)
+    expect(state.isWorking).toBe(true)
+    const socket: any = { id: 'destroyer', connected: true, data: {}, emit: vi.fn(), join: vi.fn(), to: vi.fn(() => ({ emit: vi.fn() })) }
+    await handleSessionCommand(sid, parseSessionCommand('/destroy')!, { nsp, socket, sessionMap: server.sessionMap,
+      bridge: { ...bridge, interrupt: vi.fn(async () => ({ ok: true })), destroy: vi.fn(async () => ({ ok: true })) } as any,
+      profile: 'default', runQueuedItem: vi.fn() })
+    expect(getSessionGeneration(sid)).toBe(generation)
+    release()
+    await flush()
+    expect(handleRun).not.toHaveBeenCalled()
+    expect(disposition(event)).toBe('owner_stopped')
+    expect(state.isWorking).toBe(false)
+    expect(state.activeRunMarker).toBeUndefined()
+  })
+
+  it('Stop then a new intentional turn while admission is pending: the old event never runs or touches the new turn', async () => {
+    const { server, bridge, handleRun } = makeServer()
+    const { sid, generation } = ownedSession()
+    const release = gatedAdmission(bridge)
+    const event = notification(sid, generation)
+    await server.scheduleProcessNotification(event)
+    await flush()
+    const state = server.sessionMap.get(sid)
+    // Stop released the session; the user's next turn has claimed it with its own run marker.
+    state.isWorking = true
+    state.activeRunMarker = 'cli_run_replacement'
+    release()
+    await flush()
+    expect(handleRun).not.toHaveBeenCalled()
+    expect(disposition(event)).toBe('owner_stopped')
+    expect(state.isWorking).toBe(true)
+    expect(state.activeRunMarker).toBe('cli_run_replacement')
+  })
+
+  it('positive control: the admitted run carries the marker it owns into the run', async () => {
+    const { server, handleRun } = makeServer()
+    const { sid, generation } = ownedSession()
+    await server.scheduleProcessNotification(notification(sid, generation))
+    await flush()
+    expect(handleRun).toHaveBeenCalledTimes(1)
+    const data = handleRun.mock.calls[0][1] as any
+    const state = server.sessionMap.get(sid)
+    expect(typeof data.run_marker).toBe('string')
+    expect(state.activeRunMarker).toBe(data.run_marker)
+    expect(data.machine_fence()).toBeNull()
+    state.activeRunMarker = 'cli_run_replacement'
+    expect(data.machine_fence()).toBe('owner_stopped')
+  })
+})
+
 describe('R3 queued machine events are settled when the queue is cleared', () => {
   it('Stop while the owner is busy settles the claim and records cancellation, with no later wake', async () => {
     const { server, nsp, bridge, handleRun } = makeServer()

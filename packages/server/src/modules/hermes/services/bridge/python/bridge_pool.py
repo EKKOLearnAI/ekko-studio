@@ -1259,7 +1259,8 @@ class AgentPool:
                     })
                     with self._lock:
                         self._process_notification_claims[(key, claim_id)] = event
-                notify_pending = studio.notify_pending_session_ids(loaded_session_ids)
+                notify_pending = studio.notify_pending_session_ids(
+                    loaded_session_ids, self._emitted_process_keys, self._republished_process_keys, profile)
             except Exception as exc:
                 print(
                     f"[hermes_bridge] process completion poll failed: {exc}",
