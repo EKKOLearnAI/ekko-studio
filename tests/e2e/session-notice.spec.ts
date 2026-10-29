@@ -28,11 +28,26 @@ for (const viewport of [{ name: 'desktop', width: 1280, height: 800 }, { name: '
           },
         },
       })
+      // A known failure with an empty answer is shown with its error, not hidden.
+      state.latest.__trigger('session.notice', {
+        event: 'session.notice', session_id: sid, attention: true,
+        message: {
+          id: 'studio-notice-2', session_id: sid, role: 'system', display_role: 'system',
+          content: '', timestamp: Math.floor(Date.now() / 1000) + 2,
+          studio_notice: {
+            kind: 'cron', notification_id: 2, disposition: 'notified', job_id: 'job-2', job_name: 'Nightly sync',
+            execution_id: 'exec-2', status: 'failed', success: false, reason: null, error: 'Synthetic provider failure',
+            truncated: false, finished_at: null,
+          },
+        },
+      })
     })
-    const header = page.locator('.studio-notice-header')
+    const header = page.locator('.studio-notice-header').filter({ hasText: 'Daily brief' })
     await expect(header).toContainText('Scheduled task “Daily brief” finished')
     await expect(page.locator('.markdown-body').filter({ hasText: 'Synthetic brief result' })).toBeVisible()
-    const box = await header.boundingBox()
+    const failed = page.locator('.studio-notice-header').filter({ hasText: 'Nightly sync' })
+    await expect(failed.locator('.studio-notice-detail')).toHaveText('Synthetic provider failure')
+    const box = await header.first().boundingBox()
     expect(box && box.x + box.width).toBeLessThanOrEqual(viewport.width)
   })
 }

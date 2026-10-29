@@ -38,7 +38,17 @@ describe('cron session notifications', () => {
     db = new DatabaseSync(':memory:')
     home = mkdtempSync(join(tmpdir(), 'session-notifications-'))
     bindingsPath = join(home, 'cron-bindings.db')
-    vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({ getDb: () => db }))
+    vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({
+      getDb: () => db, isSqliteAvailable: () => true, getStoragePath: () => ':memory:',
+    }))
+    // Notices are scoped to the owner session generation, so the owners exist in the real schema.
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
+    initAllHermesTables()
+    const { createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    for (const [id, generation] of [['session-A', 'g-A1'], ['session-B', 'g-B1']]) {
+      createSession({ id, source: 'cli', profile: 'default' })
+      db.prepare('UPDATE sessions SET generation_id=? WHERE id=?').run(generation, id)
+    }
   })
 
   afterEach(() => {
@@ -173,7 +183,7 @@ describe('cron session notifications', () => {
     markSessionNotificationsProjected(projection!.ids)
     expect(buildNoticeProjection('session-A')).toBeNull()
 
-    const merged = withSessionNotices('session-A', [{ id: 1, role: 'user', timestamp: 1 }], true)
+    const merged = withSessionNotices('session-A', [{ id: 1, role: 'user', timestamp: 1 }], { offset: 0, storedCount: 0 })
     expect(merged).toHaveLength(2)
     expect(merged[1]).toMatchObject({ role: 'system', studio_notice: { execution_id: 'exec-1', disposition: 'notified' } })
   })
@@ -181,11 +191,11 @@ describe('cron session notifications', () => {
   it('settles a machine-event admission interrupted by a crash as unknown, never re-dispatched', async () => {
     const store = await import(STORE)
     const record = store.acceptSessionNotification({ namespace: 'inst-1', profile: 'default', producerKey: 'hermes-process:default:proc_1:1',
-      sessionId: 'session-A', kind: 'process_completion', disposition: 'admitting', payload: {}, attention: false })
+      sessionId: 'session-A', sessionGeneration: 'g-A1', kind: 'process_completion', disposition: 'admitting', payload: {}, attention: false })
     expect(record).not.toBeNull()
     expect(store.settleInterruptedProcessAdmissions('inst-1')).toBe(1)
     expect(store.getSessionNotification('inst-1', 'default', 'hermes-process:default:proc_1:1')?.disposition).toBe('unknown')
     expect(store.acceptSessionNotification({ namespace: 'inst-1', profile: 'default', producerKey: 'hermes-process:default:proc_1:1',
-      sessionId: 'session-A', kind: 'process_completion', disposition: 'admitting', payload: {}, attention: false })).toBeNull()
+      sessionId: 'session-A', sessionGeneration: 'g-A1', kind: 'process_completion', disposition: 'admitting', payload: {}, attention: false })).toBeNull()
   })
 })

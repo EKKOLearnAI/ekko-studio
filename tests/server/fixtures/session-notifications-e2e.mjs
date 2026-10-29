@@ -97,6 +97,7 @@ function decide(body) {
   if (userText.includes('E2E_TERMINAL_OK')) return tool('terminal', { command: 'printf term-ok; exit 0', background: true, notify_on_complete: true })
   if (userText.includes('E2E_TERMINAL_FAIL')) return tool('terminal', { command: 'printf term-bad; exit 3', background: true, notify_on_complete: true })
   if (userText.includes('E2E_TERMINAL_SILENT')) return tool('terminal', { command: 'printf quiet; exit 0', background: true, notify_on_complete: false })
+  if (userText.includes('E2E_TERMINAL_RESET')) return tool('terminal', { command: 'sleep 8; printf reset-proc; exit 0', background: true, notify_on_complete: true })
   if (userText.includes('E2E_TERMINAL_WAIT')) return tool('terminal', { command: 'sleep 2; printf waited', background: true, notify_on_complete: true })
   return { text: 'OK' }
 }
@@ -250,8 +251,30 @@ async function api(path, init = {}) {
   try { json = JSON.parse(text) } catch {}
   return { status: res.status, json, text }
 }
-function connect() {
-  return io(`http://127.0.0.1:${port}/chat-run`, { auth: { token }, query: { profile: 'default' }, transports: ['websocket'], reconnection: false })
+function connect(options = {}) {
+  return io(`http://127.0.0.1:${port}/chat-run`, {
+    auth: { token: options.token || token }, query: { profile: options.profile || 'default', ...(options.state ? { session_state: '1' } : {}) },
+    transports: ['websocket'], reconnection: false })
+}
+async function stateSnapshot() {
+  const socket = connect({ state: true })
+  const snapshot = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout: session state snapshot')), 20_000)
+    socket.once('sessions.state.snapshot', value => { clearTimeout(timer); resolve(value) })
+  })
+  return { socket, snapshot }
+}
+async function ackRead(sessionId) {
+  const { socket, snapshot } = await stateSnapshot()
+  const state = snapshot.sessions.find(item => item.sessionId === sessionId)
+  const ok = await new Promise(resolve => socket.emit('sessions.read', { sessionId, messageId: state.lastMessageId, attentionId: state.lastAttentionId }, result => resolve(result?.ok)))
+  socket.disconnect()
+  return ok
+}
+async function unreadOf(sessionId) {
+  const { socket, snapshot } = await stateSnapshot()
+  socket.disconnect()
+  return snapshot.sessions.find(item => item.sessionId === sessionId) || null
 }
 function collect(socket) {
   const events = []
@@ -329,6 +352,13 @@ async function main() {
   token = login.json?.token
   if (!token) throw new Error(`login failed: ${login.text.slice(0, 200)}`)
 
+  // A second, synthetic user restricted to a disjoint profile.
+  mkdirSync(join(dirs.hermes, 'profiles', 'other'), { recursive: true })
+  const bobCreated = await api('/api/auth/users', { method: 'POST', body: JSON.stringify({ username: 'bob', password: 'bob-synthetic-pass', role: 'admin', profiles: ['other'], defaultProfile: 'other' }) })
+  const bobLogin = await fetch(`http://127.0.0.1:${port}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'bob', password: 'bob-synthetic-pass' }) }).then(res => res.json())
+  const bobToken = bobLogin?.token
+  if (!bobToken) throw new Error(`second user setup failed: ${bobCreated.status} ${bobCreated.text.slice(0, 160)}`)
+
   const A = `e2e-a-${randomUUID().slice(0, 8)}`
   const B = `e2e-b-${randomUUID().slice(0, 8)}`
   const owner = connect()
@@ -359,6 +389,12 @@ async function main() {
   const focusEvents = collect(focus)
   await waitFor(() => focus.connected, 20_000, 'focus socket')
   focus.emit('resume', { session_id: B, profile: 'default' })
+  // Unrelated profile user, connected for the whole delivery window.
+  const bob = connect({ token: bobToken, profile: 'other', state: true })
+  const bobEvents = collect(bob)
+  await waitFor(() => bob.connected, 20_000, 'second user socket')
+  // Attention baseline: earlier replies in A are read before the result arrives.
+  record('attention baseline acknowledged before delivery', await ackRead(A) === true)
   const beforeFire = modelRequests.length
   const noticeFor = name => focusEvents.find(e => e.event === 'session.notice' && e.payload?.session_id === A
     && e.payload?.message?.studio_notice?.job_name === name)
@@ -368,6 +404,17 @@ async function main() {
     noticeContent === CRON_ANSWER && notice.payload.message?.studio_notice?.execution_id && notice.payload.attention === true,
     { content: noticeContent, execution_id: notice.payload.message?.studio_notice?.execution_id })
   record('no notice addressed to B', !focusEvents.some(e => e.event === 'session.notice' && e.payload?.session_id === B))
+  await delay(2000)
+  const bobPayloads = JSON.stringify(bobEvents.map(e => ({ event: e.event, payload: e.payload })))
+  record('R1 disjoint-profile user receives no notice content or metadata', !bobEvents.some(e => e.event === 'session.notice')
+    && !bobPayloads.includes(A) && !bobPayloads.includes('e2e-brief') && !bobPayloads.includes('CRON_EXACT_ANSWER_42'),
+    { bob_events: [...new Set(bobEvents.map(e => e.event))] })
+  record('R1 authorized off-focus user receives the notice', Boolean(notice))
+  bob.disconnect()
+  const unreadAfter = await unreadOf(A)
+  record('R8 durable attention after delivery (fresh snapshot)', unreadAfter?.unread === true && unreadAfter.lastAttentionId > unreadAfter.readAttentionId,
+    { lastAttentionId: unreadAfter?.lastAttentionId, readAttentionId: unreadAfter?.readAttentionId })
+  record('R8 acknowledgement persists across reconnect', await ackRead(A) === true && (await unreadOf(A))?.unread === false)
   const scriptNotice = await waitFor(() => noticeFor('e2e-script'), 180_000, 'script notice for A')
   const scriptView = scriptNotice.payload.message?.studio_notice || {}
   record('script-only fire is a truthful status-only notice (no output claimed)', scriptView.disposition === 'status_only'
@@ -394,6 +441,9 @@ async function main() {
   await delay(20_000)
   const afterRestart = await api(`/api/studio/sessions/conversations/${A}/messages/paginated?offset=0&limit=150`)
   const notices = studioRows("SELECT count(*) AS n FROM session_notifications WHERE session_id=? AND kind='cron' AND disposition='notified'", A)[0].n
+  const unreadRestart = await unreadOf(A)
+  record('R8 acknowledged attention stays read after restart and replay (no re-arm)', unreadRestart?.unread === false,
+    { lastAttentionId: unreadRestart?.lastAttentionId, readAttentionId: unreadRestart?.readAttentionId })
   record('restart keeps exactly one durable notice (duplicate replay rejected)', notices === 1
     && (afterRestart.json?.messages || []).filter(m => m.studio_notice?.job_name === 'e2e-brief').length === 1, { notices })
 
@@ -459,6 +509,25 @@ async function main() {
   record('chat-manual run returns exactly once through its async-delegation turn, no cron notice duplicate',
     Boolean(manualJob) && delegationTurns().length === 1 && manualRows.length === 0 && manualNoticeEvents().length === 0,
     { delegation_turns: delegationTurns().length, notice_rows: manualRows.length })
+
+  // R2/R4: reset the conversation while a notifying process is still running.
+  const resetStart = machineTurns().length
+  await runTurn(actor, actorEvents, A, 'E2E_TERMINAL_RESET run then reset')
+  const clearStart = actorEvents.length
+  const resetAt = Date.now()
+  actor.emit('run', { session_id: A, input: '/clear --history', profile: 'default' })
+  await waitFor(() => actorEvents.slice(clearStart).find(e => e.event === 'session.command' && e.payload?.session_id === A
+    && e.payload?.action === 'clear' && e.payload?.clearHistory === true), 60_000, 'history clear')
+  await delay(25_000)
+  const resetRows = studioRows("SELECT disposition FROM session_notifications WHERE kind='process_completion' AND session_id=? AND created_at>=?", A, resetAt)
+  record('R2 late completion after a real history reset never enters the reset conversation',
+    !machineTurns().slice(resetStart).some(r => JSON.stringify(r.messages).includes('reset-proc')) && resetRows.some(row => row.disposition === 'owner_reset'),
+    { dispositions: resetRows.map(row => row.disposition) })
+  const afterReset = await api(`/api/studio/sessions/conversations/${A}/messages/paginated?offset=0&limit=150`)
+  const noticeAttention = studioRows("SELECT id FROM session_attention_events WHERE session_id=? AND event_key LIKE 'cron-notice:%'", A)
+  record('R4 accepted notices disappear from history and attention after the real reset',
+    !(afterReset.json?.messages || []).some(m => m.studio_notice) && noticeAttention.length === 0,
+    { remaining: (afterReset.json?.messages || []).length })
   actor.disconnect()
 }
 

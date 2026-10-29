@@ -90,6 +90,15 @@ describe.skipIf(!enabled)('real Hermes: cron session binding', { timeout: 180_00
     expect(result.exec_ask_after).toBeNull()
   })
 
+  it('R6: recovers more than one native page of executions exactly once in bounded passes', async () => {
+    const result = await runCase('observe_pagination')
+    expect(result.backlog).toBe(130)
+    expect(result.late).toBe(3)
+    expect(result.missing).toBe(0)
+    expect(result.max_rows_per_pass).toBeLessThanOrEqual(100)
+    expect(result.cursor_after).toBeNull()
+  })
+
   it('keeps a requested paused job paused while binding it', async () => {
     const result = await runCase('cron_paused')
     expect(result.job).toMatchObject({ state: 'paused', enabled: false })
@@ -151,6 +160,17 @@ describe.skipIf(!enabled)('real Hermes: terminal notify_on_complete adapter', { 
     expect(result.wait_before_drain_delivered).toBe(false)
     expect(result.claimed_after).toBe(true)
     expect(result.admit_after_log).toEqual({ admitted: false, reason: 'consumed' })
+  })
+
+  it('R2: a completion carries the owner generation declared when its process started', async () => {
+    const result = await runCase('process_owner_generation')
+    expect(result.owner_generation).toBe('gen-before-reset')
+  })
+
+  it('R10: settled notify processes stop keeping the poll active; live ones still do', async () => {
+    const result = await runCase('settled_watchers')
+    expect(result.settled_pending).toEqual([])
+    expect(result.live_pending).toEqual(['sess-A'])
   })
 
   it('routes completions only to the owning session', async () => {

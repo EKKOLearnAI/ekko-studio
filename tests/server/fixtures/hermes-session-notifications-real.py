@@ -265,5 +265,81 @@ def case_process_ownership():
             "b_session": (polled_b or {}).get("process_notifications", [{}])[0].get("session_id") if polled_b else None}
 
 
+def _scheduled_executions(job_id, count):
+    from cron.executions import create_execution, finish_execution, mark_execution_running
+    ids = []
+    for index in range(count):
+        row = create_execution(job_id, source="builtin", scheduled_instant=f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}+00:00")
+        mark_execution_running(row["id"])
+        finish_execution(row["id"], success=True)
+        ids.append(row["id"])
+    return ids
+
+
+def case_observe_pagination():
+    """More than one native page of retained executions recovers exactly once, in bounded passes."""
+    assert sn.install_cron_binding_middleware()
+    studio_session()
+    created = create({"prompt": "Backlog", "schedule": "30m", "name": "backlog"})
+    job_id = created["job_id"]
+    backlog = _scheduled_executions(job_id, 130)
+    seen, passes, max_rows_per_pass, cursor, late = [], 0, 0, None, []
+    while passes < 20:
+        passes += 1
+        item = {"job_id": job_id, "since": 0}
+        if cursor:
+            item["before"] = cursor
+        result = sn.observe_cron_jobs([item], None)
+        rows = result["executions"]
+        max_rows_per_pass = max(max_rows_per_pass, len(rows))
+        seen.extend(row["execution_id"] for row in rows)
+        state = next(job for job in result["jobs"] if job["job_id"] == job_id)
+        cursor = state.get("older_before")
+        if passes == 2:
+            late = _scheduled_executions(job_id, 3)  # new executions while the backlog drains
+        if not cursor and passes > 2:
+            break
+    return {"backlog": len(backlog), "late": len(late), "unique_seen": len(set(seen)),
+            "missing": len(set(backlog + late) - set(seen)), "passes": passes,
+            "max_rows_per_pass": max_rows_per_pass, "cursor_after": cursor}
+
+
+def case_settled_watchers():
+    """A delivered or consumed notify process stops counting as pending; live work still does."""
+    pool = _pool()
+    done = _terminal("printf settled; exit 0")
+    _poll_until(pool, ["sess-A"], lambda p: any(
+        item.get("process_id") == done["session_id"] for item in p.get("process_notifications") or []))
+    settled_pending = None
+    for _ in range(3):
+        settled_pending = pool.poll_background(["sess-A"]).get("notify_pending_session_ids")
+    live = _terminal("sleep 4; exit 0")
+    live_pending = pool.poll_background(["sess-A"]).get("notify_pending_session_ids")
+    from tools.process_registry import process_registry
+    watchers = [w for w in list(process_registry.pending_watchers) if (w or {}).get("session_key") == "sess-A"]
+    return {"settled_pending": settled_pending, "live_pending": live_pending, "live": live.get("session_id"),
+            "watcher_descriptors": len(watchers)}
+
+
+def case_process_owner_generation():
+    """A completion carries the owner generation declared when its process started."""
+    pool = _pool()
+    studio_session(generation="gen-before-reset")
+    old = json.loads(registry.dispatch("terminal", {"command": "sleep 2; printf old; exit 0", "background": True,
+                                                    "notify_on_complete": True}, task_id="task-sess-A"))
+    time.sleep(0.2)
+    sn.set_session_generation("sess-A", "gen-after-reset")  # Studio reset: next turn declares a new generation
+    found = {}
+
+    def collect(polled):
+        for item in polled.get("process_notifications") or []:
+            found[item["process_id"]] = item
+        return old["session_id"] in found
+
+    _poll_until(pool, ["sess-A"], collect)
+    item = found.get(old["session_id"]) or {}
+    return {"owner_generation": item.get("owner_generation"), "profile_key": item.get("producer_key")}
+
+
 if __name__ == "__main__":
     print("RESULT " + json.dumps(globals()["case_" + sys.argv[1]](), default=str))

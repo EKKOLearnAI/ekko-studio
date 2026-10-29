@@ -104,6 +104,10 @@ export function parseBackgroundDelegation(
   }
 }
 
+function machineDiscardMessage(reason: string): string {
+  return `Background process completion was not delivered: the conversation changed (${reason}).`
+}
+
 /** A background terminal whose Hermes result accepted `notify_on_complete` (immediate exit included). */
 export function terminalNotifyRequested(toolName: string, output: string): boolean {
   if (toolName !== 'terminal') return false
@@ -490,7 +494,7 @@ async function ensureBridgeFixedContext(args: {
 export async function handleBridgeRun(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
-  data: { task_plan_context_id?: string; input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command' | 'system'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
+  data: { task_plan_context_id?: string; input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command' | 'system'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; machine_fence?: () => string | null; on_machine_dispatch?: () => void; on_machine_discard?: (reason: string) => void; onEvent?: (event: string, payload: any) => void },
   profile: string,
   sessionMap: Map<string, SessionState>,
   bridge: AgentBridgeClient,
@@ -632,6 +636,23 @@ export async function handleBridgeRun(
   const displayRoleForStorage = shouldStoreInputInsteadOfDisplay || machineDisplay ? displayRole : null
   const displayContentForStorage = shouldStoreInputInsteadOfDisplay || machineDisplay ? inputStr : null
   let messageId: number | string | undefined
+
+  // A machine event's owner may have changed during the awaited preparation above: never store
+  // its turn for a reset, deleted, stopped or re-profiled owner.
+  const machineRefusal = data.machine_fence?.() ?? null
+  if (machineRefusal) {
+    data.on_machine_discard?.(machineRefusal)
+    state.isWorking = false
+    state.profile = undefined
+    state.runId = undefined
+    state.activeRunMarker = undefined
+    const failed = { event: 'run.failed', session_id, error: machineDiscardMessage(machineRefusal),
+      queue_remaining: state.queue.length, autonomous: true, queue_id: data.queue_id }
+    data.onEvent?.('run.failed', failed)
+    nsp.to(`session:${session_id}`).emit('run.failed', failed)
+    if (state.queue.length > 0) dequeueNextQueuedRun(socket, session_id, profile)
+    return
+  }
 
   if (shouldPersistUserMessage) {
     const userMessage = {
@@ -843,6 +864,13 @@ export async function handleBridgeRun(
       hasInstructions: Boolean(fullInstructions),
       multimodalInput: isContentBlockArray(input),
     }, '[chat-run-socket] starting CLI bridge run')
+    // Final run seam: re-check a machine event's owner after every awaited preparation step.
+    const lateMachineRefusal = data.machine_fence?.() ?? null
+    if (lateMachineRefusal) {
+      data.on_machine_discard?.(lateMachineRefusal)
+      throw new Error(machineDiscardMessage(lateMachineRefusal))
+    }
+    data.on_machine_dispatch?.()
     const sessionGeneration = getSessionGeneration(session_id)
     const started = await bridge.chat(
       session_id,

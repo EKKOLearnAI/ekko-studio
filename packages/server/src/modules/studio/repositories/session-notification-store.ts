@@ -1,17 +1,23 @@
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync } from 'fs'
 import { getDb } from '../infrastructure/database'
+import { initSessionStateTables } from '../infrastructure/database/session-state-schema'
+import { getSessionGeneration } from './session-store'
 
 export type SessionNotificationKind = 'cron' | 'process_completion'
 
 /**
  * Terminal disposition of one producer event.
  * Cron: notified | status_only | silent | no_content | unknown | owner_missing | target_changed.
- * Process completion: admitting | dispatched | consumed | owner_missing | owner_stopped | unknown.
+ * Process completion: admitting -> admitted (bridge admission) -> dispatched (final run seam), or
+ * consumed | cancelled | owner_missing | owner_reset | owner_stopped | unknown.
  */
 export type SessionNotificationDisposition =
   | 'notified' | 'status_only' | 'silent' | 'no_content' | 'unknown' | 'owner_missing' | 'target_changed'
-  | 'admitting' | 'dispatched' | 'consumed' | 'owner_stopped'
+  | 'admitting' | 'admitted' | 'dispatched' | 'consumed' | 'cancelled' | 'owner_reset' | 'owner_stopped'
+
+/** Durable attention key of an accepted notice in `session_attention_events`. */
+export const NOTICE_ATTENTION_PREFIX = 'cron-notice:'
 
 export interface SessionNotificationRecord {
   id: number
@@ -19,6 +25,8 @@ export interface SessionNotificationRecord {
   profile: string
   producer_key: string
   session_id: string
+  /** Owner session generation the event was accepted for; readers only show the current one. */
+  session_generation: string | null
   kind: SessionNotificationKind
   disposition: SessionNotificationDisposition
   payload: Record<string, unknown>
@@ -50,6 +58,11 @@ function database() {
       PRIMARY KEY(namespace, profile, job_id)
     );
   `)
+  const columns = new Set((db.prepare('PRAGMA table_info(session_notifications)').all() as Array<{ name: string }>).map(column => column.name))
+  if (!columns.has('session_generation')) db.exec('ALTER TABLE session_notifications ADD COLUMN session_generation TEXT')
+  const jobColumns = new Set((db.prepare('PRAGMA table_info(session_notification_cron_jobs)').all() as Array<{ name: string }>).map(column => column.name))
+  if (!jobColumns.has('observe_before')) db.exec('ALTER TABLE session_notification_cron_jobs ADD COLUMN observe_before TEXT')
+  initSessionStateTables(db)
   initialized.add(db)
   return db
 }
@@ -63,6 +76,7 @@ function rowToRecord(row: Record<string, unknown>): SessionNotificationRecord {
     profile: String(row.profile),
     producer_key: String(row.producer_key),
     session_id: String(row.session_id),
+    session_generation: row.session_generation == null ? null : String(row.session_generation),
     kind: String(row.kind) as SessionNotificationKind,
     disposition: String(row.disposition) as SessionNotificationDisposition,
     payload,
@@ -82,6 +96,8 @@ export function acceptSessionNotification(input: {
   profile: string
   producerKey: string
   sessionId: string
+  /** Owner generation the producer belongs to; null records a disposition that is never shown. */
+  sessionGeneration: string | null
   kind: SessionNotificationKind
   disposition: SessionNotificationDisposition
   payload: Record<string, unknown>
@@ -89,15 +105,33 @@ export function acceptSessionNotification(input: {
   now?: number
 }): SessionNotificationRecord | null {
   const now = input.now ?? Date.now()
-  const result = database().prepare(`
-    INSERT INTO session_notifications
-      (namespace, profile, producer_key, session_id, kind, disposition, payload, attention_pending, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(namespace, profile, producer_key) DO NOTHING
-  `).run(input.namespace, input.profile, input.producerKey, input.sessionId, input.kind, input.disposition,
-    JSON.stringify(input.payload), input.attention ? 1 : 0, now, now)
-  if (!result.changes) return null
-  return getSessionNotificationById(Number(result.lastInsertRowid))
+  const db = database()
+  // The notice and its durable attention event are one acceptance: both or neither.
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const result = db.prepare(`
+      INSERT INTO session_notifications
+        (namespace, profile, producer_key, session_id, session_generation, kind, disposition, payload,
+         attention_pending, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(namespace, profile, producer_key) DO NOTHING
+    `).run(input.namespace, input.profile, input.producerKey, input.sessionId, input.sessionGeneration, input.kind,
+      input.disposition, JSON.stringify(input.payload), input.attention ? 1 : 0, now, now)
+    if (!result.changes) {
+      db.exec('COMMIT')
+      return null
+    }
+    const id = Number(result.lastInsertRowid)
+    if (input.attention && input.sessionGeneration) {
+      db.prepare(`INSERT OR IGNORE INTO session_attention_events(session_id, event_key)
+        SELECT id, ? FROM sessions WHERE id = ?`).run(`${NOTICE_ATTENTION_PREFIX}${id}`, input.sessionId)
+    }
+    db.exec('COMMIT')
+    return getSessionNotificationById(id)
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
 }
 
 export function getSessionNotificationById(id: number): SessionNotificationRecord | null {
@@ -122,25 +156,30 @@ export function transitionSessionNotification(id: number, from: SessionNotificat
 export function settleInterruptedProcessAdmissions(namespace: string): number {
   if (!getDb()) return 0
   const result = database().prepare(`UPDATE session_notifications SET disposition='unknown', updated_at=?
-    WHERE namespace=? AND kind='process_completion' AND disposition='admitting'`).run(Date.now(), namespace)
+    WHERE namespace=? AND kind='process_completion' AND disposition IN ('admitting','admitted')`).run(Date.now(), namespace)
   return Number(result.changes)
 }
 
-/** Visible cron notices for a session, oldest first. */
+/** Visible cron notices of the session's current generation, oldest first. */
 export function listVisibleSessionNotifications(sessionId: string): SessionNotificationRecord[] {
   if (!getDb()) return []
+  const generation = getSessionGeneration(sessionId)
+  if (!generation) return []
   const rows = database().prepare(`SELECT * FROM session_notifications
-    WHERE session_id=? AND kind='cron' AND disposition IN ('notified','status_only','unknown')
-    ORDER BY created_at, id`).all(sessionId) as Record<string, unknown>[]
+    WHERE session_id=? AND session_generation=? AND kind='cron' AND disposition IN ('notified','status_only','unknown')
+    ORDER BY created_at, id`).all(sessionId, generation) as Record<string, unknown>[]
   return rows.map(rowToRecord)
 }
 
-/** Notices not yet shown to the model on an intentional user turn. */
+/** Current-generation notices not yet shown to the model on an intentional user turn. */
 export function listUnprojectedSessionNotifications(sessionId: string, limit: number): SessionNotificationRecord[] {
   if (!getDb()) return []
+  const generation = getSessionGeneration(sessionId)
+  if (!generation) return []
   const rows = database().prepare(`SELECT * FROM session_notifications
-    WHERE session_id=? AND kind='cron' AND disposition IN ('notified','status_only','unknown') AND projected_at IS NULL
-    ORDER BY created_at, id LIMIT ?`).all(sessionId, limit) as Record<string, unknown>[]
+    WHERE session_id=? AND session_generation=? AND kind='cron' AND disposition IN ('notified','status_only','unknown')
+      AND projected_at IS NULL
+    ORDER BY created_at, id LIMIT ?`).all(sessionId, generation, limit) as Record<string, unknown>[]
   return rows.map(rowToRecord)
 }
 
@@ -154,6 +193,20 @@ export function cronJobObservationState(namespace: string, profile: string, jobI
   const row = database().prepare('SELECT state FROM session_notification_cron_jobs WHERE namespace=? AND profile=? AND job_id=?')
     .get(namespace, profile, jobId) as { state?: string } | undefined
   return row?.state ?? null
+}
+
+/** Cursor into older native executions still to be observed (bounded recovery across passes). */
+export function cronJobObserveCursor(namespace: string, profile: string, jobId: string): string | null {
+  const row = database().prepare('SELECT observe_before FROM session_notification_cron_jobs WHERE namespace=? AND profile=? AND job_id=?')
+    .get(namespace, profile, jobId) as { observe_before?: string | null } | undefined
+  return row?.observe_before ?? null
+}
+
+export function setCronJobObserveCursor(namespace: string, profile: string, jobId: string, before: string | null): void {
+  database().prepare(`INSERT INTO session_notification_cron_jobs (namespace, profile, job_id, state, updated_at, observe_before)
+    VALUES (?, ?, ?, 'observing', ?, ?) ON CONFLICT(namespace, profile, job_id) DO UPDATE SET
+      observe_before=excluded.observe_before, updated_at=excluded.updated_at`)
+    .run(namespace, profile, jobId, Date.now(), before)
 }
 
 export function setCronJobObservationState(namespace: string, profile: string, jobId: string, state: 'observing' | 'stopped'): void {

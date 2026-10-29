@@ -42,8 +42,10 @@ import {
   acceptSessionNotification,
   settleInterruptedProcessAdmissions,
   transitionSessionNotification,
+  type SessionNotificationDisposition,
   type SessionNotificationRecord,
 } from '../repositories/session-notification-store'
+import { settleQueuedMachineEvents } from '../services/session-notifications/machine-events'
 import { cronBindingsDbPath, studioInstanceId } from '../public/session-notifications'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { bindAppEventSubscription } from '../services/webhooks/app-events'
@@ -1284,6 +1286,7 @@ export class ChatRunSocket {
       const state = this.sessionMap.get(data.session_id)
       if (!state?.queue.length) return
       const before = state.queue.length
+      settleQueuedMachineEvents(state.queue.filter(item => item.queue_id === data.queue_id), this.bridge)
       state.queue = state.queue.filter(item => item.queue_id !== data.queue_id)
       if (state.queue.length === before) return
       if (state.queueInsertion?.queueId === data.queue_id) {
@@ -1770,6 +1773,9 @@ export class ChatRunSocket {
       background_delegation_id?: string
       background_claim_id?: string
       autonomous?: boolean
+      machine_fence?: () => string | null
+      on_machine_dispatch?: () => void
+      on_machine_discard?: (reason: string) => void
       onEvent?: (event: string, payload: any) => void
     },
     profile: string,
@@ -2244,28 +2250,36 @@ export class ChatRunSocket {
       return
     }
     const namespace = studioInstanceId()
+    const ownerGeneration = typeof notification.owner_generation === 'string' && notification.owner_generation
+      ? notification.owner_generation : null
     const payload = {
       process_id: notification.process_id,
       exit_code: notification.exit_code ?? null,
       status: notification.status,
       started_at: notification.started_at ?? null,
     }
+    const event: NonNullable<QueuedRun['machineEvent']> = {
+      kind: 'process_completion', notificationId: 0, sessionId, producerKey, claimId, profile, ownerGeneration,
+      processId: String(notification.process_id || ''),
+    }
     const session = getSession(sessionId)
     const state = session ? await this.sessionStateForBackground(sessionId) : null
-    const ownerDisposition = !session || !state ? 'owner_missing' : state.backgroundWakeStopped ? 'owner_stopped' : null
+    // The producer's owner (profile + generation) must still be this session's current owner.
+    const ownerDisposition = !state ? 'owner_missing' : this.machineOwnerVerdict(event)
     if (ownerDisposition) {
-      acceptSessionNotification({ namespace, profile, producerKey, sessionId, kind: 'process_completion',
-        disposition: ownerDisposition, payload, attention: false })
+      acceptSessionNotification({ namespace, profile, producerKey, sessionId, sessionGeneration: ownerGeneration,
+        kind: 'process_completion', disposition: ownerDisposition, payload, attention: false })
       await complete()
       return
     }
-    const record = acceptSessionNotification({ namespace, profile, producerKey, sessionId, kind: 'process_completion',
-      disposition: 'admitting', payload, attention: false })
+    const record = acceptSessionNotification({ namespace, profile, producerKey, sessionId, sessionGeneration: ownerGeneration,
+      kind: 'process_completion', disposition: 'admitting', payload, attention: false })
     if (!record) {
       // Already accepted once (replay): never a second turn.
       await complete()
       return
     }
+    event.notificationId = record.id
     const next: QueuedRun = {
       queue_id: `process_${record.id}`,
       input: notification.message,
@@ -2277,14 +2291,7 @@ export class ChatRunSocket {
       workspace: session!.workspace,
       source: resolveRunSource(session!.source || undefined, sessionId),
       autonomous: true,
-      machineEvent: {
-        kind: 'process_completion',
-        notificationId: record.id,
-        producerKey,
-        claimId,
-        profile,
-        processId: String(notification.process_id || ''),
-      },
+      machineEvent: event,
     }
     if (state!.isWorking) {
       state!.queue.push(next)
@@ -2297,18 +2304,28 @@ export class ChatRunSocket {
     this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
   }
 
-  /** Dispatch boundary: owner still current and the completion not consumed by wait/log since drain. */
-  private async admitMachineEvent(sessionId: string, next: QueuedRun): Promise<boolean> {
+  /** Why a machine event may no longer run for its owner, or null when the owner is current. */
+  private machineOwnerVerdict(event: NonNullable<QueuedRun['machineEvent']>): 'owner_missing' | 'owner_reset' | 'owner_stopped' | null {
+    const session = getSession(event.sessionId)
+    if (!session || (session.profile || 'default') !== event.profile) return 'owner_missing'
+    if (!event.ownerGeneration || getSessionGeneration(event.sessionId) !== event.ownerGeneration) return 'owner_reset'
+    if (this.sessionMap.get(event.sessionId)?.backgroundWakeStopped) return 'owner_stopped'
+    return null
+  }
+
+  /**
+   * Bridge admission: the completion must not have been consumed by wait/log since the drain, and
+   * the owner is re-checked after the awaited RPC. Admission is not execution; the final run seam
+   * marks the event dispatched.
+   */
+  private async admitMachineEvent(next: QueuedRun): Promise<boolean> {
     const event = next.machineEvent!
-    const ref = { session_id: sessionId, profile: event.profile, producer_key: event.producerKey, claim_id: event.claimId }
-    const state = this.sessionMap.get(sessionId)
-    let verdict: 'dispatched' | 'consumed' | 'owner_missing' | 'owner_stopped' | 'unknown'
-    if (!getSession(sessionId)) verdict = 'owner_missing'
-    else if (state?.backgroundWakeStopped) verdict = 'owner_stopped'
-    else {
+    const ref = { session_id: event.sessionId, profile: event.profile, producer_key: event.producerKey, claim_id: event.claimId }
+    let verdict: SessionNotificationDisposition | null = this.machineOwnerVerdict(event)
+    if (!verdict) {
       try {
         const admitted = await this.backgroundBridge.processNotification('admit', ref)
-        verdict = admitted.admitted ? 'dispatched' : admitted.reason === 'consumed' ? 'consumed' : 'unknown'
+        verdict = admitted.admitted ? this.machineOwnerVerdict(event) ?? 'admitted' : admitted.reason === 'consumed' ? 'consumed' : 'unknown'
       } catch (err) {
         logger.warn(err, '[chat-run-socket] process completion admission check failed for %s', event.producerKey)
         verdict = 'unknown'
@@ -2316,7 +2333,7 @@ export class ChatRunSocket {
     }
     transitionSessionNotification(event.notificationId, 'admitting', verdict)
     await this.backgroundBridge.processNotification('complete', ref).catch(() => undefined)
-    return verdict === 'dispatched'
+    return verdict === 'admitted'
   }
 
   private async observeCronSessionResults() {
@@ -2340,19 +2357,28 @@ export class ChatRunSocket {
     }
   }
 
-  /** Live passive notice: appended to the owner's timeline and attention raised once. No model turn. */
+  /**
+   * Live passive notice for authorized viewers only: the owner session room (joined after session
+   * read authorization) and off-focus account sockets whose user may access the notice's profile.
+   * Durable unread attention goes through the authorized session-state sync. No model turn.
+   */
   private publishSessionNotice(record: SessionNotificationRecord) {
-    const message = noticeToMessage(record)
-    const rooms = isPrivatePersonSession(record.session_id)
-      ? `session:${record.session_id}`
-      : ['studio-account', `session:${record.session_id}`]
-    this.nsp.to(rooms).emit('session.notice', {
+    const payload = {
       event: 'session.notice',
       session_id: record.session_id,
       profile: record.profile,
       attention: record.attention_pending === 1,
-      message,
-    })
+      message: noticeToMessage(record),
+    }
+    const recipients = new Set<string>(this.nsp.adapter.rooms.get(`session:${record.session_id}`) || [])
+    if (!isPrivatePersonSession(record.session_id)) {
+      for (const socketId of this.nsp.adapter.rooms.get('studio-account') || []) {
+        const user = this.nsp.sockets.get(socketId)?.data?.user as AuthenticatedUser | undefined
+        if (user && this.canAccessProfile(user, record.profile)) recipients.add(socketId)
+      }
+    }
+    for (const socketId of recipients) this.nsp.sockets.get(socketId)?.emit('session.notice', payload)
+    this.sessionStateSync.publish(record.session_id)
   }
 
   private needsBackgroundPoll(): boolean {
@@ -2477,7 +2503,7 @@ export class ChatRunSocket {
         .map(message => message.id),
     )
     const taskPlans = getSessionTaskPlans(sid, messagePage.messages, true, state.runId)
-    const resumePage = { ...messagePage, messages: withSessionNotices(sid, withPersonTaskReturns(sid, withRunUsage(sid, messagePage.messages)), true), workspaceRunChanges, taskPlans }
+    const resumePage = { ...messagePage, messages: withSessionNotices(sid, withPersonTaskReturns(sid, withRunUsage(sid, messagePage.messages)), { offset: 0, storedCount: messagePage.messageLoadedCount }), workspaceRunChanges, taskPlans }
     const appMessagePage = options
       ? buildAppResumeMessagePage(resumePage, options.cachedId)
       : null
@@ -2918,8 +2944,19 @@ export class ChatRunSocket {
 
   private runQueuedItem(socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile = 'default') {
     if (next.machineEvent) {
-      const admitted = { ...next, machineEvent: undefined }
-      void this.admitMachineEvent(sessionId, next).then(ok => {
+      const event = next.machineEvent
+      // The run keeps a fence it checks again at its final seams (before the stored machine turn
+      // and immediately before bridge.chat), after every awaited preparation step.
+      const admitted: QueuedRun = {
+        ...next,
+        machineEvent: undefined,
+        machineFence: () => this.machineOwnerVerdict(event),
+        onMachineDispatch: () => { transitionSessionNotification(event.notificationId, 'admitted', 'dispatched') },
+        onMachineDiscard: (reason: string) => {
+          transitionSessionNotification(event.notificationId, 'admitted', reason as SessionNotificationDisposition)
+        },
+      }
+      void this.admitMachineEvent(next).then(ok => {
         if (ok) {
           this.runQueuedItem(socket, sessionId, admitted, fallbackProfile)
           return
@@ -3033,6 +3070,9 @@ export class ChatRunSocket {
       reasoning_effort: next.reasoningEffort,
       background_delegation_id: next.backgroundDelegationId,
       background_claim_id: next.backgroundClaimId,
+      machine_fence: next.machineFence,
+      on_machine_dispatch: next.onMachineDispatch,
+      on_machine_discard: next.onMachineDiscard,
       autonomous: next.autonomous,
     }, runProfile, skipUserMessage, backgroundContinuationContext, next.pushTargetId)
     void execution.catch(error => {
@@ -3463,6 +3503,7 @@ export class ChatRunSocket {
       state.cacheWriteTokens = 0
       state.contextTokens = 0
       state.events = []
+      settleQueuedMachineEvents(state.queue, this.backgroundBridge)
       state.queue = []
       state.queueInsertion = undefined
       state.bridgePendingAssistantContent = undefined

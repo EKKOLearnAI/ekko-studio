@@ -4,6 +4,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { isSqliteAvailable, getDb } from '../infrastructure/database'
+import { initSessionStateTables } from '../infrastructure/database/session-state-schema'
 import { TASK_PLANS_TABLE, SESSION_TASKS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE, SESSION_CATEGORIES_TABLE } from '../infrastructure/database/schemas'
 import { normalizeMessageContentForStorageRole } from './message-content'
 import { copyCompressionSnapshot } from './compression-snapshot'
@@ -520,6 +521,7 @@ export function deleteSession(id: string): boolean {
     db.prepare(`DELETE FROM ${SESSION_TASKS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
+    retireNoticeAttention(db, id)
     const result = db.prepare(`DELETE FROM ${SESSIONS_TABLE} WHERE id = ?`).run(id)
     db.exec('COMMIT')
     return result.changes > 0
@@ -527,6 +529,20 @@ export function deleteSession(id: string): boolean {
     db.exec('ROLLBACK')
     throw error
   }
+}
+
+/** Timestamp of the stored row at a database page offset (`id DESC`), or null past the end. */
+export function getSessionMessageTimestampAtOffset(id: string, offset: number): number | null {
+  if (!isSqliteAvailable() || offset < 0) return null
+  const row = getDb()!.prepare(`SELECT timestamp FROM ${MESSAGES_TABLE} WHERE session_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?`)
+    .get(id, offset) as { timestamp?: number } | undefined
+  return row?.timestamp == null ? null : Number(row.timestamp)
+}
+
+/** A reset or deleted conversation keeps no attention for passive notices of its old generation. */
+function retireNoticeAttention(db: NonNullable<ReturnType<typeof getDb>>, sessionId: string): void {
+  initSessionStateTables(db)
+  db.prepare(`DELETE FROM session_attention_events WHERE session_id = ? AND event_key LIKE 'cron-notice:%'`).run(sessionId)
 }
 
 /**
@@ -551,6 +567,7 @@ export function clearSessionMessages(id: string): number {
   db.exec('BEGIN')
   try {
     const result = db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
+    retireNoticeAttention(db, id)
     db.prepare(`DELETE FROM ${TASK_PLANS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${SESSION_TASKS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)

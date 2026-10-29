@@ -45,7 +45,11 @@ changing Hermes:
    It does this in memory only and changes no environment variable.
 2. **Observation.** Every 15 seconds `ChatRunSocket` asks the profile's bridge worker
    (`studio_cron_observe`) for the terminal executions of bound jobs. The worker reads
-   the native execution ledger. For agent-backed fires it also reads the canonical
+   the native execution ledger (`list_executions`) a bounded page of 50 at a time: the
+   newest page plus one older page per pass, continuing from the job's stored
+   `observe_before` cursor (`before_claimed_at`). A backlog larger than one page is
+   recovered over later passes while new fires keep arriving, and each execution is
+   still accepted once. For agent-backed fires it also reads the canonical
    admission result of `cron_request_id(job, execution_id)`, which holds the exact
    final response. Output files are never correlated by name or time. Only scheduled
    fires are observed. A chat `cronjob_manage run` returns through its own
@@ -54,7 +58,9 @@ changing Hermes:
    active until the result is delivered once.
 3. **Inbox.** Each execution is accepted once under
    `(instance, profile, cron:<job>:<execution>)` in `session_notifications`, with its
-   disposition, payload and attention written in the same statement.
+   disposition, payload, accepting session generation and its durable attention event
+   (`session_attention_events`, key `cron-notice:<id>`) written in one transaction.
+   The existing read cursor (`sessions.read`) clears it; a replay never re-arms it.
    - Replays (restart, a second poll) are rejected.
    - Ownership requires the same profile and an exact match between the binding's
      generation and the session's current generation. A deleted, reset or recreated session,
@@ -65,16 +71,36 @@ changing Hermes:
 
 | Disposition | Meaning | Shown |
 | --- | --- | --- |
-| `notified` | Exact final response from the native receipt | yes |
+| `notified` | Exact final response from the native receipt, or a known failure (`success=false`, with its error) even when the answer is empty or silent | yes |
 | `status_only` | No exact receipt: `no_agent`/script jobs (`output_unavailable_for_runtime`), or an agent-backed fire without a readable receipt | yes, status only |
 | `unknown` | Native execution outcome unknown; Studio never re-runs it | yes |
-| `silent` | Hermes silence sentinel (`[SILENT]`, `NO_REPLY`, …) via Hermes' own matcher | no |
-| `no_content` | Exact receipt with an empty answer | no |
+| `silent` | Successful fire with the Hermes silence sentinel (`[SILENT]`, `NO_REPLY`, …) via Hermes' own matcher | no |
+| `no_content` | Successful exact receipt with an empty answer | no |
 | `owner_missing`, `target_changed` | Fail-closed outcomes | no |
 
 Notices are not rows in `messages`, so they never become model history. Resume and the
 paginated messages API merge them into the timeline as `role: 'system'` items carrying
-`studio_notice`.
+`studio_notice`. They are scoped to the session generation that accepted them: a real
+history clear or a delete and recreate under the same id hides them from the API, the
+next-question context and attention (the attention rows are removed), while ordinary
+turns and partial message deletion keep them. On each page a notice belongs to the
+interval between the next older stored row and the page's newest stored row (equal
+timestamps go to the older page), and `offset` keeps counting stored rows only, so the
+client advances by stored rows and no notice is skipped or repeated across pages.
+
+Live `session.notice` events go only to sockets in the session room (joined after the
+session read check) and to signed-in account sockets whose user can access the owning
+profile (person-private sessions: the session room only). Other users receive neither
+the content nor the metadata.
+
+**Next-question context.** The block for the next intentional question holds at most
+three notices and 8000 characters in total, including framing and metadata. Job names
+and results are quoted as escaped JSON strings and labelled untrusted task data.
+Notices that do not fit are not marked projected and reach a later question.
+
+**`attach_to_session` is not supported.** Studio translates the delivery target to
+`deliver=local`, so a pass-through `attach_to_session` has no effect, and the
+next-question block is not native attachment.
 
 **Limitation.** Full script-only (`no_agent`) output is not delivered. Hermes keeps no
 execution-keyed receipt for it, so Studio shows the execution id and status only.
@@ -95,17 +121,25 @@ completions never reached Studio. Now `poll_background` does the following:
   Such a record is republished once through the registry's publisher, and duplicates
   of the same key are dropped.
 - It reports sessions with live `notify_on_complete` processes or pending watchers
-  (`notify_pending`), which keeps Studio polling.
+  (`notify_pending`), which keeps Studio polling. A watcher whose process has exited and
+  been settled no longer counts, so idle polling stops.
+- Each event carries the owner session generation that was current when the process
+  started (`owner_generation`).
 
 Studio accepts the event once (`admitting`) and queues a typed `machineEvent` run behind
-any busy turn. At the dispatch boundary it re-checks three things:
+any busy turn. Before queueing, after the awaited admission, and again at the final run
+seam (before the user turn is stored and immediately before the model call) it checks:
 
-- the owner session still exists;
-- the user has not pressed Stop;
+- the owner session still exists with the same profile (`owner_missing`);
+- its generation still equals the producer's (`owner_reset`; a missing generation fails
+  closed);
+- the user has not pressed Stop (`owner_stopped`);
 - Hermes has not seen the result consumed by `wait` or `log` since the drain
   (`process_notification_admit`). A plain `poll` is not consumption.
 
-Only then does the run start. It is stored as the model's user turn and displayed as a
+Only then does the run start (`admitted`, then `dispatched` at the model call). Stop,
+history clear and explicit queue cancel settle any queued machine event: the bridge
+claim is completed (never re-queued) and the disposition becomes `cancelled`. It is stored as the model's user turn and displayed as a
 system notice. A crash between admission and dispatch leaves `unknown` and never
 re-dispatches. Notifications that Hermes has not handed off are lost if the bridge
 worker dies (Hermes keeps them in memory only).

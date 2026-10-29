@@ -2346,7 +2346,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       input_tokens: session.input_tokens,
       output_tokens: session.output_tokens,
     },
-    messages: withSessionNotices(ctx.params.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages as any[])), offset === 0),
+    messages: withSessionNotices(ctx.params.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages as any[])), { offset, storedCount: result.messages.length }),
     taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
     total: result.total,

@@ -1,6 +1,8 @@
 import {
   acceptSessionNotification,
   cronJobObservationState,
+  cronJobObserveCursor,
+  setCronJobObserveCursor,
   readCronSessionBindings,
   setCronJobObservationState,
   type CronSessionBinding,
@@ -31,13 +33,13 @@ export interface CronObservedExecution {
 
 export interface CronObservationResponse {
   executions: CronObservedExecution[]
-  jobs: Array<{ job_id: string; state: 'present' | 'missing'; name?: string | null; deliver?: string | null }>
+  jobs: Array<{ job_id: string; state: 'present' | 'missing'; name?: string | null; deliver?: string | null; older_before?: string | null }>
 }
 
 export interface CronObserverDeps {
   namespace: string
   bindingsPath: string
-  observe(profile: string, jobs: Array<{ job_id: string; since: number }>): Promise<CronObservationResponse>
+  observe(profile: string, jobs: Array<{ job_id: string; since: number; before?: string }>): Promise<CronObservationResponse>
   /** Owner session with its current exact generation (`getSessionGeneration`). */
   getSession(sessionId: string): { profile?: string | null; generation?: string | null } | null
   publish(record: SessionNotificationRecord): void
@@ -75,6 +77,20 @@ export function classifyCronExecution(execution: CronObservedExecution): {
   }
   if (execution.receipt === 'exact') {
     const answer = String(execution.answer || '')
+    // A known failure is reported even with no answer text; silence/emptiness only suppress successes.
+    if (execution.success === false) {
+      const truncated = answer.length > CRON_NOTICE_MAX_CHARS
+      return {
+        disposition: 'notified',
+        payload: {
+          ...base,
+          success: false,
+          content: truncated ? answer.slice(0, CRON_NOTICE_MAX_CHARS) : answer,
+          truncated,
+          error: execution.result_error || execution.error || null,
+        },
+      }
+    }
     if (execution.silent) return { disposition: 'silent', payload: base }
     if (!answer.trim()) return { disposition: 'no_content', payload: { ...base, success: execution.success === true } }
     const truncated = answer.length > CRON_NOTICE_MAX_CHARS
@@ -111,10 +127,10 @@ export async function observeCronBindings(deps: CronObserverDeps): Promise<Sessi
   }
   const accepted: SessionNotificationRecord[] = []
   for (const [profile, profileBindings] of byProfile) {
-    const response = await deps.observe(profile, profileBindings.map(binding => ({
-      job_id: binding.job_id,
-      since: binding.bound_at - 1,
-    })))
+    const response = await deps.observe(profile, profileBindings.map(binding => {
+      const before = cronJobObserveCursor(deps.namespace, profile, binding.job_id)
+      return { job_id: binding.job_id, since: binding.bound_at - 1, ...(before ? { before } : {}) }
+    }))
     const byJob = new Map(profileBindings.map(binding => [binding.job_id, binding]))
     const changedTargets = new Set<string>()
     for (const job of response.jobs || []) {
@@ -124,12 +140,14 @@ export async function observeCronBindings(deps: CronObserverDeps): Promise<Sessi
         setCronJobObservationState(deps.namespace, profile, job.job_id, 'stopped')
         continue
       }
+      // Older retained executions still to recover; acceptance below is idempotent per execution.
+      setCronJobObserveCursor(deps.namespace, profile, job.job_id, job.older_before ?? null)
       // An out-of-band edit to an explicit target ends Studio observation: no additive mirror.
       if ((job.deliver || 'local') !== (binding.stored_deliver || 'local')) {
         changedTargets.add(job.job_id)
         acceptSessionNotification({
           namespace: deps.namespace, profile, producerKey: `cron-target:${job.job_id}`,
-          sessionId: binding.session_id, kind: 'cron', disposition: 'target_changed',
+          sessionId: binding.session_id, sessionGeneration: null, kind: 'cron', disposition: 'target_changed',
           payload: { job_id: job.job_id, bound_deliver: binding.stored_deliver, current_deliver: job.deliver ?? null },
           attention: false,
         })
@@ -148,6 +166,7 @@ export async function observeCronBindings(deps: CronObserverDeps): Promise<Sessi
         profile,
         producerKey: `cron:${execution.job_id}:${execution.execution_id}`,
         sessionId: binding.session_id,
+        sessionGeneration: current ? binding.session_generation : null,
         kind: 'cron',
         disposition: classified.disposition,
         payload: classified.payload,

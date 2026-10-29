@@ -67,11 +67,18 @@ export interface QueuedRun {
   machineEvent?: {
     kind: 'process_completion'
     notificationId: number
+    sessionId: string
     producerKey: string
     claimId: string
     profile: string
+    /** Owner generation declared for the turn that started the process. */
+    ownerGeneration: string | null
     processId: string
   }
+  /** Admitted machine event: owner fence re-checked at the final run seams. Internal only. */
+  machineFence?: () => string | null
+  onMachineDispatch?: () => void
+  onMachineDiscard?: (reason: string) => void
   /** Internal admission check, never serialized or supplied by the client. */
   authorize?: () => Promise<void>
   /** Captured at admission, independent of whichever socket drains the queue. */

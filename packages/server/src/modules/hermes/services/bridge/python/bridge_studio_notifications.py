@@ -32,6 +32,7 @@ CRON_TOOL_NAME = "cronjob_manage"
 _WRAPPER_MARKER = "_studio_session_binding_wrapper"
 _PAUSED_SENTENCE = "Created PAUSED — resume to schedule, or explicitly run now."
 _TERMINAL_EXECUTION_STATES = {"completed", "failed", "unknown"}
+_OBSERVE_PAGE = 50
 _install_lock = threading.Lock()
 
 
@@ -67,22 +68,36 @@ _SCHEMA = """CREATE TABLE IF NOT EXISTS cron_session_bindings (
   PRIMARY KEY (instance_id, profile, job_id)
 )"""
 
-# Owner session generations declared by Studio with each bridge turn (session id -> generation).
-_session_generations: dict[str, str] = {}
+# Owner session generations declared by Studio with each bridge turn, in declaration order
+# (session id -> [(declared_at, generation or None)]). A producer started during a turn belongs to
+# the generation declared for that turn, even if a later turn declares a new one.
+_session_generations: dict[str, list[tuple[float, str | None]]] = {}
 _generation_lock = threading.Lock()
+_GENERATION_HISTORY_MAX = 32
 
 
 def set_session_generation(session_id: str, generation: str | None) -> None:
     with _generation_lock:
-        if generation:
-            _session_generations[session_id] = str(generation)
-        else:
-            _session_generations.pop(session_id, None)
+        history = _session_generations.setdefault(session_id, [])
+        history.append((time.time(), str(generation) if generation else None))
+        del history[:-_GENERATION_HISTORY_MAX]
 
 
 def session_generation(session_id: str) -> str | None:
     with _generation_lock:
-        return _session_generations.get(session_id)
+        history = _session_generations.get(session_id) or []
+        return history[-1][1] if history else None
+
+
+def generation_at(session_id: str, started_at: Any) -> str | None:
+    """The owner generation declared most recently at or before ``started_at``."""
+    try:
+        moment = float(started_at)
+    except (TypeError, ValueError):
+        return None
+    with _generation_lock:
+        declared = [generation for at, generation in _session_generations.get(session_id) or [] if at <= moment]
+    return declared[-1] if declared else None
 
 
 def _connect(path: str) -> sqlite3.Connection:
@@ -364,7 +379,26 @@ def observe_cron_jobs(jobs: list[dict[str, Any]], session_db: Any) -> dict[str, 
             "failure_deliver": job.get("failure_deliver"),
             "no_agent": bool(job.get("no_agent")),
         })
-        for row in list_executions(job_id=job_id, limit=50):
+        page = list_executions(job_id=job_id, limit=_OBSERVE_PAGE)
+        rows = list(page)
+        before = str((item or {}).get("before") or "").strip() or None
+        # Bounded progress through older retained executions: at most one older page per pass,
+        # continuing from the cursor Studio stored on the previous pass.
+        if before:
+            older = list_executions(job_id=job_id, limit=_OBSERVE_PAGE, before_claimed_at=before)
+            rows.extend(older)
+            tail = older
+        else:
+            tail = page
+        oldest = _iso_seconds(tail[-1].get("claimed_at")) if tail else None
+        states[-1]["older_before"] = (
+            str(tail[-1].get("claimed_at")) if len(tail) == _OBSERVE_PAGE and oldest is not None and oldest >= since
+            else None)
+        seen_ids: set[str] = set()
+        for row in rows:
+            if str(row.get("id") or "") in seen_ids:
+                continue
+            seen_ids.add(str(row.get("id") or ""))
             status = str(row.get("status") or "")
             if status not in _TERMINAL_EXECUTION_STATES:
                 continue
@@ -491,7 +525,11 @@ def notify_pending_session_ids(loaded_session_ids: set[str]) -> list[str]:
                 pending.add(session_id)
     for watcher in list(getattr(process_registry, "pending_watchers", []) or []):
         key = str((watcher or {}).get("session_key") or "")
-        if key in loaded_session_ids and (watcher or {}).get("notify_on_complete"):
+        if key not in loaded_session_ids or not (watcher or {}).get("notify_on_complete"):
+            continue
+        # The bridge never drains Gateway watcher descriptors; only a still-running process is pending.
+        proc = process_registry.get(str((watcher or {}).get("session_id") or ""))
+        if proc is not None and not getattr(proc, "exited", False):
             pending.add(key)
     return sorted(pending)
 

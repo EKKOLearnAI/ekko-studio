@@ -1,3 +1,4 @@
+import { storedMessageCount } from '@/shared/session-notices'
 import { deploymentUrl } from '@/utils/deployment-url'
 import { chatSessionAgentAvatar, PERSON_AVATAR } from '@/utils/chat-agent-avatar'
 import { deleteSessionMessages, type MessageDeletionResult } from '@/api/studio/sessions'
@@ -2052,7 +2053,7 @@ function createChatState(scopedSessionId?: string) {
       target.messagesLoaded = true
       restorePersistedSubagentStreams(sid)
       setWorkspaceRunChanges(sid, detail.workspaceRunChanges || [])
-      target.loadedMessageCount = detail.messages.length
+      target.loadedMessageCount = storedMessageCount(detail.messages)
       target.messageTotal = detail.total
       target.messageCount = detail.total
       target.hasMoreBefore = detail.hasMore
@@ -2381,7 +2382,7 @@ function createChatState(scopedSessionId?: string) {
       target.messages = mergeTaskPlanMessages([...olderMessages, ...target.messages], page.taskPlans || [], sessionId)
       restorePersistedSubagentStreams(sessionId)
       mergeWorkspaceRunChanges(sessionId, page.workspaceRunChanges || [])
-      target.loadedMessageCount = offset + page.messages.length
+      target.loadedMessageCount = offset + storedMessageCount(page.messages)
       target.messageTotal = page.total
       target.messageCount = page.total
       target.hasMoreBefore = page.hasMore

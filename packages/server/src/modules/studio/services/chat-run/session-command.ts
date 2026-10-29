@@ -5,6 +5,7 @@ import { logger } from '../../public/logging'
 import type { PrimaryAgentBridgeClient as AgentBridgeClient } from '../../public/chat-agent-runtime'
 import { readConfigYamlForProfile } from '../../public/profile-config'
 import { flushBridgePendingToDb } from './bridge-message'
+import { settleQueuedMachineEvents } from '../session-notifications/machine-events'
 import { buildDbSnapshotAwareHistory, forceCompressBridgeHistory, getOrCreateSession, replaceState } from './compression'
 import { handleAbort } from './abort'
 import { calcAndUpdateUsage, contextTokensWithCachedOverhead, estimateUsageTokensFromMessages, updateMessageContextTokenUsage } from './usage'
@@ -968,6 +969,7 @@ export async function handleSessionCommand(
         state.responseRun = undefined
         state.activeRunMarker = undefined
         state.events = []
+        settleQueuedMachineEvents(state.queue, ctx.bridge)
         state.queue = []
         state.bridgePendingAssistantContent = undefined
         state.bridgePendingReasoningContent = undefined

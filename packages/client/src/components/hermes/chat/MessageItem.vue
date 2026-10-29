@@ -78,6 +78,8 @@ const studioNoticeDetail = computed(() => {
   if (notice.reason === "output_unavailable_for_runtime") return t("chat.sessionNotice.outputUnavailable");
   if (notice.reason === "receipt_unavailable") return t("chat.sessionNotice.receiptUnavailable");
   if (notice.truncated) return t("chat.sessionNotice.truncated");
+  // A known failure without result text shows its native error.
+  if (notice.success === false && notice.error && !props.message.content) return notice.error;
   return "";
 });
 const toast = useMessage();

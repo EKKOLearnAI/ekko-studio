@@ -1250,6 +1250,9 @@ class AgentPool:
                         "session_id": str(event.get("session_key") or ""),
                         "process_id": str(event.get("session_id") or ""),
                         "started_at": event.get("started_at"),
+                        # Owner generation declared for the turn that started the process.
+                        "owner_generation": studio.generation_at(
+                            str(event.get("session_key") or ""), event.get("started_at")),
                         "exit_code": exit_code,
                         "status": "succeeded" if exit_code == 0 else "failed",
                         "message": text,
