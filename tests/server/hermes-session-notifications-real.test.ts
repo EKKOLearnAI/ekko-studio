@@ -23,6 +23,9 @@ async function runCase(name: string): Promise<any> {
       HERMES_HOME: join(root, 'hermes'),
       HERMES_AGENT_ROOT: agentRoot,
       PYTHONDONTWRITEBYTECODE: '1',
+      // Reuse the checkout's read-only environment: no per-data-root dependency sync or relaunch.
+      HERMES_DISABLE_LAZY_INSTALLS: '1',
+      ...(process.env.HERMES_REAL_EXTRA_PYTHONPATH ? { PYTHONPATH: process.env.HERMES_REAL_EXTRA_PYTHONPATH } : {}),
       PYTHONPYCACHEPREFIX: join(root, 'pycache'),
       HERMES_AGENT_BRIDGE_STUDIO_NOTIFICATIONS: JSON.stringify({ bindings_db: join(root, 'studio', 'cron-bindings.db'), instance_id: 'inst-1' }),
     }
@@ -48,12 +51,13 @@ describe.skipIf(!enabled)('real Hermes: cron session binding', { timeout: 180_00
     expect(result.created).toMatchObject({ success: true, deliver: 'local', studio_session_delivery: 'bound' })
     expect(result.created.message).not.toContain('Created PAUSED')
     expect(result.job).toMatchObject({ state: 'scheduled', enabled: true, deliver: 'local', origin: null })
-    expect(result.bindings).toEqual([['inst-1', 'default', result.created.job_id, 'sess-A', 'local', 0]])
+    expect(result.bindings).toEqual([['inst-1', 'default', result.created.job_id, 'sess-A', 'local', 0, 'gen-A1']])
   })
 
   it('translates explicit origin to the exact Studio session, never a home-channel fallback', async () => {
     const result = await runCase('cron_origin')
-    expect(result.job).toMatchObject({ state: 'scheduled', deliver: 'local', failure_deliver: 'local', origin: null })
+    // failure_deliver is the user's explicit choice: preserved byte-for-byte, never rewritten by Studio.
+    expect(result.job).toMatchObject({ state: 'scheduled', deliver: 'local', failure_deliver: 'origin', origin: null })
     expect(result.bindings).toHaveLength(1)
   })
 
@@ -62,6 +66,28 @@ describe.skipIf(!enabled)('real Hermes: cron session binding', { timeout: 180_00
     expect(result.local).toMatchObject({ deliver: 'local', state: 'scheduled' })
     expect(result.slack).toMatchObject({ deliver: 'slack:C123', failure_deliver: 'local' })
     expect(result.bindings).toEqual([])
+  })
+
+  it('preserves an explicit failure_deliver on a bound create', async () => {
+    const result = await runCase('cron_failure_deliver_explicit')
+    expect(result.job).toMatchObject({ deliver: 'local', failure_deliver: 'slack:C9', state: 'scheduled' })
+    expect(result.bindings).toHaveLength(1)
+  })
+
+  it('refuses to bind without the owner session generation and leaves the job paused', async () => {
+    const result = await runCase('cron_missing_generation')
+    expect(result.created.success).toBe(false)
+    expect(result.created.error).toContain('left paused')
+    expect(result.job).toMatchObject({ state: 'paused', enabled: false })
+    expect(result.bindings).toEqual([])
+  })
+
+  it('offers cronjob_manage to a freshly built Studio bridge agent without a global exec-ask override', async () => {
+    const result = await runCase('fresh_agent_tools')
+    expect(result.terminal_tool).toBe(true)
+    expect(result.cron_tool).toBe(true)
+    expect(result.cron_at_dispatch).toBe(true)
+    expect(result.exec_ask_after).toBeNull()
   })
 
   it('keeps a requested paused job paused while binding it', async () => {

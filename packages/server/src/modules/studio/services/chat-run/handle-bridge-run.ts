@@ -11,7 +11,7 @@ import { markSessionNotificationsProjected } from '../../repositories/session-no
 
 import type { Server, Socket } from 'socket.io'
 import { getSystemPrompt } from '../../public/runs/prompt'
-import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
+import { getFirstSessionMessageByRole, getSession, getSessionGeneration, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
 import { recordBridgeModelUsage } from '../usage/bridge-model-usage'
 import type {
@@ -77,10 +77,22 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function parseBackgroundDelegation(
+export function parseBackgroundDelegation(
   toolName: string,
   output: string,
 ): { delegationId: string; status: string; payload: Record<string, unknown> } | null {
+  if (toolName === 'cronjob_manage') {
+    // A chat `run` dispatched in the background returns through Hermes async delegation.
+    try {
+      const payload = JSON.parse(output) as Record<string, unknown>
+      const job = payload.job && typeof payload.job === 'object' ? payload.job as Record<string, unknown> : null
+      const delegationId = stringValue(job?.delegation_id)
+      if (!delegationId || job?.execution_mode !== 'background') return null
+      return { delegationId, status: 'dispatched', payload }
+    } catch {
+      return null
+    }
+  }
   if (toolName !== 'delegate_task') return null
   try {
     const payload = JSON.parse(output) as Record<string, unknown>
@@ -831,6 +843,7 @@ export async function handleBridgeRun(
       hasInstructions: Boolean(fullInstructions),
       multimodalInput: isContentBlockArray(input),
     }, '[chat-run-socket] starting CLI bridge run')
+    const sessionGeneration = getSessionGeneration(session_id)
     const started = await bridge.chat(
       session_id,
       bridgeInput as AgentBridgeMessage,
@@ -845,6 +858,8 @@ export async function handleBridgeRun(
         // Creation fallback when this chat is the first operation for the
         // cached AgentSession (for example if context estimation was skipped).
         background_delegation_enabled: backgroundDelegationEnabled,
+        // Exact owner generation: cron jobs this turn creates are bound to it.
+        ...(sessionGeneration ? { studio_session_generation: sessionGeneration } : {}),
         // Local patch (reasoning-effort): per-session reasoning effort override.
         ...(runMetadata.originContext.reasoningEffort
           ? { reasoning_effort: runMetadata.originContext.reasoningEffort }

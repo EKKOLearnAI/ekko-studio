@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, createWriteStream, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as delay } from 'node:timers/promises'
 import { randomUUID } from 'node:crypto'
@@ -22,7 +23,8 @@ if (!agentRoot) throw new Error('HERMES_AGENT_ROOT is required')
 const python = join(agentRoot, 'venv', 'bin', 'python')
 const hermesBin = join(agentRoot, 'venv', 'bin', 'hermes')
 const evidenceDir = process.env.E2E_EVIDENCE_DIR || ''
-const root = mkdtempSync('/tmp/esn-')
+// Disposable root under the configured TMPDIR (or E2E_TMP_ROOT); never a shared system location.
+const root = mkdtempSync(join(process.env.E2E_TMP_ROOT || tmpdir(), 'esn-'))
 const dirs = Object.fromEntries(['home', 'hermes', 'studio', 'tmp', 'pyc', 'logs', 'uploads', 'bin'].map(name => [name, join(root, name)]))
 for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true })
 // The only `hermes` on PATH is the pinned checkout's entry point; no other installation is discoverable.
@@ -57,6 +59,9 @@ function decide(body) {
   const tool = (name, args) => (offered.has(name) || !offered.has('tool_call')
     ? { tool: { id: `call_${++toolCallSeq}`, name, args } }
     : { tool: { id: `call_${++toolCallSeq}`, name: 'tool_call', args: { calls: [{ name, arguments: args }] } } })
+  // A chat `cronjob_manage run` result re-enters as an async-delegation completion turn; it quotes
+  // the job prompt, so it must be recognized before the cron run's own prompt.
+  if (userText.startsWith('[ASYNC DELEGATION COMPLETE')) return { text: 'DELEGATION_ACK' }
   // The cron run's own user turn carries the job prompt; chat history only quotes it in tool arguments.
   if (userText.includes('E2E_CRON_PROMPT')) return { text: CRON_ANSWER }
   // Auxiliary calls (titles, summaries) offer no tools.
@@ -75,6 +80,14 @@ function decide(body) {
     return { text: 'TOOL_DONE' }
   }
   const in1m = new Date(Date.now() + 75_000).toISOString()
+  if (userText.includes('E2E_SCHEDULE_SCRIPT')) {
+    return tool('cronjob_manage', { action: 'create', name: 'e2e-script', no_agent: true, script: 'e2e_status.py', schedule: in1m })
+  }
+  if (userText.includes('E2E_SCHEDULE_MANUAL')) {
+    return tool('cronjob_manage', { action: 'create', name: 'e2e-manual', prompt: 'E2E_CRON_PROMPT manual run', schedule: 'every 1d' })
+  }
+  const runNow = /E2E_RUN_NOW job=(\S+)/.exec(userText)
+  if (runNow) return tool('cronjob_manage', { action: 'run', job_id: runNow[1] })
   if (userText.includes('E2E_SCHEDULE_SLACK')) {
     return tool('cronjob_manage', { action: 'create', name: 'e2e-slack', prompt: 'E2E_CRON_PROMPT slack', schedule: in1m, deliver: 'slack:C123' })
   }
@@ -168,6 +181,8 @@ async function stopChild(entry) {
 }
 
 let port = 0
+let bridgePort = 0
+const workerPortBase = 30000 + Math.floor(Math.random() * 8000)
 let studio = null
 let token = ''
 const studioEnv = () => baseEnv({
@@ -179,12 +194,12 @@ const studioEnv = () => baseEnv({
   HERMES_AGENT_ROOT: agentRoot,
   HERMES_BIN: join(dirs.bin, 'hermes'),
   HERMES_AGENT_BRIDGE_PYTHON: python,
-  HERMES_AGENT_BRIDGE_ENDPOINT: `ipc://${join(root, 'b.sock')}`,
+  // TCP: Unix socket paths under a deep temp root exceed sun_path. Private port range for this run.
+  HERMES_AGENT_BRIDGE_ENDPOINT: `tcp://127.0.0.1:${bridgePort}`,
+  HERMES_AGENT_BRIDGE_WORKER_TRANSPORT: 'tcp',
+  HERMES_AGENT_BRIDGE_WORKER_PORT_BASE: String(workerPortBase),
   HERMES_WEB_UI_DISABLE_GATEWAY_AUTOSTART: '1',
   HERMES_WEB_UI_MANAGED_GATEWAY: '0',
-  // Hermes exposes cronjob_manage only when HERMES_EXEC_ASK/INTERACTIVE/GATEWAY_SESSION is set when the
-  // agent is built; the bridge builds it before entering its exec-ask scope (pre-existing, see report).
-  HERMES_EXEC_ASK: '1',
 })
 // Studio probes the Hermes CLI with a 5s timeout; re-warm that exact import right before each start.
 const VERSION_PROBE = "import importlib.util, hermes_cli\nassert importlib.util.find_spec('hermes_cli.main')\nfrom hermes_cli.version_info import get_version_info\nprint(get_version_info().display_version)"
@@ -269,7 +284,7 @@ function bindings() {
   const file = join(dirs.studio, 'session-notifications', 'cron-bindings.db')
   if (!existsSync(file)) return []
   const db = new DatabaseSync(file, { readOnly: true })
-  try { return db.prepare('SELECT job_id, session_id, stored_deliver FROM cron_session_bindings').all() } finally { db.close() }
+  try { return db.prepare('SELECT job_id, session_id, stored_deliver, session_generation FROM cron_session_bindings').all() } finally { db.close() }
 }
 function studioRows(sql, ...params) {
   const db = new DatabaseSync(join(dirs.studio, 'hermes-web-ui.db'), { readOnly: true })
@@ -290,10 +305,18 @@ async function main() {
     '  enabled: false',
     '',
   ].join('\n'))
-  const probe = createServer()
-  await new Promise(done => probe.listen(0, '127.0.0.1', done))
-  port = probe.address().port
-  await new Promise(done => probe.close(done))
+  const freePort = async () => {
+    const probe = createServer()
+    await new Promise(done => probe.listen(0, '127.0.0.1', done))
+    const value = probe.address().port
+    await new Promise(done => probe.close(done))
+    return value
+  }
+  port = await freePort()
+  bridgePort = await freePort()
+  // A script-only (no_agent) job runs this file; Studio can only report its status.
+  mkdirSync(join(dirs.hermes, 'scripts'), { recursive: true })
+  writeFileSync(join(dirs.hermes, 'scripts', 'e2e_status.py'), 'print("SCRIPT_RAW_OUTPUT")\n')
 
   await new Promise((done, fail) => {
     const warm = spawn(python, ['-c', 'import sys; sys.path.insert(0, sys.argv[1]); import hermes_cli.main, run_agent, tools.cronjob_tools, tools.terminal_tool, cron.scheduler', agentRoot],
@@ -318,8 +341,12 @@ async function main() {
   await runTurn(owner, ownerEvents, A, 'E2E_SCHEDULE please brief me')
   const created = jobs().find(job => job.name === 'e2e-brief')
   const bound = bindings().find(row => row.job_id === created?.id)
-  record('chat create binds exact session before activation', Boolean(created && bound?.session_id === A && created.deliver === 'local' && created.enabled !== false && !created.origin),
+  record('normal chat create (no exec-ask override) binds exact session and generation before activation',
+    Boolean(created && bound?.session_id === A && bound?.session_generation && created.deliver === 'local' && created.enabled !== false && !created.origin),
     { deliver: created?.deliver, enabled: created?.enabled, bound })
+  await runTurn(owner, ownerEvents, A, 'E2E_SCHEDULE_SCRIPT run the status script')
+  const scriptJob = jobs().find(job => job.name === 'e2e-script')
+  record('script-only job created and bound', Boolean(scriptJob && scriptJob.no_agent && bindings().some(row => row.job_id === scriptJob.id)))
   // Explicit target untouched and unbound.
   await runTurn(owner, ownerEvents, A, 'E2E_SCHEDULE_SLACK post it')
   const slack = jobs().find(job => job.name === 'e2e-slack')
@@ -333,12 +360,19 @@ async function main() {
   await waitFor(() => focus.connected, 20_000, 'focus socket')
   focus.emit('resume', { session_id: B, profile: 'default' })
   const beforeFire = modelRequests.length
-  const notice = await waitFor(() => focusEvents.find(e => e.event === 'session.notice' && e.payload?.session_id === A), 330_000, 'cron notice for A')
+  const noticeFor = name => focusEvents.find(e => e.event === 'session.notice' && e.payload?.session_id === A
+    && e.payload?.message?.studio_notice?.job_name === name)
+  const notice = await waitFor(() => noticeFor('e2e-brief'), 330_000, 'cron notice for A')
   const noticeContent = notice.payload.message?.content
   record('scheduled agent-backed fire delivers exact native result to A while B is focused',
     noticeContent === CRON_ANSWER && notice.payload.message?.studio_notice?.execution_id && notice.payload.attention === true,
     { content: noticeContent, execution_id: notice.payload.message?.studio_notice?.execution_id })
   record('no notice addressed to B', !focusEvents.some(e => e.event === 'session.notice' && e.payload?.session_id === B))
+  const scriptNotice = await waitFor(() => noticeFor('e2e-script'), 180_000, 'script notice for A')
+  const scriptView = scriptNotice.payload.message?.studio_notice || {}
+  record('script-only fire is a truthful status-only notice (no output claimed)', scriptView.disposition === 'status_only'
+    && scriptView.reason === 'output_unavailable_for_runtime' && !String(scriptNotice.payload.message?.content || '').includes('SCRIPT_RAW_OUTPUT'),
+    { disposition: scriptView.disposition, reason: scriptView.reason, execution_id: scriptView.execution_id })
   await delay(3000)
   const afterFire = modelRequests.slice(beforeFire)
   record('passive cron result starts no LLM turn in A', afterFire.every(r => textOf(r.messages.map(m => textOf(m.content)).join('\n')).includes('E2E_CRON_PROMPT')),
@@ -346,7 +380,7 @@ async function main() {
   record('no run started for A by the cron notice', !focusEvents.some(e => e.event === 'run.started' && e.payload?.session_id === A))
 
   const pageA = await api(`/api/studio/sessions/conversations/${A}/messages/paginated?offset=0&limit=150`)
-  const listed = (pageA.json?.messages || []).filter(m => m.studio_notice)
+  const listed = (pageA.json?.messages || []).filter(m => m.studio_notice?.job_name === 'e2e-brief')
   const pageB = await api(`/api/studio/sessions/conversations/${B}/messages/paginated?offset=0&limit=150`)
   record('notice durable in A history and absent from B', listed.length === 1 && listed[0].content === CRON_ANSWER
     && !(pageB.json?.messages || []).some(m => m.studio_notice), { status: pageA.status, a: listed.length })
@@ -361,7 +395,7 @@ async function main() {
   const afterRestart = await api(`/api/studio/sessions/conversations/${A}/messages/paginated?offset=0&limit=150`)
   const notices = studioRows("SELECT count(*) AS n FROM session_notifications WHERE session_id=? AND kind='cron' AND disposition='notified'", A)[0].n
   record('restart keeps exactly one durable notice (duplicate replay rejected)', notices === 1
-    && (afterRestart.json?.messages || []).filter(m => m.studio_notice).length === 1, { notices })
+    && (afterRestart.json?.messages || []).filter(m => m.studio_notice?.job_name === 'e2e-brief').length === 1, { notices })
 
   const actor = connect()
   const actorEvents = collect(actor)
@@ -409,6 +443,22 @@ async function main() {
     !machineTurns().slice(waitStart).some(r => JSON.stringify(r.messages).includes('waited')))
   const processRows = studioRows("SELECT disposition, count(*) AS n FROM session_notifications WHERE kind='process_completion' GROUP BY disposition")
   record('process completion dispositions recorded', processRows.some(row => row.disposition === 'dispatched'), { processRows })
+
+  // Chat-manual `cronjob_manage run`: its own async-delegation result is the only delivery.
+  await runTurn(actor, actorEvents, A, 'E2E_SCHEDULE_MANUAL every day')
+  const manualJob = jobs().find(job => job.name === 'e2e-manual')
+  const delegationTurns = () => modelRequests.filter(r => {
+    const lastUser = [...r.messages].reverse().find(m => m.role === 'user')
+    return r.decision?.text === 'DELEGATION_ACK' && textOf(lastUser?.content).startsWith('[ASYNC DELEGATION COMPLETE')
+  })
+  const manualNoticeEvents = () => actorEvents.filter(e => e.event === 'session.notice' && e.payload?.message?.studio_notice?.job_name === 'e2e-manual')
+  await runTurn(actor, actorEvents, A, `E2E_RUN_NOW job=${manualJob?.id}`)
+  await waitFor(() => delegationTurns().length >= 1, 240_000, 'manual run delegation result')
+  await delay(40_000)
+  const manualRows = studioRows("SELECT disposition FROM session_notifications WHERE producer_key LIKE ?", `cron:${manualJob?.id}:%`)
+  record('chat-manual run returns exactly once through its async-delegation turn, no cron notice duplicate',
+    Boolean(manualJob) && delegationTurns().length === 1 && manualRows.length === 0 && manualNoticeEvents().length === 0,
+    { delegation_turns: delegationTurns().length, notice_rows: manualRows.length })
   actor.disconnect()
 }
 

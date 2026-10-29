@@ -92,6 +92,8 @@ class BridgeServer:
                 source,
                 reasoning_effort,
                 background_delegation_enabled,
+                **({"studio_session_generation": str(req["studio_session_generation"])}
+                   if req.get("studio_session_generation") else {}),
             )
             if req.get("wait"):
                 timeout = float(req.get("timeout", 0) or 0)

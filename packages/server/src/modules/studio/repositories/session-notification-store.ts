@@ -171,6 +171,8 @@ export interface CronSessionBinding {
   requested_deliver: string | null
   stored_deliver: string | null
   requested_paused: number
+  /** Owner session generation at binding time; null for bindings that predate it (never owned). */
+  session_generation: string | null
 }
 
 /** Bindings written by the Agent Bridge cronjob middleware for this Studio instance. */
@@ -181,7 +183,12 @@ export function readCronSessionBindings(path: string, instanceId: string): CronS
     db.exec('PRAGMA busy_timeout=2000')
     const rows = db.prepare('SELECT * FROM cron_session_bindings WHERE instance_id=? ORDER BY bound_at')
       .all(instanceId) as unknown as CronSessionBinding[]
-    return rows.map(row => ({ ...row, bound_at: Number(row.bound_at), requested_paused: Number(row.requested_paused || 0) }))
+    return rows.map(row => ({
+      ...row,
+      bound_at: Number(row.bound_at),
+      requested_paused: Number(row.requested_paused || 0),
+      session_generation: row.session_generation ? String(row.session_generation) : null,
+    }))
   } catch (err: any) {
     if (/no such table/i.test(String(err?.message || ''))) return []
     throw err

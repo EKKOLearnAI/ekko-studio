@@ -63,8 +63,26 @@ _SCHEMA = """CREATE TABLE IF NOT EXISTS cron_session_bindings (
   requested_deliver TEXT,
   stored_deliver TEXT,
   requested_paused INTEGER NOT NULL DEFAULT 0,
+  session_generation TEXT,
   PRIMARY KEY (instance_id, profile, job_id)
 )"""
+
+# Owner session generations declared by Studio with each bridge turn (session id -> generation).
+_session_generations: dict[str, str] = {}
+_generation_lock = threading.Lock()
+
+
+def set_session_generation(session_id: str, generation: str | None) -> None:
+    with _generation_lock:
+        if generation:
+            _session_generations[session_id] = str(generation)
+        else:
+            _session_generations.pop(session_id, None)
+
+
+def session_generation(session_id: str) -> str | None:
+    with _generation_lock:
+        return _session_generations.get(session_id)
 
 
 def _connect(path: str) -> sqlite3.Connection:
@@ -73,20 +91,27 @@ def _connect(path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=FULL")
     conn.execute(_SCHEMA)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(cron_session_bindings)")}
+    if "session_generation" not in columns:
+        conn.execute("ALTER TABLE cron_session_bindings ADD COLUMN session_generation TEXT")
     return conn
 
 
 def write_binding(config: dict[str, str], *, profile: str, job_id: str, session_id: str,
-                  requested_deliver: str | None, stored_deliver: str | None, requested_paused: bool) -> float:
+                  requested_deliver: str | None, stored_deliver: str | None, requested_paused: bool,
+                  generation: str | None) -> float:
+    if not generation:
+        raise RuntimeError("the owner session generation is unknown for this turn")
     bound_at = time.time()
     conn = _connect(config["bindings_db"])
     try:
         with conn:
             conn.execute(
                 "INSERT OR REPLACE INTO cron_session_bindings (instance_id, profile, job_id, session_id, bound_at,"
-                " requested_deliver, stored_deliver, requested_paused) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " requested_deliver, stored_deliver, requested_paused, session_generation)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (config["instance_id"], profile, job_id, session_id, bound_at, requested_deliver,
-                 stored_deliver, 1 if requested_paused else 0),
+                 stored_deliver, 1 if requested_paused else 0, generation),
             )
     finally:
         conn.close()
@@ -116,14 +141,6 @@ def translate_deliver(value: Any) -> tuple[bool, str | None]:
     if len(remaining) == len(targets):
         return False, None
     return True, ",".join(dict.fromkeys(remaining)) or "local"
-
-
-def _translate_failure_deliver(value: Any) -> Any:
-    targets = _clean_targets(value)
-    if not targets or all(target.lower() != "origin" for target in targets):
-        return value
-    remaining = [target for target in targets if target.lower() != "origin"]
-    return ",".join(dict.fromkeys(remaining)) or "local"
 
 
 def _studio_session_context() -> dict[str, str] | None:
@@ -170,9 +187,8 @@ def _bound_create(original: Callable[..., Any], config: dict[str, str], context:
     if not binds:
         return original(args, **kwargs)
     requested_paused = bool(args.get("paused", False))
+    # failure_deliver is the user's explicit choice and is passed to the native tool unchanged.
     create_args = dict(args, paused=True, deliver=native_deliver)
-    if args.get("failure_deliver") is not None:
-        create_args["failure_deliver"] = _translate_failure_deliver(args.get("failure_deliver"))
     created_raw = original(create_args, **kwargs)
     created = _loads(created_raw)
     if not created or created.get("success") is not True or not created.get("job_id"):
@@ -181,7 +197,8 @@ def _bound_create(original: Callable[..., Any], config: dict[str, str], context:
     try:
         write_binding(config, profile=context["profile"], job_id=job_id, session_id=context["session_id"],
                       requested_deliver=None if args.get("deliver") is None else ",".join(_clean_targets(args.get("deliver"))),
-                      stored_deliver=str(created.get("deliver") or native_deliver), requested_paused=requested_paused)
+                      stored_deliver=str(created.get("deliver") or native_deliver), requested_paused=requested_paused,
+                      generation=session_generation(context["session_id"]))
     except Exception as exc:
         created["success"] = False
         created["error"] = (f"Studio session binding failed; job {job_id} was left paused and will not run "
@@ -241,6 +258,29 @@ def install_cron_binding_middleware() -> bool:
         setattr(studio_cronjob_handler, _WRAPPER_MARKER, True)
         studio_cronjob_handler.__wrapped__ = original  # type: ignore[attr-defined]
         entry.handler = studio_cronjob_handler
+
+        # Hermes offers cronjob_manage only to interactive surfaces (its check reads HERMES_EXEC_ASK et al.)
+        # and caches both the verdict and the resulting tool definitions process-wide, so a resolution made
+        # outside a Studio run (e.g. its post-turn background review) would hide the tool from every later
+        # session. A Studio bridge worker serves the interactive Web UI: make that a property of the
+        # worker, then drop availability resolved before this point.
+        original_check = entry.check_fn
+
+        def studio_cronjob_available() -> bool:
+            return True
+
+        studio_cronjob_available.__wrapped__ = original_check  # type: ignore[attr-defined]
+        entry.check_fn = studio_cronjob_available
+        try:
+            from tools.registry import invalidate_check_fn_cache
+            invalidate_check_fn_cache()
+        except Exception:
+            pass
+        try:
+            import model_tools
+            model_tools._clear_tool_defs_cache()
+        except Exception:
+            pass
         return True
 
 

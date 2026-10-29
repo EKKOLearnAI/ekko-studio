@@ -12,14 +12,15 @@ describe('cron session notifications', () => {
   let home: string
   let bindingsPath: string
 
-  async function writeBinding(row: { job_id: string; session_id: string; bound_at: number; profile?: string; stored_deliver?: string; instance_id?: string }) {
+  async function writeBinding(row: { job_id: string; session_id: string; bound_at: number; profile?: string; stored_deliver?: string; instance_id?: string; generation?: string | null }) {
     const { DatabaseSync } = await import('node:sqlite')
     const bindings = new DatabaseSync(bindingsPath)
     bindings.exec(`CREATE TABLE IF NOT EXISTS cron_session_bindings (instance_id TEXT NOT NULL, profile TEXT NOT NULL,
       job_id TEXT NOT NULL, session_id TEXT NOT NULL, bound_at REAL NOT NULL, requested_deliver TEXT, stored_deliver TEXT,
-      requested_paused INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (instance_id, profile, job_id))`)
-    bindings.prepare('INSERT INTO cron_session_bindings VALUES (?, ?, ?, ?, ?, NULL, ?, 0)')
-      .run(row.instance_id || 'inst-1', row.profile || 'default', row.job_id, row.session_id, row.bound_at, row.stored_deliver || 'local')
+      requested_paused INTEGER NOT NULL DEFAULT 0, session_generation TEXT, PRIMARY KEY (instance_id, profile, job_id))`)
+    bindings.prepare('INSERT INTO cron_session_bindings VALUES (?, ?, ?, ?, ?, NULL, ?, 0, ?)')
+      .run(row.instance_id || 'inst-1', row.profile || 'default', row.job_id, row.session_id, row.bound_at, row.stored_deliver || 'local',
+        row.generation === undefined ? 'g-A1' : row.generation)
     bindings.close()
   }
 
@@ -59,7 +60,7 @@ describe('cron session notifications', () => {
   it('delivers an exact scheduled agent-backed result once to the bound session only', async () => {
     await writeBinding({ job_id: 'job-1', session_id: 'session-A', bound_at: 1000 })
     const response = { jobs: [{ job_id: 'job-1', state: 'present', deliver: 'local' }], executions: [execution()] }
-    const sessions = { 'session-A': { profile: 'default', started_at: 900 }, 'session-B': { profile: 'default', started_at: 950 } }
+    const sessions = { 'session-A': { profile: 'default', generation: 'g-A1' }, 'session-B': { profile: 'default', generation: 'g-B1' } }
     const published: any[] = []
 
     const first = await observeOnce(response, sessions, published)
@@ -80,13 +81,35 @@ describe('cron session notifications', () => {
     const published: any[] = []
 
     await observeOnce(response, {}, published)
+    // Same id, recreated after the binding: a different row generation.
     await observeOnce({ ...response, executions: [execution({ execution_id: 'exec-2' })] },
-      { 'session-A': { profile: 'default', started_at: 5000 } }, published)
+      { 'session-A': { profile: 'default', generation: 'g-A2' } }, published)
 
     const { getSessionNotification } = await import(STORE)
     expect(published).toEqual([])
     expect(getSessionNotification('inst-1', 'default', 'cron:job-1:exec-1')?.disposition).toBe('owner_missing')
     expect(getSessionNotification('inst-1', 'default', 'cron:job-1:exec-2')?.disposition).toBe('owner_missing')
+  })
+
+  it('fails closed for an owner reset under the same session id', async () => {
+    await writeBinding({ job_id: 'job-1', session_id: 'session-A', bound_at: 1000, generation: '7:900:0' })
+    const published: any[] = []
+    // history_cleared_at changed: the conversation was reset after the job was bound.
+    await observeOnce({ jobs: [{ job_id: 'job-1', state: 'present', deliver: 'local' }], executions: [execution()] },
+      { 'session-A': { profile: 'default', started_at: 900, generation: '7:900:1793300000000' } }, published)
+    const { getSessionNotification } = await import(STORE)
+    expect(published).toEqual([])
+    expect(getSessionNotification('inst-1', 'default', 'cron:job-1:exec-1')?.disposition).toBe('owner_missing')
+  })
+
+  it('never treats a binding without a generation as owned', async () => {
+    await writeBinding({ job_id: 'job-1', session_id: 'session-A', bound_at: 1000, generation: null })
+    const published: any[] = []
+    await observeOnce({ jobs: [{ job_id: 'job-1', state: 'present', deliver: 'local' }], executions: [execution()] },
+      { 'session-A': { profile: 'default', started_at: 900, generation: '7:900:0' } }, published)
+    const { getSessionNotification } = await import(STORE)
+    expect(published).toEqual([])
+    expect(getSessionNotification('inst-1', 'default', 'cron:job-1:exec-1')?.disposition).toBe('owner_missing')
   })
 
   it('records silent, empty, unknown, script-only and manual executions truthfully', async () => {
@@ -102,7 +125,7 @@ describe('cron session notifications', () => {
       ],
     }
     const published: any[] = []
-    await observeOnce(response, { 'session-A': { profile: 'default', started_at: 900 } }, published)
+    await observeOnce(response, { 'session-A': { profile: 'default', generation: 'g-A1' } }, published)
 
     const { getSessionNotification } = await import(STORE)
     const disposition = (id: string) => getSessionNotification('inst-1', 'default', `cron:job-1:${id}`)?.disposition
@@ -119,7 +142,7 @@ describe('cron session notifications', () => {
     await writeBinding({ job_id: 'job-1', session_id: 'session-A', bound_at: 1000 })
     const published: any[] = []
     await observeOnce({ jobs: [{ job_id: 'job-1', state: 'present', deliver: 'slack:C123' }], executions: [execution()] },
-      { 'session-A': { profile: 'default', started_at: 900 } }, published)
+      { 'session-A': { profile: 'default', generation: 'g-A1' } }, published)
 
     const { getSessionNotification, cronJobObservationState } = await import(STORE)
     expect(published).toEqual([])
@@ -139,7 +162,7 @@ describe('cron session notifications', () => {
   it('projects passive notices to the model once, bounded, and keeps them out of stored messages', async () => {
     await writeBinding({ job_id: 'job-1', session_id: 'session-A', bound_at: 1000 })
     await observeOnce({ jobs: [{ job_id: 'job-1', state: 'present', deliver: 'local' }], executions: [execution({ answer: 'x'.repeat(9000) })] },
-      { 'session-A': { profile: 'default', started_at: 900 } }, [])
+      { 'session-A': { profile: 'default', generation: 'g-A1' } }, [])
     const { buildNoticeProjection, withSessionNotices } = await import(PRESENTATION)
     const { markSessionNotificationsProjected } = await import(STORE)
 

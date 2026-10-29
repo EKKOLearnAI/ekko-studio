@@ -38,18 +38,18 @@ export interface CronObserverDeps {
   namespace: string
   bindingsPath: string
   observe(profile: string, jobs: Array<{ job_id: string; since: number }>): Promise<CronObservationResponse>
-  getSession(sessionId: string): { profile?: string | null; started_at?: number | null } | null
+  /** Owner session with its current exact generation (`getSessionGeneration`). */
+  getSession(sessionId: string): { profile?: string | null; generation?: string | null } | null
   publish(record: SessionNotificationRecord): void
 }
 
 const VISIBLE: ReadonlySet<SessionNotificationDisposition> = new Set(['notified', 'status_only', 'unknown'])
 
 /** The exact bound session still exists in the profile it was bound from, as the same generation. */
-export function bindingOwnerCurrent(binding: CronSessionBinding, session: { profile?: string | null; started_at?: number | null } | null): boolean {
-  if (!session) return false
+export function bindingOwnerCurrent(binding: CronSessionBinding, session: { profile?: string | null; generation?: string | null } | null): boolean {
+  if (!session || !binding.session_generation || !session.generation) return false
   if ((session.profile || 'default') !== binding.profile) return false
-  const startedAt = Number(session.started_at || 0)
-  return !startedAt || startedAt <= binding.bound_at + 1
+  return session.generation === binding.session_generation
 }
 
 /** Scheduled fires only; a chat `run` already returns through its own async-delegation result. */

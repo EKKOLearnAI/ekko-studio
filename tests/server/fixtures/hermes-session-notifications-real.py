@@ -27,15 +27,22 @@ def bindings():
         return []
     conn = sqlite3.connect(path)
     try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(cron_session_bindings)")}
+        generation = "session_generation" if "session_generation" in columns else "NULL"
         return [list(row) for row in conn.execute(
-            "SELECT instance_id, profile, job_id, session_id, stored_deliver, requested_paused FROM cron_session_bindings")]
+            "SELECT instance_id, profile, job_id, session_id, stored_deliver, requested_paused, "
+            f"{generation} FROM cron_session_bindings")]
     except sqlite3.OperationalError:
         return []
     finally:
         conn.close()
 
 
-def studio_session(session_id="sess-A", platform="agent_bridge"):
+def studio_session(session_id="sess-A", platform="agent_bridge", generation="gen-A1"):
+    # Studio declares the owner's session generation with each bridge turn.
+    declare = getattr(sn, "set_session_generation", None)
+    if declare is not None:
+        declare(session_id, generation)
     return set_session_vars(platform=platform, source="tui", session_key=session_id, session_id=session_id,
                             ui_session_id=session_id, profile="default", async_delivery=True)
 
@@ -64,6 +71,45 @@ def case_cron_origin():
     created = create({"prompt": "Summarize", "schedule": "30m", "name": "origin", "deliver": "origin",
                       "failure_deliver": "origin"})
     return {"created": created, "job": job_view(created["job_id"]), "bindings": bindings()}
+
+
+def case_cron_missing_generation():
+    assert sn.install_cron_binding_middleware()
+    studio_session(generation=None)
+    created = create({"prompt": "No generation", "schedule": "30m", "name": "no-generation"})
+    from cron.jobs import load_jobs
+    jobs = [job for job in load_jobs() if job.get("name") == "no-generation"]
+    return {"created": created, "job": job_view(jobs[0]["id"]) if jobs else None, "bindings": bindings()}
+
+
+def case_cron_failure_deliver_explicit():
+    assert sn.install_cron_binding_middleware()
+    studio_session()
+    created = create({"prompt": "Failures elsewhere", "schedule": "30m", "name": "failure-explicit",
+                      "failure_deliver": "slack:C9"})
+    return {"created": created, "job": job_view(created["job_id"]), "bindings": bindings()}
+
+
+def case_fresh_agent_tools():
+    """A fresh Studio bridge agent, built with no HERMES_EXEC_ASK in the environment, can schedule."""
+    home = os.environ["HERMES_HOME"]
+    with open(os.path.join(home, "config.yaml"), "w", encoding="utf-8") as handle:
+        handle.write("model:\n  default: fake-model\n  provider: custom\n"
+                     "  base_url: http://127.0.0.1:9/v1\n  api_key: fake-local-key\n")
+    os.environ.pop("HERMES_EXEC_ASK", None)
+    import model_tools
+    # Hermes resolves (and caches) tool definitions outside any run too, e.g. its post-turn
+    # background review; that must not decide what a Studio session can schedule.
+    model_tools.get_tool_definitions(quiet_mode=True)
+    pool = _pool()
+    session = pool.get_or_create("sess-fresh", profile=None)
+    names = set(getattr(session.agent, "valid_tool_names", set()) or set())
+    # The deferred tool_call dispatcher re-resolves definitions at call time.
+    dispatch_names = {t["function"]["name"] for t in model_tools.get_tool_definitions(
+        quiet_mode=True, skip_tool_search_assembly=True) or []}
+    return {"cron_tool": "cronjob_manage" in names, "terminal_tool": "terminal" in names,
+            "cron_at_dispatch": "cronjob_manage" in dispatch_names,
+            "exec_ask_after": os.environ.get("HERMES_EXEC_ASK")}
 
 
 def case_cron_explicit():

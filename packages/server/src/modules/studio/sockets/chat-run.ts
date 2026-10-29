@@ -61,7 +61,7 @@ import type { Server, Socket } from 'socket.io'
 import { randomUUID } from 'crypto'
 import { logger } from '../public/logging'
 import { getSystemPrompt } from '../public/runs/prompt'
-import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
+import { clearSessionMessages, deleteSession, getSession, getSessionGeneration, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
 import { deleteSessionMessageGroups } from '../repositories/session-message-deletion'
 import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
 import { getSessionCategory } from '../repositories/session-category-store'
@@ -2327,7 +2327,10 @@ export class ChatRunSocket {
         namespace: studioInstanceId(),
         bindingsPath: cronBindingsDbPath(),
         observe: (profile, jobs) => this.backgroundBridge.studioCronObserve(profile, jobs, { timeoutMs: 30_000 }),
-        getSession: sessionId => getSession(sessionId),
+        getSession: sessionId => {
+          const session = getSession(sessionId)
+          return session ? { profile: session.profile, generation: getSessionGeneration(sessionId) } : null
+        },
         publish: record => this.publishSessionNotice(record),
       })
     } catch (err) {

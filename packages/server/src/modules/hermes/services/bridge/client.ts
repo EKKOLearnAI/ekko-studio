@@ -44,6 +44,8 @@ export interface AgentBridgeRequestOptions {
 
 export interface AgentBridgeChatOptions {
   force_compress?: boolean
+  /** Studio owner session generation for this turn; cron bindings made by it carry this value. */
+  studio_session_generation?: string
   /** Agent-session creation policy. False keeps delegate_task available but
    * makes background=true fall back to synchronous execution. */
   background_delegation_enabled?: boolean
@@ -566,6 +568,7 @@ export class AgentBridgeClient {
         ? { background_delegation_enabled: options.background_delegation_enabled }
         : {}),
       ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      ...(options.studio_session_generation ? { studio_session_generation: options.studio_session_generation } : {}),
     })
   }
 

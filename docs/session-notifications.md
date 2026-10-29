@@ -19,28 +19,47 @@ changing Hermes:
    Bridge session are affected, and only when the request asks for this conversation:
    `deliver` omitted, or containing `origin`. For those requests the bridge:
    1. creates the job paused through the native tool;
-   2. writes a durable binding (Studio instance, profile, session, job) to
-      `<Web UI home>/session-notifications/cron-bindings.db`;
+   2. writes a durable binding (Studio instance, profile, session, session generation,
+      job) to `<Web UI home>/session-notifications/cron-bindings.db`;
    3. resumes the job through the native tool action, unless the request asked for
       a paused job.
 
-   `origin` is stored natively as `local`, never a home-channel fallback. If writing
-   the binding fails, the job stays paused and the tool reports the failure.
-   Explicit targets (`local`, `slack:…`, `all`, …) are passed through untouched, are
-   not bound, and are never mirrored.
+   An `origin` *delivery* target is stored natively as `local`, never a home-channel
+   fallback. `failure_deliver` is the user's explicit choice and is passed to the native
+   tool byte-for-byte. If writing the binding fails, or Studio did not declare the owner's
+   session generation for this turn, the job stays paused and the tool reports the
+   failure. Explicit targets (`local`, `slack:…`, `all`, …) are passed through untouched,
+   are not bound, and are never mirrored.
+
+   **Session generation.** `getSessionGeneration` returns the session's `generation_id`:
+   assigned on first read, cleared by `clearSessionMessages` (reset), and new for a session
+   recreated under the same id. Studio sends it with each bridge turn
+   (`studio_session_generation`), and the binding records it.
+
+   **Availability.** Hermes offers `cronjob_manage` only to interactive surfaces (its check
+   reads `HERMES_EXEC_ASK` and similar flags), and it caches both that verdict and the
+   resolved tool definitions process-wide. A resolution made outside a Studio run, such as
+   the post-turn background review, would therefore hide the tool from later sessions. The
+   bridge middleware marks the tool available in a Studio bridge worker and drops
+   previously cached availability (`invalidate_check_fn_cache`, `_clear_tool_defs_cache`).
+   It does this in memory only and changes no environment variable.
 2. **Observation.** Every 15 seconds `ChatRunSocket` asks the profile's bridge worker
    (`studio_cron_observe`) for the terminal executions of bound jobs. The worker reads
    the native execution ledger. For agent-backed fires it also reads the canonical
    admission result of `cron_request_id(job, execution_id)`, which holds the exact
    final response. Output files are never correlated by name or time. Only scheduled
-   fires are observed; a chat `cronjob_manage run` already returns through its own
-   async-delegation result.
+   fires are observed. A chat `cronjob_manage run` returns through its own
+   async-delegation result. Studio registers that delegation from the tool result
+   (`job.execution_mode == 'background'`, `job.delegation_id`), so the background poll stays
+   active until the result is delivered once.
 3. **Inbox.** Each execution is accepted once under
    `(instance, profile, cron:<job>:<execution>)` in `session_notifications`, with its
    disposition, payload and attention written in the same statement.
    - Replays (restart, a second poll) are rejected.
-   - A deleted session, or a session recreated after the binding, fails closed as
-     `owner_missing` and is never rerouted.
+   - Ownership requires the same profile and an exact match between the binding's
+     generation and the session's current generation. A deleted, reset or recreated session,
+     or a binding without a generation, fails closed as `owner_missing` and is never
+     rerouted.
    - An out-of-band edit of the native `deliver` value to another target stops
      observation (`target_changed`).
 

@@ -503,6 +503,11 @@ class AgentPool:
             with _profile_env(profile):
                 _refresh_worker_profile_env()
                 _refresh_approval_allowlist()
+                try:
+                    # Before tools are resolved for this agent: cron session binding and availability.
+                    _studio_notifications().install_cron_binding_middleware()
+                except Exception as exc:
+                    print(f"[hermes_bridge] cron session binding unavailable: {exc}", file=sys.stderr, flush=True)
                 discovered_mcp_tools = _discover_bridge_mcp_tools()
                 cfg = _load_cfg()
                 resolved_model = requested_model or _resolve_model(cfg)
@@ -1854,7 +1859,10 @@ class AgentPool:
         source: str | None = None,
         reasoning_effort: str | None = None,
         background_delegation_enabled: bool | None = None,
+        studio_session_generation: str | None = None,
     ) -> RunRecord:
+        # The owner generation this turn runs under; cron bindings made by this turn carry it.
+        _studio_notifications().set_session_generation(session_id, studio_session_generation)
         session = self.get_or_create(
             session_id,
             profile=profile,
