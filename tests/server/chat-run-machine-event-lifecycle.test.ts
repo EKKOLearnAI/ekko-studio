@@ -3,6 +3,7 @@ import { initAllHermesTables } from '../../packages/server/src/modules/studio/in
 import { clearSessionMessages, createSession, deleteSession, getSessionGeneration } from '../../packages/server/src/modules/studio/repositories/session-store'
 import { getSessionNotification } from '../../packages/server/src/modules/studio/repositories/session-notification-store'
 import { handleAbort } from '../../packages/server/src/modules/studio/services/chat-run/abort'
+import { handleSessionCommand, parseSessionCommand } from '../../packages/server/src/modules/studio/services/chat-run/session-command'
 import { studioInstanceId } from '../../packages/server/src/modules/studio/public/session-notifications'
 import * as chatRuntime from '../../packages/server/src/modules/studio/public/chat-agent-runtime'
 import { ChatRunSocket } from '../../packages/server/src/modules/studio/sockets/chat-run'
@@ -142,6 +143,48 @@ describe('R3 queued machine events are settled when the queue is cleared', () =>
     await handleAbort(nsp, socket, sid, server.sessionMap, bridge, server.runQueuedItem.bind(server))
     await flush()
     expect(server.sessionMap.get(sid).queue).toHaveLength(0)
+    expect(disposition(event)).toBe('cancelled')
+    expect(settled(bridge, event)).toBe(true)
+    expect(handleRun).not.toHaveBeenCalled()
+  })
+
+  it('explicit cancel of the queued machine run settles it; other queued items are untouched', async () => {
+    const { server, bridge, handleRun } = makeServer()
+    const { sid, generation } = ownedSession()
+    await server.sessionStateForBackground(sid)
+    const state = server.sessionMap.get(sid)
+    state.isWorking = true
+    const event = notification(sid, generation)
+    await server.scheduleProcessNotification(event)
+    state.queue.push({ queue_id: 'user-q', input: 'later question', profile: 'default', source: 'cli' })
+    const handlers = new Map<string, Function>()
+    const socket: any = { id: 'canceller', connected: true, handshake: { auth: {}, query: { profile: 'default' } }, data: {},
+      emit: vi.fn(), join: vi.fn(), to: vi.fn(() => ({ emit: vi.fn() })), on: vi.fn((name: string, fn: Function) => handlers.set(name, fn)) }
+    server.onConnection(socket)
+    const machineQueueId = state.queue.find((item: any) => item.machineEvent).queue_id
+    handlers.get('cancel_queued_run')!({ session_id: sid, queue_id: machineQueueId })
+    await flush()
+    expect(state.queue.map((item: any) => item.queue_id)).toEqual(['user-q'])
+    expect(disposition(event)).toBe('cancelled')
+    expect(settled(bridge, event)).toBe(true)
+    expect(handleRun).not.toHaveBeenCalled()
+  })
+
+  it('/destroy settles a queued machine event', async () => {
+    const { server, nsp, bridge, handleRun } = makeServer()
+    const { sid, generation } = ownedSession()
+    await server.sessionStateForBackground(sid)
+    const state = server.sessionMap.get(sid)
+    state.isWorking = true
+    const event = notification(sid, generation)
+    await server.scheduleProcessNotification(event)
+    expect(state.queue).toHaveLength(1)
+    const socket: any = { id: 'destroyer', connected: true, data: {}, emit: vi.fn(), join: vi.fn(), to: vi.fn(() => ({ emit: vi.fn() })) }
+    const commandBridge = { ...bridge, interrupt: vi.fn(async () => ({ ok: true })), destroy: vi.fn(async () => ({ ok: true })) }
+    await handleSessionCommand(sid, parseSessionCommand('/destroy')!, { nsp, socket, sessionMap: server.sessionMap,
+      bridge: commandBridge as any, profile: 'default', runQueuedItem: vi.fn() })
+    await flush()
+    expect(state.queue).toHaveLength(0)
     expect(disposition(event)).toBe('cancelled')
     expect(settled(bridge, event)).toBe(true)
     expect(handleRun).not.toHaveBeenCalled()
