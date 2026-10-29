@@ -6,7 +6,7 @@ import { historySessionSource, isBuiltinEkkoSession } from '@/utils/hermes/sessi
 import { isKnownEkkoSessionCommand } from '@/utils/hermes/bridge-session-commands'
 import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
-import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
+import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionNotice, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
 import { onAuthInvalidated } from '@/api/auth-invalidation'
@@ -94,6 +94,8 @@ export interface Attachment {
 
 export interface Message {
   personTaskReturn?: import('@/api/person').PersonTaskReturn
+  /** Passive Studio session notice (cron result); display only, never model history. */
+  studioNotice?: import('@/api/studio/sessions').StudioNoticeView
   storedMessageId?: number
   taskPlan?: TaskPlanSnapshot
   id: string
@@ -1134,6 +1136,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
       id: String(msg.id),
       role: displayRole === 'moa' ? 'system' : displayRole,
       content: displayContent || '',
+      ...(msg.studio_notice ? { studioNotice: msg.studio_notice } : {}),
       runUsage: normalizeRunUsage(msg.run_usage),
       personTaskReturn: msg.person_task_return,
       timestamp: Math.round(msg.timestamp * 1000),
@@ -5448,6 +5451,18 @@ function createChatState(scopedSessionId?: string) {
   }
 
   disposeSubscription(onSessionCommand(handleGlobalSessionCommand))
+
+  disposeSubscription(onSessionNotice(evt => {
+    const sid = evt.session_id
+    const notice = evt.message
+    if (!sid || !notice?.id) return
+    const session = sessions.value.find(item => item.id === sid)
+    if (session && session.messages.length && !session.messages.some(item => item.id === String(notice.id))) {
+      const [mapped] = mapHermesMessages([notice as any])
+      if (mapped) addMessageInTimelineOrder(sid, mapped)
+    }
+    if (evt.attention) markSessionCompletedUnread(sid)
+  }))
 
   disposeSubscription(onSessionTitleUpdated(applyGeneratedSessionTitle))
   disposeSubscription(onSessionWorkspaceUpdated(applySessionWorkspaceUpdate))

@@ -298,6 +298,21 @@ class BridgeServer:
             session_ids = req.get("session_ids")
             return self.pool.poll_background(session_ids if isinstance(session_ids, list) else None)
 
+        if action in {"process_notification_admit", "process_notification_complete", "process_notification_release"}:
+            producer_key = str(req.get("producer_key") or "").strip()
+            claim_id = str(req.get("claim_id") or "").strip()
+            if not producer_key or not claim_id:
+                raise ValueError("producer_key and claim_id are required")
+            if action == "process_notification_admit":
+                return self.pool.admit_process_notification(producer_key, claim_id)
+            if action == "process_notification_complete":
+                return self.pool.complete_process_notification(producer_key, claim_id)
+            return self.pool.release_process_notification(producer_key, claim_id)
+
+        if action == "studio_cron_observe":
+            jobs = req.get("jobs")
+            return self.pool.studio_cron_observe(jobs if isinstance(jobs, list) else [], req.get("profile"))
+
         if action == "background_notification_complete":
             delegation_id = str(req.get("delegation_id") or "").strip()
             claim_id = str(req.get("claim_id") or "").strip()

@@ -1,0 +1,136 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
+
+// Opt-in: runs against a real, read-only Hermes Agent checkout with isolated homes.
+//   HERMES_REAL_BRIDGE_E2E=1 HERMES_AGENT_ROOT=<checkout> npx vitest run tests/server/hermes-session-notifications-real.test.ts
+const agentRoot = process.env.HERMES_AGENT_ROOT || ''
+const python = process.env.HERMES_REAL_PYTHON || join(agentRoot, 'venv', 'bin', 'python')
+const enabled = process.env.HERMES_REAL_BRIDGE_E2E === '1' && Boolean(agentRoot) && existsSync(python)
+
+const execFileAsync = promisify(execFile)
+
+async function runCase(name: string): Promise<any> {
+  const root = mkdtempSync(join(tmpdir(), 'hermes-sn-real-'))
+  try {
+    for (const dir of ['home', 'hermes', 'studio', 'pycache']) mkdirSync(join(root, dir), { recursive: true })
+    const env: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      HOME: join(root, 'home'),
+      HERMES_HOME: join(root, 'hermes'),
+      HERMES_AGENT_ROOT: agentRoot,
+      PYTHONDONTWRITEBYTECODE: '1',
+      PYTHONPYCACHEPREFIX: join(root, 'pycache'),
+      HERMES_AGENT_BRIDGE_STUDIO_NOTIFICATIONS: JSON.stringify({ bindings_db: join(root, 'studio', 'cron-bindings.db'), instance_id: 'inst-1' }),
+    }
+    // Async so the Vitest worker stays responsive while Hermes imports.
+    const { stdout: output } = await execFileAsync(python, ['tests/server/fixtures/hermes-session-notifications-real.py', name], {
+      cwd: process.cwd(), env, encoding: 'utf-8', timeout: 150_000, maxBuffer: 8 * 1024 * 1024,
+    })
+    const line = output.split('\n').find(entry => entry.startsWith('RESULT '))
+    if (!line) throw new Error(`no result for ${name}:\n${output}`)
+    return JSON.parse(line.slice('RESULT '.length))
+  } catch (error) {
+    const err = error as { stdout?: string; stderr?: string; message?: string }
+    throw new Error([err.message, err.stdout && `stdout:\n${err.stdout}`, err.stderr && `stderr:\n${String(err.stderr).slice(-6000)}`]
+      .filter(Boolean).join('\n\n'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
+
+describe.skipIf(!enabled)('real Hermes: cron session binding', { timeout: 180_000 }, () => {
+  it('binds an omitted-target create before activation, then resumes it with the native shape', async () => {
+    const result = await runCase('cron_default')
+    expect(result.created).toMatchObject({ success: true, deliver: 'local', studio_session_delivery: 'bound' })
+    expect(result.created.message).not.toContain('Created PAUSED')
+    expect(result.job).toMatchObject({ state: 'scheduled', enabled: true, deliver: 'local', origin: null })
+    expect(result.bindings).toEqual([['inst-1', 'default', result.created.job_id, 'sess-A', 'local', 0]])
+  })
+
+  it('translates explicit origin to the exact Studio session, never a home-channel fallback', async () => {
+    const result = await runCase('cron_origin')
+    expect(result.job).toMatchObject({ state: 'scheduled', deliver: 'local', failure_deliver: 'local', origin: null })
+    expect(result.bindings).toHaveLength(1)
+  })
+
+  it('leaves explicit local and concrete targets untouched and unbound', async () => {
+    const result = await runCase('cron_explicit')
+    expect(result.local).toMatchObject({ deliver: 'local', state: 'scheduled' })
+    expect(result.slack).toMatchObject({ deliver: 'slack:C123', failure_deliver: 'local' })
+    expect(result.bindings).toEqual([])
+  })
+
+  it('keeps a requested paused job paused while binding it', async () => {
+    const result = await runCase('cron_paused')
+    expect(result.job).toMatchObject({ state: 'paused', enabled: false })
+    expect(result.bindings).toHaveLength(1)
+    expect(result.bindings[0][5]).toBe(1)
+  })
+
+  it('passes non-Studio calls straight through (legacy cronjob alias resolves to the wrapped entry)', async () => {
+    const result = await runCase('cron_not_studio')
+    expect(result.created.success).toBe(true)
+    expect(result.created).not.toHaveProperty('studio_session_delivery')
+    expect(result.bindings).toEqual([])
+    expect(result.legacy_alias).toBe('cronjob_manage')
+  })
+
+  it('reports a binding failure and leaves the created job paused', async () => {
+    const result = await runCase('cron_binding_failure')
+    expect(result.created.success).toBe(false)
+    expect(result.created.error).toContain('left paused')
+    expect(result.job).toMatchObject({ state: 'paused', enabled: false })
+  })
+})
+
+describe.skipIf(!enabled)('real Hermes: terminal notify_on_complete adapter', { timeout: 180_000 }, () => {
+  it('delivers success and nonzero completions as typed machine events with native text, once', async () => {
+    const result = await runCase('process_success_failure')
+    expect(result.ok_result.notify_on_complete).toBe(true)
+    expect(result.ok).toMatchObject({ kind: 'process_completion', session_id: 'sess-A', status: 'succeeded', exit_code: 0 })
+    expect(result.ok.producer_key).toMatch(/^hermes-process:/)
+    expect(result.ok.message).toContain('ok-output')
+    expect(result.bad).toMatchObject({ status: 'failed', exit_code: 3 })
+    expect(result.admitted).toEqual({ admitted: true })
+    expect(result.completed).toEqual({ completed: true })
+    expect(result.replayed).toBe(false)
+  })
+
+  it('emits nothing when notify_on_complete is false', async () => {
+    const result = await runCase('process_notify_false')
+    expect(result.result.notify_on_complete ?? false).toBe(false)
+    expect(result.delivered).toBe(false)
+  })
+
+  it('reports live notify processes and still delivers an immediate exit', async () => {
+    const result = await runCase('process_pending_and_immediate_exit')
+    expect(result.pending).toEqual(['sess-A'])
+    expect(result.immediate_delivered).toBe(true)
+  })
+
+  it('recovers the native immediate-exit race from the live record exactly once', async () => {
+    const result = await runCase('process_immediate_exit_race')
+    expect(result.native_event_published).toBe(false)
+    expect(result.recovered).toBe(1)
+    expect(result.duplicated).toBe(false)
+    expect(result.message).toContain('exit code 0')
+  })
+
+  it('suppresses completions consumed by wait before drain and by log before dispatch', async () => {
+    const result = await runCase('process_consumed_by_wait')
+    expect(result.wait_before_drain_delivered).toBe(false)
+    expect(result.claimed_after).toBe(true)
+    expect(result.admit_after_log).toEqual({ admitted: false, reason: 'consumed' })
+  })
+
+  it('routes completions only to the owning session', async () => {
+    const result = await runCase('process_ownership')
+    expect(result.a_received).toBe(false)
+    expect(result.b_received).toBe(true)
+    expect(result.b_session).toBe('sess-B')
+  })
+})

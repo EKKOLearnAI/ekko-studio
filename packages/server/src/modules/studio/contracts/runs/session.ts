@@ -63,6 +63,15 @@ export interface QueuedRun {
   personStageDelivery?: { userId: number; deliveryId: string }
   /** Internal account-bound Person result delivery. */
   personDelivery?: { userId: number; executionId: string }
+  /** Typed Hermes machine event (terminal completion). Rechecked for consumption at dispatch. */
+  machineEvent?: {
+    kind: 'process_completion'
+    notificationId: number
+    producerKey: string
+    claimId: string
+    profile: string
+    processId: string
+  }
   /** Internal admission check, never serialized or supplied by the client. */
   authorize?: () => Promise<void>
   /** Captured at admission, independent of whichever socket drains the queue. */
@@ -70,7 +79,7 @@ export interface QueuedRun {
   queue_id: string
   input: string | ContentBlock[]
   displayInput?: string | ContentBlock[] | null
-  displayRole?: 'user' | 'command'
+  displayRole?: 'user' | 'command' | 'system'
   storageMessage?: string
   model?: string
   provider?: string
@@ -141,6 +150,8 @@ export interface SessionState {
   isCompressing?: boolean
   /** Explicit Stop suppresses automatic wakeups until the next user run. */
   backgroundWakeStopped?: boolean
+  /** A Hermes terminal in this session accepted `notify_on_complete`; keeps the bridge poll active. */
+  processNotifyPending?: boolean
   /** Snapshot the owning runtime's interrupted turn without waiting for model IO. */
   finalizeRunUsage?: () => RunUsageSummary | undefined
   nativeUsageSource?: 'coding_agent'

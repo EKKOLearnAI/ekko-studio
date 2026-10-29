@@ -1106,6 +1106,14 @@ export default {
 
   // チャット
   chat: {
+    sessionNotice: {
+      cronTitle: 'スケジュールタスク「{name}」が完了しました',
+      cronFailedTitle: 'スケジュールタスク「{name}」が失敗しました',
+      outputUnavailable: 'このランタイムでは結果を取得できません（スクリプトのみ）。状態のみ表示します。',
+      receiptUnavailable: 'この実行の正確な結果記録が見つかりませんでした。状態のみ表示します。',
+      unknown: '結果は不明です。Studio はこのタスクを再実行しません。',
+      truncated: '表示のため結果を省略しました。',
+    },
     selectMessages: "メッセージを選択",
     messagesSelected: "{count} 件選択中",
     deleteSelectedMessages: "選択項目を削除",

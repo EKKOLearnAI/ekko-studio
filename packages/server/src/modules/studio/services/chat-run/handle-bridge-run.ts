@@ -2,6 +2,8 @@ import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { hermesStudioMcpCapabilities } from './studio-mcp'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
+import { buildNoticeProjection } from '../session-notifications/presentation'
+import { markSessionNotificationsProjected } from '../../repositories/session-notification-store'
 /**
  * CLI Bridge run handler — handles runs that use the agent bridge
  * to communicate with Hermes CLI agent.
@@ -87,6 +89,17 @@ function parseBackgroundDelegation(
     return { delegationId, status: stringValue(payload.status) || 'dispatched', payload }
   } catch {
     return null
+  }
+}
+
+/** A background terminal whose Hermes result accepted `notify_on_complete` (immediate exit included). */
+export function terminalNotifyRequested(toolName: string, output: string): boolean {
+  if (toolName !== 'terminal') return false
+  try {
+    const payload = JSON.parse(output) as Record<string, unknown>
+    return payload.notify_on_complete === true
+  } catch {
+    return false
   }
 }
 
@@ -465,7 +478,7 @@ async function ensureBridgeFixedContext(args: {
 export async function handleBridgeRun(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
-  data: { task_plan_context_id?: string; input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
+  data: { task_plan_context_id?: string; input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command' | 'system'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
   profile: string,
   sessionMap: Map<string, SessionState>,
   bridge: AgentBridgeClient,
@@ -600,10 +613,12 @@ export async function handleBridgeRun(
   const currentInputUsage = estimateUsageTokensFromMessages([{ role: 'user', content: actualInputStr }])
   const currentInputTokens = currentInputUsage.inputTokens
   const shouldPersistUserMessage = !skipUserMessage && displayInput !== null
-  const displayRole = data.display_role === 'command' ? 'command' : 'user'
-  const storageRole = shouldStoreInputInsteadOfDisplay ? 'user' : displayRole
-  const displayRoleForStorage = shouldStoreInputInsteadOfDisplay ? displayRole : null
-  const displayContentForStorage = shouldStoreInputInsteadOfDisplay ? inputStr : null
+  const displayRole = data.display_role === 'command' ? 'command' : data.display_role === 'system' ? 'system' : 'user'
+  // A machine event is a model-facing user turn displayed as a system notice, never as the user's words.
+  const machineDisplay = displayRole === 'system'
+  const storageRole = shouldStoreInputInsteadOfDisplay || machineDisplay ? 'user' : displayRole
+  const displayRoleForStorage = shouldStoreInputInsteadOfDisplay || machineDisplay ? displayRole : null
+  const displayContentForStorage = shouldStoreInputInsteadOfDisplay || machineDisplay ? inputStr : null
   let messageId: number | string | undefined
 
   if (shouldPersistUserMessage) {
@@ -771,7 +786,16 @@ export async function handleBridgeRun(
     const originalBridgeInput = isContentBlockArray(input)
       ? await convertContentBlocksForAgent(input)
       : input
-    const bridgeInput = withTaskPlanTurnContext(originalBridgeInput, data.task_plan_context_id, !data.background_delegation_id && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || ''))
+    const intentionalTurn = !data.autonomous && !data.background_delegation_id
+      && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || '')
+    const taskPlanInput = withTaskPlanTurnContext(originalBridgeInput, data.task_plan_context_id, !data.background_delegation_id && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || ''))
+    // Passive cron notices reach the model once, on the user's next intentional question.
+    const noticeProjection = intentionalTurn ? buildNoticeProjection(session_id) : null
+    const bridgeInput = !noticeProjection
+      ? taskPlanInput
+      : Array.isArray(taskPlanInput)
+        ? [{ type: 'text', text: noticeProjection.text }, ...taskPlanInput] as typeof taskPlanInput
+        : `${noticeProjection.text}\n\n${taskPlanInput}`
     const runMetadata: BridgeRunMetadata = {
       autonomous: data.autonomous === true,
       delegationId: data.background_delegation_id,
@@ -829,6 +853,7 @@ export async function handleBridgeRun(
     )
     if (sessionMap.get(session_id) !== state || state.activeRunMarker !== runMarker) return
     state.runId = started.run_id
+    if (noticeProjection) markSessionNotificationsProjected(noticeProjection.ids)
     if (data.background_delegation_id && data.background_claim_id) {
       await bridge.completeBackgroundNotification(
         session_id,
@@ -1389,6 +1414,7 @@ async function applyBridgeChunkAsync(
     } else if (evType === 'tool.completed') {
       const toolName = (ev.tool_name as string) || ''
       const completed = recordBridgeToolCompleted(state, sessionId, runMarker, toolName, ev)
+      if (terminalNotifyRequested(toolName, completed.output)) state.processNotifyPending = true
       const backgroundDelegation = parseBackgroundDelegation(toolName, completed.output)
       if (backgroundDelegation) {
         runMetadata?.backgroundDelegationIds.add(backgroundDelegation.delegationId)

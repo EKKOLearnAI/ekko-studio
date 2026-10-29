@@ -193,3 +193,20 @@ run (a fraction in [0, 1]); zero or unknown total input yields `null`. Cache wri
 count toward input, never toward hits. No legacy-table migration is needed.
 The UI displays this non-expandable card above the turn's file changes, after
 completion only. The thinking indicator carries no token speed.
+
+### Studio session notifications
+
+`bridge_studio_notifications.py` carries two Studio-only adapters:
+
+- **Cron binding middleware.** It wraps `cronjob_manage` create calls made inside a
+  Studio session context. Requests that target this conversation are created paused,
+  bound to the session in the Studio-owned bindings database
+  (`HERMES_AGENT_BRIDGE_STUDIO_NOTIFICATIONS`), then resumed. The
+  `studio_cron_observe` action returns the terminal executions of bound jobs with their
+  exact native admission result.
+- **Terminal completion adapter.** `background_poll` also returns
+  `process_notifications` (typed `process_completion` events) and `notify_pending`.
+  `process_notification_admit|complete|release` settle the in-memory claim; `admit`
+  re-checks wait/log consumption at dispatch.
+
+See `docs/session-notifications.md`.

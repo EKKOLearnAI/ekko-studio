@@ -36,6 +36,15 @@ import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
 import { saveTaskPlan } from '../repositories/task-plan-store'
 import { getSessionTasks, updateSessionTasks, SessionTasksError } from '../services/session-tasks'
 import { getSessionTaskPlans } from '../services/task-plans'
+import { observeCronBindings } from '../services/session-notifications/cron-observer'
+import { noticeToMessage, withSessionNotices } from '../services/session-notifications/presentation'
+import {
+  acceptSessionNotification,
+  settleInterruptedProcessAdmissions,
+  transitionSessionNotification,
+  type SessionNotificationRecord,
+} from '../repositories/session-notification-store'
+import { cronBindingsDbPath, studioInstanceId } from '../public/session-notifications'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { bindAppEventSubscription } from '../services/webhooks/app-events'
 import { mobileDeviceRoom, mobileDeviceId, sameMobileDevice, mobileEventAllowed, type MobileDeviceTarget } from '../services/chat-run/mobile-device-target'
@@ -132,6 +141,8 @@ function currentProfileFromSocket(socket: Socket): string {
     : ''
   return socketProfile || getActiveProfileName() || 'default'
 }
+
+const CRON_OBSERVE_INTERVAL_MS = 15_000
 
 function persistHermesBackgroundResult(
   sessionId: string,
@@ -464,6 +475,8 @@ export class ChatRunSocket {
   private readonly pendingMobileCalendar = new Map<string, PendingMobileCalendarRequest>()
   private readonly pendingMobileHealth = new Map<string, PendingMobileHealthRequest>()
   private backgroundPollTimer?: NodeJS.Timeout
+  private cronObserveTimer?: NodeJS.Timeout
+  private cronObserveInFlight = false
   private backgroundPollInFlight = false
   private backgroundRecoveryNeeded = true
   private backgroundBrokerId?: string
@@ -791,6 +804,14 @@ export class ChatRunSocket {
     this.backgroundPollTimer = setInterval(() => void this.pollBackgroundWork(), 500)
     this.backgroundPollTimer.unref?.()
     void this.pollBackgroundWork()
+    try {
+      settleInterruptedProcessAdmissions(studioInstanceId())
+    } catch (err) {
+      logger.warn(err, '[chat-run-socket] failed to settle interrupted machine-event admissions')
+    }
+    this.cronObserveTimer = setInterval(() => void this.observeCronSessionResults(), CRON_OBSERVE_INTERVAL_MS)
+    this.cronObserveTimer.unref?.()
+    void this.observeCronSessionResults()
     logger.info('[chat-run-socket] Socket.IO ready at /chat-run')
   }
 
@@ -1704,7 +1725,7 @@ export class ChatRunSocket {
     data: {
       input: string | ContentBlock[]
       display_input?: string | ContentBlock[] | null
-      display_role?: 'user' | 'command'
+      display_role?: 'user' | 'command' | 'system'
       storage_message?: string
       session_id?: string
       model?: string
@@ -1948,7 +1969,7 @@ export class ChatRunSocket {
       await handleEkkoAgentRun(
         this.nsp,
         socket,
-        { ...data, onEvent, resolved_mcp_servers: ekkoMcpServers },
+        { ...data, display_role: data.display_role === 'system' ? 'user' : data.display_role, onEvent, resolved_mcp_servers: ekkoMcpServers },
         profile,
         this.sessionMap,
         this.dequeueNextQueuedRun.bind(this),
@@ -2208,11 +2229,135 @@ export class ChatRunSocket {
     this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
   }
 
+  /** Typed Hermes terminal completion for its exact owner session; never a disguised delegation. */
+  private async scheduleProcessNotification(notification: any) {
+    const sessionId = String(notification?.session_id || '').trim()
+    const producerKey = String(notification?.producer_key || '').trim()
+    const claimId = String(notification?.claim_id || '').trim()
+    const profile = String(notification?.profile || 'default')
+    if (!sessionId || !producerKey || !claimId || !notification.message) return
+    const complete = () => this.backgroundBridge.processNotification('complete', notification).catch((err: unknown) => {
+      logger.warn(err, '[chat-run-socket] failed to settle process notification %s', producerKey)
+    })
+    if (this.closing) {
+      await this.backgroundBridge.processNotification('release', notification).catch(() => undefined)
+      return
+    }
+    const namespace = studioInstanceId()
+    const payload = {
+      process_id: notification.process_id,
+      exit_code: notification.exit_code ?? null,
+      status: notification.status,
+      started_at: notification.started_at ?? null,
+    }
+    const session = getSession(sessionId)
+    const state = session ? await this.sessionStateForBackground(sessionId) : null
+    const ownerDisposition = !session || !state ? 'owner_missing' : state.backgroundWakeStopped ? 'owner_stopped' : null
+    if (ownerDisposition) {
+      acceptSessionNotification({ namespace, profile, producerKey, sessionId, kind: 'process_completion',
+        disposition: ownerDisposition, payload, attention: false })
+      await complete()
+      return
+    }
+    const record = acceptSessionNotification({ namespace, profile, producerKey, sessionId, kind: 'process_completion',
+      disposition: 'admitting', payload, attention: false })
+    if (!record) {
+      // Already accepted once (replay): never a second turn.
+      await complete()
+      return
+    }
+    const next: QueuedRun = {
+      queue_id: `process_${record.id}`,
+      input: notification.message,
+      displayInput: notification.message,
+      displayRole: 'system',
+      model: session!.model || undefined,
+      provider: session!.provider || undefined,
+      profile: session!.profile || profile,
+      workspace: session!.workspace,
+      source: resolveRunSource(session!.source || undefined, sessionId),
+      autonomous: true,
+      machineEvent: {
+        kind: 'process_completion',
+        notificationId: record.id,
+        producerKey,
+        claimId,
+        profile,
+        processId: String(notification.process_id || ''),
+      },
+    }
+    if (state!.isWorking) {
+      state!.queue.push(next)
+      logger.info('[chat-run-socket] queued process completion %s for busy session %s', producerKey, sessionId)
+      return
+    }
+    state!.isWorking = true
+    state!.profile = next.profile
+    state!.source = next.source
+    this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
+  }
+
+  /** Dispatch boundary: owner still current and the completion not consumed by wait/log since drain. */
+  private async admitMachineEvent(sessionId: string, next: QueuedRun): Promise<boolean> {
+    const event = next.machineEvent!
+    const ref = { session_id: sessionId, profile: event.profile, producer_key: event.producerKey, claim_id: event.claimId }
+    const state = this.sessionMap.get(sessionId)
+    let verdict: 'dispatched' | 'consumed' | 'owner_missing' | 'owner_stopped' | 'unknown'
+    if (!getSession(sessionId)) verdict = 'owner_missing'
+    else if (state?.backgroundWakeStopped) verdict = 'owner_stopped'
+    else {
+      try {
+        const admitted = await this.backgroundBridge.processNotification('admit', ref)
+        verdict = admitted.admitted ? 'dispatched' : admitted.reason === 'consumed' ? 'consumed' : 'unknown'
+      } catch (err) {
+        logger.warn(err, '[chat-run-socket] process completion admission check failed for %s', event.producerKey)
+        verdict = 'unknown'
+      }
+    }
+    transitionSessionNotification(event.notificationId, 'admitting', verdict)
+    await this.backgroundBridge.processNotification('complete', ref).catch(() => undefined)
+    return verdict === 'dispatched'
+  }
+
+  private async observeCronSessionResults() {
+    if (this.closing || this.cronObserveInFlight) return
+    this.cronObserveInFlight = true
+    try {
+      await observeCronBindings({
+        namespace: studioInstanceId(),
+        bindingsPath: cronBindingsDbPath(),
+        observe: (profile, jobs) => this.backgroundBridge.studioCronObserve(profile, jobs, { timeoutMs: 30_000 }),
+        getSession: sessionId => getSession(sessionId),
+        publish: record => this.publishSessionNotice(record),
+      })
+    } catch (err) {
+      logger.debug(err, '[chat-run-socket] cron session observation unavailable')
+    } finally {
+      this.cronObserveInFlight = false
+    }
+  }
+
+  /** Live passive notice: appended to the owner's timeline and attention raised once. No model turn. */
+  private publishSessionNotice(record: SessionNotificationRecord) {
+    const message = noticeToMessage(record)
+    const rooms = isPrivatePersonSession(record.session_id)
+      ? `session:${record.session_id}`
+      : ['studio-account', `session:${record.session_id}`]
+    this.nsp.to(rooms).emit('session.notice', {
+      event: 'session.notice',
+      session_id: record.session_id,
+      profile: record.profile,
+      attention: record.attention_pending === 1,
+      message,
+    })
+  }
+
   private needsBackgroundPoll(): boolean {
     if (this.closing) return false
     if (this.backgroundRecoveryNeeded) return true
     if (Date.now() < this.backgroundActivityGraceUntil) return true
     for (const state of this.sessionMap.values()) {
+      if (state.processNotifyPending) return true
       if (Object.values(state.backgroundDelegations || {})
         .some(item => item.status === 'running' || item.status === 'delivering')) return true
       if (Object.values(state.backgroundTasks || {})
@@ -2243,6 +2388,9 @@ export class ChatRunSocket {
       const routes = recovering ? this.backgroundRecoveryRoutes() : undefined
       const result = await this.backgroundBridge.backgroundPoll(routes, { timeoutMs: recovering ? 120_000 : 1000 })
       if (this.closing) {
+        await Promise.allSettled((result.process_notifications || []).map((notification: any) => (
+          this.backgroundBridge.processNotification('release', notification)
+        )))
         await Promise.allSettled((result.notifications || []).map((notification: any) => (
           this.backgroundBridge.releaseBackgroundNotification(
             notification.session_id,
@@ -2268,6 +2416,17 @@ export class ChatRunSocket {
       }
       for (const notification of result.notifications || []) {
         await this.scheduleBackgroundNotification(notification)
+      }
+      const notifyPending = new Set<string>((result.notify_pending || []).map((item: any) => String(item?.session_id || '')))
+      for (const [sessionId, state] of this.sessionMap) {
+        if (state.processNotifyPending && !notifyPending.has(sessionId)) state.processNotifyPending = false
+      }
+      for (const sessionId of notifyPending) {
+        const state = this.sessionMap.get(sessionId)
+        if (state) state.processNotifyPending = true
+      }
+      for (const notification of result.process_notifications || []) {
+        await this.scheduleProcessNotification(notification)
       }
     } catch (err) {
       this.backgroundPollRetryAt = Date.now() + 5000
@@ -2315,7 +2474,7 @@ export class ChatRunSocket {
         .map(message => message.id),
     )
     const taskPlans = getSessionTaskPlans(sid, messagePage.messages, true, state.runId)
-    const resumePage = { ...messagePage, messages: withPersonTaskReturns(sid, withRunUsage(sid, messagePage.messages)), workspaceRunChanges, taskPlans }
+    const resumePage = { ...messagePage, messages: withSessionNotices(sid, withPersonTaskReturns(sid, withRunUsage(sid, messagePage.messages)), true), workspaceRunChanges, taskPlans }
     const appMessagePage = options
       ? buildAppResumeMessagePage(resumePage, options.cachedId)
       : null
@@ -2755,6 +2914,19 @@ export class ChatRunSocket {
   }
 
   private runQueuedItem(socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile = 'default') {
+    if (next.machineEvent) {
+      const admitted = { ...next, machineEvent: undefined }
+      void this.admitMachineEvent(sessionId, next).then(ok => {
+        if (ok) {
+          this.runQueuedItem(socket, sessionId, admitted, fallbackProfile)
+          return
+        }
+        const state = this.sessionMap.get(sessionId)
+        if (state) state.isWorking = false
+        this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
+      })
+      return
+    }
     if (next.personStageDelivery) {
       const { userId,deliveryId } = next.personStageDelivery
       try {
@@ -2880,7 +3052,7 @@ export class ChatRunSocket {
     data: {
       input: string | ContentBlock[]
       display_input?: string | ContentBlock[] | null
-      display_role?: 'user' | 'command'
+      display_role?: 'user' | 'command' | 'system'
       storage_message?: string
       session_id: string
       model?: string
@@ -3617,6 +3789,10 @@ export class ChatRunSocket {
     if (this.backgroundPollTimer) {
       clearInterval(this.backgroundPollTimer)
       this.backgroundPollTimer = undefined
+    }
+    if (this.cronObserveTimer) {
+      clearInterval(this.cronObserveTimer)
+      this.cronObserveTimer = undefined
     }
     for (const requestId of [...this.pendingMobileLocations.keys()]) {
       this.finishMobileLocationRequest(requestId, {

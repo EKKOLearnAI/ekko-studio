@@ -62,6 +62,24 @@ const props = withDefaults(defineProps<{
   userProfileAvatar: null,
 });
 const { t } = useI18n();
+
+const studioNoticeTitle = computed(() => {
+  const notice = props.message.studioNotice;
+  if (!notice) return "";
+  return notice.success === false || notice.status === "failed"
+    ? t("chat.sessionNotice.cronFailedTitle", { name: notice.job_name })
+    : t("chat.sessionNotice.cronTitle", { name: notice.job_name });
+});
+
+const studioNoticeDetail = computed(() => {
+  const notice = props.message.studioNotice;
+  if (!notice) return "";
+  if (notice.disposition === "unknown") return t("chat.sessionNotice.unknown");
+  if (notice.reason === "output_unavailable_for_runtime") return t("chat.sessionNotice.outputUnavailable");
+  if (notice.reason === "receipt_unavailable") return t("chat.sessionNotice.receiptUnavailable");
+  if (notice.truncated) return t("chat.sessionNotice.truncated");
+  return "";
+});
 const toast = useMessage();
 
 const isSystem = computed(() => props.message.role === "system");
@@ -1249,6 +1267,10 @@ onBeforeUnmount(() => {
               @select="file => openAssistantWorkspaceChangeFile(file, change)"
             />
 
+            <div v-if="message.studioNotice" class="studio-notice-header">
+              <div class="studio-notice-title">{{ studioNoticeTitle }}</div>
+              <div v-if="studioNoticeDetail" class="studio-notice-detail">{{ studioNoticeDetail }}</div>
+            </div>
             <!-- Render system message content -->
             <MarkdownRenderer
               v-if="message.role === 'system' && message.content && !isCommandMessage"
@@ -2167,5 +2189,20 @@ onBeforeUnmount(() => {
     padding-inline-start: 8px !important;
     padding-inline-end: 8px !important;
   }
+}
+
+.studio-notice-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.studio-notice-title {
+  font-weight: 600;
+}
+
+.studio-notice-detail {
+  font-size: 12px;
 }
 </style>

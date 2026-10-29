@@ -1106,6 +1106,14 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      cronTitle: 'La tarea programada «{name}» terminó',
+      cronFailedTitle: 'La tarea programada «{name}» falló',
+      outputUnavailable: 'Resultado no disponible para este entorno (solo script); solo estado.',
+      receiptUnavailable: 'El comprobante exacto de esta ejecución no estaba disponible; solo estado.',
+      unknown: 'Resultado desconocido. Studio no volverá a ejecutar esta tarea.',
+      truncated: 'Resultado truncado para mostrar.',
+    },
     selectMessages: "Seleccionar mensajes",
     messagesSelected: "{count} seleccionados",
     deleteSelectedMessages: "Eliminar selección",
