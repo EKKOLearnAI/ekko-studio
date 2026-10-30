@@ -159,7 +159,8 @@ seam (before the user turn is stored and immediately before the model call) it c
   session state of the run that replaced it. Ordinary runs keep their own Stop handling.
   `/destroy` captures the owner it destroys (the state object and its owner revision) before
   its interrupt, bridge-destroy and usage awaits. Every accepted run owner (a claimed turn, a
-  dequeued item, a machine or background claim, a reattached run) and every Stop advances
+  dequeued item, a machine or background claim, a reattached run, the turn an expanded
+  command such as `/plan` or `/moa` starts) and every Stop advances
   that revision synchronously; queueing behind a busy owner does not. If a new owner
   appears meanwhile, even one still preparing without a run marker,
   `/destroy` still reports its result once but leaves that turn's bridge agent, state and

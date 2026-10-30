@@ -24,7 +24,9 @@ function gate() {
 
 function syntheticProfiles() {
   const home = mkdtempSync(join(tmpdir(), 'destroy-replacement-profiles-'))
-  const model = { model: { default: 'fake-model', provider: 'custom', base_url: 'http://127.0.0.1:9/v1', api_key: 'synthetic' }, compression: { enabled: false } }
+  const model = { model: { default: 'fake-model', provider: 'custom', base_url: 'http://127.0.0.1:9/v1', api_key: 'synthetic' }, compression: { enabled: false },
+    // Synthetic MoA preset so /moa is configured (no real provider is ever contacted: the bridge is fake).
+    moa: { default_preset: 'synthetic', presets: { synthetic: { reference_models: [{ provider: 'custom', model: 'fake-ref' }], aggregator: { provider: 'custom', model: 'fake-agg' } } } } }
   configureProfileConfig({
     buildModelGroups: () => ({ default: 'fake-model', groups: [] } as any), getProfilesBaseDir: () => home,
     getProfileDir: (profile: string) => join(home, profile), getActiveProfileName: () => 'default', listProfileNames: () => ['default'],
@@ -58,6 +60,12 @@ function fakeBridge() {
     destroy: vi.fn(async () => ({ ok: true })),
     statusIfLoaded: vi.fn(async () => ({ ok: true, exists: false, running: false, loaded: false })),
     processNotification: vi.fn(async (action: string) => (action === 'admit' ? { admitted: true } : { ok: true })),
+    // /plan expands through the bridge's command endpoint.
+    command: vi.fn(async (_sessionId: string, command: string) => (command.startsWith('plan')
+      ? { handled: true, type: 'plan', message: `EXPANDED_PLAN_PROMPT for ${command}` }
+      : { handled: false })),
+    completeBackgroundNotification: vi.fn(async () => ({ ok: true })),
+    releaseBackgroundNotification: vi.fn(async () => ({ ok: true })),
   }
   const release = (input: string) => bridge.runs.get(bridge.chats.find((c: any) => c.input === input)!.runId)!.release()
   return { bridge, release }
@@ -450,5 +458,123 @@ describe('P2 /destroy after a pre-native Stop does not clobber a replacement pre
     await flush()
     expect(chatInputs(bridge)).toEqual(['original question', 'replacement question', 'third question'])
     expect(state().queue).toHaveLength(0)
+  })
+})
+
+// repair-release@6: expanded commands (/plan, configured /moa) start their turn through a direct
+// runQueuedItem hand-off; that acceptance must take ownership like every other accepted run.
+describe('repair@6 direct command turns are owners an outstanding /destroy must not clean up', () => {
+  const commands = {
+    plan: { input: '/plan draft the release', chat: 'EXPANDED_PLAN_PROMPT for plan draft the release' },
+    moa: { input: '/moa compare the options', chat: 'compare the options' },
+  } as const
+  for (const name of ['plan', 'moa'] as const) {
+    for (const phase of ['preparing before its marker', 'running with its marker'] as const) {
+      it(`/${name} accepted while an idle /destroy waits in bridge.destroy (${phase}): the command turn and a queued turn both complete once`, async () => {
+        syntheticProfiles()
+        const { bridge, release } = fakeBridge()
+        const destroyGate = gate()
+        let destroyReached = false
+        bridge.destroy.mockImplementation(async () => { destroyReached = true; await destroyGate.promise; return { ok: true } })
+        const readinessGate = gate()
+        let checks = 0
+        const { server, roomEvents } = makeServer(bridge, async () => {
+          if ((checks += 1) === 1 && phase === 'preparing before its marker') await readinessGate.promise
+          return true
+        })
+        const { sid } = session()
+        const run = userSocket(server)
+        const state = () => server.sessionMap.get(sid)
+        const command = commands[name]
+
+        const destroying = run(sid, '/destroy')
+        await vi.waitFor(() => expect(destroyReached).toBe(true))
+        const revisionAtDestroy = state().ownerRevision ?? 0
+        void run(sid, command.input)
+        if (phase === 'preparing before its marker') {
+          await vi.waitFor(() => expect(checks).toBe(1))
+          expect(state().activeRunMarker).toBeUndefined()
+        } else {
+          await vi.waitFor(() => expect(chatInputs(bridge)).toContain(command.chat))
+          expect(typeof state().activeRunMarker).toBe('string')
+        }
+        // The third message: queued behind the accepted command turn (or, if the command turn has not
+        // taken the session, started on its own; the final assertions then fail).
+        void run(sid, 'third question')
+        await vi.waitFor(() => expect(state().queue.length === 1 || chatInputs(bridge).includes('third question')).toBe(true))
+        const before = { isWorking: true, activeRunMarker: state().activeRunMarker, runId: state().runId, queue: 1 }
+        console.log('REPAIR6_SNAPSHOT', name, phase, JSON.stringify({ isWorking: state().isWorking, revisionAtDestroy, revision: state().ownerRevision, queue: state().queue.length }))
+
+        destroyGate.open()
+        await destroying
+        await flush()
+        // Only the destroy RPC already in flight before the command started; no second destructive call, no cleanup.
+        expect(bridge.destroy).toHaveBeenCalledTimes(1)
+        expect({ isWorking: state().isWorking, activeRunMarker: state().activeRunMarker, runId: state().runId, queue: state().queue.length }).toEqual(before)
+        expect(destroyResults(roomEvents)).toHaveLength(1)
+
+        readinessGate.open()
+        await vi.waitFor(() => expect(chatInputs(bridge)).toContain(command.chat))
+        release(command.chat)
+        await vi.waitFor(() => expect(chatInputs(bridge)).toContain('third question'))
+        release('third question')
+        await vi.waitFor(() => expect(state().isWorking).toBe(false))
+        await flush()
+        expect(chatInputs(bridge)).toEqual([command.chat, 'third question'])
+        expect(state().queue).toHaveLength(0)
+        expect(destroyResults(roomEvents)).toHaveLength(1)
+      })
+    }
+  }
+
+  it('control: a command sent while busy only queues; it neither advances the owner revision nor takes over', async () => {
+    syntheticProfiles()
+    const { bridge, release } = fakeBridge()
+    const { server } = makeServer(bridge)
+    const { sid } = session()
+    const run = userSocket(server)
+    const state = () => server.sessionMap.get(sid)
+    void run(sid, 'current question')
+    await vi.waitFor(() => expect(chatInputs(bridge)).toContain('current question'))
+    const owner = { revision: state().ownerRevision, marker: state().activeRunMarker, runId: state().runId }
+    await run(sid, commands.plan.input)
+    await flush()
+    expect(state().queue).toHaveLength(1)
+    expect({ revision: state().ownerRevision, marker: state().activeRunMarker, runId: state().runId }).toEqual(owner)
+    release('current question')
+    await vi.waitFor(() => expect(chatInputs(bridge)).toContain(commands.plan.chat))
+    release(commands.plan.chat)
+    await vi.waitFor(() => expect(state().isWorking).toBe(false))
+    expect(chatInputs(bridge)).toEqual(['current question', commands.plan.chat])
+  })
+
+  it('positives: a normal turn, a machine completion and a background delegation each advance ownership exactly once and run once', async () => {
+    syntheticProfiles()
+    const { bridge, release } = fakeBridge()
+    const { server } = makeServer(bridge)
+    const { sid, generation } = session()
+    const run = userSocket(server)
+    const state = () => server.sessionMap.get(sid)
+    const step = async (start: () => unknown, chat: string) => {
+      const before = state()?.ownerRevision ?? 0
+      void start()
+      await vi.waitFor(() => expect(chatInputs(bridge)).toContain(chat))
+      // Accepted once; the admission/authorize recursion inside the run does not advance it again.
+      expect(state().ownerRevision).toBe(before + 1)
+      release(chat)
+      await vi.waitFor(() => expect(state().isWorking).toBe(false))
+      await flush()
+    }
+    await step(() => run(sid, 'normal question'), 'normal question')
+    const key = `hermes-process:default:proc_${sid}:pos`
+    const machineMessage = '[IMPORTANT: Background process completed normally (exit code 0).]'
+    await step(() => server.scheduleProcessNotification({ kind: 'process_completion', producer_key: key, claim_id: `claim-${key}`, session_id: sid,
+      profile: 'default', process_id: `proc_${sid}`, owner_generation: generation, exit_code: 0, status: 'succeeded', message: machineMessage }), machineMessage)
+    // The origin context a delegating turn registers when it hands work to the background.
+    state().backgroundContinuationContexts = { 'deleg-1': { runtime: 'hermes', version: 1, delegationId: 'deleg-1', sessionId: sid,
+      originRunId: 'origin-run', messages: [], profile: 'default' } }
+    await step(() => server.scheduleBackgroundNotification({ session_id: sid, profile: 'default', delegation_id: 'deleg-1', claim_id: 'claim-deleg-1',
+      message: '[ASYNC DELEGATION COMPLETE synthetic]', status: 'completed', event: {} }), '[ASYNC DELEGATION COMPLETE synthetic]')
+    expect(chatInputs(bridge)).toEqual(['normal question', machineMessage, '[ASYNC DELEGATION COMPLETE synthetic]'])
   })
 })

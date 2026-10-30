@@ -6,6 +6,7 @@ import type { PrimaryAgentBridgeClient as AgentBridgeClient } from '../../public
 import { readConfigYamlForProfile } from '../../public/profile-config'
 import { flushBridgePendingToDb } from './bridge-message'
 import { settleQueuedMachineEvents } from '../session-notifications/machine-events'
+import { advanceRunOwnership } from './run-ownership'
 import { buildDbSnapshotAwareHistory, forceCompressBridgeHistory, getOrCreateSession, replaceState } from './compression'
 import { handleAbort } from './abort'
 import { calcAndUpdateUsage, contextTokensWithCachedOverhead, estimateUsageTokensFromMessages, updateMessageContextTokenUsage } from './usage'
@@ -151,6 +152,16 @@ export async function handleSessionCommand(
     })
   }
 
+  // An expanded command's turn (skill, bundle, learn, /moa, /plan, goal kickoff) is accepted here, not
+  // through the socket claim: take the session and advance its owner revision synchronously before the
+  // hand-off, as every other accepted run does, so an outstanding /destroy sees a new owner. A busy
+  // session only enqueues the turn (never through here).
+  const startAcceptedRun = (next: QueuedRun) => {
+    state.isWorking = true
+    advanceRunOwnership(state)
+    ctx.runQueuedItem(ctx.socket, sessionId, next, ctx.profile)
+  }
+
   if (command.name === 'skill' || command.name === 'bundles') {
     const isBundleCommand = command.name === 'bundles'
     const action = isBundleCommand ? 'bundle' : 'skill'
@@ -239,7 +250,7 @@ export async function handleSessionCommand(
         terminal: false,
         started: true,
       })
-      ctx.runQueuedItem(ctx.socket, sessionId, next, ctx.profile)
+      startAcceptedRun(next)
       return
     }
 
@@ -318,7 +329,7 @@ export async function handleSessionCommand(
         terminal: false,
         started: true,
       })
-      ctx.runQueuedItem(ctx.socket, sessionId, next, ctx.profile)
+      startAcceptedRun(next)
       return
     }
 
@@ -389,7 +400,7 @@ export async function handleSessionCommand(
         aggregator: presetInfo.aggregator,
       },
     })
-    ctx.runQueuedItem(ctx.socket, sessionId, next, ctx.profile)
+    startAcceptedRun(next)
     return
   }
 
@@ -594,7 +605,7 @@ export async function handleSessionCommand(
         terminal: false,
         started: true,
       })
-      ctx.runQueuedItem(ctx.socket, sessionId, next, ctx.profile)
+      startAcceptedRun(next)
       return
     }
 
@@ -676,7 +687,7 @@ export async function handleSessionCommand(
         return
       }
 
-      ctx.runQueuedItem(ctx.socket, sessionId, next, ctx.profile)
+      startAcceptedRun(next)
       return
     }
 
