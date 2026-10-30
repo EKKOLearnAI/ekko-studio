@@ -56,6 +56,17 @@ const urls = (count: number) => Array.from({ length: count }, (_, index) => `htt
 const tabUrls = (manager: BrowserManager) => manager.state().tabs.map(tab => tab.url)
 
 describe('desktop browser tab rotation', () => {
+  it('does not attach background tabs to the chat native view tree', async () => {
+    const { manager, window, built } = await setup()
+    const tab = await manager.createTab('https://example.com/background', false)
+    expect(window.contentView.addChildView).not.toHaveBeenCalled()
+    manager.setViewport({ x: 0, y: 0, width: 800, height: 600 }, true)
+    expect(window.contentView.addChildView).toHaveBeenCalledWith(built[0].view)
+    manager.setViewport({ x: 0, y: 0, width: 800, height: 600 }, false)
+    expect(window.contentView.removeChildView).toHaveBeenCalledWith(built[0].view)
+    expect(manager.state().tabs[0].id).toBe(tab.id)
+  })
+
   it('keeps twelve tabs and evicts the oldest created tab even after it is activated', async () => {
     const { manager, internal, built, window, root } = await setup()
     for (const url of urls(12)) await manager.createTab(url)

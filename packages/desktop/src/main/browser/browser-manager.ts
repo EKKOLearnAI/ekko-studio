@@ -144,6 +144,8 @@ export class BrowserManager {
   private readonly configuredSessions = new Set<string>()
   private readonly configuredSessionProxies = new Map<string, string>()
   private readonly automationVisibleTabs = new Set<string>()
+  private readonly attachedTabs = new Set<string>()
+  private readonly automationHosts = new Map<string, BrowserWindow>()
   private readonly profileLeases = new BrowserProfileLeases(release => app.once('will-quit', release))
   private readonly activeAnnotationTabs = new Set<string>()
   private readonly annotationMarkerCounts = new Map<string, number>()
@@ -241,7 +243,6 @@ export class BrowserManager {
         record.tab.title = htmlPreview.title
       }
       this.records.set(record.tab.id, record)
-      this.window.contentView.addChildView(record.view)
       if (activate || !this.activeTabId) this.activeTabId = record.tab.id
       this.syncViews()
       const loading = record.view.webContents.loadURL(htmlPreview?.dataUrl || normalizedUrl).catch(() => {
@@ -276,6 +277,10 @@ export class BrowserManager {
     const contents = record.view.webContents
     this.window.contentView.removeChildView(record.view)
     this.automation.detach(tabId, contents)
+    this.automationHosts.get(tabId)?.contentView.removeChildView(record.view)
+    this.automationHosts.get(tabId)?.destroy()
+    this.automationHosts.delete(tabId)
+    this.attachedTabs.delete(tabId)
     this.automationVisibleTabs.delete(tabId)
     if (contents && !contents.isDestroyed()) contents.close()
     this.records.delete(tabId)
@@ -1410,21 +1415,30 @@ export class BrowserManager {
   private syncViews(): void {
     for (const [id, record] of this.records) {
       const userVisible = this.visible && id === this.activeTabId
-      if (userVisible) {
-        record.view.setBounds(this.bounds)
-        record.view.setVisible(true)
-      } else if (this.automationVisibleTabs.has(id)) {
-        record.view.setBounds({
-          x: -Math.max(10_000, this.bounds.width + 100),
-          y: -Math.max(10_000, this.bounds.height + 100),
-          width: this.bounds.width,
-          height: this.bounds.height,
-        })
-        record.view.setVisible(true)
-      } else {
-        record.view.setBounds(this.bounds)
-        record.view.setVisible(false)
+      // Attaching a WebContentsView can make it the native first responder on
+      // macOS, even when hidden. Only user-visible tabs belong to the host tree.
+      if (userVisible && !this.attachedTabs.has(id)) {
+        this.automationHosts.get(id)?.contentView.removeChildView(record.view)
+        this.window.contentView.addChildView(record.view)
+        this.attachedTabs.add(id)
+      } else if (!userVisible && this.attachedTabs.delete(id)) {
+        this.window.contentView.removeChildView(record.view)
       }
+      if (!userVisible && this.automationVisibleTabs.has(id)) {
+        let host = this.automationHosts.get(id)
+        if (!host) {
+          host = new BrowserWindow({
+            show: false, focusable: false, skipTaskbar: true,
+            width: this.bounds.width, height: this.bounds.height,
+            webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false },
+          })
+          this.automationHosts.set(id, host)
+        }
+        host.setSize(this.bounds.width, this.bounds.height)
+        host.contentView.addChildView(record.view)
+      }
+      record.view.setBounds(userVisible ? this.bounds : { x: 0, y: 0, width: this.bounds.width, height: this.bounds.height })
+      record.view.setVisible(userVisible || this.automationVisibleTabs.has(id))
     }
   }
 
@@ -1458,11 +1472,15 @@ export class BrowserManager {
     for (const [id, record] of this.records) {
       const contents = record.view.webContents
       this.window.contentView.removeChildView(record.view)
+      this.automationHosts.get(id)?.contentView.removeChildView(record.view)
+      this.automationHosts.get(id)?.destroy()
       this.automation.detach(id, contents)
       if (contents && !contents.isDestroyed()) contents.close()
     }
     this.records.clear()
     this.automationVisibleTabs.clear()
+    this.attachedTabs.clear()
+    this.automationHosts.clear()
     this.activeAnnotationTabs.clear()
     this.annotationMarkerCounts.clear()
     this.activeTabId = undefined
