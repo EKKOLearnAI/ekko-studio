@@ -17,6 +17,7 @@ const visibleFlows = computed(() => props.flows.slice(0,50))
 const filters = computed(() => [
   { value:'all' as const,label:t('person.flowAll'),count:visibleFlows.value.length },
   { value:'active' as const,label:t('person.flowInProgress'),count:visibleFlows.value.filter(flow => flow.state === 'active').length },
+  { value:'failed' as const,label:t('person.states.failed'),count:visibleFlows.value.filter(flow => flow.state === 'failed').length },
   { value:'stopped' as const,label:t('person.flowStopped'),count:visibleFlows.value.filter(flow => flow.state === 'stopped').length },
   { value:'completed' as const,label:t('person.states.completed'),count:visibleFlows.value.filter(flow => flow.state === 'completed').length },
 ])

@@ -3222,6 +3222,41 @@ for (const width of [1440, 390]) {
 }
 
 for (const { width, mode } of [{ width:1440, mode:'light' }, { width:390, mode:'dark' }] as const) {
+  test(`Person unlocks automatically after a collaboration failure and keeps its history in ${mode}`, async ({ page }) => {
+    const { state, operations } = await setup(page,mode,mode === 'dark',mode === 'dark')
+    await page.setViewportSize({width,height:900})
+    state.tasks=[];state.busy=true
+    state.flows=[{id:'failed-flow',title:'Failure recovery',goal:'Work then review',state:'active',revision:0,current_position:0,error:'',stages:[
+      {id:'failed-stage',position:0,group_position:0,session_id:'person-main-1',session_title:'Worker role',goal:'Prepare result',state:'active',result_message_id:null,tasks:[]},
+      {id:'dependent-stage',position:1,group_position:1,session_id:'person-main-b',session_title:'Review role',goal:'Review result',state:'pending',result_message_id:null,tasks:[]},
+    ]}]
+    await page.addInitScript(() => {
+      (window as any).__PW_CHAT_SOCKET_RESUMES__['person-main-1'].messages=[{id:1,role:'assistant',content:'Keep this conversation history',timestamp:1}]
+    })
+    await page.goto('/#/person')
+    const broom=page.getByRole('button',{name:'Clear chat history and tasks',exact:true})
+    await expect(broom).toBeDisabled()
+    state.busy=false
+    Object.assign(state.flows[0],{state:'failed',revision:1,error:'Provider unavailable'})
+    Object.assign(state.flows[0].stages[0],{state:'failed',delivery_state:'failed',delivery_error:'Provider unavailable'})
+    await emit(page,'person.updated',{})
+    await expect(broom).toBeEnabled()
+    await expect(page.getByText('Keep this conversation history',{exact:true})).toBeVisible()
+    expect(operations.filter(op=>op.path.endsWith('/clear'))).toHaveLength(0)
+    await page.locator('.person-header-actions').getByRole('button',{name:'Settings',exact:true}).click()
+    const drawer=page.locator('.person-workspace-drawer')
+    await drawer.getByRole('tab',{name:'Flows',exact:true}).click()
+    await drawer.locator('.flow-filters button').filter({hasText:'Failed'}).click()
+    await drawer.getByRole('button',{name:'Failure recovery',exact:true}).click()
+    await expect(drawer.getByText('Provider unavailable',{exact:true}).first()).toBeVisible()
+    await expect(drawer.locator('.flow-overview')).toContainText('Needs attention')
+    await expect(drawer.locator('.flow-role').filter({hasText:'Review role'})).toContainText('Waiting')
+    await page.screenshot({path:`/tmp/person-flow-auto-unlock-${mode}.png`,animations:'disabled'})
+    await drawer.getByRole('button',{name:'Resume',exact:true}).click()
+    expect(operations.filter(op=>op.path.endsWith('/flows/apply')).map(op=>op.body.action)).toEqual(['resume'])
+    expect(operations.filter(op=>op.path.endsWith('/clear'))).toHaveLength(0)
+  })
+
   test(`Person displays parallel branches, waits for peers and opens their results in ${mode}`, async ({ page }) => {
     const { state, operations } = await setup(page,mode,mode === 'dark',mode === 'dark')
     state.tasks=[]

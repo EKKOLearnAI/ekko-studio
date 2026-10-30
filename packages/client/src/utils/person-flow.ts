@@ -17,7 +17,7 @@ export function personFlowStageStatus(flow: PersonFlow, stage: PersonFlowStage):
   if (stage.state === 'completed') return 'completed'
   if (stage.state === 'pending') return 'waiting_dependencies'
   if (flow.state === 'stopped') return 'interrupted'
-  if (stage.delivery_error) return 'blocked'
+  if (stage.state === 'failed' || stage.delivery_error) return 'blocked'
   const tasks = stage.tasks.filter(task => task.status !== 'closed')
   for (const state of ['waiting_user','waiting_approval','waiting_person'] as const) {
     if (tasks.some(task => task.execution_state === state)) return state
@@ -38,6 +38,7 @@ export function personFlowDependencies(flow: PersonFlow, stage: PersonFlowStage)
 export function personFlowState(flow: PersonFlow): PersonFlowStatus {
   if (flow.state === 'completed') return 'completed'
   if (flow.state === 'stopped') return 'interrupted'
+  if (flow.state === 'failed') return 'blocked'
   const current = personFlowGroups(flow).find(group => group.position === flow.current_position)
   if (flow.error || current?.stages.some(stage => personFlowStageStatus(flow,stage) === 'blocked')) return 'blocked'
   if (current?.stages.some(stage => ['waiting_user','waiting_approval'].includes(personFlowStageStatus(flow,stage)))) return 'waiting_user'

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { PersonConversationFlow, PersonStage, PersonStageContext, PersonStageDelivery } from '../contracts/person-stage'
 import { personError } from '../contracts/person'
-import { getPersonTask, personDb } from './person-store'
+import { getPersonTask, personDb, personTransaction } from './person-store'
 import { requirePersonSession } from './person-session-store'
 
 /** Only an outstanding handoff keeps its recipient active, never the waiting creator. */
@@ -9,7 +9,7 @@ export function personCollaborationPendingCount(userId: number, sessionId: strin
   return Number(personDb().prepare(`SELECT COUNT(DISTINCT f.id) AS n FROM person_flows f
     JOIN person_stages s ON s.flow_id=f.id AND s.group_position=f.current_position
     JOIN person_stage_deliveries d ON d.stage_id=s.id AND d.generation=f.generation
-    WHERE f.owner_user_id=? AND f.state='active' AND s.state='active'
+    WHERE f.owner_user_id=? AND f.state IN ('active','failed') AND s.state='active'
       AND s.session_id=? AND d.state IN ('pending','queued') AND d.error=''`).get(userId, sessionId)!.n)
 }
 
@@ -27,7 +27,7 @@ export function getPersonFlow(userId: number, id: string): PersonConversationFlo
       return { id:task.id,title:task.title,status:task.status,execution_state:task.execution_state || 'idle',agent:JSON.parse(task.selection_json).runtime }
     })
   }
-  const error = db.prepare("SELECT error FROM person_stage_deliveries WHERE flow_id=? AND state='pending' ORDER BY updated_at DESC LIMIT 1").get(id)?.error || ''
+  const error = db.prepare("SELECT error FROM person_stage_deliveries WHERE flow_id=? AND generation=? AND state IN ('pending','failed') AND error!='' ORDER BY updated_at DESC LIMIT 1").get(id,row.generation)?.error || ''
   return { ...row, stages, error } as unknown as PersonConversationFlow
 }
 export function listPersonFlows(userId: number, sessionId = '', offset = 0) {
@@ -38,7 +38,7 @@ export function listPersonFlows(userId: number, sessionId = '', offset = 0) {
 export function assertPersonStage(userId: number, context: PersonStageContext, sessionId?: string) {
   const flow = getPersonFlow(userId, context.flowId)
   const stage = flow.stages.find(item => item.id === context.stageId)
-  if (flow.state !== 'active' || flow.generation !== context.generation || stage?.group_position !== flow.current_position || stage.state !== 'active') throw personError('Flow stage is no longer current', 409)
+  if (!['active','failed'].includes(flow.state) || flow.generation !== context.generation || stage?.group_position !== flow.current_position || stage.state !== 'active') throw personError('Flow stage is no longer current', 409)
   if (sessionId && stage.session_id !== sessionId) throw personError('Stage belongs to another conversation', 403)
   requirePersonSession(userId, stage.session_id)
   if (context.deliveryId) {
@@ -47,6 +47,36 @@ export function assertPersonStage(userId: number, context: PersonStageContext, s
   }
   return { flow, stage }
 }
+/** A failed branch settles until an explicit resume. Peers keep their generation. */
+export function recordPersonStageFailure(userId: number, context: PersonStageContext, error: string) {
+  return personTransaction(() => {
+    let current: ReturnType<typeof assertPersonStage>
+    try { current = assertPersonStage(userId,context) } catch { return false }
+    const { flow,stage } = current, db = personDb(), now = Date.now()
+    const detail = (error || 'Collaboration stage failed').slice(0,1000)
+    db.prepare("UPDATE person_stages SET state='failed',completion_run_id='' WHERE id=?").run(stage.id)
+    db.prepare("UPDATE person_stage_deliveries SET state='failed',error=?,updated_at=? WHERE stage_id=? AND generation=? AND state IN ('pending','queued','delivered')")
+      .run(detail,now,stage.id,flow.generation)
+    db.prepare(`UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE state IN ('waiting','pending','queued')
+      AND execution_id IN (SELECT e.id FROM person_executions e JOIN person_stage_tasks l ON l.task_id=e.task_id WHERE l.stage_id=?)`).run(now,stage.id)
+    db.prepare("UPDATE person_flows SET state='failed',revision=revision+1,updated_at=? WHERE id=?").run(now,flow.id)
+    db.prepare("UPDATE person_occurrences SET state='failed' WHERE flow_id=?").run(flow.id)
+    return true
+  })
+}
+
+/** SQL predicate for stage alias s; failed work itself never holds a lock. */
+export const PERSON_STAGE_PENDING_WORK_SQL = `(s.completion_run_id!='' OR EXISTS(
+  SELECT 1 FROM person_stage_deliveries d WHERE d.stage_id=s.id AND d.generation=f.generation AND d.state IN ('pending','queued') AND d.error='') OR EXISTS(
+  SELECT 1 FROM person_stage_tasks l JOIN person_executions e ON e.task_id=l.task_id WHERE l.stage_id=s.id AND
+    (e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval') OR EXISTS(
+      SELECT 1 FROM person_deliveries d WHERE d.execution_id=e.id AND d.state IN ('pending','queued')))))`
+
+export function personFlowHasPendingWork(userId: number, flowId: string) {
+  return !!personDb().prepare(`SELECT 1 FROM person_flows f JOIN person_stages s ON s.flow_id=f.id
+    WHERE f.id=? AND f.owner_user_id=? AND s.group_position=f.current_position AND ${PERSON_STAGE_PENDING_WORK_SQL} LIMIT 1`).get(flowId,userId)
+}
+
 export function personTaskStage(userId: number, taskId: string): PersonStageContext | undefined {
   const row = personDb().prepare(`SELECT s.flow_id,s.id,l.generation FROM person_stage_tasks l JOIN person_stages s ON s.id=l.stage_id
     JOIN person_flows f ON f.id=s.flow_id WHERE l.task_id=? AND f.owner_user_id=?`).get(taskId, userId)

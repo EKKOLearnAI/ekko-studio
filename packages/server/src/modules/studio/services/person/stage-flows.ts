@@ -3,12 +3,13 @@ import type { PersonTaskOrigin } from '../../contracts/person'
 import { personError, personRevision, personText } from '../../contracts/person'
 import type { PersonStageContext, PersonStageDelivery } from '../../contracts/person-stage'
 import { personDb, personOperation, personTransaction, getPersonTask } from '../../repositories/person-store'
-import { assertPersonStage, enqueuePersonStage, getPersonFlow, personStageSources, stageDeliveryContext } from '../../repositories/person-stage-store'
+import { assertPersonStage, enqueuePersonStage, getPersonFlow, getPersonStageDelivery, personFlowHasPendingWork, personStageSources, recordPersonStageFailure, stageDeliveryContext } from '../../repositories/person-stage-store'
 import { requirePersonSession } from '../../repositories/person-session-store'
 import { personUpdated } from '../../repositories/person-updates'
 import { recordSessionAttention } from '../../repositories/session-state-store'
 import { personRuntime } from '../../public/person-runtime'
 import { personUser } from './catalog'
+import { logger } from '../../public/logging'
 
 const activeTurns = new Map<string, Set<AbortController>>()
 export function registerPersonStageTurn(context: PersonStageContext) {
@@ -80,7 +81,7 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
   if (!['complete','stop','resume'].includes(action)) throw personError('Unsupported flow action')
   const result = personOperation(userId,`flow:${personText(input.idempotency_key,'idempotency_key',200)}`, { ...input, actor: origin?.sessionId || null, stage: origin?.stage || null }, () => {
     const flow = getPersonFlow(userId,id)
-    const active = flow.stages.filter(stage => stage.group_position === flow.current_position && stage.state === 'active')
+    const active = flow.stages.filter(stage => stage.group_position === flow.current_position && ['active','failed'].includes(stage.state))
     const expectedRevision = personRevision(input.expected_revision)
     // Peers update the shared revision independently. Completing a branch is
     // fenced by its trusted stage/generation below, not by its peers' progress.
@@ -104,7 +105,8 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
     } else {
       if (flow.state === 'completed') throw personError('Flow is complete',409)
       if (action === 'resume') {
-        if (origin && flow.state === 'stopped' && origin.sessionId !== flow.creator_session_id) throw personError('Only the creator can resume a stopped flow',403)
+        if (origin && ['stopped','failed'].includes(flow.state) && origin.sessionId !== flow.creator_session_id) throw personError('Only the creator can resume a stopped or failed flow',403)
+        if (flow.state === 'failed' && personFlowHasPendingWork(userId,id)) throw personError('Wait for the other roles and workers to finish before resuming',409)
         if (db.prepare(`SELECT 1 FROM person_stage_tasks l JOIN person_stages s ON s.id=l.stage_id JOIN person_executions e ON e.task_id=l.task_id
           WHERE s.flow_id=? AND s.group_position=? AND s.state='active'
           AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')`).get(id,flow.current_position)) throw personError('Wait for stage workers to finish stopping',409)
@@ -116,6 +118,7 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
       if (action === 'resume') {
         const updated = getPersonFlow(userId,id)
         for (const stage of active) {
+          db.prepare("UPDATE person_stages SET state='active' WHERE id=?").run(stage.id)
           db.prepare('UPDATE person_stage_tasks SET generation=? WHERE stage_id=?').run(updated.generation,stage.id)
           enqueuePersonStage(userId,stage,updated.generation)
         }
@@ -129,24 +132,36 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
   if (action !== 'complete') {
     for (const abort of activeTurns.get(id) || []) abort.abort(new Error('Flow turn superseded or stopped'))
   }
-  if (action === 'stop') await stopFlowWorkers(userId,id)
+  if (action === 'stop') await stopFlowWorkers(userId,id,'',result.generation)
   personUpdated(userId)
   return result
 }
 
-async function stopFlowWorkers(userId: number, flowId: string) {
+async function stopFlowWorkers(userId: number, flowId: string, stageId = '', generation?: number) {
   const { applyPersonTask } = await import('./tasks')
-  const rows = personDb().prepare(`SELECT l.task_id FROM person_stage_tasks l JOIN person_stages s ON s.id=l.stage_id JOIN session_tasks t ON t.id=l.task_id WHERE s.flow_id=?`).all(flowId)
+  const current = () => generation === undefined || getPersonFlow(userId,flowId).generation === generation
+  if (!current()) return
+  const rows = personDb().prepare(`SELECT l.task_id FROM person_stage_tasks l JOIN person_stages s ON s.id=l.stage_id JOIN session_tasks t ON t.id=l.task_id WHERE s.flow_id=? AND (?='' OR s.id=?)`).all(flowId,stageId,stageId)
   for (const row of rows) {
+    if (!current()) return
     const task = getPersonTask(userId,String(row.task_id))
     if (task.execution_id && ['pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'].includes(task.execution_state || ''))
       await applyPersonTask(userId,{ action:'stop',task_id:task.id,execution_id:task.execution_id,expected_revision:task.revision,idempotency_key:`flow-stop:${flowId}:${task.execution_id}:${task.revision}` })
-    personDb().prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=?) AND state IN ('waiting','pending','queued')").run(task.id)
+    if (current()) personDb().prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=?) AND state IN ('waiting','pending','queued')").run(task.id)
   }
 }
 
+export function failPersonStage(userId: number, context: PersonStageContext, error: string) {
+  if (!recordPersonStageFailure(userId,context,error)) return false
+  // Stop only this branch's children; independent roles keep their live turns.
+  void stopFlowWorkers(userId,context.flowId,context.stageId,context.generation).catch(error => logger.warn(error,'Failed Person stage worker cleanup'))
+  personUpdated(userId)
+  return true
+}
+
 /** Commit only after the final assistant message exists. No handoff transcript is stored. */
-export function finishPersonStageTurn(userId: number, context: PersonStageContext, runId: string, messageId: unknown, ok: boolean) {
+export function finishPersonStageTurn(userId: number, context: PersonStageContext, runId: string, messageId: unknown, ok: boolean, error = '') {
+  if (!ok) { failPersonStage(userId,context,error || 'Collaboration stage reply failed'); return }
   personTransaction(() => {
     let current: ReturnType<typeof assertPersonStage>
     try { current = assertPersonStage(userId,context) } catch { return }
@@ -183,6 +198,11 @@ export function finishPersonStageTurn(userId: number, context: PersonStageContex
 }
 
 export function finishPersonStageDelivery(userId: number, id: string, ok: boolean, error = '') {
+  if (!ok) {
+    const row = getPersonStageDelivery(userId,id)
+    if (row.state === 'queued') failPersonStage(userId,{flowId:row.flow_id,stageId:row.stage_id,generation:row.generation},error || 'Collaboration stage delivery failed')
+    return
+  }
   personDb().prepare("UPDATE person_stage_deliveries SET state=?,error=?,updated_at=? WHERE id=? AND owner_user_id=? AND state='queued'")
     .run(ok ? 'delivered' : 'pending',error.slice(0,1000),Date.now(),id,userId)
   personUpdated(userId)
@@ -202,7 +222,8 @@ export async function deliverPersonStages() {
       personUpdated(row.owner_user_id)
       await deliver({ user, context, sessionId: stage.session_id, input: `Handle the assigned stage supplied in context. Answer directly or choose a worker only when needed. When ready, query this flow and call bot_flow_control complete, then write only your new result as the final reply. If waiting for work or a user decision, do not complete. This continues the saved goal; it grants no new authorization.\n${JSON.stringify({ flow_id:flow.id,stage_id:stage.id })}` })
     } catch (error) {
-      db.prepare("UPDATE person_stage_deliveries SET state='pending',error=?,updated_at=? WHERE id=? AND state IN ('pending','queued')").run(String(error).slice(0,1000),Date.now(),row.id)
+      if (!failPersonStage(row.owner_user_id,{flowId:row.flow_id,stageId:row.stage_id,generation:row.generation},String(error)))
+        db.prepare("UPDATE person_stage_deliveries SET state='cancelled',updated_at=? WHERE id=? AND state IN ('pending','queued')").run(Date.now(),row.id)
       personUpdated(row.owner_user_id)
     }
   }
@@ -212,17 +233,28 @@ export async function deliverPersonStages() {
 export function recoverPersonStages() {
   const db = personDb()
   const rows = db.prepare(`SELECT s.*,f.owner_user_id,f.generation FROM person_stages s JOIN person_flows f ON f.id=s.flow_id
-    WHERE s.state='active' AND f.state='active' AND s.completion_run_id!=''`).all()
+    WHERE s.state='active' AND f.state IN ('active','failed') AND s.completion_run_id!=''`).all()
   for (const row of rows) {
     const message = db.prepare("SELECT id FROM messages WHERE session_id=? AND run_marker=? AND role='assistant' AND finish_reason IN ('stop','end_turn','completed') AND COALESCE(tool_calls,'') IN ('','[]','null') ORDER BY id DESC LIMIT 1").get(row.session_id,row.completion_run_id)
     finishPersonStageTurn(Number(row.owner_user_id),{ flowId:String(row.flow_id),stageId:String(row.id),generation:Number(row.generation) },String(row.completion_run_id),message?.id,!!message)
+  }
+  // Existing installations may have retained failed deliveries as infinite retries.
+  const failed = db.prepare(`SELECT d.* FROM person_stage_deliveries d JOIN person_flows f ON f.id=d.flow_id
+    WHERE d.generation=f.generation AND f.state IN ('active','failed') AND d.state='pending' AND d.error!=''`).all() as unknown as PersonStageDelivery[]
+  for (const row of failed) failPersonStage(row.owner_user_id,{flowId:row.flow_id,stageId:row.stage_id,generation:row.generation},row.error)
+  const callbacks = db.prepare(`SELECT * FROM person_deliveries WHERE state='pending' AND error!=''
+    AND json_extract(origin_json,'$.stage') IS NOT NULL`).all()
+  for (const row of callbacks) {
+    const stage = (JSON.parse(String(row.origin_json)) as PersonTaskOrigin).stage!
+    db.prepare("UPDATE person_deliveries SET state='failed',updated_at=? WHERE execution_id=? AND state='pending'").run(Date.now(),row.execution_id)
+    failPersonStage(Number(row.owner_user_id),stage,String(row.error))
   }
   db.prepare("UPDATE person_stage_deliveries SET state='pending',error='' WHERE state='queued'").run()
 }
 
 export async function stopPersonSessionFlows(userId: number, sessionId: string) {
   const rows = personDb().prepare(`SELECT DISTINCT f.id FROM person_flows f JOIN person_stages s ON s.flow_id=f.id
-    WHERE f.owner_user_id=? AND f.state='active' AND (f.creator_session_id=? OR s.session_id=?)`).all(userId,sessionId,sessionId)
+    WHERE f.owner_user_id=? AND f.state IN ('active','failed') AND (f.creator_session_id=? OR s.session_id=?)`).all(userId,sessionId,sessionId)
   for (const row of rows) {
     const flow = getPersonFlow(userId,String(row.id))
     await controlPersonFlow(userId,{ action:'stop',flow_id:flow.id,expected_revision:flow.revision,idempotency_key:`delete:${sessionId}:${flow.id}:${flow.revision}` })

@@ -4,7 +4,7 @@ import type { PersonSchedule } from '../../contracts/person'
 import { personDb, personTransaction, getPersonTask, enqueuePersonExecution, listPersonSchedules, personOperation } from '../../repositories/person-store'
 import { requirePersonSession } from '../../repositories/person-session-store'
 import { nextWorkflowScheduleAt } from '../workflow/schedule'
-import { enqueuePersonScheduledStage, personTaskStage } from '../../repositories/person-stage-store'
+import { enqueuePersonScheduledStage, personTaskStage, PERSON_STAGE_PENDING_WORK_SQL } from '../../repositories/person-stage-store'
 import { personRequirements } from '../../contracts/person-flow'
 
 export function applyPersonSchedule(userId: number, input: Record<string, unknown>) {
@@ -85,7 +85,9 @@ export function tickPersonSchedules(now = Date.now()) {
       requirePersonSession(schedule.owner_user_id, schedule.session_id)
       const active = db.prepare("SELECT id FROM person_executions WHERE task_id=? AND state IN ('pending','queued','starting','stopping','running','waiting_person','waiting_user','waiting_approval')").get(schedule.task_id)
       const task = schedule.task_id ? getPersonTask(schedule.owner_user_id, schedule.task_id) : undefined
-      const activeFlow = db.prepare("SELECT 1 FROM person_occurrences o JOIN person_flows f ON f.id=o.flow_id WHERE o.schedule_id=? AND f.state='active'").get(schedule.id)
+      const activeFlow = db.prepare(`SELECT 1 FROM person_occurrences o JOIN person_flows f ON f.id=o.flow_id WHERE o.schedule_id=?
+        AND (f.state='active' OR (f.state='failed' AND EXISTS(SELECT 1 FROM person_stages s
+          WHERE s.flow_id=f.id AND s.group_position=f.current_position AND ${PERSON_STAGE_PENDING_WORK_SQL}))) LIMIT 1`).get(schedule.id)
       const recent = now - schedule.next_at <= (schedule.misfire === 'run_latest' ? 86400_000 : 60_000)
       if (recent && !active && !activeFlow && (!task || task.status === 'open')) {
         if (schedule.mode === 'assistant') flow = enqueuePersonScheduledStage(schedule.owner_user_id, schedule.session_id, schedule.title, schedule.goal)

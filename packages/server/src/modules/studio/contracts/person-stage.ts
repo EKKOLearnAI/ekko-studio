@@ -12,15 +12,15 @@ export interface PersonStage {
   delivery_error?: string
   tasks: Array<{ id: string; title: string; status: string; execution_state?: string; agent?: string }>
   id: string; flow_id: string; position: number; group_position: number; session_id: string; goal: string; return_expectation: string
-  state: 'pending' | 'active' | 'completed'; result_message_id: number | null; completion_run_id: string
+  state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; completion_run_id: string
 }
 export interface PersonConversationFlow {
   id: string; owner_user_id: number; creator_session_id: string; title: string; goal: string
   /** current_position indexes execution groups; each stage retains its unique route position. */
-  state: 'active' | 'stopped' | 'completed'; revision: number; generation: number; current_position: number
+  state: 'active' | 'failed' | 'stopped' | 'completed'; revision: number; generation: number; current_position: number
   created_at: number; updated_at: number; stages: PersonStage[]; error: string
 }
 export interface PersonStageDelivery {
   id: string; owner_user_id: number; flow_id: string; stage_id: string; generation: number
-  state: 'pending' | 'queued' | 'delivered' | 'cancelled'; updated_at: number; error: string
+  state: 'pending' | 'queued' | 'failed' | 'delivered' | 'cancelled'; updated_at: number; error: string
 }

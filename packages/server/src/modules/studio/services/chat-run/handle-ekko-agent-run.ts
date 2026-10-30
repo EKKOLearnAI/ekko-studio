@@ -545,7 +545,7 @@ export async function handleEkkoAgentRun(
   const emit = (event: string, payload: any) => {
     const tagged = { ...payload, session_id: sessionId }
     if (personStageContext && (event === 'run.completed' || event === 'run.failed')) {
-      finishPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''),payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed')
+      finishPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''),payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed',String(payload.error || ''))
     }
     if (!isPrivatePersonSession(sessionId)) observeRunChatPetEvent(profile, event, tagged)
     data.onEvent?.(event, tagged)

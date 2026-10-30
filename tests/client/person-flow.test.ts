@@ -65,4 +65,11 @@ describe('role collaboration display',() => {
     expect(personFlowGroups(current)).toHaveLength(1)
     expect(personFlowGroups(current)[0].completed).toBe(2)
   })
+
+  it('keeps failed roles blocked and later roles waiting while a parallel peer continues running',() => {
+    const current = flow();current.state='failed';current.stages[0].state='failed'
+    current.stages[1].tasks=[{id:'worker',title:'Research',status:'open',execution_state:'running'}]
+    expect(current.stages.map(stage => personFlowStageStatus(current,stage))).toEqual(['blocked','running','waiting_dependencies'])
+    expect(personFlowState(current)).toBe('blocked')
+  })
 })

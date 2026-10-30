@@ -22,6 +22,7 @@ const flowState = computed(() => personFlowState(props.flow))
 const summary = computed(() => {
   if (props.flow.state === 'stopped') return t('person.flowStoppedHint')
   if (props.flow.state === 'completed') return t('person.states.completed')
+  if (props.flow.state === 'failed') return t('person.flowBlocked')
   const group = current.value
   if (!group) return ''
   return group.stages.length > 1 ? t('person.flowParallelSummary',{ total:group.stages.length,completed:group.completed })
@@ -43,8 +44,8 @@ function dependencyLabel(stage: PersonFlowStage) {
         <h3 v-if="!embedded">{{ flow.title }}</h3>
         <p class="flow-description">{{ flow.goal }}</p>
       </div>
-      <NButton v-if="flow.state !== 'completed'" :disabled="saving" size="small" secondary @click="emit('action',flow,flow.state === 'stopped' ? 'resume' : 'stop')">
-        {{ t(flow.state === 'stopped' ? 'person.resume' : 'person.stopFlow') }}
+      <NButton v-if="flow.state !== 'completed'" :disabled="saving" size="small" secondary @click="emit('action',flow,['stopped','failed'].includes(flow.state) ? 'resume' : 'stop')">
+        {{ t(['stopped','failed'].includes(flow.state) ? 'person.resume' : 'person.stopFlow') }}
       </NButton>
     </header>
     <div class="flow-overview" aria-live="polite">

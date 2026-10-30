@@ -306,14 +306,14 @@ describe('independent Person stages', () => {
       await new Promise<void>(resolve => server.close(() => resolve()))
     }
   })
-  it.each([true, false])('clears handoff activity when delivery settles (success=%s) even if the stage stays active', async ok => {
+  it.each([true, false])('clears handoff activity when delivery settles (success=%s)', async ok => {
     const current = flow(['person-main-b'])
     expect(stages.personCollaborationPendingCount(1, 'person-main-1')).toBe(0)
     expect(stages.personCollaborationPendingCount(1, 'person-main-b')).toBe(1)
     await flows.deliverPersonStages()
     const delivery = db.prepare('SELECT id FROM person_stage_deliveries WHERE flow_id=?').get(current.id)!
     flows.finishPersonStageDelivery(1, String(delivery.id), ok, ok ? '' : 'Delivery failed')
-    expect(stages.getPersonFlow(1, current.id).state).toBe('active')
+    expect(stages.getPersonFlow(1, current.id).state).toBe(ok ? 'active' : 'failed')
     expect(stages.personCollaborationPendingCount(1, 'person-main-b')).toBe(0)
     expect(db.prepare('SELECT COUNT(*) AS n FROM session_attention_events').get()).toMatchObject({ n: 0 })
   })
@@ -601,6 +601,66 @@ describe('independent Person stages', () => {
     expect(disposeSessionMock).not.toHaveBeenCalled()
     expect(runtime.stop).not.toHaveBeenCalled()
   })
+
+  it.each(['dispatch','terminal','legacy'])('automatically releases roles after a %s failure without clearing messages', async failure => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const first = flow(), second = await complete(first, 'Keep the saved upstream result')
+    result('person-main-1','Original request history')
+    result('person-main-c','Keep the error transcript')
+    const before = db.prepare('SELECT * FROM messages ORDER BY id').all()
+    const stage = second.stages[1]
+    const context = { flowId:first.id,stageId:stage.id,generation:first.generation }
+    if (failure === 'dispatch') {
+      runtime.deliverStage = vi.fn(async () => { throw new Error('Provider unavailable') })
+      await flows.deliverPersonStages()
+    } else if (failure === 'terminal') {
+      await flows.deliverPersonStages()
+      flows.finishPersonStageTurn(1,context,'failed-run',null,false,'Provider unavailable')
+    } else {
+      db.prepare("UPDATE person_stage_deliveries SET error='Provider unavailable' WHERE stage_id=?").run(stage.id)
+      flows.recoverPersonStages()
+    }
+    expect(stages.getPersonFlow(1,first.id)).toMatchObject({ state:'failed',current_position:1,error:expect.stringContaining('Provider unavailable') })
+    expect(stages.getPersonFlow(1,first.id).stages.map(stage => stage.state)).toEqual(['completed','failed'])
+    for (const id of ['person-main-1','person-main-b','person-main-c']) {
+      expect(stages.personCollaborationPendingCount(1,id)).toBe(0)
+      expect((await personSnapshot(1,id)).can_clear).toBe(true)
+    }
+    expect(db.prepare('SELECT * FROM messages ORDER BY id').all()).toEqual(before)
+    const revision = stages.getPersonFlow(1,first.id).revision
+    flows.finishPersonStageTurn(1,context,'failed-run',stage.result_message_id,true)
+    flows.finishPersonStageTurn(1,context,'failed-run',null,false,'Late duplicate')
+    db.prepare('UPDATE person_stage_deliveries SET updated_at=0').run()
+    runtime.deliverStage = vi.fn(async () => {})
+    flows.recoverPersonStages(); await flows.deliverPersonStages()
+    expect(runtime.deliverStage).not.toHaveBeenCalled()
+    expect(stages.getPersonFlow(1,first.id).revision).toBe(revision)
+    expect(db.prepare('SELECT * FROM messages ORDER BY id').all()).toEqual(before)
+  })
+
+  it.each(['live','legacy'])('settles a %s failed worker callback automatically while preserving its task and error', async failure => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const delivery = await import('../../packages/server/src/modules/studio/services/person/delivery')
+    const first = flow()
+    await flows.deliverPersonStages()
+    const handoff = db.prepare('SELECT id FROM person_stage_deliveries WHERE stage_id=?').get(first.stages[0].id)!
+    flows.finishPersonStageDelivery(1,String(handoff.id),true)
+    const child = await tasks.applyPersonTask(1,{action:'create',title:'Worker',goal:'Work',agent_id:'worker',idempotency_key:'callback-failure'},undefined,origin(first)) as Created
+    await runner.tickPersonWork(); await wait(child.execution.id,'finished')
+    runtime.deliver = vi.fn(async () => { throw new Error('Callback unavailable') })
+    if (failure === 'live') await delivery.deliverPersonResults()
+    else {
+      db.prepare("UPDATE person_deliveries SET error='Callback unavailable' WHERE execution_id=?").run(child.execution.id)
+      flows.recoverPersonStages()
+    }
+    expect(stages.getPersonFlow(1,first.id)).toMatchObject({state:'failed',error:expect.stringContaining('Callback unavailable')})
+    expect(db.prepare('SELECT state,error FROM person_deliveries WHERE execution_id=?').get(child.execution.id))
+      .toMatchObject({state:'failed',error:expect.stringContaining('Callback unavailable')})
+    expect(store.getPersonTask(1,child.task.id).execution_state).toBe('finished')
+    expect((await personSnapshot(1,'person-main-b')).can_clear).toBe(true)
+    await delivery.deliverPersonResults()
+    expect(runtime.deliver).toHaveBeenCalledTimes(failure === 'live' ? 1 : 0)
+  })
 })
 
 describe('parallel Person stage groups', () => {
@@ -827,7 +887,7 @@ describe('parallel Person stage groups', () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM person_deliveries WHERE state!='cancelled'").get()).toMatchObject({n:0})
   })
 
-  it('retries a failed branch delivery without repeating completed peer work or starting the summary', async () => {
+  it('resumes a failed branch explicitly without repeating completed peer work or starting the summary', async () => {
     const first = plan()
     runtime.deliverStage = vi.fn(async input => { if (input.sessionId === 'person-main-c') throw new Error('Provider unavailable') })
     await flows.deliverPersonStages()
@@ -836,8 +896,58 @@ describe('parallel Person stage groups', () => {
     db.prepare("UPDATE person_stage_deliveries SET updated_at=? WHERE state='pending'").run(Date.now()-61000)
     runtime.deliverStage = vi.fn(async()=>{})
     await flows.deliverPersonStages()
+    expect(runtime.deliverStage).not.toHaveBeenCalled()
+    await control(first.id,'resume')
+    await flows.deliverPersonStages()
     expect(vi.mocked(runtime.deliverStage).mock.calls.map(([input]) => input.sessionId)).toEqual(['person-main-c'])
     expect(stages.getPersonFlow(1,first.id).current_position).toBe(0)
+  })
+
+  it('lets a healthy parallel role finish after its peer fails, releases the failed role and pauses the dependent summary', async () => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const first = plan(), b = actor(first,'person-main-b'), c = actor(first,'person-main-c')
+    const live = flows.registerPersonStageTurn(b.stage)
+    try {
+      runtime.deliverStage = vi.fn(async input => { if (input.sessionId === 'person-main-c') throw new Error('Peer unavailable') })
+      await flows.deliverPersonStages()
+      expect(live.signal.aborted).toBe(false)
+      expect(stages.personCollaborationPendingCount(1,'person-main-b')).toBe(1)
+      expect(stages.personCollaborationPendingCount(1,'person-main-c')).toBe(0)
+      expect((await personSnapshot(1,'person-main-c')).can_clear).toBe(true)
+      expect((await personSnapshot(1,'person-main-b')).can_clear).toBe(false)
+      await expect(control(first.id,'resume')).rejects.toThrow('other roles')
+      const partial = await finish(first,'person-main-b','Saved peer result')
+      expect(partial).toMatchObject({state:'failed',current_position:0})
+      expect(partial.stages.map(stage => stage.state)).toEqual(['completed','failed','pending'])
+      expect((await personSnapshot(1,'person-main-b')).can_clear).toBe(true)
+      expect(runtime.deliverStage).toHaveBeenCalledTimes(2)
+      expect(runtime.stop).not.toHaveBeenCalled()
+      live.release()
+      const resumed = await control(first.id,'resume')
+      flows.finishPersonStageTurn(1,c.stage,c.runId,null,false,'Old failure')
+      expect(stages.getPersonFlow(1,first.id).state).toBe('active')
+      runtime.deliverStage = vi.fn(async () => {})
+      await flows.deliverPersonStages()
+      expect(vi.mocked(runtime.deliverStage).mock.calls.map(([input]) => input.sessionId)).toEqual(['person-main-c'])
+      const joined = await finish(resumed,'person-main-c','Retried result')
+      expect(joined.current_position).toBe(1)
+      expect(joined.stages[0].result_message_id).toBe(partial.stages[0].result_message_id)
+    } finally { live.release() }
+  })
+
+  it('stops only the failed branch workers and keeps the parallel worker running', async () => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const first = plan(), b = actor(first,'person-main-b'), c = actor(first,'person-main-c')
+    const children = await Promise.all([b,c].map(from => tasks.applyPersonTask(1,{
+      action:'create',title:from.sessionId,goal:'Work',agent_id:'worker',idempotency_key:crypto.randomUUID(),
+    },undefined,from)))
+    for (const child of children) db.prepare("UPDATE person_executions SET state='running' WHERE id=?").run(child.execution!.id)
+    flows.finishPersonStageTurn(1,c.stage,c.runId,null,false,'Stage failed')
+    await vi.waitFor(() => expect(store.getPersonExecution(1,children[1].execution!.id).state).toBe('interrupted'))
+    expect(runtime.stop).toHaveBeenCalledExactlyOnceWith(children[1].execution!.session_id)
+    expect(store.getPersonExecution(1,children[0].execution!.id).state).toBe('running')
+    expect((await personSnapshot(1,c.sessionId)).can_clear).toBe(true)
+    expect((await personSnapshot(1,b.sessionId)).can_clear).toBe(false)
   })
 
   it('recovers simultaneously prepared saved results and queues the downstream stage only once', async () => {
