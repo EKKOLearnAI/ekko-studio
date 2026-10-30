@@ -177,13 +177,13 @@ describe('manual task status', () => {
     expect(() => service.setSessionTaskStatus('s1', 'research', task.id, { status: 'closed', expected_updated_at: task.updated_at })).toThrow('unavailable')
   })
 
-  it('lists and filters closed tasks after open and completed tasks and preserves the request link', () => {
+  it('lists recently closed tasks first, filters them and preserves the request link', () => {
     const source = message('user', 'Add export')
     const first = write([goal(), goal({ title: 'Other task' }), goal({ title: 'Done task', status: 'completed', completion_evidence: 'Checked' })])
     const task = first.tasks.find(item => item.title === 'Add data export')!
     service.setSessionTaskStatus('s1', 'research', task.id, { status: 'closed', expected_updated_at: task.updated_at })
     const query = { profiles: ['research'], order: 'newest' as const, offset: 0, limit: 50 }
-    expect(service.listSessionTaskItems(query).tasks.map(item => item.status)).toEqual(['open', 'completed', 'closed'])
+    expect(service.listSessionTaskItems(query).tasks[0]).toMatchObject({ id: task.id, status: 'closed' })
     const filtered = service.listSessionTaskItems({ ...query, status: 'closed' })
     expect(filtered.total).toBe(1)
     expect(filtered.tasks[0]).toMatchObject({ id: task.id, status: 'closed', message_id: source })
@@ -192,6 +192,28 @@ describe('manual task status', () => {
 
 describe('task list pages', () => {
   const query = (overrides = {}) => ({ profiles: ['research'], order: 'newest' as const, offset: 0, limit: 50, ...overrides })
+
+  it.each([
+    { order: 'newest', expected: ['a-completed', 'b-open', 'c-closed', 'd-open'] },
+    { order: 'oldest', expected: ['d-open', 'c-closed', 'a-completed', 'b-open'] },
+  ])('paginates by update time regardless of status with $order first', ({ order, expected }) => {
+    const source = message('user', 'Several goals')
+    const insert = db.prepare('INSERT INTO session_tasks (id, session_id, title, summary, status, source_message_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    for (const [id, status, createdAt, updatedAt] of [
+      ['d-open', 'open', 4, 10],
+      ['c-closed', 'closed', 3, 30],
+      ['b-open', 'open', 2, 40],
+      ['a-completed', 'completed', 1, 40],
+    ] as const) insert.run(id, 's1', id, '', status, source, createdAt, updatedAt)
+
+    const first = service.listSessionTaskItems(query({ order, limit: 2 }))
+    const second = service.listSessionTaskItems(query({ order, limit: 2, offset: 2 }))
+    expect(first).toMatchObject({ total: 4, has_more: true })
+    expect(second).toMatchObject({ total: 4, has_more: false })
+    expect([...first.tasks, ...second.tasks].map(task => task.id)).toEqual(expected)
+    expect(service.listSessionTaskItems(query({ order, status: 'open' })).tasks.map(task => task.id))
+      .toEqual(expected.filter(id => id.endsWith('-open')))
+  })
 
   it('uses the same first-message session name as the conversation list without persisting a title', () => {
     message('assistant', 'An assistant greeting is not the session name')
@@ -296,7 +318,7 @@ describe('task list pages', () => {
     expect(service.listSessionTaskItems(query({ status: 'completed' })).total).toBe(0)
     write([goal({ id: tasks[0].id, title: tasks[0].title, status: 'completed', completion_evidence: 'Delivered and checked' })])
     const page = service.listSessionTaskItems(query())
-    expect(page.tasks.at(-1)?.status).toBe('completed')
+    expect(page.tasks[0].status).toBe('completed')
     expect(service.listSessionTaskItems(query({ status: 'completed' })).total).toBe(1)
   })
 })

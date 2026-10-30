@@ -11,7 +11,9 @@ fills the viewport. The list fills the drawer body with no inset card, outer
 margins, statistics or banner. The mobile status filter aligns to the trailing
 edge with the same 20px content inset.
 
-Search, status filtering and update-time sorting live in the table header. Each
+Search, status filtering and update-time sorting live in the table header. Tasks
+sort by update time only, newest first by default, regardless of status. The time
+column toggles oldest first; equal timestamps use task ID for stable pagination. Each
 summary is a native details/summary disclosure: it defaults to one line and
 expands in place without navigating. The task title and trailing SVG arrow open
 the associated chat turn. Expanded summaries use the title's full text width;
