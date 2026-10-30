@@ -49,9 +49,7 @@ describe('desktop browser chat panel gate', () => {
     const browserPanel = readFileSync('packages/client/src/components/hermes/chat/DesktopBrowserPanel.vue', 'utf8')
     const settingsPage = readFileSync('packages/client/src/views/hermes/DesktopBrowserView.vue', 'utf8')
     const sidebar = readFileSync('packages/client/src/components/layout/AppSidebar.vue', 'utf8')
-    expect(chatPanel).toContain("const DesktopBrowserPanel = defineAsyncComponent")
-    expect(chatPanel).toContain('v-if="desktopBrowserAvailable"')
-    expect(chatPanel).toContain("activeToolPanel === 'browser'")
+    // Shared panel gating and tab behavior are covered in chat-tools-panel.test.ts.
     expect(chatPanel).toContain(':submit="submitBrowserAnnotations"')
     expect(chatPanel).toContain('await chatStore.sendMessage("", [attachment])')
     expect(chatPanel).toContain('OPEN_DESKTOP_BROWSER_PANEL_EVENT')
