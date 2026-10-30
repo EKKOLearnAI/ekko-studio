@@ -1441,7 +1441,9 @@ export class BrowserManager {
         this.syncViews()
         await new Promise(resolve => setTimeout(resolve, 16))
       }
-      contents.focus()
+      // CDP targets this WebContents directly. Native focus belongs to the user:
+      // even read-only waits/screenshots must not steal it from another app/view.
+      // DOM element focus for typing is handled inside the target page.
       return await operation()
     } finally {
       if (!contents.isDestroyed()) contents.setBackgroundThrottling(throttled)
