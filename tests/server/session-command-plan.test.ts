@@ -104,6 +104,27 @@ describe('plan session command', () => {
     })
   })
 
+  it('carries the chosen workspace into the created session and started run', async () => {
+    getSessionMock.mockReturnValue(undefined)
+    const state = { messages: [], isWorking: false, events: [], queue: [] }
+    const { bridge, nsp, runQueuedItem, sessionMap, socket } = makeContext(state)
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
+    const command = parseSessionCommand('/plan build the feature')!
+
+    await handleSessionCommand('session-1', command, {
+      nsp: nsp as any,
+      socket: socket as any,
+      sessionMap,
+      bridge: bridge as any,
+      profile: 'default',
+      workspace: '/work/project',
+      runQueuedItem,
+    })
+
+    expect(createSessionMock).toHaveBeenCalledWith(expect.objectContaining({ workspace: '/work/project' }))
+    expect(runQueuedItem).toHaveBeenCalledWith(socket, 'session-1', expect.objectContaining({ workspace: '/work/project' }), 'default')
+  })
+
   it('queues running plan commands once without visible command echo', async () => {
     const state = { messages: [], isWorking: true, events: [], queue: [] }
     const { bridge, namespaceEmit, nsp, runQueuedItem, sessionMap, socket } = makeContext(state)

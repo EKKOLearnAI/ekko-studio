@@ -1105,6 +1105,7 @@ export class ChatRunSocket {
               model_groups: data.model_groups,
               instructions: data.instructions,
               queueId: data.queue_id,
+              workspace: data.workspace,
               runQueuedItem: this.runQueuedItem.bind(this),
             })
             if (handled !== false) return
