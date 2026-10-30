@@ -240,6 +240,8 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   task_summary_updated_at: 'INTEGER NOT NULL DEFAULT 0',
   /** Milliseconds of the last history clear; provider usage before it describes deleted history. */
   history_cleared_at: 'INTEGER NOT NULL DEFAULT 0',
+  /** Session incarnation: new on create, rotated on history clear (reset). Never reused for an id. */
+  generation_id: 'TEXT NOT NULL DEFAULT \'\'',
   /** Context estimate after a history edit, separate from cumulative billed usage. */
   context_usage_estimate: 'TEXT',
 }

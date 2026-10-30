@@ -67,6 +67,7 @@ vi.mock('../../packages/server/src/modules/studio/public/runs/prompt', () => ({
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   getSession: getSessionMock,
+  getSessionGeneration: vi.fn(() => 'generation-test'),
   createSession: createSessionMock,
   addMessage: addMessageMock,
   updateSession: updateSessionMock,

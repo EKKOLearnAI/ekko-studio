@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve } from 'path'
 import { logger } from '../../../studio/public/logging'
 import { config } from '../../../studio/public/config'
 import { OPENROUTER_APP_HEADERS } from '../../../studio/public/openrouter-attribution'
+import { sessionNotificationBridgeEnv } from '../../../studio/public/session-notifications'
 import { resolveHermesInstallationEnvironment } from '../runtime/installation'
 import { detectHermesHome, getHermesBin } from '../runtime/path'
 import { AgentBridgeClient, DEFAULT_AGENT_BRIDGE_ENDPOINT } from './client'
@@ -107,6 +108,8 @@ export function buildAgentBridgeProcessEnv(endpoint: string, hermesHome: string 
       HERMES_WEBUI_STATE_DIR: config.appHome,
       ELECTRON_RUN_AS_NODE: '1',
     }),
+    // Studio-owned cron session bindings written by the bridge's cronjob middleware.
+    HERMES_AGENT_BRIDGE_STUDIO_NOTIFICATIONS: sessionNotificationBridgeEnv(),
     HERMES_OPENROUTER_APP_REFERER: process.env.HERMES_OPENROUTER_APP_REFERER || OPENROUTER_WEB_UI_ATTRIBUTION_ENV.HERMES_OPENROUTER_APP_REFERER,
     HERMES_OPENROUTER_APP_TITLE: process.env.HERMES_OPENROUTER_APP_TITLE || OPENROUTER_WEB_UI_ATTRIBUTION_ENV.HERMES_OPENROUTER_APP_TITLE,
     HERMES_OPENROUTER_APP_CATEGORIES: process.env.HERMES_OPENROUTER_APP_CATEGORIES || OPENROUTER_WEB_UI_ATTRIBUTION_ENV.HERMES_OPENROUTER_APP_CATEGORIES,

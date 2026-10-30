@@ -278,6 +278,8 @@ class BridgeBroker:
             sessions: list[dict[str, Any]] = []
             notifications: list[dict[str, Any]] = []
             pending_count = 0
+            process_notifications: list[dict[str, Any]] = []
+            notify_pending: list[dict[str, str]] = []
             for worker in workers:
                 profile = getattr(worker, "profile", "default") or "default"
                 if not worker.running:
@@ -297,12 +299,31 @@ class BridgeBroker:
                 for notification in response.get("notifications") or []:
                     if isinstance(notification, dict):
                         notifications.append({**notification, "profile": profile})
+                for notification in response.get("process_notifications") or []:
+                    if isinstance(notification, dict):
+                        process_notifications.append({**notification, "profile": profile})
+                for session_id in response.get("notify_pending_session_ids") or []:
+                    notify_pending.append({"profile": profile, "session_id": str(session_id)})
             return {
                 "broker_id": str(os.getpid()),
                 "pending_count": pending_count,
                 "sessions": sessions,
                 "notifications": notifications,
+                "process_notifications": process_notifications,
+                "notify_pending": notify_pending,
             }
+
+        if action in {"process_notification_admit", "process_notification_complete", "process_notification_release"}:
+            session_id = str(req.get("session_id") or "")
+            profile, worker_key = self._route_for_session(
+                session_id,
+                req.get("profile"),
+                req.get("worker_key") if "worker_key" in req else None,
+            )
+            return self._forward(profile, req, worker_key)
+
+        if action == "studio_cron_observe":
+            return self._forward(self._normalize_profile(req.get("profile")), req)
 
         if action in {"background_notification_complete", "background_notification_release"}:
             session_id = str(req.get("session_id") or "")

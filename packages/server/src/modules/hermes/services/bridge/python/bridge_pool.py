@@ -45,6 +45,24 @@ from bridge_runtime import (
     _tool_names_from_definitions,
 )
 
+
+def _studio_notifications():
+    """Sibling Studio notification adapters, loaded on first use (also when loaded by path)."""
+    module = sys.modules.get("bridge_studio_notifications")
+    if module is not None:
+        return module
+    try:
+        import bridge_studio_notifications as module
+    except ModuleNotFoundError:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "bridge_studio_notifications", Path(__file__).with_name("bridge_studio_notifications.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["bridge_studio_notifications"] = module
+        spec.loader.exec_module(module)
+    return module
+
 CLARIFY_TIMEOUT_SECONDS = 300
 
 
@@ -195,6 +213,9 @@ class AgentPool:
         self._compression_requests: dict[str, queue.Queue[dict[str, Any]]] = {}
         self._background_notification_claims: dict[tuple[str, str], dict[str, Any]] = {}
         self._suppressed_background_delegations: set[str] = set()
+        self._process_notification_claims: dict[tuple[str, str], dict[str, Any]] = {}
+        self._emitted_process_keys: set[str] = set()
+        self._republished_process_keys: set[str] = set()
         self._clarify_requests: dict[str, queue.Queue[str]] = {}
         self._run_context = threading.local()
         self._approval_handlers: dict[str, Callable[..., str]] = {}
@@ -482,6 +503,11 @@ class AgentPool:
             with _profile_env(profile):
                 _refresh_worker_profile_env()
                 _refresh_approval_allowlist()
+                try:
+                    # Before tools are resolved for this agent: cron session binding and availability.
+                    _studio_notifications().install_cron_binding_middleware()
+                except Exception as exc:
+                    print(f"[hermes_bridge] cron session binding unavailable: {exc}", file=sys.stderr, flush=True)
                 discovered_mcp_tools = _discover_bridge_mcp_tools()
                 cfg = _load_cfg()
                 resolved_model = requested_model or _resolve_model(cfg)
@@ -1202,11 +1228,85 @@ class AgentPool:
                     flush=True,
                 )
 
+        process_notifications: list[dict[str, Any]] = []
+        notify_pending: list[str] = []
+        if loaded_session_ids:
+            profile = os.environ.get("HERMES_AGENT_BRIDGE_WORKER_PROFILE") or None
+            try:
+                studio = _studio_notifications()
+                studio.republish_missed_completions(
+                    loaded_session_ids, self._emitted_process_keys, self._republished_process_keys, profile)
+                for event, text in studio.drain_owned_completions(loaded_session_ids):
+                    key = studio.process_producer_key(profile, event)
+                    if key in self._emitted_process_keys:
+                        continue
+                    self._emitted_process_keys.add(key)
+                    claim_id = studio.new_claim_id()
+                    exit_code = event.get("exit_code")
+                    process_notifications.append({
+                        "kind": "process_completion",
+                        "producer_key": key,
+                        "claim_id": claim_id,
+                        "session_id": str(event.get("session_key") or ""),
+                        "process_id": str(event.get("session_id") or ""),
+                        "started_at": event.get("started_at"),
+                        # Owner generation declared for the turn that started the process.
+                        "owner_generation": studio.generation_at(
+                            str(event.get("session_key") or ""), event.get("started_at")),
+                        "exit_code": exit_code,
+                        "status": "succeeded" if exit_code == 0 else "failed",
+                        "message": text,
+                    })
+                    with self._lock:
+                        self._process_notification_claims[(key, claim_id)] = event
+                notify_pending = studio.notify_pending_session_ids(
+                    loaded_session_ids, self._emitted_process_keys, self._republished_process_keys, profile)
+            except Exception as exc:
+                print(
+                    f"[hermes_bridge] process completion poll failed: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
         return {
             "sessions": session_payloads,
             "notifications": notifications,
             "pending_count": pending_notification_count,
+            "process_notifications": process_notifications,
+            "notify_pending_session_ids": notify_pending,
         }
+
+    def admit_process_notification(self, producer_key: str, claim_id: str) -> dict[str, Any]:
+        """Dispatch-boundary recheck: a wait/log read since the drain suppresses the turn."""
+        with self._lock:
+            event = self._process_notification_claims.get((producer_key, claim_id))
+        if event is None:
+            return {"admitted": False, "reason": "unknown_claim"}
+        if _studio_notifications().completion_consumed(str(event.get("session_id") or "")):
+            with self._lock:
+                self._process_notification_claims.pop((producer_key, claim_id), None)
+            return {"admitted": False, "reason": "consumed"}
+        return {"admitted": True}
+
+    def complete_process_notification(self, producer_key: str, claim_id: str) -> dict[str, Any]:
+        with self._lock:
+            event = self._process_notification_claims.pop((producer_key, claim_id), None)
+        return {"completed": event is not None}
+
+    def release_process_notification(self, producer_key: str, claim_id: str) -> dict[str, Any]:
+        with self._lock:
+            event = self._process_notification_claims.pop((producer_key, claim_id), None)
+        if event is None:
+            return {"released": False}
+        with self._lock:
+            self._emitted_process_keys.discard(producer_key)
+        from tools.process_registry import process_registry
+
+        process_registry.completion_queue.put(event)
+        return {"released": True}
+
+    def studio_cron_observe(self, jobs: list[dict[str, Any]], profile: str | None = None) -> dict[str, Any]:
+        return _studio_notifications().observe_cron_jobs(jobs, self._db.get_for_profile(profile))
 
     def complete_background_notification(self, delegation_id: str, claim_id: str) -> dict[str, Any]:
         from tools.async_delegation import complete_completion_delivery
@@ -1763,7 +1863,10 @@ class AgentPool:
         source: str | None = None,
         reasoning_effort: str | None = None,
         background_delegation_enabled: bool | None = None,
+        studio_session_generation: str | None = None,
     ) -> RunRecord:
+        # The owner generation this turn runs under; cron bindings made by this turn carry it.
+        _studio_notifications().set_session_generation(session_id, studio_session_generation)
         session = self.get_or_create(
             session_id,
             profile=profile,
@@ -1895,6 +1998,10 @@ class AgentPool:
                     )
                 except Exception:
                     session_context_tokens = None
+                try:
+                    _studio_notifications().install_cron_binding_middleware()
+                except Exception as exc:
+                    print(f"[hermes_bridge] cron session binding unavailable: {exc}", file=sys.stderr, flush=True)
                 try:
                     self._enter_exec_ask_scope()
                     exec_ask_scope_entered = True
@@ -3019,6 +3126,9 @@ class AgentPool:
             with self._lock:
                 for key in claimed_notifications:
                     self._background_notification_claims.pop(key, None)
+        with self._lock:
+            # Process completions are in-memory Hermes events; the worker is exiting.
+            self._process_notification_claims.clear()
 
         return {
             "interrupted_sessions": interrupted_sessions,

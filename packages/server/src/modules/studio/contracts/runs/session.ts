@@ -63,6 +63,24 @@ export interface QueuedRun {
   personStageDelivery?: { userId: number; deliveryId: string }
   /** Internal account-bound Person result delivery. */
   personDelivery?: { userId: number; executionId: string }
+  /** Typed Hermes machine event (terminal completion). Rechecked for consumption at dispatch. */
+  machineEvent?: {
+    kind: 'process_completion'
+    notificationId: number
+    sessionId: string
+    producerKey: string
+    claimId: string
+    profile: string
+    /** Owner generation declared for the turn that started the process. */
+    ownerGeneration: string | null
+    processId: string
+  }
+  /** Admitted machine event: owner fence re-checked at the final run seams. Internal only. */
+  machineFence?: () => string | null
+  /** Run marker the admitted machine run owns the session under. Internal only. */
+  runMarker?: string
+  onMachineDispatch?: () => void
+  onMachineDiscard?: (reason: string) => void
   /** Internal admission check, never serialized or supplied by the client. */
   authorize?: () => Promise<void>
   /** Captured at admission, independent of whichever socket drains the queue. */
@@ -70,7 +88,7 @@ export interface QueuedRun {
   queue_id: string
   input: string | ContentBlock[]
   displayInput?: string | ContentBlock[] | null
-  displayRole?: 'user' | 'command'
+  displayRole?: 'user' | 'command' | 'system'
   storageMessage?: string
   model?: string
   provider?: string
@@ -141,6 +159,8 @@ export interface SessionState {
   isCompressing?: boolean
   /** Explicit Stop suppresses automatic wakeups until the next user run. */
   backgroundWakeStopped?: boolean
+  /** A Hermes terminal in this session accepted `notify_on_complete`; keeps the bridge poll active. */
+  processNotifyPending?: boolean
   /** Snapshot the owning runtime's interrupted turn without waiting for model IO. */
   finalizeRunUsage?: () => RunUsageSummary | undefined
   nativeUsageSource?: 'coding_agent'
@@ -162,6 +182,10 @@ export interface SessionState {
   abortController?: AbortController
   runId?: string
   activeRunMarker?: string
+  /** Ownership token of an admitted machine run; Stop and /destroy revoke it before their first await. */
+  /** Monotonic owner revision: advanced on every accepted run owner and on Stop (see run-ownership.ts). */
+  ownerRevision?: number
+  machineRunMarker?: string
   /** Generation owned by a live Hermes output consumer, including finalization. */
   bridgeRunPollMarker?: string
   profile?: string

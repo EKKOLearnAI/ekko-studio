@@ -44,6 +44,8 @@ export interface AgentBridgeRequestOptions {
 
 export interface AgentBridgeChatOptions {
   force_compress?: boolean
+  /** Studio owner session generation for this turn; cron bindings made by it carry this value. */
+  studio_session_generation?: string
   /** Agent-session creation policy. False keeps delegate_task available but
    * makes background=true fall back to synchronous execution. */
   background_delegation_enabled?: boolean
@@ -242,11 +244,50 @@ export interface AgentBridgeBackgroundNotification {
   event: Record<string, unknown>
 }
 
+/** A Hermes ``notify_on_complete`` terminal completion owned by a loaded session. */
+export interface AgentBridgeProcessNotification {
+  kind: 'process_completion'
+  producer_key: string
+  claim_id: string
+  session_id: string
+  profile: string
+  process_id: string
+  started_at?: number
+  exit_code?: number | null
+  status: 'succeeded' | 'failed'
+  message: string
+}
+
 export interface AgentBridgeBackgroundPoll extends AgentBridgeResponse {
   broker_id?: string
   pending_count?: number
   sessions: AgentBridgeBackgroundSession[]
   notifications: AgentBridgeBackgroundNotification[]
+  process_notifications?: AgentBridgeProcessNotification[]
+  notify_pending?: Array<{ profile: string; session_id: string }>
+}
+
+export interface AgentBridgeCronObservedExecution {
+  job_id: string
+  job_name?: string | null
+  execution_id: string
+  source?: string | null
+  scheduled_instant?: string | null
+  status: 'completed' | 'failed' | 'unknown'
+  finished_at?: string | null
+  error?: string | null
+  delivery_outcome?: string | null
+  no_agent: boolean
+  receipt: 'exact' | 'unavailable'
+  success?: boolean
+  answer?: string
+  result_error?: string | null
+  silent?: boolean
+}
+
+export interface AgentBridgeCronObservation extends AgentBridgeResponse {
+  executions: AgentBridgeCronObservedExecution[]
+  jobs: Array<{ job_id: string; state: 'present' | 'missing'; name?: string | null; deliver?: string | null; failure_deliver?: string | null; no_agent?: boolean }>
 }
 
 export interface AgentBridgeBackgroundRoute {
@@ -527,6 +568,7 @@ export class AgentBridgeClient {
         ? { background_delegation_enabled: options.background_delegation_enabled }
         : {}),
       ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      ...(options.studio_session_generation ? { studio_session_generation: options.studio_session_generation } : {}),
     })
   }
 
@@ -762,6 +804,27 @@ export class AgentBridgeClient {
       action: 'background_poll',
       ...(routes?.length ? { routes } : {}),
     }, options)
+  }
+
+  processNotification(
+    action: 'admit' | 'complete' | 'release',
+    notification: Pick<AgentBridgeProcessNotification, 'session_id' | 'profile' | 'producer_key' | 'claim_id'>,
+  ): Promise<AgentBridgeResponse & { admitted?: boolean; reason?: string }> {
+    return this.request({
+      action: `process_notification_${action}`,
+      session_id: notification.session_id,
+      profile: notification.profile,
+      producer_key: notification.producer_key,
+      claim_id: notification.claim_id,
+    })
+  }
+
+  studioCronObserve(
+    profile: string,
+    jobs: Array<{ job_id: string; since: number }>,
+    options: AgentBridgeRequestOptions = {},
+  ): Promise<AgentBridgeCronObservation> {
+    return this.request<AgentBridgeCronObservation>({ action: 'studio_cron_observe', profile, jobs }, options)
   }
 
   completeBackgroundNotification(

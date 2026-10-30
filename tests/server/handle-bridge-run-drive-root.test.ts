@@ -29,6 +29,7 @@ vi.mock('../../packages/server/src/modules/studio/public/runs/prompt', () => ({
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   getSession: mocks.getSession,
+  getSessionGeneration: vi.fn(() => 'generation-test'),
   getSessionContextMessages: vi.fn(() => mocks.rows),
   getSessionContextMessage: vi.fn(),
   getFirstSessionMessageByRole: vi.fn(),
