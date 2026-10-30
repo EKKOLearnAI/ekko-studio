@@ -1,5 +1,5 @@
 import type { Context } from 'koa'
-import { authenticateUserToken } from '../public/auth'
+import { authenticateLoginUserToken } from '../public/auth'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { acceptExternalNotice, parseExternalNotice } from '../services/session-notifications/external'
 
@@ -16,11 +16,11 @@ const REFUSED = {
  * It is shown and marked unread; it never starts or queues a model turn.
  */
 export async function create(ctx: Context) {
-  // Only a Studio login token sent as a bearer header authorizes this mutation: not a query
-  // token, share link, model key or run-scoped credential.
+  // Only a token from an interactive Studio login, sent as a bearer header, authorizes this
+  // mutation: not a model-run, App, share, server, model-key or run-scoped credential.
   const token = /^Bearer\s+(\S+)$/i.exec(ctx.get('authorization'))?.[1]
   if (!token) { ctx.status = 401; ctx.body = { error: 'login_token_required' }; return }
-  const user = ctx.state.sessionShare ? null : await authenticateUserToken(token)
+  const user = ctx.state.sessionShare ? null : await authenticateLoginUserToken(token)
   if (!user) { ctx.status = 403; ctx.body = { error: 'login_token_required' }; return }
   const notice = parseExternalNotice(ctx.request.body)
   if ('invalid' in notice) { ctx.status = 400; ctx.body = { error: 'invalid_notification', field: notice.invalid }; return }
