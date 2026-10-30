@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as chatRuntime from '../../packages/server/src/modules/studio/public/chat-agent-runtime'
 import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
-import { createSession, deleteSession } from '../../packages/server/src/modules/studio/repositories/session-store'
+import { clearSessionMessages, createSession, deleteSession, getSessionGeneration } from '../../packages/server/src/modules/studio/repositories/session-store'
+import { createUser, updateUser } from '../../packages/server/src/modules/studio/repositories/users-store'
+import { SessionShareError } from '../../packages/server/src/modules/studio/contracts/session-shares'
+import { sessionShareService } from '../../packages/server/src/modules/studio/services/session-shares/service'
 import { ChatRunSocket } from '../../packages/server/src/modules/studio/sockets/chat-run'
 
 // repair-release@1 R1 / @2 S1: a live passive notice reaches only users allowed to see the owning
@@ -338,5 +341,73 @@ describe('P1 deletion evicts again right before the local delete', () => {
     await t.viewer.resume(t.sid)
     expect(t.viewer.socket.rooms.has(`session:${t.sid}`)).toBe(true)
     t.registry.setChatRunServer(null as any)
+  })
+})
+
+describe('external notices are re-fenced and re-authorized against current state at publication', () => {
+  function setup() {
+    initAllHermesTables()
+    const sid = sessionId()
+    createSession({ id: sid, profile: 'default', source: 'cli' })
+    const suffix = `${Date.now()}-${counter += 1}`
+    const user = (name: string, profiles: string[]) => createUser({ username: `${name}-${suffix}`, password: 'password-1', role: 'admin', profiles })!
+    const accounts = { member: user('member', ['default']), disabled: user('disabled', ['default']), demoted: user('demoted', ['other']) }
+    updateUser({ userId: accounts.disabled.id, status: 'disabled' })
+    const external = { ...record(sid, 'default'), kind: 'external', session_generation: getSessionGeneration(sid),
+      payload: { source: 'validator-review', event_id: 'e1', title: 'Validation complete', content: 'SECRET_RESULT', url: null } }
+    return { sid, accounts, external, ...makeServer() }
+  }
+
+  it('reaches current viewers and valid shares only, and nobody once the generation is stale', async () => {
+    const { sid, accounts, external, server, connect } = setup()
+    vi.spyOn(sessionShareService, 'authorize').mockImplementation(((token: string) => {
+      if (token !== 'sst1_valid') throw new SessionShareError('share_revoked')
+      return { share: { session_id: sid, profile: 'default' } }
+    }) as any)
+    // Sockets keep the account state cached at their handshake.
+    const viewer = connect('viewer', { user: { id: accounts.member.id, role: 'admin', profiles: ['default'] } })
+    const disabled = connect('disabled', { user: { id: accounts.disabled.id, role: 'admin', profiles: ['default'] } })
+    const demoted = connect('demoted', { user: { id: accounts.demoted.id, role: 'super_admin', profiles: [] } })
+    const share = (id: string, token: string) => {
+      const client = connect(id, { sessionShare: { token, actor: { id: 9 }, share: { session_id: sid } }, user: { id: -1, role: 'admin', profiles: [] } }, 'default', false)
+      client.socket.join(`session:${sid}`)
+      return client
+    }
+    const validShare = share('valid-share', 'sst1_valid')
+    const revokedShare = share('revoked-share', 'sst1_revoked')
+
+    server.publishSessionNotice(external)
+
+    expect(viewer.notices()).toHaveLength(1)
+    expect(viewer.notices()[0].payload.message.studio_notice).toMatchObject({ kind: 'external', title: 'Validation complete' })
+    expect(validShare.notices()).toHaveLength(1)
+    for (const outsider of [disabled, demoted, revokedShare]) expect(JSON.stringify(outsider.received)).not.toContain('SECRET_RESULT')
+    // Passive: publication neither starts nor queues a turn.
+    expect(server.sessionMap.get(sid)?.isWorking ?? false).toBe(false)
+    expect(server.sessionMap.get(sid)?.queue?.length ?? 0).toBe(0)
+    expect(viewer.received.map(entry => entry.event)).not.toContain('run.started')
+
+    clearSessionMessages(sid)
+    server.publishSessionNotice({ ...external, payload: { ...external.payload, content: 'STALE_RESULT' } })
+    expect(JSON.stringify([viewer.received, validShare.received])).not.toContain('STALE_RESULT')
+  })
+
+  it('sends unread attention state only to subscribers whose account is still allowed', async () => {
+    const { sid, accounts, external, server, connect } = setup()
+    const subscribe = (id: string, user: Record<string, unknown>) => {
+      const client = connect(id, { user }, 'default', false)
+      client.socket.handshake.query.session_state = '1'
+      server.onConnection(client.socket)
+      return client
+    }
+    const viewer = subscribe('state-viewer', { id: accounts.member.id, role: 'admin', profiles: ['default'] })
+    const disabled = subscribe('state-disabled', { id: accounts.disabled.id, role: 'admin', profiles: ['default'] })
+    const updates = (client: ReturnType<typeof subscribe>) => client.received
+      .filter(entry => entry.event === 'sessions.state.updated' && entry.payload.sessionId === sid)
+
+    server.publishSessionNotice(external)
+
+    expect(updates(viewer)).toHaveLength(1)
+    expect(updates(disabled)).toHaveLength(0)
   })
 })

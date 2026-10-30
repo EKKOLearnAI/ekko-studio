@@ -1,12 +1,13 @@
-# Session notifications (Hermes cron results and terminal completions)
+# Session notifications (Hermes cron results, terminal completions and external notices)
 
-Studio delivers two kinds of Hermes background results to the exact Studio session
-that produced them, whichever session is currently selected.
+Studio delivers Hermes background results, and notices posted by authenticated external
+services, to an exact Studio session, whichever session is currently selected.
 
 | Producer | Delivery | Model context |
 | --- | --- | --- |
 | Scheduled cron fire of a job created in a Studio Hermes chat | Passive notice in the creating session's timeline, durable across reload and restart, sidebar attention raised once | Not automatic. The next intentional user question in that session receives a bounded, once-only context block |
 | `terminal(background=true, notify_on_complete=true)` completion | Typed machine event that starts one turn in the owning session after any running turn | Yes: the native Hermes completion text, with the session's current history |
+| `POST /api/studio/sessions/{id}/notifications` from an external service | Passive notice, like a cron result | Like a cron result: once, on the next intentional question |
 
 ## Cron results
 
@@ -178,10 +179,83 @@ system notice. A crash between admission and dispatch leaves `unknown` and never
 re-dispatches. Notifications that Hermes has not handed off are lost if the bridge
 worker dies (Hermes keeps them in memory only).
 
+## External notices (HTTP)
+
+An authenticated service, such as a validation or review job, can append a passive notice
+to one existing Studio Hermes chat. Arrival never starts or queues a turn;
+`POST /api/studio/chat-run/runs` remains the API for active input.
+
+**Targets.** Version 1 accepts ordinary, locally stored Hermes bridge chats only (source
+`cli`, legacy `api_server` or empty, Hermes agent). Ekko, coding-agent, workflow, group chat,
+global agent, person and worker sessions return `422 unsupported_notification_target`.
+
+**Credential.** Send a Studio login token (the `token` returned by `POST /api/auth/login`)
+in the `Authorization: Bearer` header. Its `exp` claim is authoritative: 30 days by default,
+configured by `HERMES_WEB_UI_AUTH_JWT_EXPIRES_IN`. The account must be active and have access
+to the profile. Query-string tokens, share links, model API keys, the server token and
+run-scoped credentials are refused. There is no renewal: after expiry the operator supplies
+a new login token, and the producer retries the same `event_id` with the same frozen
+generation. Studio also gives Hermes runs a short-lived token of the same type for the
+requesting account; it is accepted like any other login token of that account.
+
+**Freezing the target.** `GET /api/studio/sessions/{id}?profile=<profile>` returns
+`session.session_generation`. Store it when the destination is chosen. A history reset or a
+delete and same-id recreation changes it, and a stale value returns
+`409 session_generation_mismatch` without writing anything. Choose the destination again
+deliberately; never refetch the generation automatically after a failure.
+
+```bash
+curl -X POST "http://127.0.0.1:8648/api/studio/sessions/<session-id>/notifications" \
+  -H "Authorization: Bearer <studio-login-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"profile":"default","expected_session_generation":"<frozen-generation>",
+       "source":"validator-review","event_id":"review-2026-10-30-1729",
+       "title":"Validation complete","content":"All required checks passed.",
+       "url":"https://example.org/reviews/1729"}'
+```
+
+| Field | Rule |
+| --- | --- |
+| `profile` | Required. Must be the session's profile and match any `x-hermes-profile` header or `profile` query |
+| `expected_session_generation` | Required, the frozen generation |
+| `source` | Required, at most 64 visible ASCII characters. A label chosen by the caller, not a verified identity |
+| `event_id` | Required, at most 128 visible ASCII characters. Stable per producer event |
+| `title` | Required, single line, at most 200 characters |
+| `content` | Required plain text, at most 32 KiB of UTF-8 |
+| `url` | Optional absolute `http(s)` link without credentials, at most 2,048 characters |
+
+Other fields are rejected. The JSON body is limited to 64 KiB before the general request
+parser reads it. Accepted values are stored exactly; nothing is truncated.
+
+| Result | Status |
+| --- | --- |
+| New notice | `201` with `{ ok, notification_id, session_id, profile, session_generation, duplicate: false }` |
+| Identical retry | `200` with the original receipt and `duplicate: true` |
+| Stale generation / same identity, different content | `409 session_generation_mismatch` / `409 notification_conflict` |
+| Unsupported session | `422 unsupported_notification_target` |
+| Missing or unusable credential | `401` or `403` |
+| Unknown session, other profile or another user's private session | `404` |
+| Invalid field / body too large / not JSON | `400` / `413` / `415` |
+
+**Idempotency.** A notice is identified by Studio instance, profile, account, session,
+generation, `source` and `event_id`. The generation is checked first, so an old receipt never
+reports delivery to a reset or recreated session. An identical retry adds no timeline entry,
+attention, live publication or context, and does not re-arm a notice that was already read
+or projected. Changed `title`, `content` or `url` never overwrites the accepted notice.
+
+**Display, delivery and context.** The notice shows its title, the unverified source label,
+the content as plain text (never Markdown, HTML, images or file previews) and the link, which
+opens only when clicked. Only a new acceptance is published live, after commit and only while
+its generation is current; each recipient is re-checked against the current account (active,
+role, profile access) and share state rather than state cached on its socket. The once-only
+projection uses the same three-notice, 8,000-character block as cron results, quoting external
+fields as untrusted JSON-string data. Studio and native Hermes history keep the user's own
+question, not the projected text, for every notice-projected turn.
+
 ## Verification
 
 ```bash
-npx vitest run tests/server/session-notifications-cron.test.ts
+npx vitest run tests/server/session-notifications-cron.test.ts tests/server/session-notifications-external.test.ts
 HERMES_REAL_BRIDGE_E2E=1 HERMES_AGENT_ROOT=<read-only hermes checkout> \
   npx vitest run tests/server/hermes-session-notifications-real.test.ts
 npm run build && HERMES_AGENT_ROOT=<read-only hermes checkout> \

@@ -21,7 +21,7 @@ import { savePersonTaskReturn, withPersonTaskReturns } from '../repositories/per
 import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
 import { isBuiltinEkkoAgent, normalizeEkkoRunData } from '../contracts/history-source'
 import { recordSessionUploadAttachments } from '../services/files/session-uploads'
-import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
+import { authenticateSessionShare, authorizeSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
 import { bindSessionShareSocket } from '../services/session-shares/socket-access'
 import { codingAgentId } from '../services/chat-run/types'
 import { studioMcpCapabilities } from '../public/runs/mcp-capabilities'
@@ -110,7 +110,7 @@ import type {
   SessionState,
 } from '../services/chat-run/types'
 import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
-import { userCanAccessProfile } from '../repositories/users-store'
+import { findUserById, userCanAccessProfile } from '../repositories/users-store'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observePersonPresenceEvent } from '../services/person/presence'
 import { SessionStateSync } from '../services/session-state'
@@ -2391,11 +2391,15 @@ export class ChatRunSocket {
    * off-focus account sockets. Every recipient, including a socket that joined the room earlier,
    * is authorized again against the session as it exists now (a deleted or recreated session
    * does not inherit its old room). Durable unread attention goes through the authorized
-   * session-state sync. No model turn.
+   * session-state sync. No model turn. An external notice is also re-fenced to the generation that
+   * accepted it, and its recipients are re-checked against current account and share state rather
+   * than the state cached on long-lived sockets.
    */
-  private publishSessionNotice(record: SessionNotificationRecord) {
+  publishSessionNotice(record: SessionNotificationRecord) {
     const session = getSession(record.session_id)
-    if (session && (session.profile || 'default') === record.profile) {
+    const external = record.kind === 'external'
+    if (session && (session.profile || 'default') === record.profile
+      && (!external || getSessionGeneration(record.session_id) === record.session_generation)) {
       const payload = {
         event: 'session.notice',
         session_id: record.session_id,
@@ -2409,23 +2413,35 @@ export class ChatRunSocket {
       }
       for (const socketId of candidates) {
         const socket = this.nsp.sockets.get(socketId)
-        if (socket && this.noticeRecipientAllowed(socket, session)) socket.emit('session.notice', payload)
+        if (socket && this.noticeRecipientAllowed(socket, session, external)) socket.emit('session.notice', payload)
       }
     }
-    this.sessionStateSync.publish(record.session_id)
+    this.sessionStateSync.publish(record.session_id, undefined,
+      external ? user => this.currentAccountAllowed(user, record.profile) : undefined)
   }
 
   /** The read rules of `resume`, applied to one socket at publication time. */
-  private noticeRecipientAllowed(socket: Socket, session: NonNullable<ReturnType<typeof getSession>>): boolean {
+  private noticeRecipientAllowed(socket: Socket, session: NonNullable<ReturnType<typeof getSession>>, current = false): boolean {
     const shared = socket.data?.sessionShare as SessionShareAccess | undefined
-    if (shared) return !isPrivatePersonSession(session.id) && shared.share.session_id === session.id
+    if (shared) {
+      if (isPrivatePersonSession(session.id) || shared.share.session_id !== session.id) return false
+      if (!current) return true
+      try { authorizeSessionShare(shared, 'read', session.id); return true } catch { return false }
+    }
     const user = socket.data?.user as AuthenticatedUser | undefined
     if (!user) return false
     if (isPersonSession(session.id)) return ownsPersonSession(user.id, session)
     if (session.id.startsWith('person-task-')) {
       try { ownedPersonTaskSession(user.id, session.id); return true } catch { return false }
     }
-    return this.canAccessProfile(user, session.profile || 'default')
+    const profile = session.profile || 'default'
+    return current ? this.currentAccountAllowed(user, profile) : this.canAccessProfile(user, profile)
+  }
+
+  /** The account as stored now: a disabled or demoted user loses access its socket still caches. */
+  private currentAccountAllowed(user: AuthenticatedUser, profile: string): boolean {
+    const account = findUserById(user.id)
+    return !!account && account.status === 'active' && (account.role === 'super_admin' || userCanAccessProfile(account.id, profile))
   }
 
   private needsBackgroundPoll(): boolean {

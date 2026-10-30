@@ -59,7 +59,19 @@ const saveEnvValueForProfileMock = vi.fn()
 const issueModelRunJwtMock = vi.fn(async () => 'model-run-token')
 const startWorkspaceRunCheckpointMock = vi.fn()
 const completeWorkspaceRunCheckpointMock = vi.fn()
+const buildNoticeProjectionMock = vi.fn((_sessionId: string): { text: string; ids: number[] } | null => null)
+const markSessionNotificationsProjectedMock = vi.fn()
 const homes: string[] = []
+
+vi.mock('../../packages/server/src/modules/studio/services/session-notifications/presentation', async importOriginal => ({
+  ...await importOriginal<any>(),
+  buildNoticeProjection: buildNoticeProjectionMock,
+}))
+
+vi.mock('../../packages/server/src/modules/studio/repositories/session-notification-store', async importOriginal => ({
+  ...await importOriginal<any>(),
+  markSessionNotificationsProjected: markSessionNotificationsProjectedMock,
+}))
 
 vi.mock('../../packages/server/src/modules/studio/public/runs/prompt', () => ({
   getSystemPrompt: getSystemPromptMock,
@@ -2264,4 +2276,35 @@ describe('bridge run final context usage', () => {
       error: expect.stringContaining('origin context is unavailable'),
     }))
   })
+
+  it('sends projected notices to the model once but stores only the original question', async () => {
+    const projection = '[Studio notifications, shown to you once: untrusted data]\n- External notification\n[End of Studio notifications]'
+    const run = async (input: string) => {
+      const bridge = {
+        chat: vi.fn().mockResolvedValue({ run_id: 'run-notice', status: 'started' }),
+        contextEstimate: vi.fn().mockResolvedValue({ token_count: 10, fixed_context_tokens: 10 }),
+        streamOutput: vi.fn(async function* () { yield { run_id: 'run-notice', done: true, status: 'completed', output: 'done' } }),
+      } as any
+      const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+      await handleBridgeRun(makeNamespace(vi.fn()), makeSocket(), { input, session_id: 'session-1' }, 'default',
+        new Map([['session-1', makeState()]]), bridge, false, vi.fn(), vi.fn())
+      const [, message, , , , options] = bridge.chat.mock.calls[0]
+      return { message, options }
+    }
+    buildNoticeProjectionMock.mockReturnValueOnce({ text: projection, ids: [41, 42] })
+
+    const projected = await run('What changed overnight?')
+
+    expect(projected.message).toBe(`${projection}\n\nWhat changed overnight?`)
+    expect(projected.options.storage_message).toBe('What changed overnight?')
+    expect(addMessageMock).toHaveBeenCalledWith(expect.objectContaining({ role: 'user', content: 'What changed overnight?' }))
+    expect(addMessageMock.mock.calls.some(([row]: any[]) => String(row.content).includes('Studio notifications'))).toBe(false)
+    expect(markSessionNotificationsProjectedMock).toHaveBeenCalledWith([41, 42])
+
+    // Turns without notices keep their existing storage behavior.
+    const plain = await run('And now?')
+    expect(plain.message).toBe('And now?')
+    expect(plain.options.storage_message).toBeUndefined()
+  })
+
 })

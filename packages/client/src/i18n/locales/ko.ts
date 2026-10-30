@@ -1113,6 +1113,7 @@ export default {
       receiptUnavailable: '이번 실행의 정확한 결과 기록을 찾을 수 없습니다. 상태만 표시합니다.',
       unknown: '결과를 알 수 없습니다. Studio는 이 작업을 다시 실행하지 않습니다.',
       truncated: '표시를 위해 결과가 잘렸습니다.',
+      externalSource: '외부 알림 · 출처 “{source}” (발신자 미확인)',
     },
     selectMessages: "메시지 선택",
     messagesSelected: "{count}개 선택됨",

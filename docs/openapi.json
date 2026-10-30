@@ -22881,6 +22881,62 @@
         "x-session-share-permission": "switchModel"
       }
     },
+    "/api/studio/sessions/{id}/notifications": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create notifications",
+        "description": "POST /api/studio/sessions/:id/notifications",
+        "operationId": "create",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/sessions/{id}/pin": {
       "post": {
         "tags": [

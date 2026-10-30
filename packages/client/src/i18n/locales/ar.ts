@@ -1127,6 +1127,7 @@ export default {
       receiptUnavailable: 'لم يتوفر إيصال النتيجة الدقيق لهذا التشغيل؛ الحالة فقط.',
       unknown: 'النتيجة غير معروفة. لن يعيد Studio تشغيل هذه المهمة.',
       truncated: 'تم اقتطاع النتيجة للعرض.',
+      externalSource: 'إشعار خارجي من "{source}" (المرسل غير موثّق)',
     },
     selectMessages: "تحديد الرسائل",
     messagesSelected: "تم تحديد {count}",

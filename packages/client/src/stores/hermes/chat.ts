@@ -5458,7 +5458,9 @@ function createChatState(scopedSessionId?: string) {
     const notice = evt.message
     if (!sid || !notice?.id) return
     const session = sessions.value.find(item => item.id === sid)
-    if (session && session.messages.length && !session.messages.some(item => item.id === String(notice.id))) {
+    // A loaded timeline may be empty; an unloaded one gets the notice from its next load.
+    const loaded = session?.messagesLoaded === true || !!session?.messages.length
+    if (session && loaded && !session.messages.some(item => item.id === String(notice.id))) {
       const [mapped] = mapHermesMessages([notice as any])
       if (mapped) addMessageInTimelineOrder(sid, mapped)
     }

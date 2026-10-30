@@ -835,7 +835,7 @@ export async function handleBridgeRun(
     const intentionalTurn = !data.autonomous && !data.background_delegation_id
       && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || '')
     const taskPlanInput = withTaskPlanTurnContext(originalBridgeInput, data.task_plan_context_id, !data.background_delegation_id && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || ''))
-    // Passive cron notices reach the model once, on the user's next intentional question.
+    // Passive notices reach the model once, on the user's next intentional question.
     const noticeProjection = intentionalTurn ? buildNoticeProjection(session_id) : null
     const bridgeInput = !noticeProjection
       ? taskPlanInput
@@ -863,9 +863,10 @@ export async function handleBridgeRun(
         reasoningEffort,
       },
     }
+    // Native history keeps the user's own question, never the projected untrusted notices.
     const bridgeStorageInput = data.storage_message !== undefined
       ? data.storage_message
-      : data.task_plan_context_id || isContentBlockArray(input)
+      : data.task_plan_context_id || isContentBlockArray(input) || noticeProjection
         ? inputStr
         : undefined
     logger.info('[chat-run-socket] starting CLI bridge run for session %s', session_id)

@@ -4,7 +4,10 @@ import { getDb } from '../infrastructure/database'
 import { initSessionStateTables } from '../infrastructure/database/session-state-schema'
 import { getSessionGeneration } from './session-store'
 
-export type SessionNotificationKind = 'cron' | 'process_completion'
+export type SessionNotificationKind = 'cron' | 'process_completion' | 'external'
+
+/** Kinds shown in the timeline and projected once into the next intentional question. */
+const PASSIVE_NOTICE_KINDS = "kind IN ('cron','external')"
 
 /**
  * Terminal disposition of one producer event.
@@ -17,7 +20,7 @@ export type SessionNotificationDisposition =
   | 'admitting' | 'admitted' | 'dispatched' | 'consumed' | 'cancelled' | 'owner_reset' | 'owner_stopped'
   | 'bridge_unavailable'
 
-/** Durable attention key of an accepted notice in `session_attention_events`. */
+/** Durable attention key of an accepted notice of any kind in `session_attention_events`. */
 export const NOTICE_ATTENTION_PREFIX = 'cron-notice:'
 
 export interface SessionNotificationRecord {
@@ -135,6 +138,59 @@ export function acceptSessionNotification(input: {
   }
 }
 
+export type FencedAcceptance =
+  | { status: 'accepted' | 'duplicate'; record: SessionNotificationRecord }
+  | { status: 'generation_mismatch' | 'conflict' }
+
+/**
+ * Accept a caller-identified notice only while the target is still the generation the caller
+ * froze. The generation is checked before an existing key is recognized, so an old receipt never
+ * reports delivery to a reset or recreated session. A reused key with different content is a
+ * conflict and never overwrites the accepted notice.
+ */
+export function acceptFencedSessionNotification(input: {
+  namespace: string
+  profile: string
+  producerKey: string
+  sessionId: string
+  expectedGeneration: string
+  kind: SessionNotificationKind
+  payload: Record<string, unknown>
+  now?: number
+}): FencedAcceptance {
+  const now = input.now ?? Date.now()
+  const db = database()
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const session = db.prepare('SELECT generation_id, profile FROM sessions WHERE id=?').get(input.sessionId) as
+      { generation_id?: string; profile?: string } | undefined
+    if (!session || (session.profile || 'default') !== input.profile || session.generation_id !== input.expectedGeneration) {
+      db.exec('COMMIT')
+      return { status: 'generation_mismatch' }
+    }
+    const existing = db.prepare('SELECT * FROM session_notifications WHERE namespace=? AND profile=? AND producer_key=?')
+      .get(input.namespace, input.profile, input.producerKey) as Record<string, unknown> | undefined
+    if (existing) {
+      db.exec('COMMIT')
+      const record = rowToRecord(existing)
+      return JSON.stringify(record.payload) === JSON.stringify(input.payload) ? { status: 'duplicate', record } : { status: 'conflict' }
+    }
+    const result = db.prepare(`INSERT INTO session_notifications
+        (namespace, profile, producer_key, session_id, session_generation, kind, disposition, payload,
+         attention_pending, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'notified', ?, 1, ?, ?)`).run(input.namespace, input.profile, input.producerKey,
+      input.sessionId, input.expectedGeneration, input.kind, JSON.stringify(input.payload), now, now)
+    const id = Number(result.lastInsertRowid)
+    db.prepare('INSERT INTO session_attention_events(session_id, event_key) VALUES (?, ?)')
+      .run(input.sessionId, `${NOTICE_ATTENTION_PREFIX}${id}`)
+    db.exec('COMMIT')
+    return { status: 'accepted', record: getSessionNotificationById(id)! }
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
 export function getSessionNotificationById(id: number): SessionNotificationRecord | null {
   const row = database().prepare('SELECT * FROM session_notifications WHERE id=?').get(id) as Record<string, unknown> | undefined
   return row ? rowToRecord(row) : null
@@ -161,13 +217,13 @@ export function settleInterruptedProcessAdmissions(namespace: string): number {
   return Number(result.changes)
 }
 
-/** Visible cron notices of the session's current generation, oldest first. */
+/** Visible passive notices of the session's current generation, oldest first. */
 export function listVisibleSessionNotifications(sessionId: string): SessionNotificationRecord[] {
   if (!getDb()) return []
   const generation = getSessionGeneration(sessionId)
   if (!generation) return []
   const rows = database().prepare(`SELECT * FROM session_notifications
-    WHERE session_id=? AND session_generation=? AND kind='cron' AND disposition IN ('notified','status_only','unknown')
+    WHERE session_id=? AND session_generation=? AND ${PASSIVE_NOTICE_KINDS} AND disposition IN ('notified','status_only','unknown')
     ORDER BY created_at, id`).all(sessionId, generation) as Record<string, unknown>[]
   return rows.map(rowToRecord)
 }
@@ -178,7 +234,7 @@ export function listUnprojectedSessionNotifications(sessionId: string, limit: nu
   const generation = getSessionGeneration(sessionId)
   if (!generation) return []
   const rows = database().prepare(`SELECT * FROM session_notifications
-    WHERE session_id=? AND session_generation=? AND kind='cron' AND disposition IN ('notified','status_only','unknown')
+    WHERE session_id=? AND session_generation=? AND ${PASSIVE_NOTICE_KINDS} AND disposition IN ('notified','status_only','unknown')
       AND projected_at IS NULL
     ORDER BY created_at, id LIMIT ?`).all(sessionId, generation, limit) as Record<string, unknown>[]
   return rows.map(rowToRecord)

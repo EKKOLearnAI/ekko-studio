@@ -1113,6 +1113,7 @@ export default {
       receiptUnavailable: 'Der genaue Ergebnisbeleg dieses Laufs war nicht verfügbar; nur Status.',
       unknown: 'Ergebnis unbekannt. Studio führt diese Aufgabe nicht erneut aus.',
       truncated: 'Ergebnis für die Anzeige gekürzt.',
+      externalSource: 'Externe Benachrichtigung von „{source}“ (Absender nicht verifiziert)',
     },
     selectMessages: "Nachrichten auswählen",
     messagesSelected: "{count} ausgewählt",

@@ -1127,6 +1127,7 @@ export default {
       receiptUnavailable: '找不到本次執行的確切結果憑據，僅顯示狀態。',
       unknown: '結果未知。Studio 不會重新執行此任務。',
       truncated: '結果過長，已截斷顯示。',
+      externalSource: '外部通知，來源「{source}」（發送方未驗證）',
     },
     selectMessages: "多選訊息",
     messagesSelected: "已選 {count} 則",

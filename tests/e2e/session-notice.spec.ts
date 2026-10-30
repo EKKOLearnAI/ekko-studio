@@ -51,3 +51,40 @@ for (const viewport of [{ name: 'desktop', width: 1280, height: 800 }, { name: '
     expect(box && box.x + box.width).toBeLessThanOrEqual(viewport.width)
   })
 }
+
+test('renders an external notice as inert plain text with a click-only link', async ({ page }) => {
+  const remote: string[] = []
+  page.on('request', request => { if (request.url().includes('external.example')) remote.push(request.url()) })
+  await authenticate(page)
+  await mockHermesApi(page)
+  await mockChatSocket(page)
+  await page.goto('/#/hermes/chat')
+  await page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)').fill('Watch the review')
+  await page.getByRole('button', { name: 'Send' }).click()
+  await page.waitForFunction(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.some((entry: any) => entry.event === 'run'))
+  const content = '**not bold** ![pixel](https://external.example/pixel.png) <img src="https://external.example/img.png"> [file](/etc/hosts)'
+  await page.evaluate(content => {
+    const state = (window as any).__PW_CHAT_SOCKET__
+    const sid = state.emitted.find((entry: any) => entry.event === 'run').payload.session_id
+    state.latest.__trigger('run.started', { event: 'run.started', session_id: sid, run_id: 'external-run' })
+    state.latest.__trigger('run.completed', { event: 'run.completed', session_id: sid, run_id: 'external-run', output: 'Watching.' })
+    state.latest.__trigger('session.notice', {
+      event: 'session.notice', session_id: sid, attention: true,
+      message: {
+        id: 'studio-notice-3', session_id: sid, role: 'system', display_role: 'system', content,
+        timestamp: Math.floor(Date.now() / 1000) + 1,
+        studio_notice: { kind: 'external', notification_id: 3, source: 'validator-review', event_id: 'review-3',
+          title: '<b>Validation</b> complete', url: 'https://external.example/reviews/3' },
+      },
+    })
+  }, content)
+  const header = page.locator('.studio-notice-header').filter({ hasText: 'Validation' })
+  await expect(header.locator('.studio-notice-title')).toHaveText('<b>Validation</b> complete')
+  await expect(header.locator('.studio-notice-detail')).toContainText('validator-review')
+  await expect(page.locator('.studio-notice-text')).toHaveText(content)
+  await expect(page.locator('img[src*="external.example"], .markdown-body strong')).toHaveCount(0)
+  const link = page.getByRole('link', { name: 'https://external.example/reviews/3' })
+  await expect(link).toHaveAttribute('rel', /noopener/)
+  await expect(link).toHaveAttribute('target', '_blank')
+  expect(remote).toEqual([])
+})

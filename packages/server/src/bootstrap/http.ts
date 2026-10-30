@@ -63,7 +63,7 @@ import {
   writeBadUpgradeRequest,
 } from '../modules/studio/middleware/security'
 import type { AdditionalShutdownStep, ShutdownHandler } from './lifecycle'
-import { createCodexProxyRequestBodyParser, createRequestBodyParser } from '../modules/studio/middleware/request-body-parser'
+import { createCodexProxyRequestBodyParser, createRequestBodyParser, createSessionNotificationRequestBodyParser } from '../modules/studio/middleware/request-body-parser'
 import {
   getCodingAgentsStatus,
   migratePersistedPiRuntimeMcpConfigs,
@@ -493,6 +493,7 @@ export async function bootstrap() {
   // authenticated request here so the proxy can remove historical image data
   // before dispatching to any provider API mode.
   app.use(createCodexProxyRequestBodyParser(isAuthorizedCodexProxyRequest))
+  app.use(createSessionNotificationRequestBodyParser())
   app.use(dshPluginUi.middleware)
   // Raise body limits above the default 1mb: profile avatars and MiMo voice-clone
   // reference audio are posted as base64 data URLs before reaching handlers.

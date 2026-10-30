@@ -1113,6 +1113,7 @@ export default {
       receiptUnavailable: 'この実行の正確な結果記録が見つかりませんでした。状態のみ表示します。',
       unknown: '結果は不明です。Studio はこのタスクを再実行しません。',
       truncated: '表示のため結果を省略しました。',
+      externalSource: '外部通知・送信元「{source}」（送信者は未検証）',
     },
     selectMessages: "メッセージを選択",
     messagesSelected: "{count} 件選択中",

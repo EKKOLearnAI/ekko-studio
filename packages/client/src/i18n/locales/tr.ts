@@ -559,6 +559,7 @@ export default {
       receiptUnavailable: 'Bu çalıştırmanın kesin sonuç kaydı bulunamadı; yalnızca durum.',
       unknown: 'Sonuç bilinmiyor. Studio bu görevi yeniden çalıştırmayacak.',
       truncated: 'Sonuç görüntüleme için kısaltıldı.',
+      externalSource: 'Harici bildirim, kaynak “{source}” (gönderen doğrulanmadı)',
     },
     selectMessages: "Mesajları seç",
     messagesSelected: "{count} seçildi",

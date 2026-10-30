@@ -1134,6 +1134,7 @@ export default {
       receiptUnavailable: '未找到本次运行的确切结果凭据，仅显示状态。',
       unknown: '结果未知。Studio 不会重新运行此任务。',
       truncated: '结果过长，已截断显示。',
+      externalSource: '外部通知，来源“{source}”（发送方未验证）',
     },
     selectMessages: "多选消息",
     messagesSelected: "已选 {count} 条",

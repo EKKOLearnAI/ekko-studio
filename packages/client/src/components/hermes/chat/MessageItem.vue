@@ -63,9 +63,17 @@ const props = withDefaults(defineProps<{
 });
 const { t } = useI18n();
 
+// External notices are untrusted caller data: plain text and a click-only web link, never Markdown.
+const externalNotice = computed(() => props.message.studioNotice?.kind === "external" ? props.message.studioNotice : null);
+const externalLink = computed(() => {
+  const url = externalNotice.value?.url;
+  return url && /^https?:\/\//i.test(url) ? url : null;
+});
+
 const studioNoticeTitle = computed(() => {
   const notice = props.message.studioNotice;
   if (!notice) return "";
+  if (notice.kind === "external") return notice.title;
   return notice.success === false || notice.status === "failed"
     ? t("chat.sessionNotice.cronFailedTitle", { name: notice.job_name })
     : t("chat.sessionNotice.cronTitle", { name: notice.job_name });
@@ -74,6 +82,7 @@ const studioNoticeTitle = computed(() => {
 const studioNoticeDetail = computed(() => {
   const notice = props.message.studioNotice;
   if (!notice) return "";
+  if (notice.kind === "external") return t("chat.sessionNotice.externalSource", { source: notice.source });
   if (notice.disposition === "unknown") return t("chat.sessionNotice.unknown");
   if (notice.reason === "output_unavailable_for_runtime") return t("chat.sessionNotice.outputUnavailable");
   if (notice.reason === "receipt_unavailable") return t("chat.sessionNotice.receiptUnavailable");
@@ -1273,9 +1282,13 @@ onBeforeUnmount(() => {
               <div class="studio-notice-title">{{ studioNoticeTitle }}</div>
               <div v-if="studioNoticeDetail" class="studio-notice-detail">{{ studioNoticeDetail }}</div>
             </div>
+            <template v-if="externalNotice">
+              <div class="studio-notice-text">{{ message.content }}</div>
+              <a v-if="externalLink" class="studio-notice-link" :href="externalLink" target="_blank" rel="noopener noreferrer nofollow">{{ externalLink }}</a>
+            </template>
             <!-- Render system message content -->
             <MarkdownRenderer
-              v-if="message.role === 'system' && message.content && !isCommandMessage"
+              v-if="message.role === 'system' && message.content && !isCommandMessage && !externalNotice"
               :content="message.content"
             />
             <div v-if="isStatusCommand" class="command-result command-status">
@@ -2206,5 +2219,15 @@ onBeforeUnmount(() => {
 
 .studio-notice-detail {
   font-size: 12px;
+}
+
+.studio-notice-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.studio-notice-link {
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 </style>

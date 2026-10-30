@@ -139,7 +139,18 @@ export interface HermesSessionPage {
   limit: number
 }
 
-export interface StudioNoticeView {
+export interface ExternalStudioNoticeView {
+  kind: 'external'
+  notification_id: number
+  source: string
+  event_id: string
+  title: string
+  url: string | null
+}
+
+export type StudioNoticeView = CronStudioNoticeView | ExternalStudioNoticeView
+
+export interface CronStudioNoticeView {
   kind: 'cron'
   notification_id: number
   disposition: string
