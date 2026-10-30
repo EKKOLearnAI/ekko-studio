@@ -586,8 +586,6 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           <span class="person-title">{{ isNewConversation ? t('person.newConversation') : conversations.find(session => session.id === selectedSessionId)?.title || data?.session?.title || t('person.title') }}</span>
         </div>
         <div v-if="!isNewConversation" class="person-header-actions">
-          <PersonWorkspaceFiles :session-id="data?.session?.id" :workspace="data?.session?.workspace"
-            :active="!chatTaskId && data?.session?.id === selectedSessionId" @attach="file => chatInputRef?.addFiles([file])" />
           <NTooltip trigger="hover">
             <template #trigger><NButton quaternary circle size="small" :aria-label="t('person.tasks')" :aria-expanded="showTasks" :disabled="!data?.session" @click="openPanel('tasks')"><SessionTaskIcon :size="17" /></NButton></template>
             {{ t('person.tasks') }}
@@ -596,6 +594,8 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
             <template #trigger><NButton quaternary circle size="small" :disabled="!data?.can_clear || busy || pending || settingsWrites > 0" :aria-label="t('chat.workspace')" :aria-expanded="showWorkspace" @click="openWorkspace"><FolderIcon /></NButton></template>
             {{ data?.settings.workspace || t('chat.workspace') }}
           </NTooltip>
+          <PersonWorkspaceFiles :session-id="data?.session?.id" :workspace="data?.session?.workspace" :submit="sendMessage"
+            :active="!chatTaskId && data?.session?.id === selectedSessionId" @attach="file => chatInputRef?.addFiles([file])" />
           <NPopconfirm v-model:show="showClearConfirm" :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" :positive-button-props="{ loading: pending }" :disabled="!data?.can_clear || busy || pending || settingsWrites > 0" @positive-click="clearHistory">
             <template #trigger>
               <NTooltip trigger="hover">

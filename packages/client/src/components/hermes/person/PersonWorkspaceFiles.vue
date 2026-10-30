@@ -1,24 +1,35 @@
 <script setup lang="ts">
-import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NButton, NDrawer, NDrawerContent, NSpin, NTooltip, useMessage } from 'naive-ui'
+import { NDrawer, NDrawerContent, NSpin, useMessage } from 'naive-ui'
 import { useFilesStore } from '@/stores/hermes/files'
 import { isPreviewableFile } from '@/utils/hermes/file-preview'
 import { useTaskDrawerLayout } from '@/components/hermes/tasks/useTaskDrawerLayout'
+import HeaderToolPanelToggle from '@/components/layout/HeaderToolPanelToggle.vue'
+import ChatToolsPanel from '@/components/hermes/chat/ChatToolsPanel.vue'
+import { hasDesktopBrowserBridge } from '@/utils/desktop-bridge'
+import { OPEN_DESKTOP_BROWSER_PANEL_EVENT } from '@/utils/desktop-browser'
+import { createBrowserAnnotationAttachment, type BrowserAnnotationSubmission } from '@/utils/browser-annotation-submit'
+import type { Attachment } from '@/stores/hermes/chat'
 
-const FilesPanel = defineAsyncComponent(() => import('@/components/hermes/chat/FilesPanel.vue'))
 const FilePreview = defineAsyncComponent(() => import('@/components/hermes/files/FilePreview.vue'))
 const props = withDefaults(defineProps<{
   sessionId?: string | null
   workspace?: string | null
   active?: boolean
+  submit: (text: string, attachments?: Attachment[]) => Promise<boolean>
 }>(), { active: true })
 const emit = defineEmits<{ attach: [file: File] }>()
 const { t } = useI18n()
 const message = useMessage()
 const filesStore = useFilesStore()
 const { drawerWidth } = useTaskDrawerLayout()
+const panelId = `person-files-panel-${useId()}`
 const show = ref(false)
+const panelReady = ref(false)
+const activePanel = ref<'files' | 'terminal' | 'browser'>('files')
+const browserAvailable = hasDesktopBrowserBridge()
+const tooltip = computed(() => [t('drawer.files'), t('drawer.terminal'), ...(browserAvailable ? [t('browser.title')] : [])].join(' / '))
 const previewOnly = ref(false)
 const loading = ref(false)
 let requestSequence = 0
@@ -26,6 +37,7 @@ let requestSequence = 0
 function reset() {
   requestSequence++
   show.value = false
+  panelReady.value = false
   if (loading.value || filesStore.previewFile?.workspaceSessionId === props.sessionId) filesStore.closePreview()
   loading.value = false
 }
@@ -38,10 +50,12 @@ function close() {
   reset()
 }
 
-function openFiles() {
-  if (!props.active || !props.sessionId || !props.workspace) return
+function openPanel(panel = activePanel.value) {
+  if (!props.active || !props.sessionId) return
+  const alreadyOpen = show.value
   if (filesStore.hasUnsavedChanges) {
     if (filesStore.editingFile?.workspaceSessionId === props.sessionId) {
+      activePanel.value = panel
       previewOnly.value = false
       show.value = true
       return
@@ -52,8 +66,19 @@ function openFiles() {
   reset()
   filesStore.closeEditor()
   filesStore.closePreview()
+  activePanel.value = panel
   previewOnly.value = false
   show.value = true
+  panelReady.value = alreadyOpen
+}
+
+function openBrowser() {
+  if (browserAvailable) openPanel('browser')
+}
+
+async function submitBrowserAnnotations(submission: BrowserAnnotationSubmission) {
+  if (!props.active || !props.sessionId) return false
+  return props.submit('', [createBrowserAnnotationAttachment(submission)])
 }
 
 function handlePreview(event: Event) {
@@ -99,36 +124,35 @@ function handlePreview(event: Event) {
 
 watch(() => [props.sessionId, props.workspace, props.active] as const, (_, previous) => {
   reset()
+  activePanel.value = 'files'
   if (filesStore.previewFile?.workspaceSessionId === previous[0]) filesStore.closePreview()
 })
-onMounted(() => window.addEventListener('hermes:preview-workspace-file', handlePreview))
+onMounted(() => {
+  window.addEventListener('hermes:preview-workspace-file', handlePreview)
+  window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, openBrowser)
+})
 onBeforeUnmount(() => {
   window.removeEventListener('hermes:preview-workspace-file', handlePreview)
+  window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, openBrowser)
   reset()
 })
 </script>
 
 <template>
-  <NTooltip trigger="hover">
-    <template #trigger>
-      <NButton quaternary circle size="small" :aria-label="t('files.title')" :aria-expanded="show"
-        :disabled="!active || !sessionId || !workspace" @click="openFiles">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-          <path d="M4 3v16h5M4 7h5M14 3h6v8h-6zM14 15h6v6h-6z" />
-        </svg>
-      </NButton>
-    </template>
-    {{ t('files.title') }}
-  </NTooltip>
-  <NDrawer :show="show" :width="drawerWidth" placement="right" class="person-files-drawer" @update:show="value => { if (!value) close() }">
-    <NDrawerContent :title="workspace || t('drawer.files')" closable :native-scrollbar="true"
+  <HeaderToolPanelToggle :expanded="show" :controls="panelId" :tooltip="tooltip"
+    :disabled="!active || !sessionId" @toggle="show ? close() : openPanel()" />
+  <NDrawer :show="show" :width="drawerWidth" placement="right" class="person-files-drawer" @after-enter="panelReady = true"
+    @update:show="value => { if (!value) close() }">
+    <NDrawerContent :id="panelId" :title="workspace || t('drawer.files')" closable :native-scrollbar="true"
       :body-content-style="{ padding: '0', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }">
       <template v-if="show">
         <template v-if="previewOnly">
           <div v-if="loading" class="person-file-loading"><NSpin size="small" /></div>
           <FilePreview v-else-if="filesStore.previewFile" :custom-close="close" />
         </template>
-        <FilesPanel v-else :workspace-session-id="sessionId" :workspace="workspace" @attach="file => emit('attach', file)" />
+        <ChatToolsPanel v-else v-model:active-panel="activePanel" :workspace-session-id="sessionId" :workspace="workspace"
+          :visible="show" :browser-visible="panelReady" :browser-available="browserAvailable"
+          :submit="submitBrowserAnnotations" @attach="file => emit('attach', file)" />
       </template>
     </NDrawerContent>
   </NDrawer>

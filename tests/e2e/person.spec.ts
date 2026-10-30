@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { authenticate, mockChatSocket, mockHermesApi } from './fixtures'
+import { authenticate, mockChatSocket, mockHermesApi, mockTerminalWebSocket } from './fixtures'
+import { installDesktopBridge } from './desktop-bridge-fixture'
 import sharp from 'sharp'
 import { PERSON_BOTS, personBotNameKey } from '../../packages/shared/person-bots'
 import { createServer } from 'node:http'
@@ -267,8 +268,13 @@ for (const { mode, width, wallpaper } of [
     await expect(page.locator('.person-compose .input-textarea')).toBeVisible()
     await page.locator('.person-compose .input-textarea').fill('Keep this main draft')
     await expect(page.getByRole('button', { name: 'Workspace', exact: true })).toBeDisabled()
-    await page.getByRole('button', { name: 'Files', exact: true }).click()
+    const panelToggle = page.getByRole('button', { name: 'Side panel', exact: true })
+    await expect(panelToggle).toHaveAttribute('aria-expanded', 'false')
+    await page.screenshot({ path: testInfo.outputPath('person-shared-side-panel-button.png'), animations: 'disabled' })
+    await panelToggle.click()
     const drawer = page.locator('.person-files-drawer')
+    await expect(panelToggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(drawer.locator('.n-drawer-content')).toHaveAttribute('id', (await panelToggle.getAttribute('aria-controls'))!)
     await expect(drawer.locator('.file-tree')).toBeVisible()
     await drawer.getByText('README.md', { exact: true }).click()
     await expect(drawer.locator('.workspace-markdown-preview')).toContainText('Browse the personal assistant files here.')
@@ -276,8 +282,10 @@ for (const { mode, width, wallpaper } of [
     await drawer.screenshot({ path: testInfo.outputPath('person-workspace-files.png'), animations: 'disabled' })
     await drawer.locator('.n-drawer-header').getByRole('button', { name: 'close', exact: true }).click()
     await expect(drawer).toBeHidden()
+    await expect(panelToggle).toHaveAttribute('aria-expanded', 'false')
 
     await page.locator('.person-view .markdown-file-link').click()
+    await expect(panelToggle).toHaveAttribute('aria-expanded', 'true')
     await expect(drawer.locator('.file-preview')).toBeVisible()
     await expect(drawer.locator('.preview-source-line.is-target-line')).toHaveCount(1)
     await expect(drawer.locator('.preview-source-line.is-target-line')).toContainText('line two')
@@ -315,7 +323,7 @@ test('Person previews task files with the task session and leaves the main conve
   expect(await page.evaluate(() => localStorage.getItem('hermes_active_session_default'))).toBe('person-main-1')
   await files.locator('.file-preview').getByRole('button', { name: 'Close', exact: true }).click()
   await expect(files).toBeHidden()
-  await taskDrawer.getByRole('button', { name: 'Files', exact: true }).click()
+  await taskDrawer.getByRole('button', { name: 'Side panel', exact: true }).click()
   await expect(files.locator('.file-tree')).toBeVisible()
   expect(requests.filter(request => request.endpoint === 'list').every(request => request.sessionId === 'person-task-task1')).toBe(true)
 })
@@ -330,7 +338,7 @@ test('Person retains workspace attachments and unsaved edits when returning to t
   }, second.id)
   await mockPersonWorkspace(page)
   await page.goto('/#/person?session=person-main-1')
-  await page.getByRole('button', { name: 'Files', exact: true }).click()
+  await page.getByRole('button', { name: 'Side panel', exact: true }).click()
   const files = page.locator('.person-files-drawer')
   await files.getByText('README.md', { exact: true }).click({ button: 'right' })
   await page.getByText('Add to Chat', { exact: true }).click()
@@ -347,9 +355,115 @@ test('Person retains workspace attachments and unsaved edits when returning to t
   await switchPersonSession(page, second.id)
   await expect(files).toBeHidden()
   await switchPersonSession(page, 'person-main-1')
-  await page.getByRole('button', { name: 'Files', exact: true }).click()
+  await page.getByRole('button', { name: 'Side panel', exact: true }).click()
   await expect(files.locator('.monaco-editor .view-lines')).toContainText('Keep my unsaved changes')
   await expect(page.locator('.person-compose .attachment-preview')).toContainText('README.md')
+})
+
+for (const mode of ['light', 'dark'] as const) {
+  for (const width of [1440, 390]) {
+    test(`Person shares the terminal tabs and preserves the terminal across tab switches in ${mode} at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 })
+      await setup(page, mode, mode === 'dark', mode === 'dark')
+      await mockPersonWorkspace(page)
+      await mockTerminalWebSocket(page)
+      await page.goto('/#/person?session=person-main-1')
+      await page.getByRole('button', { name: 'Side panel', exact: true }).click()
+      const panel = page.locator('.person-files-drawer')
+      await expect(panel.getByRole('tab', { name: 'Workspace', exact: true })).toBeVisible()
+      await expect(panel.getByRole('tab', { name: 'Browser', exact: true })).toHaveCount(0)
+      await panel.getByRole('tab', { name: 'Terminal', exact: true }).click()
+      await expect(panel.getByRole('button', { name: 'zsh #1', exact: true })).toBeVisible()
+      await panel.locator('.xterm-helper-textarea').focus()
+      await page.keyboard.type('pwd')
+      await page.keyboard.press('Enter')
+      await expect.poll(() => page.evaluate(() => (window as any).__PW_TERMINAL_WS__.sent
+        .filter((entry: any) => !entry.data.startsWith('{')).map((entry: any) => entry.data).join(''))).toContain('pwd\r')
+      await panel.getByRole('tab', { name: 'Workspace', exact: true }).click()
+      await expect(panel.locator('.file-tree')).toBeVisible()
+      await panel.getByRole('tab', { name: 'Terminal', exact: true }).click()
+      expect(await page.evaluate(() => (window as any).__PW_TERMINAL_WS__.sockets
+        .filter((socket: any) => new URL(String(socket.url), location.href).pathname === '/api/hermes/terminal').length)).toBe(1)
+      await panel.screenshot({ path: testInfo.outputPath('person-terminal.png'), animations: 'disabled' })
+    })
+  }
+}
+
+test('Person opens the shared browser from links, hides it behind overlays and sends annotations to the main conversation', async ({ page }, testInfo) => {
+  await installDesktopBridge(page, 'darwin', true)
+  await setup(page, 'light', false, false)
+  await mockPersonWorkspace(page)
+  await page.route('**/api/studio/uploads', route => route.fulfill({ json: { files: [{ name: 'browser.png', path: '/tmp/person/browser.png' }] } }))
+  await page.addInitScript(() => {
+    (window as any).__PW_CHAT_SOCKET_RESUMES__['person-main-1'].messages = [
+      { id: 'browser-link', role: 'assistant', content: '[Open example](https://example.test)', timestamp: 1 },
+    ]
+  })
+  await page.goto('/#/person?session=person-main-1')
+  await page.getByRole('link', { name: 'Open example', exact: true }).click()
+  const panel = page.locator('.person-files-drawer')
+  await expect(panel.getByRole('tab', { name: 'Browser', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.viewportCalls.at(-1)?.visible)).toBe(true)
+  await panel.getByRole('tab', { name: 'Workspace', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.viewportCalls.at(-1)?.visible)).toBe(false)
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('hermes:open-desktop-browser-panel')))
+  await expect(panel.getByRole('tab', { name: 'Browser', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.viewportCalls.at(-1)?.visible)).toBe(true)
+  await panel.screenshot({ path: testInfo.outputPath('person-browser.png'), animations: 'disabled' })
+  await page.evaluate(() => {
+    const overlay = document.createElement('div')
+    overlay.className = 'n-modal-mask'
+    overlay.dataset.personBrowserOverlay = 'true'
+    Object.assign(overlay.style, { position: 'fixed', inset: '0', zIndex: '9999' })
+    document.body.appendChild(overlay)
+  })
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.viewportCalls.at(-1)?.visible)).toBe(false)
+  await page.evaluate(() => document.querySelector('[data-person-browser-overlay]')?.remove())
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.viewportCalls.at(-1)?.visible)).toBe(true)
+  await page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.requestAnnotation({ tabId: 'tab-1', mode: 'element' }))
+  await panel.locator('.annotation-editor textarea').fill('Inspect the main assistant page')
+  await panel.locator('.annotation-session-bar').getByRole('button', { name: 'Send', exact: true }).click()
+  await expect.poll(() => emitted(page, 'run')).toHaveLength(1)
+  const [run] = await emitted(page, 'run')
+  expect(run.session_id).toBe('person-main-1')
+  expect(JSON.stringify(run)).toContain('Inspect the main assistant page')
+  await panel.locator('.n-drawer-header').getByRole('button', { name: 'close', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.viewportCalls.at(-1)?.visible)).toBe(false)
+})
+
+test('Person task conversations share the terminal and browser and submit annotations to the task', async ({ page }, testInfo) => {
+  await installDesktopBridge(page, 'darwin', true)
+  const { state, operations } = await setup(page, 'dark', true, true)
+  Object.assign(state.tasks[0], { status: 'completed', running: false, execution_state: 'finished' })
+  await mockPersonWorkspace(page)
+  await page.route('**/api/studio/uploads', route => route.fulfill({ json: { files: [{ name: 'browser.png', path: '/tmp/person/browser.png' }] } }))
+  await mockTerminalWebSocket(page)
+  await page.addInitScript(() => {
+    (window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1'] = {
+      session_id: 'person-task-task1', messages: [
+        { id: 'task-browser-link', role: 'assistant', content: '[Inspect task page](https://example.test/task)', timestamp: 1 },
+      ], isWorking: false, events: [],
+    }
+  })
+  await page.goto('/#/person?session=person-main-1')
+  await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+  await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+  const task = page.locator('.person-task-chat')
+  await task.getByRole('button', { name: 'Side panel', exact: true }).click()
+  const panel = page.locator('.person-files-drawer')
+  await panel.getByRole('tab', { name: 'Terminal', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'zsh #1', exact: true })).toBeVisible()
+  await panel.locator('.n-drawer-header').getByRole('button', { name: 'close', exact: true }).click()
+  await task.getByRole('link', { name: 'Inspect task page', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.viewportCalls.at(-1)?.visible)).toBe(true)
+  await panel.screenshot({ path: testInfo.outputPath('person-task-browser.png'), animations: 'disabled' })
+  await page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.requestAnnotation({ tabId: 'tab-1', mode: 'region' }))
+  await panel.locator('.annotation-editor textarea').fill('Task-specific browser annotation')
+  await panel.locator('.annotation-session-bar').getByRole('button', { name: 'Send', exact: true }).click()
+  await expect.poll(() => operations.filter(op => op.path.endsWith('/tasks/task1/chat') && op.body).length).toBe(1)
+  expect(JSON.stringify(operations.find(op => op.path.endsWith('/tasks/task1/chat') && op.body).body.input)).toContain('Task-specific browser annotation')
+  expect(await emitted(page, 'run')).toEqual([])
+  expect(await page.evaluate(() => localStorage.getItem('hermes_active_session_default'))).toBe('person-main-1')
 })
 
 test('Person cancels late file previews and reports failures without downloading the file', async ({ page }) => {

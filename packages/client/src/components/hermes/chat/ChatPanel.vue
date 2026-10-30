@@ -8,6 +8,7 @@ import { usePageLoadingState, usePageLoadingTask } from '@/composables/usePageLo
 import { useCodingAgentModels } from '@/composables/useCodingAgentModels'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
+import HeaderToolPanelToggle from '@/components/layout/HeaderToolPanelToggle.vue'
 import { AGENT_OPTIONS } from "@/utils/agent-options"
 import { setSessionPinned } from "@/api/studio/sessions";
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue";
@@ -63,7 +64,7 @@ import MessageList from "./MessageList.vue";
 import SessionListItem from "./SessionListItem.vue";
 import ListActionsMenu from "@/components/layout/ListActionsMenu.vue";
 import OutlinePanel from "./OutlinePanel.vue";
-import TerminalPanel from "./TerminalPanel.vue";
+import ChatToolsPanel from "./ChatToolsPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
 import { chatSessionAgentAvatar } from "@/utils/chat-agent-avatar";
 import { isHermesSession } from "@/utils/hermes/session-agent";
@@ -99,14 +100,12 @@ const props = withDefaults(defineProps<{
 
 provide('hermesWorkspaceFilePreview', true);
 
-const FilesPanel = defineAsyncComponent(async () => (await import('./FilesPanel.vue')).default);
 const SessionTasksDrawer = defineAsyncComponent(async () => (await import('@/components/hermes/tasks/SessionTasksDrawer.vue')).default);
 const ConnectionsPanel = defineAsyncComponent(async () => (await import('@/components/hermes/connections/ConnectionsPanel.vue')).default);
 const AgentManagerPanel = defineAsyncComponent(async () => (await import('@/views/hermes/AgentManagerView.vue')).default);
 const ModelsPanel = defineAsyncComponent(async () => (await import('@/views/hermes/ModelsView.vue')).default);
 const WorkspaceDiffPreview = defineAsyncComponent(async () => (await import('@/components/hermes/files/WorkspaceDiffPreview.vue')).default);
 const FilePreview = defineAsyncComponent(async () => (await import('@/components/hermes/files/FilePreview.vue')).default);
-const DesktopBrowserPanel = defineAsyncComponent(async () => (await import('./DesktopBrowserPanel.vue')).default);
 
 const chatStore = useChatStore();
 const sessionStates = useSessionReadState(() => props.contentMode === 'chat' && !chatStore.isLoadingMessages ? chatStore.activeSessionId : null);
@@ -3018,39 +3017,9 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
           </NButton>
           <!-- chat/live mode toggle hidden -->
           <template v-if="currentMode === 'chat' && !showNewChatPage">
-            <NTooltip v-if="isSuperAdmin" trigger="hover">
-              <template #trigger>
-                <NButton
-                  class="header-tool-toggle"
-                  :class="{ active: showToolPanel }"
-                  quaternary
-                  size="small"
-                  :aria-label="t('chat.sidePanel')"
-                  :aria-expanded="showToolPanel"
-                  aria-controls="chat-tool-panel"
-                  @click="toggleToolPanel"
-                  circle
-                >
-                  <template #icon>
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      aria-hidden="true"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <line x1="15" y1="3" x2="15" y2="21" />
-                    </svg>
-                  </template>
-                </NButton>
-              </template>
-              {{ desktopBrowserAvailable ? `${t("drawer.files")} / ${t("drawer.terminal")} / ${t("browser.title")}` : `${t("drawer.files")} / ${t("drawer.terminal")}` }}
-            </NTooltip>
+            <HeaderToolPanelToggle v-if="isSuperAdmin" :expanded="showToolPanel" controls="chat-tool-panel"
+              :tooltip="desktopBrowserAvailable ? `${t('drawer.files')} / ${t('drawer.terminal')} / ${t('browser.title')}` : `${t('drawer.files')} / ${t('drawer.terminal')}`"
+              @toggle="toggleToolPanel" />
             <NDropdown
               v-model:show="showActiveSessionMenu"
               trigger="click"
@@ -3259,72 +3228,10 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
                   </div>
                 </template>
                 <template v-else>
-                  <div class="chat-tool-tabs" role="tablist">
-                    <button
-                      class="chat-tool-tab"
-                      :class="{ active: activeToolPanel === 'files' }"
-                      type="button"
-                      role="tab"
-                      :title="t('drawer.files')"
-                      :aria-label="t('drawer.files')"
-                      :aria-selected="activeToolPanel === 'files'"
-                      @click="activeToolPanel = 'files'"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z" />
-                      </svg>
-                    </button>
-                    <button
-                      class="chat-tool-tab"
-                      :class="{ active: activeToolPanel === 'terminal' }"
-                      type="button"
-                      role="tab"
-                      :title="t('drawer.terminal')"
-                      :aria-label="t('drawer.terminal')"
-                      :aria-selected="activeToolPanel === 'terminal'"
-                      @click="activeToolPanel = 'terminal'"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <rect x="3" y="4" width="18" height="16" rx="2" />
-                        <path d="m7 9 3 3-3 3M13 15h4" />
-                      </svg>
-                    </button>
-                    <button
-                      v-if="desktopBrowserAvailable"
-                      class="chat-tool-tab"
-                      :class="{ active: activeToolPanel === 'browser' }"
-                      type="button"
-                      role="tab"
-                      :title="t('browser.title')"
-                      :aria-label="t('browser.title')"
-                      :aria-selected="activeToolPanel === 'browser'"
-                      @click="activeToolPanel = 'browser'"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <rect x="3" y="4" width="18" height="16" rx="2" />
-                        <path d="M3 9h18" />
-                        <circle cx="6.5" cy="6.5" r=".75" fill="currentColor" stroke="none" />
-                        <circle cx="9.5" cy="6.5" r=".75" fill="currentColor" stroke="none" />
-                      </svg>
-                    </button>
-                  </div>
-                  <div class="chat-tool-content">
-                    <FilesPanel
-                      v-show="activeToolPanel === 'files'"
-                      :workspace-session-id="activeWorkspaceSessionId"
-                      :workspace="activeWorkspacePath"
-                      @attach="handleWorkspaceFileAttach"
-                    />
-                    <TerminalPanel
-                      v-show="activeToolPanel === 'terminal'"
-                      :visible="showToolPanel && activeToolPanel === 'terminal'"
-                    />
-                    <DesktopBrowserPanel
-                      v-if="desktopBrowserAvailable && activeToolPanel === 'browser'"
-                      :visible="toolPanelTransitionReady"
-                      :submit="submitBrowserAnnotations"
-                    />
-                  </div>
+                  <ChatToolsPanel v-model:active-panel="activeToolPanel"
+                    :workspace-session-id="activeWorkspaceSessionId" :workspace="activeWorkspacePath"
+                    :visible="showToolPanel" :browser-visible="toolPanelTransitionReady" :browser-available="desktopBrowserAvailable"
+                    :submit="submitBrowserAnnotations" @attach="handleWorkspaceFileAttach" />
                 </template>
               </div>
             </aside>
@@ -3803,11 +3710,6 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
 
 }
 
-.header-tool-toggle.active {
-  color: var(--accent-primary);
-  background: rgba(var(--accent-primary-rgb), 0.1);
-}
-
 .chat-tool-panel {
   position: relative;
   flex: 0 0 auto;
@@ -3920,80 +3822,6 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
   min-height: 0;
 }
 
-.chat-tool-tabs {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex-shrink: 0;
-  order: 2;
-  width: 48px;
-  height: 100%;
-  gap: calc(4px * var(--spacing-scale, 1));
-  padding: calc(8px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
-  border-inline-start: var(--border-width, 1px) solid $border-color;
-  background: var(--theme-sidebar-bg, $bg-sidebar-surface);
-  box-sizing: border-box;
-}
-
-.chat-tool-tab {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: none;
-  border-radius: $radius-sm;
-  background: transparent;
-  color: $text-secondary;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  transition: all $transition-fast;
-
-  svg {
-    width: 18px;
-    height: 18px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  &:hover {
-    color: $text-primary;
-    background: rgba(var(--accent-primary-rgb), 0.06);
-  }
-
-  &.active {
-    color: var(--accent-primary);
-    background: rgba(var(--accent-primary-rgb), 0.12);
-
-    &::after {
-      content: "";
-      position: absolute;
-      right: -6px;
-      top: 9px;
-      bottom: 9px;
-      width: 2px;
-      border-radius: 2px 0 0 2px;
-      background: var(--accent-primary);
-    }
-  }
-}
-
-.chat-tool-content {
-  order: 1;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--theme-content-bg, $bg-main-surface);
-}
-
-.chat-tool-content > * {
-  height: 100%;
-  min-height: 0;
-}
 
 @media (max-width: $breakpoint-mobile) {
   .chat-tool-panel {

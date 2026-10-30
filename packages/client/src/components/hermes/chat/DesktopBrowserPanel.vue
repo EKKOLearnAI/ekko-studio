@@ -395,8 +395,18 @@ function detectExternalOverlay(): void {
     externalOverlayOpen.value = false
     return
   }
+  const hostDrawer = viewport.value?.closest('.n-drawer-container')
   externalOverlayOpen.value = [...document.querySelectorAll<HTMLElement>(EXTERNAL_OVERLAY_SELECTOR)].some(element => {
-    if (element.closest('.browser-panel')) return false
+    if (element.closest('.browser-panel') || element.contains(viewport.value!)) return false
+    const overlayDrawer = element.closest('.n-drawer-container')
+    // The host drawer and its backdrop belong behind the native browser view.
+    // A task conversation may also have an older drawer underneath this one.
+    if (hostDrawer && overlayDrawer) {
+      if (hostDrawer === overlayDrawer && element.classList.contains('n-drawer-mask')) return false
+      const hostZIndex = Number(getComputedStyle(hostDrawer).zIndex)
+      const overlayZIndex = Number(getComputedStyle(overlayDrawer).zIndex)
+      if (Number.isFinite(hostZIndex) && Number.isFinite(overlayZIndex) && overlayZIndex < hostZIndex) return false
+    }
     const style = window.getComputedStyle(element)
     // Entering overlays often start at opacity 0 or outside the viewport. They
     // still need to hide the native WebContentsView before their CSS transition

@@ -84,7 +84,7 @@ onBeforeUnmount(() => { lifetime.abort(); stopUpdates() })
       :body-content-style="{ padding: '0', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }">
       <template #header><div class="task-chat-heading">
         <span>{{ task?.title || t('person.tasks') }}</span>
-        <PersonWorkspaceFiles v-if="session" :session-id="session.id" :workspace="session.workspace"
+        <PersonWorkspaceFiles v-if="session" :session-id="session.id" :workspace="session.workspace" :submit="send"
           @attach="file => conversationRef?.addFiles([file])" />
         <NButton v-if="selectedIsCurrent && personTaskCanStop(task)" size="small" :loading="stopping" :disabled="stopping || task?.execution_state === 'stopping'" @click="stopTask">
           {{ t(task?.execution_state === 'stopping' ? 'person.states.stopping' : 'person.stopTask') }}

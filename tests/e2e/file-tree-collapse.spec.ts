@@ -82,7 +82,11 @@ test('collapses and restores the workspace file tree without closing the file vi
   await mockChatSocket(page)
 
   await page.goto(`/#/hermes/session/${sessionId}`)
-  await page.locator('.header-tool-toggle').click()
+  const panelToggle = page.getByRole('button', { name: 'Side panel', exact: true })
+  await expect(panelToggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(panelToggle).toHaveAttribute('aria-controls', 'chat-tool-panel')
+  await panelToggle.click()
+  await expect(panelToggle).toHaveAttribute('aria-expanded', 'true')
 
   const panel = page.locator('.chat-tool-panel')
   const tree = panel.locator('.files-tree-panel')
