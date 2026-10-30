@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NDrawer, NDrawerContent, NSpin, NSelect } from 'naive-ui'
 import { useTaskDrawerLayout } from '@/components/hermes/tasks/useTaskDrawerLayout'
 import PersonTaskConversation from './PersonTaskConversation.vue'
+import PersonWorkspaceFiles from './PersonWorkspaceFiles.vue'
 import { buildContentBlocks, uploadFiles, type Attachment } from '@/stores/hermes/chat'
 import { personRequest, personTaskCanStop, stopPersonTask, type PersonTask, type PersonExecutionSummary } from '@/api/person'
 import { onPersonUpdated } from '@/api/studio/chat'
@@ -22,6 +23,7 @@ const executionOptions = computed(() => {
 const selectedIsCurrent = computed(() => executions.value.some(run => run.id === task.value?.execution_id && run.session_id === session.value?.id))
 const task = ref<PersonTask | null>(null)
 const session = ref<SessionSummary | null>(null)
+const conversationRef = ref<InstanceType<typeof PersonTaskConversation> | null>(null)
 const pending = ref<{ id: string; input: { type: string; text?: string; name?: string }[] }[]>([])
 const ready = ref(false)
 const closing = ref(false)
@@ -82,6 +84,8 @@ onBeforeUnmount(() => { lifetime.abort(); stopUpdates() })
       :body-content-style="{ padding: '0', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }">
       <template #header><div class="task-chat-heading">
         <span>{{ task?.title || t('person.tasks') }}</span>
+        <PersonWorkspaceFiles v-if="session" :session-id="session.id" :workspace="session.workspace"
+          @attach="file => conversationRef?.addFiles([file])" />
         <NButton v-if="selectedIsCurrent && personTaskCanStop(task)" size="small" :loading="stopping" :disabled="stopping || task?.execution_state === 'stopping'" @click="stopTask">
           {{ t(task?.execution_state === 'stopping' ? 'person.states.stopping' : 'person.stopTask') }}
         </NButton>
@@ -91,7 +95,7 @@ onBeforeUnmount(() => { lifetime.abort(); stopUpdates() })
       <template v-else>
         <NSelect v-if="executionOptions.length > 1" class="task-executions" :value="session?.id" :options="executionOptions"
           :disabled="sending || stopping" :aria-label="t('person.executionHistory')" @update:value="value => refresh(executions.find(run => run.session_id === value)?.id)" />
-        <PersonTaskConversation v-if="session" :key="session.id" :session="session" :pending="pending" :send="send"
+        <PersonTaskConversation v-if="session" ref="conversationRef" :key="session.id" :session="session" :pending="pending" :send="send"
           :disabled="disabled" :stop-control="stopControl" />
         <p v-else class="task-chat-alert">{{ t('person.noExecution') }}</p>
       </template>

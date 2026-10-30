@@ -16,6 +16,8 @@ const props = defineProps<{
 const { t } = useI18n()
 const store = provideScopedChatStore(props.session.id)
 const ready = ref(false)
+const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
+defineExpose({ addFiles: (files: File[]) => chatInputRef.value?.addFiles(files) })
 onMounted(async () => {
   store.ensureSessionLoaded(props.session)
   await store.switchSession(props.session.id)
@@ -31,7 +33,7 @@ onMounted(async () => {
       <span>{{ t('person.followupsQueued', { count: pending.length }) }}</span>
       <ol><li v-for="item in pending" :key="item.id">{{ item.input.map(block => block.text || block.name || '').join(' ') }}</li></ol>
     </div>
-    <ChatInput hide-settings :submit="send" :send-disabled="disabled" :stop-control="stopControl" :model-label="session.model || ''" model-disabled reasoning-effort-disabled />
+    <ChatInput ref="chatInputRef" hide-settings :submit="send" :send-disabled="disabled" :stop-control="stopControl" :model-label="session.model || ''" model-disabled reasoning-effort-disabled />
   </template>
 </template>
 

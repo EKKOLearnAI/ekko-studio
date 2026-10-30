@@ -229,6 +229,168 @@ async function switchPersonSession(page: Page, id: string) {
   await expect(page.locator('.input-model-button')).toBeVisible()
 }
 
+async function mockPersonWorkspace(page: Page) {
+  const requests: { sessionId: string; path: string; endpoint: string }[] = []
+  await page.route(/\/api\/studio\/sessions\/[^/]+\/workspace-(?:files|file)\//, route => {
+    const url = new URL(route.request().url())
+    const sessionId = decodeURIComponent(url.pathname.split('/')[4])
+    const path = url.searchParams.get('path') || ''
+    const endpoint = url.pathname.split('/').at(-1)!
+    requests.push({ sessionId, path, endpoint })
+    if (endpoint === 'list') return route.fulfill({ json: { path, absolutePath: '/tmp/person/default', entries: [
+      { name: 'README.md', path: 'README.md', isDir: false, size: 70, modTime: '2026-10-30T00:00:00.000Z' },
+    ] } })
+    if (endpoint === 'diff') return route.fulfill({ json: { patch: '', additions: 0, deletions: 0, binary: false, truncated: false } })
+    if (endpoint === 'read') return route.fulfill({ json: { path, size: 70, content: '# Assistant workspace\n\nBrowse the personal assistant files here.' } })
+    if (endpoint === 'content') return route.fulfill({ contentType: 'text/plain', body: 'line one\nline two\nline three\n' })
+    return route.fallback()
+  })
+  return requests
+}
+
+for (const { mode, width, wallpaper } of [
+  { mode: 'light' as const, width: 1440, wallpaper: false },
+  { mode: 'dark' as const, width: 1440, wallpaper: true },
+  { mode: 'light' as const, width: 390, wallpaper: true },
+  { mode: 'dark' as const, width: 390, wallpaper: false },
+]) {
+  test(`Person browses workspace files and previews message links in ${mode} at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    await setup(page, mode, wallpaper, wallpaper)
+    const requests = await mockPersonWorkspace(page)
+    await page.addInitScript(() => {
+      (window as any).__PW_CHAT_SOCKET_RESUMES__['person-main-1'].messages = [
+        { id: 'file-link', role: 'assistant', content: '[View source](/tmp/person/default/report.ts:2:1)', timestamp: 1 },
+      ]
+    })
+    await page.goto('/#/person?session=person-main-1')
+    await expect(page.locator('.person-compose .input-textarea')).toBeVisible()
+    await page.locator('.person-compose .input-textarea').fill('Keep this main draft')
+    await expect(page.getByRole('button', { name: 'Workspace', exact: true })).toBeDisabled()
+    await page.getByRole('button', { name: 'Files', exact: true }).click()
+    const drawer = page.locator('.person-files-drawer')
+    await expect(drawer.locator('.file-tree')).toBeVisible()
+    await drawer.getByText('README.md', { exact: true }).click()
+    await expect(drawer.locator('.workspace-markdown-preview')).toContainText('Browse the personal assistant files here.')
+    expect(requests.some(request => request.sessionId === 'person-main-1' && request.path === 'README.md' && request.endpoint === 'read')).toBe(true)
+    await drawer.screenshot({ path: testInfo.outputPath('person-workspace-files.png'), animations: 'disabled' })
+    await drawer.locator('.n-drawer-header').getByRole('button', { name: 'close', exact: true }).click()
+    await expect(drawer).toBeHidden()
+
+    await page.locator('.person-view .markdown-file-link').click()
+    await expect(drawer.locator('.file-preview')).toBeVisible()
+    await expect(drawer.locator('.preview-source-line.is-target-line')).toHaveCount(1)
+    await expect(drawer.locator('.preview-source-line.is-target-line')).toContainText('line two')
+    expect(requests.some(request => request.sessionId === 'person-main-1' && request.path === 'report.ts' && request.endpoint === 'content')).toBe(true)
+    await expect(drawer.locator('.file-tree')).toHaveCount(0)
+    await drawer.screenshot({ path: testInfo.outputPath('person-file-link-preview.png'), animations: 'disabled' })
+    await drawer.locator('.file-preview').getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(drawer).toBeHidden()
+    await expect(page.locator('.person-compose .input-textarea')).toHaveValue('Keep this main draft')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  })
+}
+
+test('Person previews task files with the task session and leaves the main conversation selected', async ({ page }) => {
+  const { state } = await setup(page, 'light', false, false)
+  Object.assign(state.tasks[0], { status: 'completed', running: false, execution_state: 'finished' })
+  const requests = await mockPersonWorkspace(page)
+  await page.addInitScript(() => {
+    (window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1'] = {
+      session_id: 'person-task-task1', messages: [
+        { id: 'task-file', role: 'assistant', content: '[Task output](/tmp/external-task/report.txt)', timestamp: 1 },
+      ], isWorking: false, events: [],
+    }
+  })
+  await page.goto('/#/person?session=person-main-1')
+  await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+  await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+  const taskDrawer = page.locator('.person-task-chat')
+  await taskDrawer.locator('.markdown-file-link').click()
+  const files = page.locator('.person-files-drawer')
+  await expect(files.locator('.preview-code')).toContainText('line two')
+  expect(requests.filter(request => request.endpoint === 'content')).toEqual([
+    { sessionId: 'person-task-task1', path: '/tmp/external-task/report.txt', endpoint: 'content' },
+  ])
+  expect(await page.evaluate(() => localStorage.getItem('hermes_active_session_default'))).toBe('person-main-1')
+  await files.locator('.file-preview').getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(files).toBeHidden()
+  await taskDrawer.getByRole('button', { name: 'Files', exact: true }).click()
+  await expect(files.locator('.file-tree')).toBeVisible()
+  expect(requests.filter(request => request.endpoint === 'list').every(request => request.sessionId === 'person-task-task1')).toBe(true)
+})
+
+test('Person retains workspace attachments and unsaved edits when returning to the conversation', async ({ page }) => {
+  const { state } = await setup(page, 'light', false, false)
+  state.tasks = []
+  const second = { ...state.session, id: 'person-main-files-second', title: 'Second files' }
+  state.conversations.push(second)
+  await page.addInitScript(secondId => {
+    (window as any).__PW_CHAT_SOCKET_RESUMES__[secondId] = { session_id: secondId, messages: [], isWorking: false, events: [] }
+  }, second.id)
+  await mockPersonWorkspace(page)
+  await page.goto('/#/person?session=person-main-1')
+  await page.getByRole('button', { name: 'Files', exact: true }).click()
+  const files = page.locator('.person-files-drawer')
+  await files.getByText('README.md', { exact: true }).click({ button: 'right' })
+  await page.getByText('Add to Chat', { exact: true }).click()
+  await expect(page.locator('.person-compose .attachment-preview')).toContainText('README.md')
+  await files.getByText('README.md', { exact: true }).click()
+  await files.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(files.locator('.monaco-editor')).toBeVisible()
+  await files.locator('.monaco-editor .view-lines').click()
+  await page.keyboard.press('ControlOrMeta+End')
+  await page.keyboard.type(' Keep my unsaved changes')
+  await expect(files.locator('.monaco-editor .view-lines')).toContainText('Keep my unsaved changes')
+  await files.locator('.n-drawer-header').getByRole('button', { name: 'close', exact: true }).click()
+  await expect(files).toBeVisible()
+  await switchPersonSession(page, second.id)
+  await expect(files).toBeHidden()
+  await switchPersonSession(page, 'person-main-1')
+  await page.getByRole('button', { name: 'Files', exact: true }).click()
+  await expect(files.locator('.monaco-editor .view-lines')).toContainText('Keep my unsaved changes')
+  await expect(page.locator('.person-compose .attachment-preview')).toContainText('README.md')
+})
+
+test('Person cancels late file previews and reports failures without downloading the file', async ({ page }) => {
+  const { state } = await setup(page, 'light', false, false)
+  state.tasks = []
+  const second = { ...state.session, id: 'person-main-files-second', title: 'Second files' }
+  state.conversations.push(second)
+  await page.addInitScript(secondId => {
+    const resumes = (window as any).__PW_CHAT_SOCKET_RESUMES__
+    resumes['person-main-1'].messages = [{ id: 'slow-file', role: 'assistant', content: '[Slow file](/tmp/person/default/slow.txt)', timestamp: 1 }]
+    resumes[secondId] = { session_id: secondId, messages: [], isWorking: false, events: [] }
+  }, second.id)
+  let requested = false
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/studio/sessions/person-main-1/workspace-file/content**', async route => {
+    requested = true
+    await held
+    await route.fulfill({ contentType: 'text/plain', body: 'Late preview from the previous conversation' })
+  })
+  await page.goto('/#/person?session=person-main-1')
+  await page.locator('.markdown-file-link').click()
+  const files = page.locator('.person-files-drawer')
+  await expect(files.locator('.person-file-loading')).toBeVisible()
+  await expect.poll(() => requested).toBe(true)
+  await files.locator('.n-drawer-header').getByRole('button', { name: 'close', exact: true }).click()
+  await switchPersonSession(page, second.id)
+  release()
+  await expect(files).toBeHidden()
+  await expect(page.getByText('Late preview from the previous conversation')).toHaveCount(0)
+
+  await page.route('**/api/studio/sessions/person-main-1/workspace-file/content**', route => route.fulfill({ status: 404, json: { error: 'Preview file missing' } }))
+  await switchPersonSession(page, 'person-main-1')
+  const downloads: string[] = []
+  page.on('download', download => downloads.push(download.suggestedFilename()))
+  await page.locator('.markdown-file-link').click()
+  await expect(page.locator('.n-message')).toContainText('Preview file missing')
+  await expect(files).toBeHidden()
+  expect(downloads).toEqual([])
+})
+
 test('Person session models and efforts stay independent across switching, refresh and sending', async ({ page }) => {
   const { models, second, operations } = await setupSessionModels(page)
   await page.goto('/#/person?session=person-main-1')

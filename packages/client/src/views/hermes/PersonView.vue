@@ -20,6 +20,7 @@ import PersonBotPicker from '@/components/hermes/person/PersonBotPicker.vue'
 import MessageList from '@/components/hermes/chat/MessageList.vue'
 import SessionTasksDrawer from '@/components/hermes/tasks/SessionTasksDrawer.vue'
 import PersonTaskChat from '@/components/hermes/person/PersonTaskChat.vue'
+import PersonWorkspaceFiles from '@/components/hermes/person/PersonWorkspaceFiles.vue'
 import { personTaskNavigation } from '@/components/hermes/person/task-navigation'
 import PersonSchedulesPanel from '@/components/hermes/person/PersonSchedulesPanel.vue'
 import PersonFlowsPanel from '@/components/hermes/person/PersonFlowsPanel.vue'
@@ -59,6 +60,7 @@ const router = useRouter()
 const { expanded: showSessions, isMobile } = usePageSidebarState()
 watch(showSessions, value => appStore.setPageSidebarExpanded(value), { immediate: true })
 const selectedSessionId = computed(() => typeof route.query.session === 'string' ? route.query.session : '')
+provide('hermesWorkspaceFilePreview', computed(() => !!selectedSessionId.value))
 const conversations = ref<SessionSummary[]>([])
 const nextOffset = ref<number | null>(null)
 const showCreate = ref(false)
@@ -299,6 +301,7 @@ const workspaceValue = ref<string | null>('')
 const workspaceDirectories = useDefaultWorkspace()
 const { defaultWorkspaces, recentWorkspaces } = workspaceDirectories
 const chatTaskId = ref<string | null>(null)
+const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
 const chatExecutionId = ref<string>()
 function openTask(task: PersonTask) { showTasks.value = false; chatExecutionId.value = undefined; chatTaskId.value = task.id }
 provide(personTaskNavigation, (taskId, executionId) => { showTasks.value = false; chatExecutionId.value = executionId; chatTaskId.value = taskId })
@@ -583,6 +586,8 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           <span class="person-title">{{ isNewConversation ? t('person.newConversation') : conversations.find(session => session.id === selectedSessionId)?.title || data?.session?.title || t('person.title') }}</span>
         </div>
         <div v-if="!isNewConversation" class="person-header-actions">
+          <PersonWorkspaceFiles :session-id="data?.session?.id" :workspace="data?.session?.workspace"
+            :active="!chatTaskId && data?.session?.id === selectedSessionId" @attach="file => chatInputRef?.addFiles([file])" />
           <NTooltip trigger="hover">
             <template #trigger><NButton quaternary circle size="small" :aria-label="t('person.tasks')" :aria-expanded="showTasks" :disabled="!data?.session" @click="openPanel('tasks')"><SessionTaskIcon :size="17" /></NButton></template>
             {{ t('person.tasks') }}
@@ -650,7 +655,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       </div>
       <div v-if="data.session" class="person-compose">
         <button v-if="!currentModel" type="button" class="person-model-hint" @click="openModels">{{ t('person.defaultUnavailable') }}</button>
-        <ChatInput hide-settings managed-reasoning-effort :send-disabled="!currentModel || pending || settingsWrites > 0" :submit="sendMessage"
+        <ChatInput ref="chatInputRef" hide-settings managed-reasoning-effort :send-disabled="!currentModel || pending || settingsWrites > 0" :submit="sendMessage"
           :model-label="modelLabel" :model-disabled="busy || settingsWrites > 0" :model-expanded="showModelPicker"
           :reasoning-effort="reasoningEffort" :reasoning-effort-disabled="busy || !currentModel"
           :default-effort-label="t('person.defaultEffort')"
