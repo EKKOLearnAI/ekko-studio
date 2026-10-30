@@ -1454,6 +1454,8 @@ export async function remove(ctx: any) {
   const sessionId = ctx.params.id
   const existing = localGetSession(sessionId)
   if (denySessionAccess(ctx, existing)) return
+  // Before any await: the transcript room must not survive into a session recreated under this id.
+  getChatRunServer()?.evictSessionViewers?.(sessionId)
   if (isPersonSession(sessionId) && existing) {
     const { deletePersonConversation } = await import('../services/person/conversations')
     ctx.body = { ok: true, ...await deletePersonConversation(ctx.state.user.id, sessionId, existing.history_revision) }
@@ -1525,6 +1527,7 @@ export async function batchRemove(ctx: any) {
       continue
     }
     if (isPersonSession(id) && existing) {
+      getChatRunServer()?.evictSessionViewers?.(id)
       try {
         const { deletePersonConversation } = await import('../services/person/conversations')
         await deletePersonConversation(ctx.state.user.id, id, existing.history_revision)
@@ -1547,6 +1550,7 @@ export async function batchRemove(ctx: any) {
       continue
     }
 
+    getChatRunServer()?.evictSessionViewers?.(id)
     const providerAgentSession = isProviderAgentSession(existing)
     if (providerAgentSession) stopCodingAgentSessionRun(id, { reportClosed: false })
     const hermes = providerAgentSession

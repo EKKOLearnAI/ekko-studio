@@ -132,14 +132,15 @@ function makeSockets() {
 
 interface RunContext { state: SessionState; sessionMap: Map<string, SessionState>; nsp: Namespace; socket: Socket; bridge: ReturnType<typeof makeBridge> }
 
-async function run(fence: () => string | null, hooks: { model?: (ctx: RunContext) => void | Promise<void>; history?: (ctx: RunContext) => void | Promise<void> } = {},
+async function run(fence: (() => string | null) | undefined, hooks: { model?: (ctx: RunContext) => void | Promise<void>; history?: (ctx: RunContext) => void | Promise<void> } = {},
   options: { runMarker?: string } = {}) {
   // Production admission always hands a machine run the marker it owns the session under.
   options = { runMarker: 'cli_run_machine', ...options }
   const bridge = makeBridge()
   const { nsp, socket } = makeSockets()
   // As admission leaves it: the session is claimed for this machine run under its own marker.
-  const state: SessionState = { messages: [], isWorking: true, events: [], queue: [], ...(options.runMarker ? { activeRunMarker: options.runMarker } : {}) }
+  const state: SessionState = { messages: [], isWorking: true, events: [], queue: [],
+    ...(options.runMarker ? { activeRunMarker: options.runMarker, machineRunMarker: options.runMarker } : {}) } as SessionState
   const sessionMap = new Map([['session-1', state]])
   const ctx: RunContext = { state, sessionMap, nsp, socket, bridge }
   // History building awaits the profile config after the machine turn is stored and before bridge.chat;
@@ -271,5 +272,86 @@ describe('S4 the final fence requires the run to still own the session state and
       expect(state.activeRunMarker).toBe('cli_run_replacement')
       expect(state.runId).toBe('run-replacement')
     }
+  })
+})
+
+describe('M2 cancellation revokes machine ownership before its first await', () => {
+  beforeEach(() => {
+    mocks.rows = []
+    mocks.getSession.mockReturnValue({ id: 'session-1', profile: 'default', model: '', provider: '', history_revision: 0, workspace: '' })
+  })
+  afterEach(() => vi.clearAllMocks())
+
+  // Real /destroy, paused inside one of its awaits while the machine run's preparation continues.
+  async function destroyPausedIn(phase: 'interrupt' | 'destroy' | 'usage') {
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
+    const usage = await import('../../packages/server/src/modules/studio/services/chat-run/usage') as any
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let reached = false
+    const pause = async () => { reached = true; await gate }
+    const commandBridge = {
+      interrupt: vi.fn(async () => { if (phase === 'interrupt') await pause(); return { ok: true } }),
+      destroy: vi.fn(async () => { if (phase === 'destroy') await pause(); return { ok: true } }),
+      processNotification: vi.fn(async () => ({ ok: true })),
+    }
+    if (phase === 'usage') usage.calcAndUpdateUsage.mockImplementationOnce(async () => { await pause(); return { inputTokens: 1, outputTokens: 1 } })
+    let destroyed!: Promise<unknown>
+    const result = await run(() => null, {
+      history: async ({ sessionMap, nsp, socket }) => {
+        destroyed = handleSessionCommand('session-1', parseSessionCommand('/destroy')!, { nsp: nsp as any, socket, sessionMap,
+          bridge: commandBridge as any, profile: 'default', runQueuedItem: vi.fn() })
+        await vi.waitFor(() => expect(reached).toBe(true))
+      },
+    })
+    const chatsWhilePaused = result.bridge.chat.mock.calls.length
+    release()
+    await destroyed
+    return { ...result, chatsWhilePaused }
+  }
+
+  for (const phase of ['interrupt', 'destroy', 'usage'] as const) {
+    it(`/destroy paused inside its ${phase} await: the machine run never calls bridge.chat`, async () => {
+      const { chatsWhilePaused, bridge, dispatched, discarded, state } = await destroyPausedIn(phase)
+      expect(chatsWhilePaused).toBe(0)
+      expect(bridge.chat).not.toHaveBeenCalled()
+      expect(dispatched).not.toHaveBeenCalled()
+      expect(discarded).toHaveBeenCalledWith('owner_stopped')
+      expect(state.isWorking).toBe(false)
+      expect(state.activeRunMarker).toBeUndefined()
+    })
+  }
+
+  async function realStop(ctx: RunContext) {
+    const chatRuntime = await import('../../packages/server/src/modules/studio/public/chat-agent-runtime') as any
+    vi.spyOn(chatRuntime.chatCodingAgentRunManager, 'hasSession').mockReturnValue(false)
+    vi.spyOn(chatRuntime, 'hasChatEkkoBackgroundTasks').mockReturnValue(false)
+    const { handleAbort } = await import('../../packages/server/src/modules/studio/services/chat-run/abort')
+    await handleAbort(ctx.nsp as any, ctx.socket, 'session-1', ctx.sessionMap, { processNotification: vi.fn(async () => ({ ok: true })) }, vi.fn())
+  }
+
+  it('real Stop (no active native run), then a later turn resets working and the stop flag: still no bridge.chat', async () => {
+    const { bridge, dispatched, discarded, state } = await run(() => null, {
+      history: async ctx => {
+        await realStop(ctx)
+        expect(ctx.state.isWorking).toBe(false)
+        // A later intentional turn claims the session and clears the stop flag before its own marker.
+        ctx.state.isWorking = true
+        ctx.state.backgroundWakeStopped = false
+      },
+    })
+    expect(bridge.chat).not.toHaveBeenCalled()
+    expect(dispatched).not.toHaveBeenCalled()
+    expect(discarded).toHaveBeenCalledWith('owner_stopped')
+    // Old cleanup never clears the state the later turn now owns.
+    expect(state.isWorking).toBe(true)
+    expect(state.backgroundWakeStopped).toBe(false)
+  })
+
+  it('preserved: an ordinary run (no machine fence) keeps its existing Stop-during-preparation behaviour', async () => {
+    const { bridge, state } = await run(undefined, { history: realStop }, { runMarker: undefined as any })
+    // Ordinary runs are not machine-owned; the machine revocation does not touch their marker.
+    expect(bridge.chat).toHaveBeenCalledTimes(1)
+    expect(typeof state.activeRunMarker).toBe('string')
   })
 })

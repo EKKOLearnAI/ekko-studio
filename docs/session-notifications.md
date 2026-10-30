@@ -96,7 +96,12 @@ sockets, and every one of them is authorized again when the notice is published,
 read rules of `resume` applied to the session as it exists now: the user must be able to
 access its current profile (person-private sessions: their owner only; a share viewer: its
 shared session only). A socket that joined the room before the session was deleted or
-recreated under another profile receives neither the content nor the metadata. Studio
+recreated under another profile receives neither the content nor the metadata. Deleting a
+session (HTTP single or batch delete, and every deleting `disposeSession`) also removes all
+sockets from its `session:<id>` room synchronously, before the first await, so a session
+recreated under the same id never streams its runs (including terminal-completion turns) to
+viewers of the old one; joining again goes through the `resume` read checks. `/destroy` and a
+same-owner history clear keep their viewers. Studio
 login cannot be disabled (`isAuthEnabled()` is always true), so every ordinary chat
 socket carries a user; a socket without one is never a recipient.
 
@@ -145,13 +150,18 @@ seam (before the user turn is stored and immediately before the model call) it c
 - its generation still equals the producer's (`owner_reset`; a missing generation fails
   closed);
 - the user has not pressed Stop, and the run still owns the session: admission gives it a
-  run marker, and `/destroy`, Stop or a new turn that clears or replaces the marker ends
-  that ownership (`owner_stopped`), even though the generation is unchanged. A run that
-  lost ownership never claims or changes the session state of the run that replaced it;
+  run marker and a machine ownership token. Stop and `/destroy` revoke the token
+  synchronously, before their first await, and a new turn replaces the marker, so the run
+  ends (`owner_stopped`) even though the generation is unchanged and even if a later turn
+  resets the working or stop flags. A run that lost ownership never claims or changes the
+  session state of the run that replaced it. Ordinary runs keep their own Stop handling;
 - Hermes has not seen the result consumed by `wait` or `log` since the drain
   (`process_notification_admit`). A plain `poll` is not consumption.
 
-Only then does the run start (`admitted`, then `dispatched` at the model call). Stop,
+Only then does the run start (`admitted`, then `dispatched` at the model call). If the
+Agent Bridge reports itself not ready after admission, the event is settled as
+`bridge_unavailable` (it is not retried) and the session is released only if the machine run
+still owns it, so the next turn runs normally. Stop,
 history clear and explicit queue cancel settle any queued machine event: the bridge
 claim is completed (never re-queued) and the disposition becomes `cancelled`. It is stored as the model's user turn and displayed as a
 system notice. A crash between admission and dispatch leaves `unknown` and never

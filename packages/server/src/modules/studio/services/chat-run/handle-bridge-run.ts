@@ -605,7 +605,7 @@ export async function handleBridgeRun(
   }
 
   const machineOwnershipLost = () => Boolean(data.machine_fence) && (sessionMap.get(session_id) !== state
-    || state!.activeRunMarker !== runMarker || !state!.isWorking || state!.isAborting)
+    || state!.activeRunMarker !== runMarker || state!.machineRunMarker !== runMarker || !state!.isWorking || state!.isAborting)
   const machineFence = () => (machineOwnershipLost() ? 'owner_stopped' : data.machine_fence?.() ?? null)
   // Never claim a session the machine run no longer owns: it belongs to a destroyed or replacement run.
   if (machineOwnershipLost()) {
@@ -1040,6 +1040,8 @@ export async function handleBridgeRun(
       })
     }
     if (sessionMap.get(session_id) !== state || state.activeRunMarker !== runMarker) return
+    // A revoked machine run leaves the session to whoever owns it now.
+    if (data.machine_fence && state.machineRunMarker !== runMarker) return
     if (!state.isWorking) return
     state.bridgePendingToolCallMarkup = undefined
     flushBridgePendingToDb(state, session_id, runMarker)

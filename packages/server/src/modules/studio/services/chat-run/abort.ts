@@ -69,6 +69,9 @@ export async function handleAbort(
   const isCodingAgentRun = state?.source === 'coding_agent' || state?.source === 'builtin_agent' || state?.webhookAgent === 'ekko' || hasCodingAgentRun || hasEkkoBackgroundTasks
   if (state) {
     state.backgroundWakeStopped = true
+    // Revoke an admitted machine run before any await: a later turn resetting working or the stop
+    // flag must not make it valid again. Ordinary run markers stay as their finalizers expect.
+    state.machineRunMarker = undefined
     const dropped = state.queue.filter(item => item.goalContinuation || item.autonomous || item.backgroundDelegationId)
     state.queue = state.queue.filter(item => !dropped.includes(item))
     for (const item of dropped) if (item.personDelivery) cancelPersonDelivery(item.personDelivery.userId, item.personDelivery.executionId)

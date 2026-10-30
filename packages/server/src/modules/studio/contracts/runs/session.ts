@@ -182,6 +182,8 @@ export interface SessionState {
   abortController?: AbortController
   runId?: string
   activeRunMarker?: string
+  /** Ownership token of an admitted machine run; Stop and /destroy revoke it before their first await. */
+  machineRunMarker?: string
   /** Generation owned by a live Hermes output consumer, including finalization. */
   bridgeRunPollMarker?: string
   profile?: string

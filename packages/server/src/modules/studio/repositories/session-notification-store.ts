@@ -15,6 +15,7 @@ export type SessionNotificationKind = 'cron' | 'process_completion'
 export type SessionNotificationDisposition =
   | 'notified' | 'status_only' | 'silent' | 'no_content' | 'unknown' | 'owner_missing' | 'target_changed'
   | 'admitting' | 'admitted' | 'dispatched' | 'consumed' | 'cancelled' | 'owner_reset' | 'owner_stopped'
+  | 'bridge_unavailable'
 
 /** Durable attention key of an accepted notice in `session_attention_events`. */
 export const NOTICE_ATTENTION_PREFIX = 'cron-notice:'

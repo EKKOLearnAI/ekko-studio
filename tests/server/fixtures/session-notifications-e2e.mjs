@@ -584,6 +584,10 @@ async function main() {
     deleted.status < 300 && recreated[0]?.profile === 'default'
       && !bobViewerEvents.slice(staleSince).some(e => e.event === 'session.notice') && !stalePayloads.includes('CRON_EXACT_ANSWER_42'),
     { delete_status: deleted.status, recreated_profile: recreated[0]?.profile, stale_events: [...new Set(bobViewerEvents.slice(staleSince).map(e => e.event))] })
+  const staleSessionEvents = bobViewerEvents.slice(staleSince).filter(e => e.payload?.session_id === S)
+  record('M1 the evicted stale member receives none of the recreated session\'s live run events or content',
+    staleSessionEvents.length === 0 && !stalePayloads.includes('recreated under default'),
+    { stale_session_event_types: [...new Set(staleSessionEvents.map(e => e.event))] })
   record('S1 the authorized off-focus owner receives the recreated session notice exactly once',
     watcherEvents.filter(e => e.event === 'session.notice' && e.payload?.session_id === S).length === 1)
   bobViewer.disconnect()

@@ -17,7 +17,15 @@ function makeServer() {
     },
     except: () => ({ emit: vi.fn() }),
   })
-  const nsp: any = { use: vi.fn(), on: vi.fn(), to, emit: vi.fn(), adapter: { rooms }, sockets }
+  // socket.io's local adapter semantics for `nsp.in(room).socketsLeave(room)`.
+  const leave = (room: string) => ({
+    socketsLeave: (left: string | string[]) => {
+      for (const id of [...(rooms.get(room) || [])]) {
+        for (const name of Array.isArray(left) ? left : [left]) { rooms.get(name)?.delete(id); sockets.get(id)?.rooms.delete(name) }
+      }
+    },
+  })
+  const nsp: any = { use: vi.fn(), on: vi.fn(), to, in: leave, emit: vi.fn(), adapter: { rooms }, sockets }
   vi.spyOn(chatRuntime, 'createPrimaryAgentBridge').mockReturnValue({} as any)
   const server: any = new ChatRunSocket({ of: () => nsp } as any)
   vi.spyOn(server, 'canAccessProfile').mockImplementation((user: any, profile: any) =>
@@ -38,9 +46,9 @@ function makeServer() {
     sockets.set(id, socket)
     if (handshake) server.onConnection(socket)
     const notices = () => received.filter(entry => entry.event === 'session.notice')
-    return { socket, received, notices, resume: (sessionId: string) => handlers.get('resume')!({ session_id: sessionId }) }
+    return { socket, received, notices, handlers, resume: (sessionId: string) => handlers.get('resume')!({ session_id: sessionId }) }
   }
-  return { server, connect }
+  return { server, connect, nsp, rooms }
 }
 
 let counter = 0
@@ -156,5 +164,95 @@ describe('S6 premise check: no user-less ordinary chat socket is admitted', () =
     server.publishSessionNotice(record(sid, 'default'))
     expect(anonymous.notices()).toHaveLength(0)
     expect(member.notices()).toHaveLength(1)
+  })
+})
+
+describe('M1 deleting a session evicts its transcript-room members before the id can be reused', () => {
+  async function deletionRoutes() {
+    const controllers = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const registry = await import('../../packages/server/src/modules/studio/public/chat-run')
+    const admin = { id: 1, role: 'super_admin', profiles: [] }
+    return {
+      registry,
+      'HTTP single delete': async (_server: any, sid: string) => {
+        const ctx: any = { params: { id: sid }, query: {}, request: { body: {} }, state: { user: admin }, method: 'DELETE' }
+        await controllers.remove(ctx)
+        return ctx
+      },
+      'HTTP batch delete': async (_server: any, sid: string) => {
+        const ctx: any = { params: {}, query: {}, request: { body: { ids: [sid] } }, state: { user: admin }, method: 'POST' }
+        await controllers.batchRemove(ctx)
+        return ctx
+      },
+      'deleting disposeSession': async (server: any, sid: string) => {
+        vi.spyOn(chatRuntime.chatCodingAgentRunManager, 'stop').mockReturnValue(undefined as any)
+        await server.disposeSession(sid)
+        return {}
+      },
+    } as const
+  }
+
+  // Synthetic profile list (no profile directory is read): both profiles exist.
+  async function syntheticProfiles() {
+    const { configureProfileConfig } = await import('../../packages/server/src/modules/studio/public/profile-config')
+    configureProfileConfig({
+      buildModelGroups: () => ({ default: '', groups: [] } as any), getProfilesBaseDir: () => '/nonexistent-synthetic-profiles',
+      getProfileDir: (profile: string) => `/nonexistent-synthetic-profiles/${profile}`, getActiveProfileName: () => 'default',
+      listProfileNames: () => ['default', 'other'], providerEnvironmentMap: {}, readConfigYaml: async () => ({}),
+      readConfigYamlForProfile: async () => ({}), safeReadFile: async () => null, saveEnvValue: async () => {},
+      saveEnvValueForProfile: async () => {}, updateConfigYaml: async () => undefined, updateConfigYamlForProfile: async () => undefined,
+    })
+  }
+
+  for (const route of ['HTTP single delete', 'HTTP batch delete', 'deleting disposeSession'] as const) {
+    it(`${route}: the stale viewer leaves the room, gets nothing after recreation, and only the new owner can join`, async () => {
+      initAllHermesTables()
+      await syntheticProfiles()
+      const sid = sessionId()
+      createSession({ id: sid, profile: 'default', source: 'cli' })
+      const routes = await deletionRoutes()
+      const { server, connect, nsp, rooms } = makeServer()
+      routes.registry.setChatRunServer(server)
+      const stale = connect('stale-a', { user: { id: 2, role: 'admin', profiles: ['default'] } })
+      await stale.resume(sid)
+      expect(rooms.get(`session:${sid}`)?.has('stale-a')).toBe(true)
+
+      await routes[route](server, sid)
+      // Evicted synchronously at the deleting seam, before the id can be reused.
+      expect(rooms.get(`session:${sid}`)?.has('stale-a') ?? false).toBe(false)
+      expect(stale.socket.rooms.has(`session:${sid}`)).toBe(false)
+
+      createSession({ id: sid, profile: 'other', source: 'cli' })
+      const owner = connect('owner-b', { user: { id: 3, role: 'admin', profiles: ['other'] } }, 'other')
+      await owner.resume(sid)
+      const since = stale.received.length
+      // Any live run event for the recreated session goes to its room.
+      nsp.to(`session:${sid}`).emit('message.delta', { session_id: sid, delta: 'PROTECTED_B_CONTENT' })
+      expect(JSON.stringify(stale.received.slice(since))).not.toContain('PROTECTED_B_CONTENT')
+      expect(owner.received.filter(entry => entry.event === 'message.delta')).toHaveLength(1)
+      // A fresh join by the stale viewer is refused; the new owner's join worked.
+      const refusedAt = stale.received.length
+      await stale.resume(sid)
+      expect(stale.received.slice(refusedAt).map(entry => entry.event)).toContain('run.failed')
+      expect(stale.socket.rooms.has(`session:${sid}`)).toBe(false)
+      expect(owner.socket.rooms.has(`session:${sid}`)).toBe(true)
+      routes.registry.setChatRunServer(null as any)
+    })
+  }
+
+  it('controls: /destroy and a same-owner history clear keep rightful viewers in the room', async () => {
+    initAllHermesTables()
+    const sid = sessionId()
+    createSession({ id: sid, profile: 'default', source: 'cli' })
+    const { server, connect, nsp, rooms } = makeServer()
+    const viewer = connect('viewer', { user: { id: 2, role: 'admin', profiles: ['default'] } })
+    await viewer.resume(sid)
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
+    const ctx = { nsp, socket: viewer.socket, sessionMap: server.sessionMap, profile: 'default', runQueuedItem: vi.fn(),
+      bridge: { interrupt: vi.fn(async () => ({ ok: true })), destroy: vi.fn(async () => ({ ok: true })), processNotification: vi.fn(async () => ({ ok: true })) } as any }
+    await handleSessionCommand(sid, parseSessionCommand('/destroy')!, ctx as any)
+    await handleSessionCommand(sid, parseSessionCommand('/clear --history')!, ctx as any)
+    expect(rooms.get(`session:${sid}`)?.has('viewer')).toBe(true)
+    expect(viewer.socket.rooms.has(`session:${sid}`)).toBe(true)
   })
 })

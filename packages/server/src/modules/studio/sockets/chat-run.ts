@@ -1851,7 +1851,20 @@ export class ChatRunSocket {
         if (data.session_id) {
           const state = this.sessionMap.get(data.session_id)
           queueRemaining = state?.queue?.length ?? 0
+          // A known refusal settles an admitted machine run; it releases the session only while the
+          // run still owns it, never a replacement that claimed the session meanwhile.
+          const machineRun = typeof data.machine_fence === 'function'
+          const ownsMachineRun = machineRun && Boolean(state && data.run_marker)
+            && state!.machineRunMarker === data.run_marker && state!.activeRunMarker === data.run_marker
+          if (machineRun) {
+            if (ownsMachineRun) {
+              state!.activeRunMarker = undefined
+              state!.machineRunMarker = undefined
+            }
+            data.on_machine_discard?.(ownsMachineRun ? 'bridge_unavailable' : 'owner_stopped')
+          }
           const canReleaseCurrentRun = state && !state.runId && !state.abortController && !state.activeRunMarker
+            && (!machineRun || ownsMachineRun)
           if (canReleaseCurrentRun) {
             if (queueRemaining > 0) {
               const nextQueuedRun = state.queue[0]
@@ -2356,6 +2369,16 @@ export class ChatRunSocket {
     } finally {
       this.cronObserveInFlight = false
     }
+  }
+
+  /**
+   * A deleted session's transcript room must not outlive it: a reused id would otherwise stream the
+   * new owner's runs to sockets that joined under the old owner. Called synchronously at every
+   * deleting seam, before its first await; rejoining goes through the read checks of `resume`.
+   */
+  evictSessionViewers(sessionId: string) {
+    const room = `session:${sessionId}`
+    this.nsp.in(room).socketsLeave(room)
   }
 
   /**
@@ -2968,9 +2991,12 @@ export class ChatRunSocket {
       // new turn replaces or clears that marker; the fence then refuses even with an unchanged generation.
       const state = this.sessionMap.get(sessionId)
       const runMarker = `cli_run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-      if (state) state.activeRunMarker = runMarker
+      if (state) {
+        state.activeRunMarker = runMarker
+        state.machineRunMarker = runMarker
+      }
       const owned = () => Boolean(state) && this.sessionMap.get(sessionId) === state
-        && state!.isWorking && !state!.isAborting && state!.activeRunMarker === runMarker
+        && state!.isWorking && !state!.isAborting && state!.activeRunMarker === runMarker && state!.machineRunMarker === runMarker
       const fence = (): SessionNotificationDisposition | null => (owned() ? this.machineOwnerVerdict(event) : 'owner_stopped')
       // The run keeps the fence and checks it again at its final seams (before the stored machine
       // turn and immediately before bridge.chat), after every awaited preparation step.
@@ -2993,6 +3019,7 @@ export class ChatRunSocket {
         if (!owned()) return
         state!.isWorking = false
         state!.activeRunMarker = undefined
+        state!.machineRunMarker = undefined
         this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
       })
       return
@@ -3389,6 +3416,7 @@ export class ChatRunSocket {
   async disposeSession(sessionId: string): Promise<void> {
     const sid = String(sessionId || '').trim()
     if (!sid) return
+    this.evictSessionViewers(sid)
     this.personQuestions.delete(sid)
     for (const [requestId, pending] of this.pendingMobileLocations.entries()) {
       if (pending.sessionId !== sid) continue

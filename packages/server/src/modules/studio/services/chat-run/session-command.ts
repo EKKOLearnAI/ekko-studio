@@ -941,6 +941,8 @@ export async function handleSessionCommand(
     }
 
     case 'destroy': {
+      // Revoke an admitted machine run before the interrupt/destroy/usage awaits below.
+      state.machineRunMarker = undefined
       const wasWorking = state.isWorking
       let bridgeReachable = true
       let bridgeError: string | null = null
