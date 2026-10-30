@@ -280,8 +280,36 @@ describe('ekko-agent context usage events', () => {
     await handleEkkoAgentRun(nsp as any,socket as any,{session_id:'person-main-7',input:'Continue from 一心一意',displayInput:null,coding_agent_id:'ekko-agent',background_delegation_id:callback.subagentId,onEvent:(event,payload)=>events.push({event,payload})},'default',sessionMap,vi.fn(()=>false),true,callback)
     expect(createPersonChatAgentMock).toHaveBeenCalledWith(7,'person-main-7',undefined,'delivery-7')
     expect(addMessageMock.mock.calls.some(([m])=>m.role==='user')).toBe(false)
-    expect(finishPersonStageTurnMock).toHaveBeenCalledWith(7,stage,'stage-run','1',true)
+    expect(finishPersonStageTurnMock).toHaveBeenCalledWith(7,stage,'stage-run','1',true,'')
     expect(events.some(e=>e.event==='run.failed')).toBe(false)
+  })
+
+  it('passes a failed Person stage run and its provider error to collaboration recovery', async () => {
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap, events } = makeHarness()
+    ;(socket as any).data = { user: { id: 7 } }
+    getSessionMock.mockReturnValue({ ...getSessionMock(), id: 'person-main-7', studio_user_id: '7' })
+    const stage = { flowId: 'flow-7', stageId: 'stage-7', generation: 0, deliveryId: 'delivery-7' }
+    createPersonChatAgentMock.mockResolvedValue({
+      personStageContext: stage, run: agentRunMock, estimateContext: agentEstimateContextMock,
+      sessionWorkspaceDirectory: () => '/tmp/person-workspace',
+    })
+    agentRunMock.mockImplementationOnce(async (input: any) => {
+      input.onEvent({ type: 'run.started', runId: 'stage-failed-run', maxSteps: 3 })
+      throw new Error('Provider request timed out')
+    })
+    const callback = { ...continuationContext('person-stage:delivery-7'), runtime: 'ekko' as const }
+    await handleEkkoAgentRun(nsp as any, socket as any, {
+      session_id: 'person-main-7', input: 'Continue the stage', displayInput: null, coding_agent_id: 'ekko-agent',
+      background_delegation_id: callback.subagentId, onEvent: (event, payload) => events.push({ event, payload }),
+    }, 'default', sessionMap, vi.fn(() => false), true, callback)
+    expect(finishPersonStageTurnMock).toHaveBeenCalledOnce()
+    expect(finishPersonStageTurnMock).toHaveBeenCalledWith(7, stage, 'stage-failed-run', '', false, 'Provider request timed out')
+    expect(events).toContainEqual({
+      event: 'run.failed', payload: expect.objectContaining({ run_id: 'stage-failed-run', error: 'Provider request timed out' }),
+    })
+    expect(events.some(e => e.event === 'run.completed')).toBe(false)
+    expect(sessionMap.get('person-main-7').isWorking).toBe(false)
   })
 
   it('binds native goal reads/writes to this live turn and rejects changed profile/history or finished runs', async () => {
