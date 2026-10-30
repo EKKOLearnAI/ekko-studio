@@ -75,3 +75,12 @@ describe('desktop browser profile proxy defaults', () => {
     expect((await store.create({ name: 'Invalid', rootDirectory, proxyMode: 'invalid' as BrowserProxyMode })).proxyMode).toBe('system')
   })
 })
+
+ it('uses independent temporary files for overlapping store instances', async () => {
+  const { store } = await setup()
+  await expect(Promise.all(Array.from({ length: 16 }, async () => {
+    const other = new BrowserProfileStore(store.root)
+    await other.initialize()
+  }))).resolves.toHaveLength(16)
+  expect(JSON.parse(await readFile(join(store.root, 'profiles.json'), 'utf8'))).toBeTruthy()
+ })
