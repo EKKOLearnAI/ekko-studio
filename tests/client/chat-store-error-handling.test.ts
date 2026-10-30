@@ -31,7 +31,7 @@ vi.mock('@/api/studio/chat', () => ({
   onApprovalResolved: vi.fn(() => vi.fn()),
   onClarifyRequested: vi.fn(() => vi.fn()),
   onClarifyResolved: vi.fn(() => vi.fn()),
-  onSessionCommand: vi.fn(() => vi.fn()),
+  onSessionCommand: vi.fn(() => vi.fn()), onSessionNotice: vi.fn(() => vi.fn()),
   onSessionTitleUpdated: vi.fn(() => vi.fn()),
   onRunUsageUpdated: vi.fn(() => vi.fn()),
   onSessionWorkspaceUpdated: vi.fn(() => vi.fn()),
