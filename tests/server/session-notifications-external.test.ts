@@ -55,9 +55,11 @@ beforeEach(async () => {
   setChatRunServer({ publishSessionNotice: (record: any) => published.push(record) })
   const { createRequestBodyParser, createSessionNotificationRequestBodyParser } = await import(`${ROOT}/middleware/request-body-parser`)
   const { sessionRoutes } = await import(`${ROOT}/routes/sessions`)
+  const { authPublicRoutes } = await import(`${ROOT}/routes/auth`)
   const app = new Koa()
   app.use(createSessionNotificationRequestBodyParser())
   app.use(createRequestBodyParser())
+  app.use(authPublicRoutes.routes())
   app.use(m.auth.requireUserJwt)
   app.use(m.auth.resolveUserProfile)
   app.use(sessionRoutes.routes())
@@ -210,6 +212,38 @@ describe('external session notifications over HTTP', () => {
     expect(rows()).toHaveLength(0)
 
     expect((await post('chat-1', body, users.member.token)).status).toBe(201)
+  })
+
+  it('requires a signed login purpose; model-run, unmarked and App tokens still work on ordinary routes', async () => {
+    const expected = await generation('chat-1')
+    const member = m.usersStore.findUserById(users.member.id)
+    const login = await request('/api/auth/login', { method: 'POST', body: { username: 'member', password: 'password-1' } })
+    expect(login.status).toBe(200)
+    const app = await m.auth.issueAppJwt(member, 'phone', 'lan')
+    const { upsertAppConnection } = await import(`${ROOT}/repositories/app-connections-store`)
+    upsertAppConnection({ deviceCode: 'phone', deviceName: '', deviceBrand: '', deviceModel: '', connectionType: 'lan',
+      userId: member.id, token: app, tokenExpiresAt: 9_999_999_999 })
+    const credentials = {
+      'model-run': await m.auth.issueModelRunJwt(member),
+      // The shape every user token had before login tokens carried a purpose.
+      unmarked: m.auth.signUserJwt(member, 'external-notification-test-secret'),
+      app,
+    }
+    const results: Record<string, unknown[]> = {}
+    for (const [name, token] of Object.entries(credentials)) {
+      const ordinary = await request('/api/studio/sessions/chat-1?profile=default', { token })
+      const notification = await post('chat-1', notice(expected, { event_id: `review-${name}` }), token)
+      results[name] = [ordinary.status, (await m.auth.authenticateUserToken(token))?.id, notification.status, notification.body.error]
+    }
+    expect(results).toEqual(Object.fromEntries(Object.keys(credentials)
+      .map(name => [name, [200, users.member.id, 403, 'login_token_required']])))
+    // The purpose is signed: relabeling a model-run token invalidates it.
+    const [header, body, signature] = credentials['model-run'].split('.')
+    const relabeled = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body, 'base64url').toString()), purpose: 'login' })).toString('base64url')
+    expect((await post('chat-1', notice(expected, { event_id: 'review-relabeled' }), `${header}.${relabeled}.${signature}`)).status).toBe(401)
+    expect(rows()).toHaveLength(0)
+
+    expect((await post('chat-1', notice(expected), login.body.token)).status).toBe(201)
   })
 
   it('rejects unsupported runtimes and private surfaces without writing', async () => {

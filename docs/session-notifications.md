@@ -190,13 +190,15 @@ to one existing Studio Hermes chat. Arrival never starts or queues a turn;
 global agent, person and worker sessions return `422 unsupported_notification_target`.
 
 **Credential.** Send a Studio login token (the `token` returned by `POST /api/auth/login`)
-in the `Authorization: Bearer` header. Its `exp` claim is authoritative: 30 days by default,
-configured by `HERMES_WEB_UI_AUTH_JWT_EXPIRES_IN`. The account must be active and have access
-to the profile. Query-string tokens, share links, model API keys, the server token and
-run-scoped credentials are refused. There is no renewal: after expiry the operator supplies
-a new login token, and the producer retries the same `event_id` with the same frozen
-generation. Studio also gives Hermes runs a short-lived token of the same type for the
-requesting account; it is accepted like any other login token of that account.
+in the `Authorization: Bearer` header. Login tokens carry a signed `purpose: "login"` claim,
+and only those are accepted here. Tokens Studio issues to model runs (`purpose: "model_run"`),
+App device tokens, query-string tokens, share links, model API keys, the server token and
+run-scoped credentials are refused. A token issued before login tokens carried a purpose is
+refused by this endpoint only; sign in again once to get one. Other endpoints keep accepting
+every existing token. The `exp` claim is authoritative: 30 days by default, configured by
+`HERMES_WEB_UI_AUTH_JWT_EXPIRES_IN`. The account must be active and have access to the
+profile. There is no renewal: after expiry the operator supplies a new login token, and the
+producer retries the same `event_id` with the same frozen generation.
 
 **Freezing the target.** `GET /api/studio/sessions/{id}?profile=<profile>` returns
 `session.session_generation`. Store it when the destination is chosen. A history reset or a
@@ -233,7 +235,7 @@ parser reads it. Accepted values are stored exactly; nothing is truncated.
 | Identical retry | `200` with the original receipt and `duplicate: true` |
 | Stale generation / same identity, different content | `409 session_generation_mismatch` / `409 notification_conflict` |
 | Unsupported session | `422 unsupported_notification_target` |
-| Missing or unusable credential | `401` or `403` |
+| Missing or invalid credential / valid credential that is not a login token | `401` / `403 login_token_required` |
 | Unknown session, other profile or another user's private session | `404` |
 | Invalid field / body too large / not JSON | `400` / `413` / `415` |
 

@@ -41,11 +41,16 @@ export interface AppUserTokenInspection {
   connectionType: AppConnectionType
 }
 
+/** Signed purpose of an access JWT: an interactive login, or a token Studio issues to a model run. */
+export type UserJwtPurpose = 'login' | 'model_run'
+
 interface JwtPayload {
   sub: string
   username: string
   role: UserRole
   type: 'access' | 'app_access'
+  /** Absent on tokens issued before purposes existed; generic authentication accepts every purpose. */
+  purpose?: UserJwtPurpose
   app_device_code?: string
   app_connection_type?: AppConnectionType
   app_token_id?: string
@@ -169,6 +174,7 @@ export function signUserJwt(
   secret: string,
   now = Date.now(),
   expiresSeconds = DEFAULT_EXPIRES_SECONDS,
+  purpose?: UserJwtPurpose,
 ): string {
   const iat = Math.floor(now / 1000)
   const payload: JwtPayload = {
@@ -176,6 +182,7 @@ export function signUserJwt(
     username: user.username,
     role: user.role,
     type: 'access',
+    ...(purpose ? { purpose } : {}),
     aud: JWT_AUDIENCE,
     iat,
     exp: iat + expiresSeconds,
@@ -248,7 +255,7 @@ export function verifyUserJwt(token: string, secret: string, now = Date.now()): 
 
 export async function issueUserJwt(user: Pick<UserRecord, 'id' | 'username' | 'role'>): Promise<string> {
   const secret = await getJwtSecret()
-  return signUserJwt(user, secret, Date.now(), getUserJwtExpiresSeconds())
+  return signUserJwt(user, secret, Date.now(), getUserJwtExpiresSeconds(), 'login')
 }
 
 export async function issueAppJwt(
@@ -262,7 +269,7 @@ export async function issueAppJwt(
 
 export async function issueModelRunJwt(user: Pick<UserRecord, 'id' | 'username' | 'role'>): Promise<string> {
   const secret = await getJwtSecret()
-  return signUserJwt(user, secret, Date.now(), getModelRunJwtExpiresSeconds())
+  return signUserJwt(user, secret, Date.now(), getModelRunJwtExpiresSeconds(), 'model_run')
 }
 
 export function toAuthenticatedUser(user: Pick<UserRecord, 'id' | 'username' | 'role'>): AuthenticatedUser {
@@ -315,6 +322,17 @@ export async function authenticateUserToken(token: string): Promise<Authenticate
   const user = findUserById(payload.sub)
   if (!user || user.status !== 'active') return null
   return toAuthenticatedUser(user)
+}
+
+/**
+ * `authenticateUserToken` restricted to tokens issued by an interactive login. Model-run and App
+ * tokens, and tokens issued before login tokens carried a purpose, are refused here; every other
+ * route keeps accepting them through `authenticateUserToken`.
+ */
+export async function authenticateLoginUserToken(token: string): Promise<AuthenticatedUser | null> {
+  const payload = token ? verifyUserJwt(token, await getJwtSecret()) : null
+  if (payload?.type !== 'access' || payload.purpose !== 'login') return null
+  return authenticateUserToken(token)
 }
 
 export async function isAuthEnabled(): Promise<boolean> {
