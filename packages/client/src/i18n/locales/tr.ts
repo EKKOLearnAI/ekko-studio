@@ -550,6 +550,7 @@ export default {
       scriptReportProvenance: "Ekko sarmalayıcısından betik çağrısı raporu (yerel Hermes yürütme makbuzu değildir).",
       scriptReportUnavailable: "Bu çağrı için betik çıktısı yakalanmadı; yalnızca durum.",
       scriptReportUnknown: "Rapor eksik: betik çağrısı kesintiye uğradı. Sonuç bilinmiyor; Studio yeniden çalıştırmayacak.",
+      externalSource: 'Harici bildirim, kaynak “{source}” (gönderen doğrulanmadı)',
     },
     selectMessages: "Mesajları seç",
     messagesSelected: "{count} seçildi",

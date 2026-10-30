@@ -65,10 +65,17 @@ const { t } = useI18n();
 
 // A passive notice carries untrusted script output: plain text, never Markdown.
 const studioNotice = computed(() => props.message.studioNotice ?? null);
+// External notices are untrusted caller data too: plain text and a click-only web link.
+const externalLink = computed(() => {
+  const notice = studioNotice.value;
+  const url = notice?.kind === "external" ? notice.url : null;
+  return url && /^https?:\/\//i.test(url) ? url : null;
+});
 
 const studioNoticeTitle = computed(() => {
   const notice = studioNotice.value;
   if (!notice) return "";
+  if (notice.kind === "external") return notice.title;
   return notice.outcome === "failed" || notice.outcome === "launch_failed"
     ? t("chat.sessionNotice.scriptReportFailedTitle", { name: notice.job_name })
     : t("chat.sessionNotice.scriptReportTitle", { name: notice.job_name });
@@ -77,6 +84,7 @@ const studioNoticeTitle = computed(() => {
 const studioNoticeDetail = computed(() => {
   const notice = studioNotice.value;
   if (!notice) return "";
+  if (notice.kind === "external") return t("chat.sessionNotice.externalSource", { source: notice.source });
   if (notice.disposition === "unknown") return t("chat.sessionNotice.scriptReportUnknown");
   if (notice.disposition === "status_only") return t("chat.sessionNotice.scriptReportUnavailable");
   return notice.truncated
@@ -1247,6 +1255,7 @@ onBeforeUnmount(() => {
                 <div class="studio-notice-detail">{{ studioNoticeDetail }}</div>
               </div>
               <div v-if="message.content" class="studio-notice-text">{{ message.content }}</div>
+              <a v-if="externalLink" class="studio-notice-link" :href="externalLink" target="_blank" rel="noopener noreferrer nofollow">{{ externalLink }}</a>
             </template>
             <!-- Render system message content -->
             <MarkdownRenderer
@@ -2184,6 +2193,11 @@ onBeforeUnmount(() => {
 
 .studio-notice-text {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.studio-notice-link {
+  font-size: 12px;
   overflow-wrap: anywhere;
 }
 </style>

@@ -8,7 +8,7 @@ const VISIBLE_DISPOSITIONS = ['notified', 'status_only', 'unknown'] as const
 export const isVisibleNoticeDisposition = (disposition: string) => (VISIBLE_DISPOSITIONS as readonly string[]).includes(disposition)
 
 /** Producer of a passive notice. Notices are never `messages` rows and never model history. */
-export type SessionNotificationKind = 'script_report'
+export type SessionNotificationKind = 'script_report' | 'external'
 
 /** Only `notified`, `status_only` and `unknown` are shown; `silent` is recorded, never shown. */
 export type SessionNotificationDisposition = 'notified' | 'status_only' | 'unknown' | 'silent'

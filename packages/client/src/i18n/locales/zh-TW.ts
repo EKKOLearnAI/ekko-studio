@@ -1131,6 +1131,7 @@ export default {
       scriptReportProvenance: "來自 Ekko 包裝器的腳本呼叫報告（不是 Hermes 原生執行回條）。",
       scriptReportUnavailable: "本次呼叫未擷取腳本輸出，僅顯示狀態。",
       scriptReportUnknown: "報告不完整：腳本呼叫被中斷。結果未知，Studio 不會重新執行。",
+      externalSource: '外部通知，來源「{source}」（發送方未驗證）',
     },
     selectMessages: "多選訊息",
     messagesSelected: "已選 {count} 則",

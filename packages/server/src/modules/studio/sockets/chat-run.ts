@@ -644,7 +644,9 @@ export class ChatRunSocket {
       const socket = this.nsp.sockets.get(socketId)
       if (socket && this.noticeRecipientAllowed(socket, session.id, record.profile)) socket.emit('session.notice', payload)
     }
-    this.sessionStateSync.publish(record.session_id)
+    // An external notice's unread attention goes only to subscribers whose account is still allowed now.
+    if (record.kind === 'external') this.sessionStateSync.publish(record.session_id, undefined, user => this.currentAccountAllowed(user, record.profile))
+    else this.sessionStateSync.publish(record.session_id)
   }
 
   private noticeRecipientAllowed(socket: Socket, sessionId: string, profile: string): boolean {
@@ -654,8 +656,12 @@ export class ChatRunSocket {
       try { authorizeSessionShare(shared, 'read', sessionId); return true } catch { return false }
     }
     const user = socket.data?.user as AuthenticatedUser | undefined
-    // The account as stored now: a disabled or demoted user loses access its socket still caches.
-    const account = user ? findUserById(user.id) : null
+    return !!user && this.currentAccountAllowed(user, profile)
+  }
+
+  /** The account as stored now: a disabled or demoted user loses access its socket still caches. */
+  private currentAccountAllowed(user: AuthenticatedUser, profile: string): boolean {
+    const account = findUserById(user.id)
     return !!account && account.status === 'active' && (account.role === 'super_admin' || userCanAccessProfile(account.id, profile))
   }
 

@@ -139,11 +139,22 @@ export interface HermesSessionPage {
   limit: number
 }
 
+export interface ExternalStudioNoticeView {
+  kind: 'external'
+  notification_id: number
+  source: string
+  event_id: string
+  title: string
+  url: string | null
+}
+
+export type StudioNoticeView = ScriptReportStudioNoticeView | ExternalStudioNoticeView
+
 /**
  * Passive Studio notice: one invocation of an enrolled script wrapper. Not a native Hermes
  * execution receipt, never model history.
  */
-export interface StudioNoticeView {
+export interface ScriptReportStudioNoticeView {
   kind: 'script_report'
   notification_id: number
   disposition: string

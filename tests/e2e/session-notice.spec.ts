@@ -40,3 +40,32 @@ test('renders a script invocation report as plain text with its wrapper provenan
   // A notice is display-only: it is the only message, and no turn was added for it.
   await expect(page.locator('.message')).toHaveCount(1)
 })
+
+test('renders an external notice as inert plain text with a click-only link', async ({ page }) => {
+  const remote: string[] = []
+  page.on('request', request => { if (request.url().includes('external.example')) remote.push(request.url()) })
+  await openNotices(page)
+  const content = '**not bold** ![pixel](https://external.example/pixel.png) <img src="https://external.example/img.png"> [file](/etc/hosts)'
+  await page.evaluate(content => {
+    const sid = (window as any).sessionNoticeFixture.sid
+    ;(window as any).sessionNoticeFixture.deliver({
+      event: 'session.notice', session_id: sid, attention: true,
+      message: {
+        id: 'studio-notice-3', session_id: sid, role: 'system', display_role: 'system', content,
+        timestamp: Math.floor(Date.now() / 1000) + 1,
+        studio_notice: { kind: 'external', notification_id: 3, source: 'validator-review', event_id: 'review-3',
+          title: '<b>Validation</b> complete', url: 'https://external.example/reviews/3' },
+      },
+    })
+  }, content)
+  const header = page.locator('.studio-notice-header').filter({ hasText: 'Validation' })
+  await expect(header.locator('.studio-notice-title')).toHaveText('<b>Validation</b> complete')
+  await expect(header.locator('.studio-notice-detail')).toContainText('validator-review')
+  await expect(page.locator('.studio-notice-text')).toHaveText(content)
+  await expect(page.locator('img[src*="external.example"], .markdown-body strong')).toHaveCount(0)
+  const link = page.getByRole('link', { name: 'https://external.example/reviews/3' })
+  await expect(link).toHaveAttribute('rel', /noopener/)
+  await expect(link).toHaveAttribute('target', '_blank')
+  await expect(page.locator('.message')).toHaveCount(1)
+  expect(remote).toEqual([])
+})

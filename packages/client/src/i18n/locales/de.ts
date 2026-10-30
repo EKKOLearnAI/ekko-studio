@@ -1117,6 +1117,7 @@ export default {
       scriptReportProvenance: "Skriptaufruf-Bericht des Ekko-Wrappers (keine native Hermes-Ausführungsquittung).",
       scriptReportUnavailable: "Für diesen Aufruf wurde keine Skriptausgabe erfasst; nur Status.",
       scriptReportUnknown: "Bericht unvollständig: Der Skriptaufruf wurde unterbrochen. Ergebnis unbekannt; Studio führt ihn nicht erneut aus.",
+      externalSource: 'Externe Benachrichtigung von „{source}“ (Absender nicht verifiziert)',
     },
     selectMessages: "Nachrichten auswählen",
     messagesSelected: "{count} ausgewählt",

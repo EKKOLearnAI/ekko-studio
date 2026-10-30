@@ -1044,6 +1044,7 @@ export default {
       scriptReportProvenance: "Отчёт о вызове скрипта от обёртки Ekko (не нативная квитанция выполнения Hermes).",
       scriptReportUnavailable: "Вывод скрипта для этого вызова не получен; только статус.",
       scriptReportUnknown: "Отчёт неполный: вызов скрипта был прерван. Результат неизвестен; Studio не будет запускать его повторно.",
+      externalSource: 'Внешнее уведомление от «{source}» (отправитель не подтверждён)',
     },
     selectMessages: "Выбрать сообщения",
     messagesSelected: "Выбрано: {count}",

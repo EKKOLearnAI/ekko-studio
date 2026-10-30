@@ -5,7 +5,7 @@ import { listVisibleSessionNotifications, type SessionNotificationRecord } from 
  * Report of one invocation of an enrolled script wrapper. The invocation id is the wrapper's own
  * identity; there is no native execution id and no claim that the invocation was scheduled.
  */
-export interface StudioNoticeView {
+export interface ScriptReportNoticeView {
   kind: 'script_report'
   notification_id: number
   disposition: string
@@ -19,6 +19,18 @@ export interface StudioNoticeView {
   reason: string | null
   truncated: boolean
 }
+
+/** Caller-supplied notice: every field is untrusted data rendered as plain text. */
+export interface ExternalNoticeView {
+  kind: 'external'
+  notification_id: number
+  source: string
+  event_id: string
+  title: string
+  url: string | null
+}
+
+export type StudioNoticeView = ScriptReportNoticeView | ExternalNoticeView
 
 export interface StudioNoticeMessage {
   id: string
@@ -42,7 +54,14 @@ export function noticeToMessage(record: SessionNotificationRecord): StudioNotice
     display_role: 'system',
     content: text(payload.content),
     timestamp: Math.floor(record.created_at / 1000),
-    studio_notice: {
+    studio_notice: record.kind === 'external' ? {
+      kind: 'external',
+      notification_id: record.id,
+      source: text(payload.source),
+      event_id: text(payload.event_id),
+      title: text(payload.title),
+      url: typeof payload.url === 'string' ? payload.url : null,
+    } : {
       kind: 'script_report',
       notification_id: record.id,
       disposition: record.disposition,

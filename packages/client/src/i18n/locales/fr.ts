@@ -1117,6 +1117,7 @@ export default {
       scriptReportProvenance: "Rapport d’appel de script du wrapper Ekko (pas un reçu d’exécution natif de Hermes).",
       scriptReportUnavailable: "La sortie du script n’a pas été capturée pour cet appel ; statut uniquement.",
       scriptReportUnknown: "Rapport incomplet : l’appel du script a été interrompu. Résultat inconnu ; Studio ne le relancera pas.",
+      externalSource: 'Notification externe de « {source} » (expéditeur non vérifié)',
     },
     selectMessages: "Sélectionner des messages",
     messagesSelected: "{count} sélectionnés",
