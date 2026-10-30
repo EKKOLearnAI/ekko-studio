@@ -1467,6 +1467,9 @@ export async function remove(ctx: any) {
   const hermes = providerAgentSession
     ? { attempted: false, deleted: false, profile: hermesProfile }
     : await deleteHermesSessionIfPresent(sessionId, hermesProfile)
+  // Again right before the row goes, with no await in between: a viewer may have rejoined while the
+  // native delete was pending, because the old row still authorized it.
+  getChatRunServer()?.evictSessionViewers?.(sessionId)
   const localDeleted = existing ? localDeleteSession(sessionId) : true
   if (!localDeleted) {
     ctx.status = 500
@@ -1565,6 +1568,8 @@ export async function batchRemove(ctx: any) {
 
     const shouldDeleteLocal = Boolean(existing && (!targetProfile || existing.profile === targetProfile))
     if (shouldDeleteLocal) {
+      // Again right before the row goes (see `remove`).
+      getChatRunServer()?.evictSessionViewers?.(id)
       const ok = localDeleteSession(id)
       if (ok) {
         deleteWorkspaceRunChangesForSession(id)

@@ -256,3 +256,87 @@ describe('M1 deleting a session evicts its transcript-room members before the id
     expect(viewer.socket.rooms.has(`session:${sid}`)).toBe(true)
   })
 })
+
+// repair-release@5 P1: a viewer that rejoins while native Hermes deletion is still pending (the old
+// row still exists, so `resume` authorizes it) must be evicted again before the row is removed.
+describe('P1 deletion evicts again right before the local delete', () => {
+  async function setup(options: { localDeleteOk?: boolean } = {}) {
+    initAllHermesTables()
+    const { configureProfileConfig } = await import('../../packages/server/src/modules/studio/public/profile-config')
+    configureProfileConfig({
+      buildModelGroups: () => ({ default: '', groups: [] } as any), getProfilesBaseDir: () => '/nonexistent-synthetic-profiles',
+      getProfileDir: (profile: string) => `/nonexistent-synthetic-profiles/${profile}`, getActiveProfileName: () => 'default',
+      listProfileNames: () => ['default', 'other'], providerEnvironmentMap: {}, readConfigYaml: async () => ({}),
+      readConfigYamlForProfile: async () => ({}), safeReadFile: async () => null, saveEnvValue: async () => {},
+      saveEnvValueForProfile: async () => {}, updateConfigYaml: async () => undefined, updateConfigYamlForProfile: async () => undefined,
+    })
+    const agentStatus = await import('../../packages/server/src/modules/studio/public/agent-status-registry')
+    const sessionRuntime = await import('../../packages/server/src/modules/studio/public/session-agent-runtime')
+    const store = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    vi.spyOn(agentStatus, 'isHermesAgentAvailable').mockReturnValue(true)
+    vi.spyOn(sessionRuntime, 'getExactHermesSessionDetailForProfile').mockImplementation(async (id: string) => ({ id }))
+    let releaseNative!: () => void
+    let nativePending = false
+    vi.spyOn(sessionRuntime, 'deleteHermesSessionForProfile').mockImplementation(async () => {
+      nativePending = true
+      await new Promise<void>(resolve => { releaseNative = resolve })
+      nativePending = false
+      return true
+    })
+    if (options.localDeleteOk === false) vi.spyOn(store, 'deleteSession').mockReturnValue(false)
+    const controllers = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const registry = await import('../../packages/server/src/modules/studio/public/chat-run')
+    const sid = sessionId()
+    createSession({ id: sid, profile: 'default', source: 'cli' })
+    const { server, connect, nsp, rooms } = makeServer()
+    registry.setChatRunServer(server)
+    const viewer = connect('viewer-a', { user: { id: 2, role: 'admin', profiles: ['default'] } })
+    await viewer.resume(sid)
+    const admin = { id: 1, role: 'super_admin', profiles: [] }
+    const routes = {
+      single: (ctx: any = { params: { id: sid }, query: {}, request: { body: {} }, state: { user: admin }, method: 'DELETE' }) =>
+        controllers.remove(ctx).then(() => ctx),
+      batch: (ctx: any = { params: {}, query: {}, request: { body: { ids: [sid] } }, state: { user: admin }, method: 'POST' }) =>
+        controllers.batchRemove(ctx).then(() => ctx),
+    }
+    return { sid, server, connect, nsp, rooms, viewer, routes, registry, nativePending: () => nativePending, releaseNative: () => releaseNative() }
+  }
+
+  for (const route of ['single', 'batch'] as const) {
+    it(`${route} delete: a rejoin during the pending native delete is evicted before the row goes; nothing reaches it after recreation`, async () => {
+      const t = await setup()
+      const deleting = t.routes[route]()
+      await vi.waitFor(() => expect(t.nativePending()).toBe(true))
+      // Early eviction already happened; the old row still exists, so the read check lets A back in.
+      expect(t.viewer.socket.rooms.has(`session:${t.sid}`)).toBe(false)
+      await t.viewer.resume(t.sid)
+      expect(t.viewer.socket.rooms.has(`session:${t.sid}`)).toBe(true)
+      t.releaseNative()
+      const ctx = await deleting
+      expect(ctx.status ?? 200).toBe(200)
+      expect(t.viewer.socket.rooms.has(`session:${t.sid}`)).toBe(false)
+      expect(t.rooms.get(`session:${t.sid}`)?.has('viewer-a') ?? false).toBe(false)
+      createSession({ id: t.sid, profile: 'other', source: 'cli' })
+      const owner = t.connect('owner-b', { user: { id: 3, role: 'admin', profiles: ['other'] } }, 'other')
+      await owner.resume(t.sid)
+      const since = t.viewer.received.length
+      t.nsp.to(`session:${t.sid}`).emit('message.delta', { session_id: t.sid, delta: 'PROTECTED_B_TERMINAL_OUTPUT' })
+      expect(JSON.stringify(t.viewer.received.slice(since))).not.toContain('PROTECTED_B_TERMINAL_OUTPUT')
+      expect(owner.received.filter(entry => entry.event === 'message.delta')).toHaveLength(1)
+      t.registry.setChatRunServer(null as any)
+    })
+  }
+
+  it('failed local deletion: the session stays, and its authorized viewer can rejoin', async () => {
+    const t = await setup({ localDeleteOk: false })
+    const deleting = t.routes.single()
+    await vi.waitFor(() => expect(t.nativePending()).toBe(true))
+    t.releaseNative()
+    const ctx = await deleting
+    expect(ctx.status).toBe(500)
+    expect(t.viewer.socket.rooms.has(`session:${t.sid}`)).toBe(false)
+    await t.viewer.resume(t.sid)
+    expect(t.viewer.socket.rooms.has(`session:${t.sid}`)).toBe(true)
+    t.registry.setChatRunServer(null as any)
+  })
+})

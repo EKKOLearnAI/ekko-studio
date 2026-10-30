@@ -944,14 +944,14 @@ export async function handleSessionCommand(
       // Revoke an admitted machine run before the interrupt/destroy/usage awaits below.
       state.machineRunMarker = undefined
       const wasWorking = state.isWorking
-      // The owner this command destroys, captured before any await: the same state object with the
-      // same run marker and working flag. A turn that claims the session meanwhile is a new owner, and
-      // its bridge agent, state and queue are left alone. A replacement still preparing has no marker
-      // yet but is working, so it never equals a destroyed idle session. A session that went idle with
-      // no run is unclaimed and still cleaned up.
-      const destroyedMarker = state.activeRunMarker
+      // The owner this command destroys, captured before any await: the same state object at the same
+      // owner revision. Every accepted run owner and every Stop advances the revision (run-ownership.ts),
+      // so a turn that claims the session meanwhile is a new owner even while it is still preparing
+      // without a marker; its bridge agent, state and queue are left alone. A session that went idle
+      // with no run is unclaimed and still cleaned up.
+      const destroyedRevision = state.ownerRevision ?? 0
       const ownsSession = () => ctx.sessionMap.get(sessionId) === state && (
-        (state.activeRunMarker === destroyedMarker && (destroyedMarker !== undefined || state.isWorking === wasWorking))
+        (state.ownerRevision ?? 0) === destroyedRevision
         || (!state.isWorking && state.activeRunMarker === undefined))
       let bridgeReachable = true
       let bridgeError: string | null = null

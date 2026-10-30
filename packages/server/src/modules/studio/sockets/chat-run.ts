@@ -46,6 +46,7 @@ import {
   type SessionNotificationRecord,
 } from '../repositories/session-notification-store'
 import { settleQueuedMachineEvents } from '../services/session-notifications/machine-events'
+import { advanceRunOwnership } from '../services/chat-run/run-ownership'
 import { cronBindingsDbPath, studioInstanceId } from '../public/session-notifications'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { bindAppEventSubscription } from '../services/webhooks/app-events'
@@ -1228,6 +1229,7 @@ export class ChatRunSocket {
         }
         state.events = []
         state.isWorking = !isProviderAgentExecution(source, data)
+        advanceRunOwnership(state)
         state.runStartedAt = Date.now()
         state.profile = runProfile
         state.source = source
@@ -1869,6 +1871,7 @@ export class ChatRunSocket {
             if (queueRemaining > 0) {
               const nextQueuedRun = state.queue[0]
               state.isWorking = true
+              advanceRunOwnership(state)
               state.profile = nextQueuedRun?.profile || profile
               state.source = nextQueuedRun?.source
               shouldDequeueNext = true
@@ -2244,6 +2247,7 @@ export class ChatRunSocket {
     }
 
     state.isWorking = true
+    advanceRunOwnership(state)
     state.profile = next.profile
     state.source = next.source
     this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
@@ -2313,6 +2317,7 @@ export class ChatRunSocket {
       return
     }
     state!.isWorking = true
+    advanceRunOwnership(state!)
     state!.profile = next.profile
     state!.source = next.source
     this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
@@ -2626,6 +2631,7 @@ export class ChatRunSocket {
         state.runStartedAt = Date.now()
       }
       state.isWorking = true
+      advanceRunOwnership(state)
       state.isAborting = state.isAborting === true
       state.runId = runId
       state.activeRunMarker = undefined
@@ -2970,6 +2976,7 @@ export class ChatRunSocket {
       state.queueInsertion = undefined
     }
     state.isWorking = true
+    advanceRunOwnership(state)
     state.profile = next.profile || fallbackProfile
     state.source = next.source
     logger.info('[chat-run-socket] dequeuing queued run for session %s (remaining: %d)', sessionId, state.queue.length)
@@ -3212,6 +3219,7 @@ export class ChatRunSocket {
     const state = getOrCreateSession(this.sessionMap, sessionId)
     state.events = []
     state.isWorking = !isProviderAgentExecution(source, data)
+    advanceRunOwnership(state)
     state.runStartedAt = Date.now()
     state.profile = profile
     state.source = source

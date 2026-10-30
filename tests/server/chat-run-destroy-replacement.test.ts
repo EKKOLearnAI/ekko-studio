@@ -91,7 +91,10 @@ function userSocket(server: any) {
     rooms: new Set(), emit: vi.fn(), join: vi.fn(), to: vi.fn(() => ({ emit: vi.fn() })), use: vi.fn(),
     on: vi.fn((name: string, fn: Function) => handlers.set(name, fn)) }
   server.onConnection(socket)
-  return (sid: string, input: string) => handlers.get('run')!({ session_id: sid, input, profile: 'default' })
+  const run = (sid: string, input: string) => handlers.get('run')!({ session_id: sid, input, profile: 'default' })
+  // The real Stop handler of the same connection.
+  run.stop = (sid: string) => handlers.get('abort')!({ session_id: sid })
+  return run as typeof run & { stop: (sid: string) => unknown }
 }
 
 async function flush(times = 20) { for (let index = 0; index < times; index += 1) await new Promise(resolve => setImmediate(resolve)) }
@@ -316,5 +319,136 @@ describe('M3 positive: after a readiness refusal settles the machine run, restor
     expect(roomEvents('run.completed')).toHaveLength(2)
     expect(state.queue).toHaveLength(0)
     expect(record()).toBe('bridge_unavailable')
+  })
+})
+
+// repair-release@5 P2: Stop before any native run, then a replacement that is still preparing (no
+// marker yet) must not look like the owner an outstanding /destroy captured.
+function gatedReadiness() {
+  const gates: Array<{ promise: Promise<boolean>; resolve: (ok: boolean) => void }> = []
+  // Gates the first two readiness checks (the stopped first owner and the replacement); later turns are ready.
+  const readiness = () => {
+    if (gates.length >= 2) return Promise.resolve(true)
+    let resolve!: (ok: boolean) => void
+    const promise = new Promise<boolean>(r => { resolve = r })
+    gates.push({ promise, resolve })
+    return promise
+  }
+  return { readiness, gates }
+}
+
+describe('P2 /destroy after a pre-native Stop does not clobber a replacement preparing before its marker', () => {
+  async function stopThenReplace(kind: 'machine' | 'ordinary') {
+    syntheticProfiles()
+    const { bridge, release } = fakeBridge()
+    const interruptGate = gate()
+    let interruptReached = false
+    bridge.interrupt.mockImplementation(async () => { interruptReached = true; await interruptGate.promise; return { ok: true } })
+    const { readiness, gates } = gatedReadiness()
+    const { server, roomEvents } = makeServer(bridge, readiness)
+    const { sid, generation } = session()
+    const run = userSocket(server)
+    const state = () => server.sessionMap.get(sid)
+
+    // 1. The first owner is preparing before native dispatch (waiting at readiness).
+    if (kind === 'machine') {
+      const key = `hermes-process:default:proc_${sid}:p2`
+      await server.scheduleProcessNotification({ kind: 'process_completion', producer_key: key, claim_id: `claim-${key}`, session_id: sid,
+        profile: 'default', process_id: `proc_${sid}`, owner_generation: generation, exit_code: 0, status: 'succeeded',
+        message: '[IMPORTANT: Background process completed normally (exit code 0).]' })
+    } else {
+      void run(sid, 'first question')
+    }
+    await vi.waitFor(() => expect(gates.length).toBe(1))
+    expect(state().isWorking).toBe(true)
+    if (kind === 'machine') expect(typeof state().activeRunMarker).toBe('string')
+    else expect(state().activeRunMarker).toBeUndefined()
+
+    // 2. /destroy captures that owner and waits in the interrupt.
+    const destroying = run(sid, '/destroy')
+    await vi.waitFor(() => expect(interruptReached).toBe(true))
+    // 3. Real Stop: no native run yet, so the no-active-run branch releases the session.
+    run.stop(sid)
+    await flush()
+    expect(state().isWorking).toBe(false)
+    // 4. A replacement claims the session and waits at readiness before its own marker; a third turn queues.
+    void run(sid, 'replacement question')
+    await vi.waitFor(() => expect(gates.length).toBe(2))
+    void run(sid, 'third question')
+    await vi.waitFor(() => expect(state().queue.length).toBe(1))
+    const before = { isWorking: state().isWorking, activeRunMarker: state().activeRunMarker, queue: state().queue.length }
+    expect(before.isWorking).toBe(true)
+
+    // 5. /destroy resumes: it lost its owner, so no destructive bridge call and no cleanup.
+    interruptGate.open()
+    await destroying
+    await flush()
+    expect(bridge.destroy).not.toHaveBeenCalled()
+    expect({ isWorking: state().isWorking, activeRunMarker: state().activeRunMarker, queue: state().queue.length }).toEqual(before)
+    expect(destroyResults(roomEvents)).toHaveLength(1)
+
+    // 6. The replacement and the queued turn each run once and complete.
+    gates[1].resolve(true)
+    await vi.waitFor(() => expect(chatInputs(bridge)).toContain('replacement question'))
+    release('replacement question')
+    await vi.waitFor(() => expect(chatInputs(bridge)).toContain('third question'))
+    release('third question')
+    await vi.waitFor(() => expect(state().isWorking).toBe(false))
+    // The stopped first owner's preparation finally ends with a refusal and dispatches nothing.
+    gates[0].resolve(false)
+    await flush()
+    expect(chatInputs(bridge)).toEqual(['replacement question', 'third question'])
+    expect(state().queue).toHaveLength(0)
+    expect(destroyResults(roomEvents)).toHaveLength(1)
+  }
+
+  it('machine run preparing (marker assigned) -> /destroy -> Stop -> replacement before marker + queued turn', async () => {
+    await stopThenReplace('machine')
+  })
+
+  it('ordinary turn preparing (no marker) -> /destroy -> Stop -> replacement before marker + queued turn', async () => {
+    await stopThenReplace('ordinary')
+  })
+
+  it('control: native run working -> /destroy -> Stop completes the run -> replacement before marker + queued turn', async () => {
+    syntheticProfiles()
+    const { bridge, release } = fakeBridge()
+    const interruptGate = gate()
+    let interrupts = 0
+    bridge.interrupt.mockImplementation(async () => { if ((interrupts += 1) === 1) await interruptGate.promise; return { ok: true } })
+    let checks = 0
+    const replacementReady = gate()
+    const { server, roomEvents } = makeServer(bridge, async () => { if ((checks += 1) === 2) await replacementReady.promise; return true })
+    const { sid } = session()
+    const run = userSocket(server)
+    const state = () => server.sessionMap.get(sid)
+    void run(sid, 'original question')
+    await vi.waitFor(() => expect(chatInputs(bridge)).toContain('original question'))
+    const destroying = run(sid, '/destroy')
+    await vi.waitFor(() => expect(interrupts).toBe(1))
+    void run.stop(sid)
+    await flush()
+    release('original question')
+    await vi.waitFor(() => expect(state().isWorking).toBe(false))
+    void run(sid, 'replacement question')
+    await vi.waitFor(() => expect(checks).toBe(2))
+    void run(sid, 'third question')
+    await vi.waitFor(() => expect(state().queue.length).toBe(1))
+    interruptGate.open()
+    await destroying
+    await flush()
+    expect(bridge.destroy).not.toHaveBeenCalled()
+    expect(state().isWorking).toBe(true)
+    expect(state().queue.length).toBe(1)
+    expect(destroyResults(roomEvents)).toHaveLength(1)
+    replacementReady.open()
+    await vi.waitFor(() => expect(chatInputs(bridge)).toContain('replacement question'))
+    release('replacement question')
+    await vi.waitFor(() => expect(chatInputs(bridge)).toContain('third question'))
+    release('third question')
+    await vi.waitFor(() => expect(state().isWorking).toBe(false))
+    await flush()
+    expect(chatInputs(bridge)).toEqual(['original question', 'replacement question', 'third question'])
+    expect(state().queue).toHaveLength(0)
   })
 })

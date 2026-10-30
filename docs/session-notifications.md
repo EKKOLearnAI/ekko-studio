@@ -98,7 +98,9 @@ access its current profile (person-private sessions: their owner only; a share v
 shared session only). A socket that joined the room before the session was deleted or
 recreated under another profile receives neither the content nor the metadata. Deleting a
 session (HTTP single or batch delete, and every deleting `disposeSession`) also removes all
-sockets from its `session:<id>` room synchronously, before the first await, so a session
+sockets from its `session:<id>` room synchronously, before the first await, and the HTTP routes
+do so again immediately before removing the Studio row (a viewer may rejoin while the native
+Hermes delete is pending, because the old row still authorizes it), so a session
 recreated under the same id never streams its runs (including terminal-completion turns) to
 viewers of the old one; joining again goes through the `resume` read checks. `/destroy` and a
 same-owner history clear keep their viewers. Studio
@@ -155,8 +157,11 @@ seam (before the user turn is stored and immediately before the model call) it c
   ends (`owner_stopped`) even though the generation is unchanged and even if a later turn
   resets the working or stop flags. A run that lost ownership never claims or changes the
   session state of the run that replaced it. Ordinary runs keep their own Stop handling.
-  `/destroy` captures the owner it destroys (state, run marker, working flag) before its
-  interrupt, bridge-destroy and usage awaits. If a new turn claims the session meanwhile,
+  `/destroy` captures the owner it destroys (the state object and its owner revision) before
+  its interrupt, bridge-destroy and usage awaits. Every accepted run owner (a claimed turn, a
+  dequeued item, a machine or background claim, a reattached run) and every Stop advances
+  that revision synchronously; queueing behind a busy owner does not. If a new owner
+  appears meanwhile, even one still preparing without a run marker,
   `/destroy` still reports its result once but leaves that turn's bridge agent, state and
   queue alone;
 - Hermes has not seen the result consumed by `wait` or `log` since the drain

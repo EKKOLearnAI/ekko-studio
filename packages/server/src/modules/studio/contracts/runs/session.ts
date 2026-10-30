@@ -183,6 +183,8 @@ export interface SessionState {
   runId?: string
   activeRunMarker?: string
   /** Ownership token of an admitted machine run; Stop and /destroy revoke it before their first await. */
+  /** Monotonic owner revision: advanced on every accepted run owner and on Stop (see run-ownership.ts). */
+  ownerRevision?: number
   machineRunMarker?: string
   /** Generation owned by a live Hermes output consumer, including finalization. */
   bridgeRunPollMarker?: string

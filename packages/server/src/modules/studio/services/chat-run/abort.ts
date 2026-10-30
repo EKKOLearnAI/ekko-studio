@@ -13,6 +13,7 @@ import {
 } from '../../public/chat-agent-runtime'
 import { flushBridgePendingToDb } from './bridge-message'
 import { settleQueuedMachineEvents } from '../session-notifications/machine-events'
+import { advanceRunOwnership } from './run-ownership'
 import { flushResponseRunToDb } from './response-stream'
 import { replaceState } from './compression'
 import { calcAndUpdateUsage } from './usage'
@@ -72,6 +73,8 @@ export async function handleAbort(
     // Revoke an admitted machine run before any await: a later turn resetting working or the stop
     // flag must not make it valid again. Ordinary run markers stay as their finalizers expect.
     state.machineRunMarker = undefined
+    // Stop ends the current owner: identities captured before it (an outstanding /destroy) no longer match.
+    advanceRunOwnership(state)
     const dropped = state.queue.filter(item => item.goalContinuation || item.autonomous || item.backgroundDelegationId)
     state.queue = state.queue.filter(item => !dropped.includes(item))
     for (const item of dropped) if (item.personDelivery) cancelPersonDelivery(item.personDelivery.userId, item.personDelivery.executionId)
@@ -318,6 +321,7 @@ export async function markAbortCompleted(
   if (state.queue.length > 0) {
     const next = state.queue.shift()!
     state.isWorking = true
+    advanceRunOwnership(state)
     state.isAborting = false
     state.profile = next.profile || profile
     state.source = next.source
