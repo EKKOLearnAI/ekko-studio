@@ -944,8 +944,19 @@ export async function handleSessionCommand(
       // Revoke an admitted machine run before the interrupt/destroy/usage awaits below.
       state.machineRunMarker = undefined
       const wasWorking = state.isWorking
+      // The owner this command destroys, captured before any await: the same state object with the
+      // same run marker and working flag. A turn that claims the session meanwhile is a new owner, and
+      // its bridge agent, state and queue are left alone. A replacement still preparing has no marker
+      // yet but is working, so it never equals a destroyed idle session. A session that went idle with
+      // no run is unclaimed and still cleaned up.
+      const destroyedMarker = state.activeRunMarker
+      const ownsSession = () => ctx.sessionMap.get(sessionId) === state && (
+        (state.activeRunMarker === destroyedMarker && (destroyedMarker !== undefined || state.isWorking === wasWorking))
+        || (!state.isWorking && state.activeRunMarker === undefined))
       let bridgeReachable = true
       let bridgeError: string | null = null
+      let bridgeDestroyed = false
+      let replaced = false
       try {
         if (wasWorking) {
           flushBridgePendingToDb(state, sessionId)
@@ -953,37 +964,59 @@ export async function handleSessionCommand(
             logger.warn(err, '[chat-run-socket] /destroy interrupt failed for session %s', sessionId)
           })
         }
-        await ctx.bridge.destroy(sessionId, state.profile).catch((err: unknown) => {
-          bridgeReachable = false
-          bridgeError = err instanceof Error ? err.message : String(err)
-          logger.warn(err, '[chat-run-socket] /destroy bridge unavailable for session %s', sessionId)
-        })
+        if (ownsSession()) {
+          bridgeDestroyed = true
+          await ctx.bridge.destroy(sessionId, state.profile).catch((err: unknown) => {
+            bridgeReachable = false
+            bridgeError = err instanceof Error ? err.message : String(err)
+            logger.warn(err, '[chat-run-socket] /destroy bridge unavailable for session %s', sessionId)
+          })
+        } else {
+          replaced = true
+        }
       } finally {
         updateSessionStats(sessionId)
-        await calcAndUpdateUsage(sessionId, state, (event, payload) => {
-          emitToSession(ctx.nsp, ctx.socket, sessionId, event, payload)
-        })
-        state.isWorking = false
-        state.isAborting = false
-        state.profile = undefined
-        state.abortController = undefined
-        state.runId = undefined
-        state.responseRun = undefined
-        state.activeRunMarker = undefined
-        state.events = []
-        settleQueuedMachineEvents(state.queue, ctx.bridge)
-        state.queue = []
-        state.bridgePendingAssistantContent = undefined
-        state.bridgePendingReasoningContent = undefined
-        state.bridgePendingToolCallMarkup = undefined
-        state.bridgeOutput = undefined
-        state.bridgePendingTools = undefined
-        state.bridgeCompressionResults = undefined
-        state.backgroundContinuationContexts = undefined
-        replaceState(ctx.sessionMap, sessionId, 'session.command', {
-          event: 'session.command',
+        if (!replaced && ownsSession()) {
+          await calcAndUpdateUsage(sessionId, state, (event, payload) => {
+            emitToSession(ctx.nsp, ctx.socket, sessionId, event, payload)
+          })
+        }
+        if (!replaced && ownsSession()) {
+          state.isWorking = false
+          state.isAborting = false
+          state.profile = undefined
+          state.abortController = undefined
+          state.runId = undefined
+          state.responseRun = undefined
+          state.activeRunMarker = undefined
+          state.events = []
+          settleQueuedMachineEvents(state.queue, ctx.bridge)
+          state.queue = []
+          state.bridgePendingAssistantContent = undefined
+          state.bridgePendingReasoningContent = undefined
+          state.bridgePendingToolCallMarkup = undefined
+          state.bridgeOutput = undefined
+          state.bridgePendingTools = undefined
+          state.bridgeCompressionResults = undefined
+          state.backgroundContinuationContexts = undefined
+          replaceState(ctx.sessionMap, sessionId, 'session.command', {
+            event: 'session.command',
+            action: 'destroy',
+          })
+        } else {
+          replaced = true
+        }
+      }
+      if (replaced) {
+        emitCommand({
           action: 'destroy',
+          message: bridgeDestroyed
+            ? 'Destroyed bridge agent. A new turn started meanwhile and was left running.'
+            : 'Destroy skipped: a new turn started in this conversation and was left running.',
+          destroyed: bridgeDestroyed,
+          bridgeReachable,
         })
+        return
       }
       emitToSession(ctx.nsp, ctx.socket, sessionId, 'run.queued', {
         event: 'run.queued',

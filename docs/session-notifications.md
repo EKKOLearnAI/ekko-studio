@@ -154,7 +154,11 @@ seam (before the user turn is stored and immediately before the model call) it c
   synchronously, before their first await, and a new turn replaces the marker, so the run
   ends (`owner_stopped`) even though the generation is unchanged and even if a later turn
   resets the working or stop flags. A run that lost ownership never claims or changes the
-  session state of the run that replaced it. Ordinary runs keep their own Stop handling;
+  session state of the run that replaced it. Ordinary runs keep their own Stop handling.
+  `/destroy` captures the owner it destroys (state, run marker, working flag) before its
+  interrupt, bridge-destroy and usage awaits. If a new turn claims the session meanwhile,
+  `/destroy` still reports its result once but leaves that turn's bridge agent, state and
+  queue alone;
 - Hermes has not seen the result consumed by `wait` or `log` since the drain
   (`process_notification_admit`). A plain `poll` is not consumption.
 
