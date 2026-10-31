@@ -2332,3 +2332,105 @@ it('retains an insertion intent across a transient dispatch failure and preserve
   store.promotePersonFollowups()
   expect(store.getPersonExecution(1,second.execution.id).state).toBe('queued')
 })
+
+it('removes one durable follow-up idempotently, preserves the worker and remaining input, and never delivers the removed turn', async () => {
+  const { continuePersonTask, personTaskChat } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
+  const { removePersonTaskMessage } = await import('../../packages/server/src/modules/studio/services/person/task-queue')
+  const finish: Array<(value: any) => void> = []
+  runtime.execute = vi.fn(input => { input.onEvent('run.started', {}); return new Promise(resolve => finish.push(resolve)) })
+  const { task, execution } = await create()
+  await runner.tickPersonWork(); await wait(execution.id, 'running')
+  const first = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'Remove this' }], expected_revision: 0, idempotency_key: 'first' })
+  const second = await continuePersonTask(1, task.id, { input: [{ type: 'file', name: 'keep.txt', path: '/tmp/keep.txt' }], expected_revision: 1, idempotency_key: 'second' })
+  const request = { queue_id: first.execution.id, expected_execution_id: execution.id, expected_revision: 2, idempotency_key: 'remove-first' }
+  const result = removePersonTaskMessage(1, task.id, request)
+  expect(result.task.revision).toBe(3)
+  expect(result.pending).toEqual([{ id: second.execution.id, input: [{ type: 'file', name: 'keep.txt', path: '/tmp/keep.txt' }] }])
+  expect(result.canRemove).toBe(true)
+  expect(removePersonTaskMessage(1, task.id, request)).toEqual(result)
+  expect(() => removePersonTaskMessage(1, task.id, { ...request, queue_id: second.execution.id })).toThrow('Idempotency')
+  expect(store.getPersonTask(1, task.id).revision).toBe(3)
+  expect(store.getPersonExecution(1, execution.id).state).toBe('running')
+  expect(store.getPersonExecution(1, first.execution.id)).toMatchObject({ state: 'interrupted', generation: first.execution.generation + 1 })
+  expect(db.prepare('SELECT state FROM person_deliveries WHERE execution_id=?').get(first.execution.id)?.state).toBe('cancelled')
+  expect((await personTaskChat(1, task.id)).pending.map(item => item.id)).toEqual([second.execution.id])
+  await runner.tickPersonWork(); expect(runtime.execute).toHaveBeenCalledTimes(1)
+  expect(runtime.stop).not.toHaveBeenCalled()
+  finish[0]({ ok: true, output: 'original done' }); await wait(execution.id, 'finished')
+  await runner.tickPersonWork(); await wait(second.execution.id, 'running')
+  expect(vi.mocked(runtime.execute).mock.calls[1][0].prompt).toEqual([{ type: 'file', name: 'keep.txt', path: '/tmp/keep.txt' }])
+  finish[1]({ ok: true, output: 'remaining done' }); await wait(second.execution.id, 'finished')
+  await runner.tickPersonWork()
+  expect(vi.mocked(runtime.deliver).mock.calls.some(([item]) => item.executionId === first.execution.id)).toBe(false)
+})
+
+it('removes an unstarted queued head while keeping its next follow-up schedulable', async () => {
+  const { continuePersonTask } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
+  const { removePersonTaskMessage } = await import('../../packages/server/src/modules/studio/services/person/task-queue')
+  const { task, execution } = await create(); store.setPersonExecution(execution, 'finished')
+  const first = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'queued head' }], expected_revision: 0, idempotency_key: 'head' })
+  const second = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'remaining' }], expected_revision: 1, idempotency_key: 'tail' })
+  expect(first.execution.state).toBe('queued')
+  const result = removePersonTaskMessage(1, task.id, { queue_id: first.execution.id, expected_execution_id: first.execution.id, expected_revision: 2, idempotency_key: 'remove-head' })
+  expect(result.pending.map(item => item.id)).toEqual([second.execution.id])
+  store.promotePersonFollowups()
+  expect(store.getPersonExecution(1, second.execution.id).state).toBe('queued')
+  expect(runtime.stop).not.toHaveBeenCalled()
+})
+
+it.each(['revision', 'execution', 'task', 'conversation', 'requirements', 'started', 'stopping', 'closed'])('rejects removal fenced by %s without mutating the queue', async fence => {
+  const { continuePersonTask } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
+  const { removePersonTaskMessage } = await import('../../packages/server/src/modules/studio/services/person/task-queue')
+  const { task, execution } = await create(); store.setPersonExecution(execution, 'running')
+  const followup = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'keep' }], expected_revision: 0, idempotency_key: 'followup' })
+  const request = { queue_id: followup.execution.id, expected_execution_id: execution.id, expected_revision: 1, idempotency_key: 'remove' }
+  if (fence === 'revision') request.expected_revision = 0
+  if (fence === 'execution') request.expected_execution_id = followup.execution.id
+  if (fence === 'task') db.prepare('UPDATE person_executions SET task_id=? WHERE id=?').run((await create()).task.id, followup.execution.id)
+  if (fence === 'conversation') db.prepare('UPDATE person_executions SET session_id=? WHERE id=?').run('person-task-history', followup.execution.id)
+  if (fence === 'requirements') db.prepare('UPDATE person_executions SET requirements_revision=requirements_revision+1 WHERE id=?').run(followup.execution.id)
+  if (fence === 'started') {
+    store.setPersonExecution(execution, 'finished'); store.setPersonExecution(followup.execution, 'running')
+    request.expected_execution_id = followup.execution.id
+  }
+  if (fence === 'stopping') store.setPersonExecution(execution, 'stopping')
+  if (fence === 'closed') db.prepare("UPDATE session_tasks SET status='closed' WHERE id=?").run(task.id)
+  const before = db.prepare('SELECT * FROM person_executions ORDER BY id').all()
+  expect(() => removePersonTaskMessage(2, task.id, request)).toThrow('not found')
+  expect(() => removePersonTaskMessage(1, task.id, request)).toThrow(/changed|unavailable/i)
+  expect(db.prepare('SELECT * FROM person_executions ORDER BY id').all()).toEqual(before)
+  expect(store.getPersonTask(1, task.id).revision).toBe(1)
+})
+
+it('keeps the insertion target protected while permitting removal of another pending turn', async () => {
+  const { continuePersonTask } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
+  const { insertPersonTaskMessage, removePersonTaskMessage } = await import('../../packages/server/src/modules/studio/services/person/task-queue')
+  const { task, execution } = await create(); store.setPersonExecution(execution, 'running')
+  store.personEvent(execution, 'run.started', { run_id: 'native' })
+  runtime.interruptForInsertion = vi.fn(async () => ({ status: 'accepted', phase: 'tool_batch' }))
+  const first = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'first' }], expected_revision: 0, idempotency_key: 'first' })
+  const selected = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'selected' }], expected_revision: 1, idempotency_key: 'selected' })
+  await insertPersonTaskMessage(1, task.id, { queue_id: selected.execution.id, expected_execution_id: execution.id, expected_revision: 2, idempotency_key: 'insert' })
+  expect(() => removePersonTaskMessage(1, task.id, { queue_id: selected.execution.id, expected_execution_id: execution.id, expected_revision: 3, idempotency_key: 'remove-selected' })).toThrow('in progress')
+  const result = removePersonTaskMessage(1, task.id, { queue_id: first.execution.id, expected_execution_id: execution.id, expected_revision: 3, idempotency_key: 'remove-first' })
+  expect(result.pending.map(item => item.id)).toEqual([selected.execution.id])
+  expect(result.insertion).toMatchObject({ queueId: selected.execution.id, phase: 'waiting_for_tool_batch' })
+  expect(runtime.stop).not.toHaveBeenCalled()
+})
+
+it('checks account/profile access while removal remains available without a usable model or insertion runtime', async () => {
+  const { continuePersonTask, personTaskChat } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
+  const { removePersonTaskMessage } = await import('../../packages/server/src/modules/studio/services/person/task-queue')
+  const { task, execution } = await create(); store.setPersonExecution(execution, 'running')
+  const followup = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'first' }], expected_revision: 0, idempotency_key: 'first' })
+  const request = { queue_id: followup.execution.id, expected_execution_id: execution.id, expected_revision: 1, idempotency_key: 'remove' }
+  activeAccount = false
+  expect(() => removePersonTaskMessage(1, task.id, request)).toThrow()
+  activeAccount = true; catalog = []; installedAgent = false
+  expect((await personTaskChat(1, task.id)).canRemove).toBe(true)
+  expect(removePersonTaskMessage(1, task.id, request).pending).toEqual([])
+  const otherTask = store.createPersonTask(2, 'Other', 'Goal', selection, dir, 'person-main-2')
+  const otherRun = store.enqueuePersonExecution(otherTask)
+  allowedProfiles = []
+  expect(() => removePersonTaskMessage(2, otherTask.id, { queue_id: otherRun.id, expected_execution_id: otherRun.id, expected_revision: 0, idempotency_key: 'other' })).toThrow('permission revoked')
+})

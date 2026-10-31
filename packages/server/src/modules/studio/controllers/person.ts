@@ -4,7 +4,7 @@ import { personError, personRevision, personText } from '../contracts/person'
 import { personSnapshot, configurePerson } from '../services/person/service'
 import { personUser, personCapabilities, personModelCatalog } from '../services/person/catalog'
 import { personTaskChat, continuePersonTask } from '../services/person/task-chat'
-import { insertPersonTaskMessage } from '../services/person/task-queue'
+import { insertPersonTaskMessage, removePersonTaskMessage } from '../services/person/task-queue'
 import { applyPersonTask } from '../services/person/tasks'
 import { applyPersonSchedule } from '../services/person/schedules'
 import { replyPersonQuestion } from '../services/person/runner'
@@ -42,6 +42,7 @@ export const flowApply = (ctx: Context) => handle(ctx,(id,body)=>body.action ===
 export const taskChat = (ctx: Context) => handle(ctx, id => personTaskChat(id, ctx.params.id, String(ctx.query.execution_id || '')))
 export const taskContinue = (ctx: Context) => handle(ctx, (id, body) => continuePersonTask(id, ctx.params.id, body))
 export const taskInsert = (ctx: Context) => handle(ctx, (id, body) => insertPersonTaskMessage(id, ctx.params.id, body))
+export const taskRemove = (ctx: Context) => handle(ctx, (id, body) => removePersonTaskMessage(id, ctx.params.id, body))
 export const executions = (ctx: Context) => handle(ctx, id => ({ executions: taskPersonExecutions(id, ctx.params.id) }))
 export const events = (ctx: Context) => handle(ctx, id => ({ events: personEvents(id, ctx.params.id, Math.max(0, Number(ctx.query.after) || 0)) }))
 export const schedules = (ctx: Context) => handle(ctx, (id, body) => applyPersonSchedule(id, body))

@@ -953,6 +953,13 @@ taskInsertion.requestBody = { required: true, content: { 'application/json': { s
 } } } }
 for (const status of ['403', '409', '503']) taskInsertion.responses[status] = { description: status === '403' ? 'Resource access revoked' : status === '409' ? 'Stale task, unavailable queue item or unsupported runtime' : 'Runtime temporarily unavailable' }
 
+const taskRemoval = openapi.paths['/api/studio/person/tasks/{id}/queue/remove'].post
+taskRemoval.summary = 'Remove one queued task message without stopping the active turn'
+taskRemoval.description = 'Account-owned, revision-checked and idempotent cancellation of one pending or queued input and its result delivery. Preserves the active worker and all other inputs. Rejects an input that has started or is the target of an active queue insertion.'
+taskRemoval.requestBody = structuredClone(taskInsertion.requestBody)
+taskRemoval.responses['403'] = { description: 'Resource access revoked' }
+taskRemoval.responses['409'] = { description: 'Stale task, started or unavailable queue item, or insertion in progress' }
+
 openapi.paths['/api/studio/sessions/{id}/pin'].post.requestBody = {
   required: true,
   content: { 'application/json': { schema: {

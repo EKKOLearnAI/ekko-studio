@@ -5,7 +5,7 @@ import { requirePersonSession } from '../../repositories/person-session-store'
 import { personUpdated } from '../../repositories/person-updates'
 import { personRuntime } from '../../public/person-runtime'
 import { assertPersonStageTask } from '../../repositories/person-stage-store'
-import { validatePersonSelection } from './catalog'
+import { personUser, validatePersonSelection } from './catalog'
 
 const activeStates = ['starting', 'running', 'waiting_person', 'waiting_user', 'waiting_approval']
 const dispatching = new Map<string, Promise<void>>()
@@ -16,10 +16,38 @@ export function personTaskQueue(userId: number, taskId: string, sessionId: strin
   const current = run?.session_id === sessionId && activeStates.includes(run.state)
   return {
     canInsert: !!(current && task.status === 'open' && personRuntime().interruptForInsertion),
+    canRemove: !!(run?.session_id === sessionId && task.status === 'open' && ['pending', 'queued', ...activeStates].includes(run.state)),
     insertion: current && run.insertion_queue_id && run.insertion_phase !== 'failed'
       ? { queueId: run.insertion_queue_id, phase: run.insertion_phase } : null,
     insertionError: current ? run.insertion_error || '' : '',
   }
+}
+
+/** Cancel one unstarted turn and its callback without stopping the active worker. */
+export function removePersonTaskMessage(userId: number, taskId: string, body: Record<string, unknown>) {
+  const task = getPersonTask(userId, taskId)
+  const user = personUser(userId)
+  if (user.role !== 'super_admin' && !user.profiles.includes(JSON.parse(task.selection_json).profile || 'default')) throw personError('Resource permission revoked', 403)
+  const key = `task-remove:${personText(body.idempotency_key, 'idempotency_key', 200)}`
+  return personOperation(userId, key, { ...body, task_id: taskId }, () => {
+    assertPersonStageTask(userId, taskId)
+    const current = getPersonTask(userId, taskId)
+    requirePersonSession(userId, current.session_id)
+    if (current.status !== 'open' || personRequirements(current).flow?.stopped) throw personError('Task is unavailable', 409)
+    if (current.revision !== personRevision(body.expected_revision) || current.execution_id !== body.expected_execution_id) throw personError('Task changed; refresh and try again', 409)
+    const active = getPersonExecution(userId, personText(body.expected_execution_id, 'expected_execution_id', 100))
+    const target = getPersonExecution(userId, personText(body.queue_id, 'queue_id', 100))
+    if (active.state === 'stopping' || !['pending', 'queued'].includes(target.state) || !target.input_json
+      || target.task_id !== taskId || target.session_id !== active.session_id || target.requirements_revision !== current.requirements_revision) throw personError('Queued execution changed; refresh and try again', 409)
+    if (active.insertion_queue_id === target.id && active.insertion_phase !== 'failed') throw personError('Another insertion is in progress', 409)
+    const db = personDb(), now = Date.now()
+    db.prepare("UPDATE person_executions SET state='interrupted',generation=generation+1,queue_priority=0,updated_at=? WHERE id=? AND state IN ('pending','queued')")
+      .run(now, target.id)
+    db.prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id=? AND state IN ('waiting','pending','queued')").run(now, target.id)
+    db.prepare("UPDATE person_interactions SET state='expired',revision=revision+1 WHERE execution_id=? AND state='pending'").run(target.id)
+    db.prepare('UPDATE session_tasks SET revision=revision+1,updated_at=? WHERE id=?').run(now, taskId)
+    return { task: getPersonTask(userId, taskId), pending: pendingPersonInputs(userId, taskId, target.session_id), ...personTaskQueue(userId, taskId, target.session_id) }
+  })
 }
 
 /** Replayed requests and scheduler ticks share one dispatch for a fenced execution. */
