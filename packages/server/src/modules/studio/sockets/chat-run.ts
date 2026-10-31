@@ -1726,7 +1726,11 @@ export class ChatRunSocket {
   private async executeRun(...args: Parameters<ChatRunSocket['handleRun']>): Promise<void> {
     const [socket, data, profile, , , pushTargetId] = args
     const sessionId = data.session_id
-    if (!sessionId || (!isPersonSession(sessionId) && !isEkkoAgentExecution(data))) return this.handleRun(...args)
+    if (!sessionId) return this.handleRun(...args)
+    if (!isPersonSession(sessionId) && !isEkkoAgentExecution(data)) {
+      this.ekkoExecutions.delete(sessionId)
+      return this.handleRun(...args)
+    }
     const state = getOrCreateSession(this.sessionMap, sessionId)
     const execution = Symbol()
     this.ekkoExecutions.set(sessionId, execution)

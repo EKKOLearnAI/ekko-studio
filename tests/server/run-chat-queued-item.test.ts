@@ -324,7 +324,7 @@ describe('ChatRunSocket queued bridge runs', () => {
     }
   })
 
-  it('does not clear or drain a newer run when an older startup rejects', async () => {
+  it.each(['builtin_agent', 'cli'])('does not clear or drain a newer %s run when an older startup rejects', async nextSource => {
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { handlers, io, socket } = makeServerHarness()
     const server: any = new ChatRunSocket(io as any)
@@ -334,7 +334,7 @@ describe('ChatRunSocket queued bridge runs', () => {
     const old = new Promise<void>((_, reject) => { rejectOld = reject })
     const current = new Promise<void>(resolve => { releaseNew = resolve })
     const dispatch = vi.spyOn(server, 'handleRun').mockImplementationOnce(() => old).mockImplementationOnce(() => current)
-    const send = (input: string) => handlers.get('run')!({ session_id: 'session-1', input, queue_id: input, source: 'builtin_agent', coding_agent_id: 'ekko-agent' })
+    const send = (input: string, source = 'builtin_agent') => handlers.get('run')!({ session_id: 'session-1', input, queue_id: input, source, ...(source === 'builtin_agent' ? { coding_agent_id: 'ekko-agent' } : {}) })
     const first = send('1')
     let second: Promise<void> | undefined
     try {
@@ -342,7 +342,7 @@ describe('ChatRunSocket queued bridge runs', () => {
       // A stop/new-start can replace a run while its asynchronous preparation unwinds.
       const state = server.sessionMap.get('session-1')
       state.isWorking = false
-      second = send('2')
+      second = send('2', nextSource)
       await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2))
       const controller = new AbortController()
       state.abortController = controller
