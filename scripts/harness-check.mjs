@@ -413,7 +413,7 @@ if (desktopWebuiServer.includes('bundledBrowserExecutable()')) {
 }
 
 for (const phrase of [
-  'requestSingleInstanceLock(QUIT_EXISTING ? { quit: true } : undefined)',
+  'requestSingleInstanceLock({ quit: true })',
   'hasQuitRequest(additionalData)',
 ]) {
   if (!desktopMain.includes(phrase)) {
