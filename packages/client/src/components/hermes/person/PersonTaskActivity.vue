@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PersonActivityPath from './PersonActivityPath.vue'
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { usePageLoadingState } from '@/composables/usePageLoading'
@@ -94,9 +95,11 @@ function snakePath(count: number) {
   return path
 }
 function taskImage(task: PersonTask) {
-  if (reducedMotion.value) return avatar.value.src
+  const bot = personBot(task.bot_type)
   const state = ['failed', 'interrupted'].includes(task.execution_state) ? 'error' : ['starting', 'running', 'stopping'].includes(task.execution_state) ? 'searching' : 'sleeping'
-  return personAvatarAnimation(avatar.value, state) || PERSON_ANIMATIONS[state]
+  if (bot) return deploymentUrl(reducedMotion.value ? bot.avatar : bot.animations[state])
+  // Old servers may omit identity: use a neutral still, never another BOT's working animation.
+  return PERSON_AVATAR.src
 }
 const formattedCount = computed(() => Math.max(props.count, active.value.length, flows.value.length).toLocaleString(locale.value))
 const reducedMotion = ref(false)
@@ -138,8 +141,7 @@ onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); 
                 <div class="activity-snake-scroll">
                   <div class="activity-snake" :style="{ height: `${Math.ceil(personFlowGroups(flow).length / 3) * 160}px` }">
                     <svg width="648" :height="Math.ceil(personFlowGroups(flow).length / 3) * 160" aria-hidden="true">
-                      <path class="activity-track" :d="snakePath(personFlowGroups(flow).length)" />
-                      <path class="activity-progress" :d="snakePath(personFlowGroups(flow).filter(group => group.position <= flow.current_position).length)" />
+                      <PersonActivityPath :path="snakePath(personFlowGroups(flow).length)" :progress-path="snakePath(personFlowGroups(flow).filter(group => flow.state === 'completed' || group.position <= flow.current_position).length)" />
                     </svg>
                     <ol class="activity-stages">
                       <li v-for="(group, index) in personFlowGroups(flow)" :key="group.position" :style="groupStyle(index)" :class="{ current: group.position === flow.current_position, done: group.completed === group.stages.length }">

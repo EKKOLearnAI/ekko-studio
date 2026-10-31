@@ -78,6 +78,7 @@ const executionOrder = "CASE WHEN state IN ('finished','failed','interrupted') T
 const taskExecutionColumns = `
   json_extract(t.requirements_json, '$.creator_session_id') AS creator_session_id,
   (SELECT title FROM sessions s WHERE s.id=t.session_id) AS session_title,
+  (SELECT bot_type FROM sessions s WHERE s.id=t.session_id) AS bot_type,
   (SELECT id FROM person_executions e WHERE e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1) AS execution_id,
   COALESCE((SELECT state FROM person_executions e WHERE e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1),'idle') AS execution_state,
   (SELECT COUNT(*) FROM person_executions e WHERE e.task_id=t.id AND e.state='pending') AS pending_count,

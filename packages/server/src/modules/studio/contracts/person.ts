@@ -45,6 +45,7 @@ export interface PersonSettings {
 export interface PersonTask {
   id: string
   session_id: string
+  bot_type?: string | null
   session_title?: string
   creator_session_id?: string | null
   owner_user_id: number
