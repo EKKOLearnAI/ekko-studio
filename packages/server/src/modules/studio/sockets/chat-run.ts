@@ -1,3 +1,4 @@
+import { stopPersonSessionFlows } from '../services/person/stage-flows'
 import { personSessionIds } from '../repositories/person-session-store'
 import type { PersonResultDelivery } from '../public/person-runtime'
 import { personUser } from '../services/person/catalog'
@@ -1328,14 +1329,17 @@ export class ChatRunSocket {
           return
         }
         this.finishTaskPlanRun(sessionId, 'abort.completed')
-        void handleAbort(
+        const stoppedFlows = sessionId.startsWith('person-main-')
+          ? stopPersonSessionFlows(Number(getSession(sessionId)?.studio_user_id), sessionId)
+          : Promise.resolve()
+        void stoppedFlows.then(() => handleAbort(
           this.nsp,
           socket,
           sessionId,
           this.sessionMap,
           this.bridge,
           this.runQueuedItem.bind(this),
-        ).then(() => {
+        )).then(() => {
           const state = this.sessionMap.get(sessionId)
           this.emitSessionActivity(profile, state?.isWorking ? 'run.started' : 'abort.completed', {
             session_id: sessionId,
