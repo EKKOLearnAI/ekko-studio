@@ -186,6 +186,33 @@ describe('providers controller create', () => {
     expect(readFileSync(join(hermesHome, '.env'), 'utf-8')).not.toContain('LONGCAT_API_KEY')
   })
 
+  it('creates Runcrate preset as a chat-completions custom provider', async () => {
+    const { create } = await loadProvidersController()
+    const ctx = makeCtx({
+      name: 'Runcrate',
+      base_url: 'https://api.runcrate.ai/v1',
+      api_key: 'runcrate-key',
+      model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+      providerKey: 'runcrate',
+    })
+
+    await create(ctx)
+
+    expect(ctx.body).toEqual({ success: true })
+    const configAfter = readYaml(join(hermesHome, 'config.yaml'))
+    expect(configAfter.model).toEqual({ default: 'deepseek-ai/DeepSeek-V4.1-Flash', provider: 'custom:runcrate' })
+    expect(configAfter.custom_providers).toEqual([
+      expect.objectContaining({
+        name: 'runcrate',
+        base_url: 'https://api.runcrate.ai/v1',
+        api_key: 'runcrate-key',
+        model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+        api_mode: 'chat_completions',
+      }),
+    ])
+    expect(readFileSync(join(hermesHome, '.env'), 'utf-8')).not.toContain('RUNCRATE_API_KEY')
+  })
+
   it('persists api_mode for custom providers', async () => {
     const { create } = await loadProvidersController()
     const ctx = makeCtx({
