@@ -3255,6 +3255,18 @@ function createChatState(scopedSessionId?: string) {
     })
   }
 
+  function editQueuedMessage(sessionId: string, messageId: string, content: string) {
+    const next = content.trim()
+    if (!next) return
+    if (!(queuedUserMessages.value.get(sessionId) || []).some(message => message.id === messageId)) return
+    updateQueuedUserMessage(sessionId, messageId, { content: next })
+    getChatRunSocket(runtimeTransport())?.emit('edit_queued_run', {
+      session_id: sessionId,
+      queue_id: messageId,
+      content: next,
+    })
+  }
+
   function replaceQueueInsertionState(sessionId: string, raw: ResumeSessionPayload['queueInsertion'] | RunEvent | null | undefined) {
     const nextMap = new Map(queueInsertionStates.value)
     const phase = raw?.phase
@@ -5805,6 +5817,7 @@ function createChatState(scopedSessionId?: string) {
     getSubagentStream,
     removeQueuedMessage,
     insertQueuedMessage,
+    editQueuedMessage,
     setMessageReference,
     clearMessageReference,
     isLoadingSessions,
