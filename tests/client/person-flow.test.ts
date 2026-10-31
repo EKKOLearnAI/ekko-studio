@@ -73,3 +73,9 @@ describe('role collaboration display',() => {
     expect(personFlowState(current)).toBe('blocked')
   })
 })
+
+it('shows queued stage delivery as waiting rather than working', () => {
+ const current = flow()
+ current.stages[1].delivery_state = 'queued'
+ expect(personFlowStageStatus(current, current.stages[1])).toBe('queued')
+})

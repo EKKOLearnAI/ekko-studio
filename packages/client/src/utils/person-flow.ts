@@ -24,7 +24,7 @@ export function personFlowStageStatus(flow: PersonFlow, stage: PersonFlowStage):
   }
   if (tasks.some(task => ['starting','running','stopping'].includes(task.execution_state || ''))) return 'running'
   if (tasks.some(task => task.status === 'open' && ['failed','interrupted'].includes(task.execution_state || ''))) return 'blocked'
-  if (tasks.some(task => ['pending','queued'].includes(task.execution_state || '')) || stage.delivery_state === 'pending') return 'queued'
+  if (tasks.some(task => ['pending','queued'].includes(task.execution_state || '')) || ['pending', 'queued'].includes(stage.delivery_state || '')) return 'queued'
   if (stage.delivery_state === 'delivered') return 'waiting_reply'
   return 'active'
 }

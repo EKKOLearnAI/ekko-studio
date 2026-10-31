@@ -3941,3 +3941,23 @@ test('Chinese activity completion and stage handoff preview', async ({ page }) =
   await workspace.click()
   await expect(picker.locator('.folder-path-input input')).toHaveValue('/tmp/person/default')
  })
+
+for (const count of [1,2,5]) {
+ test(`Activity fits ${count} stage groups without unused columns`, async ({page}) => {
+  const {state}=await setup(page,'light',false,false)
+  state.tasks=[]
+  state.flows=[{id:'fit',title:'内容自适应验收',goal:'Fit',state:'active',revision:0,current_position:0,stages:Array.from({length:count},(_,i)=>({id:`stage-${i}`,position:i,group_position:i,session_id:'person-main-1',session_title:`BOT ${i+1}`,bot_type:i%2?'xiaohe':'zhezhe',goal:'Check',state:i?'pending':'active',delivery_state:'queued',tasks:[]}))}]
+  await page.goto('/#/person')
+  await page.locator('.person-task-island').click()
+  await expect(page.locator('.activity-stage')).toHaveCount(count)
+  await page.waitForTimeout(550)
+  const shell=await page.locator('.activity-shell').boundingBox()
+  const snake=await page.locator('.activity-snake').boundingBox()
+  expect(shell!.width).toBeLessThanOrEqual(count===1?300:count===2?380:540)
+  expect(snake!.height).toBe(count<=3?158:316)
+  await page.screenshot({path:`/home/agent/work/hermes-studio/.ekko-tmp/adaptive-${count}.png`})
+  await page.setViewportSize({width:390,height:844})
+  await page.waitForTimeout(450)
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+ })
+}

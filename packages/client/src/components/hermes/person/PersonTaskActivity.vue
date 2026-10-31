@@ -78,19 +78,30 @@ function stageClick(flow: PersonFlow, stage: PersonFlow['stages'][number]) {
   if (tasks.length === 1) selectTask(tasks[0].id)
   else { opened.value = false; emit('flow', flow.id) }
 }
-function groupStyle(index: number) {
-  const row = Math.floor(index / 3)
-  const column = row % 2 ? 2 - index % 3 : index % 3
-  return { left: `${90 + column * 220}px`, top: `${row * 160 + 14}px` }
+function flowLayout(flow: PersonFlow) {
+  const groups = personFlowGroups(flow)
+  const columns = Math.min(3, Math.max(1, groups.length))
+  const cell = Math.max(150, Math.max(1, ...groups.map(group => group.stages.length)) * 68 + 16)
+  const rows = Math.ceil(groups.length / columns)
+  return { columns, cell, width: columns * cell + 36, height: rows * 158 }
 }
-function snakePath(count: number) {
-  let path = 'M90 128'
+const expandedWidth = computed(() => Math.max(280, standalone.value.length ? 400 : 0, ...flows.value.map(flow => flowLayout(flow).width + 28)))
+function groupStyle(flow: PersonFlow, index: number) {
+  const { columns, cell } = flowLayout(flow)
+  const row = Math.floor(index / columns)
+  const column = row % 2 ? columns - 1 - index % columns : index % columns
+  return { left: `${18 + cell / 2 + column * cell}px`, top: `${row * 158 + 8}px`, width: `${cell - 12}px` }
+}
+function snakePath(flow: PersonFlow, count = personFlowGroups(flow).length) {
+  const { columns, cell } = flowLayout(flow)
+  const start = 18 + cell / 2
+  let path = `M${start} 142`
   for (let index = 1; index < count; index++) {
-    const row = Math.floor(index / 3)
-    const column = row % 2 ? 2 - index % 3 : index % 3
-    const x = 90 + column * 220, y = row * 160 + 128
-    if (index % 3) path += ` H${x}`
-    else { const edge = row % 2 ? 638 : -18; path += ` C${edge} ${y - 160} ${edge} ${y} ${x} ${y}` }
+    const row = Math.floor(index / columns)
+    const column = row % 2 ? columns - 1 - index % columns : index % columns
+    const x = start + column * cell, y = row * 158 + 142
+    if (index % columns) path += ` H${x}`
+    else { const edge = row % 2 ? columns * cell + 30 : 6; path += ` C${edge} ${y - 158} ${edge} ${y} ${x} ${y}` }
   }
   return path
 }
@@ -116,7 +127,7 @@ onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); 
 </script>
 
 <template>
-  <div ref="root" class="person-task-activity" :class="{ 'is-expanded': opened }">
+  <div ref="root" class="person-task-activity" :class="{ 'is-expanded': opened }" :style="{ '--activity-width': `${expandedWidth}px` }">
     <Transition name="person-task-island" appear>
       <section v-if="(hasWork || finishing || completion) && !pageLoading" class="activity-shell" data-theme-surface="card">
         <button type="button" class="person-task-island" :aria-expanded="opened" :aria-label="activityLabel" @click="opened = !opened">
@@ -139,12 +150,12 @@ onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); 
               <section v-for="flow in flows" :key="flow.id" class="activity-flow">
                 <button class="activity-row activity-flow-title" @click="opened = false; emit('flow', flow.id)"><strong>{{ flow.title }}</strong><span>›</span></button>
                 <div class="activity-snake-scroll">
-                  <div class="activity-snake" :style="{ height: `${Math.ceil(personFlowGroups(flow).length / 3) * 160}px` }">
-                    <svg width="648" :height="Math.ceil(personFlowGroups(flow).length / 3) * 160" aria-hidden="true">
-                      <PersonActivityPath :path="snakePath(personFlowGroups(flow).length)" :progress-path="snakePath(personFlowGroups(flow).filter(group => flow.state === 'completed' || group.position <= flow.current_position).length)" />
+                  <div class="activity-snake" :style="{ width: `${flowLayout(flow).width}px`, height: `${flowLayout(flow).height}px` }">
+                    <svg :width="flowLayout(flow).width" :height="flowLayout(flow).height" aria-hidden="true">
+                      <PersonActivityPath :path="snakePath(flow)" :progress-path="snakePath(flow, personFlowGroups(flow).filter(group => flow.state === 'completed' || group.position <= flow.current_position).length)" />
                     </svg>
                     <ol class="activity-stages">
-                      <li v-for="(group, index) in personFlowGroups(flow)" :key="group.position" :style="groupStyle(index)" :class="{ current: group.position === flow.current_position, done: group.completed === group.stages.length }">
+                      <li v-for="(group, index) in personFlowGroups(flow)" :key="group.position" :style="groupStyle(flow, index)" :class="{ current: group.position === flow.current_position, done: group.completed === group.stages.length }">
                         <span class="activity-stage-marker">{{ index + 1 }}</span>
                         <div class="activity-bots">
                           <button v-for="stage in group.stages" :key="stage.id" class="activity-stage" @click="stageClick(flow, stage)">
@@ -268,7 +279,7 @@ onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); 
 }
 
 /* Approved capsule: quiet surfaces, compact task rows and an open serpentine map. */
-.person-task-activity.is-expanded { width:min(696px,calc(100% - 24px)); }
+.person-task-activity.is-expanded { width:min(var(--activity-width, 400px),calc(100% - 24px)); }
 .activity-shell { border:0; }
 .person-task-island__avatar { position:static; transform:none; }
 .person-task-island__label b { color:$text-primary; font-size:16px; margin-inline-end:6px; }
@@ -286,7 +297,7 @@ onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); 
 .activity-stages > li { position:absolute; width:190px; transform:translateX(-50%); display:block; border:0; padding:0; text-align:center; }
 .activity-stage-marker { color:$text-muted; font-size:10px; }
 .activity-bots { display:flex; justify-content:center; gap:6px; }
-.activity-stage { border:0; padding:0; background:transparent; color:$text-primary; font:inherit; cursor:pointer; display:flex; flex-direction:column; align-items:center; flex:0 1 62px; min-width:0; }
+.activity-stage { border:0; padding:0; background:transparent; color:$text-primary; font:inherit; cursor:pointer; display:flex; flex-direction:column; align-items:center; flex:0 0 62px; min-width:0; }
 .activity-stage img { object-fit:contain; }
 .activity-stage > span { font-size:11px; max-width:68px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .activity-stage small { font-size:10px; }
