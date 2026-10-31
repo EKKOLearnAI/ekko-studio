@@ -3,8 +3,8 @@ import { bodyParser } from '@koa/bodyparser'
 import type { Server } from 'node:http'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ prepare: vi.fn(), models: vi.fn(), cloud: vi.fn(), run: false, appValid: false, user: { id: 7, username: 'tester', role: 'user', status: 'active' }, profiles: ['work'] }))
-vi.mock('../../packages/server/src/modules/studio/services/model-api/service', () => ({ prepareModelResponse: mocks.prepare, listApiModels: mocks.models }))
+const mocks = vi.hoisted(() => ({ prepare: vi.fn(), chat: vi.fn(), models: vi.fn(), cloud: vi.fn(), run: false, appValid: false, user: { id: 7, username: 'tester', role: 'user', status: 'active' }, profiles: ['work'] }))
+vi.mock('../../packages/server/src/modules/studio/services/model-api/service', () => ({ prepareModelResponse: mocks.prepare, prepareChatCompletion: mocks.chat, listApiModels: mocks.models }))
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({ getActiveProfileName: () => 'default', listProfileNamesFromDisk: () => ['work', 'default'] }))
 vi.mock('../../packages/server/src/modules/studio/repositories/users-store', () => ({
   findUserById: () => mocks.user, listUserProfiles: () => mocks.profiles.map(profile_name => ({ profile_name })),
@@ -52,6 +52,31 @@ it('requires authentication and Profile membership before resolving models or up
   mocks.profiles = ['work', 'default']
   expect((await fetch(`${url}/models`, { headers: { ...headers(), 'x-hermes-profile': 'other' } })).status).toBe(200)
   expect(mocks.models).toHaveBeenLastCalledWith(['default', 'work'], undefined)
+})
+
+it('serves OpenAI Chat Completions to the same Model API key', async () => {
+  mocks.chat.mockResolvedValue({ id: 'chatcmpl_1', stream: false, includeUsage: false, create: async () => ({ id: 'chatcmpl_1', object: 'chat.completion', choices: [] }) })
+  const response = await fetch(`${url}/chat/completions`, { method: 'POST', headers: headers(), body: JSON.stringify({ model: 'glm/glm-5.3', messages: [{ role: 'user', content: 'Hi' }] }) })
+  expect(response.status).toBe(200)
+  expect(response.headers.get('x-request-id')).toBe('chatcmpl_1')
+  expect(await response.json()).toMatchObject({ object: 'chat.completion' })
+  expect(mocks.chat).toHaveBeenCalledWith(expect.objectContaining({ accountId: '7', profiles: ['work'] }))
+  expect(mocks.prepare).not.toHaveBeenCalled()
+})
+
+it('streams Chat Completions frames and closes with [DONE]', async () => {
+  mocks.chat.mockResolvedValue({
+    id: 'chatcmpl_2', stream: true, includeUsage: false,
+    async *chunks() {
+      yield { id: 'chatcmpl_2', object: 'chat.completion.chunk', created: 1, model: 'glm/glm-5.3', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null, logprobs: null }] }
+    },
+  })
+  const response = await fetch(`${url}/chat/completions`, { method: 'POST', headers: headers(), body: JSON.stringify({ model: 'glm/glm-5.3', stream: true, messages: [{ role: 'user', content: 'Hi' }] }) })
+  expect(response.status).toBe(200)
+  expect(response.headers.get('content-type')).toContain('text/event-stream')
+  const text = await response.text()
+  expect(text).toContain('data: {"id":"chatcmpl_2"')
+  expect(text.trimEnd().endsWith('data: [DONE]')).toBe(true)
 })
 
 it('returns JSON with server-owned account attribution and a request ID', async () => {
