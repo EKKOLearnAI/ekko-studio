@@ -1138,6 +1138,9 @@ export class ChatRunSocket {
           }
           const command = parseSessionCommand(data.input)
           if (command && ((!ekkoExecution && isBridgeRunSource(source)) || command.name === 'branch')) {
+            // A Hermes bridge command (/destroy, /plan, /moa, ...) can wait on bridge cleanup for a long
+            // time. Run ownership already fences a turn accepted meanwhile, so do not make it wait here.
+            if (!ekkoExecution && isBridgeRunSource(source)) releaseAdmission()
             try {
               const handled = await handleSessionCommand(data.session_id, command, {
                 nsp: this.nsp,
