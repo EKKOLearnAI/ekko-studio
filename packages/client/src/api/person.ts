@@ -15,6 +15,7 @@ export interface PersonQuestion { id: string; task_id: string | null; question: 
 export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed' }
 export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; timezone: string }
 export interface PersonFlow {
+  creator_session_id?: string
   id: string; title: string; goal: string; revision: number; state: 'active' | 'failed' | 'stopped' | 'completed'; current_position: number; error: string
   stages: Array<{ id: string; position: number; group_position: number; session_id: string; session_title?: string; bot_type?: string | null; delivery_state?: string; delivery_error?: string; goal: string; state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; tasks: Array<{ id: string; title: string; status: string; execution_state?: string; agent?: string }> }>
 }
@@ -25,7 +26,7 @@ export interface PersonSnapshot {
   inherits_global_model: boolean; reasoning_efforts: string[]
   compression: { enabled: boolean; threshold: number; globalThreshold: number }
   contextTokens: number
-  tasks: PersonTask[]; schedules: PersonSchedule[]; memories: PersonMemory[]; interactions: PersonQuestion[]; flows?: PersonFlow[]
+  tasks: PersonTask[]; schedules: PersonSchedule[]; memories: PersonMemory[]; interactions: PersonQuestion[]; flows?: PersonFlow[]; active_flows?: PersonFlow[]; active_flow_count?: number
 }
 export function personRequest<T>(path = '', body?: unknown, method = 'POST', signal?: AbortSignal) {
   return request<T>(`/api/studio/person${path}`, body === undefined ? { signal } : { method, body: JSON.stringify(body), signal })

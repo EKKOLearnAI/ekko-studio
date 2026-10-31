@@ -298,6 +298,17 @@ const pending = ref(false)
 const tab = ref('general')
 const showTasks = ref(false)
 const showPanel = ref(false)
+const flowsPanelRef = ref<InstanceType<typeof PersonFlowsPanel> | null>(null)
+const requestedFlow = ref<{ flow: PersonFlow; request: number } | null>(null)
+let flowFocusSequence = 0
+const flowFocus = computed(() => {
+  const request = requestedFlow.value
+  if (!request) return null
+  const candidates = [...(data.value?.active_flows || []),...(data.value?.flows || [])].filter(flow => flow.id === request.flow.id)
+  const flow = candidates.reduce((current,next) => next.revision >= current.revision ? next : current,request.flow)
+  return { ...request,flow }
+})
+watch(showPanel, show => { if (!show) requestedFlow.value=null })
 const showAgentSetup = ref(false)
 const showWorkspace = ref(false)
 const showClearConfirm = ref(false)
@@ -358,7 +369,17 @@ function displayModel(model: string, provider: string) {
 }
 const modelLabel = computed(() => currentModel.value ? displayModel(currentModel.value.model, pickerProvider.value) : t('models.selectModel'))
 const reasoningEffort = computed(() => isNewConversation.value ? newConversationEffort.value : optimisticEffort.value ?? data.value?.settings.reasoningEffort ?? '')
-function openPanel(name: string) { if (name === 'tasks') { showTasks.value = true; return }; tab.value = name; showPanel.value = true; void refresh() }
+function openPanel(name: string) { requestedFlow.value=null; if (name === 'tasks') { showTasks.value = true; return }; tab.value = name; showPanel.value = true; void refresh() }
+async function openActivityFlow(flow: PersonFlow) {
+  showTasks.value=false
+  openPanel('flows')
+  const request = ++flowFocusSequence
+  requestedFlow.value={ flow,request }
+  try {
+    const result = await personRequest<{ flows: PersonFlow[] }>('/flows/query',{ flow_id:flow.id },'POST',lifetime.signal)
+    if (!disposed && requestedFlow.value?.request === request && result.flows[0]) requestedFlow.value={ flow:result.flows[0],request }
+  } catch (e) { if (!disposed && requestedFlow.value?.request === request) error.value=String(e) }
+}
 async function refresh() {
   if (disposed) return
   // Deletion broadcasts before its HTTP response; wait until the route is updated.
@@ -524,6 +545,7 @@ function saveSchedule(input: Record<string, unknown>) { return act(() => personR
 
 watch(busy, (running, wasRunning) => { if (wasRunning && !running) void refresh() })
 watch(selectedSessionId, id => {
+  requestedFlow.value=null
   optimisticEffort.value = null; showModelPicker.value = false; showAgentSetup.value = false
   if (!id) resetConversationDraft()
 })
@@ -663,7 +685,9 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       </NModal>
       <div v-if="!isNewConversation" ref="chatSurface" class="person-chat-surface">
       <div v-if="data.session" class="person-chat-messages">
-      <PersonTaskActivity :count="sessionStates.backgroundCount(selectedSessionId)" :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :expanded="showTasks" @open="openPanel('tasks')" />
+      <PersonTaskActivity :key="selectedSessionId" :session-id="data.session.id" :count="sessionStates.backgroundCount(selectedSessionId)" :tasks="data.tasks" :flows="data.active_flows || data.flows || []" :flow-count="data.active_flow_count"
+        :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :name="data.session.title || undefined"
+        @refresh="refresh" @open-task="openTask" @open-flow="openActivityFlow" />
       <MessageList v-if="data.session" :user-label="t('person.you')" hide-tool-calls hide-run-usage hide-reasoning :activity-label="t('person.executing')" />
       </div>
       <div v-if="data.session" class="person-compose">
@@ -689,7 +713,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       </ModelCascader>
       <ModelProtocolModal v-model:show="showModelProtocol" v-model:value="selectedModelApiMode"
         @confirm="modelProtocol.confirm" @cancel="modelProtocol.cancel" />
-      <NDrawer v-model:show="showPanel" :width="drawerWidth" placement="right" :close-on-esc="true" class="person-workspace-drawer">
+      <NDrawer v-model:show="showPanel" :width="drawerWidth" placement="right" :close-on-esc="true" class="person-workspace-drawer" @after-enter="flowsPanelRef?.revealFocus()">
         <NDrawerContent closable :native-scrollbar="false" :body-content-style="{ padding: '0' }">
           <template #header><div class="workspace-heading"><span class="workspace-brand">{{ PERSON_AVATAR.label }}</span><span class="workspace-divider">/</span><span>{{ t('person.title') }}</span></div></template>
           <div class="person-workspace">
@@ -705,7 +729,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
               </NTabPane>
               <NTabPane name="flows" :tab-props="{ role: 'tab', 'aria-selected': tab === 'flows' }">
                 <template #tab><span class="workspace-tab"><SessionTaskIcon :size="17" />{{ t('person.flows') }}</span></template>
-                <PersonFlowsPanel :flows="data.flows || []" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
+                <PersonFlowsPanel ref="flowsPanelRef" :flows="data.flows || []" :focus="flowFocus" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
               </NTabPane>
               <NTabPane name="schedules" :tab-props="{ role: 'tab', 'aria-selected': tab === 'schedules' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="schedule" :size="17" />{{ t('person.schedules') }}<span class="workspace-tab-count">{{ data.schedules.length }}</span></span></template>

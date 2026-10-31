@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PersonFlow } from '../../packages/client/src/api/person'
-import { personFlowDependencies, personFlowGroups, personFlowStageStatus, personFlowState } from '../../packages/client/src/utils/person-flow'
+import { personFlowAnimation, personFlowDependencies, personFlowGroups, personFlowStageStatus, personFlowState, personFlowVisibleInActivity } from '../../packages/client/src/utils/person-flow'
 
 function flow(): PersonFlow {
   return { id:'flow',title:'Research',goal:'Research and summarize',revision:0,state:'active',current_position:0,error:'',stages:[
@@ -11,6 +11,36 @@ function flow(): PersonFlow {
 }
 
 describe('role collaboration display',() => {
+  it('shows only the creator’s healthy activity and hides unresolved collaboration errors', () => {
+    const current = { ...flow(), creator_session_id: 'creator' }
+    expect(personFlowVisibleInActivity(current,'creator')).toBe(true)
+    expect(personFlowVisibleInActivity(current,'b')).toBe(false)
+    expect(personFlowVisibleInActivity(current,'')).toBe(false)
+    expect(personFlowVisibleInActivity({...current,creator_session_id:undefined},'creator')).toBe(false)
+    for (const state of ['failed','stopped','completed'] as const) expect(personFlowVisibleInActivity({...current,state},'creator')).toBe(false)
+    current.error='Provider unavailable'
+    expect(personFlowVisibleInActivity(current,'creator')).toBe(false)
+    current.error='';current.stages[1].state='failed'
+    expect(personFlowVisibleInActivity(current,'creator')).toBe(false)
+    current.stages[1].state='active';current.stages[1].delivery_error='Delivery failed'
+    expect(personFlowVisibleInActivity(current,'creator')).toBe(false)
+    current.stages[1].delivery_error=''
+    for (const execution_state of ['failed','interrupted']) {
+      current.stages[1].tasks=[{id:'worker',title:'Research',status:'open',execution_state}]
+      expect(personFlowVisibleInActivity(current,'creator')).toBe(false)
+    }
+    current.stages[1].tasks[0].execution_state='running'
+    expect(personFlowVisibleInActivity(current,'creator')).toBe(true)
+    current.stages[1].tasks[0].execution_state='failed';current.stages[1].tasks[0].status='closed'
+    expect(personFlowVisibleInActivity(current,'creator')).toBe(true)
+  })
+  it('uses the four avatar states without presenting waits as running work', () => {
+    expect(personFlowAnimation('completed')).toBe('done')
+    expect(personFlowAnimation('blocked')).toBe('error')
+    for (const status of ['active','running'] as const) expect(personFlowAnimation(status)).toBe('searching')
+    for (const status of ['queued','waiting_dependencies','waiting_user','waiting_approval','waiting_person','waiting_reply','interrupted'] as const)
+      expect(personFlowAnimation(status)).toBe('sleeping')
+  })
   it('groups parallel roles and counts only saved completions',() => {
     const current = flow()
     expect(personFlowGroups(current).map(group => ({ position:group.position,roles:group.stages.map(stage => stage.id),completed:group.completed }))).toEqual([
