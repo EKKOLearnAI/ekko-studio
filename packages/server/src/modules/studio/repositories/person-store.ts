@@ -75,7 +75,7 @@ export function savePersonSettingsInTransaction(userId: number, settings: Person
   return personSettings(userId, sessionId)
 }
 const executionOrder = "CASE WHEN state IN ('finished','failed','interrupted') THEN 2 WHEN state='pending' THEN 1 ELSE 0 END,created_at DESC,rowid DESC"
-const taskExecutionJoin = `LEFT JOIN person_executions selected_execution ON selected_execution.id=(
+export const taskExecutionJoin = `LEFT JOIN person_executions selected_execution ON selected_execution.id=(
   SELECT id FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1)`
 const taskExecutionColumns = `
   json_extract(t.requirements_json, '$.creator_session_id') AS creator_session_id,

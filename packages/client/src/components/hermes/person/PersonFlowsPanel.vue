@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NInput } from 'naive-ui'
 import type { PersonFlow } from '@/api/person'
@@ -7,13 +7,20 @@ import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
 import { personFlowGroups, personFlowState, personFlowStatusKey, type PersonFlowStage } from '@/utils/person-flow'
 import PersonFlowCard from './PersonFlowCard.vue'
 
-const props = defineProps<{ flows: PersonFlow[]; saving: boolean }>()
+const props = defineProps<{ flows: PersonFlow[]; saving: boolean; focus?: { flow: PersonFlow; request: number } | null }>()
 const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
 const { t } = useI18n()
 const expanded = ref<string | null>(null)
+const panel = ref<HTMLElement>()
 const search = ref('')
 const filter = ref<'all' | PersonFlow['state']>('all')
-const visibleFlows = computed(() => props.flows.slice(0,50))
+const visibleFlows = computed(() => {
+  const latest = props.flows.slice(0,50)
+  const target = props.focus?.flow
+  if (!target) return latest
+  return !latest.some(flow => flow.id === target.id) ? [target,...latest.slice(0,49)]
+    : latest.map(flow => flow.id === target.id && target.revision > flow.revision ? target : flow)
+})
 const filters = computed(() => [
   { value:'all' as const,label:t('person.flowAll'),count:visibleFlows.value.length },
   { value:'active' as const,label:t('person.flowInProgress'),count:visibleFlows.value.filter(flow => flow.state === 'active').length },
@@ -28,10 +35,22 @@ const rows = computed(() => visibleFlows.value.filter(flow => {
 }).map(flow => ({ flow,groups:personFlowGroups(flow),status:personFlowState(flow),completed:flow.stages.filter(stage => stage.state === 'completed').length })))
 watch(rows,value => { if (!value.some(row => row.flow.id === expanded.value)) expanded.value=null })
 const toggle = (id: string) => { expanded.value=expanded.value === id ? null : id }
+async function revealFocus() {
+  if (!props.focus) return
+  const id = props.focus.flow.id
+  filter.value='all';search.value='';expanded.value=id
+  await nextTick()
+  if (props.focus?.flow.id !== id) return
+  const button = panel.value?.querySelector<HTMLButtonElement>(`[data-flow-id="${CSS.escape(id)}"] > .flow-row`)
+  button?.scrollIntoView({ block:'start',inline:'nearest',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  button?.focus({ preventScroll:true })
+}
+watch(() => props.focus?.request, () => { void revealFocus() }, { immediate:true,flush:'post' })
+defineExpose({ revealFocus })
 </script>
 
 <template>
-  <section class="person-panel flow-panel">
+  <section ref="panel" class="person-panel flow-panel">
     <header class="panel-heading"><div><h2>{{ t('person.flows') }}</h2><p>{{ t('person.flowHint') }}</p></div></header>
     <div v-if="!visibleFlows.length" class="panel-empty">{{ t('person.empty') }}</div>
     <template v-else>
@@ -47,7 +66,7 @@ const toggle = (id: string) => { expanded.value=expanded.value === id ? null : i
       </div>
       <div v-if="!rows.length" class="panel-empty">{{ t('person.flowNoMatches') }}</div>
       <ul v-else class="flow-list">
-        <li v-for="row in rows" :key="row.flow.id" class="flow-entry" :class="{ 'flow-entry--expanded':expanded === row.flow.id }">
+        <li v-for="row in rows" :key="row.flow.id" class="flow-entry" :data-flow-id="row.flow.id" :class="{ 'flow-entry--expanded':expanded === row.flow.id, 'flow-entry--targeted':focus?.flow.id === row.flow.id }">
           <button type="button" class="flow-row" :aria-expanded="expanded === row.flow.id" :aria-controls="`flow-detail-${row.flow.id}`" :aria-labelledby="`flow-title-${row.flow.id}`" :aria-describedby="`flow-meta-${row.flow.id}`" @click="toggle(row.flow.id)">
             <span class="flow-row-main">
               <span :id="`flow-title-${row.flow.id}`" class="flow-row-title">{{ row.flow.title }}</span>
@@ -90,6 +109,7 @@ const toggle = (id: string) => { expanded.value=expanded.value === id ? null : i
 .flow-search { width: 230px; flex-shrink: 0; }
 .flow-list { padding: 0; margin: 0; list-style: none; border-block-start: 1px solid $border-light; }
 .flow-entry { border-block-end: 1px solid $border-light; }
+.flow-entry--targeted { scroll-margin-block: 16px; background: rgba(var(--accent-primary-rgb), .035); }
 .flow-row { display: flex; align-items: center; gap: 18px; width: 100%; min-height: 72px; padding: 12px 10px; border: 0; background: transparent; color: $text-primary; font: inherit; text-align: start; cursor: pointer; }
 .flow-row:hover, .flow-entry--expanded > .flow-row { background: rgba(var(--accent-primary-rgb), .04); }
 .flow-row:focus-visible, .flow-filters button:focus-visible { outline: 2px solid $accent-primary; outline-offset: -2px; border-radius: var(--radius-component, 6px); }

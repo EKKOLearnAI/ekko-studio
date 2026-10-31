@@ -9,7 +9,7 @@ import { isAbsolute, join } from 'node:path'
 import { getWebUiHome } from '../../public/config'
 import { ensureDirectory, normalizeDirectoryTarget } from '../workspace/directory'
 import { personHasPendingWork } from '../../repositories/person-history-store'
-import { listPersonFlows } from '../../repositories/person-stage-store'
+import { listPersonFlows, personFlowActivity } from '../../repositories/person-stage-store'
 
 export async function personSnapshot(userId: number, sessionId = '') {
   personUser(userId)
@@ -17,6 +17,7 @@ export async function personSnapshot(userId: number, sessionId = '') {
   const busy = personChatBusy(userId, sessionId || undefined)
   return { ...session, tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [], memories: await personMemories(userId),
     flows:sessionId ? listPersonFlows(userId,sessionId) : [],
+    ...(sessionId ? personFlowActivity(userId,sessionId) : { active_flow_count:0,active_flows:[] }),
     schedules: sessionId ? listPersonSchedules(userId, sessionId) : [], interactions: personInteractions(userId), busy,
     history_revision: session.session?.history_revision ?? 0, can_clear: !!session.session && !busy && !personHasPendingWork(userId, sessionId) }
 }
