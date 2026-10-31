@@ -1,3 +1,4 @@
+import { personStageRunning } from './person-stage-activity'
 import { randomUUID } from 'node:crypto'
 import type { PersonConversationFlow, PersonStage, PersonStageContext, PersonStageDelivery } from '../contracts/person-stage'
 import { personError } from '../contracts/person'
@@ -22,6 +23,9 @@ export function getPersonFlow(userId: number, id: string): PersonConversationFlo
     const delivery = db.prepare('SELECT state,error FROM person_stage_deliveries WHERE stage_id=? AND generation=?').get(stage.id,row.generation)
     stage.delivery_state = delivery ? String(delivery.state) : undefined
     stage.delivery_error = delivery ? String(delivery.error) : undefined
+    stage.execution_state = stage.state === 'active' && ['active', 'failed'].includes(String(row.state)) &&
+      personStageRunning(userId, { flowId: id, stageId: stage.id, generation: Number(row.generation) })
+      ? 'running' : delivery && ['pending', 'queued'].includes(String(delivery.state)) ? 'queued' : 'idle'
     stage.tasks = db.prepare('SELECT t.id FROM person_stage_tasks l JOIN session_tasks t ON t.id=l.task_id WHERE l.stage_id=? ORDER BY t.created_at,t.id').all(stage.id).map(({ id }) => {
       const task = getPersonTask(userId,String(id))
       return { id:task.id,title:task.title,status:task.status,execution_state:task.execution_state || 'idle',agent:JSON.parse(task.selection_json).runtime }

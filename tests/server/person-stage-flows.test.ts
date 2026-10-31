@@ -438,11 +438,34 @@ describe('independent Person stages', () => {
     expect(stages.getPersonFlow(1,first.id)).toMatchObject({current_position:0,stages:[expect.objectContaining({completion_run_id:'',result_message_id:null}),expect.anything()]})
   })
 
+  it('exposes live turn activity separately from queued delivery, and fences stopped generations', async () => {
+    const first = flow()
+    await flows.deliverPersonStages()
+    const delivery = vi.mocked(runtime.deliverStage!).mock.calls[0][0].context
+    expect(stages.getPersonFlow(1, first.id).stages[0]).toMatchObject({ delivery_state: 'queued', execution_state: 'queued' })
+    const turn = flows.registerPersonStageTurn(1, delivery)
+    expect(stages.getPersonFlow(1, first.id).stages[0]).toMatchObject({ delivery_state: 'queued', execution_state: 'running' })
+    const peer = flow(['person-main-c'])
+    expect(stages.getPersonFlow(1, peer.id).stages[0].execution_state).not.toBe('running')
+    turn.release()
+    expect(stages.getPersonFlow(1, first.id).stages[0].execution_state).toBe('queued')
+    const live = flows.registerPersonStageTurn(1, delivery)
+    await control(first.id, 'stop')
+    expect(live.signal.aborted).toBe(true)
+    expect(stages.getPersonFlow(1, first.id).stages[0].execution_state).toBe('idle')
+    const resumed = await control(first.id, 'resume')
+    const resumedTurn = flows.registerPersonStageTurn(1, context(resumed))
+    live.release()
+    expect(stages.getPersonFlow(1, first.id).stages[0].execution_state).toBe('running')
+    resumedTurn.release()
+    expect(stages.getPersonFlow(1, first.id).stages[0].execution_state).toBe('queued')
+  })
+
   it('fences stopped turns, cancels queued handoffs, and resumes only with a new generation', async () => {
     const first=flow()
     await flows.deliverPersonStages()
     const delivery=vi.mocked(runtime.deliverStage!).mock.calls[0][0].context
-    const active=flows.registerPersonStageTurn(context(first))
+    const active=flows.registerPersonStageTurn(1,context(first))
     const stopped=await control(first.id,'stop',{sessionId:'person-main-1',runId:'creator',messages:[]})
     expect(active.signal.aborted).toBe(true); active.release()
     expect(()=>stages.assertPersonStage(1,delivery)).toThrow()
@@ -471,7 +494,7 @@ describe('independent Person stages', () => {
     const first=flow()
     const input={action:'stop',flow_id:first.id,expected_revision:first.revision,idempotency_key:'stop-once'}
     await flows.controlPersonFlow(1,input)
-    const resumed=await control(first.id,'resume'), active=flows.registerPersonStageTurn(context(resumed))
+    const resumed=await control(first.id,'resume'), active=flows.registerPersonStageTurn(1,context(resumed))
     await flows.controlPersonFlow(1,input)
     expect(active.signal.aborted).toBe(false); active.release()
     expect(stages.getPersonFlow(1,first.id).state).toBe('active')
@@ -906,7 +929,7 @@ describe('parallel Person stage groups', () => {
   it('lets a healthy parallel role finish after its peer fails, releases the failed role and pauses the dependent summary', async () => {
     const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
     const first = plan(), b = actor(first,'person-main-b'), c = actor(first,'person-main-c')
-    const live = flows.registerPersonStageTurn(b.stage)
+    const live = flows.registerPersonStageTurn(1,b.stage)
     try {
       runtime.deliverStage = vi.fn(async input => { if (input.sessionId === 'person-main-c') throw new Error('Peer unavailable') })
       await flows.deliverPersonStages()

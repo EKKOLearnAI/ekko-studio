@@ -8,6 +8,7 @@ export interface PersonStageContext {
 export interface PersonStage {
   session_title?: string
   bot_type?: string | null
+  execution_state?: 'running' | 'queued' | 'idle'
   delivery_state?: string
   delivery_error?: string
   tasks: Array<{ id: string; title: string; status: string; execution_state?: string; agent?: string }>

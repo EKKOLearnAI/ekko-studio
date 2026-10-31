@@ -92,7 +92,7 @@ The current:true role is YOU: requests naming it are your work. Names are labels
   if (!stageContext) return agent
   return { ...agent,personStageContext:stageContext,async run(input: Parameters<typeof agent.run>[0]) {
     assertPersonStage(userId,stageContext,sessionId)
-    const turn = registerPersonStageTurn(stageContext)
+    const turn = registerPersonStageTurn(userId,stageContext)
     try { return await agent.run({ ...input,signal:input.signal ? AbortSignal.any([input.signal,turn.signal]) : turn.signal }) }
     finally { turn.release() }
   } }

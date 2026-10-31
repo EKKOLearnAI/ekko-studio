@@ -3961,3 +3961,38 @@ for (const count of [1,2,5]) {
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
  })
 }
+
+test('Activity distinguishes running turns from queued deliveries and animates the real SVG fold', async ({ page }) => {
+ const { state } = await setup(page, 'light', false, false)
+ state.tasks=[]
+ const stage=(i:number,group:number,bot_type:string,execution_state='idle')=>({id:`live-${i}`,position:i,group_position:group,session_id:`person-${i}`,session_title:`BOT ${i}`,goal:'Verify',bot_type,state:group?'pending':'active',execution_state,delivery_state:group?undefined:'queued',tasks:[]})
+ state.flows=[{id:'live-flow',title:'Live stage map',state:'active',revision:0,current_position:0,stages:[stage(0,0,'xiaohe','running'),stage(1,0,'dachu','queued'),stage(2,1,'zhezhe'),stage(3,2,'xiaohe'),stage(4,3,'dachu'),stage(5,4,'zhezhe')]}]
+ await page.goto('/#/person'); await page.locator('.person-task-island').click()
+ const bots=page.locator('.activity-stage')
+ await expect(bots.nth(0).locator('img')).toHaveAttribute('src',/xiaohe\/searching.gif$/)
+ await expect(bots.nth(1).locator('img')).toHaveAttribute('src',/dachu\/sleeping.gif$/)
+ state.flows[0].stages[1].execution_state='running';await emit(page,'person.updated',{})
+ await expect(bots.nth(1).locator('img')).toHaveAttribute('src',/dachu\/searching.gif$/)
+ // Move along the third-to-fourth group: this traverses the right-hand fold.
+ state.flows[0].current_position=2
+ state.flows[0].stages.forEach((stage:any)=>{if(stage.group_position<2)stage.state='completed';else if(stage.group_position===2){stage.state='active';stage.execution_state='running'}})
+ await emit(page,'person.updated',{});await page.waitForTimeout(1000)
+ const progress=page.locator('.activity-progress')
+ const before=await progress.evaluate(el=>parseFloat(getComputedStyle(el).strokeDashoffset))
+ state.flows[0].stages[3].state='completed';state.flows[0].stages[4].state='active';state.flows[0].stages[4].execution_state='running';state.flows[0].current_position=3
+ await emit(page,'person.updated',{})
+ const samples=await progress.evaluate(async el=>{
+  const values:number[]=[];for(let i=0;i<22;i++){values.push(parseFloat(getComputedStyle(el).strokeDashoffset));await new Promise(r=>setTimeout(r,50))}return values
+ })
+ const after=samples.at(-1)!
+ expect(after).toBeLessThan(before)
+ expect(samples.some(value=>value<before-.005&&value>after+.005)).toBe(true)
+ const nodes=await page.locator('.activity-stages > li').evaluateAll(els=>els.map(el=>({x:el.getBoundingClientRect().x,y:el.getBoundingClientRect().y})))
+ expect(nodes[3].y).toBeGreaterThan(nodes[2].y)
+ expect(nodes[3].x).toBe(nodes[2].x)
+ expect(nodes[4].x).toBeLessThan(nodes[3].x)
+ await page.screenshot({path:'/home/agent/work/hermes-studio/.ekko-tmp/live-stage-fixed-fold.png'})
+ await page.emulateMedia({reducedMotion:'reduce'})
+ await expect.poll(()=>progress.evaluate(el=>getComputedStyle(el).transitionDuration)).toBe('0s')
+ await expect(bots.nth(4).locator('img')).toHaveAttribute('src',/dachu\/idle.png$/)
+})

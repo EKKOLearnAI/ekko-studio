@@ -7,8 +7,10 @@ vi.mock('vue-i18n',()=>({useI18n:()=>({t:(key:string)=>key,locale:ref('en')})}))
 vi.mock('@/composables/usePageLoading',()=>({usePageLoadingState:()=>ref(false)}))
 vi.mock('@/utils/chat-agent-avatar',()=>({PERSON_AVATAR:{label:'Bot',src:'/bot.png'},PERSON_ANIMATIONS:{searching:'/search.gif',done:'/done.gif',error:'/error.gif',thinking:'/think.gif'},personAvatarAnimation:()=>undefined}))
 let wrapper: ReturnType<typeof mount>
+let svgLengthDescriptor: PropertyDescriptor | undefined
+let mockedSvgLength = false
 beforeEach(()=>{vi.useFakeTimers();vi.stubGlobal('matchMedia',()=>({matches:true,addEventListener(){},removeEventListener(){}}))})
-afterEach(()=>{wrapper?.unmount();vi.useRealTimers();vi.unstubAllGlobals()})
+afterEach(()=>{wrapper?.unmount();if(mockedSvgLength){if(svgLengthDescriptor)Object.defineProperty(SVGElement.prototype,'getTotalLength',svgLengthDescriptor);else delete (SVGElement.prototype as any).getTotalLength;mockedSvgLength=false};vi.useRealTimers();vi.unstubAllGlobals()})
 it('expands in place and routes task selection without opening all tasks',async()=>{
  const onTask = vi.fn()
  wrapper=mount(Activity,{props:{onTask,count:1,tasks:[{id:'a',title:'Run test',status:'open',execution_state:'running'} as any]},attachTo:document.body})
@@ -77,4 +79,19 @@ it('ignores stale presence counts and removes the empty capsule after completion
  expect(wrapper.find('.activity-completion').exists()).toBe(true)
  await vi.advanceTimersByTimeAsync(4000)
  expect(wrapper.find('.person-task-island').exists()).toBe(false)
+})
+
+it('shows independent live and queued GIFs for BOTs in the same stage group', async()=>{
+ // jsdom lacks SVG geometry; only the real-browser test asserts path lengths.
+ svgLengthDescriptor = Object.getOwnPropertyDescriptor(SVGElement.prototype, 'getTotalLength')
+ mockedSvgLength = true
+ Object.defineProperty(SVGElement.prototype, 'getTotalLength', { configurable:true, value:()=>100 })
+ vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){}}))
+ const stage=(id:string,bot_type:string,execution_state:string)=>({id,position:0,group_position:0,session_id:id,session_title:id,bot_type,state:'active',execution_state,delivery_state:'queued',tasks:[]})
+ wrapper=mount(Activity,{props:{count:0,flows:[{id:'f',title:'Flow',state:'active',current_position:0,stages:[stage('a','xiaohe','running'),stage('b','dachu','queued')]}] as any},global:{stubs:{PersonActivityPath:true}}})
+ await wrapper.get('.person-task-island').trigger('click')
+ expect(wrapper.findAll('.activity-stages > li')).toHaveLength(1)
+ const images=wrapper.findAll('.activity-stage img').map(image=>image.attributes('src'))
+ expect(images[0]).toContain('/person/xiaohe/searching.gif')
+ expect(images[1]).toContain('/person/dachu/sleeping.gif')
 })

@@ -1,3 +1,4 @@
+import { trackPersonStageTurn } from '../../repositories/person-stage-activity'
 import { randomUUID } from 'node:crypto'
 import type { PersonTaskOrigin } from '../../contracts/person'
 import { personError, personRevision, personText } from '../../contracts/person'
@@ -12,11 +13,12 @@ import { personUser } from './catalog'
 import { logger } from '../../public/logging'
 
 const activeTurns = new Map<string, Set<AbortController>>()
-export function registerPersonStageTurn(context: PersonStageContext) {
+export function registerPersonStageTurn(userId: number, context: PersonStageContext) {
   const abort = new AbortController()
   const turns = activeTurns.get(context.flowId) || new Set<AbortController>()
   turns.add(abort); activeTurns.set(context.flowId, turns)
-  return { signal: abort.signal, release() { turns.delete(abort); if (!turns.size) activeTurns.delete(context.flowId) } }
+  const releaseActivity = trackPersonStageTurn(userId, context, abort.signal)
+  return { signal: abort.signal, release() { releaseActivity(); turns.delete(abort); if (!turns.size && activeTurns.get(context.flowId) === turns) activeTurns.delete(context.flowId) } }
 }
 
 export function createPersonFlow(userId: number, input: Record<string, unknown>, origin?: PersonTaskOrigin) {

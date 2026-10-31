@@ -79,3 +79,18 @@ it('shows queued stage delivery as waiting rather than working', () => {
  current.stages[1].delivery_state = 'queued'
  expect(personFlowStageStatus(current, current.stages[1])).toBe('queued')
 })
+
+it('uses live execution separately from delivery receipt state and honors terminal states', () => {
+ const current = flow()
+ const stage = current.stages[1]
+ stage.delivery_state = 'queued'
+ stage.execution_state = 'running'
+ expect(personFlowStageStatus(current, stage)).toBe('running')
+ stage.execution_state = 'idle'
+ expect(personFlowStageStatus(current, stage)).toBe('queued')
+ stage.execution_state = 'running'
+ current.state = 'stopped'
+ expect(personFlowStageStatus(current, stage)).toBe('interrupted')
+ stage.state = 'completed'
+ expect(personFlowStageStatus(current, stage)).toBe('completed')
+})
