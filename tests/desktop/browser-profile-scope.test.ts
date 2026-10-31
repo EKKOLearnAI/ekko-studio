@@ -21,7 +21,9 @@ afterEach(async () => {
 
 async function setup(platform = 'darwin', isolated = false) {
   vi.stubGlobal('process', { ...process, platform })
-  const root = await mkdtemp(join(tmpdir(), 'browser-profile-scope-'))
+  // Windows TEMP may use an 8.3 alias (RUNNER~1), while realpath returns the
+  // long name. Keep fixture paths in one spelling before simulating macOS.
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'browser-profile-scope-')))
   roots.push(root)
   const userData = join(root, 'electron')
   const stateRoot = join(root, 'studio', 'desktop-browser')
@@ -71,8 +73,10 @@ describe('browser profile session scope', () => {
   })
 
   it('compares canonical session roots when identifying the legacy local session', async () => {
-    const { userData, managedProfiles, manager } = await setup()
-    native.paths.sessionData = await realpath(userData)
+    const { root, userData, managedProfiles, manager } = await setup()
+    const alias = join(root, 'electron-alias')
+    await symlink(userData, alias, hostPlatform === 'win32' ? 'junction' : 'dir')
+    native.paths.sessionData = alias
     expect(() => manager.validateSessionScope(join(managedProfiles, 'default', 'data'))).not.toThrow()
   })
 
