@@ -10,6 +10,7 @@ import { onPersonUpdated } from '@/api/studio/chat'
 import { useTaskDrawerLayout } from './useTaskDrawerLayout'
 import { chatSessionAgentAvatar, PERSON_AVATAR } from '@/utils/chat-agent-avatar'
 import { createRefreshQueue } from '@/utils/refresh-queue'
+import { clientUuid } from '@/utils/secure-uuid'
 
 const props = defineProps<{ show: boolean; person?: boolean; personSessionId?: string }>()
 const emit = defineEmits<{ 'update:show': [show: boolean]; 'open-person-task': [task: PersonTask] }>()
@@ -82,7 +83,7 @@ async function changeStatus(task: TaskRow, value: string | number) {
   savingIds.value = new Set([...savingIds.value, task.id])
   reads.cancel()
   try {
-    if (task.personTask) await personRequest('/tasks/apply', { task_id: task.id, action: value === 'closed' ? 'close' : 'reopen', expected_revision: task.personTask.revision, idempotency_key: crypto.randomUUID() })
+    if (task.personTask) await personRequest('/tasks/apply', { task_id: task.id, action: value === 'closed' ? 'close' : 'reopen', expected_revision: task.personTask.revision, idempotency_key: clientUuid() })
     else await updateSessionTaskStatus(task, value as SessionTaskStatus)
     reads.cancel()
     if (!disposed && props.show) await load(true)
