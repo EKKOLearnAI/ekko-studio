@@ -2,7 +2,7 @@ import { BrowserDownloadHistory, type DownloadFileIdentity } from './browser-dow
 import { downloadBrowserFile } from './browser-download'
 import { t } from '../desktop-i18n'
 import { realpathSync, mkdirSync, statSync, lstatSync } from 'node:fs'
-import { isAbsolute, relative } from 'node:path'
+import { isAbsolute, relative, sep } from 'node:path'
 import { BrowserProfileLeases } from './browser-profile-lease'
 import { applyBrowserColorScheme, browserBackground, type BrowserColorScheme } from './browser-theme'
 import { randomUUID } from 'node:crypto'
@@ -1188,12 +1188,22 @@ export class BrowserManager {
   private validateSessionScope(sessionPath: string): void {
     if (process.platform === 'darwin') {
       const root = realpathSync(app.getPath('sessionData'))
+      const allowedRoots = [root]
+      // The primary local Session keeps its original userData directory, while
+      // managed browser profiles have always lived under the Studio home.
+      // Isolated device/remote Sessions must still stay inside sessionData.
+      if (root === realpathSync(app.getPath('userData'))) {
+        allowedRoots.push(realpathSync(join(this.profileStore.root, 'profiles')))
+      }
       let parent = resolve(sessionPath)
       const suffix: string[] = []
       while (!existsSync(parent)) { suffix.unshift(basename(parent));parent = dirname(parent) }
       const candidate = resolve(realpathSync(parent), ...suffix)
-      const subpath = relative(root, candidate)
-      if (subpath === '..' || subpath.startsWith('../') || isAbsolute(subpath)) throw new Error(t('browser.profileOutsideStorage', { root }))
+      const allowed = allowedRoots.some(allowedRoot => {
+        const subpath = relative(allowedRoot, candidate)
+        return subpath !== '..' && !subpath.startsWith(`..${sep}`) && !isAbsolute(subpath)
+      })
+      if (!allowed) throw new Error(t('browser.profileOutsideStorage', { root }))
     }
   }
 
