@@ -3565,6 +3565,7 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_8_1_9: "Standard-Hermes-Runtime für Desktop auf 0.22.5 aktualisiert, Quellcode-Tag und Commit festgelegt und veröffentlichte Runtime-Pakete für alle sechs Plattformen einschließlich Windows ARM64 abgestimmt",
     new_0_8_1_1: "Native Fokusanforderungen der Browserautomatisierung entfernt und Hintergrund-Tabs außerhalb des Fokusbaums des Hauptfensters gerendert, um Benutzereingaben weniger zu stören (#3594)",
     new_0_8_1_2: "Browserprofile werden mit getrennten temporären Dateien gespeichert, damit gleichzeitige Schreibvorgänge mehrerer Instanzen nicht kollidieren (#3594)",
     new_0_8_1_3: "Aufgabenhinweise des Assistenten verbessert: Ergänzungen, Änderungen und Feedback sollen zuerst die ursprüngliche Aufgabe suchen und fortsetzen, auch abgeschlossene Aufgaben, mit demselben Agent und Gespräch (#3601)",

@@ -3565,6 +3565,7 @@ jobTriggered: 'Job ejecutado',
   },
 
   changelog: {
+    new_0_8_1_9: "Actualizado el runtime Hermes predeterminado de escritorio a 0.22.5, con tag y commit de origen fijados y recursos publicados alineados para las seis plataformas, incluida Windows ARM64",
     new_0_8_1_1: "Eliminada la toma de foco nativo en la automatización del navegador y aislado el renderizado de pestañas en segundo plano del árbol de foco principal para reducir interferencias con la entrada del usuario (#3594)",
     new_0_8_1_2: "Los perfiles del navegador se guardan con archivos temporales independientes para evitar colisiones entre escrituras simultáneas de varias instancias (#3594)",
     new_0_8_1_3: "Mejoradas las instrucciones de asignación del asistente: ampliaciones, cambios y comentarios deben buscar y continuar primero la tarea original, incluso completada, conservando su Agent y conversación (#3601)",

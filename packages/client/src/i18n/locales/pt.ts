@@ -3565,6 +3565,7 @@ jobTriggered: 'Job acionado',
   },
 
   changelog: {
+    new_0_8_1_9: "Runtime Hermes padrão do Desktop atualizado para 0.22.5, com tag e commit de origem fixados e recursos publicados alinhados para as seis plataformas, incluindo Windows ARM64",
     new_0_8_1_1: "Removida a captura de foco nativo pela automação do navegador e isolada a renderização das abas em segundo plano da árvore de foco principal para reduzir interferências na entrada do usuário (#3594)",
     new_0_8_1_2: "Perfis do navegador usam arquivos temporários separados ao salvar, evitando colisões entre gravações simultâneas de várias instâncias (#3594)",
     new_0_8_1_3: "Orientações de tarefas do assistente aprimoradas: acréscimos, alterações e comentários devem primeiro consultar e continuar a tarefa original, inclusive concluída, preservando seu Agent e conversa (#3601)",

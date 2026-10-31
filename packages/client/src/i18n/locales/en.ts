@@ -3982,6 +3982,7 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_1_9: "Upgraded the default desktop Hermes runtime to 0.22.5, pinned its source tag and commit, and aligned published runtime assets for all six platforms, including Windows ARM64",
     new_0_8_1_1: "Removed native focus acquisition from built-in browser automation and isolated background-tab rendering from the main window focus tree to reduce interference with user input (#3594)",
     new_0_8_1_2: "Browser profile saves use separate temporary files to avoid concurrent writes colliding across store instances (#3594)",
     new_0_8_1_3: "Improved assistant task-routing guidance: additions, changes and feedback first query and continue the original task, including completed tasks, preserving its Agent and conversation (#3601)",

@@ -3565,6 +3565,7 @@ jobTriggered: 'Job declenche',
   },
 
   changelog: {
+    new_0_8_1_9: "Runtime Hermes par défaut de Desktop mis à niveau vers 0.22.5, avec tag et commit source figés et ressources publiées alignées pour les six plateformes, dont Windows ARM64",
     new_0_8_1_1: "Suppression de la prise de focus natif par l’automatisation du navigateur et isolation du rendu des onglets en arrière-plan hors de l’arbre de focus principal pour limiter les interférences avec la saisie (#3594)",
     new_0_8_1_2: "La sauvegarde des profils navigateur utilise des fichiers temporaires distincts pour éviter les collisions entre écritures simultanées de plusieurs instances (#3594)",
     new_0_8_1_3: "Consignes de routage améliorées : les ajouts, modifications et retours doivent d’abord rechercher et poursuivre la tâche initiale, même terminée, avec le même Agent et la même conversation (#3601)",

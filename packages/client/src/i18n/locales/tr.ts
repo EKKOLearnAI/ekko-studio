@@ -163,6 +163,7 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_1_9: "Masaüstü varsayılan Hermes runtime 0.22.5 sürümüne yükseltildi, kaynak tag ve commit sabitlendi; Windows ARM64 dahil altı platformun yayımlanmış runtime dosyalarıyla eşleştirildi",
     new_0_8_1_1: "Tarayıcı otomasyonunun yerel odak alması kaldırıldı; arka plan sekmelerinin çizimi ana pencerenin odak ağacından ayrılarak kullanıcı girişine müdahale azaltıldı (#3594)",
     new_0_8_1_2: "Tarayıcı profilleri ayrı geçici dosyalarla kaydedilerek birden çok örneğin eşzamanlı yazma çakışmaları önlendi (#3594)",
     new_0_8_1_3: "Asistan görev yönlendirme talimatları geliştirildi: ek istek, değişiklik ve geri bildirimlerde tamamlanmış olsa da önce özgün görev aranıp sürdürülür; aynı Agent ve konuşma korunması yönlendirilir (#3601)",
