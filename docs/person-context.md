@@ -268,7 +268,8 @@ Person's conversation/history index, tasks and ordinary chat data are retained.
 Regression coverage includes the recorded `名字 称呼 姓名` search failure,
 controlled-name lookup, automatic recall, evidence provenance, Profile changes,
 account isolation, stale corrections/deletion, callback injection and the full
-toolset under the minimum 8k request budget.
+toolset under a 10k model request budget. This is the full-toolset validation
+budget; runtime capacity still follows the selected model's context window.
 
 ## Stopping a task
 

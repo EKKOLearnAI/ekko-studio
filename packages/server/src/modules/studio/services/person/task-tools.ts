@@ -136,7 +136,7 @@ export function personTaskTools(userId: number, currentSessionId: string): Perso
       }
     },
   })
-  const query = define('bot_tasks_query', 'List/search tasks; exact task_id for details. Use fresh task_ref/allowed_actions. assignable=true lists adoptable goals.', {
+  const query = define('bot_tasks_query', 'List/search tasks, including completed ones; exact task_id for details. Query existing work before routing follow-ups. Use fresh task_ref/allowed_actions. assignable=true lists adoptable goals.', {
     session_id: { ...text(100), description: 'Conversation filter.' },
     task_id: { ...text(100), type: ['string', 'null'], minLength: 0 }, search: { ...text(200), minLength: 0 }, offset: { type: 'integer', minimum: 0 }, assignable: { type: 'boolean' },
   }, [], async args => {
@@ -151,12 +151,12 @@ export function personTaskTools(userId: number, currentSessionId: string): Perso
     const tasks = listPersonTasks(userId, String(args.search || ''), offset, { limit: 11, sessionId: args.session_id ? requirePersonSession(userId, String(args.session_id)).id : undefined })
     return { tasks: tasks.slice(0, 10).map(task => expose(task)), next_offset: tasks.length > 10 ? offset + 10 : null }
   })
-  const create = define('bot_task_create', 'Background execution for THIS role only, never message forwarding. agent_id from bot_agents_list. Starts unless start=false. Other roles: bot_flow_create.', {
+  const create = define('bot_task_create', 'New background task for THIS role only, never message forwarding. For additions, changes, fixes or feedback on existing work, query and continue the original task, even if completed. Create only for an independent goal, an explicit separate-task request, or verified inability to continue (explain why). agent_id from bot_agents_list. Starts unless start=false. Other roles: bot_flow_create.', {
     session_id: { ...text(100), description: 'Omit; only the current conversation is allowed.' }, title: text(200), goal: text(8000), agent_id: text(100), start: { type: 'boolean' },
     remember_result: { type: 'boolean', description: 'Remember at current user request.' },
   }, ['title', 'goal'], (args, origin) => execute({ action: 'create', session_id: currentSessionId, ...args }, origin))
-  const control = define('bot_task_control', 'Use fresh task_ref/allowed_actions. advance follows legacy route; continue preserves Agent/owner. Only creator reopens stopped legacy flows.', {
-    task_ref: text(100), action: { ...text(30), enum: Object.keys(actionFields) }, session_id: { ...text(100), description: 'Adopt only, current conversation only.' }, goal: { ...text(8000), description: 'Adopt/update only.' }, message: { ...text(32000), description: 'continue: follow-up; advance: outcome and artifacts (max 4000).' }, agent_id: text(100), start: { type: 'boolean' },
+  const control = define('bot_task_control', 'Use fresh task_ref/allowed_actions. Default to continue for follow-ups on existing work, including completed tasks; it preserves the original Agent, owner and conversation. advance follows legacy route. Only creator reopens stopped legacy flows.', {
+    task_ref: text(100), action: { ...text(30), enum: Object.keys(actionFields) }, session_id: { ...text(100), description: 'Adopt only, current conversation only.' }, goal: { ...text(8000), description: 'Adopt/update only.' }, message: { ...text(32000), description: 'continue: new requirements, changes, fixes or feedback for the original Agent in its existing conversation; advance: outcome and artifacts (max 4000).' }, agent_id: text(100), start: { type: 'boolean' },
     remember_result: { type: 'boolean', description: 'adopt/start/continue only.' },
   }, ['task_ref', 'action'], async (args, origin) => {
     const action = args.action as Action
