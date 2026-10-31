@@ -646,6 +646,7 @@ export async function handleEkkoAgentRun(
         role,
         content: storageText,
         timestamp: now,
+        queued: false,
       },
     })
   }
@@ -969,6 +970,7 @@ export async function handleEkkoAgentRun(
         model: modelConfig.model,
         provider: modelConfig.provider,
         queue_id: data.queue_id,
+        queue_length: state.queue.length,
         autonomous: data.autonomous === true,
         delegation_id: data.background_delegation_id,
       })

@@ -3326,6 +3326,18 @@ function createChatState(scopedSessionId?: string) {
     queuedUserMessages.value = nextMap
   }
 
+  function promoteStartedQueuedMessage(sessionId: string, queueId: string | undefined) {
+    if (!queueId) return
+    const queue = queuedUserMessages.value.get(sessionId) || []
+    const message = queue.find(item => item.id === queueId)
+    if (!message) return
+    replaceQueuedUserMessages(sessionId, queue.filter(item => item.id !== queueId))
+    if (!getSessionMsgs(sessionId).some(item => item.id === queueId)) {
+      addMessage(sessionId, { ...message, queued: false })
+      updateSessionTitle(sessionId)
+    }
+  }
+
   function markDequeuedQueueId(sessionId: string, messageId: string) {
     const nextMap = new Map(dequeuedQueueIds.value)
     const ids = new Set(nextMap.get(sessionId) || [])
@@ -4124,6 +4136,9 @@ function createChatState(scopedSessionId?: string) {
           if (eventRunMarker) activeRunMarker = eventRunMarker
           switch (evt.event) {
             case 'run.started':
+              // Optimistic queueing can race with the previous run finishing.
+              // A direct start then has no matching server dequeue event.
+              promoteStartedQueuedMessage(sid, evt.queue_id)
               clearSessionCompletedUnread(sid)
               serverWorking.value.add(sid)
               setRunStartedAt(sid, Date.now())
@@ -4829,6 +4844,7 @@ function createChatState(scopedSessionId?: string) {
         }
 
         case 'run.started':
+          promoteStartedQueuedMessage(sid, evt.queue_id)
           clearSessionCompletedUnread(sid)
           serverWorking.value.add(sid)
           setRunStartedAt(sid, Date.now())

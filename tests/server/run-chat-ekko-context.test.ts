@@ -236,7 +236,7 @@ describe('ekko-agent context usage events', () => {
       await approval
       return { runId: 'person-run', output: { role: 'assistant', content: 'Done' }, steps: [], messages: [], events: [] }
     })
-    await handleEkkoAgentRun(nsp as any, socket as any, { session_id: 'person-main-7', input: 'Prepare report', coding_agent_id: 'ekko-agent', resolved_mcp_servers: {},
+    await handleEkkoAgentRun(nsp as any, socket as any, { session_id: 'person-main-7', input: 'Prepare report', queue_id: 'person-input-7', coding_agent_id: 'ekko-agent', resolved_mcp_servers: {},
       onEvent: (event, payload) => events.push({ event, payload }) }, 'default', sessionMap, vi.fn(() => false))
     expect(sessionMap.get('person-main-7').ekkoBoundaryInterrupt).toBeUndefined()
     expect(createPersonChatAgentMock).toHaveBeenCalledWith(7, 'person-main-7', undefined)
@@ -244,6 +244,13 @@ describe('ekko-agent context usage events', () => {
     expect(buildCompressedHistoryMock).not.toHaveBeenCalled()
     expect(addMessageMock).toHaveBeenCalledWith(expect.objectContaining({ session_id: 'person-main-7', role: 'user', content: 'Prepare report' }))
     expect(addMessageMock).toHaveBeenCalledWith(expect.objectContaining({ session_id: 'person-main-7', role: 'assistant', content: 'Done' }))
+    expect(events).toContainEqual({ event: 'run.started', payload: expect.objectContaining({
+      session_id: 'person-main-7', queue_id: 'person-input-7', queue_length: 0,
+    }) })
+    expect(socket.to).toHaveBeenCalledWith('session:person-main-7')
+    expect(socket.to('session:person-main-7').emit).toHaveBeenCalledWith('run.peer_user_message', expect.objectContaining({
+      message: expect.objectContaining({ id: 'person-input-7', queued: false }),
+    }))
     expect(events.map(e => e.event)).toContain('run.completed')
     expect(events.map(e => e.event)).not.toContain('run.failed')
   })

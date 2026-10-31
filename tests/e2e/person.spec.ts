@@ -1423,6 +1423,55 @@ async function emitted(page: Page, event: string) {
   return page.evaluate(event => (window as any).__PW_CHAT_SOCKET__.emitted.filter((e: any) => e.event === event).map((e: any) => e.payload), event)
 }
 
+for (const scenario of ['active', 'resumed'] as const) {
+  test(`Person clears a started input from the queue (${scenario})`, async ({ page }) => {
+    await setup(page, scenario === 'active' ? 'light' : 'dark', false)
+    if (scenario === 'resumed') {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.addInitScript(() => {
+        Object.assign((window as any).__PW_CHAT_SOCKET_RESUMES__['person-main-1'], {
+          isWorking: true, queueLength: 2, queueMessages: [
+            { id: 'follow-up-1', role: 'user', content: 'First queued follow-up', timestamp: 1 },
+            { id: 'follow-up-2', role: 'user', content: 'Later queued follow-up', timestamp: 2 },
+          ],
+        })
+      })
+    }
+    await page.goto('/#/person?session=person-main-1')
+    const queue = page.locator('.queue-float-panel')
+    let queueId = 'follow-up-1'
+    let text = 'First queued follow-up'
+    if (scenario === 'active') {
+      const input = page.locator('.person-compose .input-textarea')
+      await input.fill('Initial request')
+      await input.press('Enter')
+      await expect.poll(() => emitted(page, 'run').then(runs => runs.length)).toBe(1)
+      await emit(page, 'run.started', { queue_id: (await emitted(page, 'run'))[0].queue_id, queue_length: 0 })
+      text = 'Follow-up after the previous run'
+      await input.fill(text)
+      await input.press('Enter')
+      await expect.poll(() => emitted(page, 'run').then(runs => runs.length)).toBe(2)
+      queueId = (await emitted(page, 'run'))[1].queue_id
+    }
+    await expect(queue).toContainText(text)
+    await expect(page.locator('.msg-content.user').filter({ hasText: text })).toHaveCount(0)
+
+    // A direct start or a reconnect may have no matching run.queued dequeue.
+    await emit(page, 'run.started', { run_id: 'follow-up-run', queue_id: queueId, queue_length: scenario === 'resumed' ? 1 : 0 })
+    if (scenario === 'active') await expect(queue).toHaveCount(0)
+    else {
+      await expect(queue.locator('.queue-float-item')).toHaveCount(1)
+      await expect(queue).toContainText('Later queued follow-up')
+      await expect(queue).not.toContainText(text)
+    }
+    await emit(page, 'run.peer_user_message', { message: { id: queueId, role: 'user', content: text, timestamp: 3 } })
+    await expect(page.locator('.msg-content.user').filter({ hasText: text })).toHaveCount(1)
+    await expect(page.locator('.person-view')).toHaveAttribute('aria-busy', 'false')
+    await expect(page.locator('.page-loading-overlay')).toHaveCount(0)
+    await page.screenshot({ path: test.info().outputPath('queue-started.png'), animations: 'disabled' })
+  })
+}
+
 test('Person displays a delivered screenshot while keeping the artifact tool hidden', async ({ page }) => {
   await setup(page, 'light', false)
   const path = '/Users/tester/person/workspace/桌面 screenshot.png'
