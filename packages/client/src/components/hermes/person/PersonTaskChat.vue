@@ -9,6 +9,7 @@ import { buildContentBlocks, uploadFiles, type Attachment } from '@/stores/herme
 import { personRequest, personTaskCanStop, stopPersonTask, type PersonTask, type PersonExecutionSummary, type PersonTaskQueueState } from '@/api/person'
 import { onPersonUpdated } from '@/api/studio/chat'
 import type { SessionSummary } from '@/api/studio/sessions'
+import { createRefreshQueue } from '@/utils/refresh-queue'
 const props = defineProps<{ taskId: string; mainSessionId: string; executionId?: string }>()
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
@@ -28,38 +29,44 @@ const pending = ref<{ id: string; input: { type: string; text?: string; name?: s
 const queueState = ref<PersonTaskQueueState>({})
 const requestingInsertion = ref('')
 const ready = ref(false)
+const loading = ref(true)
+const loadError = ref(false)
 const closing = ref(false)
 const sending = ref(false)
 const stopping = ref(false)
 const error = ref('')
 const lifetime = new AbortController()
-let sequence = 0
 const disabled = computed(() => !ready.value || closing.value || sending.value || stopping.value || !!requestingInsertion.value || task.value?.execution_state === 'stopping' || task.value?.status === 'closed')
 const stopControl = computed(() => ({ active: selectedIsCurrent.value && personTaskCanStop(task.value), allowSend: true, pending: stopping.value || task.value?.execution_state === 'stopping', request: stopTask }))
-async function refresh(executionId = selectedExecutionId.value) {
-  const request = ++sequence
-  try {
-    const result = await personRequest<PersonTaskQueueState & { task: PersonTask; session: SessionSummary | null; pending?: typeof pending.value; execution: PersonExecutionSummary | null; executions: PersonExecutionSummary[] }>(`/tasks/${encodeURIComponent(props.taskId)}/chat${executionId ? `?execution_id=${encodeURIComponent(executionId)}` : ''}`, undefined, 'GET', lifetime.signal)
-    if (lifetime.signal.aborted || request !== sequence) return false
+const reads = createRefreshQueue({
+  load: (executionId, signal) => personRequest<PersonTaskQueueState & { task: PersonTask; session: SessionSummary | null; pending?: typeof pending.value; execution: PersonExecutionSummary | null; executions: PersonExecutionSummary[] }>(`/tasks/${encodeURIComponent(props.taskId)}/chat${executionId ? `?execution_id=${encodeURIComponent(executionId)}` : ''}`, undefined, 'GET', signal),
+  apply: result => {
     task.value = result.task; session.value = result.session; pending.value = result.pending || []
     queueState.value = result
     executions.value = result.executions; selectedExecutionId.value = result.execution?.id || ''
-    return true
-  } catch (e) { if (!lifetime.signal.aborted) error.value = String(e); return false }
-}
-const stopUpdates = onPersonUpdated(event => { if ((!event.session_id || event.session_id === props.mainSessionId) && ready.value) void refresh() })
-onMounted(async () => {
-  if (await refresh() && !lifetime.signal.aborted) ready.value = true
+    ready.value = true; loading.value = false; loadError.value = false
+  },
+  failed: () => { loading.value = false; loadError.value = true },
 })
+function refresh(executionId = selectedExecutionId.value) {
+  if (!ready.value) loading.value = true
+  loadError.value = false
+  return reads.refresh(executionId)
+}
+const stopUpdates = onPersonUpdated(event => {
+  if ((!event.session_id || event.session_id === props.mainSessionId) && !sending.value && !stopping.value && !requestingInsertion.value) void refresh()
+})
+onMounted(() => { void refresh() })
 async function send(text: string, attachments?: Attachment[]) {
   if (disabled.value || !task.value) return false
   sending.value = true; error.value = ''
+  reads.cancel()
   try {
     const input = await buildContentBlocks(text, attachments, await uploadFiles(attachments || []))
     const result = await personRequest<{ task: PersonTask; pending?: typeof pending.value }>(`/tasks/${encodeURIComponent(props.taskId)}/chat`, {
       input, execution_id: selectedExecutionId.value || undefined, expected_execution_id: task.value.execution_id || null, expected_revision: task.value.revision, idempotency_key: crypto.randomUUID(),
     }, 'POST', lifetime.signal)
-    sequence++; task.value = result.task; pending.value = result.pending || []
+    task.value = result.task; pending.value = result.pending || []
     await refresh()
     return true
   } catch (e) { if (!lifetime.signal.aborted) { error.value = String(e); await refresh() }; return false }
@@ -67,12 +74,12 @@ async function send(text: string, attachments?: Attachment[]) {
 }
 async function close() {
   if (closing.value) return
-  closing.value = true; lifetime.abort(); stopUpdates()
+  closing.value = true; reads.dispose(); lifetime.abort(); stopUpdates()
   emit('close')
 }
 async function insert(queueId: string) {
   if (disabled.value || !task.value || !selectedIsCurrent.value || !queueState.value.canInsert || requestingInsertion.value || queueState.value.insertion) return
-  requestingInsertion.value = queueId; error.value = ''; sequence++
+  requestingInsertion.value = queueId; error.value = ''; reads.cancel()
   try {
     await personRequest(`/tasks/${encodeURIComponent(props.taskId)}/queue/insert`, {
       queue_id: queueId, expected_execution_id: task.value.execution_id, expected_revision: task.value.revision, idempotency_key: crypto.randomUUID(),
@@ -82,13 +89,13 @@ async function insert(queueId: string) {
 }
 async function stopTask() {
   if (!selectedIsCurrent.value || !task.value || !personTaskCanStop(task.value) || stopping.value || task.value.execution_state === 'stopping') return
-  stopping.value = true; error.value = ''; sequence++
+  stopping.value = true; error.value = ''; reads.cancel()
   try {
     await stopPersonTask(task.value, lifetime.signal)
   } catch (e) { if (!lifetime.signal.aborted) error.value = String(e) }
   finally { if (!lifetime.signal.aborted) await refresh(); stopping.value = false }
 }
-onBeforeUnmount(() => { lifetime.abort(); stopUpdates() })
+onBeforeUnmount(() => { reads.dispose(); lifetime.abort(); stopUpdates() })
 </script>
 
 <template>
@@ -104,8 +111,11 @@ onBeforeUnmount(() => { lifetime.abort(); stopUpdates() })
         </NButton>
       </div></template>
       <NAlert v-if="error || queueState.insertionError" type="error" class="task-chat-alert">{{ error || queueState.insertionError }}</NAlert>
-      <div v-if="!ready" class="task-chat-loading"><NSpin /></div>
-      <template v-else>
+      <NAlert v-if="loadError" type="error" class="task-chat-alert">
+        {{ t('sessionTasks.loadFailed') }} <NButton size="small" @click="refresh()">{{ t('sessionTasks.retry') }}</NButton>
+      </NAlert>
+      <div v-if="loading && !ready" class="task-chat-loading"><NSpin /></div>
+      <template v-else-if="ready">
         <NSelect v-if="executionOptions.length > 1" class="task-executions" :value="session?.id" :options="executionOptions"
           :disabled="sending || stopping" :aria-label="t('person.executionHistory')" @update:value="value => refresh(executions.find(run => run.session_id === value)?.id)" />
         <PersonTaskConversation v-if="session" ref="conversationRef" :key="session.id" :session="session" :pending="pending" :send="send"

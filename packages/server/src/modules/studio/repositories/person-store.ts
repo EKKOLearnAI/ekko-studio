@@ -75,23 +75,30 @@ export function savePersonSettingsInTransaction(userId: number, settings: Person
   return personSettings(userId, sessionId)
 }
 const executionOrder = "CASE WHEN state IN ('finished','failed','interrupted') THEN 2 WHEN state='pending' THEN 1 ELSE 0 END,created_at DESC,rowid DESC"
+const taskExecutionJoin = `LEFT JOIN person_executions selected_execution ON selected_execution.id=(
+  SELECT id FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1)`
 const taskExecutionColumns = `
   json_extract(t.requirements_json, '$.creator_session_id') AS creator_session_id,
   (SELECT title FROM sessions s WHERE s.id=t.session_id) AS session_title,
-  (SELECT id FROM person_executions e WHERE e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1) AS execution_id,
-  COALESCE((SELECT state FROM person_executions e WHERE e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1),'idle') AS execution_state,
-  (SELECT COUNT(*) FROM person_executions e WHERE e.task_id=t.id AND e.state='pending') AS pending_count,
-  EXISTS(SELECT 1 FROM person_executions e WHERE e.task_id=t.id AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
-    OR EXISTS(SELECT 1 FROM person_deliveries d JOIN person_executions e ON e.id=d.execution_id WHERE e.task_id=t.id AND d.state IN ('pending','queued')) AS running`
+  selected_execution.id AS execution_id,
+  COALESCE(selected_execution.state,'idle') AS execution_state,
+  (SELECT COUNT(*) FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state='pending') AS pending_count,
+  EXISTS(SELECT 1 FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
+    OR EXISTS(SELECT 1 FROM person_deliveries d JOIN person_executions e ON e.id=d.execution_id WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND d.state IN ('pending','queued')) AS running`
 export function getPersonTask(userId: number, id: string): PersonTask {
-  const task = personDb().prepare(`SELECT t.*, ${taskExecutionColumns} FROM session_tasks t WHERE id=? AND owner_user_id=? AND bot_id=?`).get(id, userId, `person:${userId}`) as unknown as PersonTask | undefined
+  const task = personDb().prepare(`SELECT t.*, ${taskExecutionColumns} FROM session_tasks t ${taskExecutionJoin} WHERE t.id=? AND t.owner_user_id=? AND t.bot_id=?`).get(id, userId, `person:${userId}`) as unknown as PersonTask | undefined
   if (!task) throw personError('Task not found', 404)
   return task
 }
 export function listPersonTasks(userId: number, search = '', offset = 0, options: { status?: string; order?: string; limit?: number; sessionId?: string } = {}): PersonTask[] {
+  const filters = ['t.owner_user_id=?', 't.bot_id=?']
+  const params: (string | number)[] = [userId, `person:${userId}`]
+  if (search) { filters.push('(instr(lower(t.title),lower(?))>0 OR instr(lower(t.summary),lower(?))>0)'); params.push(search, search) }
+  if (options.sessionId) { filters.push('t.session_id=?'); params.push(options.sessionId) }
+  if (options.status) { filters.push('t.status=?'); params.push(options.status) }
   return personDb().prepare(`SELECT t.*, ${taskExecutionColumns}
-    FROM session_tasks t WHERE owner_user_id=? AND bot_id=? AND (instr(lower(title),lower(?))>0 OR instr(lower(summary),lower(?))>0)
-    AND (?='' OR t.session_id=?) AND (?='' OR status=?) ORDER BY updated_at ${options.order === 'oldest' ? 'ASC' : 'DESC'},id LIMIT ? OFFSET ?`).all(userId, `person:${userId}`, search, search, options.sessionId || '', options.sessionId || '', options.status || '', options.status || '', Math.max(1, Math.min(100, Number(options.limit) || 20)), offset) as unknown as PersonTask[]
+    FROM session_tasks t ${taskExecutionJoin} WHERE ${filters.join(' AND ')}
+    ORDER BY t.updated_at ${options.order === 'oldest' ? 'ASC' : 'DESC'},t.id LIMIT ? OFFSET ?`).all(...params, Math.max(1, Math.min(100, Number(options.limit) || 20)), offset) as unknown as PersonTask[]
 }
 export function createPersonTask(userId: number, title: string, requirements: string, selection: PersonSelection, workspace: string, sessionId: string): PersonTask {
   requirePersonSession(userId, sessionId)
@@ -160,7 +167,7 @@ export function taskPersonConversations(userId: number, taskId: string) {
   getPersonTask(userId, taskId)
   return personDb().prepare(`SELECT id,session_id,state,created_at,occurrence_id FROM person_executions e
     WHERE owner_user_id=? AND task_id=? AND rowid=(SELECT rowid FROM person_executions latest
-      WHERE latest.session_id=e.session_id ORDER BY created_at DESC,rowid DESC LIMIT 1)
+      WHERE latest.session_id=e.session_id AND latest.owner_user_id=e.owner_user_id AND latest.task_id=e.task_id ORDER BY created_at DESC,rowid DESC LIMIT 1)
     ORDER BY created_at DESC,rowid DESC LIMIT 20`).all(userId,taskId) as unknown as Pick<PersonExecution,'id'|'session_id'|'state'|'created_at'|'occurrence_id'>[]
 }
 export function setPersonExecution(run: PersonExecution, state: PersonRunState, extra: { output?: string; error?: string } = {}): boolean {
@@ -234,7 +241,8 @@ export function personBackgroundPendingCount(sessionId: string, reportingExecuti
     .get(sessionId, reportingExecutionId) as { n: number }).n)
 }
 export function personTaskRunning(taskId: string): boolean {
-  return !!personDb().prepare(`SELECT 1 FROM person_executions e WHERE e.task_id=? AND
+  return !!personDb().prepare(`SELECT 1 FROM session_tasks t JOIN person_executions e
+    ON e.task_id=t.id AND e.owner_user_id=t.owner_user_id WHERE t.id=? AND
     (e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')
       OR EXISTS(SELECT 1 FROM person_deliveries d WHERE d.execution_id=e.id AND d.state IN ('pending','queued'))) LIMIT 1`).get(taskId)
 }

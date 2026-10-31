@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NSpin } from 'naive-ui'
+import { NAlert, NButton, NSpin } from 'naive-ui'
 import type { SessionSummary } from '@/api/studio/sessions'
 import MessageList from '@/components/hermes/chat/MessageList.vue'
 import ChatInput from '@/components/hermes/chat/ChatInput.vue'
@@ -22,21 +22,33 @@ const props = defineProps<{
 const { t } = useI18n()
 const store = provideScopedChatStore(props.session.id)
 const ready = ref(false)
+const loading = ref(true)
+const failed = ref(false)
+let disposed = false
 const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
 const queueItems = computed(() => props.pending.map(item => ({ id: item.id, text: item.input.map(block => block.text || block.name || '').join(' ') })))
 const activeInsertId = computed(() => props.requestingInsertion || props.insertion?.queueId || null)
 const insertTitle = () => t(props.insertion?.phase === 'waiting_for_tool_batch' ? 'chat.queueInsertionWaitingTools' : activeInsertId.value ? 'chat.queueInsertionStopping' : 'chat.insertQueuedMessage')
 defineExpose({ addFiles: (files: File[]) => chatInputRef.value?.addFiles(files) })
-onMounted(async () => {
-  store.ensureSessionLoaded(props.session)
-  await store.switchSession(props.session.id)
-  ready.value = true
-})
+async function load() {
+  loading.value = true; failed.value = false
+  try {
+    store.ensureSessionLoaded(props.session)
+    const loaded = await store.switchSession(props.session.id)
+    if (!disposed) { ready.value = loaded; failed.value = !loaded }
+  } catch { if (!disposed) failed.value = true }
+  finally { if (!disposed) loading.value = false }
+}
+onMounted(load)
+onBeforeUnmount(() => { disposed = true })
 </script>
 
 <template>
-  <NSpin v-if="!ready" />
-  <template v-else>
+  <NSpin v-if="loading" />
+  <NAlert v-else-if="failed" type="error">
+    {{ t('sessionTasks.loadFailed') }} <NButton size="small" @click="load">{{ t('sessionTasks.retry') }}</NButton>
+  </NAlert>
+  <template v-else-if="ready">
     <MessageList />
     <div v-if="pending.length" class="task-chat-queue" role="status">
       <MessageQueueFloatPanel :items="queueItems" :can-insert="canInsert" :can-remove="false" :active-insert-id="activeInsertId" :insert-title="insertTitle" @insert="insert" />

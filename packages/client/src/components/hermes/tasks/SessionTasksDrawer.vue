@@ -9,6 +9,7 @@ import { personRequest, personTaskCanStop, stopPersonTask, type PersonTask } fro
 import { onPersonUpdated } from '@/api/studio/chat'
 import { useTaskDrawerLayout } from './useTaskDrawerLayout'
 import { chatSessionAgentAvatar, PERSON_AVATAR } from '@/utils/chat-agent-avatar'
+import { createRefreshQueue } from '@/utils/refresh-queue'
 
 const props = defineProps<{ show: boolean; person?: boolean; personSessionId?: string }>()
 const emit = defineEmits<{ 'update:show': [show: boolean]; 'open-person-task': [task: PersonTask] }>()
@@ -40,7 +41,6 @@ const taskStatusOptions = computed(() => [
   { key: 'closed', label: t('sessionTasks.closed') },
 ])
 const statusOptions = computed(() => [{ key: '', label: t('sessionTasks.all') }, ...taskStatusOptions.value])
-let requestSequence = 0
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 let disposed = false
@@ -49,25 +49,29 @@ function updateQuery(change: Record<string, string | undefined>) {
   return router.replace({ query: { ...route.query, taskPage: undefined, ...change } })
 }
 
-async function load(silent = false) {
-  const sequence = ++requestSequence
-  if (!silent) loading.value = true
-  error.value = false
-  try {
-    const query = { search: typeof route.query.taskSearch === 'string' ? route.query.taskSearch : '',
-      status: status.value, order: order.value, page: page.value }
-    const result = props.person ? await loadPersonTasks(query) : await fetchSessionTasks(query)
-    if (disposed || sequence !== requestSequence || !props.show) return
+type TaskQuery = { search: string; status: string; order: string; page: number; person?: boolean; sessionId?: string }
+const reads = createRefreshQueue<{ tasks: TaskRow[]; total: number }>({
+  load: (key, signal) => {
+    const query: TaskQuery = JSON.parse(key)
+    return query.person ? loadPersonTasks(query, signal) : fetchSessionTasks(query, signal)
+  },
+  apply: result => {
+    if (disposed || !props.show) return
     tasks.value = result.tasks
     total.value = result.total
+    error.value = false; loading.value = false
     if (!props.person && page.value > 1 && !result.tasks.length && result.total > 0) {
-      await updateQuery({ taskPage: String(Math.ceil(result.total / 50)) })
+      void updateQuery({ taskPage: String(Math.ceil(result.total / 50)) })
     }
-  } catch {
-    if (!disposed && sequence === requestSequence && props.show) error.value = true
-  } finally {
-    if (!disposed && sequence === requestSequence) loading.value = false
-  }
+  },
+  failed: () => { if (!disposed && props.show) { error.value = !tasks.value.length; loading.value = false } },
+})
+function load(silent = false) {
+  if (!silent) { loading.value = true; tasks.value = [] }
+  error.value = false
+  const query: TaskQuery = { search: typeof route.query.taskSearch === 'string' ? route.query.taskSearch : '',
+    status: status.value, order: order.value, page: page.value, person: props.person, sessionId: props.personSessionId }
+  return reads.refresh(JSON.stringify(query))
 }
 
 function refresh() {
@@ -76,11 +80,11 @@ function refresh() {
 async function changeStatus(task: TaskRow, value: string | number) {
   if (task.personTask?.running || savingIds.value.has(task.id) || value === task.status || !['open', 'completed', 'closed'].includes(String(value))) return
   savingIds.value = new Set([...savingIds.value, task.id])
-  requestSequence++
+  reads.cancel()
   try {
     if (task.personTask) await personRequest('/tasks/apply', { task_id: task.id, action: value === 'closed' ? 'close' : 'reopen', expected_revision: task.personTask.revision, idempotency_key: crypto.randomUUID() })
     else await updateSessionTaskStatus(task, value as SessionTaskStatus)
-    requestSequence++
+    reads.cancel()
     if (!disposed && props.show) await load(true)
   } catch {
     if (!disposed) message.error(t('sessionTasks.updateFailed'))
@@ -98,7 +102,7 @@ async function openSearch() {
 async function stopTask(task: TaskRow) {
   const person = task.personTask
   if (!person || !personTaskCanStop(person) || person.execution_state === 'stopping' || savingIds.value.has(task.id)) return
-  savingIds.value = new Set([...savingIds.value, task.id]); requestSequence++
+  savingIds.value = new Set([...savingIds.value, task.id]); reads.cancel()
   try { await stopPersonTask(person) }
   catch { if (!disposed) message.error(t('sessionTasks.updateFailed')) }
   finally {
@@ -132,8 +136,8 @@ function rowStatus(task: TaskRow) {
   return t(`person.states.${state}`)
 }
 function openTask(task: TaskRow) { if (task.personTask) emit('open-person-task', task.personTask) }
-async function loadPersonTasks(query: { search: string; status: string; order: string }) {
-  const result = await personRequest<{ tasks: PersonTask[] }>('/tasks/query', { ...query, session_id: props.personSessionId, limit: 100 })
+async function loadPersonTasks(query: TaskQuery, signal: AbortSignal) {
+  const result = await personRequest<{ tasks: PersonTask[] }>('/tasks/query', { search: query.search, status: query.status, order: query.order, session_id: query.sessionId, limit: 100 }, 'POST', signal)
   return { total: result.tasks.length, tasks: result.tasks.map(task => {
     const selection = JSON.parse(task.selection_json || '{}')
     return { id: task.id, title: task.title, summary: task.summary, status: task.status as SessionTaskStatus,
@@ -142,7 +146,7 @@ async function loadPersonTasks(query: { search: string; status: string; order: s
       agent: selection.runtime === 'ekko' ? 'ekko-agent' : selection.runtime || 'ekko-agent', personTask: task }
   }) }
 }
-const stopPersonUpdates = onPersonUpdated(() => { if (props.person) refresh() })
+const stopPersonUpdates = onPersonUpdated(event => { if (props.person && (!event.session_id || event.session_id === props.personSessionId)) refresh() })
 function formatTime(timestamp: number, compact = false) {
   const sameDay = new Date(timestamp).toDateString() === new Date().toDateString()
   const options: Intl.DateTimeFormatOptions = compact
@@ -155,11 +159,10 @@ watch(search, () => {
   searchTimer = setTimeout(() => { if (props.show) void updateQuery({ taskSearch: search.value.trim() || undefined }) }, 200)
 })
 watch([() => props.show, () => props.personSessionId, () => route.query.taskSearch, () => route.query.taskStatus, () => route.query.taskOrder, () => route.query.taskPage], () => {
-  requestSequence++
   const value = typeof route.query.taskSearch === 'string' ? route.query.taskSearch : ''
   if (search.value.trim() !== value) search.value = value
   if (props.show) void load()
-  else { clearTimeout(searchTimer); statusMenuOpen.value = false }
+  else { reads.cancel(); clearTimeout(searchTimer); statusMenuOpen.value = false }
 }, { immediate: true })
 onMounted(() => {
   window.addEventListener('keydown', handleKeydown, true)
@@ -170,7 +173,7 @@ onMounted(() => {
 onUnmounted(() => {
   stopPersonUpdates()
   disposed = true
-  requestSequence++
+  reads.dispose()
   clearTimeout(searchTimer)
   clearInterval(refreshTimer)
   window.removeEventListener('keydown', handleKeydown, true)

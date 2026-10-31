@@ -2434,3 +2434,93 @@ it('checks account/profile access while removal remains available without a usab
   allowedProfiles = []
   expect(() => removePersonTaskMessage(2, otherTask.id, { queue_id: otherRun.id, expected_execution_id: otherRun.id, expected_revision: 0, idempotency_key: 'other' })).toThrow('permission revoked')
 })
+
+describe('Person task loading reads', () => {
+  function seedRun(taskId: string, id: string, state: string, createdAt: number, sessionId = 'person-task-loading', owner = 1) {
+    db.prepare(`INSERT INTO person_executions(id,task_id,owner_user_id,requirements_revision,state,session_id,selection_json,created_at,updated_at)
+      VALUES (?,?,?,1,?,?,?,?,?)`).run(id, taskId, owner, state, sessionId, JSON.stringify(selection), createdAt, createdAt)
+  }
+
+  it('keeps active/pending/terminal priority, rowid ties, delivery activity and account boundaries', () => {
+    const task = store.createPersonTask(1, 'Priority', 'Check ordering', selection, dir, 'person-main-1')
+    seedRun(task.id, 'active', 'running', 1)
+    seedRun(task.id, 'pending', 'pending', 2)
+    seedRun(task.id, 'finished', 'finished', 3)
+    expect(store.getPersonTask(1, task.id)).toMatchObject({ execution_id: 'active', execution_state: 'running', pending_count: 1, running: 1 })
+    db.prepare("UPDATE person_executions SET state='finished' WHERE id='active'").run()
+    expect(store.getPersonTask(1, task.id).execution_id).toBe('pending')
+    db.prepare("UPDATE person_executions SET state='finished' WHERE id='pending'").run()
+    seedRun(task.id, 'tie', 'failed', 3)
+    expect(store.getPersonTask(1, task.id)).toMatchObject({ execution_id: 'tie', execution_state: 'failed', running: 0 })
+    db.prepare("INSERT INTO person_deliveries(execution_id,owner_user_id,origin_json,state,updated_at) VALUES ('finished',1,'{}','pending',1)").run()
+    expect(store.getPersonTask(1, task.id).running).toBe(1)
+    expect(store.personTaskRunning(task.id)).toBe(true)
+    expect(store.listPersonTasks(1)[0].execution_id).toBe('tie')
+    expect(store.listPersonTasks(2)).toEqual([])
+    expect(() => store.getPersonTask(2, task.id)).toThrow('not found')
+  })
+
+  it('preserves scoped search, status, sorting and offset while using bounded execution lookups', () => {
+    const first = store.createPersonTask(1, 'First needle', 'Search summary', selection, dir, 'person-main-1')
+    const second = store.createPersonTask(1, 'Second', 'Contains NEEDLE', selection, dir, 'person-main-1')
+    store.createPersonTask(2, 'Foreign needle', 'Excluded', selection, dir, 'person-main-2')
+    db.prepare('UPDATE session_tasks SET updated_at=10 WHERE id=?').run(first.id)
+    db.prepare("UPDATE session_tasks SET updated_at=20,status='completed' WHERE id=?").run(second.id)
+    expect(store.listPersonTasks(1, 'needle', 0, { order: 'oldest', limit: 1 }).map(x => x.id)).toEqual([first.id])
+    expect(store.listPersonTasks(1, 'needle', 1, { order: 'oldest', limit: 1 }).map(x => x.id)).toEqual([second.id])
+    expect(store.listPersonTasks(1, 'needle', 0, { status: 'completed' }).map(x => x.id)).toEqual([second.id])
+    expect(store.listPersonTasks(1, '', 0, { sessionId: 'person-main-2' })).toEqual([])
+    const prepare = vi.spyOn(db, 'prepare')
+    store.listPersonTasks(1, '', 0, { sessionId: 'person-main-1' })
+    const sql = prepare.mock.calls.find(([sql]) => sql.startsWith('SELECT t.*'))![0]
+    prepare.mockRestore()
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(1, 'person:1', 'person-main-1', 20, 0).map(x => String(x.detail)).join('\n')
+    expect(plan).toContain('idx_person_session_goals')
+    expect(plan).toContain('idx_person_execution_order')
+    expect(plan).not.toMatch(/SCAN e\b/)
+  })
+
+  it('finds the latest execution in a long conversation without repeated inner sorting', () => {
+    const task = store.createPersonTask(1, 'Long conversation', 'Read latest', selection, dir, 'person-main-1')
+    db.exec('BEGIN')
+    for (let i = 0; i < 1500; i++) seedRun(task.id, `long-${i}`, 'finished', i)
+    seedRun(task.id, 'newest-tie', 'finished', 1499)
+    db.exec('COMMIT')
+    const prepare = vi.spyOn(db, 'prepare')
+    expect(store.taskPersonConversations(1, task.id).map(x => x.id)).toEqual(['newest-tie'])
+    const sql = prepare.mock.calls.find(([sql]) => sql.startsWith('SELECT id,session_id,state,created_at,occurrence_id FROM person_executions e'))![0]
+    prepare.mockRestore()
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(1, task.id).map(x => String(x.detail)).join('\n')
+    expect(plan).toContain('idx_person_conversation_latest')
+    expect(plan).not.toContain('USE TEMP B-TREE FOR ORDER BY')
+    expect(() => store.taskPersonConversations(2, task.id)).toThrow('not found')
+  })
+
+  it('reads an effective snapshot with SQLite writes disabled and synchronizes only changed run metadata', async () => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const { ensurePersonSession } = await import('../../packages/server/src/modules/studio/services/person/chat-agent')
+    db.prepare("UPDATE sessions SET model='old',provider='old',workspace='/old' WHERE id='person-main-1'").run()
+    const stored = db.prepare("SELECT * FROM sessions WHERE id='person-main-1'").get()
+    const changes = () => Number(db.prepare('SELECT total_changes() AS n').get()!.n)
+    const before = changes()
+    db.exec('PRAGMA query_only=ON')
+    try {
+      const snapshot = await personSnapshot(1, 'person-main-1')
+      expect(snapshot.session).toMatchObject({ model: 'm', provider: 'test', workspace: dir })
+      expect(db.prepare("SELECT * FROM sessions WHERE id='person-main-1'").get()).toEqual(stored)
+      expect(changes()).toBe(before)
+    } finally { db.exec('PRAGMA query_only=OFF') }
+    await ensurePersonSession(1, 'person-main-1')
+    expect(db.prepare("SELECT model,workspace FROM sessions WHERE id='person-main-1'").get()).toMatchObject({ model: 'm', workspace: dir })
+    const synchronized = changes()
+    await ensurePersonSession(1, 'person-main-1')
+    expect(changes()).toBe(synchronized)
+  })
+
+  it('keeps running-session metadata in a snapshot without changing or reconfiguring it', async () => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    db.prepare("UPDATE sessions SET model='running-model',workspace='/running' WHERE id='person-main-1'").run()
+    mainBusy = 'person-main-1'
+    expect((await personSnapshot(1, 'person-main-1')).session).toMatchObject({ model: 'running-model', workspace: '/running' })
+  })
+})

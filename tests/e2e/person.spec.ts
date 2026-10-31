@@ -1874,6 +1874,86 @@ test('Person uses the single-chat task drawer with search and filters but no pag
 })
 
 for (const mode of ['light', 'dark'] as const) {
+  test(`Person task loading recovers and coalesces detail updates in ${mode}`, async ({ page }, testInfo) => {
+    const { state } = await setup(page, mode, mode === 'light', false)
+    if (mode === 'dark') await page.setViewportSize({ width: 390, height: 844 })
+    await page.addInitScript(() => {
+      (window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1'] = {
+        session_id: 'person-task-task1', messages: [{ id: 'result', role: 'assistant', content: 'Recovered task output', timestamp: 1 }], isWorking: false, events: [],
+      }
+    })
+    let attempts = 0
+    await page.route('**/api/studio/person/tasks/task1/chat**', route => {
+      if (++attempts === 1) return route.fulfill({ status: 503, json: { error: 'Temporary failure' } })
+      return route.fallback()
+    })
+    await page.goto('/#/person')
+    await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+    await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+    const drawer = page.locator('.person-task-chat')
+    await expect(drawer.getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
+    await expect(drawer.locator('.task-chat-loading')).toHaveCount(0)
+    await page.screenshot({ path: testInfo.outputPath('detail-load-error.png') })
+    await drawer.getByRole('button', { name: 'Retry', exact: true }).click()
+    await expect(drawer.getByText('Recovered task output', { exact: true })).toBeVisible()
+    await expect(drawer.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0)
+
+    let reads = 0, releaseFirst!: () => void, releaseNext!: () => void
+    const first = new Promise<void>(resolve => { releaseFirst = resolve })
+    const next = new Promise<void>(resolve => { releaseNext = resolve })
+    await page.route('**/api/studio/person/tasks/task1/chat**', async route => {
+      reads++
+      if (reads === 1) await first
+      if (reads === 2) await next
+      await route.fallback()
+    })
+    await page.evaluate(() => {
+      for (let i = 0; i < 20; i++) (window as any).__PW_CHAT_SOCKET__.broadcast('person.updated', { session_id: 'person-main-1' })
+    })
+    await expect.poll(() => reads).toBe(1)
+    state.tasks[0].title = 'First update'; releaseFirst()
+    await expect.poll(() => reads).toBe(2)
+    await expect(drawer.locator('.task-chat-heading')).toContainText('First update')
+    await expect(drawer.getByText('Recovered task output', { exact: true })).toBeVisible()
+    state.tasks[0].title = 'Latest update'; releaseNext()
+    await expect(drawer.locator('.task-chat-heading')).toContainText('Latest update')
+    expect(reads).toBe(2)
+    await page.screenshot({ path: testInfo.outputPath('detail-load-recovered.png') })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  })
+
+  test(`Person task loading publishes the first list response during an update burst in ${mode}`, async ({ page }, testInfo) => {
+    await setup(page, mode, mode === 'light', false)
+    if (mode === 'dark') await page.setViewportSize({ width: 390, height: 844 })
+    let reads = 0, releaseFirst!: () => void, releaseNext!: () => void
+    const first = new Promise<void>(resolve => { releaseFirst = resolve })
+    const next = new Promise<void>(resolve => { releaseNext = resolve })
+    await page.route('**/api/studio/person/tasks/query', async route => {
+      reads++
+      if (reads === 1) await first
+      if (reads === 2) await next
+      await route.fallback()
+    })
+    await page.goto('/#/person')
+    await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+    await expect.poll(() => reads).toBe(1)
+    await page.evaluate(() => {
+      for (let i = 0; i < 20; i++) (window as any).__PW_CHAT_SOCKET__.broadcast('person.updated', { session_id: 'person-main-1' })
+    })
+    expect(reads).toBe(1)
+    releaseFirst()
+    const drawer = page.locator('.session-tasks-drawer')
+    await expect(drawer.locator('.task-row')).toHaveCount(1)
+    await expect.poll(() => reads).toBe(2)
+    await expect(drawer.locator('table')).toHaveAttribute('aria-busy', 'false')
+    await page.screenshot({ path: testInfo.outputPath('list-during-followup.png') })
+    releaseNext()
+    await expect(drawer.getByRole('button', { name: 'View in conversation: Check report', exact: true })).toBeVisible()
+    expect(reads).toBe(2)
+  })
+}
+
+for (const mode of ['light', 'dark'] as const) {
   test(`stops a Person task from the list and waits for acknowledgement in ${mode}`, async ({ page }) => {
     const { state, operations } = await setup(page, mode)
     if (mode === 'dark') await page.setViewportSize({ width: 390, height: 844 })
