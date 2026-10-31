@@ -134,18 +134,30 @@ function quoteForWindowsCommand(value) {
   return `"${value.replace(/"/g, '""')}"`
 }
 
-function spawnCli(command, args, options) {
-  if (process.platform === 'win32') {
-    const lowerCommand = String(command).toLowerCase()
-    if (!lowerCommand.endsWith('.cmd') && !lowerCommand.endsWith('.bat')) {
-      return spawn(command, args, options)
-    }
+function isWindowsBatchFile(command) {
+  const lowerCommand = String(command).toLowerCase()
+  return process.platform === 'win32' && (lowerCommand.endsWith('.cmd') || lowerCommand.endsWith('.bat'))
+}
 
-    const commandLine = `${quoteForWindowsCommand(command)} ${args.map(arg => String(arg)).join(' ')}`
-    return spawn(getWindowsShell(), ['/d', '/s', '/c', commandLine], options)
+function getWindowsBatchArgs(command, args) {
+  // cmd /s strips one outer quote pair, so wrap the whole line to keep quotes around a path with spaces.
+  return ['/d', '/s', '/c', `"${quoteForWindowsCommand(command)} ${args.map(arg => String(arg)).join(' ')}"`]
+}
+
+function spawnCli(command, args, options) {
+  if (isWindowsBatchFile(command)) {
+    return spawn(getWindowsShell(), getWindowsBatchArgs(command, args), { ...options, windowsVerbatimArguments: true })
   }
 
   return spawn(command, args, options)
+}
+
+function execCliSync(command, args, options) {
+  if (isWindowsBatchFile(command)) {
+    return execFileSync(getWindowsShell(), getWindowsBatchArgs(command, args), { ...options, windowsVerbatimArguments: true })
+  }
+
+  return execFileSync(command, args, options)
 }
 
 function getPortFromArgs() {
@@ -756,7 +768,7 @@ function doUpdate() {
   const npm = getNpmBin()
   try {
     console.log('  🧹 Cleaning npm cache...')
-    execFileSync(npm, ['cache', 'clean', '--force'], {
+    execCliSync(npm, ['cache', 'clean', '--force'], {
       stdio: 'inherit',
       env: getCurrentNodeEnv(),
     })
@@ -814,6 +826,8 @@ if (process.argv[1] && realpathSync(resolve(process.argv[1])) === __filename) {
 
 export {
   doUpdate,
+  execCliSync,
+  spawnCli,
   clearLoginLocks,
   commandExists,
   getDaemonStopGraceMs,
