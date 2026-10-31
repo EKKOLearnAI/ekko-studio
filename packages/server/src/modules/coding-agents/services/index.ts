@@ -38,6 +38,7 @@ import { codingAgentRunManager } from './runtime/run-manager'
 import { mergePiSettings, userSettingsProvidesPiMcpAdapter } from './pi/settings'
 import { ANTIGRAVITY_DEFAULT_SETTINGS, ANTIGRAVITY_INSTALL_URL, prepareAntigravityRuntime, validateAntigravitySettings } from './antigravity/config'
 import { CURSOR_DEFAULT_SETTINGS, cursorSettingsPath, validateCursorSettings } from './cursor/settings'
+import { cursorCliBinPaths } from './cursor/installation'
 import { normalizePiThinkingLevel, PI_EXTENDED_THINKING_LEVEL_MAP, piModelSupportsThinking } from './pi/thinking'
 import { GROK_API_KEY_ENV, GROK_PROVIDER_ID } from './grok/definition'
 import { getDisabledManagedMcpServers, getManagedMcpServerOverride } from './mcp-overrides'
@@ -2282,11 +2283,13 @@ function getScopedConfigFileDefinition(
 
 function getCurrentNodeEnv(): NodeJS.ProcessEnv {
   const pathDelimiter = process.platform === 'win32' ? ';' : delimiter
-  return {
-    ...process.env,
-    PATH: [getNodeBinDir(), getNvmNodeBinPaths(), process.env.PATH].filter(Boolean).join(pathDelimiter),
-    npm_node_execpath: process.execPath,
-  }
+  const env = { ...process.env }
+  // Windows 继承的键名通常是 Path。若这里另外写入大写的 PATH，后续 prependPathEntries
+  // 会改到第一个键（Path），而命令查找读取的是 PATH，补进去的目录就永远不会生效。
+  const pathKey = Object.keys(env).find(key => key.toLowerCase() === 'path') || 'PATH'
+  env[pathKey] = [getNodeBinDir(), getNvmNodeBinPaths(), env[pathKey]].filter(Boolean).join(pathDelimiter)
+  env.npm_node_execpath = process.execPath
+  return env
 }
 
 async function npmExecution(args: string[], env: NodeJS.ProcessEnv): Promise<CommandExecution> {
@@ -2517,6 +2520,8 @@ async function commandEnv(): Promise<NodeJS.ProcessEnv> {
     npmBin,
     ...(loginShellPath ? loginShellPath.split(':') : []),
     ...getDesktopCommonBinPaths(),
+    // Cursor CLI 安装后不会刷新已运行进程的 PATH，这里补上官方安装目录。
+    ...cursorCliBinPaths(env),
   ])
   prioritizeManagedNpmBin(env, npmBin)
   return env

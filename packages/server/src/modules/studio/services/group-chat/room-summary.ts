@@ -13,6 +13,9 @@ import type { JevGenerationContext } from '../../public/jev'
 
 export type GroupRoomSummaryStatus = 'idle' | 'summarizing' | 'success' | 'failed'
 
+/** A wedged summary run must never block message dispatch for longer than this. */
+const DISPATCH_SUMMARY_DEADLINE_MS = 90_000
+
 export interface GroupRoomSummary {
   roomId: string
   summary: string
@@ -246,8 +249,36 @@ export class GroupRoomSummaryService {
   }
 
   async prepareForMessage(roomId: string, currentMessageId?: string): Promise<GroupRuntimeContext> {
-    await this.startSummaryIfNeeded(roomId, currentMessageId)
+    try {
+      await this.waitForSummaryWithDeadline(roomId, this.startSummaryIfNeeded(roomId, currentMessageId))
+    } catch (error) {
+      // Drop the stale run so later turns do not keep waiting on it, then send
+      // the message with the summary that is already persisted.
+      this.summaryRuns.delete(roomId)
+      logger.warn({ roomId, err: error instanceof Error ? error.message : String(error) },
+        'group chat summary did not finish in time; dispatching with the current context')
+    }
     return this.buildRuntimeContext(roomId, currentMessageId)
+  }
+
+  /**
+   * A summary provider/tool call can hang forever. Bound the wait so one stuck
+   * summary cannot freeze the room scheduler (drain waits on this call).
+   */
+  private async waitForSummaryWithDeadline(roomId: string, run: Promise<unknown>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`summary dispatch deadline exceeded for room ${roomId}`)),
+        DISPATCH_SUMMARY_DEADLINE_MS,
+      )
+      timer.unref?.()
+    })
+    try {
+      await Promise.race([run, deadline])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   buildRuntimeContext(roomId: string, currentMessageId?: string): GroupRuntimeContext {

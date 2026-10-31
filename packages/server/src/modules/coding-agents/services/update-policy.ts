@@ -16,6 +16,7 @@ const blank = (): UpdateState => ({autoUpdate:false,checkedAt:'',currentVersion:
 export class AgentUpdatePolicy {
   private states: Record<string, UpdateState> = {}
   private checks = new Map<string, Promise<Awaited<ReturnType<UpdateAdapter['check']>>>>()
+  private installs = new Map<string, Promise<{ success: boolean; tool: { version: string }; message?: string; updateState: UpdateState }>>()
   private idle = new Map<string, { since: number; revision: number }>()
   private manualInstalls = new Set<string>()
   private running = false
@@ -40,26 +41,33 @@ export class AgentUpdatePolicy {
   }
   async installAndRefresh<T extends { success: boolean; tool: { version: string }; message?: string }>(id: string, install: () => Promise<T>): Promise<T & { updateState: UpdateState }> {
     if (!this.adapter.ids().includes(id)) throw new Error('Invalid agent update policy')
+    // 重复点击安装时复用同一个任务，避免第二次请求被当成安装失败。
+    const pending = this.installs.get(id)
+    if (pending) return pending as unknown as Promise<T & { updateState: UpdateState }>
     if (this.manualInstalls.has(id) || this.states[id]?.status === 'updating') throw new Error('Agent update in progress')
     this.manualInstalls.add(id)
     this.idle.delete(id)
-    try {
-      // Drain an older check before mutation so it cannot overwrite the readback.
-      await this.checks.get(id)?.catch(() => undefined)
-      const state = this.states[id] ||= blank()
-      state.status = 'updating'; state.error = undefined
-      const result = await install()
-      state.currentVersion = result.tool.version
-      state.status = 'unknown'; state.checkedAt = ''
-      if (result.success) {
-        try { await this.checkNow(id, true) } catch { /* checkNow records failed/unknown freshness */ }
-      } else { state.status = 'failed'; state.error = result.message || 'Install failed' }
-      return { ...result, updateState: { ...state } }
-    } catch (error) {
-      const state = this.states[id] ||= blank()
-      state.status = 'failed'; state.error = error instanceof Error ? error.message : 'Install failed'
-      throw error
-    } finally { this.manualInstalls.delete(id) }
+    const job = (async () => {
+      try {
+        // Drain an older check before mutation so it cannot overwrite the readback.
+        await this.checks.get(id)?.catch(() => undefined)
+        const state = this.states[id] ||= blank()
+        state.status = 'updating'; state.error = undefined
+        const result = await install()
+        state.currentVersion = result.tool.version
+        state.status = 'unknown'; state.checkedAt = ''
+        if (result.success) {
+          try { await this.checkNow(id, true) } catch { /* checkNow records failed/unknown freshness */ }
+        } else { state.status = 'failed'; state.error = result.message || 'Install failed' }
+        return { ...result, updateState: { ...state } }
+      } catch (error) {
+        const state = this.states[id] ||= blank()
+        state.status = 'failed'; state.error = error instanceof Error ? error.message : 'Install failed'
+        throw error
+      } finally { this.manualInstalls.delete(id) }
+    })()
+    this.installs.set(id, job)
+    try { return await job } finally { this.installs.delete(id) }
   }
 
   start(): void { if(this.timer)return;void this.tick();this.timer=setInterval(()=>void this.tick(),60_000);this.timer.unref?.() }

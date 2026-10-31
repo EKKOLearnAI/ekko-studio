@@ -105,6 +105,20 @@ it('manual install refreshes shared state and preserves a still-available update
  expect(older.updateState.status).toBe('available')
  expect(adapter.install).not.toHaveBeenCalled()
 })
+it('joins a concurrent manual install instead of reporting a false failure',async()=>{
+ const {policy}=await setup()
+ let release!:()=>void
+ const gate=new Promise<void>(resolve=>{release=resolve})
+ const first=policy.installAndRefresh('codex',async()=>{await gate;return {success:true,tool:{version:'2'}}})
+ let secondInstallRan=false
+ const second=policy.installAndRefresh('codex',async()=>{secondInstallRan=true;return {success:true,tool:{version:'3'}}})
+ release()
+ const [a,b]=await Promise.all([first,second])
+ expect(secondInstallRan).toBe(false)
+ expect(a.tool.version).toBe('2')
+ expect(b.tool.version).toBe('2')
+ expect(policy.snapshot().codex.status).toBe('available')
+})
 it('install success with failed version check does not claim latest',async()=>{
  const {policy,adapter}=await setup();adapter.check.mockRejectedValueOnce(new Error('offline'))
  const result=await policy.installAndRefresh('codex',async()=>({success:true,tool:{version:'2'}}))

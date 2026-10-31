@@ -95,8 +95,18 @@ export class DshAcpTurn {
         this.receiveStream(message.params.frame)
       } else if (message.id !== undefined) {
         if (message.method === 'session/request_permission' && message.params?.sessionId === this.sessionId) {
-          const kind = this.callbacks.permissionRequired ? 'reject_once' : 'allow_once'
-          const option = message.params.options?.find((entry: any) => entry.kind === kind)
+          const options: any[] = message.params.options || []
+          const allowOption = options.find(entry => entry.kind === 'allow_once')
+            || options.find(entry => String(entry.kind || '').startsWith('allow'))
+            || options.find(entry => !String(entry.kind || '').startsWith('reject'))
+          const rejectOption = options.find(entry => entry.kind === 'reject_once')
+            || options.find(entry => String(entry.kind || '').startsWith('reject'))
+          const option = allowOption || rejectOption
+          if (options.length > 0) {
+            logger.info({ sessionId: this.sessionId, permissionRequired: this.callbacks.permissionRequired,
+              kinds: options.map((entry: any) => entry.kind), picked: option?.kind },
+              '[dsh] permission request auto-resolved')
+          }
           this.write({ id: message.id, result: { outcome: option
             ? { outcome: 'selected', optionId: option.optionId }
             : { outcome: 'cancelled' } } })

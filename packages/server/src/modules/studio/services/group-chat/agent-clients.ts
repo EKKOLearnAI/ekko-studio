@@ -2265,13 +2265,24 @@ export class AgentClients {
 
     // Each Agent owns an independent FIFO inside a room. Summary-only work uses
     // a separate room-scoped queue so one busy Agent cannot block another.
-    private _processingMentionQueues = new Set<string>()
+    // The value is the last progress timestamp: an interrupted or replaced Agent
+    // can leave a drain loop waiting forever, and that marker would otherwise
+    // swallow every later mention for that Agent.
+    private _processingMentionQueues = new Map<string, number>()
     private _mentionQueues = new Map<string, Array<{
         target: { agent: GroupAgentExecutor; queueId: string | null } | null
         msg: MentionMessage
         resolve: (error: MentionQueueError | null) => void
     }>>()
     private _pausedRooms = new Set<string>()
+    private _pausedAt = new Map<string, number>()
+    private _queueWatchdog: ReturnType<typeof setInterval> | null = null
+    private static readonly QUEUE_WATCHDOG_INTERVAL_MS = 60_000
+    /** Queued work that never started points at a wedged scheduler, not a long run. */
+    private static readonly QUEUE_STALL_MS = 3 * 60_000
+    /** Backstop for a drain loop that made no progress at all for a long time. */
+    private static readonly QUEUE_FORCE_STALL_MS = 40 * 60_000
+    private static readonly PAUSE_STALL_MS = 3 * 60_000
     private _scheduledAgentCounts = new Map<string, Map<string, number>>()
 
     private mentionQueueKey(roomId: string, agentId?: string): string {
@@ -2304,6 +2315,7 @@ export class AgentClients {
      * Connect an agent to a room.
      */
     async addAgentToRoom(roomId: string, client: AgentClient): Promise<JoinResult> {
+        this.startQueueWatchdog()
         let room = this.rooms.get(roomId)
         if (!room) {
             room = new Map()
@@ -2360,6 +2372,87 @@ export class AgentClients {
         if (room.size === 0) {
             this.rooms.delete(roomId)
         }
+        this.clearAgentMentionQueue(roomId, agentId)
+    }
+
+    /**
+     * A replaced Agent connection can leave a drain loop waiting on a promise
+     * that never settles, which would pin the processing marker forever and
+     * silently drop later mentions. Release that marker and fail the pending
+     * rows so the Agent stays usable after a reconnect.
+     */
+    private clearAgentMentionQueue(roomId: string, agentId: string): void {
+        const key = this.mentionQueueKey(roomId, agentId)
+        this._processingMentionQueues.delete(key)
+        const queue = this._mentionQueues.get(key)
+        if (!queue) return
+        this._mentionQueues.delete(key)
+        for (const entry of queue) {
+            entry.target?.agent.releaseInvocation?.()
+            if (entry.target?.queueId) {
+                this._storage?.failExecutionQueueItem?.(
+                    entry.target.queueId,
+                    'Agent connection was replaced before the run started',
+                )
+            }
+            entry.resolve({ message: 'Agent connection was replaced before the run started', outcomeUnknown: false })
+        }
+        this._executionQueueBroadcaster?.(roomId)
+    }
+
+    /**
+     * Recover a room whose scheduler wedged: a replaced Agent, an interrupt that
+     * never settled, or a summary call that hung all pin a drain marker and
+     * silently swallow every later mention. Run the check lazily so no extra
+     * timer exists for rooms nobody is using.
+     */
+    private startQueueWatchdog(): void {
+        if (this._queueWatchdog) return
+        this._queueWatchdog = setInterval(() => {
+            try {
+                this.releaseStalledQueues()
+            } catch (error) {
+                logger.warn(`[AgentClients] queue watchdog failed: ${error instanceof Error ? error.message : String(error)}`)
+            }
+        }, AgentClients.QUEUE_WATCHDOG_INTERVAL_MS)
+        this._queueWatchdog.unref?.()
+    }
+
+    private releaseStalledQueues(): void {
+        const now = Date.now()
+        for (const roomId of [...this.rooms.keys()]) {
+            // (1) Queued work that never started still holds a drain marker: the
+            //     loop is wedged, so release that Agent and dispatch again.
+            const queued = this._storage?.listQueuedExecutionItems?.(roomId) || []
+            for (const item of queued) {
+                if (now - Number(item.createdAt || 0) < AgentClients.QUEUE_STALL_MS) continue
+                const targetAgentId = String((item as { targetAgentId?: string }).targetAgentId || '')
+                const key = this.mentionQueueKey(roomId, targetAgentId || undefined)
+                if (!this._processingMentionQueues.has(key)) continue
+                logger.warn(`[AgentClients] releasing stalled mention queue for ${targetAgentId || 'room summary'} in ${roomId}`)
+                this.clearAgentMentionQueue(roomId, targetAgentId)
+                void this._drainRoomQueues(roomId).catch(() => {})
+            }
+            // (2) A drain marker with no progress for a very long time is stuck
+            //     even if it is the summary queue or a target with no queue row.
+            for (const [key, since] of [...this._processingMentionQueues]) {
+                if (this.mentionQueueRoomId(key) !== roomId) continue
+                if (now - since < AgentClients.QUEUE_FORCE_STALL_MS) continue
+                const agentId = key.slice(roomId.length + 1)
+                logger.warn(`[AgentClients] force-releasing stalled mention queue ${agentId} in ${roomId}`)
+                if (agentId === '__summary__') this._processingMentionQueues.delete(key)
+                else this.clearAgentMentionQueue(roomId, agentId)
+                void this._drainRoomQueues(roomId).catch(() => {})
+            }
+            // (3) An interrupt that never settled leaves the room paused forever.
+            const pausedSince = this._pausedAt.get(roomId)
+            if (pausedSince !== undefined && now - pausedSince >= AgentClients.PAUSE_STALL_MS) {
+                logger.warn(`[AgentClients] releasing stalled room pause in ${roomId}`)
+                this._pausedRooms.delete(roomId)
+                this._pausedAt.delete(roomId)
+                void this._drainRoomQueues(roomId).catch(() => {})
+            }
+        }
     }
 
     /**
@@ -2395,7 +2488,7 @@ export class AgentClients {
 
     hasRoomWork(roomId: string): boolean {
         return this.activeSessionIds(roomId).length > 0
-            || [...this._processingMentionQueues].some(key => this.mentionQueueRoomId(key) === roomId)
+            || [...this._processingMentionQueues.keys()].some(key => this.mentionQueueRoomId(key) === roomId)
             || [...this._mentionQueues].some(([key, queue]) => this.mentionQueueRoomId(key) === roomId && queue.length > 0)
     }
 
@@ -2601,6 +2694,7 @@ export class AgentClients {
     async interruptRoom(roomId: string): Promise<void> {
         const agents = this.getAgents(roomId)
         this._pausedRooms.add(roomId)
+        this._pausedAt.set(roomId, Date.now())
         const results = await Promise.allSettled(agents.map(agent => agent.interrupt(roomId)))
         let unsynced = false
         for (const result of results) {
@@ -2613,6 +2707,7 @@ export class AgentClients {
             }
         }
         this._pausedRooms.delete(roomId)
+        this._pausedAt.delete(roomId)
         if (unsynced) {
             throw this.buildUnsyncedInterruptError(roomId)
         }
@@ -2630,6 +2725,7 @@ export class AgentClients {
         await Promise.allSettled([...room.values()].map(client => client.disconnect()))
         this.clearMentionQueuesForRoom(roomId)
         this._pausedRooms.delete(roomId)
+        this._pausedAt.delete(roomId)
         logger.info(`[AgentClients] All agents disconnected from room: ${roomId}`)
 
     }
@@ -2637,7 +2733,8 @@ export class AgentClients {
     resetRoomContext(roomId: string): void {
         this.clearMentionQueuesForRoom(roomId)
         this._pausedRooms.delete(roomId)
-        for (const key of this._processingMentionQueues) {
+        this._pausedAt.delete(roomId)
+        for (const key of this._processingMentionQueues.keys()) {
             if (this.mentionQueueRoomId(key) === roomId) this._processingMentionQueues.delete(key)
         }
     }
@@ -2852,13 +2949,14 @@ export class AgentClients {
 
     private async _drainMentionQueue(roomId: string, key: string): Promise<void> {
         if (this._processingMentionQueues.has(key) || this._pausedRooms.has(roomId)) return
-        this._processingMentionQueues.add(key)
+        this._processingMentionQueues.set(key, Date.now())
         try {
             while (!this._pausedRooms.has(roomId)) {
                 const queue = this._mentionQueues.get(key)
                 const next = queue?.shift()
                 if (!next) break
                 if (queue?.length === 0) this._mentionQueues.delete(key)
+                this._processingMentionQueues.set(key, Date.now())
 
                 let queueError: MentionQueueError | null = null
                 try {
@@ -2919,6 +3017,11 @@ export class AgentClients {
                             this._storage?.finishExecutionQueueItem?.(target.queueId, 'completed')
                         }
                     }
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error)
+                    queueError ||= { message, outcomeUnknown: false }
+                    if (next.target?.queueId) this._storage?.failExecutionQueueItem?.(next.target.queueId, message)
+                    logger.error(`[AgentClients] failed to dispatch mention for ${next.target?.agent.name || 'room summary'}: ${message}`)
                 } finally {
                     if (next.target) {
                         next.target.agent.releaseInvocation?.()

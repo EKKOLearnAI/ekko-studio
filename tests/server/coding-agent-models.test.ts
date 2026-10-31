@@ -233,14 +233,31 @@ describe('native model directory adapters', () => {
     expect(modelsFromAcpSession({ models: { currentModelId: 'a', availableModels: [{ modelId: 'a', name: 'A', token: 'private' }] } }).models).toEqual([{ id: 'a', name: 'A', isDefault: true }])
   })
 
-  it('attaches ACP thought-level metadata only to its current native model', () => {
+  it('keeps ACP thought-level choices editable for every native model', () => {
     expect(modelsFromAcpSession({ configOptions: [
       { id: 'native-model', category: 'model', currentValue: 'a', options: [{ value: 'a', name: 'A' }, { value: 'b', name: 'B' }] },
       { id: 'native-thought', category: 'thought_level', options: [{ value: 'low' }, { value: 'high' }] },
     ] }).models).toEqual([
       { id: 'a', name: 'A', isDefault: true, reasoningEfforts: ['low', 'high'] },
-      { id: 'b', name: 'B', isDefault: false },
+      { id: 'b', name: 'B', isDefault: false, reasoningEfforts: ['low', 'high'] },
     ])
+  })
+
+  it('merges native per-model effort metadata and context windows without leaking account fields', () => {
+    const session = {
+      configOptions: [
+        { id: 'native-model', category: 'model', currentValue: 'dsf', options: [{ value: 'dsf', name: 'DSF' }, { value: 'hy3', name: 'Hy3' }] },
+        { id: 'native-thought', category: 'thought_level', options: [{ value: 'high' }, { value: 'enabled' }] },
+      ],
+      models: { availableModels: [
+        { modelId: 'dsf', name: 'DSF', apiKey: 'secret', _meta: { maxInputTokens: 1000000, effortOptions: [{ value: 'low' }, { value: 'max' }] } },
+        { modelId: 'hy3', name: 'Hy3', _meta: { maxInputTokens: 192000, effortOptions: [{ value: 'medium' }] } },
+      ] },
+    }
+    const models = modelsFromAcpSession(session).models
+    expect(models[0]).toMatchObject({ id: 'dsf', isDefault: true, contextWindow: 1000000, reasoningEfforts: ['low', 'high', 'max', 'enabled'] })
+    expect(models[1]).toMatchObject({ id: 'hy3', isDefault: false, contextWindow: 192000, reasoningEfforts: ['medium', 'high', 'enabled'] })
+    expect(JSON.stringify(models)).not.toContain('secret')
   })
 
   it.each([true, false])('closes ACP discovery sessions even when model selectors are unavailable (%s)', async selectors => {

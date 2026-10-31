@@ -312,6 +312,15 @@ function storedPriorAgentMode(value: unknown): 'scoped' | 'global' | '' {
     return value === 'global' || value === 'scoped' ? value : ''
 }
 
+/**
+ * Global mode keeps Studio out of provider routing, but native CLIs still own a
+ * model and effort selector. Only Hermes/Ekko have no native model identity, so
+ * their global records must stay credential-free.
+ */
+function keepsNativeGlobalSelection(agent: string, agentMode: 'scoped' | 'global'): boolean {
+    return agentMode === 'global' && agent !== 'hermes' && agent !== 'ekko'
+}
+
 const GROUP_MEMBER_AVATAR_MAX_LENGTH = 1_500_000
 
 function normalizeRoomMemberAvatar(value: unknown): string {
@@ -2662,10 +2671,13 @@ class ChatStorage {
         const agent = metadata.agent || 'hermes'
         const agentMode = metadata.agentMode === 'global' ? 'global' : 'scoped'
         const priorAgentMode = storedPriorAgentMode(metadata.priorAgentMode)
+        const keepsNativeSelection = keepsNativeGlobalSelection(agent, agentMode)
         const provider = agentMode === 'global' ? '' : String(metadata.provider || '').trim()
-        const model = agentMode === 'global' ? '' : String(metadata.model || '').trim()
+        const model = agentMode === 'global' && !keepsNativeSelection ? '' : String(metadata.model || '').trim()
         const apiMode = agent === 'hermes' || agentMode === 'global' ? '' : String(metadata.apiMode || '').trim()
-        const reasoningEffort = agentMode === 'global' ? '' : String(metadata.reasoningEffort || '').trim()
+        const reasoningEffort = agentMode === 'global' && !keepsNativeSelection
+            ? ''
+            : String(metadata.reasoningEffort || '').trim()
         const agentPreset = typeof metadata.agentPreset === 'string' ? metadata.agentPreset.trim() : ''
         const avatar = String(metadata.avatar || '').trim()
         const executorType = metadata.executorType === 'remote' ? 'remote' : 'server'
@@ -2743,10 +2755,13 @@ class ChatStorage {
         const agent = metadata.agent || 'hermes'
         const agentMode = metadata.agentMode === 'global' ? 'global' : 'scoped'
         const priorAgentMode = storedPriorAgentMode(metadata.priorAgentMode)
+        const keepsNativeSelection = keepsNativeGlobalSelection(agent, agentMode)
         const provider = agentMode === 'global' ? '' : String(metadata.provider || '').trim()
-        const model = agentMode === 'global' ? '' : String(metadata.model || '').trim()
+        const model = agentMode === 'global' && !keepsNativeSelection ? '' : String(metadata.model || '').trim()
         const apiMode = agent === 'hermes' || agentMode === 'global' ? '' : String(metadata.apiMode || '').trim()
-        const reasoningEffort = agentMode === 'global' ? '' : String(metadata.reasoningEffort || '').trim()
+        const reasoningEffort = agentMode === 'global' && !keepsNativeSelection
+            ? ''
+            : String(metadata.reasoningEffort || '').trim()
         const agentPreset = typeof metadata.agentPreset === 'string' ? metadata.agentPreset.trim() : ''
         const avatar = String(metadata.avatar || '').trim()
         this.db()?.prepare(
