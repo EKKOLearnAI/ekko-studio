@@ -299,16 +299,25 @@ const deletingBundleCommand = ref('')
 let bundlesLoadedKey = ''
 let bundlesLoadRequest: Promise<void> | null = null
 let bundlesLoadRequestKey = ''
+// On the New Chat page there is no session yet. Build the same identity that
+// ChatPanel.submitNewChat() will give the session (source / agent / codingAgentId),
+// so slash commands resolve for the agent the user picked, including future agents.
+const draftSessionIdentity = computed<{ source: string; agent: string; codingAgentId?: string; profile?: string } | null>(() => {
+  if (!props.draft || !props.draftConfig) return null
+  const agent = String(props.draftConfig.agent || 'hermes').trim() || 'hermes'
+  const source = agent === 'hermes' ? 'cli' : agent === 'ekko-agent' ? 'builtin_agent' : 'coding_agent'
+  return { source, agent, codingAgentId: agent === 'hermes' ? undefined : agent, profile: props.draftConfig.profile }
+})
+const slashSession = computed(() => props.draft ? draftSessionIdentity.value : composerSession.value)
 const isBridgeSession = computed(() => {
-  if (props.draft) return false
-  const session = composerSession.value
-  if (!session) return chatStore.runtimeMode !== 'global_agent'
+  const session = slashSession.value
+  if (!session) return !props.draft && chatStore.runtimeMode !== 'global_agent'
   return session.source === 'cli' && !isBuiltinEkkoSession(session)
 })
-const isEkkoSession = computed(() => isBuiltinEkkoSession(composerSession.value))
-const isCodingAgentSession = computed(() => isExternalCodingAgentSession(composerSession.value))
-const isCursorSession = computed(() => (composerSession.value?.codingAgentId === 'cursor' || composerSession.value?.codingAgentId === 'antigravity') || (composerSession.value?.agent === 'cursor' || composerSession.value?.agent === 'antigravity'))
-const showSessionUsage = computed(() => isCodingAgentSession.value)
+const isEkkoSession = computed(() => isBuiltinEkkoSession(slashSession.value))
+const isCodingAgentSession = computed(() => isExternalCodingAgentSession(slashSession.value))
+const isCursorSession = computed(() => (slashSession.value?.codingAgentId === 'cursor' || slashSession.value?.codingAgentId === 'antigravity') || (slashSession.value?.agent === 'cursor' || slashSession.value?.agent === 'antigravity'))
+const showSessionUsage = computed(() => !props.draft && isCodingAgentSession.value)
 const isForkCommandSession = computed(() => !!composerSession.value && !isEkkoSession.value && !isCodingAgentSession.value)
 const skillPickerItems = computed(() => {
   const byName = new Map<string, SkillInfo>()
@@ -338,8 +347,8 @@ const filteredBridgeCommands = computed(() => {
       ? bridgeCommands.value.filter(command => CODING_AGENT_SLASH_COMMANDS.includes(command.name)
         && !(command.name === 'context' && isCursorSession.value)
         && !(command.name === 'compact' && (
-          composerSession.value?.codingAgentId === 'opencode'
-          || composerSession.value?.agent === 'opencode'
+          slashSession.value?.codingAgentId === 'opencode'
+          || slashSession.value?.agent === 'opencode'
           || isCursorSession.value
         )))
       : isForkCommandSession.value
@@ -385,7 +394,7 @@ function skillCommandName(name: string) {
 }
 
 function currentSkillsKey() {
-  return composerSession.value?.profile || profilesStore.activeProfileName || 'default'
+  return slashSession.value?.profile || profilesStore.activeProfileName || 'default'
 }
 
 async function loadSkills() {
@@ -627,7 +636,7 @@ watch(() => settingsStore.display.chat_input_height, () => {
 })
 
 watch(
-  () => [composerSession.value?.profile, profilesStore.activeProfileName],
+  () => [slashSession.value?.profile, profilesStore.activeProfileName],
   () => {
     skillsLoadedKey = ''
     skillCategories.value = []
