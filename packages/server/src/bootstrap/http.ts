@@ -487,7 +487,7 @@ export async function bootstrap() {
   startChatWebhookDispatcher()
   console.log('[bootstrap] all stores initialized')
 
-  app.use(securityHeaders())
+  app.use(securityHeaders({ allowRemoteImages: config.allowRemoteImages }))
   app.use(cors({ origin: createCorsOriginResolver(config.corsOrigins) }))
   // Codex can replay inline images from its native thread. Accept a bounded,
   // authenticated request here so the proxy can remove historical image data

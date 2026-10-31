@@ -411,6 +411,7 @@ Studio 启动后端聊天能力时，会优先使用包含 `run_agent.py` 的源
 | `HERMES_WEB_UI_ALLOW_TRANSIENT_MCP_AUTOINJECT` | 未设置 | 当 `HERMES_WEB_UI_HOME` 位于临时目录（例如 Version Preview runtime）时，仍允许托管 MCP 自动注入。 |
 | `UPLOAD_DIR` | `$HERMES_WEB_UI_HOME/upload` | 覆盖上传根目录。文件会保存在按 Profile 隔离的子目录下。 |
 | `CORS_ORIGINS` | 仅同 host | HTTP、Socket.IO、WebSocket 跨源 allowlist，支持逗号或空格分隔。只有明确需要旧版 wildcard CORS 时才设置为 `*`。 |
+| `HERMES_WEB_UI_ALLOW_REMOTE_IMAGES` | 未设置（关闭） | 设为 `1` 或 `true` 时，在 Content-Security-Policy 的 `img-src` 中加入 `https:`，允许浏览器加载远程 `https:` 图片。默认只加载同源、`data:` 和 `blob:` 图片，因此模型输出中写入的图片 URL 不会被自动请求。如果希望显示远程图片（例如预览 README 中的徽章或聊天回答里的图片），可开启此项。 |
 | `AUTH_TOKEN` | 自动生成 | 显式指定 Bearer Token。未设置时，Studio 会在 `HERMES_WEB_UI_HOME` 下自动生成。 |
 | `AUTH_JWT_SECRET` | `AUTH_TOKEN` | 用户名/密码会话的 JWT 签名密钥覆盖。 |
 | `HERMES_WEB_UI_AUTH_JWT_EXPIRES_IN` | `30d` | 用户名/密码会话 JWT 有效期。支持秒数或 `s`/`m`/`h`/`d` 后缀，例如 `12h` 或 `7d`。 |

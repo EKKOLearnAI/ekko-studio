@@ -147,7 +147,18 @@ function isGroupChatAgentLinkDocument(ctx: Context): boolean {
     && ctx.query.groupChatAgentLink === '1'
 }
 
-export function securityHeaders(): Middleware {
+export interface SecurityHeadersOptions {
+  /** Add `https:` to CSP `img-src` so the browser may load remote images. Default: off. */
+  allowRemoteImages?: boolean
+}
+
+export function securityHeaders(options: SecurityHeadersOptions = {}): Middleware {
+  // Rendered chat markdown can contain `![](https://...)`. The browser would fetch
+  // that URL without a click, so remote images are opt-in rather than the default.
+  const imgSrc = options.allowRemoteImages
+    ? "img-src 'self' data: blob: https:"
+    : "img-src 'self' data: blob:"
+
   return async (ctx, next) => {
     ctx.set('X-Content-Type-Options', 'nosniff')
     ctx.set('X-Frame-Options', 'DENY')
@@ -163,7 +174,7 @@ export function securityHeaders(): Middleware {
       "frame-ancestors 'none'",
       "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https:",
+      imgSrc,
       "font-src 'self' data:",
       "media-src 'self' data: blob:",
       "connect-src 'self' http: https: ws: wss:",
