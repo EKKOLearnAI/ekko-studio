@@ -236,6 +236,53 @@ describe('sidebar working state', () => {
     expect(store.isStreaming).toBe(false)
     expect(store.isRunActive).toBe(false)
   })
+
+  it('clears a stale background-session running light by re-verifying against the server on re-sync', async () => {
+    const listen = vi.spyOn(document, 'addEventListener')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    const store = useChatStore()
+    store.sessions = [session('one'), session('two')]
+    await store.switchSession('one')
+    await store.sendMessage('delegate')
+    const onEvent = api.startRunViaSocket.mock.calls[0][1]
+    // Foreground run ends but a background delegation keeps 'one' in serverWorking with no
+    // live run socket — the exact stale-light shape from the upgrade incident.
+    onEvent({ event: 'run.completed', session_id: 'one', output: 'started', background_pending: 1 })
+    expect(store.isSessionWorking('one')).toBe(true)
+    expect(store.isSessionLive('one')).toBe(false)
+    await store.switchSession('two') // 'one' is now a background session
+
+    const onVisible = listen.mock.calls.find((c) => c[0] === 'visibilitychange')![1] as () => void
+    listen.mockRestore()
+    // Server is authoritative: background 'one' is no longer working.
+    api.resumeSession.mockImplementation((sid, cb) => {
+      cb({ session_id: sid, isWorking: false, messages: [], events: [], backgroundPending: 0 })
+    })
+    onVisible()
+    expect(store.isSessionWorking('one')).toBe(false) // stale background light cleared
+  })
+
+  it('keeps a genuinely-running background session (server still says working)', async () => {
+    const listen = vi.spyOn(document, 'addEventListener')
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    const store = useChatStore()
+    store.sessions = [session('one'), session('two')]
+    await store.switchSession('one')
+    await store.sendMessage('delegate')
+    const onEvent = api.startRunViaSocket.mock.calls[0][1]
+    onEvent({ event: 'run.completed', session_id: 'one', output: 'started', background_pending: 1 })
+    expect(store.isSessionWorking('one')).toBe(true)
+    await store.switchSession('two')
+
+    const onVisible = listen.mock.calls.find((c) => c[0] === 'visibilitychange')![1] as () => void
+    listen.mockRestore()
+    // Server says 'one' is STILL working → must not be cleared (no false-negative on live runs).
+    api.resumeSession.mockImplementation((sid, cb) => {
+      cb({ session_id: sid, isWorking: true, messages: [], events: [], backgroundPending: 1 })
+    })
+    onVisible()
+    expect(store.isSessionWorking('one')).toBe(true)
+  })
 })
 
 
