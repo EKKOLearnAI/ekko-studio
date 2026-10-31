@@ -4109,3 +4109,55 @@ for (const locale of supportedLocales) for (const width of [1280, 390]) {
   await expect(root).not.toHaveClass(/is-expanded/)
  })
 }
+
+for (const {locale,width,mode,reduced} of [
+ {locale:'zh',width:1440,mode:'light',reduced:false},
+ {locale:'en',width:1440,mode:'dark',reduced:false},
+ {locale:'ar',width:390,mode:'dark',reduced:true},
+ {locale:'de',width:390,mode:'light',reduced:false},
+] as const) test(`Capsule node locates its exact repeated or parallel BOT stage in ${locale}`,async({page})=>{
+ const {state}=await setup(page,mode,locale==='en',locale==='en')
+ await page.addInitScript(lang=>localStorage.setItem('hermes_locale',lang),locale)
+ await page.setViewportSize({width,height:1000})
+ await page.emulateMedia({reducedMotion:reduced?'reduce':'no-preference'})
+ const worker=state.tasks[0];state.tasks=[]
+ state.flows=[{id:'target-flow',title:'精准定位 / Exact stage',goal:'Open the selected BOT occurrence',state:'active',revision:0,current_position:0,error:'',stages:Array.from({length:8},(_,i)=>({
+  id:`target-stage-${i}`,position:i,group_position:Math.max(0,i-1),session_id:'person-main-1',session_title:i%2?'Parallel BOT / 多语言校对':'Repeat BOT / 重复角色',bot_type:i%2?'dachu':'xiaohe',goal:`Stage ${i+1} — ${'Review the selected stage. '.repeat(4)}`,state:i===0?'completed':i===1?'active':'pending',result_message_id:null,tasks:i===6?[worker]:[],
+ }))}]
+ await page.goto('/#/person')
+ const island=page.locator('.person-task-island'),drawer=page.locator('.person-workspace-drawer')
+ async function openStage(index:number){
+  await island.click();const node=page.locator('.activity-stage').nth(index)
+  await node.scrollIntoViewIfNeeded();await node.click()
+  const target=drawer.locator(`[data-flow-stage-id="target-stage-${index}"]`)
+  await expect(target).toBeFocused();await expect(target).toBeInViewport({ratio:0.8})
+  await expect(target).toHaveClass(/flow-role--targeted/)
+  await expect(drawer.locator('.flow-role--targeted')).toHaveCount(1)
+  await expect(page.locator('.person-task-chat')).toHaveCount(0)
+  return target
+ }
+ // The same BOT name occurs four times, including a stage with one worker.
+ const target=await openStage(6)
+ await page.screenshot({path:`/home/agent/work/hermes-studio/.ekko-tmp/stage-target-${locale}-${width}.png`})
+ const scroll=drawer.locator('.n-scrollbar-container').first()
+ await expect(target).not.toHaveClass(/flow-role--targeted/,{timeout:4000})
+ await expect(target).toHaveCSS('outline-style','none')
+ await scroll.evaluate(el=>{el.scrollTop=0})
+ state.flows[0].revision++;await emit(page,'person.updated',{})
+ await expect.poll(()=>scroll.evaluate(el=>el.scrollTop)).toBe(0)
+ // Reopening the identical node is a new navigation, not a stale selection.
+ await page.keyboard.press('Escape');await expect(drawer).not.toBeVisible()
+ await openStage(6)
+ await page.keyboard.press('Escape');await expect(drawer).not.toBeVisible()
+ // Parallel peers share the group but have distinct IDs.
+ await openStage(1)
+ await page.keyboard.press('Escape');await expect(drawer).not.toBeVisible()
+ await openStage(0)
+ await page.keyboard.press('Escape');await expect(drawer).not.toBeVisible()
+ // Clicking the flow title resets the stage target and shows the overview.
+ await island.click();await page.locator('.activity-flow-title').click()
+ await expect(drawer.locator('.flow-card')).toBeFocused()
+ await expect(drawer.locator('.flow-card .flow-header')).toBeInViewport()
+ await expect(drawer.locator('.flow-role--targeted')).toHaveCount(0)
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+})

@@ -9,7 +9,7 @@ import { deploymentUrl } from '@/utils/deployment-url'
 import PersonActivityPath from './PersonActivityPath.vue'
 
 const props = defineProps<{ flow: PersonFlow; maxWidth: number; reducedMotion: boolean; fallbackAvatar: string }>()
-const emit = defineEmits<{ task: [id: string]; flow: [id: string]; resize: [width: number] }>()
+const emit = defineEmits<{ flow: [id: string, stageId?: string]; resize: [width: number] }>()
 const { t, locale } = useI18n()
 const groups = computed(() => personFlowGroups(props.flow))
 const rtl = computed(() => isRtlLocale(locale.value))
@@ -36,9 +36,7 @@ function stageImage(stage: PersonFlow['stages'][number]) {
   return deploymentUrl(bot.animations[state])
 }
 function selectStage(stage: PersonFlow['stages'][number]) {
-  const tasks = stage.tasks.filter(task => task.status !== 'closed')
-  if (tasks.length === 1) emit('task', tasks[0].id)
-  else emit('flow', props.flow.id)
+  emit('flow', props.flow.id, stage.id)
 }
 function measure() {
   frame = undefined

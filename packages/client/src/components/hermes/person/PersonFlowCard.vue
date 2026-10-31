@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NProgress } from 'naive-ui'
 import type { PersonFlow } from '@/api/person'
@@ -10,6 +10,24 @@ import { personFlowDependencies, personFlowGroups, personFlowStageStatus, person
 const props = defineProps<{ flow: PersonFlow; saving: boolean; embedded?: boolean }>()
 const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
 const { t, locale } = useI18n()
+const root = ref<HTMLElement>()
+const highlightedStage = ref<string>()
+let highlightTimer: ReturnType<typeof setTimeout> | undefined
+function focusStage(stageId?: string) {
+  clearTimeout(highlightTimer)
+  const stage = stageId && Array.from(root.value?.querySelectorAll<HTMLElement>('[data-flow-stage-id]') || [])
+    .find(element => element.dataset.flowStageId === stageId)
+  const target = stage || root.value
+  highlightedStage.value = stage ? stageId : undefined
+  if (!target) return
+  target.focus({ preventScroll: true })
+  target.scrollIntoView({ block: stage ? 'center' : 'start', inline: 'nearest',
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+  if (stage) highlightTimer = setTimeout(() => { highlightedStage.value = undefined }, 2400)
+}
+onBeforeUnmount(() => clearTimeout(highlightTimer))
+defineExpose({ focusStage })
+
 const groups = computed(() => personFlowGroups(props.flow))
 const completed = computed(() => props.flow.stages.filter(stage => stage.state === 'completed').length)
 const current = computed(() => groups.value.find(group => group.position === props.flow.current_position))
@@ -35,7 +53,7 @@ function dependencyLabel(stage: PersonFlowStage) {
 </script>
 
 <template>
-  <article class="flow-card" :class="{ 'flow-card--embedded':embedded }" :aria-label="flow.title">
+  <article ref="root" tabindex="-1" class="flow-card" :class="{ 'flow-card--embedded':embedded }" :aria-label="flow.title">
     <header class="flow-header">
       <div class="flow-heading">
         <span v-if="!embedded" class="flow-status" :class="`flow-status--${flowState}`" role="status">
@@ -66,7 +84,7 @@ function dependencyLabel(stage: PersonFlowStage) {
         </div>
         <div class="flow-branches">
           <div v-for="stage in group.stages" :key="stage.id" class="flow-lane">
-            <section class="flow-role" :class="`flow-role--${status(stage)}`" data-theme-surface="card" :aria-label="name(stage)">
+            <section class="flow-role" :class="[`flow-role--${status(stage)}`, { 'flow-role--targeted': highlightedStage === stage.id }]" :data-flow-stage-id="stage.id" tabindex="-1" data-theme-surface="card" :aria-label="name(stage)">
               <header class="flow-role-header">
                 <img class="flow-role-avatar" :src="avatar(stage).src" :style="personAvatarStyle(avatar(stage))" alt="" width="48" height="48" />
                 <div class="flow-role-identity">
@@ -145,6 +163,8 @@ function dependencyLabel(stage: PersonFlowStage) {
 .flow-group--wrapped .flow-branches::before, .flow-group--wrapped .flow-branches::after, .flow-group--wrapped .flow-lane::before, .flow-group--wrapped .flow-lane::after { display: none; }
 .flow-role { display: flex; flex-direction: column; gap: 14px; flex: 1; min-width: 0; min-height: 175px; padding: 20px; background: $bg-card; border: var(--border-width, 1px) solid $border-light; border-radius: var(--radius-component, 12px); }
 .flow-role--active, .flow-role--running { border-color: rgba(var(--accent-info-rgb), .45); }
+.flow-card:focus, .flow-role:focus { outline: none; }
+.flow-role--targeted, .flow-role--targeted:focus { outline: 2px solid $accent-primary; outline-offset: 3px; }
 .flow-role--blocked { border-color: rgba(var(--error-rgb), .45); }
 .flow-role-header { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .flow-role-avatar { @include person-avatar.person-avatar(48px); flex-shrink: 0; }

@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NInput } from 'naive-ui'
 import type { PersonFlow } from '@/api/person'
 import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
-import { personFlowGroups, personFlowState, personFlowStatusKey, type PersonFlowStage } from '@/utils/person-flow'
+import { personFlowGroups, personFlowState, personFlowStatusKey, type PersonFlowStage, type PersonFlowTarget } from '@/utils/person-flow'
 import PersonFlowCard from './PersonFlowCard.vue'
 
-const props = defineProps<{ flows: PersonFlow[]; saving: boolean; selectedId?: string }>()
+const props = defineProps<{ flows: PersonFlow[]; saving: boolean; target?: PersonFlowTarget; navigationReady?: boolean }>()
 const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
 const { t } = useI18n()
 const expanded = ref<string | null>(null)
-watch(() => props.selectedId, id => { if (id) expanded.value = id }, { immediate: true })
 const search = ref('')
 const filter = ref<'all' | PersonFlow['state']>('all')
 const visibleFlows = computed(() => props.flows.slice(0,50))
@@ -29,6 +28,17 @@ const rows = computed(() => visibleFlows.value.filter(flow => {
 }).map(flow => ({ flow,groups:personFlowGroups(flow),status:personFlowState(flow),completed:flow.stages.filter(stage => stage.state === 'completed').length })))
 watch(rows,value => { if (!value.some(row => row.flow.id === expanded.value)) expanded.value=null })
 const toggle = (id: string) => { expanded.value=expanded.value === id ? null : id }
+const cards = new Map<string, InstanceType<typeof PersonFlowCard>>()
+const targetFlowId = computed(() => visibleFlows.value.find(flow => flow.id === props.target?.flowId)?.id)
+watch([() => props.target, () => props.navigationReady, targetFlowId], async ([target, ready, id]) => {
+  if (!target || !id || !ready) return
+  // Explicit navigation wins over a previous search/filter, but live status
+  // updates must never pull the reader back to a previously selected stage.
+  search.value = ''; filter.value = 'all'; expanded.value = id
+  await nextTick()
+  if (props.target === target && props.navigationReady) cards.get(id)?.focusStage(target.stageId)
+}, { immediate: true, flush: 'post' })
+
 </script>
 
 <template>
@@ -68,7 +78,7 @@ const toggle = (id: string) => { expanded.value=expanded.value === id ? null : i
             <SessionTaskIcon name="chevron-down" class="flow-row-chevron" :size="14" />
           </button>
           <div v-show="expanded === row.flow.id" :id="`flow-detail-${row.flow.id}`" class="flow-detail">
-            <PersonFlowCard v-if="expanded === row.flow.id" :flow="row.flow" :saving="saving" embedded
+            <PersonFlowCard v-if="expanded === row.flow.id" :ref="el => { if (el) cards.set(row.flow.id, el as InstanceType<typeof PersonFlowCard>); else cards.delete(row.flow.id) }" :flow="row.flow" :saving="saving" embedded
               @action="(item,action) => emit('action',item,action)" @open-result="(sessionId,messageId) => emit('openResult',sessionId,messageId)"
               @open-task="emit('openTask',$event)" @open-conversation="emit('openConversation',$event)" />
           </div>

@@ -1,5 +1,6 @@
 import type { PersonFlow } from '@/api/person'
 
+export type PersonFlowTarget = { flowId: string; stageId?: string }
 export type PersonFlowStage = PersonFlow['stages'][number]
 export type PersonFlowStatus = 'completed' | 'active' | 'running' | 'queued' | 'waiting_dependencies' | 'waiting_user' | 'waiting_person' | 'waiting_approval' | 'waiting_reply' | 'interrupted' | 'blocked'
 

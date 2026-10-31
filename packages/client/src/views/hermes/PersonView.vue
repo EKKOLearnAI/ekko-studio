@@ -47,6 +47,7 @@ import { DEFAULT_PERSON_BOT_TYPE, personBot } from '../../../../shared/person-bo
 import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import { PERSON_AVATAR, chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 import { personBotLabel } from '@/utils/person-bot-label'
+import type { PersonFlowTarget } from '@/utils/person-flow'
 import { deploymentUrl } from '@/utils/deployment-url'
 import { prepareAgentDeployment, type AgentDeploymentController } from '@/components/hermes/chat/agentDeployment.mjs'
 
@@ -399,8 +400,15 @@ function openFlowConversation(sessionId: string) {
   showPanel.value = false
   return router.push({ name:'hermes.person',query:{ session:sessionId } })
 }
-const activityFlowId = ref<string>()
-function openActivityFlow(id: string) { activityFlowId.value = id; openPanel('flows') }
+const activityFlowTarget = ref<PersonFlowTarget>()
+const flowDrawerReady = ref(false)
+watch(showPanel, show => {
+  if (!show) { flowDrawerReady.value = false; activityFlowTarget.value = undefined }
+})
+function openActivityFlow(id: string, stageId?: string) {
+  activityFlowTarget.value = { flowId: id, stageId }
+  openPanel('flows')
+}
 function openFlowTask(taskId: string) { showPanel.value = false; chatExecutionId.value = undefined; chatTaskId.value = taskId }
 async function act(work: () => Promise<unknown>) {
   if (pending.value) return false
@@ -516,6 +524,7 @@ function saveSchedule(input: Record<string, unknown>) { return act(() => personR
 watch(busy, (running, wasRunning) => { if (wasRunning && !running) void refresh() })
 watch(selectedSessionId, id => {
   optimisticEffort.value = null; showModelPicker.value = false; showAgentSetup.value = false
+  activityFlowTarget.value = undefined
   if (!id) resetConversationDraft()
 })
 const stopPersonUpdates = onPersonUpdated(() => { void loadConversations().catch(() => {}); void refresh() })
@@ -678,7 +687,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           <NButton size="small" quaternary :disabled="creating || (!isNewConversation && (busy || settingsWrites > 0))" @click="inheritModel">{{ (isNewConversation ? !newConversationModel : data.inherits_global_model) ? t('person.followingGlobalModel') : t('person.useGlobalModel') }}</NButton>
         </template>
       </ModelCascader>
-      <NDrawer v-model:show="showPanel" :width="drawerWidth" placement="right" :close-on-esc="true" class="person-workspace-drawer">
+      <NDrawer v-model:show="showPanel" :width="drawerWidth" placement="right" :close-on-esc="true" class="person-workspace-drawer" @after-enter="flowDrawerReady = true">
         <NDrawerContent closable :native-scrollbar="false" :body-content-style="{ padding: '0' }">
           <template #header><div class="workspace-heading"><span class="workspace-brand">{{ PERSON_AVATAR.label }}</span><span class="workspace-divider">/</span><span>{{ t('person.title') }}</span></div></template>
           <div class="person-workspace">
@@ -694,7 +703,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
               </NTabPane>
               <NTabPane name="flows" :tab-props="{ role: 'tab', 'aria-selected': tab === 'flows' }">
                 <template #tab><span class="workspace-tab"><SessionTaskIcon :size="17" />{{ t('person.flows') }}</span></template>
-                <PersonFlowsPanel :selected-id="activityFlowId" :flows="data.flows || []" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
+                <PersonFlowsPanel :target="activityFlowTarget" :navigation-ready="showPanel && flowDrawerReady && tab === 'flows'" :flows="data.flows || []" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
               </NTabPane>
               <NTabPane name="schedules" :tab-props="{ role: 'tab', 'aria-selected': tab === 'schedules' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="schedule" :size="17" />{{ t('person.schedules') }}<span class="workspace-tab-count">{{ data.schedules.length }}</span></span></template>

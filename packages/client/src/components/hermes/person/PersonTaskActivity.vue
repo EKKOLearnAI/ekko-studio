@@ -10,7 +10,7 @@ import { deploymentUrl } from '@/utils/deployment-url'
 import type { PersonTask, PersonFlow } from '@/api/person'
 import { activityTasks, activityFlows, standaloneActivityTasks, attentionStates } from '@/utils/person-activity'
 const props = withDefaults(defineProps<{ count?: number; avatar?: ChatAgentAvatar; tasks?: PersonTask[]; flows?: PersonFlow[]; scope?: string }>(), { tasks: () => [], flows: () => [] })
-const emit = defineEmits<{ task: [id: string]; flow: [id: string] }>()
+const emit = defineEmits<{ task: [id: string]; flow: [id: string, stageId?: string] }>()
 const { t, locale } = useI18n()
 const pageLoading = usePageLoadingState()
 const avatar = computed(() => props.avatar || PERSON_AVATAR)
@@ -77,7 +77,7 @@ const animation = computed(() => personAvatarAnimation(avatar.value, state.value
 function dismiss(event: Event) { if (!root.value?.contains(event.target as Node)) opened.value = false }
 function keydown(event: KeyboardEvent) { if (event.key === 'Escape' && opened.value) { opened.value = false; if (root.value?.contains(document.activeElement)) root.value?.querySelector<HTMLButtonElement>('button')?.focus() } }
 function selectTask(id: string) { opened.value = false; emit('task', id) }
-function selectFlow(id: string) { opened.value = false; emit('flow', id) }
+function selectFlow(id: string, stageId?: string) { opened.value = false; emit('flow', id, stageId) }
 const expandedWidth = computed(() => Math.max(280, standalone.value.length ? 420 : 0, ...flows.value.map(flow => (flowWidths.value[flow.id] || 280) + 28)))
 function taskImage(task: PersonTask) {
   const bot = personBot(task.bot_type)
@@ -126,7 +126,7 @@ onBeforeUnmount(() => { containerObserver?.disconnect(); motionQuery?.removeEven
               <button v-for="task in standalone" :key="task.id" class="activity-row" type="button" :title="task.title" @click="selectTask(task.id)">
                 <img :src="taskImage(task)" alt="" width="40" height="40" /><span class="activity-task-text"><strong dir="auto">{{ task.title }}</strong><small>{{ t(`person.states.${task.execution_state || 'pending'}`) }}</small><small v-if="task.summary" class="activity-task-summary" :title="task.summary" dir="auto">{{ task.summary }}</small></span><span class="activity-row-chevron" aria-hidden="true">›</span>
               </button>
-              <PersonActivityFlow v-for="flow in flows" :key="flow.id" :flow="flow" :max-width="availableWidth - 28" :reduced-motion="reducedMotion" :fallback-avatar="avatar.src" @task="selectTask" @flow="selectFlow" @resize="rememberFlowWidth(flow.id, $event)" />
+              <PersonActivityFlow v-for="flow in flows" :key="flow.id" :flow="flow" :max-width="availableWidth - 28" :reduced-motion="reducedMotion" :fallback-avatar="avatar.src" @flow="selectFlow" @resize="rememberFlowWidth(flow.id, $event)" />
               <p v-if="finishing" role="status">{{ t('person.states.finished') }}</p>
             </div>
           </div>
