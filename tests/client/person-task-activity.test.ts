@@ -29,3 +29,33 @@ it('collapses on outside interaction without moving focus',async()=>{
  document.body.dispatchEvent(new Event('pointerdown',{bubbles:true}));await wrapper.vm.$nextTick()
  expect(wrapper.get('button').attributes('aria-expanded')).toBe('false')
 })
+it('queues individual completions while other tasks remain active and does not replay snapshots',async()=>{
+ const a={id:'a',title:'First',status:'open',execution_state:'running',execution_id:'run-a'} as any
+ const b={id:'b',title:'Second',status:'open',execution_state:'running',execution_id:'run-b'} as any
+ wrapper=mount(Activity,{props:{count:2,tasks:[a,b]}})
+ await wrapper.setProps({count:1,tasks:[{...a,status:'completed',execution_state:'finished'},b]})
+ expect(wrapper.find('.activity-completion').text()).toContain('First')
+ await wrapper.setProps({tasks:[{...a,status:'completed',execution_state:'finished'},b]})
+ await vi.advanceTimersByTimeAsync(3500)
+ expect(wrapper.find('.activity-completion').exists()).toBe(false)
+})
+it('does not replay initial completions and clears feedback on session change',async()=>{
+ const task={id:'a',title:'First',status:'completed',execution_state:'finished'} as any
+ wrapper=mount(Activity,{props:{count:0,scope:'one',tasks:[task]}})
+ expect(wrapper.find('.activity-completion').exists()).toBe(false)
+ await wrapper.setProps({count:1,tasks:[{...task,status:'open',execution_state:'running'}]})
+ await wrapper.setProps({count:0,tasks:[task]})
+ expect(wrapper.find('.activity-completion').exists()).toBe(true)
+ await wrapper.setProps({scope:'two',tasks:[task]})
+ expect(wrapper.find('.activity-completion').exists()).toBe(false)
+})
+it('shows simultaneous completions one by one without dropping the second',async()=>{
+ const tasks=['a','b'].map(id=>({id,title:id,status:'open',execution_state:'running'} as any))
+ wrapper=mount(Activity,{props:{count:2,tasks}})
+ await wrapper.setProps({count:0,tasks:tasks.map(t=>({...t,status:'completed',execution_state:'finished'}))})
+ expect(wrapper.find('.activity-completion').text()).toContain('a')
+ await vi.advanceTimersByTimeAsync(3200)
+ expect(wrapper.find('.activity-completion').text()).toContain('b')
+ await vi.advanceTimersByTimeAsync(3200)
+ expect(wrapper.find('.activity-completion').exists()).toBe(false)
+})

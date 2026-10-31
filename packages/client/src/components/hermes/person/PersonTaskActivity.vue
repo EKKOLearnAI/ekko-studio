@@ -19,6 +19,37 @@ const root = ref<HTMLElement>()
 const active = computed(() => activityTasks(props.tasks))
 const flows = computed(() => activityFlows(props.flows, active.value))
 const standalone = computed(() => standaloneActivityTasks(active.value, flows.value))
+type Completion = { id: string; title: string; key: string }
+const completions = ref<Completion[]>([])
+let completionTimer: ReturnType<typeof setTimeout> | undefined
+let previousTasks = new Map<string, { done: boolean; execution: string }>()
+let completionScope = props.scope
+const completion = computed(() => completions.value[0])
+function advanceCompletion() {
+  if (completionTimer || !completions.value.length) return
+  completionTimer = setTimeout(() => {
+    completions.value.shift(); completionTimer = undefined; advanceCompletion()
+  }, 3200)
+}
+watch(() => [props.scope, props.tasks, props.flows] as const, () => {
+  if (completionScope !== props.scope) {
+    completionScope = props.scope; previousTasks.clear(); completions.value = []
+    clearTimeout(completionTimer); completionTimer = undefined
+  }
+  const items = new Map(props.flows.flatMap(flow => flow.stages.flatMap(stage => stage.tasks)).map(task => [task.id, task]))
+  for (const task of props.tasks) items.set(task.id, task)
+  for (const task of items.values()) {
+    const done = task.status === 'completed' || task.execution_state === 'finished'
+    const execution = ('execution_id' in task ? String(task.execution_id || '') : '')
+    const previous = previousTasks.get(task.id)
+    if (done && previous && !previous.done && (!previous.execution || !execution || previous.execution === execution)) {
+      const key = `${task.id}:${execution}`
+      if (!completions.value.some(item => item.key === key)) completions.value.push({ id: task.id, title: task.title, key })
+    }
+    previousTasks.set(task.id, { done, execution })
+  }
+  advanceCompletion()
+}, { deep: true, immediate: true })
 const finishing = ref(false)
 let finishTimer: ReturnType<typeof setTimeout> | undefined
 const hasWork = computed(() => active.value.length > 0 || flows.value.length > 0 || props.count > 0)
@@ -27,10 +58,10 @@ watch(hasWork, (value, previous) => {
   finishing.value = !value && previous
   if (finishing.value) finishTimer = setTimeout(() => { finishing.value = false; opened.value = false }, 3000)
 })
-watch(() => props.scope, () => { opened.value = false; finishing.value = false; clearTimeout(finishTimer) })
-const state = computed(() => finishing.value ? 'done' : active.value.some(task => ['failed', 'interrupted'].includes(task.execution_state)) || flows.value.some(flow => flow.state === 'failed') ? 'error' : active.value.some(task => attentionStates.has(task.execution_state)) ? 'thinking' : 'searching')
+watch(() => props.scope, () => { opened.value = false; finishing.value = false; clearTimeout(finishTimer); clearTimeout(completionTimer) })
+const state = computed(() => completion.value || finishing.value ? 'done' : active.value.some(task => ['failed', 'interrupted'].includes(task.execution_state)) || flows.value.some(flow => flow.state === 'failed') ? 'error' : active.value.some(task => attentionStates.has(task.execution_state)) ? 'thinking' : 'searching')
 const animation = computed(() => personAvatarAnimation(avatar.value, state.value) || PERSON_ANIMATIONS[state.value])
-const headline = computed(() => finishing.value ? t('person.states.finished') : active.value[0]?.title || flows.value[0]?.title || t('person.backgroundTasks'))
+const headline = computed(() => completion.value ? `${t('person.states.finished')} · ${completion.value.title}` : finishing.value ? t('person.states.finished') : active.value[0]?.title || flows.value[0]?.title || t('person.backgroundTasks'))
 function dismiss(event: Event) { if (!root.value?.contains(event.target as Node)) opened.value = false }
 function keydown(event: KeyboardEvent) { if (event.key === 'Escape' && opened.value) { opened.value = false; if (root.value?.contains(document.activeElement)) root.value?.querySelector<HTMLButtonElement>('button')?.focus() } }
 function selectTask(id: string) { opened.value = false; emit('task', id) }
@@ -45,33 +76,38 @@ onMounted(() => {
   syncMotion()
   motionQuery.addEventListener('change', syncMotion)
 })
-onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', keydown); clearTimeout(finishTimer) })
+onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', keydown); clearTimeout(finishTimer); clearTimeout(completionTimer) })
 </script>
 
 <template>
   <div ref="root" class="person-task-activity" :class="{ 'is-expanded': opened }">
     <Transition name="person-task-island" appear>
-      <section v-if="(hasWork || finishing) && !pageLoading" class="activity-shell" data-theme-surface="card">
+      <section v-if="(hasWork || finishing || completion) && !pageLoading" class="activity-shell" data-theme-surface="card">
         <button type="button" class="person-task-island" :aria-expanded="opened" :aria-label="`${avatar.label} · ${t('person.backgroundTasks')} · ${formattedCount}`" @click="opened = !opened">
           <span class="person-task-island__avatar-slot" aria-hidden="true"><img class="person-task-island__avatar" :src="reducedMotion ? avatar.src : animation" alt="" width="48" height="48" /></span>
           <span class="person-task-island__label"><strong>{{ avatar.label }}</strong><Transition name="activity-label" mode="out-in"><span :key="headline">{{ headline }}</span></Transition></span>
           <span class="person-task-island__count">{{ formattedCount }}</span>
           <span aria-hidden="true">{{ opened ? '−' : '+' }}</span>
         </button>
+        <Transition name="activity-completion" mode="out-in">
+          <button v-if="completion" :key="completion.key" class="activity-completion" @click="selectTask(completion.id)">
+            <span aria-hidden="true">✓</span><span role="status">{{ t('person.states.finished') }} · {{ completion.title }}</span><span aria-hidden="true">›</span>
+          </button>
+        </Transition>
         <Transition name="activity-content">
           <div v-if="opened" class="activity-content">
             <div class="activity-scroll">
               <section v-for="flow in flows" :key="flow.id" class="activity-flow">
                 <button class="activity-row" @click="opened = false; emit('flow', flow.id)"><strong>{{ flow.title }}</strong><span>›</span></button>
-                <ol class="activity-stages">
+                <TransitionGroup tag="ol" name="activity-stage" class="activity-stages">
                   <li v-for="group in personFlowGroups(flow)" :key="group.position" :class="{ current: group.position === flow.current_position, done: group.completed === group.stages.length }">
-                    <span aria-hidden="true">{{ group.completed === group.stages.length ? '✓' : group.position === flow.current_position ? '●' : '○' }}</span>
+                    <span class="activity-stage-marker" :key="`${flow.id}:${group.position}:${group.position === flow.current_position}:${group.completed}`" aria-hidden="true">{{ group.completed === group.stages.length ? '✓' : group.position === flow.current_position ? '●' : '○' }}</span>
                     <div v-for="stage in group.stages" :key="stage.id" class="activity-stage">
-                      <span class="activity-role"><img :src="personBot(stage.bot_type) ? deploymentUrl(personBot(stage.bot_type)!.avatar) : avatar.src" alt="" width="24" height="24" />{{ stage.session_title || stage.goal }}</span><small>{{ t(personFlowStatusKey(personFlowStageStatus(flow, stage))) }}</small>
+                      <span class="activity-role"><img :src="personBot(stage.bot_type) ? deploymentUrl(personBot(stage.bot_type)!.avatar) : avatar.src" alt="" width="24" height="24" />{{ stage.session_title || stage.goal }}</span><Transition name="activity-label" mode="out-in"><small :key="personFlowStageStatus(flow, stage)">{{ t(personFlowStatusKey(personFlowStageStatus(flow, stage))) }}</small></Transition>
                       <button v-for="task in stage.tasks.filter(item => item.status !== 'closed')" :key="task.id" class="activity-row" @click="selectTask(task.id)"><span>{{ task.title }}</span><small>{{ t(`person.states.${task.execution_state || 'pending'}`) }}</small><span>›</span></button>
                     </div>
                   </li>
-                </ol>
+                </TransitionGroup>
               </section>
               <button v-for="task in standalone" :key="task.id" class="activity-row" @click="selectTask(task.id)">
                 <span class="activity-task-text"><strong>{{ task.title }}</strong><small>{{ t(`person.states.${task.execution_state || 'pending'}`) }}</small><small v-if="task.summary">{{ task.summary }}</small></span><span>›</span>
@@ -168,4 +204,20 @@ onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); 
 .activity-content-enter-active, .activity-content-leave-active { transition:opacity 180ms,transform 220ms; }
 .activity-content-enter-from, .activity-content-leave-to { opacity:0; transform:translateY(-6px); }
 @media (prefers-reduced-motion: reduce) { .person-task-activity, .activity-label-enter-active, .activity-label-leave-active, .activity-content-enter-active, .activity-content-leave-active { transition:none; } }
+
+.activity-completion { display:flex; gap:8px; align-items:center; width:100%; padding:8px 18px 12px; border:0; background:transparent; color:$accent-primary; font:inherit; text-align:start; cursor:pointer; }
+.activity-completion > span:nth-child(2) { flex:1; overflow-wrap:anywhere; }
+.activity-completion:focus-visible { outline:2px solid $accent-primary; outline-offset:-3px; }
+.activity-completion-enter-active, .activity-completion-leave-active { transition:opacity 180ms,transform 260ms; }
+.activity-completion-enter-from { opacity:0; transform:translateY(6px); }
+.activity-completion-leave-to { opacity:0; transform:translateY(-6px); }
+.activity-stage-move, .activity-stage-enter-active, .activity-stage-leave-active { transition:transform 360ms cubic-bezier(.22,1,.36,1),opacity 220ms; }
+.activity-stage-enter-from, .activity-stage-leave-to { opacity:0; transform:translateX(-8px); }
+.activity-stages > li { transition:border-color 320ms,color 240ms; }
+.activity-stage-marker { animation:stage-handoff 420ms cubic-bezier(.22,1,.36,1); }
+@keyframes stage-handoff { from { transform:scale(.65); opacity:.3; } to { transform:scale(1); opacity:1; } }
+@media (prefers-reduced-motion: reduce) {
+ .activity-stage-marker { animation:none; }
+ .activity-stages > li, .activity-stage-move, .activity-stage-enter-active, .activity-stage-leave-active, .activity-completion-enter-active, .activity-completion-leave-active { transition:none; }
+}
 </style>

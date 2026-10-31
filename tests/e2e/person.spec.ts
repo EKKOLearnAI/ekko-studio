@@ -3906,3 +3906,24 @@ test('Person activity groups parallel collaboration and opens the selected flow'
  await expect(page.locator('.flow-panel')).toBeVisible()
  await expect(page.locator('.flow-panel').getByRole('button',{name:/Parallel delivery/}).first()).toHaveAttribute('aria-expanded','true')
 })
+
+test('Chinese activity completion and stage handoff preview', async ({ page }) => {
+ const { state } = await setup(page,'dark',false,false)
+ await page.addInitScript(()=>localStorage.setItem('hermes_locale','zh'))
+ state.tasks=[{...state.tasks[0],title:'整理调研资料',execution_id:'run-a'},{...state.tasks[0],id:'task2',title:'编写实现方案',execution_id:'run-b'}]
+ state.flows=[{id:'handoff',title:'产品方案协作',goal:'交付方案',revision:1,state:'active',current_position:0,error:'',stages:[
+ {id:'research',position:0,group_position:0,session_id:'person-main-1',session_title:'资料调研',goal:'调研',state:'active',bot_type:'zhezhe',tasks:[state.tasks[0]]},
+ {id:'design',position:1,group_position:1,session_id:'person-main-1',session_title:'方案设计',goal:'设计',state:'pending',bot_type:'xiaohe',tasks:[state.tasks[1]]}]}]
+ await page.goto('/#/person');await page.locator('.person-task-island').click()
+ await expect(page.locator('.activity-content')).toBeVisible()
+ state.tasks[0]={...state.tasks[0],status:'completed',execution_state:'finished',running:false}
+ state.flows[0].stages[0].tasks=[state.tasks[0]];state.flows[0].stages[0].state='completed';state.flows[0].stages[1].state='active';state.flows[0].current_position=1
+ await emit(page,'person.updated',{})
+ await expect(page.locator('.activity-completion')).toContainText('整理调研资料')
+ await expect(page.locator('.activity-stages > li.current')).toContainText('方案设计')
+ await page.waitForTimeout(500)
+ await page.screenshot({path:'/home/agent/work/hermes-studio/.ekko-tmp/island-zh-completion.png',animations:'disabled'})
+ await expect(page.locator('.activity-completion')).not.toBeVisible({timeout:5000})
+ await expect(page.locator('.person-task-island')).toBeVisible()
+ await page.screenshot({path:'/home/agent/work/hermes-studio/.ekko-tmp/island-zh-handoff.png',animations:'disabled'})
+})
