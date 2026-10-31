@@ -193,6 +193,7 @@ it('adds Person event subscriptions with account ownership independent of the vi
 
 it('restores only current Person owner interactions across Profiles, with device preferences and safe envelopes', async () => {
  const { personNotificationSnapshot } = await import('../../packages/server/src/modules/studio/services/notifications/person-notification-state')
+ const runtime = await import('../../packages/server/src/modules/studio/public/chat-agent-runtime')
  const own={id:'person-main-1',studio_user_id:'1',profile:'model-resource',source:'builtin_agent',agent:'ekko-agent'}
  sessionFixtures.set(own.id,own)
  sessionFixtures.set('person-main-other',{...own,id:'person-main-other',studio_user_id:'2'})
@@ -207,6 +208,7 @@ it('restores only current Person owner interactions across Profiles, with device
   {event:'clarify.requested',data:{clarify_id:'question',timeout_ms:30000,requested_at:Date.now(),question:'private-question'}},
   {event:'run.completed',data:{output:'private-output'}},
  ]} as any
+ const broker = vi.spyOn(runtime, 'pendingChatEkkoInteractions').mockImplementation(id => id === own.id ? [request('pending'), state.events[7]] : [])
  const snapshot=()=>personNotificationSnapshot(auth.user.id,new Map([
   [own.id,state],['person-main-other',state],['person-task-private',state],['person-main-archived',state],
   ['ordinary',state],['person-main-idle',{...state,isWorking:false}],
@@ -226,7 +228,7 @@ it('restores only current Person owner interactions across Profiles, with device
   mutedTokens.add('test');expect((await subscribe()).snapshot).toEqual([])
   mutedTokens.delete('test');auth.user={id:3,role:'super_admin'}
   expect((await subscribe()).snapshot).toEqual([])
- } finally {s.handlers.get('disconnect')!()}
+ } finally {s.handlers.get('disconnect')!();broker.mockRestore()}
 })
 
 it('publishes silent Person run state without attaching an HTTP webhook or push alert', async () => {
@@ -367,4 +369,63 @@ it('adds silent removals through an optional capability while preserving legacy 
   await flush()
   expect(s.emit).toHaveBeenCalledTimes(1)
  } finally {s.handlers.get('disconnect')!()}
+})
+
+it.each(['response', 'timeout', 'abort', 'cancel'])('restores live Person broker requests after 200 events and removes them on %s', async terminal => {
+ vi.useFakeTimers()
+ const approvals = await import('../../packages/server/src/modules/ekko/services/approvals')
+ const clarifications = await import('../../packages/server/src/modules/ekko/services/clarifications')
+ const runtime = await import('../../packages/server/src/modules/studio/public/chat-agent-runtime')
+ const { personNotificationSnapshot } = await import('../../packages/server/src/modules/studio/services/notifications/person-notification-state')
+ const sid = 'person-main-broker'
+ const other = 'person-main-other'
+ sessionFixtures.set(sid, { id:sid, studio_user_id:'1', profile:'model-resource' })
+ sessionFixtures.set(other, { id:other, studio_user_id:'2', profile:'model-resource' })
+ const broker = vi.spyOn(runtime, 'pendingChatEkkoInteractions').mockImplementation(id => [
+  ...approvals.pendingEkkoToolApprovalEvents(id), ...clarifications.pendingEkkoClarificationEvents(id),
+ ])
+ const controller = new AbortController()
+ const request = { approvalId:'approval-live', toolName:'terminal_exec', key:'terminal', command:'private-command',
+  description:'private-description', choices:['once','deny'] as const, allowPermanent:false, timeoutMs:30000 }
+ const approval = approvals.waitForEkkoToolApproval({...request,choices:[...request.choices]}, {sessionId:sid,runId:'turn',signal:controller.signal,onRequested:vi.fn()})
+ const clarify = clarifications.waitForEkkoClarification({clarifyId:'clarify-live',question:'private-question',choices:['A','B'],timeoutMs:30000},
+  {sessionId:sid,runId:'turn',signal:controller.signal,onRequested:vi.fn()})
+ const privateApproval = approvals.waitForEkkoToolApproval({...request,approvalId:'private',choices:[...request.choices]}, {sessionId:other,onRequested:vi.fn()})
+ const originalRequests = broker(sid)
+ const state = {isWorking:true,runId:'turn',events:[...originalRequests,...Array.from({length:250},()=>({event:'message.delta',data:{delta:'text'}}))].slice(-200)} as any
+ const snapshot=()=>personNotificationSnapshot(1,new Map([[sid,state],[other,state]]))
+ let s: ReturnType<typeof socket> | undefined
+ try {
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(state.events).toHaveLength(200)
+  expect(state.events.some((e:any)=>e.event.endsWith('.requested'))).toBe(false)
+  // The subscription is rebuilt from the current broker, including on reconnect.
+  const subscribe=async()=>{
+   s?.handlers.get('disconnect')!()
+   s=socket();bindAppEventSubscription(s as any,snapshot)
+   const ack=vi.fn();await s.handlers.get('app.events.subscribe')!({schema_version:1,profile:'default',include_snapshot:true},ack)
+   return ack.mock.calls[0][0].snapshot
+  }
+  for(let reconnect=0;reconnect<2;reconnect++) {
+   const restored=await subscribe()
+   expect(restored.map((e:any)=>e.type)).toEqual(['person.run.updated','person.approval.requested','person.clarification.requested'])
+   expect(restored.slice(1).map((e:any)=>e.interaction.remaining_timeout_ms)).toEqual([25000,25000])
+   expect(JSON.stringify(restored)).not.toMatch(/private-|command|question"\s*:/)
+  }
+  if(terminal==='response') {
+   expect(approvals.respondToEkkoToolApproval(sid,'approval-live','once').resolved).toBe(true)
+   expect(clarifications.respondToEkkoClarification(sid,'clarify-live','A').resolved).toBe(true)
+  } else if(terminal==='timeout') await vi.advanceTimersByTimeAsync(25000)
+  else if(terminal==='abort') controller.abort()
+  else {approvals.denyPendingEkkoToolApprovals(sid);clarifications.cancelPendingEkkoClarifications(sid)}
+  await Promise.all([approval,clarify])
+  // Stale requested events cannot resurrect a resolved broker request.
+  state.events=originalRequests
+  expect((await subscribe()).map((e:any)=>e.type)).toEqual(['person.run.updated'])
+ } finally {
+  s?.handlers.get('disconnect')!()
+  approvals.denyPendingEkkoToolApprovals();clarifications.cancelPendingEkkoClarifications()
+  await Promise.all([approval,clarify,privateApproval])
+  broker.mockRestore();vi.useRealTimers()
+ }
 })

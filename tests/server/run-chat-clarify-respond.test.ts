@@ -14,6 +14,7 @@ const bridgeMock = vi.hoisted(() => ({
   statusIfLoaded: vi.fn(),
 }))
 const respondToEkkoClarificationMock = vi.hoisted(() => vi.fn())
+const pendingEkkoInteractionsMock = vi.hoisted(() => vi.fn(() => [] as any[]))
 
 vi.mock('../../packages/server/src/modules/hermes/services/bridge/index', () => ({
   AgentBridgeClient: vi.fn(() => bridgeMock),
@@ -38,6 +39,7 @@ vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', ()
   getChatEkkoAgent: vi.fn(() => ({ requestBoundaryInterrupt: vi.fn() })),
   respondToChatEkkoToolApproval: vi.fn(() => ({ handled: false, resolved: false })),
   respondToChatEkkoClarification: respondToEkkoClarificationMock,
+  pendingChatEkkoInteractions: pendingEkkoInteractionsMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({
@@ -106,6 +108,7 @@ describe('ChatRunSocket clarify responses', { timeout: 15_000 }, () => {
   beforeEach(() => {
     vi.resetModules()
     personInteractionMock.mockReset()
+    pendingEkkoInteractionsMock.mockReset().mockReturnValue([])
     sessionStoreMock.getSession.mockReset()
     sessionStoreMock.getSession.mockReturnValue({ id: 'session-1', profile: 'default' })
     bridgeMock.clarifyRespond.mockReset()
@@ -176,6 +179,30 @@ describe('ChatRunSocket clarify responses', { timeout: 15_000 }, () => {
     expect(state.events).not.toContainEqual(expect.objectContaining({ event: 'clarify.requested' }))
     expect(respondToEkkoClarificationMock).not.toHaveBeenCalled()
     expect(bridgeMock.clarifyRespond).not.toHaveBeenCalled()
+  })
+
+  it('resumes and answers Person requests from the live broker after event history is trimmed', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io, socket, handlers } = createSocketHarness()
+    const server: any = new ChatRunSocket(io as any)
+    const sid = 'person-main-1'
+    sessionStoreMock.getSession.mockReturnValue({ id: sid, profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', studio_user_id: '1' } as any)
+    socket.data = { user: { id: 1, role: 'admin' } } as any
+    const state = { isWorking: true, runId: 'turn', profile: 'default', messages: [], queue: [],
+      events: Array.from({length:200},()=>({event:'message.delta',data:{delta:'text'}})) }
+    server.sessionMap.set(sid,state)
+    vi.spyOn(server, 'backgroundPendingCount').mockReturnValue(0)
+    const request = {event:'clarify.requested',data:{event:'clarify.requested',session_id:sid,clarify_id:'live',question:'Which?',timeout_ms:30000,requested_at:Date.now()}}
+    pendingEkkoInteractionsMock.mockImplementation(id => id === sid ? [request] : [])
+    server.onConnection(socket)
+    await handlers.get('resume')!({session_id:sid})
+    const resumed = socket.emit.mock.calls.find(([event])=>event==='resumed')![1]
+    expect(resumed.events.filter((entry:any)=>entry.event==='clarify.requested')).toEqual([expect.objectContaining({data:expect.objectContaining({clarify_id:'live',remaining_timeout_ms:expect.any(Number)})})])
+    respondToEkkoClarificationMock.mockReturnValue({handled:true,resolved:true})
+    expect(await server.respondPersonInteraction(sid,'unknown','A',false)).toBe(false)
+    expect(respondToEkkoClarificationMock).not.toHaveBeenCalled()
+    expect(await server.respondPersonInteraction(sid,'live','A',false)).toBe(true)
+    expect(respondToEkkoClarificationMock).toHaveBeenCalledWith(sid,'live','A')
   })
 
   it('routes Person answers through the live question and hides pending prompts from profile subscribers', async () => {

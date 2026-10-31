@@ -27,6 +27,7 @@ import { codingAgentId } from '../services/chat-run/types'
 import { studioMcpCapabilities } from '../public/runs/mcp-capabilities'
 import { hermesStudioMcpCapabilities } from '../services/chat-run/studio-mcp'
 import { publishAppState, stateEvent, planStateEvent } from '../services/webhooks/app-event-state'
+import { pendingChatEkkoInteractions } from '../public/chat-agent-runtime'
 import { personNotificationSnapshot } from '../services/notifications/person-notification-state'
 import type { BusinessEvent } from '../services/webhooks/business-events'
 import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
@@ -1675,7 +1676,8 @@ export class ChatRunSocket {
   async respondPersonInteraction(sessionId: string, id: string, response: string, approval: boolean): Promise<boolean> {
     const state = this.sessionMap.get(sessionId)
     const eventName = approval ? 'approval.requested' : 'clarify.requested'
-    if (!state?.events.some(entry => entry.event === eventName && (entry.data?.approval_id === id || entry.data?.clarify_id === id))) return false
+    const pending = isPersonSession(sessionId) ? pendingChatEkkoInteractions(sessionId) : state?.events || []
+    if (!state || !pending.some(entry => entry.event === eventName && (entry.data?.approval_id === id || entry.data?.clarify_id === id))) return false
     let resolved = false
     if (approval) {
       if (!['once', 'session', 'deny'].includes(response)) return false
@@ -2296,7 +2298,9 @@ export class ChatRunSocket {
       this.sessionMap.set(sid, state)
     }
     const resumeEvents = state.isWorking
-      ? state.events
+      ? isPersonSession(sid)
+        ? [...state.events.filter(entry => !['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(entry.event)), ...pendingChatEkkoInteractions(sid)]
+        : state.events
       : (state.events || []).filter(evt => evt?.event === 'run.reattach_failed')
     if (isPersonSession(sid) && !state.isWorking) {
       const question = personChatInteraction(Number(socket.data.user.id), sid)

@@ -1349,6 +1349,7 @@ export async function handleEkkoAgentRun(
         }
         return waitForEkkoToolApproval(request, {
           sessionId,
+          runId: runId || turnId,
           signal: abortController.signal,
           onRequested: (pending: any) => {
             const requestedAt = Date.now()
