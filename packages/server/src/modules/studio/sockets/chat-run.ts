@@ -3524,10 +3524,11 @@ export class ChatRunSocket {
 
   private emitPendingInteraction(profile: string, event: string, payload: any) {
     if (isPrivatePersonSession(payload?.session_id)) {
-      this.sessionStateSync.observe(event, payload)
       const session = getSession(payload.session_id)
       const userId = Number(session?.studio_user_id)
       if (session?.id !== payload.session_id || !ownsPersonSession(userId, session) || payload.replayed || payload.restored || payload.background_snapshot) return
+      // Silent state must reach the App even when there is no visible notice.
+      this.emitSessionActivity(profile, event, payload)
       const interaction = ['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)
       const notice = foregroundNotification(event, payload)
       if (!interaction && (!notice || ['cancelled', 'canceled'].includes(payload.stop_reason))) return
