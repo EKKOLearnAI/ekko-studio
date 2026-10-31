@@ -200,6 +200,32 @@ every existing token. The `exp` claim is authoritative: 30 days by default, conf
 profile. There is no renewal: after expiry the operator supplies a new login token, and the
 producer retries the same `event_id` with the same frozen generation.
 
+**Publisher grants (unattended producers).** A login token is account-wide and cannot be
+revoked on its own, so a recurring producer should use a publisher grant instead. The session
+owner issues one with a login token:
+
+```bash
+curl -X POST "http://127.0.0.1:8648/api/studio/sessions/<session-id>/notification-publishers" \
+  -H "Authorization: Bearer <login token>" -H "X-Hermes-Profile: default" -H "Content-Type: application/json" \
+  -d '{"profile":"default","expected_session_generation":"<generation>",
+       "sources":["repo-puller","pr-review-cron"],"expires_in_days":90,"label":"background producers"}'
+```
+
+The response carries the secret (`esnp_…`) once; Studio stores only its SHA-256. A grant is
+bound to one Studio instance, profile, session and **session generation**, lists the `source`
+values it may post (at most 8), and expires after `expires_in_days` (default 90, at most 180).
+A history reset or a delete and same-id recreation invalidates it. The auth middleware accepts a
+grant only as `Authorization: Bearer` on `POST /api/studio/sessions/{id}/notifications`; every
+other route, method, query-string token and WebSocket refuses it (`403
+publisher_token_route_not_allowed`), and it can neither issue, list nor revoke grants. A notice
+outside the grant's session, profile or generation returns `403 publisher_scope_mismatch`, a
+source not in the grant returns `403 publisher_source_not_allowed`, and a revoked, expired or
+unknown grant, or one whose owner is disabled or lost the profile, returns `401
+publisher_token_invalid`. Accepted notices use the same identity, idempotency and passive
+delivery as login-token notices, attributed to the owner. The owner lists grants (without
+secrets) with `GET …/notification-publishers` and revokes one with `DELETE
+…/notification-publishers/{publisherId}`.
+
 **Freezing the target.** `GET /api/studio/sessions/{id}?profile=<profile>` returns
 `session.session_generation`. Store it when the destination is chosen. A history reset or a
 delete and same-id recreation changes it, and a stale value returns

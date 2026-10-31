@@ -124,6 +124,32 @@ export const TASK_PLANS_SCHEMA: Record<string, string> = {
 export const SESSIONS_TABLE = 'sessions'
 
 export const SESSION_SHARES_TABLE = 'session_shares'
+
+/**
+ * Notice publisher grants: a hashed, expiring, revocable credential that lets one unattended
+ * producer post passive notices to exactly one session, profile and session generation through
+ * `POST /api/studio/sessions/:id/notifications`. Only the SHA-256 of the secret is stored.
+ */
+export const SESSION_NOTICE_PUBLISHERS_TABLE = 'session_notice_publishers'
+export const SESSION_NOTICE_PUBLISHERS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  token_hash: 'TEXT NOT NULL',
+  owner_user_id: 'INTEGER NOT NULL',
+  namespace: 'TEXT NOT NULL',
+  profile: 'TEXT NOT NULL',
+  session_id: 'TEXT NOT NULL',
+  session_generation: 'TEXT NOT NULL',
+  sources: 'TEXT NOT NULL',
+  label: "TEXT NOT NULL DEFAULT ''",
+  created_at: 'INTEGER NOT NULL',
+  expires_at: 'INTEGER NOT NULL',
+  revoked_at: 'INTEGER',
+  last_used_at: 'INTEGER',
+}
+export const SESSION_NOTICE_PUBLISHERS_INDEXES: Record<string, string> = {
+  uniq_session_notice_publishers_token: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_notice_publishers_token ON session_notice_publishers(token_hash)',
+  idx_session_notice_publishers_owner: 'CREATE INDEX IF NOT EXISTS idx_session_notice_publishers_owner ON session_notice_publishers(owner_user_id, session_id)',
+}
 export const SESSION_SHARES_SCHEMA: Record<string, string> = {
   id: 'TEXT PRIMARY KEY',
   session_id: 'TEXT NOT NULL',
@@ -1851,6 +1877,8 @@ export function initAllHermesTables(): void {
     // App authorization codes and connected mobile devices
     syncTable(SESSION_SHARES_TABLE, SESSION_SHARES_SCHEMA, { indexes: SESSION_SHARES_INDEXES })
     createIndexes(db, SESSION_SHARES_INDEXES)
+    syncTable(SESSION_NOTICE_PUBLISHERS_TABLE, SESSION_NOTICE_PUBLISHERS_SCHEMA, { indexes: SESSION_NOTICE_PUBLISHERS_INDEXES })
+    createIndexes(db, SESSION_NOTICE_PUBLISHERS_INDEXES)
     syncTable(SESSION_UPLOADS_TABLE, SESSION_UPLOADS_SCHEMA, { indexes: SESSION_UPLOADS_INDEXES })
     createIndexes(db, SESSION_UPLOADS_INDEXES)
     syncTable(APP_CONNECTIONS_TABLE, APP_CONNECTIONS_SCHEMA, {

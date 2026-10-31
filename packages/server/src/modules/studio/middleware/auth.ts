@@ -7,6 +7,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { getToken } from '../services/auth/token-auth'
 import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
 import { MODEL_API_KEY_PREFIX, findModelApiKey, touchModelApiKey } from '../services/model-api/keys'
+import { authenticateNoticePublisher, isNoticePublisherToken } from '../services/session-notifications/publishers'
 import { ModelApiError, modelApiErrorBody } from '../services/model-api/errors'
 import {
   findUserById,
@@ -124,6 +125,9 @@ function safeEqual(a: string, b: string): boolean {
 async function getJwtSecret(): Promise<string> {
   return process.env.AUTH_JWT_SECRET || await getToken()
 }
+
+/** The only route a notice publisher grant may call. */
+const NOTICE_DELIVERY_PATH = /^\/api\/studio\/sessions\/[^/]+\/notifications\/?$/i
 
 function requestToken(ctx: Context): string {
   const auth = ctx.headers.authorization || ''
@@ -395,6 +399,23 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
 
   const secret = await getJwtSecret()
   const token = requestToken(ctx)
+  if (isNoticePublisherToken(token)) {
+    // A notice publisher grant only delivers passive notices to its one session: it never
+    // authenticates any other endpoint, method, query-string token or WebSocket.
+    if (!(ctx.method === 'POST' && NOTICE_DELIVERY_PATH.test(decodedPath))) {
+      ctx.status = 403; ctx.body = { error: 'publisher_token_route_not_allowed' }; return
+    }
+    if (ctx.get('authorization') !== `Bearer ${token}`) {
+      ctx.status = 401; ctx.body = { error: 'publisher_token_header_required' }; return
+    }
+    const grant = authenticateNoticePublisher(token)
+    const owner = grant ? findUserById(grant.owner_user_id) : null
+    if (!grant || !owner) { ctx.status = 401; ctx.body = { error: 'publisher_token_invalid' }; return }
+    ctx.state.user = toAuthenticatedUser(owner)
+    ctx.state.noticePublisher = grant
+    await next()
+    return
+  }
   if (token.startsWith(MODEL_API_KEY_PREFIX)) {
     try {
       // Keys never authenticate UI, management, proxy or WebSocket endpoints.

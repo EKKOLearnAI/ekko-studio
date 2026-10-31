@@ -22881,6 +22881,129 @@
         "x-session-share-permission": "switchModel"
       }
     },
+    "/api/studio/sessions/{id}/notification-publishers": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Get notification-publishers",
+        "description": "GET /api/studio/sessions/:id/notification-publishers",
+        "operationId": "listPublishers",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create notification-publishers",
+        "description": "POST /api/studio/sessions/:id/notification-publishers",
+        "operationId": "issuePublisher",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/sessions/{id}/notification-publishers/{publisherId}": {
+      "delete": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Delete :publisherId",
+        "description": "DELETE /api/studio/sessions/:id/notification-publishers/:publisherId",
+        "operationId": "revokePublisher",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "publisherId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/studio/sessions/{id}/notifications": {
       "post": {
         "tags": [
@@ -22910,14 +23033,6 @@
             "name": "id",
             "in": "path",
             "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "profile",
-            "in": "query",
-            "required": false,
             "schema": {
               "type": "string"
             }
