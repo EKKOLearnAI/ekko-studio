@@ -654,7 +654,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       </NModal>
       <div v-if="!isNewConversation" ref="chatSurface" class="person-chat-surface">
       <div v-if="data.session" class="person-chat-messages">
-      <PersonTaskActivity :count="sessionStates.backgroundCount(selectedSessionId)" :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :key="selectedSessionId || 'empty'" :scope="selectedSessionId || ''" :tasks="data?.tasks || []" :flows="data?.flows || []" @task="openFlowTask" @flow="openActivityFlow" @open="openPanel('tasks')" />
+      <PersonTaskActivity :count="sessionStates.backgroundCount(selectedSessionId)" :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :key="selectedSessionId || 'empty'" :scope="selectedSessionId || ''" :tasks="data?.tasks || []" :flows="data?.flows || []" @task="openFlowTask" @flow="openActivityFlow" />
       <MessageList v-if="data.session" :user-label="t('person.you')" hide-tool-calls hide-run-usage hide-reasoning :activity-label="t('person.executing')" />
       </div>
       <div v-if="data.session" class="person-compose">

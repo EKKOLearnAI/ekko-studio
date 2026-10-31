@@ -4,6 +4,8 @@ import { installDesktopBridge } from './desktop-bridge-fixture'
 import sharp from 'sharp'
 import { PERSON_BOTS, personBotNameKey } from '../../packages/shared/person-bots'
 import { createServer } from 'node:http'
+import { supportedLocales, type SupportedLocale } from '../../packages/client/src/i18n/messages'
+import { personMessages } from '../../packages/client/src/i18n/person-messages'
 import { Server } from 'socket.io'
 import type { SessionListState } from '../../packages/shared/session-state'
 
@@ -201,7 +203,7 @@ async function setupSessionModels(page: Page, mode: 'light' | 'dark' = 'light') 
     const selected = models.get(id)!
     return { ...state, settings: { ...state.settings, model: selected.model, reasoningEffort: selected.reasoningEffort },
       inherits_global_model: selected.inherits, reasoning_efforts: selected.model.model === 'fast-model' ? [] : ['none', 'low', 'high'],
-      session: { ...state.conversations.find((session: any) => session.id === id), model: selected.model.model, provider: selected.model.provider, reasoning_effort: selected.reasoningEffort }, tasks: [], schedules: [] }
+      session: { ...state.conversations.find((session: any) => session.id === id), model: selected.model.model, provider: selected.model.provider, reasoning_effort: selected.reasoningEffort }, tasks: state.tasksBySession?.get(id) || [], schedules: [] }
   }
   await page.route(/\/api\/studio\/person(?:\?.*)?$/, route => {
     const id = new URL(route.request().url()).searchParams.get('session_id')
@@ -762,7 +764,9 @@ async function backgroundTaskCount(page: Page, count: number, _state = 'searchin
 }
 
 test('Person scopes task indicators to the conversation and receives remote unread receipts', async ({ page }) => {
-  const { second } = await setupSessionModels(page)
+  const { state, second } = await setupSessionModels(page)
+  const base={...state.tasks[0]}
+  state.tasksBySession=new Map()
   await page.goto('/#/person?session=person-main-1')
   await expect(page.locator('.person-title')).toHaveText('Person')
   const island = page.locator('.person-task-island')
@@ -776,10 +780,13 @@ test('Person scopes task indicators to the conversation and receives remote unre
       lastMessageId: 10, readMessageId: 0, unread: true })
   }, second.id)
   await expect(row.locator('.session-item-unread-dot')).toHaveCount(0)
+  state.tasksBySession.set('person-main-1',[{...base,id:'one'}])
+  state.tasksBySession.set(second.id,[{...base,id:'two',session_id:second.id},{...base,id:'three',session_id:second.id}])
+  await emit(page,'person.updated',{})
   await backgroundTaskCount(page, 1)
   await expect(island).toBeVisible()
   await switchPersonSession(page, second.id)
-  await expect(island.locator('.person-task-island__count')).toHaveText('2')
+  await expect(island).toHaveAttribute('aria-label', /Background tasks · 2/)
   expect(await emitted(page, 'sessions.read')).not.toContainEqual({ sessionId: second.id, messageId: 10 })
   await page.evaluate(sessionId => {
     const socket = (window as any).__PW_CHAT_SOCKET__.allSockets.find((socket: any) => socket.options?.query?.session_state === '1')
@@ -792,6 +799,8 @@ test('Person scopes task indicators to the conversation and receives remote unre
     socket.__trigger('sessions.state.updated', { sessionId, working: false, backgroundPending: 0,
       lastMessageId: 10, readMessageId: 10, unread: false })
   }, second.id)
+  state.tasksBySession.set(second.id,[])
+  await emit(page,'person.updated',{})
   await expect(island).toHaveCount(0)
   await expect(row.locator('.session-item-unread-dot')).toHaveCount(0)
   await expect(page.locator('.person-sidebar .session-item').filter({ hasText: 'Person' }).locator('.session-item-agent-logo-wrap.streaming')).toBeVisible()
@@ -927,17 +936,14 @@ for (const mode of ['light', 'dark'] as const) {
     const composer = page.locator('.person-compose')
     const messageBounds = await messages.boundingBox(), composerBounds = await composer.boundingBox()
     await page.evaluate(async () => { const image = new Image(); image.src = '/person/searching.gif'; await image.decode() })
+    const base={...state.tasks[0],status:'open',execution_state:'running',running:true}
+    state.tasks=Array.from({length:3},(_,i)=>({...base,id:`live-${i}`}))
     await backgroundTaskCount(page, 3)
-    const animations = await page.evaluate(async () => {
-      await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame)
-      const animations = document.querySelector('.person-task-activity')!.getAnimations({ subtree: true })
-      for (const animation of animations) { animation.pause(); animation.currentTime = 100 }
-      return animations.length
-    })
-    expect(animations).toBeGreaterThan(0)
-    await page.screenshot({ path: `/home/agent/work/hermes-studio/.ekko-tmp/person-task-island-enter-${mode}.png` })
-    await page.evaluate(() => document.querySelector('.person-task-activity')!.getAnimations({ subtree: true }).forEach(animation => animation.finish()))
-    await expect(page.getByRole('button', { name: 'zhezhe · Background tasks · 3', exact: true })).toBeVisible()
+    await emit(page,'person.updated',{})
+    await expect(island).toBeVisible()
+    await expect(island).toHaveAttribute('aria-label', /Background tasks · 3/)
+    await expect(island).toHaveAttribute('aria-expanded', 'false')
+    await page.waitForTimeout(300)
     await expect(island.locator('img')).toHaveAttribute('src', '/person/searching.gif')
     const box = await island.boundingBox()
     expect(Math.abs(box!.x + box!.width / 2 - messageBounds!.x - messageBounds!.width / 2)).toBeLessThan(1)
@@ -949,9 +955,11 @@ for (const mode of ['light', 'dark'] as const) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await page.screenshot({ path: `/home/agent/work/hermes-studio/.ekko-tmp/person-task-island-expanded-${mode}.png`, animations: 'disabled' })
     await island.evaluate(element => { (element as HTMLElement).dataset.instance = 'same-task-animation' })
-    // The server count can exceed the current task-list page; feedback never hides active tasks.
+    // Snapshot is authoritative; presence count alone must not drive the capsule.
+    state.tasks=Array.from({length:24},(_,i)=>({...base,id:`live-${i}`}))
     await backgroundTaskCount(page, 24, 'done')
-    await expect(page.getByRole('button', { name: 'zhezhe · Background tasks · 24', exact: true })).toBeVisible()
+    await emit(page,'person.updated',{})
+    await expect(island).toHaveAttribute('aria-label', /Background tasks · 24/)
     await expect(island).toHaveAttribute('data-instance', 'same-task-animation')
     await expect(island.locator('img')).toHaveAttribute('src', '/person/searching.gif')
     await island.click()
@@ -960,10 +968,14 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(island).toHaveAttribute('aria-expanded', 'true')
     await page.keyboard.press('Escape')
     await expect(page.locator('.session-tasks-drawer')).not.toBeVisible()
+    state.tasks=[]
+    await emit(page,'person.updated',{})
     await backgroundTaskCount(page, 0, 'idle')
     await expect(island).toHaveCount(0)
     expect(await messages.boundingBox()).toEqual(messageBounds)
     expect(await composer.boundingBox()).toEqual(composerBounds)
+    state.tasks=[{...base,id:'restart'}]
+    await emit(page,'person.updated',{})
     await backgroundTaskCount(page, 1)
     await expect(island).toBeVisible()
     await page.setViewportSize({ width: mode === 'dark' ? 1440 : 360, height: 900 })
@@ -1021,12 +1033,16 @@ for (const mode of ['light', 'dark'] as const) {
 
 test('Person background-task island supports reduced motion and hides for main-chat activity alone', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await setup(page, 'light', false, false)
+  const {state}=await setup(page, 'light', false, false)
+  const base={...state.tasks[0]}
+  state.tasks=[]
   await page.goto('/#/person')
   await backgroundTaskCount(page, 0, 'thinking')
   await expect(page.locator('.person-task-island')).toHaveCount(0)
+  state.tasks=[base]
+  await emit(page,'person.updated',{})
   await backgroundTaskCount(page, 1)
-  const island = page.getByRole('button', { name: 'zhezhe · Background tasks · 1', exact: true })
+  const island = page.getByRole('button', { name: /zhezhe · Background tasks · 1 ·/ })
   await expect(island).toBeVisible()
   await expect(island.locator('img')).toHaveAttribute('src', '/coding-agents/person.jpg')
   expect(await island.evaluate(element => element.getAnimations().length)).toBe(0)
@@ -3953,8 +3969,10 @@ for (const count of [1,2,5]) {
   await page.waitForTimeout(550)
   const shell=await page.locator('.activity-shell').boundingBox()
   const snake=await page.locator('.activity-snake').boundingBox()
-  expect(shell!.width).toBeLessThanOrEqual(count===1?300:count===2?380:540)
-  expect(snake!.height).toBe(count<=3?158:316)
+  expect(shell!.width).toBeLessThanOrEqual(count===1?320:count===2?440:580)
+  const rows=await page.locator('.activity-stages > li').evaluateAll(nodes=>nodes.map(node=>({ top:node.getBoundingClientRect().top, bottom:node.getBoundingClientRect().bottom })))
+  expect(new Set(rows.map(row=>row.top)).size).toBe(count<=3?1:2)
+  expect(snake!.height).toBeLessThanOrEqual(Math.max(...rows.map(row=>row.bottom))-Math.min(...rows.map(row=>row.top))+24)
   await page.screenshot({path:`/home/agent/work/hermes-studio/.ekko-tmp/adaptive-${count}.png`})
   await page.setViewportSize({width:390,height:844})
   await page.waitForTimeout(450)
@@ -3996,3 +4014,98 @@ test('Activity distinguishes running turns from queued deliveries and animates t
  await expect.poll(()=>progress.evaluate(el=>getComputedStyle(el).transitionDuration)).toBe('0s')
  await expect(bots.nth(4).locator('img')).toHaveAttribute('src',/dachu\/idle.png$/)
 })
+
+const capsuleLocaleNames: Record<SupportedLocale, string[]> = {
+ 'zh': ['并行调研小鹤与资料来源逐项核对', '方案设计大厨与交付复核', '最终交付验证折折'],
+ 'zh-TW': ['並行調研小鶴與資料來源逐項核對', '方案設計大廚與交付複核', '最終交付驗證折折'],
+ en: ['Research and source verification', 'Design and delivery review', 'Final delivery verification'],
+ ja: ['並列調査と資料の正確性を確認する担当', '設計と納品レビュー担当', '最終結果の確認担当'],
+ ko: ['병렬 조사 및 자료 출처 확인 담당', '설계 및 납품 검토 담당', '최종 결과 검증 담당'],
+ fr: ['Recherche et vérification des sources', 'Conception et revue de livraison', 'Vérification du résultat final'],
+ es: ['Investigación y verificación de fuentes', 'Diseño y revisión de entrega', 'Verificación del resultado final'],
+ de: ['Hintergrundaufgabenüberprüfung und Recherche', 'Entwurf und Auslieferungsprüfung', 'Abschließende Ergebnisprüfung'],
+ pt: ['Pesquisa e verificação das fontes', 'Projeto e revisão da entrega', 'Verificação do resultado final'],
+ ru: ['Исследование и проверка источников', 'Проектирование и проверка результата', 'Итоговая проверка передачи'],
+ ar: ['البحث والتحقق من المصادر بالتوازي', 'التصميم ومراجعة نتائج التسليم', 'التحقق النهائي من نتائج العمل'],
+ tr: ['Paralel araştırma ve kaynak doğrulama', 'Tasarım ve teslimat incelemesi', 'Sonuçların nihai doğrulaması'],
+}
+for (const locale of supportedLocales) for (const width of [1280, 390]) {
+ const mode = width === 1280 ? 'light' : 'dark'
+
+ test(`Capsule wraps names and stays compact until requested in ${locale} at ${width}`,async({page})=>{
+  const {state}=await setup(page,mode,width<600,false)
+  await page.setViewportSize({width,height:960})
+  await page.addInitScript(lang=>localStorage.setItem('hermes_locale',lang),locale)
+  const names=capsuleLocaleNames[locale]
+  const labels=personMessages[locale]
+  const task={...state.tasks[0],title:`${names[0]} · ${names[1]} · ${names[2]}`,bot_type:'zhezhe',execution_id:'wrap-task'}
+  state.tasks=[task]
+  const stage=(i:number,group:number)=>({id:`wrap-${i}`,position:i,group_position:group,session_id:`person-main-${i}`,session_title:names[i%names.length],goal:'Check',bot_type:i%2?'dachu':'xiaohe',state:group?'pending':'active',execution_state:group?'idle':'running',delivery_state:group?undefined:'queued',tasks:[]})
+  state.flows=[{id:'wrap-flow',title:`${labels.flows} · ${names[2]}`,state:'active',revision:0,current_position:0,stages:[stage(0,0),stage(1,0),stage(2,1),stage(3,2),stage(4,3)]}]
+  await page.goto('/#/person')
+  const island=page.locator('.person-task-island'),content=page.locator('.activity-content')
+  await expect(island).toHaveAttribute('aria-expanded','false')
+  await expect(content).toHaveCount(0)
+  await expect(island).toContainText(labels.backgroundTasks)
+  await expect(island).toContainText(labels.flows)
+  await expect(page.locator('html')).toHaveAttribute('dir',locale==='ar'?'rtl':'ltr')
+  await expect(page.locator('html')).toHaveCSS('transform','none')
+  await expect(page.locator('body')).toHaveCSS('transform','none')
+  await page.waitForTimeout(300) // settle the entry transition before comparing dimensions
+  const collapsed=await page.locator('.activity-shell').boundingBox()
+  await island.click();await expect(content).toBeVisible();await page.waitForTimeout(550)
+  await expect(page.locator('.activity-all')).toHaveCount(0)
+  const expanded=await page.locator('.activity-shell').boundingBox()
+  expect(expanded!.height).toBeGreaterThan(collapsed!.height)
+  const fit=await page.locator('.activity-stage > span,.activity-stage small,.activity-task-text strong').evaluateAll(nodes=>nodes.map(node=>({text:node.textContent,client:node.clientWidth,scroll:node.scrollWidth,h:node.clientHeight,sh:node.scrollHeight})))
+  expect(fit.every(x=>x.scroll<=x.client+1&&x.sh<=x.h+1)).toBe(true)
+  await expect(page.locator('.activity-stage').first()).toContainText(names[0])
+  expect(await page.locator('.activity-stage > span').first().evaluate(el=>el.getBoundingClientRect().height)).toBeGreaterThan(24)
+  await expect(page.locator('.activity-stage small').first()).toHaveText(labels.states.running)
+  await expect(page.locator('.activity-stage small').nth(2)).toHaveText(labels.flowWaitingDependencies)
+  const counters=await island.locator('.activity-count').allTextContents()
+  expect(counters).toEqual([new Intl.NumberFormat(locale).format(1),new Intl.NumberFormat(locale).format(1)])
+  const headerFit=await island.locator('.person-task-island__label').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}))
+  expect(headerFit.scroll).toBeLessThanOrEqual(headerFit.width+1)
+  // Native CSS direction must agree with both DOM node order and SVG fold.
+  const geometry=await page.locator('.activity-snake').evaluate(el=>{
+   const nodes=Array.from(el.querySelectorAll('.activity-stages > li')).map(n=>{const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y}})
+   const path=el.querySelector('path.activity-track') as SVGPathElement
+   const samples=Array.from({length:101},(_,i)=>path.getPointAtLength(path.getTotalLength()*i/100))
+   return {nodes,min:Math.min(...samples.map(p=>p.x)),max:Math.max(...samples.map(p=>p.x)),width:el.clientWidth}
+  })
+  expect(geometry.min).toBeGreaterThanOrEqual(0)
+  expect(geometry.max).toBeLessThanOrEqual(geometry.width)
+  const row=geometry.nodes.filter(node=>node.y===geometry.nodes[0].y)
+  if(row.length>1)expect(locale==='ar'?row[0].x>row[1].x:row[0].x<row[1].x).toBe(true)
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true)
+  // Hit tests stay on the node and don't collapse while interacting inside.
+  await content.dispatchEvent('pointerdown');await expect(island).toHaveAttribute('aria-expanded','true')
+  const root=page.locator('.person-task-activity')
+  const path=page.locator('.activity-snake svg')
+  const clean=await path.evaluate(el=>{
+   const nodes=Array.from(document.querySelectorAll('.activity-stages > li')) as HTMLElement[]
+   return nodes.every(node=>{const label=node.querySelector('small')!;return label.getBoundingClientRect().bottom<node.getBoundingClientRect().bottom-12})
+  })
+  expect(clean).toBe(true)
+  await page.screenshot({path:`/home/agent/work/hermes-studio/.ekko-tmp/capsule-text-${locale}-${width}.png`})
+  await page.locator('.person-title').click()
+  await expect(island).toHaveAttribute('aria-expanded','false');await expect(content).toHaveCount(0)
+  const afterClose=await page.locator('.activity-shell').boundingBox()
+  expect(Math.abs(afterClose!.height-collapsed!.height)).toBeLessThan(1)
+  // Socket updates/completions must not reopen a dismissed panel.
+  state.tasks=[{...task,status:'completed',execution_state:'finished',running:false}];await emit(page,'person.updated',{})
+  await expect(page.locator('.activity-completion-compact')).toContainText(task.title)
+  await expect(page.locator('.activity-completion-compact')).toContainText(labels.states.finished)
+  await expect(content).toHaveCount(0)
+  await expect(island).toBeVisible();await page.waitForTimeout(3600)
+  await expect(island).toBeVisible();await expect(content).toHaveCount(0)
+  await island.click();await expect(content).toBeVisible();await page.keyboard.press('Escape')
+  await expect(content).toHaveCount(0)
+  state.flows[0].state='completed';state.flows[0].stages.forEach((s:any)=>s.state='completed');await emit(page,'person.updated',{})
+  await expect(island).toHaveCount(0,{timeout:5000})
+  state.tasks=[{...task,id:'new-task',execution_id:'new-run'}];await emit(page,'person.updated',{})
+  await expect(island).toBeVisible();await expect(island).toHaveAttribute('aria-expanded','false');await expect(content).toHaveCount(0)
+  await expect(root).not.toHaveClass(/is-expanded/)
+ })
+}
