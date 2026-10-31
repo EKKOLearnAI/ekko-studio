@@ -145,6 +145,7 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
       state.tasks[0].revision++
       return route.fulfill({ json: { task: state.tasks[0] } })
     }
+    if (path.endsWith('/flows/query')) return route.fulfill({ json: { flows: [...(state.flows || []),...(state.active_flows || [])].filter(flow => flow.id === body.flow_id).slice(0,1) } })
     if (path.endsWith('/flows/apply')) {
       const flow = state.flows.find((item: any) => item.id === body.flow_id)
       if (body.expected_revision !== flow.revision) return route.fulfill({status:409,json:{error:'Flow changed'}})
@@ -998,7 +999,7 @@ test('Person scopes task indicators to the conversation and receives remote unre
   await backgroundTaskCount(page, 1)
   await expect(island).toBeVisible()
   await switchPersonSession(page, second.id)
-  await expect(island.locator('.person-task-island__count')).toHaveText('2')
+  await expect(island.locator('.activity-counter > span')).toHaveText('2')
   expect(await emitted(page, 'sessions.read')).not.toContainEqual({ sessionId: second.id, messageId: 10 })
   await page.evaluate(sessionId => {
     const socket = (window as any).__PW_CHAT_SOCKET__.allSockets.find((socket: any) => socket.options?.query?.session_state === '1')
@@ -1156,8 +1157,8 @@ for (const mode of ['light', 'dark'] as const) {
     expect(animations).toBeGreaterThan(0)
     await page.screenshot({ path: `/tmp/person-task-island-enter-${mode}.png` })
     await page.evaluate(() => document.querySelector('.person-task-activity')!.getAnimations({ subtree: true }).forEach(animation => animation.finish()))
-    await expect(page.getByRole('button', { name: 'zhezhe · Background tasks · 3', exact: true })).toBeVisible()
-    await expect(island.locator('img')).toHaveAttribute('src', '/person/searching.gif')
+    await expect(page.getByRole('button', { name: 'Person · Background tasks · 3', exact: true })).toBeVisible()
+    await expect(island.locator('.person-task-island__avatar')).toHaveAttribute('src', '/person/searching.gif')
     const box = await island.boundingBox()
     expect(Math.abs(box!.x + box!.width / 2 - messageBounds!.x - messageBounds!.width / 2)).toBeLessThan(1)
     await expect(page.locator('.person-task-activity')).toHaveCSS('position', 'absolute')
@@ -1170,14 +1171,17 @@ for (const mode of ['light', 'dark'] as const) {
     await island.evaluate(element => { (element as HTMLElement).dataset.instance = 'same-task-animation' })
     // The server count can exceed the current task-list page; feedback never hides active tasks.
     await backgroundTaskCount(page, 24, 'done')
-    await expect(page.getByRole('button', { name: 'zhezhe · Background tasks · 24', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Person · Background tasks · 24', exact: true })).toBeVisible()
     await expect(island).toHaveAttribute('data-instance', 'same-task-animation')
-    await expect(island.locator('img')).toHaveAttribute('src', '/person/searching.gif')
-    await island.click()
-    await expect(page.locator('.session-tasks-drawer')).toBeVisible()
-    await expect(island).toHaveAttribute('aria-expanded', 'true')
+    await expect(island.locator('.person-task-island__avatar')).toHaveAttribute('src', '/person/searching.gif')
+    const toggle = island.locator('.person-task-island__toggle')
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(island.locator('.activity-details')).toBeVisible()
+    await expect.poll(async () => (await island.boundingBox())!.width).toBeGreaterThan(box!.width)
+    expect(await composer.boundingBox()).toEqual(composerBounds)
     await page.keyboard.press('Escape')
-    await expect(page.locator('.session-tasks-drawer')).not.toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
     await backgroundTaskCount(page, 0, 'idle')
     await expect(island).toHaveCount(0)
     expect(await messages.boundingBox()).toEqual(messageBounds)
@@ -1192,7 +1196,10 @@ for (const mode of ['light', 'dark'] as const) {
     }).toBeLessThan(1)
     await page.locator('.person-compose textarea').click()
     await expect(page.locator('.person-compose textarea')).toBeFocused()
-    await island.focus(); await page.keyboard.press('Enter')
+    await toggle.focus(); await page.keyboard.press('Enter')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(island.getByRole('button', { name: 'Tasks', exact: true })).toHaveCount(0)
+    await page.locator('.person-header-actions').getByRole('button', { name: 'Tasks', exact: true }).click()
     await expect(page.locator('.session-tasks-drawer')).toBeVisible()
     await page.keyboard.press('Escape')
     await page.goto('/#/hermes/theme')
@@ -1244,12 +1251,13 @@ test('Person background-task island supports reduced motion and hides for main-c
   await backgroundTaskCount(page, 0, 'thinking')
   await expect(page.locator('.person-task-island')).toHaveCount(0)
   await backgroundTaskCount(page, 1)
-  const island = page.getByRole('button', { name: 'zhezhe · Background tasks · 1', exact: true })
+  const island = page.getByRole('button', { name: 'Person · Background tasks · 1', exact: true })
   await expect(island).toBeVisible()
-  await expect(island.locator('img')).toHaveAttribute('src', '/coding-agents/person.jpg')
+  await expect(island.locator('.person-task-island__avatar')).toHaveAttribute('src', '/coding-agents/person.jpg')
   expect(await island.evaluate(element => element.getAnimations().length)).toBe(0)
   await island.click()
-  await expect(page.locator('.session-tasks-drawer')).toBeVisible()
+  await expect(island).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator('.activity-details')).toBeVisible()
 })
 
 test('Person general settings save independently, survive refresh and retain drafts across tabs', async ({ page }) => {
@@ -4341,5 +4349,243 @@ for(const mode of ['light','dark'] as const){
     await expect(drawer.locator('.message.assistant .message-bubble p')).toContainText('Color sample')
     expect(await read(drawer)).toEqual(expected)
     await page.screenshot({path:testInfo.outputPath(`task-text-colors-${mode}.png`),animations:'disabled'})
+  })
+}
+
+for (const width of [1440, 360]) {
+  test(`Person activity capsule places each bot along a turning route at ${width}px`, async ({ page }, testInfo) => {
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    const { state } = await setup(page, width === 1440 ? 'light' : 'dark', false, false)
+    const counts = [1,3,1,8,1,3,1,1]
+    const stages = counts.flatMap((count, group) => Array.from({ length: count }, (_, index) => {
+      const id = `person-main-${group}-${index}`
+      state.conversations.push({ ...state.session, id, title: `Role ${group}-${index}`, bot_type: PERSON_BOTS[(group + index) % PERSON_BOTS.length].type })
+      return { id: `stage-${group}-${index}`, position: group * 8 + index, group_position: group, session_id: id,
+        session_title: `Role ${group}-${index}`, bot_type: PERSON_BOTS[(group + index) % PERSON_BOTS.length].type,
+        goal: 'Work together', state: group < 3 || (group === 3 && index === 0) ? 'completed' : group > 3 ? 'pending' : 'active',
+        result_message_id: null, tasks: group === 3 && index === 3 ? [{ id: 'waiting-task', title: 'Confirm scope', status: 'open', execution_state: 'waiting_user' }] : [] }
+    }))
+    state.flows = [{ id: 'parallel-preview', creator_session_id: state.session.id, title: 'Publish together', goal: 'Review and publish', state: 'active', revision: 0, current_position: 3, error: '', stages }]
+    await page.setViewportSize({ width, height: 950 })
+    await page.goto('/#/person')
+    await backgroundTaskCount(page, 1)
+    const island = page.locator('.person-task-island'), toggle = island.locator('.person-task-island__toggle')
+    await expect(toggle).toHaveAccessibleName('Person · Background tasks · 1 · Flows · 1')
+    const closed = await island.boundingBox(), compose = await page.locator('.person-compose').boundingBox()
+    await toggle.click()
+    const graph = island.locator('.person-flow-graph')
+    await expect(graph.getByRole('button')).toHaveCount(19)
+    await expect.poll(async () => (await island.boundingBox())!.width).toBeGreaterThan(closed!.width + 70)
+    expect(await page.locator('.person-compose').boundingBox()).toEqual(compose)
+    await expect(island.getByRole('button', { name: 'Check report', exact: true })).toBeVisible()
+    const steps = graph.getByRole('listitem')
+    await expect(steps).toHaveCount(19)
+    await expect(graph.locator('.flow-step > .bot-sprite')).toHaveCount(19)
+    await expect(graph.locator('.step-bots')).toHaveCount(0)
+    await expect(graph).toHaveText('')
+    await expect(graph.locator('.route-line')).toHaveCount(7)
+    await expect(graph.locator('.route-passed')).toHaveCount(3)
+    await expect(graph.locator('.route-pending')).toHaveCount(4)
+    const parallel = graph.locator('[data-group="3"] > .bot-sprite')
+    await expect(parallel).toHaveCount(8)
+    await expect.poll(() => graph.locator('[data-group="3"][data-turn="true"]').count()).toBeGreaterThan(0)
+    // A parallel node follows the bend too; it is neither a separate grid nor a chain of edges.
+    const directions = await parallel.evaluateAll(elements => elements.slice(1).map((element,index) => Math.sign(element.getBoundingClientRect().x-elements[index].getBoundingClientRect().x)))
+    if (width === 360) expect(directions).toContain(1)
+    expect(directions).toContain(-1)
+    await expect.poll(() => graph.locator('img').evaluateAll(images => images.every(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true)
+    const animations = await graph.locator('img').evaluateAll(images => images.map(image => (image as HTMLImageElement).src))
+    for (const state of ['done','sleeping','searching']) expect(animations.some(src => src.endsWith(`/${state}.gif`))).toBe(true)
+    // Connect only node boundaries, with no line through any parallel peer or avatar.
+    const geometry = await graph.evaluate(root => {
+      const bounds = root.getBoundingClientRect()
+      const boxes = [...root.querySelectorAll('.bot-sprite')].map(element => element.getBoundingClientRect())
+      const collisions = boxes.some((box,index) => boxes.slice(index+1).some(other => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top))
+      let crossedBots = false, outside = false, internalEdges = false, detached = false
+      const bots = [...root.querySelectorAll('.flow-step')]
+      for (const edge of root.querySelectorAll<SVGPathElement>('.route-line')) {
+        const source = Number(edge.dataset.source), target = Number(edge.dataset.target)
+        internalEdges ||= bots[source].getAttribute('data-group') === bots[target].getAttribute('data-group')
+        const length = edge.getTotalLength(), matrix = edge.getScreenCTM()!
+        const start = edge.getPointAtLength(0).matrixTransform(matrix), end = edge.getPointAtLength(length).matrixTransform(matrix)
+        detached ||= Math.hypot(start.x-boxes[source].x-16,start.y-boxes[source].y-16)>25 || Math.hypot(end.x-boxes[target].x-16,end.y-boxes[target].y-16)>25
+        for (let distance = 0; distance <= length; distance += 1) {
+          const point = edge.getPointAtLength(distance).matrixTransform(matrix)
+          outside ||= point.x < bounds.left || point.x > bounds.right || point.y < bounds.top || point.y > bounds.bottom
+          crossedBots ||= boxes.some(box => point.x > box.left && point.x < box.right && point.y > box.top && point.y < box.bottom)
+        }
+      }
+      return { internalEdges, detached, outside, collisions, crossedBots, overflow: boxes.some(box => box.left < bounds.left || box.right > bounds.right) }
+    })
+    expect(geometry).toEqual({ internalEdges: false, detached: false, outside: false, collisions: false, crossedBots: false, overflow: false })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`capsule-${width}.png`), animations: 'disabled' })
+    await island.screenshot({ path: testInfo.outputPath(`capsule-closeup-${width}.png`), animations: 'disabled' })
+    await graph.screenshot({ path: `/tmp/person-capsule-flow-${width}.png` })
+    const current = state.flows[0].stages.filter(stage => stage.group_position === 3)
+    current.at(-1).state='completed'
+    await emit(page, 'person.updated', {})
+    await expect(graph.locator('.route-passed[data-from="3"]')).toHaveCount(0)
+    current.at(-1).state='active'
+    current.slice(0,-1).forEach(stage => { stage.state='completed' })
+    await emit(page, 'person.updated', {})
+    await expect(graph.locator('.route-passed')).toHaveCount(3)
+    current.at(-1).state='completed'
+    state.flows[0].current_position=4
+    state.flows[0].stages.find(stage => stage.group_position === 4).state='active'
+    await emit(page, 'person.updated', {})
+    await expect(graph.locator('.route-passed')).toHaveCount(4)
+    // Collapsing a flow survives real-time refreshes and only one flow opens at a time.
+    const flowToggle = island.locator('.flow-preview-toggle')
+    await flowToggle.click()
+    await emit(page, 'person.updated', {})
+    await expect(flowToggle).toHaveAttribute('aria-expanded', 'false')
+    await flowToggle.click()
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await expect.poll(() => graph.locator('img').evaluateAll(images => images.every(image => !(image as HTMLImageElement).src.endsWith('.gif')))).toBe(true)
+    // A node opens and locates its collaboration in the drawer.
+    const target = graph.getByRole('button').first()
+    await target.click()
+    const drawer=page.locator('.person-workspace-drawer')
+    const selected=drawer.getByRole('button',{name:'Publish together',exact:true})
+    await expect(selected).toHaveAttribute('aria-expanded','true')
+    await expect(selected).toBeFocused()
+    await expect(drawer.locator('.flow-card')).toHaveCount(1)
+    await expect(page.locator('.person-title')).toHaveText('Person')
+    expect(errors).toEqual([])
+  })
+}
+
+test('Person capsule includes flows without workers and handles long names, counts and resize', async ({ page }) => {
+  const { state } = await setup(page, 'light', false, false)
+  state.tasks = []
+  state.session.title = 'Ein außergewöhnlich langer mehrsprachiger Botname '.repeat(3)
+  state.flows = []
+  state.active_flow_count = 128
+  state.active_flows = [{ id: 'older-flow', creator_session_id: state.session.id, title: 'An older flow outside the history page', goal: '', state: 'active', current_position: 0, revision: 0, error: '',
+    stages: Array.from({ length: 8 }, (_, index) => ({ id: `parallel-${index}`, position: index, group_position: 0, session_id: 'person-main-1', session_title: `Bot ${index}`, bot_type: PERSON_BOTS[index].type, goal: '', state: 'active', result_message_id: null, tasks: [] })) }]
+  await page.setViewportSize({ width: 320, height: 850 })
+  await page.goto('/#/person')
+  const island = page.locator('.person-task-island'), toggle = island.locator('.person-task-island__toggle')
+  await expect(toggle).toBeVisible()
+  await expect(toggle).toHaveAccessibleName(`${state.session.title} · Flows · 128`)
+  await expect(island.locator('.activity-counter')).toHaveText('99+')
+  await toggle.click()
+  await expect(island.locator('.activity-full-name')).toHaveText(state.session.title)
+  const bots = island.locator('.bot-sprite')
+  await expect(bots).toHaveCount(8)
+  await expect(island.locator('.route-line')).toHaveCount(0)
+  await expect.poll(() => island.locator('.flow-step[data-turn="true"]').count()).toBeGreaterThan(0)
+  const fits = () => bots.evaluateAll(elements => elements.every(element => { const box=element.getBoundingClientRect(),root=element.closest('.person-flow-graph')!.getBoundingClientRect(); return box.left >= root.left && box.right <= root.right }))
+  await expect.poll(fits).toBe(true)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect.poll(fits).toBe(true)
+  await expect(island.locator('.route-line')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(toggle).toBeFocused()
+  await toggle.click()
+  await page.locator('.person-compose textarea').click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  state.active_flow_count = 0; state.active_flows = []
+  await emit(page, 'person.updated', {})
+  await expect(island).toHaveCount(0)
+})
+
+for (const width of [1440, 360]) {
+  test(`Person capsule hides failed and participant flows from its list and count at ${width}px`, async ({ page }) => {
+    const { state } = await setup(page, 'light', false, false)
+    const healthy = { id: 'own-flow', creator_session_id: state.session.id, title: 'Own healthy collaboration', goal: '', state: 'active', current_position: 0, revision: 0, error: '',
+      stages: [{ id: 'own-stage', position: 0, group_position: 0, session_id: state.session.id, session_title: 'Creator', goal: '', state: 'active', result_message_id: null, tasks: [] }] }
+    const failed = { ...healthy, id: 'failed-flow', title: 'Failed collaboration', state: 'failed' }
+    const incoming = { ...healthy, id: 'incoming-flow', creator_session_id: 'person-main-b', title: 'Someone else created this' }
+    const brokenDelivery = { ...healthy, id: 'delivery-error', title: 'Handoff error', stages: [{ ...healthy.stages[0], delivery_error: 'Cannot deliver' }] }
+    state.flows = [healthy, failed, incoming, brokenDelivery]
+    state.tasks = []
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/#/person')
+    const island = page.locator('.person-task-island'), toggle = island.locator('.person-task-island__toggle')
+    await expect(toggle).toHaveAccessibleName('Person · Flows · 1')
+    await toggle.click()
+    await expect(island.locator('.activity-flow-row')).toHaveCount(1)
+    await expect(island.getByRole('button', { name: healthy.title, exact: true })).toBeVisible()
+    for (const flow of [failed,incoming,brokenDelivery]) await expect(island.getByRole('button', { name: flow.title, exact: true })).toHaveCount(0)
+    healthy.state = 'failed'
+    await emit(page, 'person.updated', {})
+    await expect(island).toHaveCount(0)
+    healthy.state = 'active'
+    await emit(page, 'person.updated', {})
+    await expect(toggle).toHaveAccessibleName('Person · Flows · 1')
+    healthy.creator_session_id = 'person-main-b'
+    await emit(page, 'person.updated', {})
+    await expect(island).toHaveCount(0)
+    // Background tasks keep their own capsule when all collaboration rows are hidden.
+    await backgroundTaskCount(page, 2)
+    await expect(toggle).toHaveAccessibleName('Person · Background tasks · 2')
+    await toggle.click()
+    await expect(island.locator('.activity-flow-row')).toHaveCount(0)
+  })
+}
+
+for (const width of [1440, 360]) {
+  test(`Person capsule opens the exact flow in the drawer including older history at ${width}px`, async ({ page }, testInfo) => {
+    const { state,operations }=await setup(page,'light',false,false)
+    state.tasks=[]
+    const makeFlow=(id:string,title:string,status='active')=>({id,creator_session_id:state.session.id,title,goal:`Goal for ${title}`,state:status,current_position:0,revision:0,error:'',stages:[
+      {id:`stage-${id}`,position:0,group_position:0,session_id:state.session.id,session_title:'Creator',bot_type:'zhezhe',goal:`Review ${title}`,state:status === 'completed' ? 'completed' : 'active',result_message_id:null,tasks:[]},
+    ]})
+    state.flows=Array.from({length:50},(_,index)=>makeFlow(`recent-${index}`,`Recent collaboration ${index}`,index === 40 ? 'active' : 'completed'))
+    const target=state.flows[40],older=makeFlow('older-target','Older collaboration outside the recent page')
+    state.active_flows=[target,older];state.active_flow_count=2
+    await page.setViewportSize({width,height:900})
+    await page.goto('/#/person')
+    const island=page.locator('.person-task-island'),toggle=island.locator('.person-task-island__toggle')
+    await toggle.click()
+    await expect(island.getByRole('button',{name:'Tasks',exact:true})).toHaveCount(0)
+    await expect(island.getByRole('button',{name:'Flows',exact:true})).toHaveCount(0)
+    const drawer=page.locator('.person-workspace-drawer')
+    const title=island.getByRole('button',{name:target.title,exact:true})
+    const preview=island.locator('.activity-list > li').filter({has:page.getByRole('button',{name:target.title,exact:true})}).locator('.person-flow-graph')
+    await expect(title).toHaveAttribute('aria-expanded','true')
+    await title.click()
+    await expect(title).toHaveAttribute('aria-expanded','false')
+    await expect(preview).toHaveCount(0)
+    await expect(drawer).not.toBeVisible()
+    expect(operations.filter(op=>op.path.endsWith('/flows/query'))).toEqual([])
+    await title.press('Enter')
+    await expect(title).toHaveAttribute('aria-expanded','true')
+    await expect(preview).toBeVisible()
+    await expect(drawer).not.toBeVisible()
+    expect(operations.filter(op=>op.path.endsWith('/flows/query'))).toEqual([])
+    // Blank space in the expanded flow opens its drawer too.
+    await preview.click({position:{x:5,y:5}})
+    const current=drawer.getByRole('button',{name:target.title,exact:true})
+    await expect(drawer.getByRole('tab',{name:'Flows',exact:true})).toHaveAttribute('aria-selected','true')
+    await expect(current).toHaveAttribute('aria-expanded','true')
+    await expect(current).toBeFocused()
+    await expect(current).toBeInViewport()
+    await expect(drawer.locator('.flow-card')).toHaveCount(1)
+    await drawer.getByRole('textbox',{name:'Search flows or roles',exact:true}).fill('An unrelated query')
+    await expect(drawer.getByText('No matching flows.',{exact:true})).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(drawer).not.toBeVisible()
+    await toggle.click()
+    const olderTitle=island.getByRole('button',{name:older.title,exact:true})
+    await olderTitle.click()
+    await expect(olderTitle).toHaveAttribute('aria-expanded','true')
+    await expect(title).toHaveAttribute('aria-expanded','false')
+    await expect(drawer).not.toBeVisible()
+    expect(operations.filter(op=>op.path.endsWith('/flows/query')).map(op=>op.body.flow_id)).toEqual([target.id])
+    const olderPreview=island.locator('.activity-list > li').filter({has:page.getByRole('button',{name:older.title,exact:true})}).locator('.person-flow-graph')
+    await olderPreview.getByRole('button').first().click()
+    const olderRow=drawer.getByRole('button',{name:older.title,exact:true})
+    await expect(olderRow).toHaveAttribute('aria-expanded','true')
+    await expect(olderRow).toBeFocused()
+    await expect(drawer.getByRole('textbox',{name:'Search flows or roles',exact:true})).toHaveValue('')
+    await expect(drawer.locator('.flow-card')).toContainText(older.goal)
+    await expect(drawer.locator('.flow-card')).toHaveCount(1)
+    expect(operations.filter(op=>op.path.endsWith('/flows/query')).map(op=>op.body.flow_id)).toEqual([target.id,older.id])
+    await page.screenshot({path:testInfo.outputPath(`located-flow-${width}.png`),animations:'disabled'})
   })
 }

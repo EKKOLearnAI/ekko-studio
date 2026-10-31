@@ -3,6 +3,19 @@ import type { PersonFlow } from '@/api/person'
 export type PersonFlowStage = PersonFlow['stages'][number]
 export type PersonFlowStatus = 'completed' | 'active' | 'running' | 'queued' | 'waiting_dependencies' | 'waiting_user' | 'waiting_person' | 'waiting_approval' | 'waiting_reply' | 'interrupted' | 'blocked'
 
+export function personFlowVisibleInActivity(flow: PersonFlow, sessionId: string) {
+  return !!sessionId && flow.creator_session_id === sessionId && flow.state === 'active' && !flow.error
+    && !flow.stages.some(stage => stage.state === 'failed' || stage.delivery_error
+      || (stage.state !== 'completed' && stage.tasks.some(task => task.status === 'open' && ['failed','interrupted'].includes(task.execution_state || ''))))
+}
+
+export function personFlowAnimation(status: PersonFlowStatus) {
+  if (status === 'completed') return 'done'
+  if (status === 'blocked') return 'error'
+  if (status === 'active' || status === 'running') return 'searching'
+  return 'sleeping'
+}
+
 export function personFlowGroups(flow: PersonFlow) {
   const groups = new Map<number, PersonFlowStage[]>()
   flow.stages.forEach((stage,index) => {
