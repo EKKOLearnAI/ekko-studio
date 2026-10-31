@@ -208,16 +208,17 @@ profile access alone is not enough, `403 session_owner_required`):
 Keep tokens off command lines and out of terminal output: process arguments and shell
 history are readable. In these examples curl reads the `Authorization: Bearer …` line from a
 private file (curl 7.55+ `-H @file`). The issue response, which carries the grant secret once,
-goes to a private file instead of the terminal:
+goes to a new file in a fresh private directory instead of the terminal (an existing file would
+keep its permissions, and curl follows symlinks):
 
 ```bash
-umask 077
+grant_dir="$(mktemp -d)"   # new directory, mode 0700
 curl -sS -X POST "http://127.0.0.1:8648/api/studio/sessions/<session-id>/notification-publishers" \
   -H @"<private file with the login Authorization header>" \
   -H "X-Hermes-Profile: default" -H "Content-Type: application/json" \
   -d '{"profile":"default","expected_session_generation":"<generation>",
        "sources":["repo-puller","pr-review-cron"],"expires_in_days":90,"label":"background producers"}' \
-  -o publisher-grant.json
+  -o "$grant_dir/publisher-grant.json"
 ```
 
 The response carries the secret (`esnp_…`) once; Studio stores only its SHA-256. A grant is
