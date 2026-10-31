@@ -20,13 +20,13 @@ it('expands in place and routes task selection without opening all tasks',async(
  expect(wrapper.get('img').attributes('src')).toBe('/bot.png')
 })
 it('shows completion briefly and cancels it on new work',async()=>{
- wrapper=mount(Activity,{props:{count:1}})
- await wrapper.setProps({count:0});await wrapper.get('.person-task-island').trigger('click');expect(wrapper.text()).toContain('person.states.finished')
- await wrapper.setProps({count:1});await vi.advanceTimersByTimeAsync(4000)
+ wrapper=mount(Activity,{props:{count:1,tasks:[{id:'a',status:'open',execution_state:'running'} as any]}})
+ await wrapper.setProps({count:0,tasks:[]});await wrapper.get('.person-task-island').trigger('click');expect(wrapper.text()).toContain('person.states.finished')
+ await wrapper.setProps({count:1,tasks:[{id:'b',status:'open',execution_state:'running'} as any]});await vi.advanceTimersByTimeAsync(4000)
  expect(wrapper.find('.person-task-island').exists()).toBe(true)
 })
 it('collapses on outside interaction without moving focus',async()=>{
- wrapper=mount(Activity,{props:{count:1},attachTo:document.body});await wrapper.get('button').trigger('click')
+ wrapper=mount(Activity,{props:{count:1,tasks:[{id:'a',status:'open',execution_state:'running'} as any]},attachTo:document.body});await wrapper.get('button').trigger('click')
  document.body.dispatchEvent(new Event('pointerdown',{bubbles:true}));await wrapper.vm.$nextTick()
  expect(wrapper.get('button').attributes('aria-expanded')).toBe('false')
 })
@@ -66,4 +66,15 @@ it('uses each task session BOT identity rather than the current capsule avatar',
  const images=wrapper.findAll('.activity-row img').map(image=>image.attributes('src'))
  expect(images[0]).toContain('/person/xiaohe/idle.png')
  expect(images[1]).toContain('/person/dachu/idle.png')
+})
+
+it('ignores stale presence counts and removes the empty capsule after completion feedback', async()=>{
+ const task={id:'a',title:'Task',status:'open',execution_state:'running'} as any
+ wrapper=mount(Activity,{props:{count:1,tasks:[task]}})
+ await wrapper.get('.person-task-island').trigger('click')
+ await wrapper.setProps({tasks:[{...task,status:'completed',execution_state:'finished'}]})
+ expect(wrapper.get('.person-task-island').attributes('aria-label')).toContain('person.backgroundTasks · 0')
+ expect(wrapper.find('.activity-completion').exists()).toBe(true)
+ await vi.advanceTimersByTimeAsync(4000)
+ expect(wrapper.find('.person-task-island').exists()).toBe(false)
 })

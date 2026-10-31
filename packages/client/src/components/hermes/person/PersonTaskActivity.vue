@@ -53,13 +53,13 @@ watch(() => [props.scope, props.tasks, props.flows] as const, () => {
 }, { deep: true, immediate: true })
 const finishing = ref(false)
 let finishTimer: ReturnType<typeof setTimeout> | undefined
-const hasWork = computed(() => active.value.length > 0 || flows.value.length > 0 || props.count > 0)
+const hasWork = computed(() => active.value.length > 0 || flows.value.length > 0)
 watch(hasWork, (value, previous) => {
   clearTimeout(finishTimer)
   finishing.value = !value && previous
   if (finishing.value) finishTimer = setTimeout(() => { finishing.value = false; opened.value = false }, 3000)
 })
-watch(() => props.scope, () => { opened.value = false; finishing.value = false; clearTimeout(finishTimer); clearTimeout(completionTimer) })
+watch(() => props.scope, () => { opened.value = false; finishing.value = false; clearTimeout(finishTimer); clearTimeout(completionTimer); completionTimer = undefined })
 const state = computed(() => completion.value || finishing.value ? 'done' : active.value.some(task => ['failed', 'interrupted'].includes(task.execution_state)) || flows.value.some(flow => flow.state === 'failed') ? 'error' : active.value.some(task => attentionStates.has(task.execution_state)) ? 'thinking' : 'searching')
 const animation = computed(() => personAvatarAnimation(avatar.value, state.value) || PERSON_ANIMATIONS[state.value])
 function dismiss(event: Event) { if (!root.value?.contains(event.target as Node)) opened.value = false }
@@ -101,7 +101,7 @@ function taskImage(task: PersonTask) {
   // Old servers may omit identity: use a neutral still, never another BOT's working animation.
   return PERSON_AVATAR.src
 }
-const formattedCount = computed(() => Math.max(props.count, active.value.length, flows.value.length).toLocaleString(locale.value))
+const activityLabel = computed(() => `${avatar.value.label} · ${t('person.backgroundTasks')} · ${standalone.value.length.toLocaleString(locale.value)} · ${t('person.flows')} · ${flows.value.length.toLocaleString(locale.value)}`)
 const reducedMotion = ref(false)
 let motionQuery: MediaQueryList | undefined
 function syncMotion() { reducedMotion.value = motionQuery?.matches ?? false }
@@ -112,14 +112,14 @@ onMounted(() => {
   syncMotion()
   motionQuery.addEventListener('change', syncMotion)
 })
-onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', keydown); clearTimeout(finishTimer); clearTimeout(completionTimer) })
+onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', keydown); clearTimeout(finishTimer); clearTimeout(completionTimer); completionTimer = undefined })
 </script>
 
 <template>
   <div ref="root" class="person-task-activity" :class="{ 'is-expanded': opened }">
     <Transition name="person-task-island" appear>
       <section v-if="(hasWork || finishing || completion) && !pageLoading" class="activity-shell" data-theme-surface="card">
-        <button type="button" class="person-task-island" :aria-expanded="opened" :aria-label="`${avatar.label} · ${t('person.backgroundTasks')} · ${formattedCount}`" @click="opened = !opened">
+        <button type="button" class="person-task-island" :aria-expanded="opened" :aria-label="activityLabel" @click="opened = !opened">
           <span class="person-task-island__avatar-slot" aria-hidden="true"><img class="person-task-island__avatar" :src="reducedMotion ? avatar.src : animation" alt="" width="48" height="48" /></span>
           <span class="person-task-island__label"><span><b>{{ standalone.length.toLocaleString(locale) }}</b> {{ t('person.backgroundTasks') }}</span><span><b>{{ flows.length.toLocaleString(locale) }}</b> {{ t('person.flows') }}</span></span>
 
