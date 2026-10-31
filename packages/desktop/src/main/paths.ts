@@ -10,7 +10,7 @@ import {
 import { hermesAgentVersionFromRuntimeTag } from './runtime-version'
 
 const isWin = platform() === 'win32'
-const DEFAULT_HERMES_AGENT_VERSION = '0.20.6'
+const DEFAULT_HERMES_AGENT_VERSION = '0.22.5'
 const PACKAGED_RUNTIME_RELEASE_NAME = 'runtime-release.json'
 const ACTIVE_RUNTIME_VERSION_NAME = 'active-version.json'
 let incompleteActiveWebUiWarningPath = ''

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { BusinessEvent } from '../../packages/server/src/modules/studio/services/webhooks/business-events'
 
 const recordSessionUploadAttachmentsMock = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('../../packages/server/src/modules/studio/services/files/session-uploads', () => ({
@@ -154,6 +155,7 @@ function makeServerHarness() {
     connected: true,
     handshake: { auth: {}, query: { profile: 'default' } },
     data: {},
+    rooms: new Set<string>(),
     emit: vi.fn(),
     join: vi.fn(),
     to: vi.fn(() => ({ emit: vi.fn() })),
@@ -206,6 +208,68 @@ describe('ChatRunSocket global pending interactions', () => {
     getSessionMock.mockReturnValueOnce(main as any)
     ;(server as any).emitPendingInteraction('research','run.completed',{session_id:main.id,run_id:'replay',replayed:true})
     expect(emitted).toHaveLength(count)
+  })
+
+  it.each([
+    ['run.started', {}, 'running'],
+    ['run.completed', {}, 'completed'],
+    ['run.completed', { queue_remaining: 1 }, 'running'],
+    ['run.failed', {}, 'failed'],
+    ['run.failed', { queue_remaining: 1 }, 'running'],
+    ['abort.completed', {}, 'completed'],
+    ['abort.completed', { queue_length: 1 }, 'running'],
+    ['session.command', { started: true }, 'running'],
+    ['session.command', { terminal: true, ok: false }, 'failed'],
+  ])('publishes silent Person state through the live dispatcher for %s (%j)', async (event, patch, status) => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+    const { appEventEnvelope } = await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+    const { io, emitted } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const main = { id: 'person-main-live', studio_user_id: '1', profile: 'research', source: 'builtin_agent' }
+    ;(server as any).sessionMap.set(main.id, { activeRunMarker: 'current-turn', source: main.source, runStartedAt: 123,
+      messages: [], events: [], queue: [], isWorking: true })
+    const observe = vi.spyOn((server as any).sessionStateSync, 'observe')
+    const states: BusinessEvent[] = []
+    const stop = businessEvents.subscribe('person-live-dispatch-test', value => { states.push(value) })
+    try {
+      getSessionMock.mockReturnValueOnce(main as any)
+      const payload = { session_id: main.id, run_id: 'runtime', command: 'private-command', error: 'private-error', ...patch }
+      ;(server as any).emitPendingInteraction(main.profile, event, payload)
+      expect(observe).toHaveBeenCalledExactlyOnceWith(event, payload)
+      expect(states).toHaveLength(1)
+      expect(states[0]).toMatchObject({ type: 'person.run.updated', source: 'person', profile: main.profile,
+        subject: { session_id: main.id, run_id: 'current-turn' },
+        payload: { state: { session_id: main.id, status, started_at: 123, reset_progress: event === 'run.started' } } })
+      expect(states[0].chat).toBeUndefined()
+      expect(appEventEnvelope(states[0])).toMatchObject({ notify: false, state: { status } })
+      expect(JSON.stringify(states)).not.toContain('private-')
+      expect(emitted.filter(value => value.event === 'session.activity')).toEqual([
+        { room: `session:${main.id}`, event: 'session.activity', payload: expect.objectContaining({ status }) },
+      ])
+    } finally { stop(); await server.close() }
+  })
+
+  it('excludes private workers, invalid owners and replayed events from live Person state', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { businessEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+    const { io, emitted } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const states: BusinessEvent[] = []
+    const stop = businessEvents.subscribe('person-private-dispatch-test', value => { states.push(value) })
+    try {
+      const main = { id: 'person-main-live', studio_user_id: '1', profile: 'research', source: 'builtin_agent' }
+      for (const patch of [{ replayed: true }, { restored: true }, { background_snapshot: true }]) {
+        getSessionMock.mockReturnValueOnce(main as any)
+        ;(server as any).emitPendingInteraction(main.profile, 'run.started', { session_id: main.id, run_id: 'runtime', ...patch })
+      }
+      for (const session of [{ ...main, id: 'person-task-private' }, { ...main, studio_user_id: undefined }]) {
+        getSessionMock.mockReturnValueOnce(session as any)
+        ;(server as any).emitPendingInteraction(main.profile, 'run.started', { session_id: session.id, run_id: 'runtime' })
+      }
+      expect(states).toEqual([])
+      expect(emitted).toEqual([])
+    } finally { stop(); await server.close() }
   })
 
   it('binds session goals to the active primary turn without publishing a plan card', async () => {

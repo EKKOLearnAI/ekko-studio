@@ -35,8 +35,7 @@ export function listSessionTaskItems(query: SessionTaskListQuery): SessionTaskLi
       AND m.role = 'user' AND COALESCE(m.display_role, m.role) = 'user' AND m.content NOT LIKE '/%'
       AND m.id <= CASE WHEN t.status = 'completed' THEN COALESCE(t.evidence_message_id, t.source_message_id) ELSE t.source_message_id END
       ORDER BY m.id DESC LIMIT 1) AS message_id
-    ${from} ORDER BY CASE t.status WHEN 'open' THEN 0 WHEN 'completed' THEN 1 ELSE 2 END,
-      t.updated_at ${query.order === 'oldest' ? 'ASC' : 'DESC'}, t.id ASC LIMIT ? OFFSET ?`)
+    ${from} ORDER BY t.updated_at ${query.order === 'oldest' ? 'ASC' : 'DESC'}, t.id ASC LIMIT ? OFFSET ?`)
     .all(...args, Math.min(query.limit, total - query.offset), query.offset) as unknown as Array<SessionTaskListPage['tasks'][number] & { session_preview: string }>
   const tasks = rows.map(({ session_preview, ...task }) => ({
     ...task, session_title: sessionDisplayTitle(task.session_title, session_preview),

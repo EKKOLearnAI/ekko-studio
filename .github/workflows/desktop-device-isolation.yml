@@ -33,6 +33,8 @@ jobs:
           tests/desktop/desktop-listening-message.test.ts
           tests/desktop/desktop-resource-process.test.ts
           tests/desktop/installation-coordinator.test.ts
+          tests/desktop/quit-startup.test.ts
+          tests/desktop/installer-shutdown.test.ts
           tests/desktop/device-window-owner.test.ts
           tests/desktop/device-instance.test.ts
           tests/desktop/remote-devices.test.ts
@@ -40,6 +42,7 @@ jobs:
           tests/desktop/desktop-device-storage.test.ts
           tests/desktop/browser-profile-lease.test.ts
           tests/desktop/browser-profile-directory.test.ts
+          tests/desktop/browser-profile-scope.test.ts
           tests/desktop/browser-download-history.test.ts
           tests/desktop/browser-download-actions.test.ts
           tests/desktop/webui-startup-diagnostics.test.ts

@@ -13,6 +13,8 @@ export interface EkkoClarificationResolution {
 }
 
 interface PendingEkkoClarification {
+  request: AgentClarificationRequest
+  requestedAt: number
   sessionId: string
   runId: string
   resolve: (response: string) => void
@@ -74,6 +76,8 @@ export function waitForEkkoClarification(
     })
     pendingClarifications.set(request.clarifyId, {
       sessionId: options.sessionId,
+      request: { ...request, choices: request.choices ? [...request.choices] : undefined },
+      requestedAt: Date.now(),
       runId: String(options.runId || ''),
       resolve,
       timer,
@@ -91,6 +95,19 @@ export function waitForEkkoClarification(
       })
     }
   })
+}
+
+/** Read the live broker slots independently of the bounded chat event history. */
+export function pendingEkkoClarificationEvents(sessionId: string) {
+  return [...pendingClarifications.values()].filter(pending => pending.sessionId === sessionId).map(pending => ({
+    event: 'clarify.requested',
+    data: {
+      event: 'clarify.requested', session_id: sessionId, run_id: pending.runId,
+      clarify_id: pending.request.clarifyId, question: pending.request.question,
+      choices: pending.request.choices ? [...pending.request.choices] : null,
+      timeout_ms: pending.request.timeoutMs, requested_at: pending.requestedAt,
+    },
+  }))
 }
 
 export function respondToEkkoClarification(

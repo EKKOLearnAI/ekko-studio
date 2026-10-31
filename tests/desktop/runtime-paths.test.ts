@@ -197,7 +197,7 @@ describe('desktop runtime paths', () => {
 
     expect(desktopRuntimeDir()).toBe(runtimeDir)
     expect(webuiDir()).toBe(webUiDir)
-    expect(targetDesktopRuntimeDir()).toBe(join(storageRoot, 'hermes', '0.20.6', runtimePlatformKey()))
+    expect(targetDesktopRuntimeDir()).toBe(join(storageRoot, 'hermes', '0.22.5', runtimePlatformKey()))
   })
 
   it('falls back to the bundled Web UI when the active Web UI directory is incomplete', async () => {
@@ -345,7 +345,7 @@ describe('desktop runtime paths', () => {
 
     const { runtimePlatformKey } = await import('../../packages/desktop/src/main/runtime-paths')
     const runtimeDir = join(homeDir, 'desktop-runtime', 'hermes', '0.15.2', runtimePlatformKey())
-    const targetRuntimeDir = join(homeDir, 'desktop-runtime', 'hermes', '0.20.6', runtimePlatformKey())
+    const targetRuntimeDir = join(homeDir, 'desktop-runtime', 'hermes', '0.22.5', runtimePlatformKey())
     createRuntimeWithoutManifest(runtimeDir)
 
     const { desktopRuntimeDir, targetDesktopRuntimeDir } = await import('../../packages/desktop/src/main/paths')

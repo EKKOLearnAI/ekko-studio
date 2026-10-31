@@ -3,7 +3,7 @@
   "info": {
     "title": "Ekko Studio API",
     "description": "Ekko Studio API — chat sessions, scheduled jobs, platform channels, model management, skills, memory, logs, file browser, group chat, and terminal.",
-    "version": "0.7.39"
+    "version": "0.8.11"
   },
   "servers": [
     {
@@ -19615,7 +19615,7 @@
           "Person"
         ],
         "summary": "Create apply",
-        "description": "Create an ordered flow with session_id (creator), title, goal and stages. No execution preset is required. Stop/resume require flow_id and current expected_revision. Stop cancels stage turns, deliveries and workers; resume requeues the same current role with a new generation. Only an assigned live model turn may prepare completion; the host commits it after saving its final result. Route and creator are immutable.",
+        "description": "Create a flow with session_id (creator), title, goal and stages (session_id, goal, return_expectation). Omit group on all stages for serial execution, or set ordered contiguous group numbers from zero on every stage: 0,0,1 runs A and B in parallel then C. Each role appears once per group; the creator may join a first parallel group. The next group receives every previous-group result only after all are saved. No execution preset is required. Stop/resume require flow_id and current expected_revision. Stop cancels all stage turns, deliveries and workers; resume requeues only unfinished branches with a new generation, preserving completed results. Only an assigned live model turn may prepare its branch completion; its stage and generation fence the operation, so peer revision changes do not require retries. The host commits it after saving its final result. Route and creator are immutable.",
         "operationId": "flowApply",
         "security": [
           {
@@ -19717,7 +19717,7 @@
           "Person"
         ],
         "summary": "Create query",
-        "description": "List owned flows, optionally filtered by involved conversation, or read one flow_id. Includes ordered stages, original result message references and optional child tasks.",
+        "description": "List up to 50 owned flows per page, most recently updated first, optionally filtered by involved conversation. Use offset for older flows, or read one flow_id. Includes ordered role stages with group_position, Bot appearance, current-generation delivery state/error, original result references and child tasks with actual execution state and Agent runtime. current_position identifies the current execution group; every role in that group can be active.",
         "operationId": "flows",
         "security": [
           {
@@ -20168,7 +20168,9 @@
                   "maxConcurrentTasks": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 4
+                    "maximum": 12,
+                    "default": 6,
+                    "description": "Account-shared concurrency across all Person BOTs; additional tasks queue."
                   }
                 },
                 "required": [
@@ -20599,6 +20601,163 @@
             }
           }
         ]
+      }
+    },
+    "/api/studio/person/tasks/{id}/queue/insert": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Prioritize a queued task message and interrupt the current turn",
+        "description": "Account-owned task operation. Preserves other queued inputs. Returns the durable insertion phase; accepted does not mean the next turn has started. The native runtime must acknowledge interruption before the task scheduler starts the selected input.",
+        "operationId": "taskInsert",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Resource access revoked"
+          },
+          "409": {
+            "description": "Stale task, unavailable queue item or unsupported runtime"
+          },
+          "503": {
+            "description": "Runtime temporarily unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "queue_id",
+                  "expected_execution_id",
+                  "expected_revision",
+                  "idempotency_key"
+                ],
+                "properties": {
+                  "queue_id": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Pending execution ID from the task chat snapshot."
+                  },
+                  "expected_execution_id": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/tasks/{id}/queue/remove": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Remove one queued task message without stopping the active turn",
+        "description": "Account-owned, revision-checked and idempotent cancellation of one pending or queued input and its result delivery. Preserves the active worker and all other inputs. Rejects an input that has started or is the target of an active queue insertion.",
+        "operationId": "taskRemove",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Resource access revoked"
+          },
+          "409": {
+            "description": "Stale task, started or unavailable queue item, or insertion in progress"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "queue_id",
+                  "expected_execution_id",
+                  "expected_revision",
+                  "idempotency_key"
+                ],
+                "properties": {
+                  "queue_id": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Pending execution ID from the task chat snapshot."
+                  },
+                  "expected_execution_id": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/studio/petdex/asset": {

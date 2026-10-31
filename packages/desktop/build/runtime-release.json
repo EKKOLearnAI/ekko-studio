@@ -1,9 +1,9 @@
 {
-  "tag": "hermes-0.20.6-runtime",
-  "hermesAgentVersion": "0.20.6",
+  "tag": "hermes-0.22.5-runtime",
+  "hermesAgentVersion": "0.22.5",
   "hermesSource": {
     "repository": "https://github.com/NousResearch/hermes-agent.git",
-    "ref": "v2026.8.27",
-    "commit": "5fc308a70719a83cccdbba4c0e39c23f5a8239d5"
+    "ref": "v0.22.5",
+    "commit": "bf0203a794a07aac3ff764972ab9087baa4e4f4e"
   }
 }

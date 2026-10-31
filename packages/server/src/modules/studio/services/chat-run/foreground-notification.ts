@@ -2,7 +2,8 @@
 export function foregroundNotification(event: string, value: Record<string, unknown>, now = Date.now()) {
   const sessionId = typeof value.session_id === 'string' ? value.session_id : ''
   if (!sessionId || value.replayed === true || value.restored === true || value.background_snapshot === true) return null
-  if (event.endsWith('.resolved') && (value.resolved === false || value.stale === true)) return null
+  if (event.endsWith('.resolved') && (value.stale === true || value.resolved === false
+    && !['timeout', 'aborted', 'cancelled', 'canceled'].includes(String(value.reason)))) return null
   const requestKind = event.startsWith('approval.') ? 'approval' : event.startsWith('clarify.') ? 'clarify' : ''
   const id = requestKind ? value[`${requestKind}_id`] : value.run_id
   if (typeof id !== 'string' || !id) return null

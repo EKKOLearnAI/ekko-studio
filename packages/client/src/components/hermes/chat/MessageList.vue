@@ -1248,6 +1248,7 @@ defineExpose({
 @use "@/styles/person-avatar" as *;
 
 .message-list-shell {
+  color: $text-primary;
   flex: 1;
   min-height: 0;
   position: relative;

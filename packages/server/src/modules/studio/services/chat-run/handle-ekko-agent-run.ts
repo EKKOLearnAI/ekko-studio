@@ -545,7 +545,7 @@ export async function handleEkkoAgentRun(
   const emit = (event: string, payload: any) => {
     const tagged = { ...payload, session_id: sessionId }
     if (personStageContext && (event === 'run.completed' || event === 'run.failed')) {
-      finishPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''),payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed')
+      finishPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''),payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed',String(payload.error || ''))
     }
     if (!isPrivatePersonSession(sessionId)) observeRunChatPetEvent(profile, event, tagged)
     data.onEvent?.(event, tagged)
@@ -646,6 +646,7 @@ export async function handleEkkoAgentRun(
         role,
         content: storageText,
         timestamp: now,
+        queued: false,
       },
     })
   }
@@ -969,6 +970,7 @@ export async function handleEkkoAgentRun(
         model: modelConfig.model,
         provider: modelConfig.provider,
         queue_id: data.queue_id,
+        queue_length: state.queue.length,
         autonomous: data.autonomous === true,
         delegation_id: data.background_delegation_id,
       })
@@ -1349,6 +1351,7 @@ export async function handleEkkoAgentRun(
         }
         return waitForEkkoToolApproval(request, {
           sessionId,
+          runId: runId || turnId,
           signal: abortController.signal,
           onRequested: (pending: any) => {
             const requestedAt = Date.now()
@@ -1691,6 +1694,8 @@ export async function handleEkkoAgentRun(
       message_id: assistantMessageId || undefined,
       output: assistantText,
       context: result.context,
+      interrupted: boundaryInterrupted,
+      boundary_interrupt: boundaryInterrupted,
       contextTokens: contextEstimate?.contextTokens,
       context_tokens: contextEstimate?.contextTokens,
       contextEstimate,

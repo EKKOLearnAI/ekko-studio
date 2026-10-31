@@ -20,6 +20,7 @@ import PersonBotPicker from '@/components/hermes/person/PersonBotPicker.vue'
 import MessageList from '@/components/hermes/chat/MessageList.vue'
 import SessionTasksDrawer from '@/components/hermes/tasks/SessionTasksDrawer.vue'
 import PersonTaskChat from '@/components/hermes/person/PersonTaskChat.vue'
+import PersonWorkspaceFiles from '@/components/hermes/person/PersonWorkspaceFiles.vue'
 import { personTaskNavigation } from '@/components/hermes/person/task-navigation'
 import PersonSchedulesPanel from '@/components/hermes/person/PersonSchedulesPanel.vue'
 import PersonFlowsPanel from '@/components/hermes/person/PersonFlowsPanel.vue'
@@ -59,6 +60,7 @@ const router = useRouter()
 const { expanded: showSessions, isMobile } = usePageSidebarState()
 watch(showSessions, value => appStore.setPageSidebarExpanded(value), { immediate: true })
 const selectedSessionId = computed(() => typeof route.query.session === 'string' ? route.query.session : '')
+provide('hermesWorkspaceFilePreview', computed(() => !!selectedSessionId.value))
 const conversations = ref<SessionSummary[]>([])
 const nextOffset = ref<number | null>(null)
 const showCreate = ref(false)
@@ -299,6 +301,7 @@ const workspaceValue = ref<string | null>('')
 const workspaceDirectories = useDefaultWorkspace()
 const { defaultWorkspaces, recentWorkspaces } = workspaceDirectories
 const chatTaskId = ref<string | null>(null)
+const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
 const chatExecutionId = ref<string>()
 function openTask(task: PersonTask) { showTasks.value = false; chatExecutionId.value = undefined; chatTaskId.value = task.id }
 provide(personTaskNavigation, (taskId, executionId) => { showTasks.value = false; chatExecutionId.value = executionId; chatTaskId.value = taskId })
@@ -391,6 +394,10 @@ function flowAction(flow: PersonFlow, action: 'stop' | 'resume') {
 function openFlowResult(sessionId: string, messageId: number) {
   showPanel.value = false
   return router.push({ name: 'hermes.person', query: { session: sessionId, message: String(messageId) } })
+}
+function openFlowConversation(sessionId: string) {
+  showPanel.value = false
+  return router.push({ name:'hermes.person',query:{ session:sessionId } })
 }
 function openFlowTask(taskId: string) { showPanel.value = false; chatExecutionId.value = undefined; chatTaskId.value = taskId }
 async function act(work: () => Promise<unknown>) {
@@ -587,6 +594,8 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
             <template #trigger><NButton quaternary circle size="small" :disabled="!data?.can_clear || busy || pending || settingsWrites > 0" :aria-label="t('chat.workspace')" :aria-expanded="showWorkspace" @click="openWorkspace"><FolderIcon /></NButton></template>
             {{ data?.settings.workspace || t('chat.workspace') }}
           </NTooltip>
+          <PersonWorkspaceFiles :session-id="data?.session?.id" :workspace="data?.session?.workspace" :submit="sendMessage"
+            :active="!chatTaskId && data?.session?.id === selectedSessionId" @attach="file => chatInputRef?.addFiles([file])" />
           <NPopconfirm v-model:show="showClearConfirm" :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" :positive-button-props="{ loading: pending }" :disabled="!data?.can_clear || busy || pending || settingsWrites > 0" @positive-click="clearHistory">
             <template #trigger>
               <NTooltip trigger="hover">
@@ -646,7 +655,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       </div>
       <div v-if="data.session" class="person-compose">
         <button v-if="!currentModel" type="button" class="person-model-hint" @click="openModels">{{ t('person.defaultUnavailable') }}</button>
-        <ChatInput hide-settings managed-reasoning-effort :send-disabled="!currentModel || pending || settingsWrites > 0" :submit="sendMessage"
+        <ChatInput ref="chatInputRef" hide-settings managed-reasoning-effort :send-disabled="!currentModel || pending || settingsWrites > 0" :submit="sendMessage"
           :model-label="modelLabel" :model-disabled="busy || settingsWrites > 0" :model-expanded="showModelPicker"
           :reasoning-effort="reasoningEffort" :reasoning-effort-disabled="busy || !currentModel"
           :default-effort-label="t('person.defaultEffort')"
@@ -681,7 +690,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
               </NTabPane>
               <NTabPane name="flows" :tab-props="{ role: 'tab', 'aria-selected': tab === 'flows' }">
                 <template #tab><span class="workspace-tab"><SessionTaskIcon :size="17" />{{ t('person.flows') }}</span></template>
-                <PersonFlowsPanel :flows="data.flows || []" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" />
+                <PersonFlowsPanel :flows="data.flows || []" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
               </NTabPane>
               <NTabPane name="schedules" :tab-props="{ role: 'tab', 'aria-selected': tab === 'schedules' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="schedule" :size="17" />{{ t('person.schedules') }}<span class="workspace-tab-count">{{ data.schedules.length }}</span></span></template>

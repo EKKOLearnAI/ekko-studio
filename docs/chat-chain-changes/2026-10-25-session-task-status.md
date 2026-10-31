@@ -16,8 +16,8 @@ Startup upgrades the legacy SQLite status CHECK constraint transactionally,
 preserving existing task rows, columns, indexes and triggers. The upgrade is
 idempotent and leaves existing ledger revisions unchanged.
 
-Closed tasks remain in the ledger and list. They follow open and completed tasks
-in the default list, and link to the original request. The model's update tools
+Closed tasks remain in the ledger and list. All statuses share the selected
+update-time order, and closed tasks link to the original request. The model's update tools
 continue to accept only open/completed. They can read closed tasks, but cannot
 change them by id or normalized title; an attempted mixed batch is rejected
 atomically. Only a manual status change can reopen a closed task. Turn prompts,

@@ -37,7 +37,7 @@ const timezones = computed(() => [...new Set(['UTC', props.settings.timezone, ..
 const integerInRange = (value: number | null, min: number, max: number) => value !== null && Number.isSafeInteger(value) && value >= min && value <= max
 const compressionPercent = computed(() => Math.round((draft.value.compressionThreshold ?? props.compression.globalThreshold) * 100))
 const compressionTokens = computed(() => Math.floor(props.contextTokens * compressionPercent.value / 100).toLocaleString())
-const valid = computed(() => integerInRange(draft.value.maxSteps, 2, 30) && integerInRange(draft.value.maxConcurrentTasks, 1, 4) && !!draft.value.timezone
+const valid = computed(() => integerInRange(draft.value.maxSteps, 2, 30) && integerInRange(draft.value.maxConcurrentTasks, 1, 12) && !!draft.value.timezone
   && (draft.value.compressionThreshold === null || (draft.value.compressionThreshold >= 0.05 && draft.value.compressionThreshold <= 0.95)))
 function reset() { draft.value = pickSettings(); saved.value = false }
 async function submit() {
@@ -67,7 +67,7 @@ async function submit() {
         <div class="setting-heading"><span class="tile-icon"><PersonPanelIcon name="agents" /></span><h3 id="person-runtime-title">{{ t('person.runLimits') }}</h3></div>
         <div class="setting-fields">
           <label><span>{{ t('person.maxSteps') }}</span><NInputNumber v-model:value="draft.maxSteps" :min="2" :max="30" :precision="0" :disabled="saving" :input-props="{ 'aria-label': t('person.maxSteps') }" /><small>{{ t('person.maxStepsHint') }}</small></label>
-          <label><span>{{ t('person.maxConcurrentTasks') }}</span><NInputNumber v-model:value="draft.maxConcurrentTasks" :min="1" :max="4" :precision="0" :disabled="saving" :input-props="{ 'aria-label': t('person.maxConcurrentTasks') }" /><small>{{ t('person.maxConcurrentTasksHint') }}</small></label>
+          <label><span>{{ t('person.maxConcurrentTasks') }}</span><NInputNumber v-model:value="draft.maxConcurrentTasks" :min="1" :max="12" :precision="0" :disabled="saving" :input-props="{ 'aria-label': t('person.maxConcurrentTasks') }" /><small>{{ t('person.maxConcurrentTasksHint') }}</small></label>
         </div>
       </section>
       <section class="panel-tile" data-theme-surface="card" aria-labelledby="person-timezone-title">

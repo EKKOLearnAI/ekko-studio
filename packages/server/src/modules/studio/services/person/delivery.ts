@@ -8,6 +8,7 @@ import { personRuntime } from '../../public/person-runtime'
 import { personUser } from './catalog'
 import { personFlowSummary, personRequirements } from '../../contracts/person-flow'
 import { assertPersonStage, personTaskStage } from '../../repositories/person-stage-store'
+import { failPersonStage } from './stage-flows'
 
 export function savePersonTaskOrigin(userId: number, taskId: string, supplied?: PersonTaskOrigin) {
   const sessionId = getPersonTask(userId, taskId).session_id
@@ -27,6 +28,16 @@ export function readyPersonDelivery(run: PersonExecution) {
   personUpdated(run.owner_user_id)
 }
 export function finishPersonDelivery(userId: number, executionId: string, ok: boolean, error = '') {
+  const db = personDb()
+  const row = db.prepare("SELECT origin_json FROM person_deliveries WHERE execution_id=? AND owner_user_id=? AND state='queued'").get(executionId,userId)
+  const stage = row ? (JSON.parse(String(row.origin_json)) as PersonTaskOrigin).stage : undefined
+  if (!ok && stage) {
+    const detail = error || 'Stage worker result delivery failed'
+    db.prepare("UPDATE person_deliveries SET state='failed',error=?,updated_at=? WHERE execution_id=? AND owner_user_id=? AND state='queued'").run(detail.slice(0,1000),Date.now(),executionId,userId)
+    failPersonStage(userId,stage,detail)
+    personUpdated(userId)
+    return
+  }
   personDb().prepare("UPDATE person_deliveries SET state=?,error=?,updated_at=? WHERE execution_id=? AND owner_user_id=? AND state='queued'")
     .run(ok ? 'delivered' : 'pending', error.slice(0,1000), Date.now(), executionId, userId)
   personUpdated(userId)

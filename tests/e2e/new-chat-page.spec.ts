@@ -348,14 +348,15 @@ for (const { width, height } of [
 ]) test(`mobile new chat centers its content and keeps DSH options usable at ${width}x${height}`, async ({ page }) => {
   await page.setViewportSize({ width, height })
   await authenticate(page, TEST_ACCESS_KEY, 'research')
-  await page.addInitScript(() => {
+  const workspace = '/workspace/hermes-studio-with-a-long-name'
+  await page.addInitScript(workspace => {
     localStorage.setItem('hermes_locale', 'zh')
     localStorage.setItem('hermes_brightness', 'dark')
     localStorage.setItem('hermes_new_chat_agent_v1', 'dsh')
-  })
+    localStorage.setItem('hermes_new_chat_form_v1:1', JSON.stringify({ agent: 'dsh', profile: 'research', workspace }))
+  }, workspace)
   await mockHermesApi(page)
   await mockChatSocket(page)
-  const workspace = '/workspace/hermes-studio-with-a-long-name'
   await page.route('**/api/studio/workspace/directories', route => route.fulfill({ json: { directories: [
     { path: workspace, isFavorite: true, lastUsed: Date.now(), useCount: 1, createdAt: 1, updatedAt: 1 },
   ] } }))

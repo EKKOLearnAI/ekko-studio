@@ -1,5 +1,5 @@
 import { personMemories } from './memory'
-import { ensurePersonSession, personChatBusy } from './chat-agent'
+import { readPersonSession, personChatBusy } from './chat-agent'
 import { personError, personRevision, personText } from '../../contracts/person'
 import { personSettings, savePersonSettings,
   listPersonTasks, listPersonSchedules, personInteractions } from '../../repositories/person-store'
@@ -13,7 +13,7 @@ import { listPersonFlows } from '../../repositories/person-stage-store'
 
 export async function personSnapshot(userId: number, sessionId = '') {
   personUser(userId)
-  const session = sessionId ? await ensurePersonSession(userId, sessionId) : { ...await effectivePersonSettings(userId), session: null }
+  const session = sessionId ? await readPersonSession(userId, sessionId) : { ...await effectivePersonSettings(userId), session: null }
   const busy = personChatBusy(userId, sessionId || undefined)
   return { ...session, tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [], memories: await personMemories(userId),
     flows:sessionId ? listPersonFlows(userId,sessionId) : [],
@@ -56,7 +56,7 @@ export async function configurePerson(userId: number, input: Record<string, unkn
     if (value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0.05 || value > 0.95)) throw personError('Invalid compressionThreshold')
     settings.compressionThreshold = value as number | null
   }
-  for (const [key, min, max] of [['maxSteps', 2, 30], ['maxConcurrentTasks', 1, 4]] as const) {
+  for (const [key, min, max] of [['maxSteps', 2, 30], ['maxConcurrentTasks', 1, 12]] as const) {
     if (input[key] !== undefined) {
       const value = input[key]
       if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) throw personError(`Invalid ${key}`)

@@ -10,7 +10,7 @@ export function initPersonStageTables(db: DatabaseSync) {
     );
     CREATE INDEX IF NOT EXISTS idx_person_flows_owner ON person_flows(owner_user_id,updated_at);
     CREATE TABLE IF NOT EXISTS person_stages (
-      id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, position INTEGER NOT NULL, session_id TEXT NOT NULL,
+      id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, position INTEGER NOT NULL, group_position INTEGER NOT NULL DEFAULT 0, session_id TEXT NOT NULL,
       goal TEXT NOT NULL, return_expectation TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
       result_message_id INTEGER, completion_run_id TEXT NOT NULL DEFAULT '', UNIQUE(flow_id,position)
     );
@@ -26,4 +26,7 @@ export function initPersonStageTables(db: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_person_stage_tasks_stage ON person_stage_tasks(stage_id);
     CREATE INDEX IF NOT EXISTS idx_person_stage_delivery_pending ON person_stage_deliveries(state,updated_at);
   `)
+  if (!db.prepare('PRAGMA table_info(person_stages)').all().some(column => column.name === 'group_position')) {
+    db.exec('ALTER TABLE person_stages ADD COLUMN group_position INTEGER NOT NULL DEFAULT 0; UPDATE person_stages SET group_position=position;')
+  }
 }

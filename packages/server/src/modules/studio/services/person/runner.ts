@@ -20,6 +20,7 @@ import { personRequirements } from '../../contracts/person-flow'
 import { assertPersonStageTask } from '../../repositories/person-stage-store'
 import { deliverPersonStages, recoverPersonStages } from './stage-flows'
 import { personTaskPrompt } from './task-prompt'
+import { dispatchPersonInsertion } from './task-queue'
 
 const active = new Map<string, { run: PersonExecution; abort: AbortController }>()
 const busyTasks = new Set<string>()
@@ -145,6 +146,15 @@ async function execute(run: PersonExecution, abort: AbortController) {
       },
     })
     current(run)
+    const latestRun = current(run)
+    if (result.interrupted && latestRun.insertion_queue_id) {
+      personTransaction(() => {
+        setPersonExecution(current(run), 'interrupted', { output: result.output || '', error: '' })
+        personDb().prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id=? AND state IN ('waiting','pending','queued')").run(Date.now(), run.id)
+        if (run.occurrence_id) personDb().prepare("UPDATE person_occurrences SET state='interrupted' WHERE id=?").run(run.occurrence_id)
+      })
+      return // The selected durable follow-up owns the next run and its result delivery.
+    }
     if (!result.ok) throw new Error(result.error || 'Execution failed')
     const output = (result.output || '').slice(0,2_000_000)
     personTransaction(() => {
@@ -175,6 +185,8 @@ export async function tickPersonWork() {
     promotePersonFollowups()
     tickPersonSchedules()
     const db = personDb()
+    const inserting = db.prepare("SELECT * FROM person_executions WHERE insertion_phase='requesting' AND state IN ('starting','running','waiting_person','waiting_user','waiting_approval')").all() as unknown as PersonExecution[]
+    for (const run of inserting) void dispatchPersonInsertion(run).catch(error => logger.warn(error, 'Person queue insertion dispatch failed'))
     const stopping = db.prepare("SELECT * FROM person_executions WHERE state='stopping' LIMIT 30").all() as unknown as PersonExecution[]
     for (const run of stopping) {
       // A slow native acknowledgement must not block unrelated tasks or schedules.
@@ -190,7 +202,7 @@ export async function tickPersonWork() {
     }
     const queued = db.prepare("SELECT * FROM person_executions WHERE state='queued' ORDER BY created_at").all() as unknown as PersonExecution[]
     for (const next of queued) {
-      if (active.size >= 6) break
+      if (active.size >= 12) break
       if (busyTasks.has(next.task_id)) continue
       const count = Number((db.prepare("SELECT COUNT(*) AS n FROM person_executions WHERE owner_user_id=? AND state IN ('starting','running','waiting_person','waiting_user','waiting_approval','stopping')").get(next.owner_user_id) as { n: number }).n)
       if (count >= personSettings(next.owner_user_id).settings.maxConcurrentTasks) continue

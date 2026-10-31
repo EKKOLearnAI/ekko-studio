@@ -13,6 +13,7 @@ export function initPersonTables(db: DatabaseSync): void {
   }
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_person_goals ON session_tasks(owner_user_id, bot_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_person_session_goals ON session_tasks(owner_user_id, bot_id, session_id, updated_at, id);
     CREATE TABLE IF NOT EXISTS person_accounts (
       user_id INTEGER PRIMARY KEY, settings_json TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0
     );
@@ -36,6 +37,10 @@ export function initPersonTables(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS idx_person_runs ON person_executions(owner_user_id, task_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_person_execution_session ON person_executions(session_id, owner_user_id);
+    CREATE INDEX IF NOT EXISTS idx_person_task_state ON person_executions(owner_user_id, task_id, state);
+    CREATE INDEX IF NOT EXISTS idx_person_execution_order ON person_executions(owner_user_id, task_id,
+      CASE WHEN state IN ('finished','failed','interrupted') THEN 2 WHEN state='pending' THEN 1 ELSE 0 END, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_person_conversation_latest ON person_executions(session_id, owner_user_id, task_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_person_presence_runs ON person_executions(owner_user_id)
       WHERE state IN ('starting','running','stopping');
     CREATE UNIQUE INDEX IF NOT EXISTS idx_person_active_run ON person_executions(task_id)
@@ -81,6 +86,15 @@ export function initPersonTables(db: DatabaseSync): void {
       PRIMARY KEY(session_id, assistant_message_id)
     );
   `)
+  const executionColumns = db.prepare('PRAGMA table_info(person_executions)').all()
+  for (const [name, definition] of Object.entries({
+    queue_priority: 'INTEGER NOT NULL DEFAULT 0',
+    insertion_queue_id: "TEXT NOT NULL DEFAULT ''",
+    insertion_phase: "TEXT NOT NULL DEFAULT ''",
+    insertion_error: "TEXT NOT NULL DEFAULT ''",
+  })) {
+    if (!executionColumns.some(column => column.name === name)) db.exec(`ALTER TABLE person_executions ADD COLUMN ${name} ${definition}`)
+  }
   initPersonContextTables(db)
   initPersonStageTables(db)
   // Discard account-wide model choices; never copy them into conversations.

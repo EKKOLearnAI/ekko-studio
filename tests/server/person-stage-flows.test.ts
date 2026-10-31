@@ -205,6 +205,22 @@ async function complete(current: ReturnType<typeof flow>, text: string) {
 }
 
 describe('independent Person stages', () => {
+  it('lists the 50 most recently updated flows for a conversation and keeps older flows queryable', () => {
+    const created=Array.from({length:51},(_,index)=>{
+      const current=flow()
+      db.prepare('UPDATE person_flows SET updated_at=? WHERE id=?').run(index+1,current.id)
+      return current
+    })
+    const unrelated=flows.createPersonFlow(1,{session_id:'person-main-b',title:'Another collaboration',goal:'Unrelated to the selected conversation',idempotency_key:crypto.randomUUID(),stages:[{session_id:'person-main-c',goal:'Reply',return_expectation:'Save a result'}]})
+    db.prepare('UPDATE person_flows SET updated_at=1000 WHERE id=?').run(unrelated.id)
+    const latest=stages.listPersonFlows(1,'person-main-1')
+    expect(latest.map(item=>item.id)).toEqual(created.slice(1).reverse().map(item=>item.id))
+    expect(stages.listPersonFlows(1)).toHaveLength(50)
+    expect(stages.listPersonFlows(1,'person-main-1',50).map(item=>item.id)).toEqual([created[0].id])
+    expect(stages.getPersonFlow(1,created[0].id).id).toBe(created[0].id)
+    expect(stages.listPersonFlows(2)).toEqual([])
+  })
+
   it('lights only the current recipient and reports unread results after completion across devices', async () => {
     const { SessionStateSync } = await import('../../packages/server/src/modules/studio/services/session-state')
     const { onPersonUpdated } = await import('../../packages/server/src/modules/studio/repositories/person-updates')
@@ -290,14 +306,14 @@ describe('independent Person stages', () => {
       await new Promise<void>(resolve => server.close(() => resolve()))
     }
   })
-  it.each([true, false])('clears handoff activity when delivery settles (success=%s) even if the stage stays active', async ok => {
+  it.each([true, false])('clears handoff activity when delivery settles (success=%s)', async ok => {
     const current = flow(['person-main-b'])
     expect(stages.personCollaborationPendingCount(1, 'person-main-1')).toBe(0)
     expect(stages.personCollaborationPendingCount(1, 'person-main-b')).toBe(1)
     await flows.deliverPersonStages()
     const delivery = db.prepare('SELECT id FROM person_stage_deliveries WHERE flow_id=?').get(current.id)!
     flows.finishPersonStageDelivery(1, String(delivery.id), ok, ok ? '' : 'Delivery failed')
-    expect(stages.getPersonFlow(1, current.id).state).toBe('active')
+    expect(stages.getPersonFlow(1, current.id).state).toBe(ok ? 'active' : 'failed')
     expect(stages.personCollaborationPendingCount(1, 'person-main-b')).toBe(0)
     expect(db.prepare('SELECT COUNT(*) AS n FROM session_attention_events').get()).toMatchObject({ n: 0 })
   })
@@ -584,6 +600,409 @@ describe('independent Person stages', () => {
     expect(stages.getPersonFlow(1,first.id).state).toBe('stopped')
     expect(disposeSessionMock).not.toHaveBeenCalled()
     expect(runtime.stop).not.toHaveBeenCalled()
+  })
+
+  it.each(['dispatch','terminal','legacy'])('automatically releases roles after a %s failure without clearing messages', async failure => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const first = flow(), second = await complete(first, 'Keep the saved upstream result')
+    result('person-main-1','Original request history')
+    result('person-main-c','Keep the error transcript')
+    const before = db.prepare('SELECT * FROM messages ORDER BY id').all()
+    const stage = second.stages[1]
+    const context = { flowId:first.id,stageId:stage.id,generation:first.generation }
+    if (failure === 'dispatch') {
+      runtime.deliverStage = vi.fn(async () => { throw new Error('Provider unavailable') })
+      await flows.deliverPersonStages()
+    } else if (failure === 'terminal') {
+      await flows.deliverPersonStages()
+      flows.finishPersonStageTurn(1,context,'failed-run',null,false,'Provider unavailable')
+    } else {
+      db.prepare("UPDATE person_stage_deliveries SET error='Provider unavailable' WHERE stage_id=?").run(stage.id)
+      flows.recoverPersonStages()
+    }
+    expect(stages.getPersonFlow(1,first.id)).toMatchObject({ state:'failed',current_position:1,error:expect.stringContaining('Provider unavailable') })
+    expect(stages.getPersonFlow(1,first.id).stages.map(stage => stage.state)).toEqual(['completed','failed'])
+    for (const id of ['person-main-1','person-main-b','person-main-c']) {
+      expect(stages.personCollaborationPendingCount(1,id)).toBe(0)
+      expect((await personSnapshot(1,id)).can_clear).toBe(true)
+    }
+    expect(db.prepare('SELECT * FROM messages ORDER BY id').all()).toEqual(before)
+    const revision = stages.getPersonFlow(1,first.id).revision
+    flows.finishPersonStageTurn(1,context,'failed-run',stage.result_message_id,true)
+    flows.finishPersonStageTurn(1,context,'failed-run',null,false,'Late duplicate')
+    db.prepare('UPDATE person_stage_deliveries SET updated_at=0').run()
+    runtime.deliverStage = vi.fn(async () => {})
+    flows.recoverPersonStages(); await flows.deliverPersonStages()
+    expect(runtime.deliverStage).not.toHaveBeenCalled()
+    expect(stages.getPersonFlow(1,first.id).revision).toBe(revision)
+    expect(db.prepare('SELECT * FROM messages ORDER BY id').all()).toEqual(before)
+  })
+
+  it.each(['live','legacy'])('settles a %s failed worker callback automatically while preserving its task and error', async failure => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const delivery = await import('../../packages/server/src/modules/studio/services/person/delivery')
+    const first = flow()
+    await flows.deliverPersonStages()
+    const handoff = db.prepare('SELECT id FROM person_stage_deliveries WHERE stage_id=?').get(first.stages[0].id)!
+    flows.finishPersonStageDelivery(1,String(handoff.id),true)
+    const child = await tasks.applyPersonTask(1,{action:'create',title:'Worker',goal:'Work',agent_id:'worker',idempotency_key:'callback-failure'},undefined,origin(first)) as Created
+    await runner.tickPersonWork(); await wait(child.execution.id,'finished')
+    runtime.deliver = vi.fn(async () => { throw new Error('Callback unavailable') })
+    if (failure === 'live') await delivery.deliverPersonResults()
+    else {
+      db.prepare("UPDATE person_deliveries SET error='Callback unavailable' WHERE execution_id=?").run(child.execution.id)
+      flows.recoverPersonStages()
+    }
+    expect(stages.getPersonFlow(1,first.id)).toMatchObject({state:'failed',error:expect.stringContaining('Callback unavailable')})
+    expect(db.prepare('SELECT state,error FROM person_deliveries WHERE execution_id=?').get(child.execution.id))
+      .toMatchObject({state:'failed',error:expect.stringContaining('Callback unavailable')})
+    expect(store.getPersonTask(1,child.task.id).execution_state).toBe('finished')
+    expect((await personSnapshot(1,'person-main-b')).can_clear).toBe(true)
+    await delivery.deliverPersonResults()
+    expect(runtime.deliver).toHaveBeenCalledTimes(failure === 'live' ? 1 : 0)
+  })
+})
+
+describe('parallel Person stage groups', () => {
+  type Flow = ReturnType<typeof stages.getPersonFlow>
+  const plan = (route = [['person-main-b','person-main-c'],['person-main-1']]) => flows.createPersonFlow(1, {
+    session_id:'person-main-1',title:'Parallel research',goal:'Research independently, then summarize',idempotency_key:crypto.randomUUID(),
+    stages:route.flatMap((roles,group) => roles.map(session_id => ({ session_id,group,goal:`Work for ${session_id}`,return_expectation:'Save your new result' }))),
+  })
+  function actor(current: Flow, sessionId: string) {
+    const stage = current.stages.find(item => item.group_position === current.current_position && item.session_id === sessionId)!
+    return { sessionId,runId:`run:${stage.id}`,messages:[],stage:{ flowId:current.id,stageId:stage.id,generation:current.generation } }
+  }
+  async function finish(current: Flow, sessionId: string, text: string) {
+    const from = actor(stages.getPersonFlow(1,current.id),sessionId)
+    await control(current.id,'complete',from)
+    flows.finishPersonStageTurn(1,from.stage,from.runId,result(sessionId,text,from.runId),true)
+    return stages.getPersonFlow(1,current.id)
+  }
+
+  it('dispatches both roles without workers, joins every result once, then completes the summary', async () => {
+    store.savePersonSettings(1,{...store.personSettings(1).settings,agents:[]},1)
+    const first = plan()
+    expect(first.stages.map(stage => stage.state)).toEqual(['active','active','pending'])
+    await flows.deliverPersonStages()
+    expect(vi.mocked(runtime.deliverStage!).mock.calls.map(([input]) => input.sessionId)).toEqual(['person-main-b','person-main-c'])
+    expect(stages.personCollaborationPendingCount(1,'person-main-b')).toBe(1)
+    expect(stages.personCollaborationPendingCount(1,'person-main-c')).toBe(1)
+    const old = actor(first,'person-main-b')
+    const partial = await finish(first,'person-main-b','Competitor evidence')
+    expect(partial.current_position).toBe(0)
+    expect(partial.stages.map(stage => stage.state)).toEqual(['completed','active','pending'])
+    expect(stages.personStageSources(1,actor(partial,'person-main-c').stage)).toEqual([])
+    const joined = await finish(partial,'person-main-c','User needs evidence')
+    expect(joined.current_position).toBe(1)
+    expect(stages.personStageSources(1,actor(joined,'person-main-1').stage)).toEqual([
+      expect.objectContaining({ session_id:'person-main-b',content:'Competitor evidence' }),
+      expect.objectContaining({ session_id:'person-main-c',content:'User needs evidence' }),
+    ])
+    // Duplicate native completion and repeated recovery must not enqueue the summary again.
+    flows.finishPersonStageTurn(1,old.stage,old.runId,joined.stages[0].result_message_id,true)
+    flows.recoverPersonStages(); flows.recoverPersonStages()
+    await flows.deliverPersonStages()
+    expect(vi.mocked(runtime.deliverStage!).mock.calls.filter(([input]) => input.sessionId === 'person-main-1')).toHaveLength(1)
+    expect((await finish(joined,'person-main-1','Combined proposal')).state).toBe('completed')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM session_attention_events').get()).toMatchObject({n:1})
+    expect(db.prepare('SELECT COUNT(*) AS n FROM person_executions').get()).toMatchObject({n:0})
+    expect(runtime.execute).not.toHaveBeenCalled()
+  })
+
+  it('supports serial work followed by parallel review and another serial stage', async () => {
+    let current = plan([['person-main-b'],['person-main-c','person-main-1'],['person-main-b']])
+    current = await finish(current,'person-main-b','Shared artifact')
+    for (const role of ['person-main-c','person-main-1']) {
+      expect(stages.personStageSources(1,actor(current,role).stage)).toEqual([expect.objectContaining({content:'Shared artifact'})])
+    }
+    current = await finish(current,'person-main-1','Review two')
+    expect(current.current_position).toBe(1)
+    current = await finish(current,'person-main-c','Review one')
+    expect(stages.personStageSources(1,actor(current,'person-main-b').stage).map(source => source.content)).toEqual(['Review one','Review two'])
+    expect((await finish(current,'person-main-b','Final artifact')).state).toBe('completed')
+  })
+
+  it('runs each branch worker independently and joins their actual result callbacks', async () => {
+    const first = plan()
+    const workers = await Promise.all(['person-main-b','person-main-c'].map(sessionId => tasks.applyPersonTask(1,{
+      action:'create',title:sessionId,goal:`Research for ${sessionId}`,idempotency_key:crypto.randomUUID(),
+    },undefined,actor(first,sessionId))))
+    runtime.deliver = vi.fn(async input => {
+      expect(input.origin.stage?.stageId).toBe(actor(first,input.origin.sessionId).stage.stageId)
+      await finish(stages.getPersonFlow(1,first.id),input.origin.sessionId,`Reviewed ${input.output}`)
+    })
+    await runner.tickPersonWork()
+    await Promise.all(workers.map(worker => wait(worker.execution!.id,'finished')))
+    expect(runtime.execute).toHaveBeenCalledTimes(2)
+    expect(stages.getPersonFlow(1,first.id).stages.slice(0,2).map(stage => stage.tasks[0])).toEqual(workers.map(worker => expect.objectContaining({id:worker.task.id,execution_state:'finished',agent:'ekko'})))
+    expect(new Set(vi.mocked(runtime.execute).mock.calls.map(([input]) => input.sessionId)).size).toBe(2)
+    await runner.tickPersonWork()
+    expect(runtime.deliver).toHaveBeenCalledTimes(2)
+    const joined = stages.getPersonFlow(1,first.id)
+    expect(joined.current_position).toBe(1)
+    expect(stages.personStageSources(1,actor(joined,'person-main-1').stage).map(source => source.content)).toEqual(['Reviewed Verified result','Reviewed Verified result'])
+  })
+
+  it('lets everyone include the speaking role, and scopes queried completion to each actual branch', async () => {
+    const { personFlowTools } = await import('../../packages/server/src/modules/studio/services/person/stage-tools')
+    const tools = personFlowTools(1,'person-main-1')
+    const created:any = await tools.find(tool => tool.name === 'bot_flow_create')!.execute({
+      title:'Everyone introduces themselves',goal:'Each role introduces itself',
+      stages:['person-main-1','person-main-b','person-main-c'].map(session_id => ({session_id,group:0,goal:'Introduce yourself',return_expectation:'Only your introduction'})),
+    })
+    expect(created.ok).toBe(true)
+    const first = stages.getPersonFlow(1,created.flow.id)
+    await flows.deliverPersonStages()
+    expect(runtime.deliverStage).toHaveBeenCalledTimes(3)
+    const branchTools = personFlowTools(1,'person-main-c'), from = actor(first,'person-main-c')
+    const queried:any = await branchTools.find(tool => tool.name === 'bot_flows_query')!.execute({flow_id:first.id},from)
+    expect(queried.flows[0].current_stage).toBe(from.stage.stageId)
+    expect(queried.flows[0].current_stages).toHaveLength(3)
+    expect(await branchTools.find(tool => tool.name === 'bot_flow_control')!.execute({action:'complete',flow_ref:queried.flows[0].flow_ref},from)).toMatchObject({ok:true})
+    const prepared = stages.getPersonFlow(1,first.id)
+    expect(prepared.stages.map(stage => !!stage.completion_run_id)).toEqual([false,false,true])
+    flows.finishPersonStageTurn(1,from.stage,from.runId,result(from.sessionId,'I am C',from.runId),true)
+    const second = await finish(prepared,'person-main-b','I am B')
+    expect((await finish(second,'person-main-1','I am the speaking role')).state).toBe('completed')
+    expect(db.prepare('SELECT content FROM messages ORDER BY id').all().map(row => row.content)).toEqual(['I am C','I am B','I am the speaking role'])
+  })
+
+  it('uses two creator steps and three steps per role when six introductions complete concurrently', async () => {
+    const {createPersonAgent}=await import('../../packages/server/src/bootstrap/person-chat-agent')
+    const {createPersonChatAgent}=await import('../../packages/server/src/modules/studio/services/person/chat-agent')
+    runtime.chatAgent=createPersonAgent
+    store.savePersonSettings(1,{...store.personSettings(1).settings,agents:[],maxSteps:3},1)
+    for (const id of ['person-main-d','person-main-e','person-main-f']) sessions.createSession({id,studio_user_id:1,user_id:1,title:id,source:'builtin_agent',agent:'ekko-agent',agent_preset:'person',profile:'default'})
+    const roles=['person-main-1','person-main-b','person-main-c','person-main-d','person-main-e','person-main-f']
+    const capabilities={streaming:true,tools:true,vision:false,jsonMode:false,systemPrompt:true}
+    const creator=await createPersonChatAgent(1,roles[0])
+    let creatorCalls=0
+    const created=await creator.run({messages:[{role:'user',content:'Everyone introduce yourself'}],toolContext:{sessionId:roles[0]},modelClient:{
+      provider:'test',capabilities,create:async()=>({content:'Dispatched'}),
+      async *stream() {
+        if(creatorCalls===0) yield {type:'tool-call',toolCall:{id:'create',name:'bot_flow_create',arguments:{title:'Everyone introduces themselves',goal:'Each role introduces itself',stages:roles.map(session_id=>({session_id,group:0,goal:'Introduce yourself',return_expectation:'Only your introduction'}))}}}
+        yield {type:'done',response:{content:creatorCalls++ ? 'Everyone is introducing themselves.' : '',finishReason:'stop'}}
+      },
+    }})
+    expect(created.steps.filter(step=>step.type==='model')).toHaveLength(2)
+    const first=stages.listPersonFlows(1)[0]
+    await flows.deliverPersonStages()
+    const deliveries=vi.mocked(runtime.deliverStage!).mock.calls.map(([input])=>input)
+    expect(new Set(deliveries.map(delivery=>delivery.sessionId))).toEqual(new Set(roles))
+    let queried=0,release!:()=>void
+    const allQueried=new Promise<void>(resolve=>{release=resolve})
+    const completed=await Promise.all(deliveries.map(async delivery=>{
+      const agent=await createPersonChatAgent(1,delivery.sessionId,undefined,delivery.context.deliveryId)
+      let calls=0
+      const run=await agent.run({messages:[{role:'user',content:delivery.input}],memoryInput:{messages:[]},toolContext:{sessionId:delivery.sessionId},modelClient:{
+        provider:'test',capabilities,create:async()=>({content:'Introduction'}),
+        async *stream() {
+          if(calls===0) yield {type:'tool-call',toolCall:{id:'query',name:'bot_flows_query',arguments:{flow_id:first.id}}}
+          else if(calls===1) {
+            // Every model observes revision zero before any peer prepares completion.
+            if(++queried===roles.length) release()
+            await allQueried
+            yield {type:'tool-call',toolCall:{id:'complete',name:'bot_flow_control',arguments:{action:'complete',flow_ref:`${first.id}:0`}}}
+          }
+          yield {type:'done',response:{content:calls++===2 ? `Introduction from ${delivery.sessionId}` : '',finishReason:'stop'}}
+        },
+      }})
+      expect(calls).toBe(3)
+      expect(run.output.finishReason).toBe('stop')
+      const toolSteps=run.steps.filter(step=>step.type==='tool')
+      expect(toolSteps.map(step=>[step.toolName,step.result.ok])).toEqual([['bot_flows_query',true],['bot_flow_control',true]])
+      expect(run.events.some(event=>event.type==='run.max_steps')).toBe(false)
+      return {delivery,run}
+    }))
+    for (const {delivery,run} of completed) flows.finishPersonStageTurn(1,delivery.context,run.runId,result(delivery.sessionId,String(run.output.content),run.runId),true)
+    expect(creatorCalls).toBe(2)
+    expect(stages.getPersonFlow(1,first.id).state).toBe('completed')
+    expect(stages.getPersonFlow(1,first.id).stages.every(stage=>stage.result_message_id)).toBe(true)
+    expect(runtime.execute).not.toHaveBeenCalled()
+  },15000)
+
+  it.each([
+    ['starts above zero',[1,1]], ['skips a group',[0,2]], ['goes backwards',[0,1,0]],
+    ['mixes grouped and ungrouped',[0,undefined]], ['uses a negative group',[-1,0]], ['uses a fractional group',[0,0.5]],
+  ])('rejects a route that %s without persisting work', (_name, groups) => {
+    expect(() => flows.createPersonFlow(1,{session_id:'person-main-1',title:'Invalid',goal:'Invalid grouping',idempotency_key:crypto.randomUUID(),
+      stages:(groups as number[]).map((group,index) => ({session_id:index % 2 ? 'person-main-c' : 'person-main-b',goal:'Work',return_expectation:'Result',...(group === undefined ? {} : {group})})),
+    })).toThrow()
+    expect(db.prepare('SELECT COUNT(*) AS n FROM person_flows').get()).toMatchObject({n:0})
+  })
+
+  it('rejects duplicate roles in one group and a forged peer identity', async () => {
+    expect(() => plan([['person-main-b','person-main-b']])).toThrow('only once')
+    const first = plan(), from = actor(first,'person-main-b')
+    await expect(control(first.id,'complete',{...from,sessionId:'person-main-c'})).rejects.toThrow('another conversation')
+    expect(stages.getPersonFlow(1,first.id).stages.every(stage => !stage.completion_run_id)).toBe(true)
+  })
+
+  it.each(['prepared','saved'])('completes a branch with its observed reference after a peer has %s its result', async state => {
+    const {personFlowTools} = await import('../../packages/server/src/modules/studio/services/person/stage-tools')
+    const first = plan(), b = actor(first,'person-main-b'), c = actor(first,'person-main-c')
+    const toolsets = [personFlowTools(1,b.sessionId),personFlowTools(1,c.sessionId)]
+    const query = (index:number) => toolsets[index].find(tool => tool.name === 'bot_flows_query')!
+    const complete = (index:number) => toolsets[index].find(tool => tool.name === 'bot_flow_control')!
+    const qb:any = await query(0).execute({flow_id:first.id},b), qc:any = await query(1).execute({flow_id:first.id},c)
+    expect(await complete(0).execute({action:'complete',flow_ref:qb.flows[0].flow_ref},b)).toMatchObject({ok:true})
+    if (state === 'saved') flows.finishPersonStageTurn(1,b.stage,b.runId,result(b.sessionId,'Saved result',b.runId),true)
+    expect(await complete(1).execute({action:'complete',flow_ref:qc.flows[0].flow_ref},c)).toMatchObject({ok:true})
+    for (const from of state === 'saved' ? [c] : [c,b]) flows.finishPersonStageTurn(1,from.stage,from.runId,result(from.sessionId,'Saved result',from.runId),true)
+    expect(stages.getPersonFlow(1,first.id).current_position).toBe(1)
+  })
+
+  it('preserves completed branches across stop/resume and fences late results from unfinished peers', async () => {
+    const first = plan(), partial = await finish(first,'person-main-b','Preserved result')
+    const old = actor(partial,'person-main-c')
+    await control(first.id,'complete',old)
+    await control(first.id,'stop')
+    flows.finishPersonStageTurn(1,old.stage,old.runId,result(old.sessionId,'Late result',old.runId),true)
+    const resumed = await control(first.id,'resume')
+    await expect(flows.controlPersonFlow(1,{action:'complete',flow_id:first.id,expected_revision:partial.revision,idempotency_key:'stale-complete-after-resume'},old)).rejects.toThrow('no longer current')
+    expect(resumed.stages[0].result_message_id).toBe(partial.stages[0].result_message_id)
+    expect(resumed.stages[1].completion_run_id).toBe('')
+    await flows.deliverPersonStages()
+    expect(vi.mocked(runtime.deliverStage!).mock.calls.map(([input]) => input.sessionId)).toEqual(['person-main-c'])
+    const joined = await finish(resumed,'person-main-c','Fresh result')
+    expect(stages.personStageSources(1,actor(joined,'person-main-1').stage).map(source => source.content)).toEqual(['Preserved result','Fresh result'])
+  })
+
+  it('stops workers from all branches and resumes only after every native stop is acknowledged', async () => {
+    const first = plan()
+    const workers = await Promise.all(['person-main-b','person-main-c'].map(sessionId => tasks.applyPersonTask(1,{
+      action:'create',title:sessionId,goal:'Work independently',idempotency_key:crypto.randomUUID(),
+    },undefined,actor(first,sessionId))))
+    const releases: Array<() => void> = []
+    runtime.stop = vi.fn(() => new Promise<void>(resolve => releases.push(resolve)))
+    for (const worker of workers) db.prepare("UPDATE person_executions SET state='running' WHERE id=?").run(worker.execution!.id)
+    await control(first.id,'stop')
+    await vi.waitFor(() => expect(runtime.stop).toHaveBeenCalledTimes(2))
+    await expect(control(first.id,'resume')).rejects.toThrow('finish stopping')
+    releases[0](); await vi.waitFor(() => expect(store.getPersonExecution(1,workers[0].execution!.id).state).toBe('interrupted'))
+    await expect(control(first.id,'resume')).rejects.toThrow('finish stopping')
+    releases[1](); await vi.waitFor(() => expect(store.getPersonExecution(1,workers[1].execution!.id).state).toBe('interrupted'))
+    expect((await control(first.id,'resume')).state).toBe('active')
+    expect(db.prepare("SELECT COUNT(*) AS n FROM person_deliveries WHERE state!='cancelled'").get()).toMatchObject({n:0})
+  })
+
+  it('resumes a failed branch explicitly without repeating completed peer work or starting the summary', async () => {
+    const first = plan()
+    runtime.deliverStage = vi.fn(async input => { if (input.sessionId === 'person-main-c') throw new Error('Provider unavailable') })
+    await flows.deliverPersonStages()
+    await finish(first,'person-main-b','Ready')
+    expect(stages.getPersonFlow(1,first.id)).toMatchObject({current_position:0,error:expect.stringContaining('Provider unavailable')})
+    db.prepare("UPDATE person_stage_deliveries SET updated_at=? WHERE state='pending'").run(Date.now()-61000)
+    runtime.deliverStage = vi.fn(async()=>{})
+    await flows.deliverPersonStages()
+    expect(runtime.deliverStage).not.toHaveBeenCalled()
+    await control(first.id,'resume')
+    await flows.deliverPersonStages()
+    expect(vi.mocked(runtime.deliverStage).mock.calls.map(([input]) => input.sessionId)).toEqual(['person-main-c'])
+    expect(stages.getPersonFlow(1,first.id).current_position).toBe(0)
+  })
+
+  it('lets a healthy parallel role finish after its peer fails, releases the failed role and pauses the dependent summary', async () => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const first = plan(), b = actor(first,'person-main-b'), c = actor(first,'person-main-c')
+    const live = flows.registerPersonStageTurn(b.stage)
+    try {
+      runtime.deliverStage = vi.fn(async input => { if (input.sessionId === 'person-main-c') throw new Error('Peer unavailable') })
+      await flows.deliverPersonStages()
+      expect(live.signal.aborted).toBe(false)
+      expect(stages.personCollaborationPendingCount(1,'person-main-b')).toBe(1)
+      expect(stages.personCollaborationPendingCount(1,'person-main-c')).toBe(0)
+      expect((await personSnapshot(1,'person-main-c')).can_clear).toBe(true)
+      expect((await personSnapshot(1,'person-main-b')).can_clear).toBe(false)
+      await expect(control(first.id,'resume')).rejects.toThrow('other roles')
+      const partial = await finish(first,'person-main-b','Saved peer result')
+      expect(partial).toMatchObject({state:'failed',current_position:0})
+      expect(partial.stages.map(stage => stage.state)).toEqual(['completed','failed','pending'])
+      expect((await personSnapshot(1,'person-main-b')).can_clear).toBe(true)
+      expect(runtime.deliverStage).toHaveBeenCalledTimes(2)
+      expect(runtime.stop).not.toHaveBeenCalled()
+      live.release()
+      const resumed = await control(first.id,'resume')
+      flows.finishPersonStageTurn(1,c.stage,c.runId,null,false,'Old failure')
+      expect(stages.getPersonFlow(1,first.id).state).toBe('active')
+      runtime.deliverStage = vi.fn(async () => {})
+      await flows.deliverPersonStages()
+      expect(vi.mocked(runtime.deliverStage).mock.calls.map(([input]) => input.sessionId)).toEqual(['person-main-c'])
+      const joined = await finish(resumed,'person-main-c','Retried result')
+      expect(joined.current_position).toBe(1)
+      expect(joined.stages[0].result_message_id).toBe(partial.stages[0].result_message_id)
+    } finally { live.release() }
+  })
+
+  it('stops only the failed branch workers and keeps the parallel worker running', async () => {
+    const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const first = plan(), b = actor(first,'person-main-b'), c = actor(first,'person-main-c')
+    const children = await Promise.all([b,c].map(from => tasks.applyPersonTask(1,{
+      action:'create',title:from.sessionId,goal:'Work',agent_id:'worker',idempotency_key:crypto.randomUUID(),
+    },undefined,from)))
+    for (const child of children) db.prepare("UPDATE person_executions SET state='running' WHERE id=?").run(child.execution!.id)
+    flows.finishPersonStageTurn(1,c.stage,c.runId,null,false,'Stage failed')
+    await vi.waitFor(() => expect(store.getPersonExecution(1,children[1].execution!.id).state).toBe('interrupted'))
+    expect(runtime.stop).toHaveBeenCalledExactlyOnceWith(children[1].execution!.session_id)
+    expect(store.getPersonExecution(1,children[0].execution!.id).state).toBe('running')
+    expect((await personSnapshot(1,c.sessionId)).can_clear).toBe(true)
+    expect((await personSnapshot(1,b.sessionId)).can_clear).toBe(false)
+  })
+
+  it('recovers simultaneously prepared saved results and queues the downstream stage only once', async () => {
+    const first = plan()
+    for (const role of ['person-main-b','person-main-c']) {
+      const from = actor(first,role)
+      await control(first.id,'complete',from)
+      result(role,`Recovered ${role}`,from.runId)
+    }
+    flows.recoverPersonStages(); flows.recoverPersonStages()
+    const joined = stages.getPersonFlow(1,first.id)
+    expect(joined.current_position).toBe(1)
+    expect(joined.stages.filter(stage => stage.state === 'completed')).toHaveLength(2)
+    expect(db.prepare("SELECT COUNT(*) AS n FROM person_stage_deliveries WHERE state='pending'").get()).toMatchObject({n:1})
+  })
+
+  it('bounds combined upstream context while retaining both references, and blocks if either original disappears', async () => {
+    const first = plan(), partial = await finish(first,'person-main-b','A'.repeat(5000)), joined = await finish(partial,'person-main-c','B'.repeat(5000))
+    const sources = stages.personStageSources(1,actor(joined,'person-main-1').stage)
+    expect(sources).toHaveLength(2)
+    expect(sources.reduce((total,source) => total+source.content.length,0)).toBe(6000)
+    expect(sources.every(source => source.truncated)).toBe(true)
+    db.prepare('DELETE FROM messages WHERE id=?').run(sources[0].id)
+    await flows.deliverPersonStages()
+    expect(runtime.deliverStage).not.toHaveBeenCalled()
+    expect(stages.getPersonFlow(1,first.id).error).toContain('Previous stage result is unavailable')
+  })
+
+  it('injects both upstream results into the summary Bot once without persisting handoff messages', async () => {
+    const {createPersonChatAgent} = await import('../../packages/server/src/modules/studio/services/person/chat-agent')
+    const first = plan(), partial = await finish(first,'person-main-b','Competitor source ALPHA'), joined = await finish(partial,'person-main-c','Needs source BETA')
+    const seen: Parameters<NonNullable<PersonRuntimePort['chatAgent']>>[0][] = []
+    runtime.chatAgent = options => { seen.push(options); return {run:vi.fn()} as any }
+    await flows.deliverPersonStages()
+    const delivery = vi.mocked(runtime.deliverStage!).mock.calls[0][0].context
+    await createPersonChatAgent(1,'person-main-1',undefined,delivery.deliveryId)
+    const packet = JSON.stringify(seen[0].loadHistory('source'))
+    expect(packet.match(/Competitor source ALPHA/g)).toHaveLength(1)
+    expect(packet.match(/Needs source BETA/g)).toHaveLength(1)
+    expect(seen[0].stage?.stageId).toBe(joined.stages[2].id)
+    expect(db.prepare("SELECT COUNT(*) AS n FROM messages WHERE session_id='person-main-1'").get()).toMatchObject({n:0})
+  })
+
+  it('keeps saved serial routes serial when adding group storage', async () => {
+    const {initPersonStageTables} = await import('../../packages/server/src/modules/studio/infrastructure/database/person-stage-schema')
+    const old = new DatabaseSync(':memory:')
+    try {
+      old.exec(`CREATE TABLE person_stages(id TEXT PRIMARY KEY,flow_id TEXT,position INTEGER,session_id TEXT,goal TEXT,return_expectation TEXT,state TEXT,result_message_id INTEGER,completion_run_id TEXT);
+        INSERT INTO person_stages VALUES('a','flow',0,'role-a','Goal','Result','completed',7,'');
+        INSERT INTO person_stages VALUES('b','flow',1,'role-b','Goal','Result','active',NULL,'');`)
+      initPersonStageTables(old); initPersonStageTables(old)
+      expect(old.prepare('SELECT id,group_position,state,result_message_id FROM person_stages ORDER BY position').all()).toEqual([
+        {id:'a',group_position:0,state:'completed',result_message_id:7}, {id:'b',group_position:1,state:'active',result_message_id:null},
+      ])
+    } finally { old.close() }
   })
 })
 

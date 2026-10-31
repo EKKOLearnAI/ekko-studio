@@ -14,10 +14,14 @@ import { BrowserManager } from '../../packages/desktop/src/main/browser/browser-
 import { BrowserProfileStore } from '../../packages/desktop/src/main/browser/browser-profile-store'
 
 const roots: string[] = []
+const stores: BrowserProfileStore[] = []
 afterEach(async () => {
   vi.clearAllMocks()
   native.openPath.mockResolvedValue('')
   native.showMessageBox.mockResolvedValue({ response: 0 })
+  // Download completion remembers its directory asynchronously. Drain those
+  // profile writes before deleting the fixture's storage directory.
+  await Promise.all(stores.splice(0).map(store => store.setTabs(store.active().id, store.active().tabs)))
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 async function setup() {
@@ -27,6 +31,7 @@ async function setup() {
   const internal = manager as any
   const store = internal.profileStore as BrowserProfileStore
   await store.initialize()
+  stores.push(store)
   const profile = store.active()
   internal.activeProfileId = profile.id
   const contents = {}

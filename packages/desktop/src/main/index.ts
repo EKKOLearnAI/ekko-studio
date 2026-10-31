@@ -1651,6 +1651,13 @@ ipcMain.handle('hermes-desktop:retry-bootstrap', async (_event, source?: Runtime
 
 let installationCoordinator: InstallationCoordinator | null = null
 async function runDesktopApp() {
+  if (QUIT_EXISTING) {
+    // The installer waits for this control process. It must notify the
+    // existing instance without joining or recovering the installation.
+    app.requestSingleInstanceLock({ quit: true })
+    quitApp()
+    return
+  }
   installationCoordinator = new InstallationCoordinator(process.execPath)
   try { installationCoordinator.register(app.getVersion()) } catch (error) {
     if (!(error instanceof Error) || error.message !== 'DESKTOP_INSTALLATION_IN_PROGRESS') throw error
@@ -1678,7 +1685,7 @@ async function runDesktopApp() {
   setWebUiUnexpectedExitHandler(details => {
     void recoverUnexpectedWebUiExit(details)
   })
-  const gotLock = app.requestSingleInstanceLock(QUIT_EXISTING ? { quit: true } : undefined)
+  const gotLock = app.requestSingleInstanceLock()
   if (!gotLock) {
     quitApp()
     return
@@ -1707,10 +1714,6 @@ async function runDesktopApp() {
   app.once('will-quit', releaseDevice)
 
   app.whenReady().then(async () => {
-    if (QUIT_EXISTING) {
-      quitApp()
-      return
-    }
     if (app.isPackaged && !process.env[DEVICE_INSTANCE_ENV]) {
       try {
         if (!app.setAsDefaultProtocolClient(PROVIDER_IMPORT_SCHEME)) {

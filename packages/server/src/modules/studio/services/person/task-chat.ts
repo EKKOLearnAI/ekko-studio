@@ -1,7 +1,7 @@
 import { personError, personRevision, personText } from '../../contracts/person'
 import type { ContentBlock } from '../../contracts/runs/session'
 import type { PersonExecution, PersonTask, PersonTaskOrigin } from '../../contracts/person'
-import { getPersonTask, getPersonExecution, taskPersonConversations, personDb, personOperation, personTaskRunning, enqueuePersonExecution, replayPersonOperation, pendingPersonInputs } from '../../repositories/person-store'
+import { getPersonTask, getPersonExecution, taskPersonConversations, personDb, personOperation, enqueuePersonExecution, replayPersonOperation, pendingPersonInputs } from '../../repositories/person-store'
 import { getSession } from '../../repositories/session-store'
 import { personUpdated } from '../../repositories/person-updates'
 import { personUser, validatePersonSelection } from './catalog'
@@ -10,6 +10,7 @@ import { requirePersonSession } from '../../repositories/person-session-store'
 import { personRequirements } from '../../contracts/person-flow'
 import { assertPersonTaskActor } from './task-flow'
 import { assertPersonStage, assertPersonStageTask } from '../../repositories/person-stage-store'
+import { personTaskQueue } from './task-queue'
 
 /** Hidden task conversations are account-owned, never shared by Profile. */
 export function ownedPersonTaskSession(userId: number | undefined, sessionId: string) {
@@ -41,7 +42,7 @@ export async function personTaskChat(userId: number, taskId: string, executionId
   if (current && !executions.some(run => run.id === current.id)) executions.unshift(current)
   // Include a selected older conversation even when it falls outside the recent page.
   if (execution && !executions.some(run => run.session_id === execution.session_id)) executions.push(execution)
-  return { task: { ...task, running: personTaskRunning(taskId) }, session, execution: execution || null, executions, pending: pendingPersonInputs(userId, taskId, session?.id) }
+  return { task: { ...task, running: !!task.running }, session, execution: execution || null, executions, pending: pendingPersonInputs(userId, taskId, session?.id), ...personTaskQueue(userId, taskId, session?.id || '') }
 }
 
 function chatInput(value: unknown): ContentBlock[] {

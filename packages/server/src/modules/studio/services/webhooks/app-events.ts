@@ -145,10 +145,11 @@ export function bindAppEventSubscription(socket: Socket, localState?: AppStatePr
       // Exact IDs avoid pruning unread sessions merely because a paginated list omits them.
       const unreadSessions = request.unreadSessionIds?.filter(id => {
         const session = getSession(id)
-        return session && !session.is_archived && (session.profile || 'default') === request.profile
-          && session.user_id != null && String(session.user_id) === String(user.id)
+        return session && !session.is_archived && (ownsPersonSession(user.id, session)
+          || !isPrivatePersonSession(id) && (session.profile || 'default') === request.profile
+          && session.user_id != null && String(session.user_id) === String(user.id))
       })
-      ack?.({ ok: true, schema_version: 1, ...(snapshot ? { snapshot, timestamp: Date.now() } : {}),
+      ack?.({ ok: true, schema_version: 1, ...(snapshot ? { snapshot, timestamp: Date.now(), person_state_version: 1 } : {}),
         ...(unreadSessions ? { unread_sessions: unreadSessions } : {}) })
     } catch { if (!closed && ticket === revision) { subscription = null; ack?.({ ok: false, error: 'event_subscription_denied' }) } }
   })

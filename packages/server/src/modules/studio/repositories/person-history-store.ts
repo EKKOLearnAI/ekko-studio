@@ -4,10 +4,15 @@ import { COMPRESSION_SNAPSHOT_TABLE, TASK_PLANS_TABLE, RUN_USAGE_TABLE, SESSION_
   WORKSPACE_RUN_CHANGES_TABLE, WORKSPACE_RUN_CHANGE_FILES_TABLE } from '../infrastructure/database/schemas'
 import { personDb, personTransaction } from './person-store'
 import { getSession } from './session-store'
+import { PERSON_STAGE_PENDING_WORK_SQL } from './person-stage-store'
 
 export function personHasPendingWork(userId: number, sessionId = ''): boolean {
-  if (personDb().prepare(`SELECT 1 FROM person_flows f JOIN person_stages s ON s.flow_id=f.id
-    WHERE f.owner_user_id=? AND f.state='active' AND (?='' OR s.session_id=? OR f.creator_session_id=?) LIMIT 1`).get(userId,sessionId,sessionId,sessionId)) return true
+  if (personDb().prepare(`SELECT 1 FROM person_flows f JOIN person_stages member ON member.flow_id=f.id
+    WHERE f.owner_user_id=? AND f.state IN ('active','failed') AND (?='' OR member.session_id=? OR f.creator_session_id=?)
+    AND (f.state='active' OR EXISTS(SELECT 1 FROM person_stages s WHERE s.flow_id=f.id AND s.group_position=f.current_position
+      AND (?='' OR s.session_id=? OR (member.session_id=? AND member.group_position<f.current_position AND member.result_message_id IS NOT NULL))
+      AND ${PERSON_STAGE_PENDING_WORK_SQL})) LIMIT 1`)
+    .get(userId,sessionId,sessionId,sessionId,sessionId,sessionId,sessionId)) return true
   return !!personDb().prepare(`SELECT 1 FROM person_executions e JOIN session_tasks t ON t.id=e.task_id WHERE e.owner_user_id=? AND (?='' OR t.session_id=?) AND
     (e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')
     OR EXISTS(SELECT 1 FROM person_deliveries d WHERE d.execution_id=e.id AND d.state IN ('pending','queued'))) LIMIT 1`).get(userId, sessionId, sessionId)

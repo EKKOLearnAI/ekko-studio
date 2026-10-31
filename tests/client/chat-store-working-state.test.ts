@@ -44,6 +44,84 @@ beforeEach(() => {
 })
 
 describe('sidebar working state', () => {
+  it('preserves later optimistic inputs while earlier queue confirmations arrive', async () => {
+    const store = useChatStore()
+    store.sessions = [{ ...session('person-main-1'), source: 'builtin_agent', agent: 'ekko-agent', agentPreset: 'person' }]
+    await store.switchSession('person-main-1')
+    await store.sendMessage('1')
+    await store.sendMessage('2')
+    await store.sendMessage('3')
+    const [second, onEvent] = api.startRunViaSocket.mock.calls[1]
+    const [third] = api.startRunViaSocket.mock.calls[2]
+
+    onEvent({ event: 'run.queued', session_id: 'person-main-1', queue_id: second.queue_id, queue_length: 1,
+      queued_messages: [{ id: second.queue_id, role: 'user', content: '2', timestamp: 1 }] })
+    expect(store.queuedUserMessages.get('person-main-1')?.map(message => message.content)).toEqual(['2', '3'])
+
+    onEvent({ event: 'run.queued', session_id: 'person-main-1', dequeued_queue_id: second.queue_id, queue_length: 0, queued_messages: [] })
+    expect(store.messages.filter(message => message.role === 'user').map(message => message.content)).toEqual(['1', '2'])
+    expect(store.queuedUserMessages.get('person-main-1')?.map(message => message.id)).toEqual([third.queue_id])
+    onEvent({ event: 'run.started', session_id: 'person-main-1', queue_id: third.queue_id, queue_length: 0 })
+    expect(store.messages.filter(message => message.role === 'user').map(message => message.content)).toEqual(['1', '2', '3'])
+    expect(store.queuedUserMessages.get('person-main-1')).toBeUndefined()
+  })
+
+  it('moves a locally direct input out of the transcript when the server queues it', async () => {
+    const store = useChatStore()
+    store.sessions = [{ ...session('person-main-1'), source: 'builtin_agent', agent: 'ekko-agent', agentPreset: 'person' }]
+    await store.switchSession('person-main-1')
+    await store.sendMessage('2')
+    const [payload, onEvent] = api.startRunViaSocket.mock.calls[0]
+    onEvent({ event: 'run.queued', session_id: 'person-main-1', queue_id: payload.queue_id, queue_length: 1,
+      queued_messages: [{ id: payload.queue_id, role: 'user', content: '2', timestamp: 1 }] })
+    expect(store.messages.filter(message => message.role === 'user')).toEqual([])
+    expect(store.queuedUserMessages.get('person-main-1')?.map(message => message.content)).toEqual(['2'])
+    onEvent({ event: 'message.delta', session_id: 'person-main-1', delta: 'reply to 1' })
+    onEvent({ event: 'run.queued', session_id: 'person-main-1', dequeued_queue_id: payload.queue_id, queue_length: 0, queued_messages: [] })
+    expect(store.messages.map(message => message.content)).toEqual(['reply to 1', '2'])
+  })
+
+  it('removes an optimistic Person queue entry as soon as its run starts', async () => {
+    const store = useChatStore()
+    store.sessions = [{ ...session('person-main-1'), source: 'builtin_agent', agent: 'ekko-agent', agentPreset: 'person' }]
+    await store.switchSession('person-main-1')
+    await store.sendMessage('first request')
+    await store.sendMessage('follow-up request')
+    const [payload, onEvent] = api.startRunViaSocket.mock.calls.at(-1)!
+    expect(store.queuedUserMessages.get('person-main-1')).toHaveLength(1)
+
+    // The server can finish the prior turn before this input arrives, so there
+    // is no server-side dequeue event for this optimistically queued input.
+    onEvent({ event: 'run.started', session_id: 'person-main-1', queue_id: payload.queue_id, queue_length: 0 })
+
+    expect(store.queuedUserMessages.get('person-main-1')).toBeUndefined()
+    expect(store.messages.filter(message => message.id === payload.queue_id)).toEqual([
+      expect.objectContaining({ content: 'follow-up request', queued: false }),
+    ])
+  })
+
+  it('reconciles a resumed Person queue by started input id while preserving later follow-ups', async () => {
+    api.resumeSession.mockImplementationOnce((sid, callback) => {
+      callback({ session_id: sid, isWorking: true, messages: [], events: [], queueLength: 2, queueMessages: [
+        { id: 'follow-up-1', role: 'user', content: 'first follow-up', timestamp: 1 },
+        { id: 'follow-up-2', role: 'user', content: 'later follow-up', timestamp: 2 },
+      ] })
+    })
+    const store = useChatStore()
+    store.sessions = [{ ...session('person-main-1'), source: 'builtin_agent', agent: 'ekko-agent', agentPreset: 'person' }]
+    await store.switchSession('person-main-1')
+    const handlers = api.registerSessionHandlers.mock.calls.at(-1)![1]
+    const started = { event: 'run.started', session_id: 'person-main-1', queue_id: 'follow-up-1', queue_length: 1 }
+    handlers.onRunStarted(started)
+    handlers.onRunStarted(started)
+
+    expect(store.queuedUserMessages.get('person-main-1')?.map(message => message.id)).toEqual(['follow-up-2'])
+    expect(store.queueLengths.get('person-main-1')).toBe(1)
+    expect(store.messages.filter(message => message.id === 'follow-up-1')).toEqual([
+      expect.objectContaining({ content: 'first follow-up', queued: false }),
+    ])
+  })
+
   it('reattaches passive background listeners when a visible tab resumes idle foreground work', async () => {
     const listen = vi.spyOn(document, 'addEventListener')
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })

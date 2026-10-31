@@ -27,6 +27,8 @@ import { codingAgentId } from '../services/chat-run/types'
 import { studioMcpCapabilities } from '../public/runs/mcp-capabilities'
 import { hermesStudioMcpCapabilities } from '../services/chat-run/studio-mcp'
 import { publishAppState, stateEvent, planStateEvent } from '../services/webhooks/app-event-state'
+import { pendingChatEkkoInteractions } from '../public/chat-agent-runtime'
+import { personNotificationSnapshot } from '../services/notifications/person-notification-state'
 import type { BusinessEvent } from '../services/webhooks/business-events'
 import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
 import { bindRunPushTarget, type PushRunRef, getRunPushTarget } from '../repositories/run-push-store'
@@ -343,6 +345,8 @@ export interface ChatRunAndWaitResult {
   output?: string | null
   reasoning?: string | null
   error?: string
+  interrupted?: boolean
+  stop_reason?: string
 }
 
 type ChatRunAutoApprovalChoice = 'once' | 'session' | 'always'
@@ -462,6 +466,8 @@ export class ChatRunSocket {
   private backgroundBridge = createPrimaryAgentBridge({ timeoutMs: 1000, connectRetryMs: 0 })
   /** sessionId → session state (messages, working status, events, run tracking) */
   private sessionMap = new Map<string, SessionState>()
+  private readonly runAdmissions = new Map<string, Promise<void>>()
+  private readonly ekkoExecutions = new Map<string, symbol>()
   private hermesQueueInsertionOperations = new Map<string, Promise<void>>()
   private readonly taskPlanRuns = new TaskPlanRuns(saveTaskPlan, (sessionId, snapshot) => {
     this.emitExternalEvent(sessionId, 'plan.updated', { event: 'plan.updated', ...snapshot })
@@ -615,6 +621,19 @@ export class ChatRunSocket {
     } catch (err) {
       // Keep terminal run delivery working even if persistence fails; startup recovery settles the stored plan.
       logger.warn(err, '[chat-run-socket] failed to finish task plan for %s', sessionId)
+    }
+  }
+
+  private async acquireRunAdmission(sessionId?: string): Promise<() => void> {
+    if (!sessionId) return () => {}
+    const previous = this.runAdmissions.get(sessionId)
+    let release!: () => void
+    const current = new Promise<void>(resolve => { release = resolve })
+    this.runAdmissions.set(sessionId, current)
+    await previous
+    return () => {
+      release()
+      if (this.runAdmissions.get(sessionId) === current) this.runAdmissions.delete(sessionId)
     }
   }
 
@@ -883,7 +902,7 @@ export class ChatRunSocket {
     })
     if (!shared) {
       bindAppEventSubscription(socket, (_user, profile) => {
-        const result: BusinessEvent[] = []
+        const result: BusinessEvent[] = personNotificationSnapshot(_user.id, this.sessionMap)
         for (const [sessionId, state] of this.sessionMap) {
           if (isPrivatePersonSession(sessionId) || !state.isWorking || (state.profile || getSession(sessionId)?.profile || 'default') !== profile) continue
           const source = state.source || getSession(sessionId)?.source
@@ -1066,205 +1085,214 @@ export class ChatRunSocket {
       reasoning_effort?: string
       push_enabled?: boolean
     }) => {
-      const pushSnapshot = data.push_snapshot
-      delete data.push_snapshot
-      let pushTargetId: string | undefined
-      let runProfile: string
+      const releaseAdmission = await this.acquireRunAdmission(data.session_id)
       try {
-        runProfile = resolveRunProfile(data.session_id, data.profile)
-        if (isPersonSession(data.session_id)) {
-          requirePersonAgents(socketUser!.id)
-          const { session, settings } = await ensurePersonSession(socketUser!.id, data.session_id!)
-          if (!settings.model) throw new Error('No available Person model')
-          // Only input/queue identity comes from the client. Agent policy and resources are server-owned.
-          data = { session_id: session.id, input: data.input, queue_id: data.queue_id,
-            profile: settings.model.profile, model: settings.model.model, provider: settings.model.provider,
-            apiMode: settings.model.apiMode, reasoning_effort: settings.reasoningEffort,
-            source: 'builtin_agent', coding_agent_id: 'ekko-agent', mode: 'scoped' }
-          runProfile = settings.model.profile
+        const pushSnapshot = data.push_snapshot
+        delete data.push_snapshot
+        let pushTargetId: string | undefined
+        let runProfile: string
+        try {
+          runProfile = resolveRunProfile(data.session_id, data.profile)
+          if (isPersonSession(data.session_id)) {
+            requirePersonAgents(socketUser!.id)
+            const { session, settings } = await ensurePersonSession(socketUser!.id, data.session_id!)
+            if (!settings.model) throw new Error('No available Person model')
+            // Only input/queue identity comes from the client. Agent policy and resources are server-owned.
+            data = { session_id: session.id, input: data.input, queue_id: data.queue_id,
+              profile: settings.model.profile, model: settings.model.model, provider: settings.model.provider,
+              apiMode: settings.model.apiMode, reasoning_effort: settings.reasoningEffort,
+              source: 'builtin_agent', coding_agent_id: 'ekko-agent', mode: 'scoped' }
+            runProfile = settings.model.profile
+          }
+          normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
+          if (!shared && data.session_id && Array.isArray(data.input)) {
+            // New chats carry a client-generated id; the runtime persists them on the first run.
+            if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id, runProfile)
+            await recordSessionUploadAttachments(data.session_id, runProfile, data.input, { allowPendingSession: true })
+          }
+        } catch (err) {
+          const payload = {
+            event: 'run.failed',
+            session_id: data.session_id,
+            queue_id: data.queue_id,
+            error: err instanceof Error ? err.message : String(err),
+          }
+          socket.emit('run.failed', payload)
+          return
         }
-        normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
-        if (!shared && data.session_id && Array.isArray(data.input)) {
-          // New chats carry a client-generated id; the runtime persists them on the first run.
-          if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id, runProfile)
-          await recordSessionUploadAttachments(data.session_id, runProfile, data.input, { allowPendingSession: true })
+        if (data.category_id !== undefined) {
+          data.category_id = resolveSessionCategoryId(data.category_id)
         }
-      } catch (err) {
-        const payload = {
-          event: 'run.failed',
-          session_id: data.session_id,
-          queue_id: data.queue_id,
-          error: err instanceof Error ? err.message : String(err),
-        }
-        socket.emit('run.failed', payload)
-        return
-      }
-      if (data.category_id !== undefined) {
-        data.category_id = resolveSessionCategoryId(data.category_id)
-      }
-      if (data.session_id) {
-        const state = getOrCreateSession(this.sessionMap, data.session_id)
-        const source = resolveRunSource(data.source, data.session_id)
-        const storedSession = getSession(data.session_id)
-        const ekkoExecution = isEkkoAgentExecution(data)
-        if (ekkoExecution) {
-          data.agent_id = 'ekko-agent'
-          const ekkoCommand = isPersonSession(data.session_id) ? null : parseEkkoRunCommand(data, storedSession?.source)
-          if (ekkoCommand) {
-            await handleEkkoSessionCommand(this.nsp, socket, data, ekkoCommand, runProfile, this.sessionMap, this.dequeueNextQueuedRun.bind(this))
+        if (data.session_id) {
+          const state = getOrCreateSession(this.sessionMap, data.session_id)
+          const source = resolveRunSource(data.source, data.session_id)
+          const storedSession = getSession(data.session_id)
+          const ekkoExecution = isEkkoAgentExecution(data)
+          if (ekkoExecution) {
+            data.agent_id = 'ekko-agent'
+            const ekkoCommand = isPersonSession(data.session_id) ? null : parseEkkoRunCommand(data, storedSession?.source)
+            if (ekkoCommand) {
+              await handleEkkoSessionCommand(this.nsp, socket, data, ekkoCommand, runProfile, this.sessionMap, this.dequeueNextQueuedRun.bind(this))
+              return
+            }
+          }
+          const command = parseSessionCommand(data.input)
+          if (command && ((!ekkoExecution && isBridgeRunSource(source)) || command.name === 'branch')) {
+            try {
+              const handled = await handleSessionCommand(data.session_id, command, {
+                nsp: this.nsp,
+                socket,
+                sessionMap: this.sessionMap,
+                bridge: this.bridge,
+                profile: runProfile,
+                model: data.model,
+                provider: data.provider,
+                model_groups: data.model_groups,
+                instructions: data.instructions,
+                queueId: data.queue_id,
+                runQueuedItem: this.runQueuedItem.bind(this),
+              })
+              if (handled !== false) return
+              data.allow_command_passthrough = true
+            } catch (err) {
+              this.emitToSession(socket, data.session_id, 'session.command', {
+                event: 'session.command',
+                command: command.rawName,
+                ok: false,
+                action: 'error',
+                message: err instanceof Error ? err.message : String(err),
+              })
+            }
             return
           }
-        }
-        const command = parseSessionCommand(data.input)
-        if (command && ((!ekkoExecution && isBridgeRunSource(source)) || command.name === 'branch')) {
+          if (!ekkoExecution && isProviderAgentExecution(source, data)) {
+            if (typeof data.input === 'string') {
+              const codingAgentCommand = parseCodingAgentSessionCommand(data.input)
+              if (codingAgentCommand) {
+                await handleCodingAgentSessionCommand(this.nsp, socket, data, codingAgentCommand, runProfile, this.sessionMap)
+                return
+              }
+            }
+          }
           try {
-            const handled = await handleSessionCommand(data.session_id, command, {
-              nsp: this.nsp,
-              socket,
-              sessionMap: this.sessionMap,
-              bridge: this.bridge,
-              profile: runProfile,
+            const actor = shared ? null : await authenticatedPushActor(socket.handshake.auth?.token)
+            if (actor) {
+              const target = bindRunPushTarget({ kind: 'chat', profile: runProfile, runId: randomUUID() }, data.session_id, actor, {
+                ciphertext: prepareRunPushSnapshot(actor, pushSnapshot),
+                platform: String((pushSnapshot as any)?.platform || 'unknown'),
+              })
+              pushTargetId = target.id
+              socket.emit('run.push.bound', { session_id: data.session_id, queue_id: data.queue_id, run_id: target.run_id })
+            }
+          } catch {
+            socket.emit('run.failed', { session_id: data.session_id, queue_id: data.queue_id, error: 'Run device binding failed' })
+            return
+          }
+          if (state.isWorking) {
+            const queueId = data.queue_id || `queue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+            state.queue.push({
+              queue_id: queueId,
+              input: data.input,
+              displayInput: data.display_input,
+              displayRole: data.display_role,
+              storageMessage: data.storage_message,
               model: data.model,
               provider: data.provider,
               model_groups: data.model_groups,
               instructions: data.instructions,
-              queueId: data.queue_id,
-              runQueuedItem: this.runQueuedItem.bind(this),
+              groupSystemPrompt: data.group_system_prompt,
+              groupRoomId: data.group_room_id,
+              groupAgentId: data.group_agent_id,
+              workflowId: data.workflow_id,
+              workflowNodeId: data.workflow_node_id,
+              profile: runProfile,
+              workspace: data.workspace,
+              source,
+              sessionSource: data.session_source,
+              codingAgentId: data.coding_agent_id,
+              agentId: data.agent_id,
+              mode: data.mode,
+              baseUrl: data.baseUrl,
+              base_url: data.base_url,
+              apiKey: data.apiKey,
+              api_key: data.api_key,
+              apiMode: data.apiMode,
+              api_mode: data.api_mode,
+              mcpServers: data.mcpServers,
+              mcp_servers: data.mcp_servers,
+              commandPassthrough: data.allow_command_passthrough,
+              reasoningEffort: data.reasoning_effort,
+              originSocketId: socket.id,
+              authorize: shared ? async () => { await refreshSessionShare(shared, 'input', data.session_id) } : undefined,
+              pushTargetId,
             })
-            if (handled !== false) return
-            data.allow_command_passthrough = true
-          } catch (err) {
-            this.emitToSession(socket, data.session_id, 'session.command', {
-              event: 'session.command',
-              command: command.rawName,
-              ok: false,
-              action: 'error',
-              message: err instanceof Error ? err.message : String(err),
+            const queuedPayload = {
+              event: 'run.queued',
+              session_id: data.session_id,
+              queue_id: queueId,
+              queue_length: state.queue.length,
+              queued_messages: this.serializeQueuedMessages(state.queue),
+            }
+            observeChatRunWebhookEvent({
+              event: 'run.queued',
+              sessionId: data.session_id,
+              profile: runProfile,
+              source,
+              agent: webhookAgentForRun(data),
+              payload: queuedPayload,
+              roomId: data.group_room_id,
+              workflowId: data.workflow_id,
+              workflowNodeId: data.workflow_node_id,
+            })
+            this.nsp.to(`session:${data.session_id}`).emit('run.queued', queuedPayload)
+            logger.info('[chat-run-socket] queued run for session %s (queue: %d)', data.session_id, state.queue.length)
+            return
+          }
+          state.events = []
+          // Person setup awaits again inside handleRun. Reserve its slot before
+          // that await so later inputs queue instead of starting parallel turns.
+          state.isWorking = ekkoExecution || !isProviderAgentExecution(source, data)
+          advanceRunOwnership(state)
+          state.runStartedAt = Date.now()
+          state.profile = runProfile
+          state.source = source
+        }
+        // Release admission after queueing/reserving, before the model run finishes.
+        releaseAdmission()
+        try {
+          await this.executeRun(socket, data, runProfile, false, undefined, pushTargetId)
+        } catch (err) {
+          const payload = {
+            event: 'run.failed',
+            session_id: data.session_id,
+            queue_id: data.queue_id,
+            error: err instanceof Error ? err.message : String(err),
+          }
+          if (data.session_id) {
+            observeChatRunWebhookEvent({
+              pushTargetId,
+              event: 'run.failed',
+              sessionId: data.session_id,
+              profile: runProfile,
+              source: resolveRunSource(data.source, data.session_id),
+              agent: webhookAgentForRun(data),
+              payload,
+              roomId: data.group_room_id,
+              workflowId: data.workflow_id,
+              workflowNodeId: data.workflow_node_id,
             })
           }
-          return
-        }
-        if (!ekkoExecution && isProviderAgentExecution(source, data)) {
-          if (typeof data.input === 'string') {
-            const codingAgentCommand = parseCodingAgentSessionCommand(data.input)
-            if (codingAgentCommand) {
-              await handleCodingAgentSessionCommand(this.nsp, socket, data, codingAgentCommand, runProfile, this.sessionMap)
-              return
+          if (data.session_id) {
+            const state = this.sessionMap.get(data.session_id)
+            if (state && !state.runId && !state.abortController && !state.activeRunMarker) {
+              state.isWorking = false
+              state.profile = undefined
             }
           }
+          socket.emit('run.failed', payload)
         }
-        try {
-          const actor = shared ? null : await authenticatedPushActor(socket.handshake.auth?.token)
-          if (actor) {
-            const target = bindRunPushTarget({ kind: 'chat', profile: runProfile, runId: randomUUID() }, data.session_id, actor, {
-              ciphertext: prepareRunPushSnapshot(actor, pushSnapshot),
-              platform: String((pushSnapshot as any)?.platform || 'unknown'),
-            })
-            pushTargetId = target.id
-            socket.emit('run.push.bound', { session_id: data.session_id, queue_id: data.queue_id, run_id: target.run_id })
-          }
-        } catch {
-          socket.emit('run.failed', { session_id: data.session_id, queue_id: data.queue_id, error: 'Run device binding failed' })
-          return
-        }
-        if (state.isWorking) {
-          const queueId = data.queue_id || `queue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-          state.queue.push({
-            queue_id: queueId,
-            input: data.input,
-            displayInput: data.display_input,
-            displayRole: data.display_role,
-            storageMessage: data.storage_message,
-            model: data.model,
-            provider: data.provider,
-            model_groups: data.model_groups,
-            instructions: data.instructions,
-            groupSystemPrompt: data.group_system_prompt,
-            groupRoomId: data.group_room_id,
-            groupAgentId: data.group_agent_id,
-            workflowId: data.workflow_id,
-            workflowNodeId: data.workflow_node_id,
-            profile: runProfile,
-            workspace: data.workspace,
-            source,
-            sessionSource: data.session_source,
-            codingAgentId: data.coding_agent_id,
-            agentId: data.agent_id,
-            mode: data.mode,
-            baseUrl: data.baseUrl,
-            base_url: data.base_url,
-            apiKey: data.apiKey,
-            api_key: data.api_key,
-            apiMode: data.apiMode,
-            api_mode: data.api_mode,
-            mcpServers: data.mcpServers,
-            mcp_servers: data.mcp_servers,
-            commandPassthrough: data.allow_command_passthrough,
-            reasoningEffort: data.reasoning_effort,
-            originSocketId: socket.id,
-            authorize: shared ? async () => { await refreshSessionShare(shared, 'input', data.session_id) } : undefined,
-            pushTargetId,
-          })
-          const queuedPayload = {
-            event: 'run.queued',
-            session_id: data.session_id,
-            queue_id: queueId,
-            queue_length: state.queue.length,
-            queued_messages: this.serializeQueuedMessages(state.queue),
-          }
-          observeChatRunWebhookEvent({
-            event: 'run.queued',
-            sessionId: data.session_id,
-            profile: runProfile,
-            source,
-            agent: webhookAgentForRun(data),
-            payload: queuedPayload,
-            roomId: data.group_room_id,
-            workflowId: data.workflow_id,
-            workflowNodeId: data.workflow_node_id,
-          })
-          this.nsp.to(`session:${data.session_id}`).emit('run.queued', queuedPayload)
-          logger.info('[chat-run-socket] queued run for session %s (queue: %d)', data.session_id, state.queue.length)
-          return
-        }
-        state.events = []
-        state.isWorking = !isProviderAgentExecution(source, data)
-        advanceRunOwnership(state)
-        state.runStartedAt = Date.now()
-        state.profile = runProfile
-        state.source = source
-      }
-      try {
-        await this.handleRun(socket, data, runProfile, false, undefined, pushTargetId)
-      } catch (err) {
-        const payload = {
-          event: 'run.failed',
-          session_id: data.session_id,
-          queue_id: data.queue_id,
-          error: err instanceof Error ? err.message : String(err),
-        }
-        if (data.session_id) {
-          observeChatRunWebhookEvent({
-            pushTargetId,
-            event: 'run.failed',
-            sessionId: data.session_id,
-            profile: runProfile,
-            source: resolveRunSource(data.source, data.session_id),
-            agent: webhookAgentForRun(data),
-            payload,
-            roomId: data.group_room_id,
-            workflowId: data.workflow_id,
-            workflowNodeId: data.workflow_node_id,
-          })
-        }
-        if (data.session_id) {
-          const state = this.sessionMap.get(data.session_id)
-          if (state && !state.runId && !state.abortController && !state.activeRunMarker) {
-            state.isWorking = false
-            state.profile = undefined
-          }
-        }
-        socket.emit('run.failed', payload)
+      } finally {
+        releaseAdmission()
       }
     })
 
@@ -1700,7 +1728,8 @@ export class ChatRunSocket {
   async respondPersonInteraction(sessionId: string, id: string, response: string, approval: boolean): Promise<boolean> {
     const state = this.sessionMap.get(sessionId)
     const eventName = approval ? 'approval.requested' : 'clarify.requested'
-    if (!state?.events.some(entry => entry.event === eventName && (entry.data?.approval_id === id || entry.data?.clarify_id === id))) return false
+    const pending = isPersonSession(sessionId) ? pendingChatEkkoInteractions(sessionId) : state?.events || []
+    if (!state || !pending.some(entry => entry.event === eventName && (entry.data?.approval_id === id || entry.data?.clarify_id === id))) return false
     let resolved = false
     if (approval) {
       if (!['once', 'session', 'deny'].includes(response)) return false
@@ -1724,6 +1753,56 @@ export class ChatRunSocket {
   }
 
   // --- Run dispatcher ---
+
+  private async executeRun(...args: Parameters<ChatRunSocket['handleRun']>): Promise<void> {
+    const [socket, data, profile, , , pushTargetId] = args
+    const sessionId = data.session_id
+    if (!sessionId) return this.handleRun(...args)
+    if (!isPersonSession(sessionId) && !isEkkoAgentExecution(data)) {
+      this.ekkoExecutions.delete(sessionId)
+      return this.handleRun(...args)
+    }
+    const state = getOrCreateSession(this.sessionMap, sessionId)
+    const execution = Symbol()
+    this.ekkoExecutions.set(sessionId, execution)
+    try {
+      await this.handleRun(...args)
+    } catch (err) {
+      // Setup can fail before the runtime's own try/finally, even after it
+      // installs a controller. Never release a replacement turn's reservation.
+      if (this.ekkoExecutions.get(sessionId) !== execution || this.sessionMap.get(sessionId) !== state) return
+      state.abortController?.abort()
+      state.abortController = undefined
+      state.runId = undefined
+      state.activeRunMarker = undefined
+      state.responseRun = undefined
+      state.ekkoBoundaryInterrupt = undefined
+      state.isAborting = false
+      state.events = []
+      state.isWorking = state.queue.length > 0
+      if (!state.isWorking) state.profile = undefined
+      const payload = {
+        event: 'run.failed', session_id: sessionId, queue_id: data.queue_id,
+        error: err instanceof Error ? err.message : String(err), queue_remaining: state.queue.length,
+      }
+      observeChatRunWebhookEvent({
+        pushTargetId, event: 'run.failed', sessionId, profile,
+        source: resolveRunSource(data.source, sessionId), agent: 'ekko', payload,
+        roomId: data.group_room_id, workflowId: data.workflow_id, workflowNodeId: data.workflow_node_id,
+      })
+      data.onEvent?.('run.failed', payload)
+      this.emitPendingInteraction(profile, 'run.failed', payload)
+      if (isPersonSession(sessionId)) {
+        this.personQuestions.delete(sessionId)
+        personUpdated(Number(socket.data.user?.id))
+      }
+      this.nsp.to(`session:${sessionId}`).emit('run.failed', payload)
+      if (!this.nsp.adapter.rooms.get(`session:${sessionId}`)?.has(socket.id)) socket.emit('run.failed', payload)
+      this.dequeueNextQueuedRun(socket, sessionId, profile)
+    } finally {
+      if (this.ekkoExecutions.get(sessionId) === execution) this.ekkoExecutions.delete(sessionId)
+    }
+  }
 
   private async handleRun(
     socket: Socket,
@@ -2546,7 +2625,9 @@ export class ChatRunSocket {
       this.sessionMap.set(sid, state)
     }
     const resumeEvents = state.isWorking
-      ? state.events
+      ? isPersonSession(sid)
+        ? [...state.events.filter(entry => !['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(entry.event)), ...pendingChatEkkoInteractions(sid)]
+        : state.events
       : (state.events || []).filter(evt => evt?.event === 'run.reattach_failed')
     if (isPersonSession(sid) && !state.isWorking) {
       const question = personChatInteraction(Number(socket.data.user.id), sid)
@@ -2734,7 +2815,7 @@ export class ChatRunSocket {
       && item.autonomous !== true
   }
 
-  private queueInsertionRuntime(sessionId: string, state: SessionState): QueueInsertionRuntime | null {
+  private queueInsertionRuntime(sessionId: string, state: SessionState, taskRun = false): QueueInsertionRuntime | null {
     const storedAgent = String(getSession(sessionId)?.agent || '').trim()
     const activeAgent = state.webhookAgent
       || (storedAgent === 'ekko-agent' ? 'ekko' : storedAgent === 'claude' ? 'claude-code' : storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || (storedAgent === 'antigravity' || isNativeCodingAgent(storedAgent))) ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : 'bridge')
@@ -2742,7 +2823,24 @@ export class ChatRunSocket {
     if (activeAgent === 'claude-code' || activeAgent === 'codex' || activeAgent === 'pi' || activeAgent === 'grok' || (activeAgent === 'cursor' || (activeAgent === 'antigravity' || isNativeCodingAgent(activeAgent))) || (activeAgent === 'opencode' || activeAgent === 'dsh')) return activeAgent
     if (activeAgent !== 'bridge') return null
     if (state.source === 'coding_agent' || state.source === 'builtin_agent') return null
-    return state.source === 'cli' || state.source === 'global_agent' ? 'hermes' : null
+    return state.source === 'cli' || state.source === 'global_agent' || (taskRun && state.source === 'api_server') ? 'hermes' : null
+  }
+
+  /** Person owns the durable queue; this internal port only interrupts the fenced native turn. */
+  async interruptTaskRun(sessionId: string, expectedRunId: string): Promise<{ status: string; phase?: string }> {
+    const state = this.sessionMap.get(sessionId)
+    if (!sessionId.startsWith('person-task-') || !state?.isWorking) return { status: 'not_running' }
+    if (state.runId !== expectedRunId) return { status: 'run_mismatch' }
+    const runtime = this.queueInsertionRuntime(sessionId, state, true)
+    if (!runtime) return { status: 'unsupported' }
+    if (runtime === 'hermes') return this.bridge.requestBoundaryInterrupt(sessionId, expectedRunId, state.profile)
+    if (runtime === 'ekko') return state.ekkoBoundaryInterrupt?.(expectedRunId)
+      ?? getGlobalEkkoAgent(state.profile || 'default').requestBoundaryInterrupt({ sessionId, expectedRunId })
+    return codingAgentRunManager.interruptForQueueInsertion(sessionId, expectedRunId)
+  }
+
+  async waitForRunTermination(sessionId: string): Promise<void> {
+    await Promise.all([codingAgentRunManager.waitForSessionExit(sessionId), ...(this.runHandlers.get(sessionId) || [])])
   }
 
   private emitQueueInsertionUpdate(
@@ -3103,7 +3201,7 @@ export class ChatRunSocket {
       ? backgroundContinuationContext.profile
       : next.profile || fallbackProfile
     let deliverySettled = false
-    const execution = this.handleRun(socket, {
+    const execution = this.executeRun(socket, {
       onEvent: next.personStageDelivery ? (event:string,payload:any) => {
         if (event !== 'run.completed' && event !== 'run.failed') return
         deliverySettled = true
@@ -3317,6 +3415,11 @@ export class ChatRunSocket {
         }
       }
       const onEvent = (event: string, payload: any = {}) => {
+        // Tag task boundary stops before the shared emitters serialize the event for the drawer.
+        if (sessionId.startsWith('person-task-') && (payload.boundary_interrupt === true || payload.result?.boundary_interrupt === true)) {
+          payload.interrupted = true
+          payload.stop_reason = 'queue_insertion'
+        }
         if (typeof payload.run_id === 'string' && payload.run_id) runId = payload.run_id
         if (event === 'message.delta' && typeof payload.delta === 'string') output += payload.delta
         if ((event === 'reasoning.delta' || event === 'thinking.delta') && typeof payload.delta === 'string') reasoning += payload.delta
@@ -3336,6 +3439,8 @@ export class ChatRunSocket {
             run_id: payload.run_id,
             output: typeof payload.output === 'string' && payload.output ? payload.output : output,
             reasoning: typeof payload.reasoning === 'string' && payload.reasoning ? payload.reasoning : reasoning,
+            interrupted: payload.interrupted === true || payload.boundary_interrupt === true || payload.result?.boundary_interrupt === true || payload.result?.interrupted === true,
+            stop_reason: payload.stop_reason,
           })
         } else if (event === 'run.failed') {
           finish({
@@ -3345,6 +3450,8 @@ export class ChatRunSocket {
             output,
             reasoning,
             error: payload.error ? String(payload.error) : 'chat-run failed',
+            interrupted: payload.interrupted === true || payload.result?.boundary_interrupt === true || payload.result?.interrupted === true,
+            stop_reason: payload.stop_reason,
           })
         }
       }
@@ -3376,7 +3483,7 @@ export class ChatRunSocket {
 
       const handlers = this.runHandlers.get(sessionId) || new Set<Promise<void>>()
       this.runHandlers.set(sessionId, handlers)
-      const handler = this.handleRun(fakeSocket, { ...data, onEvent }, profile, false, undefined, pushTargetId)
+      const handler = this.executeRun(fakeSocket, { ...data, onEvent }, profile, false, undefined, pushTargetId)
         .catch(err => {
           const error = err instanceof Error ? err.message : String(err)
           const payload = { event: 'run.failed', session_id: sessionId, error }
@@ -3822,10 +3929,11 @@ export class ChatRunSocket {
 
   private emitPendingInteraction(profile: string, event: string, payload: any) {
     if (isPrivatePersonSession(payload?.session_id)) {
-      this.sessionStateSync.observe(event, payload)
       const session = getSession(payload.session_id)
       const userId = Number(session?.studio_user_id)
       if (session?.id !== payload.session_id || !ownsPersonSession(userId, session) || payload.replayed || payload.restored || payload.background_snapshot) return
+      // Silent state must reach the App even when there is no visible notice.
+      this.emitSessionActivity(profile, event, payload)
       const interaction = ['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)
       const notice = foregroundNotification(event, payload)
       if (!interaction && (!notice || ['cancelled', 'canceled'].includes(payload.stop_reason))) return
@@ -3878,6 +3986,10 @@ export class ChatRunSocket {
     const state = this.sessionMap.get(sessionId)
     const source = state?.source || getSession(sessionId)?.source
     const runId = state?.activeRunMarker || state?.responseRun?.runMarker || payload.run_marker || state?.runId || payload.run_id
+    if (isPersonSession(sessionId)) publishAppState({ ...stateEvent('person.run.updated', profile,
+      { session_id: sessionId, run_id: runId },
+      { state: { session_id: sessionId, status, timestamp: Date.now(), started_at: state?.runStartedAt,
+        reset_progress: event === 'run.started' } }), source: 'person' })
     if (!isPrivatePersonSession(sessionId) && source !== 'group_chat' && source !== 'workflow') publishAppState(stateEvent('chat.run.updated', profile,
       { session_id: sessionId, run_id: runId },
       { state: { session_id: sessionId, status, timestamp: Date.now(), started_at: state?.runStartedAt,

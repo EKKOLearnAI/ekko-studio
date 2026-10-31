@@ -79,3 +79,18 @@ it('unblocks a pending stop when initialization fails without emitting run.start
   worker.resolve({ ok: false }); await execution; await stopped
   expect(native.abortSession).toHaveBeenCalledTimes(1)
 })
+
+
+it('waits for the interrupted native handler to unwind before releasing the Person lease', async () => {
+  const termination = deferred()
+  const waitForRunTermination = vi.fn(() => termination.promise)
+  ;(native as any).waitForRunTermination = waitForRunTermination
+  native.runAndWait.mockResolvedValue({ ok: false, interrupted: true, stop_reason: 'queue_insertion' })
+  let released = false
+  const result = executePersonTask(input(new AbortController().signal)).then(value => { released = true; return value })
+  await vi.waitFor(() => expect(waitForRunTermination).toHaveBeenCalledWith('person-task-1'))
+  expect(released).toBe(false)
+  expect(native.abortSession).not.toHaveBeenCalled()
+  termination.resolve()
+  expect(await result).toMatchObject({ interrupted:true, stop_reason:'queue_insertion' })
+})

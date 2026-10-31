@@ -220,7 +220,7 @@ export class BrowserProfileStore {
 
   private async persist(): Promise<void> {
     const write = this.persistQueue.catch(() => undefined).then(async () => {
-      const tempPath = `${this.profilesFile}.${process.pid}.tmp`
+      const tempPath = `${this.profilesFile}.${process.pid}.${randomUUID()}.tmp`
       await mkdir(this.root, { recursive: true, mode: 0o700 })
       await writeFile(tempPath, `${JSON.stringify(this.requireDocument(), null, 2)}\n`, { mode: 0o600 })
       await rename(tempPath, this.profilesFile)

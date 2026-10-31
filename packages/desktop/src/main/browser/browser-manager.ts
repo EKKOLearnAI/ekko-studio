@@ -2,7 +2,7 @@ import { BrowserDownloadHistory, type DownloadFileIdentity } from './browser-dow
 import { downloadBrowserFile } from './browser-download'
 import { t } from '../desktop-i18n'
 import { realpathSync, mkdirSync, statSync, lstatSync } from 'node:fs'
-import { isAbsolute, relative } from 'node:path'
+import { isAbsolute, relative, sep } from 'node:path'
 import { BrowserProfileLeases } from './browser-profile-lease'
 import { applyBrowserColorScheme, browserBackground, type BrowserColorScheme } from './browser-theme'
 import { randomUUID } from 'node:crypto'
@@ -144,6 +144,8 @@ export class BrowserManager {
   private readonly configuredSessions = new Set<string>()
   private readonly configuredSessionProxies = new Map<string, string>()
   private readonly automationVisibleTabs = new Set<string>()
+  private readonly attachedTabs = new Set<string>()
+  private readonly automationHosts = new Map<string, BrowserWindow>()
   private readonly profileLeases = new BrowserProfileLeases(release => app.once('will-quit', release))
   private readonly activeAnnotationTabs = new Set<string>()
   private readonly annotationMarkerCounts = new Map<string, number>()
@@ -241,7 +243,6 @@ export class BrowserManager {
         record.tab.title = htmlPreview.title
       }
       this.records.set(record.tab.id, record)
-      this.window.contentView.addChildView(record.view)
       if (activate || !this.activeTabId) this.activeTabId = record.tab.id
       this.syncViews()
       const loading = record.view.webContents.loadURL(htmlPreview?.dataUrl || normalizedUrl).catch(() => {
@@ -276,6 +277,10 @@ export class BrowserManager {
     const contents = record.view.webContents
     this.window.contentView.removeChildView(record.view)
     this.automation.detach(tabId, contents)
+    this.automationHosts.get(tabId)?.contentView.removeChildView(record.view)
+    this.automationHosts.get(tabId)?.destroy()
+    this.automationHosts.delete(tabId)
+    this.attachedTabs.delete(tabId)
     this.automationVisibleTabs.delete(tabId)
     if (contents && !contents.isDestroyed()) contents.close()
     this.records.delete(tabId)
@@ -1183,12 +1188,22 @@ export class BrowserManager {
   private validateSessionScope(sessionPath: string): void {
     if (process.platform === 'darwin') {
       const root = realpathSync(app.getPath('sessionData'))
+      const allowedRoots = [root]
+      // The primary local Session keeps its original userData directory, while
+      // managed browser profiles have always lived under the Studio home.
+      // Isolated device/remote Sessions must still stay inside sessionData.
+      if (root === realpathSync(app.getPath('userData'))) {
+        allowedRoots.push(realpathSync(join(this.profileStore.root, 'profiles')))
+      }
       let parent = resolve(sessionPath)
       const suffix: string[] = []
       while (!existsSync(parent)) { suffix.unshift(basename(parent));parent = dirname(parent) }
       const candidate = resolve(realpathSync(parent), ...suffix)
-      const subpath = relative(root, candidate)
-      if (subpath === '..' || subpath.startsWith('../') || isAbsolute(subpath)) throw new Error(t('browser.profileOutsideStorage', { root }))
+      const allowed = allowedRoots.some(allowedRoot => {
+        const subpath = relative(allowedRoot, candidate)
+        return subpath !== '..' && !subpath.startsWith(`..${sep}`) && !isAbsolute(subpath)
+      })
+      if (!allowed) throw new Error(t('browser.profileOutsideStorage', { root }))
     }
   }
 
@@ -1410,21 +1425,30 @@ export class BrowserManager {
   private syncViews(): void {
     for (const [id, record] of this.records) {
       const userVisible = this.visible && id === this.activeTabId
-      if (userVisible) {
-        record.view.setBounds(this.bounds)
-        record.view.setVisible(true)
-      } else if (this.automationVisibleTabs.has(id)) {
-        record.view.setBounds({
-          x: -Math.max(10_000, this.bounds.width + 100),
-          y: -Math.max(10_000, this.bounds.height + 100),
-          width: this.bounds.width,
-          height: this.bounds.height,
-        })
-        record.view.setVisible(true)
-      } else {
-        record.view.setBounds(this.bounds)
-        record.view.setVisible(false)
+      // Attaching a WebContentsView can make it the native first responder on
+      // macOS, even when hidden. Only user-visible tabs belong to the host tree.
+      if (userVisible && !this.attachedTabs.has(id)) {
+        this.automationHosts.get(id)?.contentView.removeChildView(record.view)
+        this.window.contentView.addChildView(record.view)
+        this.attachedTabs.add(id)
+      } else if (!userVisible && this.attachedTabs.delete(id)) {
+        this.window.contentView.removeChildView(record.view)
       }
+      if (!userVisible && this.automationVisibleTabs.has(id)) {
+        let host = this.automationHosts.get(id)
+        if (!host) {
+          host = new BrowserWindow({
+            show: false, focusable: false, skipTaskbar: true,
+            width: this.bounds.width, height: this.bounds.height,
+            webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false },
+          })
+          this.automationHosts.set(id, host)
+        }
+        host.setSize(this.bounds.width, this.bounds.height)
+        host.contentView.addChildView(record.view)
+      }
+      record.view.setBounds(userVisible ? this.bounds : { x: 0, y: 0, width: this.bounds.width, height: this.bounds.height })
+      record.view.setVisible(userVisible || this.automationVisibleTabs.has(id))
     }
   }
 
@@ -1441,7 +1465,9 @@ export class BrowserManager {
         this.syncViews()
         await new Promise(resolve => setTimeout(resolve, 16))
       }
-      contents.focus()
+      // CDP targets this WebContents directly. Native focus belongs to the user:
+      // even read-only waits/screenshots must not steal it from another app/view.
+      // DOM element focus for typing is handled inside the target page.
       return await operation()
     } finally {
       if (!contents.isDestroyed()) contents.setBackgroundThrottling(throttled)
@@ -1456,11 +1482,15 @@ export class BrowserManager {
     for (const [id, record] of this.records) {
       const contents = record.view.webContents
       this.window.contentView.removeChildView(record.view)
+      this.automationHosts.get(id)?.contentView.removeChildView(record.view)
+      this.automationHosts.get(id)?.destroy()
       this.automation.detach(id, contents)
       if (contents && !contents.isDestroyed()) contents.close()
     }
     this.records.clear()
     this.automationVisibleTabs.clear()
+    this.attachedTabs.clear()
+    this.automationHosts.clear()
     this.activeAnnotationTabs.clear()
     this.annotationMarkerCounts.clear()
     this.activeTabId = undefined

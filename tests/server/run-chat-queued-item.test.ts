@@ -160,6 +160,7 @@ function makeServerHarness() {
   const socket = {
     id: 'socket-1',
     connected: true,
+    rooms: new Set(['session:session-1']),
     handshake: { auth: {}, query: { profile: 'default' } },
     data: {},
     emit: vi.fn(),
@@ -174,6 +175,191 @@ function makeServerHarness() {
 }
 
 describe('ChatRunSocket queued bridge runs', () => {
+  it('does not let a later input overtake async preparation of the first input', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const uploads = await import('../../packages/server/src/modules/studio/services/files/session-uploads')
+    const { handlers, io, socket } = makeServerHarness()
+    const server: any = new ChatRunSocket(io as any)
+    server.onConnection(socket)
+    let releasePreparation!: () => void
+    let releaseRun!: () => void
+    const preparing = new Promise<void>(resolve => { releasePreparation = resolve })
+    const running = new Promise<void>(resolve => { releaseRun = resolve })
+    const preparation = vi.spyOn(uploads, 'recordSessionUploadAttachments').mockImplementation(async () => { await preparing })
+    const dispatch = vi.spyOn(server, 'handleRun').mockImplementation(async () => { await running })
+    const first = handlers.get('run')!({ session_id: 'session-1', input: [{ type: 'text', text: '1' }], queue_id: '1',
+      source: 'builtin_agent', coding_agent_id: 'ekko-agent' })
+    const requests = [first]
+    try {
+      await vi.waitFor(() => expect(preparation).toHaveBeenCalledOnce())
+      requests.push(handlers.get('run')!({ session_id: 'session-1', input: '2', queue_id: '2', source: 'builtin_agent', coding_agent_id: 'ekko-agent' }))
+      await new Promise(resolve => setImmediate(resolve))
+      expect(dispatch).not.toHaveBeenCalled()
+      releasePreparation()
+      await vi.waitFor(() => expect(server.sessionMap.get('session-1').queue.map((item: any) => item.input)).toEqual(['2']))
+      expect(dispatch).toHaveBeenCalledOnce()
+      expect(dispatch.mock.calls[0][1]).toMatchObject({ queue_id: '1' })
+    } finally {
+      releasePreparation()
+      releaseRun()
+      await Promise.allSettled(requests)
+      preparation.mockRestore()
+    }
+  })
+
+  it('accepts the next input after earlier preparation fails', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const uploads = await import('../../packages/server/src/modules/studio/services/files/session-uploads')
+    const { handlers, io, socket } = makeServerHarness()
+    const server: any = new ChatRunSocket(io as any)
+    server.onConnection(socket)
+    const preparation = vi.spyOn(uploads, 'recordSessionUploadAttachments').mockRejectedValueOnce(new Error('Upload not available'))
+    const dispatch = vi.spyOn(server, 'handleRun').mockResolvedValue(undefined)
+    try {
+      await Promise.all([
+        handlers.get('run')!({ session_id: 'session-1', input: [{ type: 'text', text: '1' }], queue_id: '1', source: 'builtin_agent', coding_agent_id: 'ekko-agent' }),
+        handlers.get('run')!({ session_id: 'session-1', input: '2', queue_id: '2', source: 'builtin_agent', coding_agent_id: 'ekko-agent' }),
+      ])
+      expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ queue_id: '1', error: 'Upload not available' }))
+      expect(dispatch).toHaveBeenCalledOnce()
+      expect(dispatch.mock.calls[0][1]).toMatchObject({ queue_id: '2' })
+    } finally {
+      preparation.mockRestore()
+    }
+  })
+
+  it('reserves an Ekko session during async startup so later inputs stay in FIFO order', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server: any = new ChatRunSocket(io as any)
+    server.onConnection(socket)
+    let release!: () => void
+    const starting = new Promise<void>(resolve => { release = resolve })
+    const dispatch = vi.spyOn(server, 'handleRun').mockImplementation(async () => { await starting })
+    const send = (input: string) => handlers.get('run')!({ session_id: 'session-1', input, queue_id: input,
+      source: 'builtin_agent', coding_agent_id: 'ekko-agent' })
+    const requests = [send('1')]
+    try {
+      await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(1))
+      requests.push(send('2'), send('3'))
+      await vi.waitFor(() => expect(server.sessionMap.get('session-1').queue.map((item: any) => item.input)).toEqual(['2', '3']))
+      expect(dispatch).toHaveBeenCalledTimes(1)
+      expect(server.sessionMap.get('session-1').isWorking).toBe(true)
+    } finally {
+      release()
+      await Promise.allSettled(requests)
+    }
+  })
+
+  it.each(['person preparation', 'runtime setup'])('drains failed Person startups in FIFO order after %s fails', async failure => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const sessions = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    const agents = await import('../../packages/server/src/modules/studio/services/person/agents')
+    const person = await import('../../packages/server/src/modules/studio/services/person/chat-agent')
+    const ekko = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const models = await import('../../packages/server/src/modules/studio/services/chat-run/model-config')
+    const { handlers, io, socket, roomEmit } = makeServerHarness()
+    const server: any = new ChatRunSocket(io as any)
+    const session = { id: 'person-main-1', user_id: '1', studio_user_id: '1', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent' }
+    const originalSession = vi.mocked(sessions.getSession).getMockImplementation()!
+    vi.mocked(sessions.getSession).mockReturnValue(session as any)
+    socket.data = { user: { id: 1, role: 'super_admin' } }
+    server.onConnection(socket)
+    const updates = await import('../../packages/server/src/modules/studio/repositories/person-updates')
+    const notify = vi.spyOn(updates, 'personUpdated').mockImplementation(() => {})
+    const presets = vi.spyOn(agents, 'requirePersonAgents').mockReturnValue([{}] as any)
+    const prepared = { session, settings: { model: { profile: 'default', model: 'test', provider: 'test' } } } as any
+    let rejectStartup!: (error: Error) => void
+    const starting = new Promise<any>((_, reject) => { rejectStartup = reject })
+    void starting.catch(() => {})
+    const preparation = vi.spyOn(person, 'ensurePersonSession').mockResolvedValue(prepared)
+    const originalRuntime = ekko.handleEkkoAgentRun
+    const runtime = vi.spyOn(ekko, 'handleEkkoAgentRun')
+    const model = vi.spyOn(models, 'resolveBridgeRunModelConfig')
+    if (failure === 'person preparation') {
+      preparation.mockResolvedValueOnce(prepared).mockImplementationOnce(() => starting)
+    } else {
+      // Use the real runtime until its first awaited setup, after it installs the controller.
+      model.mockImplementationOnce(() => starting)
+    }
+    let releaseLast!: () => void
+    const last = new Promise<void>(resolve => { releaseLast = resolve })
+    const started: string[] = []
+    runtime.mockImplementation(async (...args) => {
+      const [, , data, , states, dequeue] = args
+      started.push(data.queue_id!)
+      if (failure === 'runtime setup' && data.queue_id === '1') return originalRuntime(...args)
+      if (data.queue_id === '2') throw new Error('Second startup failed')
+      await last
+      const state = states.get(session.id)!
+      state.isWorking = false
+      dequeue(socket as any, session.id)
+    })
+    const send = (input: string) => handlers.get('run')!({ session_id: session.id, input, queue_id: input })
+    const first = send('1')
+    try {
+      await vi.waitFor(() => {
+        expect(socket.emit.mock.calls.filter(([event]) => event === 'run.failed')).toEqual([])
+        expect(failure === 'runtime setup' ? model.mock.calls.length : preparation.mock.calls.length).toBe(failure === 'runtime setup' ? 1 : 2)
+      })
+      await Promise.all([send('2'), send('3')])
+      expect(server.sessionMap.get(session.id).queue.map((item: any) => item.queue_id)).toEqual(['2', '3'])
+      if (failure === 'runtime setup') expect(server.sessionMap.get(session.id).abortController).toBeInstanceOf(AbortController)
+      rejectStartup(new Error('First startup failed'))
+      await first
+      await vi.waitFor(() => expect(started).toContain('3'))
+      await send('4')
+      expect(server.sessionMap.get(session.id).queue.map((item: any) => item.queue_id)).toEqual(['4'])
+      expect(server.sessionMap.get(session.id).abortController).toBeUndefined()
+      expect(roomEmit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ queue_id: '1', queue_remaining: 2 }))
+      expect(roomEmit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ queue_id: '2', queue_remaining: 1 }))
+      expect(roomEmit.mock.calls.filter(([event]) => event === 'run.queued').map(([, data]) => data.dequeued_queue_id).filter(Boolean)).toEqual(['2', '3'])
+    } finally {
+      rejectStartup(new Error('cleanup'))
+      releaseLast()
+      await first
+      await new Promise(resolve => setImmediate(resolve))
+      presets.mockRestore(); preparation.mockRestore(); runtime.mockRestore(); model.mockRestore(); notify.mockRestore()
+      vi.mocked(sessions.getSession).mockImplementation(originalSession)
+    }
+  })
+
+  it.each(['builtin_agent', 'cli'])('does not clear or drain a newer %s run when an older startup rejects', async nextSource => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server: any = new ChatRunSocket(io as any)
+    server.onConnection(socket)
+    let rejectOld!: (error: Error) => void
+    let releaseNew!: () => void
+    const old = new Promise<void>((_, reject) => { rejectOld = reject })
+    const current = new Promise<void>(resolve => { releaseNew = resolve })
+    const dispatch = vi.spyOn(server, 'handleRun').mockImplementationOnce(() => old).mockImplementationOnce(() => current)
+    const send = (input: string, source = 'builtin_agent') => handlers.get('run')!({ session_id: 'session-1', input, queue_id: input, source, ...(source === 'builtin_agent' ? { coding_agent_id: 'ekko-agent' } : {}) })
+    const first = send('1')
+    let second: Promise<void> | undefined
+    try {
+      await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce())
+      // A stop/new-start can replace a run while its asynchronous preparation unwinds.
+      const state = server.sessionMap.get('session-1')
+      state.isWorking = false
+      second = send('2', nextSource)
+      await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2))
+      const controller = new AbortController()
+      state.abortController = controller
+      state.runId = 'new-run'
+      await send('3')
+      rejectOld(new Error('Old startup failed'))
+      await first
+      expect(state).toMatchObject({ isWorking: true, runId: 'new-run', abortController: controller })
+      expect(controller.signal.aborted).toBe(false)
+      expect(state.queue.map((item: any) => item.queue_id)).toEqual(['3'])
+      expect(dispatch).toHaveBeenCalledTimes(2)
+    } finally {
+      rejectOld(new Error('cleanup')); releaseNew()
+      await Promise.allSettled([first, second])
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     respondToEkkoToolApprovalMock.mockReset().mockReturnValue({ handled: false, resolved: false })
@@ -1225,6 +1411,33 @@ describe('ChatRunSocket queued bridge runs', () => {
       await expect(resultPromise).resolves.toMatchObject({ ok: false, error: 'chat-run timed out after 25ms' })
       expect(abortSpy).toHaveBeenCalledWith('session-1', 'chat-run timed out after 25ms')
     } finally { vi.useRealTimers() }
+  })
+
+
+  it.each(['run.completed','run.failed'])('preserves task insertion interruption metadata on %s',async event=>{
+    handleBridgeRunMock.mockImplementationOnce(async(_nsp,_socket,data)=>data.onEvent(event,{run_id:'native',interrupted:true,stop_reason:'queue_insertion',output:'partial'}))
+    const {ChatRunSocket}=await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const {io}=makeServerHarness(); const server=new ChatRunSocket(io as any)
+    expect(await server.runAndWait({session_id:'session-1',input:'task',source:'api_server'})).toMatchObject({interrupted:true,stop_reason:'queue_insertion'})
+  })
+
+  it('interrupts a fenced Hermes task through its bridge without copying the durable input into the chat queue',async()=>{
+    const {ChatRunSocket}=await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const {io}=makeServerHarness(); const server=new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('person-task-owned',{isWorking:true,runId:'native',source:'api_server',webhookAgent:'bridge',profile:'default',queue:[]})
+    expect(await server.interruptTaskRun('person-task-owned','old')).toEqual({status:'run_mismatch'})
+    expect(bridgeMock.requestBoundaryInterrupt).not.toHaveBeenCalled()
+    expect(await server.interruptTaskRun('person-task-owned','native')).toMatchObject({status:'accepted'})
+    expect(bridgeMock.requestBoundaryInterrupt).toHaveBeenCalledExactlyOnceWith('person-task-owned','native','default')
+    expect((server as any).sessionMap.get('person-task-owned').queue).toEqual([])
+  })
+
+  it('tags a task boundary completion before its observer and drawer receive an empty result',async()=>{
+    handleBridgeRunMock.mockImplementationOnce(async(_nsp,_socket,data)=>data.onEvent('run.completed',{run_id:'native',output:'',result:{boundary_interrupt:true}}))
+    const {ChatRunSocket}=await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const {io}=makeServerHarness(); const server=new ChatRunSocket(io as any); const onEvent=vi.fn()
+    expect(await server.runAndWait({session_id:'person-task-owned',input:'task',source:'api_server'},{onEvent})).toMatchObject({interrupted:true,stop_reason:'queue_insertion'})
+    expect(onEvent).toHaveBeenCalledWith('run.completed',expect.objectContaining({interrupted:true,stop_reason:'queue_insertion'}))
   })
 
 })

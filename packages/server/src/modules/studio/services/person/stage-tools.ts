@@ -10,15 +10,20 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
   const namespace = randomUUID()
   const references = new Map<string, { id: string; revision: number }>()
   const requests = new Map<string, Promise<unknown>>()
-  const expose = (flow: PersonConversationFlow) => {
+  const expose = (flow: PersonConversationFlow, origin?: PersonTaskOrigin) => {
     const ref = `${flow.id}:${flow.revision}`
     references.set(ref,{ id:flow.id,revision:flow.revision })
     if (references.size > 100) references.delete(references.keys().next().value!)
-    const stage = flow.stages[flow.current_position]
+    const current = flow.stages.filter(stage => stage.group_position === flow.current_position)
+    const stage = current.find(item => item.id === origin?.stage?.stageId)
+      || current.find(item => item.session_id === sessionId && item.state === 'active')
+      || current.find(item => item.state === 'active') || current[0]
     return { id:flow.id,flow_ref:ref,title:flow.title,state:flow.state,current_stage:stage.id,session_id:stage.session_id,
       creator_session_id:flow.creator_session_id,position:flow.current_position,total:flow.stages.length,error:flow.error,
+      group_count:Math.max(...flow.stages.map(item => item.group_position)) + 1,
+      current_stages:current.map(item => ({ id:item.id,session_id:item.session_id,state:item.state,goal:item.goal.slice(0,300),task_count:item.tasks.length })),
       tasks:stage.tasks.slice(0,5).map(task=>({ ...task,title:task.title.slice(0,80) })),task_count:stage.tasks.length,
-      results:flow.stages.filter(item=>item.result_message_id).map(item=>({ position:item.position,session_id:item.session_id,message_id:item.result_message_id })),
+      results:flow.stages.filter(item=>item.result_message_id).map(item=>({ position:item.position,group:item.group_position,session_id:item.session_id,message_id:item.result_message_id })),
       goal:stage.goal.slice(0,600),return_expectation:stage.return_expectation.slice(0,600) }
   }
   const string = { type:'string' }
@@ -43,23 +48,23 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
     const pending = (async () => {
       const flow = create ? createPersonFlow(userId,{ ...args,idempotency_key:`${namespace}:${key}` },origin)
         : await controlPersonFlow(userId,{ ...args,idempotency_key:`${namespace}:${key}` },origin)
-      return { ok:true,flow:expose(flow),...(create ? {instruction:'Handoff queued. The host will wake each recipient. Do not perform or launch their work again; acknowledge the handoff and end this turn.'} : {}),...(args.action === 'complete' ? { instruction:'Completion is prepared. Write your new stage result as the final reply now; successful persistence commits the handoff. Do not start more work.' } : {}) }
+      return { ok:true,flow:expose(flow,origin),...(create ? {instruction:'Flow queued. The host wakes every role in the first group, including you if assigned, then waits for every saved result before the next group. Do not perform or launch assigned work now; acknowledge and end this turn.'} : {}),...(args.action === 'complete' ? { instruction:'Completion is prepared. Write your new stage result as the final reply now; successful persistence completes your branch. The host waits for its peers before the next group. Do not start more work.' } : {}) }
     })()
     requests.set(key,pending)
     try { return await pending } catch (error) { requests.delete(key); throw error }
   }
   return [
-    define('bot_flows_query','List flows or read one; use fresh flow_ref for control.',{ flow_id:string,offset:{ type:'integer',minimum:0 } },[],async args => {
+    define('bot_flows_query','Query flows; fresh flow_ref for control.',{ flow_id:string,offset:{ type:'integer',minimum:0 } },[],async (args,origin) => {
       const offset = args.offset === undefined ? 0 : Number(args.offset)
       if (!Number.isSafeInteger(offset) || offset < 0) throw personError('Invalid offset')
       const rows = args.flow_id ? [getPersonFlow(userId,String(args.flow_id))] : listPersonFlows(userId,sessionId,offset)
-      return { flows:rows.slice(0,3).map(expose),next_offset:rows.length > 3 ? offset+3 : null }
+      return { flows:rows.slice(0,3).map(flow => expose(flow,origin)),next_offset:rows.length > 3 ? offset+3 : null }
     }),
-    define('bot_flow_create','Hand off to OTHER roles in order. Never self; finish your part first. Recipients handle their own work. Simple messages need no workers.',{
+    define('bot_flow_create','Role flow: equal groups=parallel, omitted=serial. 0,0,1=A+B then C.',{
       title:string,goal:string,stages:{ type:'array',minItems:1,maxItems:13,items:{ type:'object',additionalProperties:false,
-        properties:{ session_id:string,goal:string,return_expectation:string },required:['session_id','goal','return_expectation'] } },
+        properties:{ session_id:string,goal:string,return_expectation:string,group:{ type:'integer',minimum:0 } },required:['session_id','goal','return_expectation'] } },
     },['title','goal','stages'],(args,origin)=>mutate(args,origin!,true)),
-    define('bot_flow_control','complete then reply with the stage result; stop cancels; resume requeues the current role (creator only).',{
+    define('bot_flow_control','complete branch then reply; stop all; creator resumes unfinished.',{
       action:{ type:'string',enum:['complete','stop','resume'] },flow_ref:string,
     },['action','flow_ref'],(args,origin)=>{
       const reference = references.get(String(args.flow_ref))
