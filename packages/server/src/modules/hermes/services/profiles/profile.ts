@@ -76,7 +76,7 @@ export function listProfileNamesFromDisk(): string[] {
   const profilesDir = join(hermesBase, 'profiles')
   try {
     for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
-      if (entry.isDirectory() && entry.name.trim()) {
+      if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name.trim()) {
         names.add(entry.name)
       }
     }
