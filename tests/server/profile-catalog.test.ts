@@ -9,6 +9,7 @@ vi.mock('os', async importOriginal => ({
   homedir: () => home.path,
 }))
 
+import { listProfileNamesFromDisk } from '../../packages/server/src/modules/hermes/services/profiles/profile'
 import { listProfilesFromDisk } from '../../packages/server/src/modules/hermes/services/profiles/catalog'
 
 describe('local profile catalog', () => {
@@ -21,6 +22,12 @@ describe('local profile catalog', () => {
   afterEach(async () => {
     vi.unstubAllEnvs()
     await rm(home.path, { recursive: true, force: true })
+  })
+
+  it('excludes internal hidden directories from execution resources', async () => {
+    const root = join(home.path, '.hermes', 'profiles')
+    await Promise.all(['.deleted', '.cache', 'work'].map(name => mkdir(join(root, name), { recursive: true })))
+    expect(listProfileNamesFromDisk()).toEqual(['default', 'work'])
   })
 
   it('reads both model formats and tolerates missing or invalid YAML', async () => {

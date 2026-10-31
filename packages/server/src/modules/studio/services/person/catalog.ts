@@ -22,7 +22,7 @@ export function personUser(userId: number) {
 }
 export function personProfiles(userId: number) {
   const user = personUser(userId)
-  return listProfileNamesFromDisk().filter(p => user.role === 'super_admin' || user.profiles.includes(p)).sort()
+  return listProfileNamesFromDisk().filter(p => user.role === 'super_admin' || user.profiles.includes(p))
 }
 export function personCapabilities(userId: number) {
   personUser(userId)
