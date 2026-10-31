@@ -7,10 +7,11 @@ import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
 import { personFlowGroups, personFlowState, personFlowStatusKey, type PersonFlowStage } from '@/utils/person-flow'
 import PersonFlowCard from './PersonFlowCard.vue'
 
-const props = defineProps<{ flows: PersonFlow[]; saving: boolean }>()
+const props = defineProps<{ flows: PersonFlow[]; saving: boolean; selectedId?: string }>()
 const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
 const { t } = useI18n()
 const expanded = ref<string | null>(null)
+watch(() => props.selectedId, id => { if (id) expanded.value = id }, { immediate: true })
 const search = ref('')
 const filter = ref<'all' | PersonFlow['state']>('all')
 const visibleFlows = computed(() => props.flows.slice(0,50))

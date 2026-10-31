@@ -399,6 +399,8 @@ function openFlowConversation(sessionId: string) {
   showPanel.value = false
   return router.push({ name:'hermes.person',query:{ session:sessionId } })
 }
+const activityFlowId = ref<string>()
+function openActivityFlow(id: string) { activityFlowId.value = id; openPanel('flows') }
 function openFlowTask(taskId: string) { showPanel.value = false; chatExecutionId.value = undefined; chatTaskId.value = taskId }
 async function act(work: () => Promise<unknown>) {
   if (pending.value) return false
@@ -650,7 +652,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       </NModal>
       <div v-if="!isNewConversation" ref="chatSurface" class="person-chat-surface">
       <div v-if="data.session" class="person-chat-messages">
-      <PersonTaskActivity :count="sessionStates.backgroundCount(selectedSessionId)" :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :expanded="showTasks" @open="openPanel('tasks')" />
+      <PersonTaskActivity :count="sessionStates.backgroundCount(selectedSessionId)" :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :key="selectedSessionId || 'empty'" :scope="selectedSessionId || ''" :tasks="data?.tasks || []" :flows="data?.flows || []" @task="openFlowTask" @flow="openActivityFlow" @open="openPanel('tasks')" />
       <MessageList v-if="data.session" :user-label="t('person.you')" hide-tool-calls hide-run-usage hide-reasoning :activity-label="t('person.executing')" />
       </div>
       <div v-if="data.session" class="person-compose">
@@ -690,7 +692,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
               </NTabPane>
               <NTabPane name="flows" :tab-props="{ role: 'tab', 'aria-selected': tab === 'flows' }">
                 <template #tab><span class="workspace-tab"><SessionTaskIcon :size="17" />{{ t('person.flows') }}</span></template>
-                <PersonFlowsPanel :flows="data.flows || []" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
+                <PersonFlowsPanel :selected-id="activityFlowId" :flows="data.flows || []" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
               </NTabPane>
               <NTabPane name="schedules" :tab-props="{ role: 'tab', 'aria-selected': tab === 'schedules' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="schedule" :size="17" />{{ t('person.schedules') }}<span class="workspace-tab-count">{{ data.schedules.length }}</span></span></template>
