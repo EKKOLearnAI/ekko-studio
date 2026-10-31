@@ -935,7 +935,7 @@ for (const mode of ['light', 'dark'] as const) {
       return animations.length
     })
     expect(animations).toBeGreaterThan(0)
-    await page.screenshot({ path: `/tmp/person-task-island-enter-${mode}.png` })
+    await page.screenshot({ path: `/home/agent/work/hermes-studio/.ekko-tmp/person-task-island-enter-${mode}.png` })
     await page.evaluate(() => document.querySelector('.person-task-activity')!.getAnimations({ subtree: true }).forEach(animation => animation.finish()))
     await expect(page.getByRole('button', { name: 'zhezhe · Background tasks · 3', exact: true })).toBeVisible()
     await expect(island.locator('img')).toHaveAttribute('src', '/person/searching.gif')
@@ -947,7 +947,7 @@ for (const mode of ['light', 'dark'] as const) {
     const headerBounds = await page.locator('.person-header').boundingBox()
     expect(box!.y).toBeGreaterThanOrEqual(headerBounds!.y + headerBounds!.height)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    await page.screenshot({ path: `/tmp/person-task-island-expanded-${mode}.png`, animations: 'disabled' })
+    await page.screenshot({ path: `/home/agent/work/hermes-studio/.ekko-tmp/person-task-island-expanded-${mode}.png`, animations: 'disabled' })
     await island.evaluate(element => { (element as HTMLElement).dataset.instance = 'same-task-animation' })
     // The server count can exceed the current task-list page; feedback never hides active tasks.
     await backgroundTaskCount(page, 24, 'done')
@@ -955,7 +955,8 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(island).toHaveAttribute('data-instance', 'same-task-animation')
     await expect(island.locator('img')).toHaveAttribute('src', '/person/searching.gif')
     await island.click()
-    await expect(page.locator('.session-tasks-drawer')).toBeVisible()
+    await expect(page.locator('.activity-content')).toBeVisible()
+    await expect(page.locator('.session-tasks-drawer')).not.toBeVisible()
     await expect(island).toHaveAttribute('aria-expanded', 'true')
     await page.keyboard.press('Escape')
     await expect(page.locator('.session-tasks-drawer')).not.toBeVisible()
@@ -974,7 +975,7 @@ for (const mode of ['light', 'dark'] as const) {
     await page.locator('.person-compose textarea').click()
     await expect(page.locator('.person-compose textarea')).toBeFocused()
     await island.focus(); await page.keyboard.press('Enter')
-    await expect(page.locator('.session-tasks-drawer')).toBeVisible()
+    await expect(page.locator('.activity-content')).toBeVisible()
     await page.keyboard.press('Escape')
     await page.goto('/#/hermes/theme')
     await expect(island).toHaveCount(0)
@@ -982,7 +983,7 @@ for (const mode of ['light', 'dark'] as const) {
 
   test(`Person background-task island follows wallpaper, regional and reset themes in ${mode}`, async ({ page }) => {
     await setup(page, mode, true, false)
-    const island = page.locator('.person-task-island')
+    const island = page.locator('.activity-shell')
     async function open() { await page.goto('/#/person'); await backgroundTaskCount(page, 2); await expect(island).toBeVisible() }
     const wallpaper = mode === 'light' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(42, 42, 42, 0.72)'
     await open()
@@ -1030,7 +1031,7 @@ test('Person background-task island supports reduced motion and hides for main-c
   await expect(island.locator('img')).toHaveAttribute('src', '/coding-agents/person.jpg')
   expect(await island.evaluate(element => element.getAnimations().length)).toBe(0)
   await island.click()
-  await expect(page.locator('.session-tasks-drawer')).toBeVisible()
+  await expect(page.locator('.activity-content')).toBeVisible()
 })
 
 test('Person general settings save independently, survive refresh and retain drafts across tabs', async ({ page }) => {
@@ -3873,4 +3874,56 @@ test('limits collaboration display and filters to the latest 50 flows',async ({p
   await drawer.getByRole('button',{name:'View result',exact:true}).click()
   await expect(page).toHaveURL(/session=person-main-1&message=7/)
   await expect(drawer).not.toBeVisible()
+})
+
+test('Person activity expands running tasks in place and opens the task conversation', async ({ page }) => {
+  await setup(page)
+  await page.goto('/#/person')
+  const island = page.locator('.person-task-island')
+  await expect(island).toBeVisible()
+  await island.click()
+  await expect(page.locator('.session-tasks-drawer')).not.toBeVisible()
+  const row = page.locator('.activity-content').getByRole('button', { name: /Check report/ })
+  await expect(row).toBeVisible()
+  await row.click()
+  await expect(page.locator('.activity-content')).not.toBeVisible()
+  await expect(page.locator('.person-task-chat')).toBeVisible()
+})
+
+test('Person activity groups parallel collaboration and opens the selected flow', async ({ page }) => {
+ const { state } = await setup(page)
+ state.flows = [{id:'island-flow',title:'Parallel delivery',goal:'Ship',revision:1,state:'active',current_position:0,error:'',stages:[
+  {id:'s1',position:0,group_position:0,session_id:'person-main-1',session_title:'Research',goal:'Research',state:'active',tasks:[state.tasks[0]]},
+  {id:'s2',position:1,group_position:0,session_id:'person-main-1',session_title:'Review',goal:'Review',state:'active',tasks:[]},
+ ]}]
+ await page.goto('/#/person');await page.locator('.person-task-island').click()
+ await expect(page.locator('.activity-stages > li')).toHaveCount(1)
+ await expect(page.locator('.activity-stage')).toHaveCount(2)
+ await expect(page.locator('.activity-content').getByRole('button',{name:/Check report/})).toHaveCount(1)
+ await page.waitForTimeout(500)
+ await page.screenshot({path:'/home/agent/work/hermes-studio/.ekko-tmp/activity-collaboration.png', animations:'disabled'})
+ await page.locator('.activity-content').getByRole('button',{name:/Parallel delivery/}).click()
+ await expect(page.locator('.flow-panel')).toBeVisible()
+ await expect(page.locator('.flow-panel').getByRole('button',{name:/Parallel delivery/}).first()).toHaveAttribute('aria-expanded','true')
+})
+
+test('Chinese activity completion and stage handoff preview', async ({ page }) => {
+ const { state } = await setup(page,'dark',false,false)
+ await page.addInitScript(()=>localStorage.setItem('hermes_locale','zh'))
+ state.tasks=[{...state.tasks[0],title:'整理调研资料',execution_id:'run-a'},{...state.tasks[0],id:'task2',title:'编写实现方案',execution_id:'run-b'}]
+ state.flows=[{id:'handoff',title:'产品方案协作',goal:'交付方案',revision:1,state:'active',current_position:0,error:'',stages:[
+ {id:'research',position:0,group_position:0,session_id:'person-main-1',session_title:'资料调研',goal:'调研',state:'active',bot_type:'zhezhe',tasks:[state.tasks[0]]},
+ {id:'design',position:1,group_position:1,session_id:'person-main-1',session_title:'方案设计',goal:'设计',state:'pending',bot_type:'xiaohe',tasks:[state.tasks[1]]}]}]
+ await page.goto('/#/person');await page.locator('.person-task-island').click()
+ await expect(page.locator('.activity-content')).toBeVisible()
+ state.tasks[0]={...state.tasks[0],status:'completed',execution_state:'finished',running:false}
+ state.flows[0].stages[0].tasks=[state.tasks[0]];state.flows[0].stages[0].state='completed';state.flows[0].stages[1].state='active';state.flows[0].current_position=1
+ await emit(page,'person.updated',{})
+ await expect(page.locator('.activity-completion')).toContainText('整理调研资料')
+ await expect(page.locator('.activity-stages > li.current')).toContainText('方案设计')
+ await page.waitForTimeout(500)
+ await page.screenshot({path:'/home/agent/work/hermes-studio/.ekko-tmp/island-zh-completion.png',animations:'disabled'})
+ await expect(page.locator('.activity-completion')).not.toBeVisible({timeout:5000})
+ await expect(page.locator('.person-task-island')).toBeVisible()
+ await page.screenshot({path:'/home/agent/work/hermes-studio/.ekko-tmp/island-zh-handoff.png',animations:'disabled'})
 })

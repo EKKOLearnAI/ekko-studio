@@ -14,6 +14,9 @@ import PersonPanelIcon from './PersonPanelIcon.vue'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
 
+import { defaultPersonResource } from '@/utils/person-resource'
+import { getActiveProfileName } from '@/api/client'
+
 const props = defineProps<{ agents: PersonAgentPreset[]; saving: boolean; saveError?: string }>()
 const emit = defineEmits<{ save: [agents: PersonAgentPreset[]] }>()
 const { t } = useI18n()
@@ -54,7 +57,7 @@ function changeRuntime(agent: PersonAgentPreset, runtime: string) {
 function add() {
   editingId.value = crypto.randomUUID()
   draft.value.push({ id: editingId.value, name: '', description: '', selection: { runtime: '', mode: 'scoped',
-    profile: profiles.value[0]?.value || '', provider: '', model: '', reasoningEffort: '' } })
+    profile: defaultPersonResource(resourceProfiles.value, groups.value, getActiveProfileName() || "default"), provider: '', model: '', reasoningEffort: '' } })
 }
 function cancelEdit() {
   const index = draft.value.findIndex(agent => agent.id === editingId.value)
