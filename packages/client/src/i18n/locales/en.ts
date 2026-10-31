@@ -3982,6 +3982,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_1_1: "Removed native focus acquisition from built-in browser automation and isolated background-tab rendering from the main window focus tree to reduce interference with user input (#3594)",
+    new_0_8_1_2: "Browser profile saves use separate temporary files to avoid concurrent writes colliding across store instances (#3594)",
+    new_0_8_1_3: "Improved assistant task-routing guidance: additions, changes and feedback first query and continue the original task, including completed tasks, preserving its Agent and conversation (#3601)",
+    new_0_8_1_4: "Completed silent assistant run-state updates across the lifecycle; App reconnection restores live main-session state in the current Studio process across model Profiles in the same account (#3602)",
+    new_0_8_1_5: "Restore pending assistant approvals and clarifications from live requests and withdraw reminders on timeout, cancellation or abort; exclude private workers, archived sessions and expired requests (#3602)",
+    new_0_8_1_6: "Fixed missing, duplicate, out-of-order and stuck queued messages during continuous assistant input; preserve unacknowledged input, reconcile the queue with the transcript and retain order after refresh (#3603)",
+    new_0_8_1_7: "Serialize request preparation per session and reserve execution slots early so later inputs queue in submission order; preparation or startup failures release the slot and advance the queue (#3603)",
+    new_0_8_1_8: "Fixed report artifact name collisions when rerunning Playwright workflows by allowing existing shard and merged reports to be overwritten (#3602)",
     new_0_8_0_1: "Added personal assistant Bots created with the first message, with naming, search, switching and batch deletion; conversations stay separate while account memory, Agent presets and workspace are shared (#3552, #3568, #3575)",
     new_0_8_0_2: "Added ten characters and a looping picker with mouse, touch and keyboard support; improved initial setup, duplicate-name feedback and draft preservation (#3581, #3583)",
     new_0_8_0_3: "Assistant background tasks accept queued follow-ups, continue existing work and show live tool calls; worker instructions are readable text (#3566, #3580)",
