@@ -1,8 +1,9 @@
 import type { SessionSummary } from './studio/sessions'
 import { request } from './client'
 import type { AvailableModelGroup } from './hermes/system'
-export interface PersonModel { profile: string; provider: string; model: string }
-export interface PersonModelGroup extends Pick<AvailableModelGroup, 'provider' | 'label' | 'models' | 'model_meta'> { profile: string }
+import type { ProviderApiMode } from './studio/provider-api-mode'
+export interface PersonModel { profile: string; provider: string; model: string; apiMode?: ProviderApiMode }
+export interface PersonModelGroup extends Pick<AvailableModelGroup, 'provider' | 'label' | 'models' | 'model_meta' | 'api_mode' | 'api_mode_by_model'> { profile: string }
 export interface PersonAgentPreset { id: string; name: string; description: string; selection: PersonModel & { runtime: string; mode: 'scoped' | 'global'; reasoningEffort: string } }
 export interface PersonTask { session_id: string; session_title?: string; updated_at: number; selection_json: string; id: string; title: string; summary: string; status: string; revision: number; execution_id?: string | null; execution_state: string; running: boolean | number; completion_evidence: string }
 export interface PersonExecutionSummary { id: string; session_id: string; state: string; created_at: number; occurrence_id?: string | null }

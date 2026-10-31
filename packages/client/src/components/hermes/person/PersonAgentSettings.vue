@@ -45,7 +45,7 @@ function efforts(agent: PersonAgentPreset) {
   return agentReasoningEffortOptions([{ label: t('chat.reasoningEffort.options.none'), value: '' }, ...modelReasoningEfforts(groupsFor(agent), agent.selection.provider, agent.selection.model)
     .map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value }))])
 }
-function resetModel(agent: PersonAgentPreset) { agent.selection.provider = ''; agent.selection.model = ''; agent.selection.reasoningEffort = '' }
+function resetModel(agent: PersonAgentPreset) { agent.selection.provider = ''; agent.selection.model = ''; agent.selection.apiMode = undefined; agent.selection.reasoningEffort = '' }
 function changeRuntime(agent: PersonAgentPreset, runtime: string) {
   agent.selection.runtime = runtime
   agent.selection.mode = isGlobalOnlyCodingAgent(runtime) ? 'global' : 'scoped'
@@ -104,6 +104,7 @@ onMounted(async () => {
         </label>
         <template v-if="editingAgent.selection.mode === 'scoped'">
           <label>{{ t('person.chooseModel') }}<ScopedModelSelector :provider="editingAgent.selection.provider" :model="editingAgent.selection.model" :groups="groupsFor(editingAgent)" :disabled="saving || !editingAgent.selection.runtime"
+            :select-protocol="editingAgent.selection.runtime !== 'hermes'" :api-mode="editingAgent.selection.apiMode"
             @select="Object.assign(editingAgent.selection, $event, { reasoningEffort: '' })" /></label>
           <label>{{ t('chat.reasoningEffort.tooltip') }}<NSelect :value="agentReasoningEffortValue(editingAgent.selection.reasoningEffort, efforts(editingAgent))" @update:value="editingAgent.selection.reasoningEffort = $event" :options="efforts(editingAgent)" :disabled="saving || !editingAgent.selection.model" :aria-label="t('chat.reasoningEffort.tooltip')" /></label>
         </template>

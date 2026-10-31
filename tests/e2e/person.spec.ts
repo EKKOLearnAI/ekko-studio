@@ -78,8 +78,8 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
       await state.afterDelete?.()
       return route.fulfill({ json: { deleted: true, session_id: id } })
     }
-    if (path.endsWith('/capabilities')) return route.fulfill({ json: { agents: [{ runtime: 'ekko', installed: true }, { runtime: 'codex', installed: true }], native_allowed: true } })
-    if (path.endsWith('/models') || path.endsWith('/agent-models')) return route.fulfill({ json: { groups: [{ provider: 'provider', profile: 'default', label: 'My provider', models: ['global-model', 'fast-model'], model_meta: { 'global-model': { reasoning_efforts: ['none', 'low', 'high'] }, 'fast-model': { reasoning: false } } }] } })
+    if (path.endsWith('/capabilities')) return route.fulfill({ json: { agents: [{ runtime: 'ekko', installed: true }, { runtime: 'codex', installed: true }, { runtime: 'claude-code', installed: true }], native_allowed: true } })
+    if (path.endsWith('/models') || path.endsWith('/agent-models')) return route.fulfill({ json: { groups: state.modelGroups || [{ provider: 'provider', profile: 'default', label: 'My provider', models: ['global-model', 'fast-model'], model_meta: { 'global-model': { reasoning_efforts: ['none', 'low', 'high'] }, 'fast-model': { reasoning: false } } }] } })
     if (path.endsWith('/settings')) {
       if (body.expected_revision !== state.revision) return route.fulfill({ status: 409, json: { error: 'Settings changed' } })
       for (const key of ['compressionThreshold', 'maxSteps', 'maxConcurrentTasks', 'timezone']) if (body[key] !== undefined) state.settings[key] = body[key]
@@ -729,6 +729,7 @@ test('Person session models and efforts stay independent across switching, refre
   await page.goto('/#/person?session=person-main-1')
   await page.locator('.input-model-button').click()
   await page.locator('.model-cascader:visible').getByRole('menuitemradio').filter({ hasText: 'fast-model' }).click()
+  await page.getByRole('dialog', { name: 'Protocol', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
   await expect(page.locator('.input-model-button')).toHaveAttribute('aria-label', 'fast-model')
   await switchPersonSession(page, second.id)
   await expect(page.locator('.input-model-button')).toHaveAttribute('aria-label', 'global-model')
@@ -1333,6 +1334,7 @@ test('Person compression follows the interaction model and can restore the globa
   await page.keyboard.press('Escape')
   await page.locator('.input-model-button').click()
   await page.locator('.model-cascader:visible').getByRole('menuitemradio').filter({ hasText: 'fast-model' }).click()
+  await page.getByRole('dialog', { name: 'Protocol', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
   await settings.click()
   await expect(panel.locator('.model-context-name')).toHaveText('fast-model')
   await expect(panel.locator('.model-context-capacity')).toContainText('128,000')
@@ -1562,6 +1564,7 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(menu).toBeVisible()
     await page.screenshot({ path: `/tmp/person-chat-${mode}-models.png`, animations: 'disabled' })
     await menu.getByRole('menuitemradio').filter({ hasText: 'fast-model' }).click()
+    await page.getByRole('dialog', { name: 'Protocol', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
     await expect(page.locator('.input-model-button')).toHaveAttribute('aria-label', 'fast-model')
     await page.reload()
     await expect(page.locator('.input-model-button')).toHaveAttribute('aria-label', 'fast-model')
@@ -1890,6 +1893,7 @@ test('Person offers model selection when the global default is unavailable', asy
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled()
   await page.getByRole('button', { name: 'Global default model is unavailable. Choose a model.' }).click()
   await page.getByRole('menuitemradio').filter({ hasText: 'fast-model' }).click()
+  await page.getByRole('dialog', { name: 'Protocol', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled()
 })
 
@@ -1908,6 +1912,7 @@ test('Person saves agent presets, preserves unsaved edits and only offers openin
   await page.getByRole('button', { name: 'Codex', exact: true }).click()
   await page.locator('.person-agent-settings .scoped-model-selector button').click()
   await page.getByRole('menuitemradio').filter({ hasText: 'global-model' }).click()
+  await page.getByRole('dialog', { name: 'Protocol', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
   await page.locator('.person-agent-settings .n-select').last().click()
   await page.locator('.n-base-select-option__content:visible').getByText('High', { exact: true }).click()
   state.revision++ // Another window changed settings; keep the draft retryable.
@@ -2563,6 +2568,7 @@ async function addExecutionAgent(page: Page, conflict = false) {
   await settings.getByRole('textbox', { name: 'Purpose', exact: true }).fill('Handle assistant tasks')
   await settings.locator('.scoped-model-selector button').click()
   await page.getByRole('menuitemradio').filter({ hasText: 'global-model' }).click()
+  await page.getByRole('dialog', { name: 'Protocol', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
   await settings.getByRole('button', { name: 'Save', exact: true }).click()
   if (conflict) {
     await expect(settings.locator('.n-alert')).toContainText('Settings changed')
@@ -3253,6 +3259,7 @@ test('Person drafts its name, model and first message without changing the curre
   await page.screenshot({ path: '/tmp/studio-bot-send-create/draft-light-desktop.png', animations: 'disabled' })
   await draft.locator('.input-model-button').click()
   await page.locator('.model-cascader:visible').getByRole('menuitemradio').filter({ hasText: 'fast-model' }).click()
+  await page.getByRole('dialog', { name: 'Protocol', exact: true }).getByRole('button', { name: 'Confirm', exact: true }).click()
   await expect(draft.locator('.input-model-button')).toHaveAttribute('aria-label', 'fast-model')
   expect(operations.some(operation => operation.path.endsWith('/settings'))).toBe(false)
   expect(state.session.model).toBe('global-model')
@@ -4341,5 +4348,72 @@ for(const mode of ['light','dark'] as const){
     await expect(drawer.locator('.message.assistant .message-bubble p')).toContainText('Color sample')
     expect(await read(drawer)).toEqual(expected)
     await page.screenshot({path:testInfo.outputPath(`task-text-colors-${mode}.png`),animations:'disabled'})
+  })
+}
+
+
+for (const runtime of ['codex', 'claude-code']) {
+  test(`BOT saves independent GPT and Opus upstream protocols for ${runtime}`, async ({ page }) => {
+    const { state, operations } = await setup(page, 'dark', true)
+    state.modelGroups = [{ provider: 'provider', profile: 'default', label: 'Shared provider', models: ['gpt', 'opus'], api_mode: 'chat_completions' }]
+    state.settings.agents[0].selection = { runtime, mode: 'scoped', profile: 'default', provider: 'provider', model: 'gpt', apiMode: 'codex_responses', reasoningEffort: '' }
+    await page.goto('/#/person')
+    await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('tab', { name: /^Agents/ }).click()
+    const settings = page.locator('.person-agent-settings')
+    await settings.getByRole('button', { name: 'Edit', exact: true }).click()
+    await settings.locator('.scoped-model-selector button').click()
+    await page.getByRole('menuitemradio').filter({ hasText: 'gpt' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Protocol', exact: true })
+    await expect(dialog).toContainText('OpenAI Responses')
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    expect(operations.filter(op => op.path.endsWith('/settings'))).toHaveLength(0)
+    await page.getByRole('menuitemradio').filter({ hasText: 'opus' }).click()
+    await dialog.locator('.n-select').click()
+    await page.locator('.n-base-select-option__content:visible').getByText('Anthropic Messages (/v1/messages)', { exact: true }).click()
+    await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
+    await settings.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(() => state.settings.agents[0].selection).toMatchObject({ runtime, provider: 'provider', model: 'opus', apiMode: 'anthropic_messages' })
+    await page.reload()
+    await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('tab', { name: /^Agents/ }).click()
+    await settings.getByRole('button', { name: 'Edit', exact: true }).click()
+    await settings.locator('.scoped-model-selector button').click()
+    await page.getByRole('menuitemradio').filter({ hasText: 'opus' }).click()
+    await expect(dialog).toContainText('Anthropic Messages')
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+    await page.getByRole('menuitemradio').filter({ hasText: 'gpt' }).click()
+    await dialog.locator('.n-select').click()
+    await page.locator('.n-base-select-option__content:visible').getByText('OpenAI Responses (/v1/responses)', { exact: true }).click()
+    await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
+    await settings.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(() => state.settings.agents[0].selection).toMatchObject({ model: 'gpt', apiMode: 'codex_responses' })
+  })
+}
+
+for (const [mode, wallpaper, width] of [['light', false, 1440], ['dark', false, 1440], ['light', true, 390], ['dark', true, 390]] as const) {
+  test(`BOT conversation protocol confirmation ${mode} wallpaper=${wallpaper} width=${width}`, async ({ page }) => {
+    const { state, operations } = await setup(page, mode, wallpaper)
+    state.modelGroups = [{ provider: 'provider', profile: 'default', label: 'Shared provider', models: ['global-model', 'fast-model'], api_mode: 'chat_completions' }]
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/#/person')
+    await page.locator('.input-model-button').click()
+    await page.getByRole('menuitemradio').filter({ hasText: 'fast-model' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Protocol', exact: true })
+    await dialog.locator('.n-select').click()
+    await page.locator('.n-base-select-option__content:visible').getByText('Anthropic Messages (/v1/messages)', { exact: true }).click()
+    await expect(page.locator('.n-base-select-option__content:visible')).toHaveCount(0)
+    await page.screenshot({ path: `.git/bot-protocol-${mode}-${width}.png`, animations: 'disabled' })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
+    await expect.poll(() => state.settings.model).toMatchObject({ model: 'fast-model', apiMode: 'anthropic_messages' })
+    expect(operations.filter(op => op.path.endsWith('/settings')).at(-1).body.model.apiMode).toBe('anthropic_messages')
+    await page.reload()
+    await page.locator('.input-model-button').click()
+    await page.getByRole('menuitemradio').filter({ hasText: 'fast-model' }).click()
+    await expect(dialog).toContainText('Anthropic Messages')
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    expect(state.settings.model.apiMode).toBe('anthropic_messages')
   })
 }
