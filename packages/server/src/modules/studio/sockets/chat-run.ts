@@ -27,6 +27,7 @@ import { codingAgentId } from '../services/chat-run/types'
 import { studioMcpCapabilities } from '../public/runs/mcp-capabilities'
 import { hermesStudioMcpCapabilities } from '../services/chat-run/studio-mcp'
 import { publishAppState, stateEvent, planStateEvent } from '../services/webhooks/app-event-state'
+import { personNotificationSnapshot } from '../services/notifications/person-notification-state'
 import type { BusinessEvent } from '../services/webhooks/business-events'
 import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
 import { bindRunPushTarget, type PushRunRef, getRunPushTarget } from '../repositories/run-push-store'
@@ -859,7 +860,7 @@ export class ChatRunSocket {
     })
     if (!shared) {
       bindAppEventSubscription(socket, (_user, profile) => {
-        const result: BusinessEvent[] = []
+        const result: BusinessEvent[] = personNotificationSnapshot(_user.id, this.sessionMap)
         for (const [sessionId, state] of this.sessionMap) {
           if (isPrivatePersonSession(sessionId) || !state.isWorking || (state.profile || getSession(sessionId)?.profile || 'default') !== profile) continue
           const source = state.source || getSession(sessionId)?.source
@@ -3579,6 +3580,10 @@ export class ChatRunSocket {
     const state = this.sessionMap.get(sessionId)
     const source = state?.source || getSession(sessionId)?.source
     const runId = state?.activeRunMarker || state?.responseRun?.runMarker || payload.run_marker || state?.runId || payload.run_id
+    if (isPersonSession(sessionId)) publishAppState({ ...stateEvent('person.run.updated', profile,
+      { session_id: sessionId, run_id: runId },
+      { state: { session_id: sessionId, status, timestamp: Date.now(), started_at: state?.runStartedAt,
+        reset_progress: event === 'run.started' } }), source: 'person' })
     if (!isPrivatePersonSession(sessionId) && source !== 'group_chat' && source !== 'workflow') publishAppState(stateEvent('chat.run.updated', profile,
       { session_id: sessionId, run_id: runId },
       { state: { session_id: sessionId, status, timestamp: Date.now(), started_at: state?.runStartedAt,

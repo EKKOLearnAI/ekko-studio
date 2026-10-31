@@ -191,6 +191,57 @@ it('adds Person event subscriptions with account ownership independent of the vi
  } finally{s.handlers.get('disconnect')!()}
 })
 
+it('restores only current Person owner interactions across Profiles, with device preferences and safe envelopes', async () => {
+ const { personNotificationSnapshot } = await import('../../packages/server/src/modules/studio/services/notifications/person-notification-state')
+ const own={id:'person-main-1',studio_user_id:'1',profile:'model-resource',source:'builtin_agent',agent:'ekko-agent'}
+ sessionFixtures.set(own.id,own)
+ sessionFixtures.set('person-main-other',{...own,id:'person-main-other',studio_user_id:'2'})
+ sessionFixtures.set('person-task-private',{...own,id:'person-task-private'})
+ sessionFixtures.set('person-main-archived',{...own,id:'person-main-archived',is_archived:1})
+ const request=(id:string)=>({event:'approval.requested',data:{approval_id:id,requested_at:Date.now(),timeout_ms:30000,command:'private-command'}})
+ const state={isWorking:true,profile:'model-resource',runId:'main-turn',events:[
+  request('resolved'),{event:'approval.resolved',data:{approval_id:'resolved',resolved:true}},
+  request('cancelled'),{event:'approval.resolved',data:{approval_id:'cancelled',resolved:false,reason:'cancelled'}},
+  request('pending'),{event:'approval.resolved',data:{approval_id:'pending',resolved:false}},
+  {event:'clarify.requested',data:{clarify_id:'expired',timeout_ms:10,requested_at:1}},
+  {event:'clarify.requested',data:{clarify_id:'question',timeout_ms:30000,requested_at:Date.now(),question:'private-question'}},
+  {event:'run.completed',data:{output:'private-output'}},
+ ]} as any
+ const snapshot=()=>personNotificationSnapshot(auth.user.id,new Map([
+  [own.id,state],['person-main-other',state],['person-task-private',state],['person-main-archived',state],
+  ['ordinary',state],['person-main-idle',{...state,isWorking:false}],
+ ]))
+ const s=socket();bindAppEventSubscription(s as any,snapshot)
+ try {
+  const subscribe=async()=>{const ack=vi.fn();await s.handlers.get('app.events.subscribe')!({schema_version:1,profile:'default',include_snapshot:true,unread_session_ids:[own.id,'person-main-other','person-task-private']},ack);return ack.mock.calls[0][0]}
+  const first=await subscribe()
+  expect(first.person_state_version).toBe(1)
+  expect(first.snapshot.map((e:any)=>e.type)).toEqual(['person.run.updated','person.approval.requested','person.clarification.requested'])
+  expect(first.snapshot[0]).toMatchObject({notify:false,state:{session_id:own.id,status:'running'}})
+  expect(first.snapshot[1]).toMatchObject({source:'person',profile:'model-resource',subject:{session_id:own.id,run_id:'main-turn',approval_id:'pending'},interaction:{remaining_timeout_ms:expect.any(Number)}})
+  expect(first.unread_sessions).toEqual([own.id])
+  expect(JSON.stringify(first.snapshot)).not.toMatch(/private-|command|question"\s*:/)
+  expect((await subscribe()).snapshot[0].subject).toEqual(first.snapshot[0].subject)
+  expect(s.emit).not.toHaveBeenCalled() // Snapshots never publish to APNs/business consumers.
+  mutedTokens.add('test');expect((await subscribe()).snapshot).toEqual([])
+  mutedTokens.delete('test');auth.user={id:3,role:'super_admin'}
+  expect((await subscribe()).snapshot).toEqual([])
+ } finally {s.handlers.get('disconnect')!()}
+})
+
+it('publishes silent Person run state without attaching an HTTP webhook or push alert', async () => {
+ const {publishAppState,stateEvent}=await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')
+ const {businessEvents}=await import('../../packages/server/src/modules/studio/services/webhooks/business-events')
+ const {appEventEnvelope}=await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+ const observed:any[]=[];const stop=businessEvents.subscribe('person-state-test',event=>{observed.push(event)})
+ try {
+  publishAppState({...stateEvent('person.run.updated','model-resource',{session_id:'person-main-1',run_id:'turn'},
+   {state:{session_id:'person-main-1',status:'completed',timestamp:10}}),source:'person'})
+  expect(observed).toHaveLength(1);expect(observed[0].chat).toBeUndefined()
+  expect(appEventEnvelope(observed[0])).toMatchObject({type:'person.run.updated',notify:false,state:{status:'completed'}})
+ } finally {stop()}
+})
+
 it('applies ownership to legacy notifications as well as the versioned subscription', async () => {
  const { bindLegacyAppEvents } = await import('../../packages/server/src/modules/studio/services/webhooks/legacy-app-events')
  const { stateEvent } = await import('../../packages/server/src/modules/studio/services/webhooks/app-event-state')

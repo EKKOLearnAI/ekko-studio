@@ -12,6 +12,13 @@ describe('foreground notification contract', () => {
     expect(event('run.completed',{session_id:'s',run_id:'r',queue_remaining:1})).toBeNull()
     expect(event('run.completed',{session_id:'s',run_id:'r',interrupted:true})).toBeNull()
   })
+  it('retracts timeout and cancellation even when resolved is false, but keeps failed or stale responses', () => {
+    for (const reason of ['timeout','cancelled','canceled','aborted']) {
+      expect(event('approval.resolved',{session_id:'person-main-owner',approval_id:'a',resolved:false,reason})?.resolved).toBe(true)
+    }
+    expect(event('approval.resolved',{session_id:'person-main-owner',approval_id:'a',resolved:false})).toBeNull()
+    expect(event('approval.resolved',{session_id:'person-main-owner',approval_id:'a',resolved:true,stale:true})).toBeNull()
+  })
 })
 
  it('ships bounded title and completion preview without command or error payloads', () => {
