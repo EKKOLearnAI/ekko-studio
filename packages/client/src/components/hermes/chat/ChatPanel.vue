@@ -25,6 +25,7 @@ import {
   type SessionCategory,
 } from "@/api/studio/sessions";
 import type { AvailableModelGroup } from "@/api/hermes/system";
+import ModelProtocolModal from '@/components/hermes/models/ModelProtocolModal.vue'
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
 import { nativeCatalogModel, nativeModelLabel, nativeModelFamilies, nativeModelPickerId, nativeModelEffortChoices, selectNativeModelEffort } from "@/utils/native-model-families";
 import { agentInstallationState, fetchAgentAvailabilitySnapshot, type AgentAvailabilitySnapshot } from "@/api/agent-status";
@@ -2937,29 +2938,13 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
       </template>
     </ModelCascader>
 
-    <NModal
+    <ModelProtocolModal
       v-model:show="showSessionModelModeModal"
-      preset="dialog"
-      :title="t('codingAgents.protocolScope')"
-      :mask-closable="!sessionModelSwitching"
-      :close-on-esc="!sessionModelSwitching"
-      :closable="!sessionModelSwitching"
-      style="width: min(420px, calc(100vw - 32px))"
-    >
-      <NSelect
-        v-model:value="sessionModelApiMode"
-        :options="newChatApiModeOptions"
-        :disabled="sessionModelSwitching"
-      />
-      <template #action>
-        <NButton size="small" :disabled="sessionModelSwitching" @click="cancelSessionModelMode">
-          {{ t('common.cancel') }}
-        </NButton>
-        <NButton size="small" type="primary" :loading="sessionModelSwitching" @click="confirmSessionModelMode">
-          {{ sessionModelSwitching ? t('chat.modelSwitching') : t('common.confirm') }}
-        </NButton>
-      </template>
-    </NModal>
+      v-model:value="sessionModelApiMode"
+      :loading="sessionModelSwitching"
+      @cancel="cancelSessionModelMode"
+      @confirm="confirmSessionModelMode"
+    />
 
 
 
