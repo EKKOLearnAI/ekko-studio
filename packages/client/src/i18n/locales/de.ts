@@ -1106,6 +1106,15 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      cronTitle: 'Geplante Aufgabe „{name}“ abgeschlossen',
+      cronFailedTitle: 'Geplante Aufgabe „{name}“ fehlgeschlagen',
+      outputUnavailable: 'Für diese Laufzeit ist kein Ergebnis verfügbar (nur Skript); nur Status.',
+      receiptUnavailable: 'Der genaue Ergebnisbeleg dieses Laufs war nicht verfügbar; nur Status.',
+      unknown: 'Ergebnis unbekannt. Studio führt diese Aufgabe nicht erneut aus.',
+      truncated: 'Ergebnis für die Anzeige gekürzt.',
+      externalSource: 'Externe Benachrichtigung von „{source}“ (Absender nicht verifiziert)',
+    },
     selectMessages: "Nachrichten auswählen",
     messagesSelected: "{count} ausgewählt",
     deleteSelectedMessages: "Auswahl löschen",

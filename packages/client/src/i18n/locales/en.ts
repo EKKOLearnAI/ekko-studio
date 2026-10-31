@@ -1127,6 +1127,15 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      cronTitle: 'Scheduled task “{name}” finished',
+      cronFailedTitle: 'Scheduled task “{name}” failed',
+      outputUnavailable: 'Result unavailable for this runtime (script-only job); status only.',
+      receiptUnavailable: 'This run\'s exact result receipt was not available; status only.',
+      unknown: 'Outcome unknown. Studio will not re-run this job.',
+      truncated: 'Result truncated for display.',
+      externalSource: 'External notification from “{source}” (sender not verified)',
+    },
     selectMessages: "Select messages",
     messagesSelected: "{count} selected",
     deleteSelectedMessages: "Delete selected",

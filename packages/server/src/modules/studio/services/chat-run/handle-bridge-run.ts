@@ -2,6 +2,8 @@ import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { hermesStudioMcpCapabilities } from './studio-mcp'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
+import { buildNoticeProjection } from '../session-notifications/presentation'
+import { markSessionNotificationsProjected } from '../../repositories/session-notification-store'
 /**
  * CLI Bridge run handler — handles runs that use the agent bridge
  * to communicate with Hermes CLI agent.
@@ -9,7 +11,7 @@ import { withTaskPlanTurnContext } from '../task-plan-runs'
 
 import type { Server, Socket } from 'socket.io'
 import { getSystemPrompt } from '../../public/runs/prompt'
-import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
+import { getFirstSessionMessageByRole, getSession, getSessionGeneration, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
 import { recordBridgeModelUsage } from '../usage/bridge-model-usage'
 import type {
@@ -75,10 +77,22 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function parseBackgroundDelegation(
+export function parseBackgroundDelegation(
   toolName: string,
   output: string,
 ): { delegationId: string; status: string; payload: Record<string, unknown> } | null {
+  if (toolName === 'cronjob_manage') {
+    // A chat `run` dispatched in the background returns through Hermes async delegation.
+    try {
+      const payload = JSON.parse(output) as Record<string, unknown>
+      const job = payload.job && typeof payload.job === 'object' ? payload.job as Record<string, unknown> : null
+      const delegationId = stringValue(job?.delegation_id)
+      if (!delegationId || job?.execution_mode !== 'background') return null
+      return { delegationId, status: 'dispatched', payload }
+    } catch {
+      return null
+    }
+  }
   if (toolName !== 'delegate_task') return null
   try {
     const payload = JSON.parse(output) as Record<string, unknown>
@@ -87,6 +101,21 @@ function parseBackgroundDelegation(
     return { delegationId, status: stringValue(payload.status) || 'dispatched', payload }
   } catch {
     return null
+  }
+}
+
+function machineDiscardMessage(reason: string): string {
+  return `Background process completion was not delivered: the conversation changed (${reason}).`
+}
+
+/** A background terminal whose Hermes result accepted `notify_on_complete` (immediate exit included). */
+export function terminalNotifyRequested(toolName: string, output: string): boolean {
+  if (toolName !== 'terminal') return false
+  try {
+    const payload = JSON.parse(output) as Record<string, unknown>
+    return payload.notify_on_complete === true
+  } catch {
+    return false
   }
 }
 
@@ -465,7 +494,7 @@ async function ensureBridgeFixedContext(args: {
 export async function handleBridgeRun(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
-  data: { task_plan_context_id?: string; input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
+  data: { task_plan_context_id?: string; input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command' | 'system'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; run_marker?: string; machine_fence?: () => string | null; on_machine_dispatch?: () => void; on_machine_discard?: (reason: string) => void; onEvent?: (event: string, payload: any) => void },
   profile: string,
   sessionMap: Map<string, SessionState>,
   bridge: AgentBridgeClient,
@@ -556,7 +585,9 @@ export async function handleBridgeRun(
     fullInstructions = `\n${runPrompt}\n${fullInstructions}`
   }
 
-  const runMarker = `cli_run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  // An admitted machine run keeps the marker it was admitted under; it owns the session only while
+  // the session state still carries that marker (Stop, /destroy or a new turn clear or replace it).
+  const runMarker = data.run_marker || `cli_run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
   const now = Math.floor(Date.now() / 1000)
   let state = sessionMap.get(session_id)
   if (!state) {
@@ -571,6 +602,17 @@ export async function handleBridgeRun(
     } catch (err) {
       bridgeLogger.warn(err, '[chat-run-socket] failed to reopen session %s for bridge run', session_id)
     }
+  }
+
+  const machineOwnershipLost = () => Boolean(data.machine_fence) && (sessionMap.get(session_id) !== state
+    || state!.activeRunMarker !== runMarker || state!.machineRunMarker !== runMarker || !state!.isWorking || state!.isAborting)
+  const machineFence = () => (machineOwnershipLost() ? 'owner_stopped' : data.machine_fence?.() ?? null)
+  // Never claim a session the machine run no longer owns: it belongs to a destroyed or replacement run.
+  if (machineOwnershipLost()) {
+    data.on_machine_discard?.('owner_stopped')
+    data.onEvent?.('run.failed', { event: 'run.failed', session_id, error: machineDiscardMessage('owner_stopped'),
+      autonomous: true, queue_id: data.queue_id })
+    return
   }
 
   state.isWorking = true
@@ -600,11 +642,30 @@ export async function handleBridgeRun(
   const currentInputUsage = estimateUsageTokensFromMessages([{ role: 'user', content: actualInputStr }])
   const currentInputTokens = currentInputUsage.inputTokens
   const shouldPersistUserMessage = !skipUserMessage && displayInput !== null
-  const displayRole = data.display_role === 'command' ? 'command' : 'user'
-  const storageRole = shouldStoreInputInsteadOfDisplay ? 'user' : displayRole
-  const displayRoleForStorage = shouldStoreInputInsteadOfDisplay ? displayRole : null
-  const displayContentForStorage = shouldStoreInputInsteadOfDisplay ? inputStr : null
+  const displayRole = data.display_role === 'command' ? 'command' : data.display_role === 'system' ? 'system' : 'user'
+  // A machine event is a model-facing user turn displayed as a system notice, never as the user's words.
+  const machineDisplay = displayRole === 'system'
+  const storageRole = shouldStoreInputInsteadOfDisplay || machineDisplay ? 'user' : displayRole
+  const displayRoleForStorage = shouldStoreInputInsteadOfDisplay || machineDisplay ? displayRole : null
+  const displayContentForStorage = shouldStoreInputInsteadOfDisplay || machineDisplay ? inputStr : null
   let messageId: number | string | undefined
+
+  // A machine event's owner may have changed during the awaited preparation above: never store
+  // its turn for a reset, deleted, stopped or re-profiled owner.
+  const machineRefusal = machineFence()
+  if (machineRefusal) {
+    data.on_machine_discard?.(machineRefusal)
+    state.isWorking = false
+    state.profile = undefined
+    state.runId = undefined
+    state.activeRunMarker = undefined
+    const failed = { event: 'run.failed', session_id, error: machineDiscardMessage(machineRefusal),
+      queue_remaining: state.queue.length, autonomous: true, queue_id: data.queue_id }
+    data.onEvent?.('run.failed', failed)
+    nsp.to(`session:${session_id}`).emit('run.failed', failed)
+    if (state.queue.length > 0) dequeueNextQueuedRun(socket, session_id, profile)
+    return
+  }
 
   if (shouldPersistUserMessage) {
     const userMessage = {
@@ -771,7 +832,16 @@ export async function handleBridgeRun(
     const originalBridgeInput = isContentBlockArray(input)
       ? await convertContentBlocksForAgent(input)
       : input
-    const bridgeInput = withTaskPlanTurnContext(originalBridgeInput, data.task_plan_context_id, !data.background_delegation_id && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || ''))
+    const intentionalTurn = !data.autonomous && !data.background_delegation_id
+      && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || '')
+    const taskPlanInput = withTaskPlanTurnContext(originalBridgeInput, data.task_plan_context_id, !data.background_delegation_id && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || ''))
+    // Passive notices reach the model once, on the user's next intentional question.
+    const noticeProjection = intentionalTurn ? buildNoticeProjection(session_id) : null
+    const bridgeInput = !noticeProjection
+      ? taskPlanInput
+      : Array.isArray(taskPlanInput)
+        ? [{ type: 'text', text: noticeProjection.text }, ...taskPlanInput] as typeof taskPlanInput
+        : `${noticeProjection.text}\n\n${taskPlanInput}`
     const runMetadata: BridgeRunMetadata = {
       autonomous: data.autonomous === true,
       delegationId: data.background_delegation_id,
@@ -793,9 +863,10 @@ export async function handleBridgeRun(
         reasoningEffort,
       },
     }
+    // Native history keeps the user's own question, never the projected untrusted notices.
     const bridgeStorageInput = data.storage_message !== undefined
       ? data.storage_message
-      : data.task_plan_context_id || isContentBlockArray(input)
+      : data.task_plan_context_id || isContentBlockArray(input) || noticeProjection
         ? inputStr
         : undefined
     logger.info('[chat-run-socket] starting CLI bridge run for session %s', session_id)
@@ -807,6 +878,14 @@ export async function handleBridgeRun(
       hasInstructions: Boolean(fullInstructions),
       multimodalInput: isContentBlockArray(input),
     }, '[chat-run-socket] starting CLI bridge run')
+    // Final run seam: re-check a machine event's owner after every awaited preparation step.
+    const lateMachineRefusal = machineFence()
+    if (lateMachineRefusal) {
+      data.on_machine_discard?.(lateMachineRefusal)
+      throw new Error(machineDiscardMessage(lateMachineRefusal))
+    }
+    data.on_machine_dispatch?.()
+    const sessionGeneration = getSessionGeneration(session_id)
     const started = await bridge.chat(
       session_id,
       bridgeInput as AgentBridgeMessage,
@@ -821,6 +900,8 @@ export async function handleBridgeRun(
         // Creation fallback when this chat is the first operation for the
         // cached AgentSession (for example if context estimation was skipped).
         background_delegation_enabled: backgroundDelegationEnabled,
+        // Exact owner generation: cron jobs this turn creates are bound to it.
+        ...(sessionGeneration ? { studio_session_generation: sessionGeneration } : {}),
         // Local patch (reasoning-effort): per-session reasoning effort override.
         ...(runMetadata.originContext.reasoningEffort
           ? { reasoning_effort: runMetadata.originContext.reasoningEffort }
@@ -829,6 +910,7 @@ export async function handleBridgeRun(
     )
     if (sessionMap.get(session_id) !== state || state.activeRunMarker !== runMarker) return
     state.runId = started.run_id
+    if (noticeProjection) markSessionNotificationsProjected(noticeProjection.ids)
     if (data.background_delegation_id && data.background_claim_id) {
       await bridge.completeBackgroundNotification(
         session_id,
@@ -959,6 +1041,8 @@ export async function handleBridgeRun(
       })
     }
     if (sessionMap.get(session_id) !== state || state.activeRunMarker !== runMarker) return
+    // A revoked machine run leaves the session to whoever owns it now.
+    if (data.machine_fence && state.machineRunMarker !== runMarker) return
     if (!state.isWorking) return
     state.bridgePendingToolCallMarkup = undefined
     flushBridgePendingToDb(state, session_id, runMarker)
@@ -1389,6 +1473,7 @@ async function applyBridgeChunkAsync(
     } else if (evType === 'tool.completed') {
       const toolName = (ev.tool_name as string) || ''
       const completed = recordBridgeToolCompleted(state, sessionId, runMarker, toolName, ev)
+      if (terminalNotifyRequested(toolName, completed.output)) state.processNotifyPending = true
       const backgroundDelegation = parseBackgroundDelegation(toolName, completed.output)
       if (backgroundDelegation) {
         runMetadata?.backgroundDelegationIds.add(backgroundDelegation.delegationId)

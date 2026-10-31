@@ -139,8 +139,35 @@ export interface HermesSessionPage {
   limit: number
 }
 
+export interface ExternalStudioNoticeView {
+  kind: 'external'
+  notification_id: number
+  source: string
+  event_id: string
+  title: string
+  url: string | null
+}
+
+export type StudioNoticeView = CronStudioNoticeView | ExternalStudioNoticeView
+
+export interface CronStudioNoticeView {
+  kind: 'cron'
+  notification_id: number
+  disposition: string
+  job_id: string
+  job_name: string
+  execution_id: string
+  status: string
+  success: boolean | null
+  reason: string | null
+  error: string | null
+  truncated: boolean
+  finished_at: string | null
+}
+
 export interface HermesMessage {
   person_task_return?: import('../person').PersonTaskReturn
+  studio_notice?: StudioNoticeView
   run_usage?: import('@/utils/run-usage').RunUsageSummary
   id: number
   session_id: string

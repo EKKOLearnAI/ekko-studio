@@ -16,6 +16,7 @@ const chatApi = vi.hoisted(() => ({
   peerUserMessageHandlers: [] as Array<(event: any) => void>,
   sessionTitleUpdatedHandlers: [] as Array<(event: any) => void>,
   sessionWorkspaceUpdatedHandlers: [] as Array<(event: any) => void>,
+  sessionNoticeHandlers: [] as Array<(event: any) => void>,
 }))
 
 vi.mock('@/api/studio/chat', () => ({
@@ -40,6 +41,10 @@ vi.mock('@/api/studio/chat', () => ({
     return vi.fn()
   }),
   onRunUsageUpdated: vi.fn(() => vi.fn()),
+  onSessionNotice: vi.fn((handler: (event: any) => void) => {
+    chatApi.sessionNoticeHandlers.push(handler)
+    return vi.fn()
+  }),
   onSessionWorkspaceUpdated: vi.fn((handler: (event: any) => void) => {
     chatApi.sessionWorkspaceUpdatedHandlers.push(handler)
     return vi.fn()
@@ -92,6 +97,7 @@ describe('chat store session.command fanout', () => {
     chatApi.sessionCommandHandlers = []
     chatApi.peerUserMessageHandlers = []
     chatApi.sessionTitleUpdatedHandlers = []
+    chatApi.sessionNoticeHandlers = []
     chatApi.startRunViaSocket.mockReturnValue({ abort: vi.fn() })
     setActivePinia(createPinia())
   })
@@ -843,4 +849,21 @@ describe('chat store session.command fanout', () => {
       expect.objectContaining({ role: 'assistant', content: 'Previous answer' }),
     ])
   })
+
+  it('inserts a live notice into a loaded empty timeline and leaves unloaded sessions to their next load', () => {
+    const store = useChatStore()
+    store.sessions = [{ ...makeSession(), messagesLoaded: true }, { ...makeSession(), id: 'session-2', messagesLoaded: false }]
+    const notice = (sid: string) => ({ event: 'session.notice', session_id: sid, attention: false, message: {
+      id: `studio-notice-${sid}`, session_id: sid, role: 'system', display_role: 'system', content: 'Review passed', timestamp: 100,
+      studio_notice: { kind: 'external', notification_id: 1, source: 'validator-review', event_id: 'e1', title: 'Validation complete', url: null },
+    } })
+    for (const handler of chatApi.sessionNoticeHandlers) {
+      handler(notice('session-1'))
+      handler(notice('session-2'))
+    }
+    expect(store.sessions[0].messages.map(message => message.content)).toEqual(['Review passed'])
+    expect(store.sessions[0].messages[0].studioNotice).toMatchObject({ kind: 'external', title: 'Validation complete' })
+    expect(store.sessions[1].messages).toEqual([])
+  })
+
 })

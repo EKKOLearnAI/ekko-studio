@@ -1,4 +1,5 @@
 import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
+import { withSessionNotices } from '../services/session-notifications/presentation'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage } from '../public/usage'
 import { withPersonTaskReturns } from '../services/person/service'
@@ -45,7 +46,7 @@ import {
   updateSessionStats as localUpdateSessionStats,
 } from '../public/sessions'
 import { buildDbExportHistory, ExportCompressor } from '../services/context-compressor/export-compressor'
-import { getUsage, getUsageBatch } from '../public/sessions'
+import { getSessionGeneration, getUsage, getUsageBatch } from '../public/sessions'
 import {
   SESSION_CATEGORY_NAME_MAX_LENGTH,
   createSessionCategory,
@@ -795,7 +796,8 @@ export async function get(ctx: any) {
   if (ctx.state?.sessionShare) {
     delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
   }
-  ctx.body = { session }
+  // Callers freeze this to fence delayed writes (external notifications) to this incarnation.
+  ctx.body = { session: { ...session, session_generation: getSessionGeneration(session.id) } }
 }
 
 export async function listWorkspaceRunChanges(ctx: any) {
@@ -1453,6 +1455,8 @@ export async function remove(ctx: any) {
   const sessionId = ctx.params.id
   const existing = localGetSession(sessionId)
   if (denySessionAccess(ctx, existing)) return
+  // Before any await: the transcript room must not survive into a session recreated under this id.
+  getChatRunServer()?.evictSessionViewers?.(sessionId)
   if (isPersonSession(sessionId) && existing) {
     const { deletePersonConversation } = await import('../services/person/conversations')
     ctx.body = { ok: true, ...await deletePersonConversation(ctx.state.user.id, sessionId, existing.history_revision) }
@@ -1464,6 +1468,9 @@ export async function remove(ctx: any) {
   const hermes = providerAgentSession
     ? { attempted: false, deleted: false, profile: hermesProfile }
     : await deleteHermesSessionIfPresent(sessionId, hermesProfile)
+  // Again right before the row goes, with no await in between: a viewer may have rejoined while the
+  // native delete was pending, because the old row still authorized it.
+  getChatRunServer()?.evictSessionViewers?.(sessionId)
   const localDeleted = existing ? localDeleteSession(sessionId) : true
   if (!localDeleted) {
     ctx.status = 500
@@ -1524,6 +1531,7 @@ export async function batchRemove(ctx: any) {
       continue
     }
     if (isPersonSession(id) && existing) {
+      getChatRunServer()?.evictSessionViewers?.(id)
       try {
         const { deletePersonConversation } = await import('../services/person/conversations')
         await deletePersonConversation(ctx.state.user.id, id, existing.history_revision)
@@ -1546,6 +1554,7 @@ export async function batchRemove(ctx: any) {
       continue
     }
 
+    getChatRunServer()?.evictSessionViewers?.(id)
     const providerAgentSession = isProviderAgentSession(existing)
     if (providerAgentSession) stopCodingAgentSessionRun(id, { reportClosed: false })
     const hermes = providerAgentSession
@@ -1560,6 +1569,8 @@ export async function batchRemove(ctx: any) {
 
     const shouldDeleteLocal = Boolean(existing && (!targetProfile || existing.profile === targetProfile))
     if (shouldDeleteLocal) {
+      // Again right before the row goes (see `remove`).
+      getChatRunServer()?.evictSessionViewers?.(id)
       const ok = localDeleteSession(id)
       if (ok) {
         deleteWorkspaceRunChangesForSession(id)
@@ -2345,7 +2356,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       input_tokens: session.input_tokens,
       output_tokens: session.output_tokens,
     },
-    messages: withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages)),
+    messages: withSessionNotices(ctx.params.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages as any[])), { offset, storedCount: result.messages.length }),
     taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
     total: result.total,

@@ -1,4 +1,5 @@
 import Router from '@koa/router'
+import * as notifications from '../controllers/session-notifications'
 import * as shares from '../controllers/session-shares'
 import * as directories from '../controllers/workspace-directories'
 import * as ctrl from '../controllers/sessions'
@@ -41,6 +42,10 @@ sessionRoutes.delete('/api/studio/sessions/:id/workspace-file/delete', ctrl.dele
 sessionRoutes.post('/api/studio/sessions/:id/workspace-file/rename', ctrl.renameWorkspaceFile)
 sessionRoutes.post('/api/studio/sessions/:id/workspace-file/copy', ctrl.copyWorkspaceFile)
 sessionRoutes.get('/api/studio/sessions/:id', ctrl.get)
+sessionRoutes.post('/api/studio/sessions/:id/notifications', notifications.create)
+sessionRoutes.get('/api/studio/sessions/:id/notification-publishers', notifications.listPublishers)
+sessionRoutes.post('/api/studio/sessions/:id/notification-publishers', notifications.issuePublisher)
+sessionRoutes.delete('/api/studio/sessions/:id/notification-publishers/:publisherId', notifications.revokePublisher)
 sessionRoutes.get('/api/studio/sessions/:id/message-selection', ctrl.messageSelection)
 sessionRoutes.post('/api/studio/sessions/:id/messages/batch-delete', ctrl.deleteMessages)
 sessionRoutes.get('/api/studio/sessions/:id/export', ctrl.exportSession)

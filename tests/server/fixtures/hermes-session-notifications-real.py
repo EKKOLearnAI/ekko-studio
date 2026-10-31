@@ -1,0 +1,424 @@
+"""Real Hermes harness for Studio session notifications (no stubs).
+
+Run by tests/server/hermes-session-notifications-real.test.ts with an isolated HOME,
+HERMES_HOME and Studio bindings database. Imports the installed Hermes source read-only.
+"""
+
+import json
+import os
+import sqlite3
+import sys
+import time
+
+sys.path.insert(0, os.environ["HERMES_AGENT_ROOT"])
+sys.path.insert(0, os.path.join(os.getcwd(), "packages/server/src/modules/hermes/services/bridge/python"))
+
+import bridge_studio_notifications as sn  # noqa: E402
+import tools.cronjob_tools  # noqa: E402,F401  registers cronjob_manage
+import tools.process_registry  # noqa: E402,F401
+import tools.terminal_tool  # noqa: E402,F401  registers terminal
+from gateway.session_context import set_session_vars  # noqa: E402
+from tools.registry import registry  # noqa: E402
+
+
+def bindings():
+    path = json.loads(os.environ[sn.STUDIO_CONFIG_ENV])["bindings_db"]
+    if not os.path.exists(path):
+        return []
+    conn = sqlite3.connect(path)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(cron_session_bindings)")}
+        generation = "session_generation" if "session_generation" in columns else "NULL"
+        return [list(row) for row in conn.execute(
+            "SELECT instance_id, profile, job_id, session_id, stored_deliver, requested_paused, "
+            f"{generation} FROM cron_session_bindings")]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+
+def studio_session(session_id="sess-A", platform="agent_bridge", generation="gen-A1"):
+    # Studio declares the owner's session generation with each bridge turn.
+    declare = getattr(sn, "set_session_generation", None)
+    if declare is not None:
+        declare(session_id, generation)
+    return set_session_vars(platform=platform, source="tui", session_key=session_id, session_id=session_id,
+                            ui_session_id=session_id, profile="default", async_delivery=True)
+
+
+def create(args, session_id="sess-A"):
+    return json.loads(registry.dispatch("cronjob_manage", dict(args, action="create"), task_id="task-" + session_id,
+                                        session_id=session_id))
+
+
+def job_view(job_id):
+    from cron.jobs import get_job
+    job = get_job(job_id)
+    return None if job is None else {key: job.get(key) for key in ("state", "enabled", "deliver", "failure_deliver", "origin")}
+
+
+def case_cron_default():
+    assert sn.install_cron_binding_middleware()
+    studio_session()
+    created = create({"prompt": "Summarize the day", "schedule": "30m", "name": "default-target"})
+    return {"created": created, "job": job_view(created["job_id"]), "bindings": bindings()}
+
+
+def case_cron_origin():
+    assert sn.install_cron_binding_middleware()
+    studio_session()
+    created = create({"prompt": "Summarize", "schedule": "30m", "name": "origin", "deliver": "origin",
+                      "failure_deliver": "origin"})
+    return {"created": created, "job": job_view(created["job_id"]), "bindings": bindings()}
+
+
+def case_cron_missing_generation():
+    assert sn.install_cron_binding_middleware()
+    studio_session(generation=None)
+    created = create({"prompt": "No generation", "schedule": "30m", "name": "no-generation"})
+    from cron.jobs import load_jobs
+    jobs = [job for job in load_jobs() if job.get("name") == "no-generation"]
+    return {"created": created, "job": job_view(jobs[0]["id"]) if jobs else None, "bindings": bindings()}
+
+
+def case_cron_failure_deliver_explicit():
+    assert sn.install_cron_binding_middleware()
+    studio_session()
+    created = create({"prompt": "Failures elsewhere", "schedule": "30m", "name": "failure-explicit",
+                      "failure_deliver": "slack:C9"})
+    return {"created": created, "job": job_view(created["job_id"]), "bindings": bindings()}
+
+
+def case_fresh_agent_tools():
+    """A fresh Studio bridge agent, built with no HERMES_EXEC_ASK in the environment, can schedule."""
+    home = os.environ["HERMES_HOME"]
+    with open(os.path.join(home, "config.yaml"), "w", encoding="utf-8") as handle:
+        handle.write("model:\n  default: fake-model\n  provider: custom\n"
+                     "  base_url: http://127.0.0.1:9/v1\n  api_key: fake-local-key\n")
+    os.environ.pop("HERMES_EXEC_ASK", None)
+    import model_tools
+    # Hermes resolves (and caches) tool definitions outside any run too, e.g. its post-turn
+    # background review; that must not decide what a Studio session can schedule.
+    model_tools.get_tool_definitions(quiet_mode=True)
+    pool = _pool()
+    session = pool.get_or_create("sess-fresh", profile=None)
+    names = set(getattr(session.agent, "valid_tool_names", set()) or set())
+    # The deferred tool_call dispatcher re-resolves definitions at call time.
+    dispatch_names = {t["function"]["name"] for t in model_tools.get_tool_definitions(
+        quiet_mode=True, skip_tool_search_assembly=True) or []}
+    return {"cron_tool": "cronjob_manage" in names, "terminal_tool": "terminal" in names,
+            "cron_at_dispatch": "cronjob_manage" in dispatch_names,
+            "exec_ask_after": os.environ.get("HERMES_EXEC_ASK")}
+
+
+def case_cron_explicit():
+    assert sn.install_cron_binding_middleware()
+    studio_session()
+    local = create({"prompt": "Write files", "schedule": "30m", "name": "explicit-local", "deliver": "local"})
+    slack = create({"prompt": "Post", "schedule": "30m", "name": "explicit-slack", "deliver": "slack:C123",
+                    "failure_deliver": "local"})
+    return {"local": job_view(local["job_id"]), "slack": job_view(slack["job_id"]), "bindings": bindings(),
+            "slack_success": slack.get("success")}
+
+
+def case_cron_paused():
+    assert sn.install_cron_binding_middleware()
+    studio_session()
+    created = create({"prompt": "Later", "schedule": "30m", "name": "paused", "paused": True})
+    return {"created": created, "job": job_view(created["job_id"]), "bindings": bindings()}
+
+
+def case_cron_not_studio():
+    assert sn.install_cron_binding_middleware()
+    studio_session(platform="cli")
+    created = create({"prompt": "CLI", "schedule": "30m", "name": "cli"})
+    import model_tools
+    return {"created": created, "job": job_view(created["job_id"]), "bindings": bindings(),
+            "legacy_alias": getattr(model_tools, "_LEGACY_TOOL_ALIASES", {}).get("cronjob")}
+
+
+def case_cron_binding_failure():
+    blocker = os.path.join(os.environ["HOME"], "not-a-directory")
+    with open(blocker, "w", encoding="utf-8") as handle:
+        handle.write("x")
+    os.environ[sn.STUDIO_CONFIG_ENV] = json.dumps({"bindings_db": os.path.join(blocker, "b.db"), "instance_id": "inst-1"})
+    assert sn.install_cron_binding_middleware()
+    studio_session()
+    created = create({"prompt": "Fail closed", "schedule": "30m", "name": "binding-failure"})
+    from cron.jobs import load_jobs
+    jobs = [job for job in load_jobs() if job.get("name") == "binding-failure"]
+    return {"created": created, "job": job_view(jobs[0]["id"]) if jobs else None}
+
+
+def _pool():
+    import bridge_pool
+    return bridge_pool.AgentPool()
+
+
+def _terminal(command, notify=True, session_id="sess-A"):
+    studio_session(session_id)
+    return json.loads(registry.dispatch("terminal", {"command": command, "background": True,
+                                                     "notify_on_complete": notify}, task_id="task-" + session_id))
+
+
+def _poll_until(pool, session_ids, predicate, timeout=60.0):
+    deadline = time.time() + timeout
+    seen = []
+    while time.time() < deadline:
+        polled = pool.poll_background(session_ids)
+        seen.append(polled)
+        if predicate(polled):
+            return polled, seen
+        time.sleep(0.2)
+    return None, seen
+
+
+def case_process_success_failure():
+    pool = _pool()
+    ok = _terminal("printf ok-output; exit 0")
+    bad = _terminal("printf bad-output; exit 3")
+    found = {}
+
+    def collect(polled):
+        for item in polled.get("process_notifications") or []:
+            found[item["process_id"]] = item
+        return len(found) >= 2
+
+    _poll_until(pool, ["sess-A"], collect)
+    ok_item = found.get(ok["session_id"]) or {}
+    bad_item = found.get(bad["session_id"]) or {}
+    admitted = pool.admit_process_notification(ok_item.get("producer_key", ""), ok_item.get("claim_id", ""))
+    completed = pool.complete_process_notification(ok_item.get("producer_key", ""), ok_item.get("claim_id", ""))
+    replay, _ = _poll_until(pool, ["sess-A"], lambda polled: bool(polled.get("process_notifications")), timeout=1.5)
+    return {"ok_result": ok, "ok": ok_item, "bad": bad_item, "admitted": admitted, "completed": completed,
+            "replayed": replay is not None}
+
+
+def case_process_notify_false():
+    pool = _pool()
+    result = _terminal("exit 0", notify=False)
+    polled, _ = _poll_until(pool, ["sess-A"], lambda p: bool(p.get("process_notifications")), timeout=3.0)
+    return {"result": result, "delivered": polled is not None}
+
+
+def case_process_pending_and_immediate_exit():
+    pool = _pool()
+    running = _terminal("sleep 3; exit 0")
+    pending = pool.poll_background(["sess-A"]).get("notify_pending_session_ids")
+    immediate = _terminal("exit 0")
+    polled, _ = _poll_until(pool, ["sess-A"], lambda p: any(
+        item.get("process_id") == immediate["session_id"] for item in p.get("process_notifications") or []))
+    return {"pending": pending, "running": running.get("session_id"), "immediate_delivered": polled is not None}
+
+
+def case_process_immediate_exit_race():
+    """Reproduce the native order: the record is flagged after the process already exited."""
+    from tools.process_registry import process_registry
+    pool = _pool()
+    proc = process_registry.spawn_local(command="exit 0", cwd=os.getcwd(), task_id="task-sess-A",
+                                        owner_task_id="task-sess-A", session_key="sess-A")
+    deadline = time.time() + 30
+    while not process_registry.get(proc.id).exited and time.time() < deadline:
+        time.sleep(0.05)
+    native_event_published = any(evt.get("session_id") == proc.id for evt in list(process_registry.completion_queue.queue))
+    proc.notify_on_complete = True  # what the terminal tool does after spawn
+    polled, _ = _poll_until(pool, ["sess-A"], lambda p: any(
+        item.get("process_id") == proc.id for item in p.get("process_notifications") or []), timeout=15.0)
+    items = [item for item in (polled or {}).get("process_notifications") or [] if item.get("process_id") == proc.id]
+    again, _ = _poll_until(pool, ["sess-A"], lambda p: bool(p.get("process_notifications")), timeout=3.0)
+    return {"native_event_published": native_event_published, "recovered": len(items), "duplicated": again is not None,
+            "message": items[0]["message"] if items else None}
+
+
+def case_process_consumed_by_wait():
+    pool = _pool()
+    before_drain = _terminal("printf waited; exit 0")
+    studio_session()
+    registry.dispatch("process_manage", {"action": "wait", "session_id": before_drain["session_id"], "timeout": 10},
+                      task_id="task-sess-A")
+    drained, _ = _poll_until(pool, ["sess-A"], lambda p: bool(p.get("process_notifications")), timeout=2.0)
+
+    after_drain = _terminal("printf later; exit 0")
+    claimed = {}
+
+    def collect(polled):
+        for item in polled.get("process_notifications") or []:
+            claimed[item["process_id"]] = item
+        return after_drain["session_id"] in claimed
+
+    _poll_until(pool, ["sess-A"], collect)
+    item = claimed.get(after_drain["session_id"]) or {}
+    studio_session()
+    registry.dispatch("process_manage", {"action": "log", "session_id": after_drain["session_id"]}, task_id="task-sess-A")
+    admitted = pool.admit_process_notification(item.get("producer_key", ""), item.get("claim_id", ""))
+    return {"wait_before_drain_delivered": drained is not None, "claimed_after": bool(item), "admit_after_log": admitted}
+
+
+def case_process_ownership():
+    pool = _pool()
+    other = _terminal("exit 0", session_id="sess-B")
+    polled_a, _ = _poll_until(pool, ["sess-A"], lambda p: bool(p.get("process_notifications")), timeout=3.0)
+    polled_b, _ = _poll_until(pool, ["sess-B"], lambda p: any(
+        item.get("process_id") == other["session_id"] for item in p.get("process_notifications") or []))
+    return {"a_received": polled_a is not None, "b_received": polled_b is not None,
+            "b_session": (polled_b or {}).get("process_notifications", [{}])[0].get("session_id") if polled_b else None}
+
+
+def _scheduled_executions(job_id, count):
+    from cron.executions import create_execution, finish_execution, mark_execution_running
+    ids = []
+    for index in range(count):
+        row = create_execution(job_id, source="builtin", scheduled_instant=f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}+00:00")
+        mark_execution_running(row["id"])
+        finish_execution(row["id"], success=True)
+        ids.append(row["id"])
+    return ids
+
+
+def case_observe_pagination():
+    """More than one native page of retained executions recovers exactly once, in bounded passes."""
+    assert sn.install_cron_binding_middleware()
+    studio_session()
+    created = create({"prompt": "Backlog", "schedule": "30m", "name": "backlog"})
+    job_id = created["job_id"]
+    backlog = _scheduled_executions(job_id, 130)
+    seen, passes, max_rows_per_pass, cursor, late = [], 0, 0, None, []
+    while passes < 20:
+        passes += 1
+        item = {"job_id": job_id, "since": 0}
+        if cursor:
+            item["before"] = cursor
+        result = sn.observe_cron_jobs([item], None)
+        rows = result["executions"]
+        max_rows_per_pass = max(max_rows_per_pass, len(rows))
+        seen.extend(row["execution_id"] for row in rows)
+        state = next(job for job in result["jobs"] if job["job_id"] == job_id)
+        cursor = state.get("older_before")
+        if passes == 2:
+            late = _scheduled_executions(job_id, 3)  # new executions while the backlog drains
+        if not cursor and passes > 2:
+            break
+    return {"backlog": len(backlog), "late": len(late), "unique_seen": len(set(seen)),
+            "missing": len(set(backlog + late) - set(seen)), "passes": passes,
+            "max_rows_per_pass": max_rows_per_pass, "cursor_after": cursor}
+
+
+def case_settled_watchers():
+    """A delivered or consumed notify process stops counting as pending; live work still does."""
+    pool = _pool()
+    done = _terminal("printf settled; exit 0")
+    _poll_until(pool, ["sess-A"], lambda p: any(
+        item.get("process_id") == done["session_id"] for item in p.get("process_notifications") or []))
+    settled_pending = None
+    for _ in range(3):
+        settled_pending = pool.poll_background(["sess-A"]).get("notify_pending_session_ids")
+    live = _terminal("sleep 4; exit 0")
+    live_pending = pool.poll_background(["sess-A"]).get("notify_pending_session_ids")
+    from tools.process_registry import process_registry
+    watchers = [w for w in list(process_registry.pending_watchers) if (w or {}).get("session_key") == "sess-A"]
+    return {"settled_pending": settled_pending, "live_pending": live_pending, "live": live.get("session_id"),
+            "watcher_descriptors": len(watchers)}
+
+
+def case_process_owner_generation():
+    """A completion carries the owner generation declared when its process started."""
+    pool = _pool()
+    studio_session(generation="gen-before-reset")
+    old = json.loads(registry.dispatch("terminal", {"command": "sleep 2; printf old; exit 0", "background": True,
+                                                    "notify_on_complete": True}, task_id="task-sess-A"))
+    time.sleep(0.2)
+    sn.set_session_generation("sess-A", "gen-after-reset")  # Studio reset: next turn declares a new generation
+    found = {}
+
+    def collect(polled):
+        for item in polled.get("process_notifications") or []:
+            found[item["process_id"]] = item
+        return old["session_id"] in found
+
+    _poll_until(pool, ["sess-A"], collect)
+    item = found.get(old["session_id"]) or {}
+    return {"owner_generation": item.get("owner_generation"), "profile_key": item.get("producer_key")}
+
+
+def case_process_owner_generation_long_lived():
+    """S3: a live process keeps its owner generation across more than 32 unchanged-owner turns."""
+    pool = _pool()
+    studio_session(generation="gen-long")
+    proc = json.loads(registry.dispatch("terminal", {"command": "sleep 3; printf long; exit 0", "background": True,
+                                                     "notify_on_complete": True}, task_id="task-sess-A"))
+    time.sleep(0.05)
+    for _ in range(40):  # every later turn in the same conversation declares the unchanged generation
+        sn.set_session_generation("sess-A", "gen-long")
+    # True reset control on another owner: one reset, then many turns under the new generation.
+    studio_session(session_id="sess-B", generation="gen-before")
+    old = json.loads(registry.dispatch("terminal", {"command": "sleep 3; printf old; exit 0", "background": True,
+                                                    "notify_on_complete": True}, task_id="task-sess-B"))
+    time.sleep(0.05)
+    for _ in range(40):
+        sn.set_session_generation("sess-B", "gen-after")
+    found = {}
+
+    def collect(polled):
+        for item in polled.get("process_notifications") or []:
+            found[item["process_id"]] = item
+        return proc["session_id"] in found and old["session_id"] in found
+
+    _poll_until(pool, ["sess-A", "sess-B"], collect)
+    return {"long_owner_generation": (found.get(proc["session_id"]) or {}).get("owner_generation"),
+            "long_current": sn.session_generation("sess-A"),
+            "reset_owner_generation": (found.get(old["session_id"]) or {}).get("owner_generation"),
+            "reset_current": sn.session_generation("sess-B")}
+
+
+def _exit_before_arming(session_id="sess-A", notify=True):
+    from tools.process_registry import process_registry
+    proc = process_registry.spawn_local(command="exit 0", cwd=os.getcwd(), task_id="task-" + session_id,
+                                        owner_task_id="task-" + session_id, session_key=session_id)
+    deadline = time.time() + 30
+    while not process_registry.get(proc.id).exited and time.time() < deadline:
+        time.sleep(0.05)
+    if notify:
+        proc.notify_on_complete = True  # the terminal tool flags the record after the process already exited
+    return proc
+
+
+def _poll_view(polled):
+    return {"pending": polled.get("notify_pending_session_ids"),
+            "process_notifications": polled.get("process_notifications") or [],
+            "at": time.time()}
+
+
+def case_immediate_exit_poll_gate():
+    """S5: pending stays reported while an immediate exit awaits recovery, then retires."""
+    pool = _pool()
+    proc = _exit_before_arming()
+    polls = [_poll_view(pool.poll_background(["sess-A"]))]  # inside the recovery grace
+    deadline = time.time() + 15
+    while time.time() < deadline and not polls[-1]["process_notifications"]:
+        time.sleep(0.2)
+        polls.append(_poll_view(pool.poll_background(["sess-A"])))
+    for _ in range(2):
+        polls.append(_poll_view(pool.poll_background(["sess-A"])))
+    return {"process_id": proc.id, "exited_at": proc.exited_at, "polls": polls}
+
+
+def case_immediate_exit_pending_controls():
+    """S5 controls: a consumed or notify-off immediate exit is never pending."""
+    pool = _pool()
+    consumed = _exit_before_arming()
+    studio_session()
+    registry.dispatch("process_manage", {"action": "wait", "session_id": consumed.id, "timeout": 5}, task_id="task-sess-A")
+    consumed_pending = pool.poll_background(["sess-A"]).get("notify_pending_session_ids")
+    quiet = _exit_before_arming(session_id="sess-B", notify=False)
+    quiet_pending = pool.poll_background(["sess-B"]).get("notify_pending_session_ids")
+    time.sleep(1.3)
+    later = pool.poll_background(["sess-A", "sess-B"])
+    return {"consumed_pending": consumed_pending, "quiet_pending": quiet_pending,
+            "later_pending": later.get("notify_pending_session_ids"),
+            "later_notifications": [item.get("process_id") for item in later.get("process_notifications") or []],
+            "ids": [consumed.id, quiet.id]}
+
+
+if __name__ == "__main__":
+    print("RESULT " + json.dumps(globals()["case_" + sys.argv[1]](), default=str))

@@ -1120,6 +1120,15 @@ export default {
 
   // 對話
   chat: {
+    sessionNotice: {
+      cronTitle: '排程任務「{name}」已完成',
+      cronFailedTitle: '排程任務「{name}」失敗',
+      outputUnavailable: '此執行環境無法取得結果（僅腳本任務），僅顯示狀態。',
+      receiptUnavailable: '找不到本次執行的確切結果憑據，僅顯示狀態。',
+      unknown: '結果未知。Studio 不會重新執行此任務。',
+      truncated: '結果過長，已截斷顯示。',
+      externalSource: '外部通知，來源「{source}」（發送方未驗證）',
+    },
     selectMessages: "多選訊息",
     messagesSelected: "已選 {count} 則",
     deleteSelectedMessages: "刪除所選",

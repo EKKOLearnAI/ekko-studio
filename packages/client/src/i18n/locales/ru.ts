@@ -1033,6 +1033,15 @@ export default {
 
 
   chat: {
+    sessionNotice: {
+      cronTitle: 'Запланированная задача «{name}» завершена',
+      cronFailedTitle: 'Запланированная задача «{name}» завершилась ошибкой',
+      outputUnavailable: 'Для этой среды результат недоступен (только скрипт); только статус.',
+      receiptUnavailable: 'Точная квитанция результата этого запуска недоступна; только статус.',
+      unknown: 'Результат неизвестен. Studio не будет перезапускать эту задачу.',
+      truncated: 'Результат сокращён для отображения.',
+      externalSource: 'Внешнее уведомление от «{source}» (отправитель не подтверждён)',
+    },
     selectMessages: "Выбрать сообщения",
     messagesSelected: "Выбрано: {count}",
     deleteSelectedMessages: "Удалить выбранное",

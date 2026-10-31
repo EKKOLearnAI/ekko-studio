@@ -346,6 +346,15 @@ describe('user auth tables and middleware', () => {
     expect(auth.verifyUserJwt(`${unsigned}.${signature}`, 'secret', 1000)).toBeNull()
   })
 
+  it('marks login and model-run JWTs with distinct signed purposes', async () => {
+    const { auth } = await initUsers()
+    const user = { id: 1, username: 'admin', role: 'super_admin' as const }
+    const purpose = (token: string) => auth.verifyUserJwt(token, 'test-secret')?.purpose
+    expect(purpose(await auth.issueUserJwt(user))).toBe('login')
+    expect(purpose(await auth.issueModelRunJwt(user))).toBe('model_run')
+    expect(purpose(auth.signUserJwt(user, 'test-secret'))).toBeUndefined()
+  })
+
   it('signs model run JWTs with the same payload shape and a one hour expiry', async () => {
     const { auth } = await initUsers()
     const token = auth.signUserJwt(

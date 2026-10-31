@@ -71,9 +71,10 @@ export class SessionStateSync {
     } catch (error) { logger.warn(error, '[session-state] snapshot unavailable') }
   }
 
-  publish(sessionId?: string, userId?: number) {
+  /** `allow` narrows recipients further, e.g. to accounts that are still allowed right now. */
+  publish(sessionId?: string, userId?: number, allow?: (user: AuthenticatedUser) => boolean) {
     for (const subscriber of this.subscribers) {
-      if (userId == null || subscriber.user.id === userId) this.send(subscriber, sessionId)
+      if ((userId == null || subscriber.user.id === userId) && (!allow || allow(subscriber.user))) this.send(subscriber, sessionId)
     }
   }
 

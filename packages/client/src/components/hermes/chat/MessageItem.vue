@@ -62,6 +62,35 @@ const props = withDefaults(defineProps<{
   userProfileAvatar: null,
 });
 const { t } = useI18n();
+
+// External notices are untrusted caller data: plain text and a click-only web link, never Markdown.
+const externalNotice = computed(() => props.message.studioNotice?.kind === "external" ? props.message.studioNotice : null);
+const externalLink = computed(() => {
+  const url = externalNotice.value?.url;
+  return url && /^https?:\/\//i.test(url) ? url : null;
+});
+
+const studioNoticeTitle = computed(() => {
+  const notice = props.message.studioNotice;
+  if (!notice) return "";
+  if (notice.kind === "external") return notice.title;
+  return notice.success === false || notice.status === "failed"
+    ? t("chat.sessionNotice.cronFailedTitle", { name: notice.job_name })
+    : t("chat.sessionNotice.cronTitle", { name: notice.job_name });
+});
+
+const studioNoticeDetail = computed(() => {
+  const notice = props.message.studioNotice;
+  if (!notice) return "";
+  if (notice.kind === "external") return t("chat.sessionNotice.externalSource", { source: notice.source });
+  if (notice.disposition === "unknown") return t("chat.sessionNotice.unknown");
+  if (notice.reason === "output_unavailable_for_runtime") return t("chat.sessionNotice.outputUnavailable");
+  if (notice.reason === "receipt_unavailable") return t("chat.sessionNotice.receiptUnavailable");
+  if (notice.truncated) return t("chat.sessionNotice.truncated");
+  // A known failure without result text shows its native error.
+  if (notice.success === false && notice.error && !props.message.content) return notice.error;
+  return "";
+});
 const toast = useMessage();
 
 const isSystem = computed(() => props.message.role === "system");
@@ -1249,9 +1278,17 @@ onBeforeUnmount(() => {
               @select="file => openAssistantWorkspaceChangeFile(file, change)"
             />
 
+            <div v-if="message.studioNotice" class="studio-notice-header">
+              <div class="studio-notice-title">{{ studioNoticeTitle }}</div>
+              <div v-if="studioNoticeDetail" class="studio-notice-detail">{{ studioNoticeDetail }}</div>
+            </div>
+            <template v-if="externalNotice">
+              <div class="studio-notice-text">{{ message.content }}</div>
+              <a v-if="externalLink" class="studio-notice-link" :href="externalLink" target="_blank" rel="noopener noreferrer nofollow">{{ externalLink }}</a>
+            </template>
             <!-- Render system message content -->
             <MarkdownRenderer
-              v-if="message.role === 'system' && message.content && !isCommandMessage"
+              v-if="message.role === 'system' && message.content && !isCommandMessage && !externalNotice"
               :content="message.content"
             />
             <div v-if="isStatusCommand" class="command-result command-status">
@@ -2167,5 +2204,30 @@ onBeforeUnmount(() => {
     padding-inline-start: 8px !important;
     padding-inline-end: 8px !important;
   }
+}
+
+.studio-notice-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.studio-notice-title {
+  font-weight: 600;
+}
+
+.studio-notice-detail {
+  font-size: 12px;
+}
+
+.studio-notice-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.studio-notice-link {
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 </style>

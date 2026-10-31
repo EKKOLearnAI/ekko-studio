@@ -14,7 +14,7 @@ vi.mock('@/api/studio/chat', () => ({
   unregisterSessionHandlers: vi.fn(),
   getChatRunSocket: vi.fn(() => ({ emit: vi.fn() })),
   respondToolApproval: vi.fn(), respondClarify: vi.fn(),
-  onPeerUserMessage: vi.fn(), onSessionCommand: vi.fn(),
+  onPeerUserMessage: vi.fn(), onSessionCommand: vi.fn(), onSessionNotice: vi.fn(() => vi.fn()),
   onSessionTitleUpdated: vi.fn(), onRunUsageUpdated: vi.fn(() => vi.fn()),
   onSessionWorkspaceUpdated: vi.fn(), onSessionSettingsUpdated: vi.fn(),
 }))

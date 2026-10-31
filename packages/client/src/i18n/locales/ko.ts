@@ -1106,6 +1106,15 @@ export default {
 
   // 채팅
   chat: {
+    sessionNotice: {
+      cronTitle: '예약 작업 “{name}” 완료',
+      cronFailedTitle: '예약 작업 “{name}” 실패',
+      outputUnavailable: '이 런타임에서는 결과를 사용할 수 없습니다(스크립트 전용). 상태만 표시합니다.',
+      receiptUnavailable: '이번 실행의 정확한 결과 기록을 찾을 수 없습니다. 상태만 표시합니다.',
+      unknown: '결과를 알 수 없습니다. Studio는 이 작업을 다시 실행하지 않습니다.',
+      truncated: '표시를 위해 결과가 잘렸습니다.',
+      externalSource: '외부 알림 · 출처 “{source}” (발신자 미확인)',
+    },
     selectMessages: "메시지 선택",
     messagesSelected: "{count}개 선택됨",
     deleteSelectedMessages: "선택 항목 삭제",

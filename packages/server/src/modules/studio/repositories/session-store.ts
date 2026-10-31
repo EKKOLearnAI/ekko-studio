@@ -2,7 +2,9 @@
  * Self-built session database — completely replaces Hermes CLI dependency.
  * Uses the same ensureTable/getDb pattern as usage-store.ts.
  */
+import { randomUUID } from 'node:crypto'
 import { isSqliteAvailable, getDb } from '../infrastructure/database'
+import { initSessionStateTables } from '../infrastructure/database/session-state-schema'
 import { TASK_PLANS_TABLE, SESSION_TASKS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE, SESSION_CATEGORIES_TABLE } from '../infrastructure/database/schemas'
 import { normalizeMessageContentForStorageRole } from './message-content'
 import { copyCompressionSnapshot } from './compression-snapshot'
@@ -519,6 +521,7 @@ export function deleteSession(id: string): boolean {
     db.prepare(`DELETE FROM ${SESSION_TASKS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
+    retireNoticeAttention(db, id)
     const result = db.prepare(`DELETE FROM ${SESSIONS_TABLE} WHERE id = ?`).run(id)
     db.exec('COMMIT')
     return result.changes > 0
@@ -528,12 +531,43 @@ export function deleteSession(id: string): boolean {
   }
 }
 
+/** Timestamp of the stored row at a database page offset (`id DESC`), or null past the end. */
+export function getSessionMessageTimestampAtOffset(id: string, offset: number): number | null {
+  if (!isSqliteAvailable() || offset < 0) return null
+  const row = getDb()!.prepare(`SELECT timestamp FROM ${MESSAGES_TABLE} WHERE session_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?`)
+    .get(id, offset) as { timestamp?: number } | undefined
+  return row?.timestamp == null ? null : Number(row.timestamp)
+}
+
+/** A reset or deleted conversation keeps no attention for passive notices of its old generation. */
+function retireNoticeAttention(db: NonNullable<ReturnType<typeof getDb>>, sessionId: string): void {
+  initSessionStateTables(db)
+  db.prepare(`DELETE FROM session_attention_events WHERE session_id = ? AND event_key LIKE 'cron-notice:%'`).run(sessionId)
+}
+
+/**
+ * Exact identity of this session's current incarnation. Assigned on first read, rotated by a
+ * history clear (reset), and new for a session recreated under the same id.
+ */
+export function getSessionGeneration(id: string): string | null {
+  if (!isSqliteAvailable()) return null
+  const db = getDb()!
+  const row = db.prepare(`SELECT generation_id FROM ${SESSIONS_TABLE} WHERE id = ?`).get(id) as { generation_id?: string } | undefined
+  if (!row) return null
+  if (row.generation_id) return row.generation_id
+  const generation = randomUUID()
+  db.prepare(`UPDATE ${SESSIONS_TABLE} SET generation_id = ? WHERE id = ? AND generation_id = ''`).run(generation, id)
+  const current = db.prepare(`SELECT generation_id FROM ${SESSIONS_TABLE} WHERE id = ?`).get(id) as { generation_id?: string } | undefined
+  return current?.generation_id || null
+}
+
 export function clearSessionMessages(id: string): number {
   if (!isSqliteAvailable()) return 0
   const db = getDb()!
   db.exec('BEGIN')
   try {
     const result = db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
+    retireNoticeAttention(db, id)
     db.prepare(`DELETE FROM ${TASK_PLANS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${SESSION_TASKS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)
@@ -543,6 +577,7 @@ export function clearSessionMessages(id: string): number {
            task_summary_revision = task_summary_revision + 1,
            task_summary_updated_at = 0,
            history_cleared_at = ?,
+           generation_id = '',
            message_count = 0,
            last_active = started_at
        WHERE id = ?`,

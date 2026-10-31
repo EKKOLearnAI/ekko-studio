@@ -1120,6 +1120,15 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      cronTitle: 'اكتملت المهمة المجدولة «{name}»',
+      cronFailedTitle: 'فشلت المهمة المجدولة «{name}»',
+      outputUnavailable: 'النتيجة غير متاحة لبيئة التشغيل هذه (مهمة نصية فقط)؛ الحالة فقط.',
+      receiptUnavailable: 'لم يتوفر إيصال النتيجة الدقيق لهذا التشغيل؛ الحالة فقط.',
+      unknown: 'النتيجة غير معروفة. لن يعيد Studio تشغيل هذه المهمة.',
+      truncated: 'تم اقتطاع النتيجة للعرض.',
+      externalSource: 'إشعار خارجي من "{source}" (المرسل غير موثّق)',
+    },
     selectMessages: "تحديد الرسائل",
     messagesSelected: "تم تحديد {count}",
     deleteSelectedMessages: "حذف المحدد",

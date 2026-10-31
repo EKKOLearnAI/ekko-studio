@@ -7,6 +7,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'crypto'
 import { getToken } from '../services/auth/token-auth'
 import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
 import { MODEL_API_KEY_PREFIX, findModelApiKey, touchModelApiKey } from '../services/model-api/keys'
+import { authenticateNoticePublisher, isNoticePublisherToken } from '../services/session-notifications/publishers'
 import { ModelApiError, modelApiErrorBody } from '../services/model-api/errors'
 import {
   findUserById,
@@ -41,11 +42,16 @@ export interface AppUserTokenInspection {
   connectionType: AppConnectionType
 }
 
+/** Signed purpose of an access JWT: an interactive login, or a token Studio issues to a model run. */
+export type UserJwtPurpose = 'login' | 'model_run'
+
 interface JwtPayload {
   sub: string
   username: string
   role: UserRole
   type: 'access' | 'app_access'
+  /** Absent on tokens issued before purposes existed; generic authentication accepts every purpose. */
+  purpose?: UserJwtPurpose
   app_device_code?: string
   app_connection_type?: AppConnectionType
   app_token_id?: string
@@ -120,6 +126,9 @@ async function getJwtSecret(): Promise<string> {
   return process.env.AUTH_JWT_SECRET || await getToken()
 }
 
+/** The only route a notice publisher grant may call. */
+const NOTICE_DELIVERY_PATH = /^\/api\/studio\/sessions\/[^/]+\/notifications\/?$/i
+
 function requestToken(ctx: Context): string {
   const auth = ctx.headers.authorization || ''
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice(7).trim()
@@ -169,6 +178,7 @@ export function signUserJwt(
   secret: string,
   now = Date.now(),
   expiresSeconds = DEFAULT_EXPIRES_SECONDS,
+  purpose?: UserJwtPurpose,
 ): string {
   const iat = Math.floor(now / 1000)
   const payload: JwtPayload = {
@@ -176,6 +186,7 @@ export function signUserJwt(
     username: user.username,
     role: user.role,
     type: 'access',
+    ...(purpose ? { purpose } : {}),
     aud: JWT_AUDIENCE,
     iat,
     exp: iat + expiresSeconds,
@@ -248,7 +259,7 @@ export function verifyUserJwt(token: string, secret: string, now = Date.now()): 
 
 export async function issueUserJwt(user: Pick<UserRecord, 'id' | 'username' | 'role'>): Promise<string> {
   const secret = await getJwtSecret()
-  return signUserJwt(user, secret, Date.now(), getUserJwtExpiresSeconds())
+  return signUserJwt(user, secret, Date.now(), getUserJwtExpiresSeconds(), 'login')
 }
 
 export async function issueAppJwt(
@@ -262,7 +273,7 @@ export async function issueAppJwt(
 
 export async function issueModelRunJwt(user: Pick<UserRecord, 'id' | 'username' | 'role'>): Promise<string> {
   const secret = await getJwtSecret()
-  return signUserJwt(user, secret, Date.now(), getModelRunJwtExpiresSeconds())
+  return signUserJwt(user, secret, Date.now(), getModelRunJwtExpiresSeconds(), 'model_run')
 }
 
 export function toAuthenticatedUser(user: Pick<UserRecord, 'id' | 'username' | 'role'>): AuthenticatedUser {
@@ -315,6 +326,17 @@ export async function authenticateUserToken(token: string): Promise<Authenticate
   const user = findUserById(payload.sub)
   if (!user || user.status !== 'active') return null
   return toAuthenticatedUser(user)
+}
+
+/**
+ * `authenticateUserToken` restricted to tokens issued by an interactive login. Model-run and App
+ * tokens, and tokens issued before login tokens carried a purpose, are refused here; every other
+ * route keeps accepting them through `authenticateUserToken`.
+ */
+export async function authenticateLoginUserToken(token: string): Promise<AuthenticatedUser | null> {
+  const payload = token ? verifyUserJwt(token, await getJwtSecret()) : null
+  if (payload?.type !== 'access' || payload.purpose !== 'login') return null
+  return authenticateUserToken(token)
 }
 
 export async function isAuthEnabled(): Promise<boolean> {
@@ -377,6 +399,23 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
 
   const secret = await getJwtSecret()
   const token = requestToken(ctx)
+  if (isNoticePublisherToken(token)) {
+    // A notice publisher grant only delivers passive notices to its one session: it never
+    // authenticates any other endpoint, method, query-string token or WebSocket.
+    if (!(ctx.method === 'POST' && NOTICE_DELIVERY_PATH.test(decodedPath))) {
+      ctx.status = 403; ctx.body = { error: 'publisher_token_route_not_allowed' }; return
+    }
+    if (ctx.get('authorization') !== `Bearer ${token}`) {
+      ctx.status = 401; ctx.body = { error: 'publisher_token_header_required' }; return
+    }
+    const grant = authenticateNoticePublisher(token)
+    const owner = grant ? findUserById(grant.owner_user_id) : null
+    if (!grant || !owner) { ctx.status = 401; ctx.body = { error: 'publisher_token_invalid' }; return }
+    ctx.state.user = toAuthenticatedUser(owner)
+    ctx.state.noticePublisher = grant
+    await next()
+    return
+  }
   if (token.startsWith(MODEL_API_KEY_PREFIX)) {
     try {
       // Keys never authenticate UI, management, proxy or WebSocket endpoints.
