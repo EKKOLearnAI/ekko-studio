@@ -22,16 +22,27 @@ export function personChatBusy(userId: number, sessionId?: string): boolean {
   return sessionId ? !!server?.isSessionRunning?.(sessionId) : personSessionIds(userId).some(id => server?.isSessionRunning?.(id))
 }
 
-/** Person owns an account session in the shared single-chat store. */
-export async function ensurePersonSession(userId: number, id: string) {
+/** Read the effective presentation without acquiring a write lock for a snapshot. */
+export async function readPersonSession(userId: number, id: string) {
   const effective = await effectivePersonSettings(userId, personSettings(userId, id))
-  const workspace = personWorkspace(userId)
   const session = requirePersonSession(userId, id)
+  if (personChatBusy(userId, id)) return { ...effective, session }
+  const model = effective.settings.model
+  return { ...effective, session: { ...session, profile: model?.profile || session.profile,
+    workspace: personWorkspace(userId), model: model?.model || '', provider: model?.provider || '',
+    api_mode: model?.apiMode || '', reasoning_effort: effective.settings.reasoningEffort } }
+}
+
+/** Synchronize metadata only at conversation creation/run admission, and only if it changed. */
+export async function ensurePersonSession(userId: number, id: string) {
+  const effective = await readPersonSession(userId, id)
+  const stored = requirePersonSession(userId, id)
   if (!personChatBusy(userId, id)) {
-    const model = effective.settings.model
-    // This Profile is a model resource, never the owner of the conversation.
-    if (model) personDb().prepare('UPDATE sessions SET profile=? WHERE id=?').run(model.profile, id)
-    updateSession(id, { workspace, model: model?.model || '', provider: model?.provider || '', api_mode: model?.apiMode || '', reasoning_effort: effective.settings.reasoningEffort })
+    const session = effective.session
+    if (session.profile !== stored.profile) personDb().prepare('UPDATE sessions SET profile=? WHERE id=?').run(session.profile, id)
+    const changes = Object.fromEntries((['workspace', 'model', 'provider', 'api_mode', 'reasoning_effort'] as const)
+      .filter(key => session[key] !== stored[key]).map(key => [key, session[key]]))
+    if (Object.keys(changes).length) updateSession(id, changes)
   }
   return { ...effective, session: getSession(id)! }
 }
