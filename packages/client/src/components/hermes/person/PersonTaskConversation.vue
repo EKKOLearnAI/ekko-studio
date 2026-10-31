@@ -14,9 +14,13 @@ const props = defineProps<{
   send: (text: string, attachments?: Attachment[]) => Promise<boolean>
   disabled: boolean
   canInsert: boolean
+  canRemove: boolean
   insertion?: PersonTaskQueueState['insertion']
   requestingInsertion: string
+  requestingRemoval: string
+  queueDisabled: boolean
   insert: (queueId: string) => Promise<void>
+  remove: (queueId: string) => Promise<void>
   stopControl: { active: boolean; allowSend: boolean; pending: boolean; request: () => Promise<void> }
 }>()
 const { t } = useI18n()
@@ -26,8 +30,8 @@ const loading = ref(true)
 const failed = ref(false)
 let disposed = false
 const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
-const queueItems = computed(() => props.pending.map(item => ({ id: item.id, text: item.input.map(block => block.text || block.name || '').join(' ') })))
 const activeInsertId = computed(() => props.requestingInsertion || props.insertion?.queueId || null)
+const queueItems = computed(() => props.pending.map(item => ({ id: item.id, text: item.input.map(block => block.text || block.name || '').join(' '), removeDisabled: activeInsertId.value === item.id })))
 const insertTitle = () => t(props.insertion?.phase === 'waiting_for_tool_batch' ? 'chat.queueInsertionWaitingTools' : activeInsertId.value ? 'chat.queueInsertionStopping' : 'chat.insertQueuedMessage')
 defineExpose({ addFiles: (files: File[]) => chatInputRef.value?.addFiles(files) })
 async function load() {
@@ -50,8 +54,8 @@ onBeforeUnmount(() => { disposed = true })
   </NAlert>
   <template v-else-if="ready">
     <MessageList />
-    <div v-if="pending.length" class="task-chat-queue" role="status">
-      <MessageQueueFloatPanel :items="queueItems" :can-insert="canInsert" :can-remove="false" :active-insert-id="activeInsertId" :insert-title="insertTitle" @insert="insert" />
+    <div v-if="pending.length" class="task-chat-queue" role="status" :aria-busy="!!requestingRemoval">
+      <MessageQueueFloatPanel :items="queueItems" :can-insert="canInsert" :can-remove="canRemove" :remove-disabled="queueDisabled" :active-insert-id="activeInsertId" :insert-title="insertTitle" @insert="insert" @remove="remove" />
     </div>
     <ChatInput ref="chatInputRef" hide-settings :submit="send" :send-disabled="disabled" :stop-control="stopControl" :model-label="session.model || ''" model-disabled reasoning-effort-disabled />
   </template>

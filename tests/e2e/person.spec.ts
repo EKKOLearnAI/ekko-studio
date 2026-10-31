@@ -111,7 +111,22 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
       state.insertion={queueId:body.queue_id,phase:'waiting_for_tool_batch'}; state.tasks[0].revision++
       return route.fulfill({json:{task:state.tasks[0],pending:state.pending,...(state.canInsert ? {canInsert:true,insertion:state.insertion} : {})}})
     }
+    if (path.endsWith('/tasks/task1/queue/remove')) {
+      state.removeAttempted = true
+      await state.beforeRemove?.()
+      if (state.removeFailure) {
+        if (state.removeFailure.abort) return route.abort('failed')
+        if (state.removeFailure.status === 409) state.tasks[0].revision++
+        return route.fulfill({ status: state.removeFailure.status, json: { error: state.removeFailure.error } })
+      }
+      if (body.expected_revision !== state.tasks[0].revision || body.expected_execution_id !== state.tasks[0].execution_id) return route.fulfill({ status: 409, json: { error: 'Task changed' } })
+      if (state.insertion?.queueId === body.queue_id) return route.fulfill({ status: 409, json: { error: 'Another insertion is in progress' } })
+      state.pending = state.pending.filter((item: any) => item.id !== body.queue_id)
+      state.tasks[0].revision++
+      return route.fulfill({ json: { task: state.tasks[0], pending: state.pending, canRemove: state.canRemove, canInsert: !!state.canInsert, insertion: state.insertion || null } }).catch(() => {})
+    }
     if (path.endsWith('/tasks/task1/chat')) {
+      if (req.method() === 'GET' && state.removeAttempted && state.failChatReadAfterRemove) return route.fulfill({ status: 503, json: { error: 'Refresh unavailable' } })
       if (req.method() === 'POST') {
         if (body.expected_revision !== state.tasks[0].revision) return route.fulfill({ status: 409, json: { error: 'Task changed' } })
         state.pending ||= []
@@ -121,7 +136,7 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
       }
       const executions = state.executions || [{ id: state.tasks[0].execution_id || 'execution1', session_id: 'person-task-task1', state: state.tasks[0].execution_state, created_at: 1 }]
       const execution = executions.find((run: any) => run.id === new URL(req.url()).searchParams.get('execution_id')) || executions[0]
-      return route.fulfill({ json: { canInsert: !!state.canInsert, insertion: state.insertion || null, pending: state.pending || [], task: state.tasks[0], executions, execution, session: { ...state.session, id: execution.session_id, title: state.tasks[0].title } } })
+      return route.fulfill({ json: { canInsert: !!state.canInsert, ...(state.canRemove === undefined ? {} : { canRemove: state.canRemove }), insertion: state.insertion || null, pending: state.pending || [], task: state.tasks[0], executions, execution, session: { ...state.session, id: execution.session_id, title: state.tasks[0].title } } })
     }
     if (path.endsWith('/tasks/apply')) {
       if (body.expected_revision !== state.tasks[0].revision || (body.action === 'stop' && body.execution_id !== state.tasks[0].execution_id)) return route.fulfill({ status: 409, json: { error: 'Execution changed' } })
@@ -161,6 +176,201 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
   })
   return { state, operations }
 }
+
+async function setupTaskRemoval(page: Page, mode: 'light' | 'dark' = 'light') {
+  const scenario = await setup(page, mode, mode === 'light', false)
+  Object.assign(scenario.state, {
+    canRemove: true,
+    canInsert: true,
+    pending: [
+      { id: 'first', input: [{ type: 'text', text: 'Keep the earlier message' }] },
+      { id: 'selected', input: [{ type: 'text', text: 'Remove this queued message' }, { type: 'file', name: 'report.txt' }] },
+      { id: 'last', input: [{ type: 'text', text: 'Keep the last message' }] },
+    ],
+  })
+  await page.addInitScript(() => {
+    for (const id of ['person-task-task1', 'person-task-older']) (window as any).__PW_CHAT_SOCKET_RESUMES__[id] = { session_id: id, isWorking: true, messages: [], events: [] }
+  })
+  const drawer = page.locator('.person-task-chat')
+  const open = async () => {
+    await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+    await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+    await expect(drawer.locator('.queue-float-item')).toHaveCount(scenario.state.pending.length)
+  }
+  return { ...scenario, drawer, open, attempts: () => scenario.operations.filter(op => op.path.endsWith('/queue/remove')) }
+}
+
+for (const mode of ['light', 'dark'] as const) {
+  test(`task queue removal preserves other inputs and survives drawer reopen in ${mode}`, async ({ page }, testInfo) => {
+    const { state, operations, drawer, open, attempts } = await setupTaskRemoval(page, mode)
+    await page.setViewportSize({ width: mode === 'light' ? 390 : 1440, height: 900 })
+    await page.goto('/#/person'); await open()
+    const items = drawer.locator('.queue-float-item')
+    await items.filter({ hasText: 'Remove this queued message' }).getByRole('button', { name: 'Remove queued message', exact: true }).click()
+    await expect(items).toHaveCount(2)
+    expect(await items.locator('.queue-text').allTextContents()).toEqual(['Keep the earlier message', 'Keep the last message'])
+    expect(attempts()[0].body).toMatchObject({ queue_id: 'selected', expected_execution_id: 'execution1', expected_revision: 0 })
+    expect(attempts()[0].body.idempotency_key).toBeTruthy()
+    expect(state.tasks[0]).toMatchObject({ status: 'open', execution_state: 'running', running: true })
+    expect(operations.some(op => op.path.endsWith('/tasks/apply'))).toBe(false)
+    expect(await emitted(page, 'cancel_queued_run')).toEqual([])
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`task-queue-removal-${mode}.png`), animations: 'disabled' })
+    await page.keyboard.press('Escape'); await expect(drawer).toHaveCount(0)
+    await open(); await expect(items).toHaveCount(2)
+    await items.first().getByRole('button', { name: 'Remove queued message', exact: true }).click()
+    await expect(items).toHaveCount(1)
+    await items.first().getByRole('button', { name: 'Remove queued message', exact: true }).click()
+    await expect(drawer.locator('.task-chat-queue')).toHaveCount(0)
+    expect(attempts().map(op => op.body.expected_revision)).toEqual([0, 1, 2])
+    expect(new Set(attempts().map(op => op.body.idempotency_key)).size).toBe(3)
+    await expect(drawer.locator('.input-textarea')).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`task-queue-empty-${mode}.png`), animations: 'disabled' })
+  })
+}
+
+test('task queue removal blocks duplicate actions while the request is pending', async ({ page }) => {
+  const { state, drawer, open, attempts } = await setupTaskRemoval(page)
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  state.beforeRemove = () => gate
+  await page.goto('/#/person'); await open()
+  const removes = drawer.locator('.queue-remove')
+  await removes.first().click()
+  await expect.poll(() => attempts().length).toBe(1)
+  await expect(drawer.locator('.task-chat-queue')).toHaveAttribute('aria-busy', 'true')
+  for (const button of await removes.all()) await expect(button).toBeDisabled()
+  await expect(drawer.getByRole('button', { name: 'Stop task', exact: true })).toBeDisabled()
+  await page.screenshot({ path: test.info().outputPath('task-queue-removal-pending.png'), animations: 'disabled' })
+  await removes.nth(1).evaluate((button: HTMLButtonElement) => button.click())
+  expect(attempts()).toHaveLength(1)
+  release()
+  await expect(drawer.locator('.queue-float-item')).toHaveCount(2)
+  await expect(removes.first()).toBeEnabled()
+})
+
+test('task queue removal protects the inserting item and permits removal of another input', async ({ page }) => {
+  const { state, drawer, open, attempts } = await setupTaskRemoval(page)
+  state.insertion = { queueId: 'selected', phase: 'waiting_for_tool_batch' }
+  await page.goto('/#/person'); await open()
+  const selected = drawer.locator('.queue-float-item').filter({ hasText: 'Remove this queued message' })
+  await expect(selected.locator('.queue-remove')).toBeDisabled()
+  await drawer.locator('.queue-float-item').first().locator('.queue-remove').click()
+  await expect(drawer.locator('.queue-float-item')).toHaveCount(2)
+  await expect(selected.locator('.queue-remove')).toBeDisabled()
+  expect(state.insertion.queueId).toBe('selected')
+  expect(attempts().map(op => op.body.queue_id)).toEqual(['first'])
+})
+
+test('task queue removal hides controls for old backends without the capability', async ({ page }) => {
+  const { state, drawer, open, attempts } = await setupTaskRemoval(page)
+  delete state.canRemove
+  await page.goto('/#/person'); await open()
+  await expect(drawer.locator('.queue-remove')).toHaveCount(0)
+  expect(attempts()).toEqual([])
+})
+
+test('task queue removal prevents operations on historical and stopping executions', async ({ page }) => {
+  const { state, drawer, open, attempts } = await setupTaskRemoval(page)
+  state.executions = [
+    { id: 'execution1', session_id: 'person-task-task1', created_at: 2000, state: 'running' },
+    { id: 'older', session_id: 'person-task-older', created_at: 1000, state: 'finished' },
+  ]
+  await page.goto('/#/person'); await open()
+  await drawer.getByLabel('Execution history', { exact: true }).click()
+  await page.locator('.n-base-select-option:visible').last().click()
+  await expect(drawer.locator('.queue-remove')).toHaveCount(0)
+  state.tasks[0].execution_state = 'stopping'
+  await drawer.getByLabel('Execution history', { exact: true }).click()
+  await page.locator('.n-base-select-option:visible').first().click()
+  await expect(drawer.locator('.queue-remove')).toHaveCount(3)
+  for (const button of await drawer.locator('.queue-remove').all()) await expect(button).toBeDisabled()
+  expect(attempts()).toEqual([])
+})
+
+for (const status of ['completed', 'closed']) {
+  test(`task queue removal hides controls when the task becomes ${status}`, async ({ page }) => {
+    const { state, drawer, open, attempts } = await setupTaskRemoval(page)
+    await page.goto('/#/person'); await open()
+    state.tasks[0].status = status
+    await emit(page, 'person.updated', { session_id: 'person-main-1' })
+    await expect(drawer).toBeVisible()
+    await expect(drawer.locator('.queue-remove')).toHaveCount(0)
+    expect(attempts()).toEqual([])
+  })
+}
+
+for (const failure of [
+  { status: 403, error: 'Resource permission revoked' },
+  { status: 409, error: 'Task changed; refresh and try again' },
+  { status: 404, error: 'Deletion endpoint unavailable' },
+  { status: 500, error: 'Server unavailable' },
+  { status: 0, abort: true, error: 'Failed to fetch' },
+]) {
+  test(`task queue removal preserves messages and recovers after ${failure.status || 'network'} failure`, async ({ page }) => {
+    const { state, drawer, open, attempts } = await setupTaskRemoval(page)
+    state.removeFailure = failure
+    state.failChatReadAfterRemove = failure.status === 403
+    await page.goto('/#/person'); await open()
+    const removes = drawer.locator('.queue-remove')
+    await removes.first().click()
+    await expect(drawer.locator('.task-chat-alert').filter({ hasText: failure.error })).toBeVisible()
+    await expect(drawer.locator('.queue-float-item')).toHaveCount(3)
+    await expect(removes.first()).toBeEnabled()
+    expect(attempts()).toHaveLength(1)
+    const revision = state.tasks[0].revision
+    state.removeFailure = null; state.failChatReadAfterRemove = false
+    await removes.first().click()
+    await expect(drawer.locator('.queue-float-item')).toHaveCount(2)
+    await expect(drawer.locator('.task-chat-alert')).toHaveCount(0)
+    expect(attempts()[1].body.expected_revision).toBe(revision)
+    expect(attempts()[1].body.idempotency_key).not.toBe(attempts()[0].body.idempotency_key)
+  })
+}
+
+test('task queue removal retains a confirmed deletion when the follow-up refresh fails', async ({ page }) => {
+  const { state, drawer, open, attempts } = await setupTaskRemoval(page)
+  state.failChatReadAfterRemove = true
+  await page.goto('/#/person'); await open()
+  await drawer.locator('.queue-remove').first().click()
+  await expect(drawer.locator('.task-chat-alert')).toContainText('Could not load tasks')
+  await expect(drawer.getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
+  await expect(drawer.locator('.queue-float-item')).toHaveCount(2)
+  await expect(drawer.locator('.queue-float-item').filter({ hasText: 'Keep the earlier message' })).toHaveCount(0)
+  expect(attempts()).toHaveLength(1)
+  state.failChatReadAfterRemove = false
+  await drawer.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(drawer.locator('.task-chat-alert')).toHaveCount(0)
+  await expect(drawer.locator('.queue-float-item')).toHaveCount(2)
+})
+
+test('task queue removal reconciles an accepted deletion after closing and reopening the drawer', async ({ page }) => {
+  const { state, drawer, open, attempts } = await setupTaskRemoval(page)
+  let release!: () => void
+  state.beforeRemove = () => new Promise<void>(resolve => { release = resolve })
+  await page.goto('/#/person'); await open()
+  await drawer.locator('.queue-remove').first().click()
+  await expect.poll(() => attempts().length).toBe(1)
+  await page.keyboard.press('Escape'); await expect(drawer).toHaveCount(0)
+  release()
+  await expect.poll(() => state.pending.length).toBe(2)
+  await open()
+  await expect(drawer.locator('.queue-float-item')).toHaveCount(2)
+  await expect(drawer.locator('.task-chat-alert')).toHaveCount(0)
+})
+
+test('task queue removal refreshes a queued input that started before the delete reached the server', async ({ page }) => {
+  const { state, drawer, open, attempts } = await setupTaskRemoval(page)
+  state.beforeRemove = async () => { state.pending.shift() }
+  state.removeFailure = { status: 409, error: 'Queued execution changed; refresh and try again' }
+  await page.goto('/#/person'); await open()
+  await drawer.locator('.queue-remove').first().click()
+  await expect(drawer.locator('.task-chat-alert')).toContainText('Queued execution changed')
+  await expect(drawer.locator('.queue-float-item')).toHaveCount(2)
+  await expect(drawer.locator('.queue-float-item').filter({ hasText: 'Keep the earlier message' })).toHaveCount(0)
+  expect(attempts()).toHaveLength(1)
+  expect(state.tasks[0].execution_state).toBe('running')
+})
 
 for (const listState of ['existing', 'empty', 'unavailable']) {
   test(`leaving a focused Person result sends to ordinary chat (${listState} list)`, async ({ page }) => {

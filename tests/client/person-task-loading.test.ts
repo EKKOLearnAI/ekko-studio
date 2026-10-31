@@ -7,10 +7,10 @@ import PersonTaskConversation from '@/components/hermes/person/PersonTaskConvers
 import SessionTasksDrawer from '@/components/hermes/tasks/SessionTasksDrawer.vue'
 
 const mocks = vi.hoisted(() => ({
-  request: vi.fn(), switchSession: vi.fn(), subscribers: new Set<(event: { session_id?: string }) => void>(),
+  request: vi.fn(), remove: vi.fn(), switchSession: vi.fn(), subscribers: new Set<(event: { session_id?: string }) => void>(),
   route: { query: {} as Record<string, string> },
 }))
-vi.mock('@/api/person', () => ({ personRequest: mocks.request, personTaskCanStop: () => false, stopPersonTask: vi.fn() }))
+vi.mock('@/api/person', () => ({ personRequest: mocks.request, personTaskCanStop: () => false, stopPersonTask: vi.fn(), removePersonTaskMessage: mocks.remove }))
 vi.mock('@/api/studio/chat', () => ({ onPersonUpdated: (fn: (event: { session_id?: string }) => void) => { mocks.subscribers.add(fn); return () => mocks.subscribers.delete(fn) } }))
 vi.mock('@/stores/hermes/chat', () => ({ provideScopedChatStore: () => ({ ensureSessionLoaded: vi.fn(), switchSession: mocks.switchSession }), buildContentBlocks: vi.fn(), uploadFiles: vi.fn() }))
 vi.mock('@/api/studio/session-tasks', () => ({ fetchSessionTasks: vi.fn(), updateSessionTaskStatus: vi.fn() }))
@@ -37,7 +37,7 @@ const response = { task: { id: 'task', title: 'Loaded task', status: 'open', rev
 const row = (title: string) => ({ id: title, title, summary: 'Summary', status: 'open', updated_at: 1, session_id: 'main', selection_json: '{}' })
 const emitUpdate = () => { for (const fn of mocks.subscribers) fn({ session_id: 'main' }) }
 let wrapper: VueWrapper | undefined
-beforeEach(() => { mocks.request.mockReset(); mocks.switchSession.mockReset().mockResolvedValue(true); mocks.subscribers.clear(); mocks.route = reactive({ query: {} }) })
+beforeEach(() => { mocks.request.mockReset(); mocks.remove.mockReset(); mocks.switchSession.mockReset().mockResolvedValue(true); mocks.subscribers.clear(); mocks.route = reactive({ query: {} }) })
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers() })
 
 describe('Person task loading and recovery', () => {
@@ -119,12 +119,72 @@ describe('Person task loading and recovery', () => {
   it('offers retry when message resume returns false, then displays the conversation on success', async () => {
     mocks.switchSession.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
     wrapper = mount(PersonTaskConversation, { props: { session: { id: 'task-session' } as any, pending: [], send: vi.fn(), disabled: false, canInsert: false,
-      requestingInsertion: '', insert: vi.fn(), stopControl: { active: false, allowSend: true, pending: false, request: vi.fn() } } })
+      requestingInsertion: '', insert: vi.fn(), canRemove: false, requestingRemoval: '', queueDisabled: false, remove: vi.fn(), stopControl: { active: false, allowSend: true, pending: false, request: vi.fn() } } })
     await flushPromises()
     expect(wrapper.find('[role="progressbar"]').exists()).toBe(false)
     expect(wrapper.find('.test-messages').exists()).toBe(false)
     await wrapper.get('[role="alert"] button').trigger('click'); await flushPromises()
     expect(wrapper.find('.test-messages').exists()).toBe(true)
     expect(wrapper.find('.test-input').exists()).toBe(true)
+  })
+})
+
+describe('Person task removal with queued refreshes', () => {
+  const current = () => ({ ...response, task: { ...response.task, execution_id: 'run' },
+    session: { id: 'task-session' }, execution: { id: 'run' },
+    executions: [{ id: 'run', session_id: 'task-session' }], canInsert: true, canRemove: true,
+    pending: [{ id: 'selected', input: [{ type: 'text', text: 'Selected' }] }, { id: 'kept', input: [{ type: 'text', text: 'Kept' }] }],
+  })
+
+  it('blocks repeated mutations and update reads until the post-removal refresh settles', async () => {
+    const initial = current(), removal = deferred<ReturnType<typeof current>>(), following = deferred<ReturnType<typeof current>>()
+    mocks.request.mockResolvedValueOnce(initial).mockReturnValueOnce(following.promise)
+    mocks.remove.mockReturnValueOnce(removal.promise)
+    wrapper = mount(PersonTaskChat, { props: { taskId: 'task', mainSessionId: 'main' } })
+    await flushPromises()
+    const conversation = () => wrapper!.getComponent(PersonTaskConversation)
+    const operation = conversation().props('remove')('selected')
+    await flushPromises()
+    expect(conversation().props('queueDisabled')).toBe(true)
+    expect(conversation().props('disabled')).toBe(true)
+    for (let i = 0; i < 10; i++) emitUpdate()
+    await conversation().props('remove')('selected')
+    await conversation().props('insert')('kept')
+    expect(await conversation().props('send')('Follow-up')).toBe(false)
+    expect(mocks.remove).toHaveBeenCalledTimes(1)
+    expect(mocks.request).toHaveBeenCalledTimes(1)
+    const confirmed = { ...initial, task: { ...initial.task, revision: 2 }, pending: initial.pending.slice(1) }
+    removal.resolve(confirmed); await flushPromises()
+    expect(conversation().props('pending')).toEqual(confirmed.pending)
+    expect(conversation().props('queueDisabled')).toBe(true)
+    emitUpdate(); await flushPromises()
+    expect(mocks.request).toHaveBeenCalledTimes(2)
+    following.reject(new Error('Refresh failed')); await operation; await flushPromises()
+    expect(conversation().props('pending')).toEqual(confirmed.pending)
+    expect(conversation().props('queueDisabled')).toBe(false)
+    expect(wrapper.text()).toContain('sessionTasks.loadFailed')
+  })
+
+  it('keeps removal disabled for a coalesced follow-up and reenables it after a read timeout', async () => {
+    vi.useFakeTimers()
+    const initial = current(), first = deferred<ReturnType<typeof current>>(), following = deferred<ReturnType<typeof current>>()
+    mocks.request.mockResolvedValueOnce(initial).mockReturnValueOnce(first.promise).mockReturnValueOnce(following.promise)
+    wrapper = mount(PersonTaskChat, { props: { taskId: 'task', mainSessionId: 'main' } })
+    await flushPromises()
+    const conversation = () => wrapper!.getComponent(PersonTaskConversation)
+    emitUpdate(); await flushPromises()
+    for (let i = 0; i < 10; i++) emitUpdate()
+    expect(conversation().props('queueDisabled')).toBe(true)
+    first.resolve(initial); await flushPromises()
+    expect(mocks.request).toHaveBeenCalledTimes(3)
+    expect(conversation().props('queueDisabled')).toBe(true)
+    await conversation().props('remove')('selected')
+    expect(mocks.remove).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(15_000); await flushPromises()
+    expect(mocks.request.mock.calls[2][3].aborted).toBe(true)
+    expect(conversation().props('queueDisabled')).toBe(false)
+    expect(conversation().props('pending')).toEqual(initial.pending)
+    following.resolve({ ...initial, pending: [] }); await flushPromises()
+    expect(conversation().props('pending')).toEqual(initial.pending)
   })
 })

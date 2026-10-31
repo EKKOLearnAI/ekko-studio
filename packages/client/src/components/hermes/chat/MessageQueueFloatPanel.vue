@@ -6,6 +6,7 @@ export interface MessageQueueFloatItem {
   text: string
   secondary?: string
   position?: number
+  removeDisabled?: boolean
 }
 
 const props = withDefaults(defineProps<{
@@ -13,6 +14,7 @@ const props = withDefaults(defineProps<{
   testId?: string
   canInsert?: boolean
   canRemove?: boolean
+  removeDisabled?: boolean
   activeInsertId?: string | null
   insertTitle?: (item: MessageQueueFloatItem) => string
   removeTitle?: string | ((item: MessageQueueFloatItem) => string)
@@ -20,6 +22,7 @@ const props = withDefaults(defineProps<{
   testId: undefined,
   canInsert: false,
   canRemove: true,
+  removeDisabled: false,
   activeInsertId: null,
   insertTitle: undefined,
   removeTitle: undefined,
@@ -82,6 +85,7 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
           v-if="canRemove"
           type="button"
           class="queue-remove"
+          :disabled="removeDisabled || item.removeDisabled"
           :title="resolvedRemoveTitle(item)"
           :aria-label="resolvedRemoveTitle(item)"
           @click="emit('remove', item.id)"
@@ -257,6 +261,12 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
 .queue-remove:hover {
   color: $error;
   background: rgba($error, 0.1);
+}
+
+.queue-remove:disabled {
+  pointer-events: none;
+  cursor: default;
+  opacity: 0.34;
 }
 
 @media (max-width: 640px) {
