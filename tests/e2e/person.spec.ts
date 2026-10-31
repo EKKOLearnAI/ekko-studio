@@ -1423,6 +1423,60 @@ async function emitted(page: Page, event: string) {
   return page.evaluate(event => (window as any).__PW_CHAT_SOCKET__.emitted.filter((e: any) => e.event === event).map((e: any) => e.payload), event)
 }
 
+test('Person preserves 1 2 3 through partial queue snapshots and refresh', async ({ page }) => {
+  await setup(page, 'dark', false)
+  await page.goto('/#/person?session=person-main-1')
+  await expect(page.locator('.person-view')).toHaveAttribute('aria-busy', 'false')
+  const input = page.locator('.person-compose .input-textarea')
+  const queue = page.locator('.queue-float-panel')
+  await input.fill('1')
+  await input.press('Enter')
+  await expect.poll(() => emitted(page, 'run').then(runs => runs.length)).toBe(1)
+  await emit(page, 'run.started', { queue_id: (await emitted(page, 'run'))[0].queue_id, queue_length: 0 })
+  for (const text of ['2', '3']) {
+    await input.fill(text)
+    await input.press('Enter')
+  }
+  await expect.poll(() => emitted(page, 'run').then(runs => runs.length)).toBe(3)
+  const [, second, third] = await emitted(page, 'run')
+  await emit(page, 'run.queued', { queue_id: second.queue_id, queue_length: 1,
+    queued_messages: [{ id: second.queue_id, role: 'user', content: '2', timestamp: 1 }] })
+  await expect(queue.locator('.queue-float-item')).toHaveCount(2)
+  await expect(queue).toContainText('2')
+  await expect(queue).toContainText('3')
+  await emit(page, 'message.delta', { delta: 'reply 1' })
+  await emit(page, 'run.completed', { output: 'reply 1', queue_remaining: 1 })
+  await emit(page, 'run.queued', { dequeued_queue_id: second.queue_id, queue_length: 0, queued_messages: [] })
+  await emit(page, 'run.started', { run_id: 'turn-2', queue_id: second.queue_id, queue_length: 0 })
+  await expect(queue.locator('.queue-float-item')).toHaveCount(1)
+  await expect(queue).toContainText('3')
+  await expect(page.locator('.msg-content.user .markdown-body')).toHaveText(['1', '2'])
+  await page.screenshot({ path: test.info().outputPath('second-running-third-queued.png'), animations: 'disabled' })
+  await emit(page, 'run.queued', { queue_id: third.queue_id, queue_length: 1,
+    queued_messages: [{ id: third.queue_id, role: 'user', content: '3', timestamp: 1 }] })
+  await emit(page, 'message.delta', { run_id: 'turn-2', delta: 'reply 2' })
+  await emit(page, 'run.completed', { run_id: 'turn-2', output: 'reply 2', queue_remaining: 1 })
+  await emit(page, 'run.queued', { dequeued_queue_id: third.queue_id, queue_length: 0, queued_messages: [] })
+  await emit(page, 'run.started', { run_id: 'turn-3', queue_id: third.queue_id, queue_length: 0 })
+  await emit(page, 'message.delta', { run_id: 'turn-3', delta: 'reply 3' })
+  await emit(page, 'run.completed', { run_id: 'turn-3', output: 'reply 3', queue_remaining: 0 })
+  const expected = ['1', 'reply 1', '2', 'reply 2', '3', 'reply 3']
+  await expect(page.locator('.msg-content .markdown-body')).toHaveText(expected)
+  await expect(queue).toHaveCount(0)
+  await page.addInitScript(messages => {
+    (window as any).__PW_CHAT_SOCKET_RESUMES__ = { ...(window as any).__PW_CHAT_SOCKET_RESUMES__, 'person-main-1': {
+      session_id: 'person-main-1', isWorking: false, events: [], queueLength: 0, queueMessages: [], messages,
+    } }
+  }, expected.map((content, index) => ({ id: index + 1, role: index % 2 ? 'assistant' : 'user', content, timestamp: index + 1 })))
+  await page.reload()
+  await expect(page.locator('.msg-content .markdown-body')).toHaveText(expected)
+  await expect(queue).toHaveCount(0)
+  await expect(page.locator('.person-view')).toHaveAttribute('aria-busy', 'false')
+  await expect(page.locator('.page-loading-overlay')).toHaveCount(0)
+  await expect(page.locator('.person-chat-surface')).toHaveCSS('opacity', '1')
+  await page.screenshot({ path: test.info().outputPath('ordered-after-refresh.png'), animations: 'disabled' })
+})
+
 for (const scenario of ['active', 'resumed'] as const) {
   test(`Person clears a started input from the queue (${scenario})`, async ({ page }) => {
     await setup(page, scenario === 'active' ? 'light' : 'dark', false)

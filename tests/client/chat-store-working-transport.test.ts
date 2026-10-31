@@ -132,6 +132,43 @@ afterEach(async () => {
 })
 
 describe('sidebar activity through the real chat API', () => {
+  it.each(['dequeue', 'peer'])('keeps inputs 1, 2 and 3 through partial queue acknowledgements and consecutive turns (%s)', async (promotion) => {
+    Object.assign(store.sessions[0], { source: 'builtin_agent', agent: 'ekko-agent', agentPreset: 'person' })
+    await store.switchSession('one')
+    await store.sendMessage('1')
+    const socket = socketState.sockets[0]
+    const runs = () => socket.emit.mock.calls.filter((call: any[]) => call[0] === 'run').map((call: any[]) => call[1])
+    const emit = (event: string, payload: object) => socket.__trigger(event, { event, session_id: 'one', ...payload })
+    emit('run.started', { queue_id: runs()[0].queue_id, queue_length: 0 })
+    await store.sendMessage('2')
+    await store.sendMessage('3')
+    const [, second, third] = runs()
+    emit('run.queued', { queue_id: second.queue_id, queue_length: 1,
+      queued_messages: [{ id: second.queue_id, content: '2', timestamp: 1 }] })
+    expect(store.queuedUserMessages.get('one')?.map(message => message.content)).toEqual(['2', '3'])
+    emit('message.delta', { delta: 'reply 1' })
+    emit('run.completed', { output: 'reply 1', queue_remaining: 1 })
+    if (promotion === 'peer') {
+      emit('run.peer_user_message', { message: { id: second.queue_id, role: 'user', content: '2', timestamp: 1, queued: false } })
+      expect(store.messages.map(message => message.content)).toEqual(['1', 'reply 1', '2'])
+    }
+    emit('run.queued', { dequeued_queue_id: second.queue_id, queue_length: 0, queued_messages: [] })
+    emit('run.started', { queue_id: second.queue_id, queue_length: 0 })
+    expect(store.queuedUserMessages.get('one')?.map(message => message.content)).toEqual(['3'])
+    emit('run.queued', { queue_id: third.queue_id, queue_length: 1,
+      queued_messages: [{ id: second.queue_id, content: '2', timestamp: 1 }, { id: third.queue_id, content: '3', timestamp: 1 }] })
+    expect(store.queuedUserMessages.get('one')?.map(message => message.content)).toEqual(['3'])
+    emit('message.delta', { delta: 'reply 2' })
+    emit('run.completed', { output: 'reply 2', queue_remaining: 1 })
+    emit('run.queued', { dequeued_queue_id: third.queue_id, queue_length: 0, queued_messages: [] })
+    emit('run.started', { queue_id: third.queue_id, queue_length: 0 })
+    emit('message.delta', { delta: 'reply 3' })
+    emit('run.completed', { output: 'reply 3', queue_remaining: 0 })
+    expect(store.messages.map(message => message.content)).toEqual(['1', 'reply 1', '2', 'reply 2', '3', 'reply 3'])
+    expect(store.queuedUserMessages.get('one')).toBeUndefined()
+    expect(store.isSessionLive('one')).toBe(false)
+  })
+
   it.each(['clear', 'replace', 'server'])('does not submit a prepared send after %s invalidation', async (action) => {
     await store.switchSession('one')
     const { useAppStore } = await import('@/stores/hermes/app')

@@ -44,6 +44,43 @@ beforeEach(() => {
 })
 
 describe('sidebar working state', () => {
+  it('preserves later optimistic inputs while earlier queue confirmations arrive', async () => {
+    const store = useChatStore()
+    store.sessions = [{ ...session('person-main-1'), source: 'builtin_agent', agent: 'ekko-agent', agentPreset: 'person' }]
+    await store.switchSession('person-main-1')
+    await store.sendMessage('1')
+    await store.sendMessage('2')
+    await store.sendMessage('3')
+    const [second, onEvent] = api.startRunViaSocket.mock.calls[1]
+    const [third] = api.startRunViaSocket.mock.calls[2]
+
+    onEvent({ event: 'run.queued', session_id: 'person-main-1', queue_id: second.queue_id, queue_length: 1,
+      queued_messages: [{ id: second.queue_id, role: 'user', content: '2', timestamp: 1 }] })
+    expect(store.queuedUserMessages.get('person-main-1')?.map(message => message.content)).toEqual(['2', '3'])
+
+    onEvent({ event: 'run.queued', session_id: 'person-main-1', dequeued_queue_id: second.queue_id, queue_length: 0, queued_messages: [] })
+    expect(store.messages.filter(message => message.role === 'user').map(message => message.content)).toEqual(['1', '2'])
+    expect(store.queuedUserMessages.get('person-main-1')?.map(message => message.id)).toEqual([third.queue_id])
+    onEvent({ event: 'run.started', session_id: 'person-main-1', queue_id: third.queue_id, queue_length: 0 })
+    expect(store.messages.filter(message => message.role === 'user').map(message => message.content)).toEqual(['1', '2', '3'])
+    expect(store.queuedUserMessages.get('person-main-1')).toBeUndefined()
+  })
+
+  it('moves a locally direct input out of the transcript when the server queues it', async () => {
+    const store = useChatStore()
+    store.sessions = [{ ...session('person-main-1'), source: 'builtin_agent', agent: 'ekko-agent', agentPreset: 'person' }]
+    await store.switchSession('person-main-1')
+    await store.sendMessage('2')
+    const [payload, onEvent] = api.startRunViaSocket.mock.calls[0]
+    onEvent({ event: 'run.queued', session_id: 'person-main-1', queue_id: payload.queue_id, queue_length: 1,
+      queued_messages: [{ id: payload.queue_id, role: 'user', content: '2', timestamp: 1 }] })
+    expect(store.messages.filter(message => message.role === 'user')).toEqual([])
+    expect(store.queuedUserMessages.get('person-main-1')?.map(message => message.content)).toEqual(['2'])
+    onEvent({ event: 'message.delta', session_id: 'person-main-1', delta: 'reply to 1' })
+    onEvent({ event: 'run.queued', session_id: 'person-main-1', dequeued_queue_id: payload.queue_id, queue_length: 0, queued_messages: [] })
+    expect(store.messages.map(message => message.content)).toEqual(['reply to 1', '2'])
+  })
+
   it('removes an optimistic Person queue entry as soon as its run starts', async () => {
     const store = useChatStore()
     store.sessions = [{ ...session('person-main-1'), source: 'builtin_agent', agent: 'ekko-agent', agentPreset: 'person' }]

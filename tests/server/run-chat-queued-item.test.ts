@@ -174,6 +174,82 @@ function makeServerHarness() {
 }
 
 describe('ChatRunSocket queued bridge runs', () => {
+  it('does not let a later input overtake async preparation of the first input', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const uploads = await import('../../packages/server/src/modules/studio/services/files/session-uploads')
+    const { handlers, io, socket } = makeServerHarness()
+    const server: any = new ChatRunSocket(io as any)
+    server.onConnection(socket)
+    let releasePreparation!: () => void
+    let releaseRun!: () => void
+    const preparing = new Promise<void>(resolve => { releasePreparation = resolve })
+    const running = new Promise<void>(resolve => { releaseRun = resolve })
+    const preparation = vi.spyOn(uploads, 'recordSessionUploadAttachments').mockImplementation(async () => { await preparing })
+    const dispatch = vi.spyOn(server, 'handleRun').mockImplementation(async () => { await running })
+    const first = handlers.get('run')!({ session_id: 'session-1', input: [{ type: 'text', text: '1' }], queue_id: '1',
+      source: 'builtin_agent', coding_agent_id: 'ekko-agent' })
+    const requests = [first]
+    try {
+      await vi.waitFor(() => expect(preparation).toHaveBeenCalledOnce())
+      requests.push(handlers.get('run')!({ session_id: 'session-1', input: '2', queue_id: '2', source: 'builtin_agent', coding_agent_id: 'ekko-agent' }))
+      await new Promise(resolve => setImmediate(resolve))
+      expect(dispatch).not.toHaveBeenCalled()
+      releasePreparation()
+      await vi.waitFor(() => expect(server.sessionMap.get('session-1').queue.map((item: any) => item.input)).toEqual(['2']))
+      expect(dispatch).toHaveBeenCalledOnce()
+      expect(dispatch.mock.calls[0][1]).toMatchObject({ queue_id: '1' })
+    } finally {
+      releasePreparation()
+      releaseRun()
+      await Promise.allSettled(requests)
+      preparation.mockRestore()
+    }
+  })
+
+  it('accepts the next input after earlier preparation fails', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const uploads = await import('../../packages/server/src/modules/studio/services/files/session-uploads')
+    const { handlers, io, socket } = makeServerHarness()
+    const server: any = new ChatRunSocket(io as any)
+    server.onConnection(socket)
+    const preparation = vi.spyOn(uploads, 'recordSessionUploadAttachments').mockRejectedValueOnce(new Error('Upload not available'))
+    const dispatch = vi.spyOn(server, 'handleRun').mockResolvedValue(undefined)
+    try {
+      await Promise.all([
+        handlers.get('run')!({ session_id: 'session-1', input: [{ type: 'text', text: '1' }], queue_id: '1', source: 'builtin_agent', coding_agent_id: 'ekko-agent' }),
+        handlers.get('run')!({ session_id: 'session-1', input: '2', queue_id: '2', source: 'builtin_agent', coding_agent_id: 'ekko-agent' }),
+      ])
+      expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({ queue_id: '1', error: 'Upload not available' }))
+      expect(dispatch).toHaveBeenCalledOnce()
+      expect(dispatch.mock.calls[0][1]).toMatchObject({ queue_id: '2' })
+    } finally {
+      preparation.mockRestore()
+    }
+  })
+
+  it('reserves an Ekko session during async startup so later inputs stay in FIFO order', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server: any = new ChatRunSocket(io as any)
+    server.onConnection(socket)
+    let release!: () => void
+    const starting = new Promise<void>(resolve => { release = resolve })
+    const dispatch = vi.spyOn(server, 'handleRun').mockImplementation(async () => { await starting })
+    const send = (input: string) => handlers.get('run')!({ session_id: 'session-1', input, queue_id: input,
+      source: 'builtin_agent', coding_agent_id: 'ekko-agent' })
+    const requests = [send('1')]
+    try {
+      await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(1))
+      requests.push(send('2'), send('3'))
+      await vi.waitFor(() => expect(server.sessionMap.get('session-1').queue.map((item: any) => item.input)).toEqual(['2', '3']))
+      expect(dispatch).toHaveBeenCalledTimes(1)
+      expect(server.sessionMap.get('session-1').isWorking).toBe(true)
+    } finally {
+      release()
+      await Promise.allSettled(requests)
+    }
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     respondToEkkoToolApprovalMock.mockReset().mockReturnValue({ handled: false, resolved: false })
