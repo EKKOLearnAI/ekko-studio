@@ -61,10 +61,43 @@ watch(hasWork, (value, previous) => {
 watch(() => props.scope, () => { opened.value = false; finishing.value = false; clearTimeout(finishTimer); clearTimeout(completionTimer) })
 const state = computed(() => completion.value || finishing.value ? 'done' : active.value.some(task => ['failed', 'interrupted'].includes(task.execution_state)) || flows.value.some(flow => flow.state === 'failed') ? 'error' : active.value.some(task => attentionStates.has(task.execution_state)) ? 'thinking' : 'searching')
 const animation = computed(() => personAvatarAnimation(avatar.value, state.value) || PERSON_ANIMATIONS[state.value])
-const headline = computed(() => completion.value ? `${t('person.states.finished')} · ${completion.value.title}` : finishing.value ? t('person.states.finished') : active.value[0]?.title || flows.value[0]?.title || t('person.backgroundTasks'))
 function dismiss(event: Event) { if (!root.value?.contains(event.target as Node)) opened.value = false }
 function keydown(event: KeyboardEvent) { if (event.key === 'Escape' && opened.value) { opened.value = false; if (root.value?.contains(document.activeElement)) root.value?.querySelector<HTMLButtonElement>('button')?.focus() } }
 function selectTask(id: string) { opened.value = false; emit('task', id) }
+function stageImage(flow: PersonFlow, stage: PersonFlow['stages'][number]) {
+  const bot = personBot(stage.bot_type)
+  if (!bot) return avatar.value.src
+  if (reducedMotion.value) return deploymentUrl(bot.avatar)
+  const status = personFlowStageStatus(flow, stage)
+  const animation = status === 'completed' ? 'done' : ['blocked', 'interrupted'].includes(status) ? 'error' : ['running', 'active'].includes(status) ? 'searching' : 'sleeping'
+  return deploymentUrl(bot.animations[animation])
+}
+function stageClick(flow: PersonFlow, stage: PersonFlow['stages'][number]) {
+  const tasks = stage.tasks.filter(task => task.status !== 'closed')
+  if (tasks.length === 1) selectTask(tasks[0].id)
+  else { opened.value = false; emit('flow', flow.id) }
+}
+function groupStyle(index: number) {
+  const row = Math.floor(index / 3)
+  const column = row % 2 ? 2 - index % 3 : index % 3
+  return { left: `${90 + column * 220}px`, top: `${row * 160 + 14}px` }
+}
+function snakePath(count: number) {
+  let path = 'M90 128'
+  for (let index = 1; index < count; index++) {
+    const row = Math.floor(index / 3)
+    const column = row % 2 ? 2 - index % 3 : index % 3
+    const x = 90 + column * 220, y = row * 160 + 128
+    if (index % 3) path += ` H${x}`
+    else { const edge = row % 2 ? 638 : -18; path += ` C${edge} ${y - 160} ${edge} ${y} ${x} ${y}` }
+  }
+  return path
+}
+function taskImage(task: PersonTask) {
+  if (reducedMotion.value) return avatar.value.src
+  const state = ['failed', 'interrupted'].includes(task.execution_state) ? 'error' : ['starting', 'running', 'stopping'].includes(task.execution_state) ? 'searching' : 'sleeping'
+  return personAvatarAnimation(avatar.value, state) || PERSON_ANIMATIONS[state]
+}
 const formattedCount = computed(() => Math.max(props.count, active.value.length, flows.value.length).toLocaleString(locale.value))
 const reducedMotion = ref(false)
 let motionQuery: MediaQueryList | undefined
@@ -85,8 +118,8 @@ onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); 
       <section v-if="(hasWork || finishing || completion) && !pageLoading" class="activity-shell" data-theme-surface="card">
         <button type="button" class="person-task-island" :aria-expanded="opened" :aria-label="`${avatar.label} · ${t('person.backgroundTasks')} · ${formattedCount}`" @click="opened = !opened">
           <span class="person-task-island__avatar-slot" aria-hidden="true"><img class="person-task-island__avatar" :src="reducedMotion ? avatar.src : animation" alt="" width="48" height="48" /></span>
-          <span class="person-task-island__label"><strong>{{ avatar.label }}</strong><Transition name="activity-label" mode="out-in"><span :key="headline">{{ headline }}</span></Transition></span>
-          <span class="person-task-island__count">{{ formattedCount }}</span>
+          <span class="person-task-island__label"><span><b>{{ standalone.length.toLocaleString(locale) }}</b> {{ t('person.backgroundTasks') }}</span><span><b>{{ flows.length.toLocaleString(locale) }}</b> {{ t('person.flows') }}</span></span>
+
           <span aria-hidden="true">{{ opened ? '−' : '+' }}</span>
         </button>
         <Transition name="activity-completion" mode="out-in">
@@ -97,21 +130,32 @@ onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); 
         <Transition name="activity-content">
           <div v-if="opened" class="activity-content">
             <div class="activity-scroll">
-              <section v-for="flow in flows" :key="flow.id" class="activity-flow">
-                <button class="activity-row" @click="opened = false; emit('flow', flow.id)"><strong>{{ flow.title }}</strong><span>›</span></button>
-                <TransitionGroup tag="ol" name="activity-stage" class="activity-stages">
-                  <li v-for="group in personFlowGroups(flow)" :key="group.position" :class="{ current: group.position === flow.current_position, done: group.completed === group.stages.length }">
-                    <span class="activity-stage-marker" :key="`${flow.id}:${group.position}:${group.position === flow.current_position}:${group.completed}`" aria-hidden="true">{{ group.completed === group.stages.length ? '✓' : group.position === flow.current_position ? '●' : '○' }}</span>
-                    <div v-for="stage in group.stages" :key="stage.id" class="activity-stage">
-                      <span class="activity-role"><img :src="personBot(stage.bot_type) ? deploymentUrl(personBot(stage.bot_type)!.avatar) : avatar.src" alt="" width="24" height="24" />{{ stage.session_title || stage.goal }}</span><Transition name="activity-label" mode="out-in"><small :key="personFlowStageStatus(flow, stage)">{{ t(personFlowStatusKey(personFlowStageStatus(flow, stage))) }}</small></Transition>
-                      <button v-for="task in stage.tasks.filter(item => item.status !== 'closed')" :key="task.id" class="activity-row" @click="selectTask(task.id)"><span>{{ task.title }}</span><small>{{ t(`person.states.${task.execution_state || 'pending'}`) }}</small><span>›</span></button>
-                    </div>
-                  </li>
-                </TransitionGroup>
-              </section>
               <button v-for="task in standalone" :key="task.id" class="activity-row" @click="selectTask(task.id)">
-                <span class="activity-task-text"><strong>{{ task.title }}</strong><small>{{ t(`person.states.${task.execution_state || 'pending'}`) }}</small><small v-if="task.summary">{{ task.summary }}</small></span><span>›</span>
+                <img :src="taskImage(task)" alt="" width="40" height="40" /><span class="activity-task-text"><strong>{{ task.title }}</strong><small>{{ t(`person.states.${task.execution_state || 'pending'}`) }}</small><small v-if="task.summary">{{ task.summary }}</small></span><span>›</span>
               </button>
+              <section v-for="flow in flows" :key="flow.id" class="activity-flow">
+                <button class="activity-row activity-flow-title" @click="opened = false; emit('flow', flow.id)"><strong>{{ flow.title }}</strong><span>›</span></button>
+                <div class="activity-snake-scroll">
+                  <div class="activity-snake" :style="{ height: `${Math.ceil(personFlowGroups(flow).length / 3) * 160}px` }">
+                    <svg width="648" :height="Math.ceil(personFlowGroups(flow).length / 3) * 160" aria-hidden="true">
+                      <path class="activity-track" :d="snakePath(personFlowGroups(flow).length)" />
+                      <path class="activity-progress" :d="snakePath(personFlowGroups(flow).filter(group => group.position <= flow.current_position).length)" />
+                    </svg>
+                    <ol class="activity-stages">
+                      <li v-for="(group, index) in personFlowGroups(flow)" :key="group.position" :style="groupStyle(index)" :class="{ current: group.position === flow.current_position, done: group.completed === group.stages.length }">
+                        <span class="activity-stage-marker">{{ index + 1 }}</span>
+                        <div class="activity-bots">
+                          <button v-for="stage in group.stages" :key="stage.id" class="activity-stage" @click="stageClick(flow, stage)">
+                            <img :src="stageImage(flow, stage)" alt="" width="48" height="48" />
+                            <span>{{ stage.session_title || stage.goal }}</span>
+                            <small>{{ t(personFlowStatusKey(personFlowStageStatus(flow, stage))) }}</small>
+                          </button>
+                        </div>
+                      </li>
+                    </ol>
+                  </div>
+                </div>
+              </section>
               <p v-if="finishing" role="status">{{ t('person.states.finished') }}</p>
             </div>
             <button class="activity-all" @click="opened = false; emit('open')">{{ t('person.tasks') }} ›</button>
@@ -220,4 +264,29 @@ onBeforeUnmount(() => { motionQuery?.removeEventListener('change', syncMotion); 
  .activity-stage-marker { animation:none; }
  .activity-stages > li, .activity-stage-move, .activity-stage-enter-active, .activity-stage-leave-active, .activity-completion-enter-active, .activity-completion-leave-active { transition:none; }
 }
+
+/* Approved capsule: quiet surfaces, compact task rows and an open serpentine map. */
+.person-task-activity.is-expanded { width:min(696px,calc(100% - 24px)); }
+.activity-shell { border:0; }
+.person-task-island__avatar { position:static; transform:none; }
+.person-task-island__label b { color:$text-primary; font-size:16px; margin-inline-end:6px; }
+.activity-row + .activity-row, .activity-flow + .activity-flow { border:0; }
+.activity-task-text { flex:1; }
+.activity-scroll { max-height:min(65vh,600px); }
+.activity-flow-title { margin-top:16px; }
+.activity-snake-scroll { overflow-x:auto; }
+.activity-snake { position:relative; width:648px; }
+.activity-snake svg { position:absolute; inset:0; pointer-events:none; overflow:visible; }
+.activity-track, .activity-progress { fill:none; stroke:$border-color; stroke-width:2; stroke-linecap:round; }
+.activity-track { stroke-dasharray:2 6; }
+.activity-progress { stroke:$accent-primary; opacity:.55; }
+.activity-stages { padding:0; margin:0; list-style:none; }
+.activity-stages > li { position:absolute; width:190px; transform:translateX(-50%); display:block; border:0; padding:0; text-align:center; }
+.activity-stage-marker { color:$text-muted; font-size:10px; }
+.activity-bots { display:flex; justify-content:center; gap:6px; }
+.activity-stage { border:0; padding:0; background:transparent; color:$text-primary; font:inherit; cursor:pointer; display:flex; flex-direction:column; align-items:center; flex:0 1 62px; min-width:0; }
+.activity-stage img { object-fit:contain; }
+.activity-stage > span { font-size:11px; max-width:68px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.activity-stage small { font-size:10px; }
+.activity-stage:focus-visible { outline:2px solid $accent-primary; outline-offset:2px; }
 </style>

@@ -3899,7 +3899,7 @@ test('Person activity groups parallel collaboration and opens the selected flow'
  await page.goto('/#/person');await page.locator('.person-task-island').click()
  await expect(page.locator('.activity-stages > li')).toHaveCount(1)
  await expect(page.locator('.activity-stage')).toHaveCount(2)
- await expect(page.locator('.activity-content').getByRole('button',{name:/Check report/})).toHaveCount(1)
+ await expect(page.locator('.activity-stage').filter({ hasText: 'Research' })).toHaveCount(1)
  await page.waitForTimeout(500)
  await page.screenshot({path:'/home/agent/work/hermes-studio/.ekko-tmp/activity-collaboration.png', animations:'disabled'})
  await page.locator('.activity-content').getByRole('button',{name:/Parallel delivery/}).click()
@@ -3927,3 +3927,17 @@ test('Chinese activity completion and stage handoff preview', async ({ page }) =
  await expect(page.locator('.person-task-island')).toBeVisible()
  await page.screenshot({path:'/home/agent/work/hermes-studio/.ekko-tmp/island-zh-handoff.png',animations:'disabled'})
 })
+
+ test('Person workspace picker restores effective directory and ignores cancelled edits', async ({ page }) => {
+  const { state } = await setup(page, 'light', false)
+  state.tasks = []
+  await page.goto('/#/person')
+  const workspace = page.getByRole('button', { name: 'Workspace', exact: true })
+  await workspace.click()
+  const picker = page.locator('.n-modal:visible')
+  await expect(picker.locator('.folder-path-input input')).toHaveValue('/tmp/person/default')
+  await picker.locator('.folder-path-input input').fill('/workspace/not-confirmed')
+  await picker.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await workspace.click()
+  await expect(picker.locator('.folder-path-input input')).toHaveValue('/tmp/person/default')
+ })

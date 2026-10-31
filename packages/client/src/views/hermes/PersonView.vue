@@ -414,7 +414,7 @@ function syncSession(snapshot: PersonSnapshot) {
 }
 function folderName(path: string) { return path.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || path }
 function openWorkspace() {
-  workspaceValue.value = isNewConversation.value ? newConversationWorkspace.value ?? draftDefaults.value?.settings.workspace ?? '' : data.value?.settings.workspace || ''
+  workspaceValue.value = isNewConversation.value ? newConversationWorkspace.value ?? draftDefaults.value?.settings.workspace ?? '' : data.value?.settings.workspace || data.value?.session?.workspace || ''
   showWorkspace.value = true
   void workspaceDirectories.init().catch(e => { error.value = String(e) })
 }
@@ -422,11 +422,13 @@ async function saveWorkspace() {
   const workspace = workspaceValue.value?.trim() || ''
   if (isNewConversation.value) {
     newConversationWorkspace.value = workspace
+    if (workspace) void workspaceDirectories.recordWorkspaceUsage(workspace).catch(e => { error.value = String(e) })
     showWorkspace.value = false
     return true
   }
-  await saveSettings({ workspace })
+  if (!await saveSettings({ workspace })) return false
   if (data.value?.settings.workspace !== workspace) return false
+  if (workspace) void workspaceDirectories.recordWorkspaceUsage(workspace).catch(e => { error.value = String(e) })
   await refresh()
   showWorkspace.value = false
   return true
