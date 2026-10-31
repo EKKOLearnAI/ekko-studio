@@ -449,6 +449,7 @@ export class ChatRunSocket {
   /** sessionId → session state (messages, working status, events, run tracking) */
   private sessionMap = new Map<string, SessionState>()
   private readonly runAdmissions = new Map<string, Promise<void>>()
+  private readonly ekkoExecutions = new Map<string, symbol>()
   private hermesQueueInsertionOperations = new Map<string, Promise<void>>()
   private readonly taskPlanRuns = new TaskPlanRuns(saveTaskPlan, (sessionId, snapshot) => {
     this.emitExternalEvent(sessionId, 'plan.updated', { event: 'plan.updated', ...snapshot })
@@ -1230,7 +1231,7 @@ export class ChatRunSocket {
         // Release admission after queueing/reserving, before the model run finishes.
         releaseAdmission()
         try {
-          await this.handleRun(socket, data, runProfile, false, undefined, pushTargetId)
+          await this.executeRun(socket, data, runProfile, false, undefined, pushTargetId)
         } catch (err) {
           const payload = {
             event: 'run.failed',
@@ -1721,6 +1722,52 @@ export class ChatRunSocket {
   }
 
   // --- Run dispatcher ---
+
+  private async executeRun(...args: Parameters<ChatRunSocket['handleRun']>): Promise<void> {
+    const [socket, data, profile, , , pushTargetId] = args
+    const sessionId = data.session_id
+    if (!sessionId || (!isPersonSession(sessionId) && !isEkkoAgentExecution(data))) return this.handleRun(...args)
+    const state = getOrCreateSession(this.sessionMap, sessionId)
+    const execution = Symbol()
+    this.ekkoExecutions.set(sessionId, execution)
+    try {
+      await this.handleRun(...args)
+    } catch (err) {
+      // Setup can fail before the runtime's own try/finally, even after it
+      // installs a controller. Never release a replacement turn's reservation.
+      if (this.ekkoExecutions.get(sessionId) !== execution || this.sessionMap.get(sessionId) !== state) return
+      state.abortController?.abort()
+      state.abortController = undefined
+      state.runId = undefined
+      state.activeRunMarker = undefined
+      state.responseRun = undefined
+      state.ekkoBoundaryInterrupt = undefined
+      state.isAborting = false
+      state.events = []
+      state.isWorking = state.queue.length > 0
+      if (!state.isWorking) state.profile = undefined
+      const payload = {
+        event: 'run.failed', session_id: sessionId, queue_id: data.queue_id,
+        error: err instanceof Error ? err.message : String(err), queue_remaining: state.queue.length,
+      }
+      observeChatRunWebhookEvent({
+        pushTargetId, event: 'run.failed', sessionId, profile,
+        source: resolveRunSource(data.source, sessionId), agent: 'ekko', payload,
+        roomId: data.group_room_id, workflowId: data.workflow_id, workflowNodeId: data.workflow_node_id,
+      })
+      data.onEvent?.('run.failed', payload)
+      this.emitPendingInteraction(profile, 'run.failed', payload)
+      if (isPersonSession(sessionId)) {
+        this.personQuestions.delete(sessionId)
+        personUpdated(Number(socket.data.user?.id))
+      }
+      this.nsp.to(`session:${sessionId}`).emit('run.failed', payload)
+      if (!this.nsp.adapter.rooms.get(`session:${sessionId}`)?.has(socket.id)) socket.emit('run.failed', payload)
+      this.dequeueNextQueuedRun(socket, sessionId, profile)
+    } finally {
+      if (this.ekkoExecutions.get(sessionId) === execution) this.ekkoExecutions.delete(sessionId)
+    }
+  }
 
   private async handleRun(
     socket: Socket,
@@ -2834,7 +2881,7 @@ export class ChatRunSocket {
       ? backgroundContinuationContext.profile
       : next.profile || fallbackProfile
     let deliverySettled = false
-    const execution = this.handleRun(socket, {
+    const execution = this.executeRun(socket, {
       onEvent: next.personStageDelivery ? (event:string,payload:any) => {
         if (event !== 'run.completed' && event !== 'run.failed') return
         deliverySettled = true
@@ -3102,7 +3149,7 @@ export class ChatRunSocket {
 
       const handlers = this.runHandlers.get(sessionId) || new Set<Promise<void>>()
       this.runHandlers.set(sessionId, handlers)
-      const handler = this.handleRun(fakeSocket, { ...data, onEvent }, profile, false, undefined, pushTargetId)
+      const handler = this.executeRun(fakeSocket, { ...data, onEvent }, profile, false, undefined, pushTargetId)
         .catch(err => {
           const error = err instanceof Error ? err.message : String(err)
           const payload = { event: 'run.failed', session_id: sessionId, error }
