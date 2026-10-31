@@ -191,5 +191,10 @@
     "sherpa-onnx-linux-x64": "1.13.3",
     "sherpa-onnx-win-ia32": "1.13.3",
     "sherpa-onnx-win-x64": "1.13.3"
+  },
+  "allowScripts": {
+    "esbuild@0.27.7": true,
+    "fsevents@2.3.3": true,
+    "fsevents@2.3.2": true
   }
 }
