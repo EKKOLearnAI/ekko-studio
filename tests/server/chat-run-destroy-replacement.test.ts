@@ -527,6 +527,41 @@ describe('repair@6 direct command turns are owners an outstanding /destroy must 
     }
   }
 
+  // Only /destroy gives up run admission while it waits; a command that is still preparing keeps its
+  // place, so a message sent meanwhile queues behind it instead of overtaking it.
+  for (const name of ['plan', 'moa'] as const) {
+    it(`a message sent while /${name} is still preparing queues behind it`, async () => {
+      syntheticProfiles()
+      const { bridge, release } = fakeBridge()
+      const commandGate = gate()
+      let preparing = false
+      if (name === 'plan') {
+        const expand = bridge.command.getMockImplementation()!
+        bridge.command.mockImplementation(async (...args: any[]) => { preparing = true; await commandGate.promise; return expand(...args) })
+      }
+      const { server } = makeServer(bridge, async () => {
+        if (name === 'moa' && !preparing) { preparing = true; await commandGate.promise }
+        return true
+      })
+      const { sid } = session()
+      const run = userSocket(server)
+      const command = commands[name]
+
+      void run(sid, command.input)
+      await vi.waitFor(() => expect(preparing).toBe(true))
+      void run(sid, 'later question')
+      await flush()
+      expect(chatInputs(bridge)).toEqual([])
+      commandGate.open()
+      await vi.waitFor(() => expect(chatInputs(bridge)).toContain(command.chat))
+      release(command.chat)
+      await vi.waitFor(() => expect(chatInputs(bridge)).toContain('later question'))
+      release('later question')
+      await vi.waitFor(() => expect(server.sessionMap.get(sid).isWorking).toBe(false))
+      expect(chatInputs(bridge)).toEqual([command.chat, 'later question'])
+    })
+  }
+
   it('control: a command sent while busy only queues; it neither advances the owner revision nor takes over', async () => {
     syntheticProfiles()
     const { bridge, release } = fakeBridge()
