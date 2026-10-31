@@ -44,6 +44,13 @@ const updateContextTokenUsageMock = vi.fn((sid: string, state: any, emit: any, c
   })
   return contextTokens
 })
+const clampContextWindowTokensMock = vi.fn((tokens: number, _contextLength?: number) => tokens)
+const anchoredContextWindowTokensMock = vi.fn(
+  (_sid: string, _source: string, _history: any[], _freshAfterCreatedAt?: number): { contextTokens: number; anchorCreatedAt: number; deltaTokens: number; stale: boolean } | undefined => undefined,
+)
+const recordedContextWindowTokensMock = vi.fn(
+  (_sid: string, _source: string, _minCreatedAt?: number): number | undefined => undefined,
+)
 const getCachedBridgeContextOverheadMock = vi.fn(() => undefined)
 const contextTokensWithCachedOverheadMock = vi.fn((_state: any, messageTokens: number) => messageTokens)
 const updateMessageContextTokenUsageMock = vi.fn((sid: string, state: any, emit: any, messageTokens: number, usage?: { inputTokens: number; outputTokens: number }) => updateContextTokenUsageMock(sid, state, emit, messageTokens, usage))
@@ -99,6 +106,9 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () =
   contextTokensWithCachedOverhead: contextTokensWithCachedOverheadMock,
   updateContextTokenUsage: updateContextTokenUsageMock,
   updateMessageContextTokenUsage: updateMessageContextTokenUsageMock,
+  recordedContextWindowTokens: recordedContextWindowTokensMock,
+  anchoredContextWindowTokens: anchoredContextWindowTokensMock,
+  clampContextWindowTokens: clampContextWindowTokensMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/bridge-message', () => ({
@@ -185,6 +195,10 @@ describe('bridge run final context usage', () => {
     buildSnapshotAwareHistoryMock.mockImplementation(async (_sessionId: string, _profile: string, history: any[]) => history)
     calcAndUpdateUsageMock.mockResolvedValue({ inputTokens: 11, outputTokens: 7 })
     estimateUsageTokensFromMessagesMock.mockReturnValue({ inputTokens: 11, outputTokens: 7 })
+    // vi.clearAllMocks() drops calls but keeps implementations, so the two context-window probes
+    // must be reset explicitly or a test that armed them leaks into every later test.
+    recordedContextWindowTokensMock.mockReturnValue(undefined)
+    anchoredContextWindowTokensMock.mockReturnValue(undefined)
     completeWorkspaceRunCheckpointMock.mockReturnValue(null)
     ensureOpenBridgeAssistantMessageMock.mockImplementation((state: any, sessionId: string, runMarker: string) => {
       const existing = [...state.messages].reverse().find((message: any) => (
@@ -1538,6 +1552,153 @@ describe('bridge run final context usage', () => {
     expect(state.contextTokens).toBe(20_018)
     expect(emit).toHaveBeenCalledWith('run.completed', expect.objectContaining({
       contextTokens: 20_018,
+    }))
+  })
+
+  it('prefers recorded model usage over the local token estimate when the run reported usage', async () => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    state.runStartedAt = 1_000
+    const sessionMap = new Map([['session-1', state]])
+    recordedContextWindowTokensMock.mockReturnValue(48_250)
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'started' }),
+      contextEstimate: vi.fn(),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-1', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'default',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(recordedContextWindowTokensMock).toHaveBeenCalledWith('session-1', 'hermes', 1_000)
+    expect(state.contextTokens).toBe(48_250)
+    expect(emit).toHaveBeenCalledWith('run.completed', expect.objectContaining({
+      contextTokens: 48_250,
+    }))
+  })
+
+  it('falls back to the local estimate when no usage was recorded by this run', async () => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    state.runStartedAt = 1_000
+    const sessionMap = new Map([['session-1', state]])
+    recordedContextWindowTokensMock.mockReturnValue(undefined)
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'started' }),
+      contextEstimate: vi.fn(),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-1', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'default',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(recordedContextWindowTokensMock).toHaveBeenCalledWith('session-1', 'hermes', 1_000)
+    expect(state.contextTokens).toBe(18)
+    expect(emit).toHaveBeenCalledWith('run.completed', expect.objectContaining({
+      contextTokens: 18,
+    }))
+  })
+
+  it('anchors on recorded usage instead of the whole transcript when this run recorded none', async () => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    state.runStartedAt = 5_000
+    const sessionMap = new Map([['session-1', state]])
+    recordedContextWindowTokensMock.mockReturnValue(undefined)
+    anchoredContextWindowTokensMock.mockReturnValue({ contextTokens: 61_000, anchorCreatedAt: 4_000, deltaTokens: 1_000, stale: false })
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'started' }),
+      contextEstimate: vi.fn(),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-1', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'default',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(anchoredContextWindowTokensMock).toHaveBeenCalledWith('session-1', 'hermes', expect.any(Array), 5_000)
+    expect(state.contextTokens).toBe(61_000)
+    expect(emit).toHaveBeenCalledWith('run.completed', expect.objectContaining({
+      contextTokens: 61_000,
+    }))
+  })
+
+  it('rejects a stale anchor and falls back to the local estimate', async () => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    state.runStartedAt = 5_000
+    const sessionMap = new Map([['session-1', state]])
+    recordedContextWindowTokensMock.mockReturnValue(undefined)
+    // An anchor from before this run describes a prompt the proxy was sending then, not now.
+    anchoredContextWindowTokensMock.mockReturnValue({ contextTokens: 141_144, anchorCreatedAt: 4_000, deltaTokens: 0, stale: true })
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'started' }),
+      contextEstimate: vi.fn(),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-1', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'default',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(anchoredContextWindowTokensMock).toHaveBeenCalledWith('session-1', 'hermes', expect.any(Array), 5_000)
+    expect(state.contextTokens).toBe(18)
+    expect(emit).toHaveBeenCalledWith('run.completed', expect.objectContaining({
+      contextTokens: 18,
     }))
   })
 
