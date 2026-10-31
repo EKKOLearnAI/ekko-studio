@@ -14,6 +14,7 @@ const dialogWarningMock = vi.hoisted(() => vi.fn())
 const setSessionPushEnabledMock = vi.hoisted(() => vi.fn())
 const fetchContextLengthMock = vi.hoisted(() => vi.fn())
 const messageWarningMock = vi.hoisted(() => vi.fn())
+const fetchContextLengthMock = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -157,6 +158,47 @@ describe('ChatInput focusComposer', () => {
     expect(options).not.toContain('chat.pushEnabled')
     expect(setSessionPushEnabledMock).not.toHaveBeenCalled()
     expect(useChatStore().activeSession?.pushEnabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('retries context length for the same model after a transient lookup failure', async () => {
+    fetchContextLengthMock
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce(360000)
+    const wrapper = mountForSession('session-context-a', {
+      profile: 'default',
+      provider: 'custom:test',
+      model: 'model-360k',
+    })
+    const chatStore = useChatStore()
+    await flushPromises()
+
+    const nextSession = {
+      ...chatStore.sessions[0],
+      id: 'session-context-b',
+      title: 'session-context-b',
+    }
+    chatStore.sessions = [nextSession]
+    chatStore.activeSessionId = nextSession.id
+    chatStore.activeSession = nextSession
+    await nextTick()
+    await flushPromises()
+
+    expect(fetchContextLengthMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('360.0k')
+
+    const cachedSession = {
+      ...nextSession,
+      id: 'session-context-c',
+      title: 'session-context-c',
+    }
+    chatStore.sessions = [cachedSession]
+    chatStore.activeSessionId = cachedSession.id
+    chatStore.activeSession = cachedSession
+    await nextTick()
+    await flushPromises()
+
+    expect(fetchContextLengthMock).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 
