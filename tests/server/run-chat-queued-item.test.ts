@@ -1413,4 +1413,31 @@ describe('ChatRunSocket queued bridge runs', () => {
     } finally { vi.useRealTimers() }
   })
 
+
+  it.each(['run.completed','run.failed'])('preserves task insertion interruption metadata on %s',async event=>{
+    handleBridgeRunMock.mockImplementationOnce(async(_nsp,_socket,data)=>data.onEvent(event,{run_id:'native',interrupted:true,stop_reason:'queue_insertion',output:'partial'}))
+    const {ChatRunSocket}=await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const {io}=makeServerHarness(); const server=new ChatRunSocket(io as any)
+    expect(await server.runAndWait({session_id:'session-1',input:'task',source:'api_server'})).toMatchObject({interrupted:true,stop_reason:'queue_insertion'})
+  })
+
+  it('interrupts a fenced Hermes task through its bridge without copying the durable input into the chat queue',async()=>{
+    const {ChatRunSocket}=await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const {io}=makeServerHarness(); const server=new ChatRunSocket(io as any)
+    ;(server as any).sessionMap.set('person-task-owned',{isWorking:true,runId:'native',source:'api_server',webhookAgent:'bridge',profile:'default',queue:[]})
+    expect(await server.interruptTaskRun('person-task-owned','old')).toEqual({status:'run_mismatch'})
+    expect(bridgeMock.requestBoundaryInterrupt).not.toHaveBeenCalled()
+    expect(await server.interruptTaskRun('person-task-owned','native')).toMatchObject({status:'accepted'})
+    expect(bridgeMock.requestBoundaryInterrupt).toHaveBeenCalledExactlyOnceWith('person-task-owned','native','default')
+    expect((server as any).sessionMap.get('person-task-owned').queue).toEqual([])
+  })
+
+  it('tags a task boundary completion before its observer and drawer receive an empty result',async()=>{
+    handleBridgeRunMock.mockImplementationOnce(async(_nsp,_socket,data)=>data.onEvent('run.completed',{run_id:'native',output:'',result:{boundary_interrupt:true}}))
+    const {ChatRunSocket}=await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const {io}=makeServerHarness(); const server=new ChatRunSocket(io as any); const onEvent=vi.fn()
+    expect(await server.runAndWait({session_id:'person-task-owned',input:'task',source:'api_server'},{onEvent})).toMatchObject({interrupted:true,stop_reason:'queue_insertion'})
+    expect(onEvent).toHaveBeenCalledWith('run.completed',expect.objectContaining({interrupted:true,stop_reason:'queue_insertion'}))
+  })
+
 })

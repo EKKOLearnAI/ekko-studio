@@ -6,7 +6,7 @@ import { useTaskDrawerLayout } from '@/components/hermes/tasks/useTaskDrawerLayo
 import PersonTaskConversation from './PersonTaskConversation.vue'
 import PersonWorkspaceFiles from './PersonWorkspaceFiles.vue'
 import { buildContentBlocks, uploadFiles, type Attachment } from '@/stores/hermes/chat'
-import { personRequest, personTaskCanStop, stopPersonTask, type PersonTask, type PersonExecutionSummary } from '@/api/person'
+import { personRequest, personTaskCanStop, stopPersonTask, type PersonTask, type PersonExecutionSummary, type PersonTaskQueueState } from '@/api/person'
 import { onPersonUpdated } from '@/api/studio/chat'
 import type { SessionSummary } from '@/api/studio/sessions'
 const props = defineProps<{ taskId: string; mainSessionId: string; executionId?: string }>()
@@ -25,6 +25,8 @@ const task = ref<PersonTask | null>(null)
 const session = ref<SessionSummary | null>(null)
 const conversationRef = ref<InstanceType<typeof PersonTaskConversation> | null>(null)
 const pending = ref<{ id: string; input: { type: string; text?: string; name?: string }[] }[]>([])
+const queueState = ref<PersonTaskQueueState>({})
+const requestingInsertion = ref('')
 const ready = ref(false)
 const closing = ref(false)
 const sending = ref(false)
@@ -32,14 +34,15 @@ const stopping = ref(false)
 const error = ref('')
 const lifetime = new AbortController()
 let sequence = 0
-const disabled = computed(() => !ready.value || closing.value || sending.value || stopping.value || task.value?.execution_state === 'stopping' || task.value?.status === 'closed')
+const disabled = computed(() => !ready.value || closing.value || sending.value || stopping.value || !!requestingInsertion.value || task.value?.execution_state === 'stopping' || task.value?.status === 'closed')
 const stopControl = computed(() => ({ active: selectedIsCurrent.value && personTaskCanStop(task.value), allowSend: true, pending: stopping.value || task.value?.execution_state === 'stopping', request: stopTask }))
 async function refresh(executionId = selectedExecutionId.value) {
   const request = ++sequence
   try {
-    const result = await personRequest<{ task: PersonTask; session: SessionSummary | null; pending?: typeof pending.value; execution: PersonExecutionSummary | null; executions: PersonExecutionSummary[] }>(`/tasks/${encodeURIComponent(props.taskId)}/chat${executionId ? `?execution_id=${encodeURIComponent(executionId)}` : ''}`, undefined, 'GET', lifetime.signal)
+    const result = await personRequest<PersonTaskQueueState & { task: PersonTask; session: SessionSummary | null; pending?: typeof pending.value; execution: PersonExecutionSummary | null; executions: PersonExecutionSummary[] }>(`/tasks/${encodeURIComponent(props.taskId)}/chat${executionId ? `?execution_id=${encodeURIComponent(executionId)}` : ''}`, undefined, 'GET', lifetime.signal)
     if (lifetime.signal.aborted || request !== sequence) return false
     task.value = result.task; session.value = result.session; pending.value = result.pending || []
+    queueState.value = result
     executions.value = result.executions; selectedExecutionId.value = result.execution?.id || ''
     return true
   } catch (e) { if (!lifetime.signal.aborted) error.value = String(e); return false }
@@ -67,6 +70,16 @@ async function close() {
   closing.value = true; lifetime.abort(); stopUpdates()
   emit('close')
 }
+async function insert(queueId: string) {
+  if (disabled.value || !task.value || !selectedIsCurrent.value || !queueState.value.canInsert || requestingInsertion.value || queueState.value.insertion) return
+  requestingInsertion.value = queueId; error.value = ''; sequence++
+  try {
+    await personRequest(`/tasks/${encodeURIComponent(props.taskId)}/queue/insert`, {
+      queue_id: queueId, expected_execution_id: task.value.execution_id, expected_revision: task.value.revision, idempotency_key: crypto.randomUUID(),
+    }, 'POST', lifetime.signal)
+  } catch (e) { if (!lifetime.signal.aborted) error.value = String(e) }
+  finally { if (!lifetime.signal.aborted) await refresh(); requestingInsertion.value = '' }
+}
 async function stopTask() {
   if (!selectedIsCurrent.value || !task.value || !personTaskCanStop(task.value) || stopping.value || task.value.execution_state === 'stopping') return
   stopping.value = true; error.value = ''; sequence++
@@ -90,12 +103,13 @@ onBeforeUnmount(() => { lifetime.abort(); stopUpdates() })
           {{ t(task?.execution_state === 'stopping' ? 'person.states.stopping' : 'person.stopTask') }}
         </NButton>
       </div></template>
-      <NAlert v-if="error" type="error" class="task-chat-alert">{{ error }}</NAlert>
+      <NAlert v-if="error || queueState.insertionError" type="error" class="task-chat-alert">{{ error || queueState.insertionError }}</NAlert>
       <div v-if="!ready" class="task-chat-loading"><NSpin /></div>
       <template v-else>
         <NSelect v-if="executionOptions.length > 1" class="task-executions" :value="session?.id" :options="executionOptions"
           :disabled="sending || stopping" :aria-label="t('person.executionHistory')" @update:value="value => refresh(executions.find(run => run.session_id === value)?.id)" />
         <PersonTaskConversation v-if="session" ref="conversationRef" :key="session.id" :session="session" :pending="pending" :send="send"
+          :can-insert="selectedIsCurrent && !!queueState.canInsert && !disabled" :insertion="queueState.insertion" :requesting-insertion="requestingInsertion" :insert="insert"
           :disabled="disabled" :stop-control="stopControl" />
         <p v-else class="task-chat-alert">{{ t('person.noExecution') }}</p>
       </template>

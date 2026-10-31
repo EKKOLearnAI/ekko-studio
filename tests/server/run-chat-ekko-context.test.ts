@@ -696,6 +696,8 @@ describe('ekko-agent context usage events', () => {
       payload: expect.objectContaining({
         run_id: 'run-boundary-interrupt',
         output: '',
+        interrupted: true,
+        boundary_interrupt: true,
       }),
     })
     expect(events.some(item => item.event === 'run.failed')).toBe(false)

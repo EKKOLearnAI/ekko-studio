@@ -70,6 +70,7 @@ export interface PersonExecution {
   state: PersonRunState; input_json: string; session_id: string; selection_json: string; output: string
   error: string; generation: number
   lease_until: number; created_at: number; updated_at: number; occurrence_id: string | null
+  queue_priority?: number; insertion_queue_id?: string; insertion_phase?: string; insertion_error?: string
 }
 export interface PersonInteraction {
   id: string; owner_user_id: number; task_id: string; execution_id: string

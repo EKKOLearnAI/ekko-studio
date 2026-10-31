@@ -939,6 +939,20 @@ Object.keys(openapi.paths).sort().forEach(key => {
 openapi.paths = sortedPaths
 
 // Add special endpoints after sorting
+const taskInsertion = openapi.paths['/api/studio/person/tasks/{id}/queue/insert'].post
+taskInsertion.summary = 'Prioritize a queued task message and interrupt the current turn'
+taskInsertion.description = 'Account-owned task operation. Preserves other queued inputs. Returns the durable insertion phase; accepted does not mean the next turn has started. The native runtime must acknowledge interruption before the task scheduler starts the selected input.'
+taskInsertion.requestBody = { required: true, content: { 'application/json': { schema: {
+  type: 'object', required: ['queue_id', 'expected_execution_id', 'expected_revision', 'idempotency_key'],
+  properties: {
+    queue_id: { type: 'string', maxLength: 100, description: 'Pending execution ID from the task chat snapshot.' },
+    expected_execution_id: { type: 'string', maxLength: 100 },
+    expected_revision: { type: 'integer', minimum: 0 },
+    idempotency_key: { type: 'string', maxLength: 200 },
+  },
+} } } }
+for (const status of ['403', '409', '503']) taskInsertion.responses[status] = { description: status === '403' ? 'Resource access revoked' : status === '409' ? 'Stale task, unavailable queue item or unsupported runtime' : 'Runtime temporarily unavailable' }
+
 openapi.paths['/api/studio/sessions/{id}/pin'].post.requestBody = {
   required: true,
   content: { 'application/json': { schema: {

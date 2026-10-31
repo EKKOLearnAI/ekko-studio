@@ -102,6 +102,15 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
       })
       return route.fulfill({ json: { cleared: true } })
     }
+    if (path.endsWith('/tasks/task1/queue/insert')) {
+      if (body.expected_revision !== state.tasks[0].revision || body.expected_execution_id !== state.tasks[0].execution_id) return route.fulfill({status:409,json:{error:'Task changed'}})
+      if (state.rejectInsertion) return route.fulfill({status:409,json:{error:'Task insertion unavailable: unsupported'}})
+      const index=state.pending.findIndex((item:any)=>item.id===body.queue_id)
+      if(index<0) return route.fulfill({status:409,json:{error:'Queued execution changed'}})
+      state.pending.unshift(...state.pending.splice(index,1))
+      state.insertion={queueId:body.queue_id,phase:'waiting_for_tool_batch'}; state.tasks[0].revision++
+      return route.fulfill({json:{task:state.tasks[0],pending:state.pending,...(state.canInsert ? {canInsert:true,insertion:state.insertion} : {})}})
+    }
     if (path.endsWith('/tasks/task1/chat')) {
       if (req.method() === 'POST') {
         if (body.expected_revision !== state.tasks[0].revision) return route.fulfill({ status: 409, json: { error: 'Task changed' } })
@@ -112,7 +121,7 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
       }
       const executions = state.executions || [{ id: state.tasks[0].execution_id || 'execution1', session_id: 'person-task-task1', state: state.tasks[0].execution_state, created_at: 1 }]
       const execution = executions.find((run: any) => run.id === new URL(req.url()).searchParams.get('execution_id')) || executions[0]
-      return route.fulfill({ json: { pending: state.pending || [], task: state.tasks[0], executions, execution, session: { ...state.session, id: execution.session_id, title: state.tasks[0].title } } })
+      return route.fulfill({ json: { canInsert: !!state.canInsert, insertion: state.insertion || null, pending: state.pending || [], task: state.tasks[0], executions, execution, session: { ...state.session, id: execution.session_id, title: state.tasks[0].title } } })
     }
     if (path.endsWith('/tasks/apply')) {
       if (body.expected_revision !== state.tasks[0].revision || (body.action === 'stop' && body.execution_id !== state.tasks[0].execution_id)) return route.fulfill({ status: 409, json: { error: 'Execution changed' } })
@@ -1957,10 +1966,10 @@ for (const mode of ['light', 'dark'] as const) {
     await page.keyboard.press('Escape'); await expect(drawer).toHaveCount(0)
     await page.getByRole('button', { name: 'Tasks', exact: true }).click()
     await open()
-    await expect(drawer.locator('.task-chat-queue')).toContainText('1 follow-up(s) queued')
+    await expect(drawer.locator('.task-chat-queue .queue-float-item')).toHaveCount(1)
     await drawer.locator('.input-textarea').fill('Send me the merge result too.')
     await drawer.locator('.input-textarea').press('Enter')
-    await expect(drawer.locator('.task-chat-queue li')).toHaveCount(2)
+    await expect(drawer.locator('.task-chat-queue .queue-float-item')).toHaveCount(2)
     expect(operations.filter(op => op.path.endsWith('/tasks/task1/chat') && op.body).map(op => op.body.expected_revision)).toEqual([0, 1])
     await page.mouse.move(2, 2)
     await page.evaluate(async () => { await Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))) })
@@ -3977,3 +3986,70 @@ test('limits collaboration display and filters to the latest 50 flows',async ({p
   await expect(page).toHaveURL(/session=person-main-1&message=7/)
   await expect(drawer).not.toBeVisible()
 })
+
+
+for(const mode of ['light','dark'] as const){
+  test(`task queue insertion selects a later message and preserves the rest in ${mode}`,async({page},testInfo)=>{
+    const {state,operations}=await setup(page,mode,false,false)
+    state.canInsert=true
+    state.pending=[{id:'first',input:[{type:'text',text:'Keep this earlier follow-up'}]},{id:'selected',input:[{type:'text',text:'Insert this message now'}]}]
+    await page.addInitScript(()=>{(window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1']={session_id:'person-task-task1',isWorking:true,messages:[],events:[]}})
+    await page.goto('/#/person')
+    await page.getByRole('button',{name:'Tasks',exact:true}).click()
+    const open=()=>page.getByRole('button',{name:'View in conversation: Check report',exact:true}).click()
+    await open()
+    const drawer=page.locator('.person-task-chat')
+    const items=drawer.locator('.queue-float-item')
+    await expect(items).toHaveCount(2)
+    await items.filter({hasText:'Insert this message now'}).getByRole('button',{name:'Insert queued message',exact:true}).click()
+    await expect(items.first()).toContainText('Insert this message now')
+    await expect(items.nth(1)).toContainText('Keep this earlier follow-up')
+    await expect(drawer.getByRole('button',{name:'Waiting for the current tools to finish'})).toHaveCount(2)
+    await expect(items.locator('.queue-insert').first()).toBeDisabled()
+    const operation=operations.find(op=>op.path.endsWith('/tasks/task1/queue/insert'))
+    expect(operation.body).toMatchObject({queue_id:'selected',expected_execution_id:'execution1',expected_revision:0})
+    expect(operations.some(op=>op.path.endsWith('/tasks/apply'))).toBe(false)
+    expect(await emitted(page,'insert_queued_run')).toEqual([])
+    await page.keyboard.press('Escape');await expect(drawer).toHaveCount(0)
+    await page.getByRole('button',{name:'Tasks',exact:true}).click();await open()
+    await expect(items.first()).toContainText('Insert this message now')
+    await expect(items.locator('.queue-insert').first()).toBeDisabled()
+    await page.screenshot({path:testInfo.outputPath(`task-insertion-${mode}.png`),animations:'disabled'})
+  })
+}
+
+test('task insertion reports a rejected runtime without losing queued messages',async({page})=>{
+  const {state}=await setup(page,'light',false,false)
+  state.canInsert=true;state.rejectInsertion=true
+  state.pending=[{id:'first',input:[{type:'text',text:'Keep my queued message'}]}]
+  await page.addInitScript(()=>{(window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1']={session_id:'person-task-task1',isWorking:true,messages:[],events:[]}})
+  await page.goto('/#/person');await page.getByRole('button',{name:'Tasks',exact:true}).click()
+  await page.getByRole('button',{name:'View in conversation: Check report',exact:true}).click()
+  const drawer=page.locator('.person-task-chat')
+  await drawer.getByRole('button',{name:'Insert queued message',exact:true}).click()
+  await expect(drawer.locator('.task-chat-alert')).toContainText('unsupported')
+  await expect(drawer.locator('.queue-float-item')).toContainText('Keep my queued message')
+  await expect(drawer.getByRole('button',{name:'Insert queued message',exact:true})).toBeEnabled()
+})
+
+for(const mode of ['light','dark'] as const){
+  test(`task messages use the same primary and semantic colors as the main chat in ${mode}`,async({page},testInfo)=>{
+    await setup(page,mode,true,false)
+    await page.addInitScript(()=>{
+      const messages=[{id:'user',role:'user',content:'Color sample **strong** *emphasis* [link](https://example.com) and `code`.',timestamp:1},{id:'assistant',role:'assistant',content:'Color sample **strong** *emphasis* [link](https://example.com) and `code`.',timestamp:2}]
+      for(const id of ['person-main-1','person-task-task1'])(window as any).__PW_CHAT_SOCKET_RESUMES__[id]={session_id:id,isWorking:false,messages,events:[]}
+    })
+    await page.goto('/#/person')
+    const main=page.locator('.person-view')
+    await expect(main).toHaveAttribute('aria-busy','false')
+    const read=(root:Locator)=>root.evaluate(element=>Object.fromEntries(['user','assistant'].map(role=>[role,Object.fromEntries(['p','strong','em','a','code'].map(tag=>[tag,getComputedStyle(element.querySelector(`.message.${role} .message-bubble ${tag}`)!).color]))])))
+    await expect(main.locator('.message.assistant .message-bubble p')).toContainText('Color sample')
+    const expected=await read(main)
+    await page.getByRole('button',{name:'Tasks',exact:true}).click()
+    await page.getByRole('button',{name:'View in conversation: Check report',exact:true}).click()
+    const drawer=page.locator('.person-task-chat')
+    await expect(drawer.locator('.message.assistant .message-bubble p')).toContainText('Color sample')
+    expect(await read(drawer)).toEqual(expected)
+    await page.screenshot({path:testInfo.outputPath(`task-text-colors-${mode}.png`),animations:'disabled'})
+  })
+}

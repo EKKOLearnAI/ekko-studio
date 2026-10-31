@@ -81,6 +81,15 @@ export function initPersonTables(db: DatabaseSync): void {
       PRIMARY KEY(session_id, assistant_message_id)
     );
   `)
+  const executionColumns = db.prepare('PRAGMA table_info(person_executions)').all()
+  for (const [name, definition] of Object.entries({
+    queue_priority: 'INTEGER NOT NULL DEFAULT 0',
+    insertion_queue_id: "TEXT NOT NULL DEFAULT ''",
+    insertion_phase: "TEXT NOT NULL DEFAULT ''",
+    insertion_error: "TEXT NOT NULL DEFAULT ''",
+  })) {
+    if (!executionColumns.some(column => column.name === name)) db.exec(`ALTER TABLE person_executions ADD COLUMN ${name} ${definition}`)
+  }
   initPersonContextTables(db)
   initPersonStageTables(db)
   // Discard account-wide model choices; never copy them into conversations.

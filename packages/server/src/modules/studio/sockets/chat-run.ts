@@ -331,6 +331,8 @@ export interface ChatRunAndWaitResult {
   output?: string | null
   reasoning?: string | null
   error?: string
+  interrupted?: boolean
+  stop_reason?: string
 }
 
 type ChatRunAutoApprovalChoice = 'once' | 'session' | 'always'
@@ -2561,7 +2563,7 @@ export class ChatRunSocket {
       && item.autonomous !== true
   }
 
-  private queueInsertionRuntime(sessionId: string, state: SessionState): QueueInsertionRuntime | null {
+  private queueInsertionRuntime(sessionId: string, state: SessionState, taskRun = false): QueueInsertionRuntime | null {
     const storedAgent = String(getSession(sessionId)?.agent || '').trim()
     const activeAgent = state.webhookAgent
       || (storedAgent === 'ekko-agent' ? 'ekko' : storedAgent === 'claude' ? 'claude-code' : storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || (storedAgent === 'antigravity' || isNativeCodingAgent(storedAgent))) ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : 'bridge')
@@ -2569,7 +2571,24 @@ export class ChatRunSocket {
     if (activeAgent === 'claude-code' || activeAgent === 'codex' || activeAgent === 'pi' || activeAgent === 'grok' || (activeAgent === 'cursor' || (activeAgent === 'antigravity' || isNativeCodingAgent(activeAgent))) || (activeAgent === 'opencode' || activeAgent === 'dsh')) return activeAgent
     if (activeAgent !== 'bridge') return null
     if (state.source === 'coding_agent' || state.source === 'builtin_agent') return null
-    return state.source === 'cli' || state.source === 'global_agent' ? 'hermes' : null
+    return state.source === 'cli' || state.source === 'global_agent' || (taskRun && state.source === 'api_server') ? 'hermes' : null
+  }
+
+  /** Person owns the durable queue; this internal port only interrupts the fenced native turn. */
+  async interruptTaskRun(sessionId: string, expectedRunId: string): Promise<{ status: string; phase?: string }> {
+    const state = this.sessionMap.get(sessionId)
+    if (!sessionId.startsWith('person-task-') || !state?.isWorking) return { status: 'not_running' }
+    if (state.runId !== expectedRunId) return { status: 'run_mismatch' }
+    const runtime = this.queueInsertionRuntime(sessionId, state, true)
+    if (!runtime) return { status: 'unsupported' }
+    if (runtime === 'hermes') return this.bridge.requestBoundaryInterrupt(sessionId, expectedRunId, state.profile)
+    if (runtime === 'ekko') return state.ekkoBoundaryInterrupt?.(expectedRunId)
+      ?? getGlobalEkkoAgent(state.profile || 'default').requestBoundaryInterrupt({ sessionId, expectedRunId })
+    return codingAgentRunManager.interruptForQueueInsertion(sessionId, expectedRunId)
+  }
+
+  async waitForRunTermination(sessionId: string): Promise<void> {
+    await Promise.all([codingAgentRunManager.waitForSessionExit(sessionId), ...(this.runHandlers.get(sessionId) || [])])
   }
 
   private emitQueueInsertionUpdate(
@@ -3099,6 +3118,11 @@ export class ChatRunSocket {
         }
       }
       const onEvent = (event: string, payload: any = {}) => {
+        // Tag task boundary stops before the shared emitters serialize the event for the drawer.
+        if (sessionId.startsWith('person-task-') && (payload.boundary_interrupt === true || payload.result?.boundary_interrupt === true)) {
+          payload.interrupted = true
+          payload.stop_reason = 'queue_insertion'
+        }
         if (typeof payload.run_id === 'string' && payload.run_id) runId = payload.run_id
         if (event === 'message.delta' && typeof payload.delta === 'string') output += payload.delta
         if ((event === 'reasoning.delta' || event === 'thinking.delta') && typeof payload.delta === 'string') reasoning += payload.delta
@@ -3118,6 +3142,8 @@ export class ChatRunSocket {
             run_id: payload.run_id,
             output: typeof payload.output === 'string' && payload.output ? payload.output : output,
             reasoning: typeof payload.reasoning === 'string' && payload.reasoning ? payload.reasoning : reasoning,
+            interrupted: payload.interrupted === true || payload.boundary_interrupt === true || payload.result?.boundary_interrupt === true || payload.result?.interrupted === true,
+            stop_reason: payload.stop_reason,
           })
         } else if (event === 'run.failed') {
           finish({
@@ -3127,6 +3153,8 @@ export class ChatRunSocket {
             output,
             reasoning,
             error: payload.error ? String(payload.error) : 'chat-run failed',
+            interrupted: payload.interrupted === true || payload.result?.boundary_interrupt === true || payload.result?.interrupted === true,
+            stop_reason: payload.stop_reason,
           })
         }
       }

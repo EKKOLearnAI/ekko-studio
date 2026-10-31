@@ -138,13 +138,13 @@ export function promotePersonFollowups() {
   personDb().prepare(`UPDATE person_executions SET state='queued',updated_at=? WHERE id IN (
     SELECT e.id FROM person_executions e JOIN session_tasks t ON t.id=e.task_id
     WHERE e.state='pending' AND t.status='open' AND e.requirements_revision=t.requirements_revision
-    AND e.rowid=(SELECT p.rowid FROM person_executions p WHERE p.task_id=e.task_id AND p.state='pending' ORDER BY created_at,rowid LIMIT 1)
+    AND e.rowid=(SELECT p.rowid FROM person_executions p WHERE p.task_id=e.task_id AND p.state='pending' ORDER BY queue_priority DESC,created_at,rowid LIMIT 1)
     AND NOT EXISTS(SELECT 1 FROM person_executions a WHERE a.task_id=e.task_id AND a.state IN ('queued','starting','stopping','running','waiting_person','waiting_user','waiting_approval'))
   )`).run(Date.now())
 }
 export function pendingPersonInputs(userId: number, taskId: string, sessionId = '') {
   getPersonTask(userId, taskId)
-  return (personDb().prepare("SELECT id,input_json FROM person_executions WHERE owner_user_id=? AND task_id=? AND (?='' OR session_id=?) AND state IN ('pending','queued') AND input_json!='' ORDER BY created_at,rowid").all(userId, taskId, sessionId, sessionId) as { id: string; input_json: string }[])
+  return (personDb().prepare("SELECT id,input_json FROM person_executions WHERE owner_user_id=? AND task_id=? AND (?='' OR session_id=?) AND state IN ('pending','queued') AND input_json!='' ORDER BY queue_priority DESC,created_at,rowid").all(userId, taskId, sessionId, sessionId) as { id: string; input_json: string }[])
     .map(row => ({ id: row.id, input: JSON.parse(row.input_json) as import('../contracts/runs/session').ContentBlock[] }))
 }
 export function getPersonExecution(userId: number, id: string): PersonExecution {

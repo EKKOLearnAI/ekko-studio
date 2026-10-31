@@ -1694,6 +1694,8 @@ export async function handleEkkoAgentRun(
       message_id: assistantMessageId || undefined,
       output: assistantText,
       context: result.context,
+      interrupted: boundaryInterrupted,
+      boundary_interrupt: boundaryInterrupted,
       contextTokens: contextEstimate?.contextTokens,
       context_tokens: contextEstimate?.contextTokens,
       contextEstimate,

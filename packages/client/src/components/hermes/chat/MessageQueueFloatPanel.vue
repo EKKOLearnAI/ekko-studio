@@ -12,12 +12,14 @@ const props = withDefaults(defineProps<{
   items: MessageQueueFloatItem[]
   testId?: string
   canInsert?: boolean
+  canRemove?: boolean
   activeInsertId?: string | null
   insertTitle?: (item: MessageQueueFloatItem) => string
   removeTitle?: string | ((item: MessageQueueFloatItem) => string)
 }>(), {
   testId: undefined,
   canInsert: false,
+  canRemove: true,
   activeInsertId: null,
   insertTitle: undefined,
   removeTitle: undefined,
@@ -77,6 +79,7 @@ function resolvedRemoveTitle(item: MessageQueueFloatItem): string {
           </svg>
         </button>
         <button
+          v-if="canRemove"
           type="button"
           class="queue-remove"
           :title="resolvedRemoveTitle(item)"
