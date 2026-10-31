@@ -64,13 +64,21 @@ export function parseIssueRequest(body: unknown): IssueRequest | { invalid: stri
 
 export type IssueResult =
   | { status: 'issued'; token: string; publisher: PublicSessionNoticePublisher }
-  | { status: 'forbidden' | 'not_found' | 'unsupported' | 'generation_mismatch' }
+  | { status: 'forbidden' | 'owner_required' | 'not_found' | 'unsupported' | 'generation_mismatch' }
+
+/** Only the session's owning account may issue for it; a legacy session without an owner needs a super admin. */
+function ownsSession(userId: number, session: { studio_user_id?: string | number | null }): boolean {
+  const owner = session.studio_user_id
+  if (owner === null || owner === undefined || owner === '') return findUserById(userId)?.role === 'super_admin'
+  return String(owner) === String(userId)
+}
 
 /** Issue a grant for one session at its current generation. The secret is returned once and never stored. */
 export function issueNoticePublisher(ownerUserId: number, sessionId: string, request: IssueRequest, now = Date.now()): IssueResult {
   if (!ownerMayUse(ownerUserId, request.profile)) return { status: 'forbidden' }
   const session = getSession(sessionId)
   if (!session || (session.profile || 'default') !== request.profile) return { status: 'not_found' }
+  if (!ownsSession(ownerUserId, session)) return { status: 'owner_required' }
   if (!isExternalNoticeTarget(session)) return { status: 'unsupported' }
   if (getSessionGeneration(sessionId) !== request.expectedGeneration) return { status: 'generation_mismatch' }
   const token = `${NOTICE_PUBLISHER_PREFIX}${randomBytes(32).toString('base64url')}`

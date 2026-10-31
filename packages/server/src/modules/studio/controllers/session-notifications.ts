@@ -15,6 +15,7 @@ import {
 
 const REFUSED = {
   forbidden: [403, 'profile_access_denied'],
+  owner_required: [403, 'session_owner_required'],
   not_found: [404, 'Session not found'],
   unsupported: [422, 'unsupported_notification_target'],
   generation_mismatch: [409, 'session_generation_mismatch'],
@@ -80,7 +81,7 @@ export async function create(ctx: Context) {
 
 /**
  * POST /api/studio/sessions/:id/notification-publishers — the session owner issues a publisher grant
- * for the session's current generation. The secret is in this response only; Studio stores its hash.
+ * for the session's current generation (a legacy session without an owner: a super admin only). The secret is in this response only; Studio stores its hash.
  */
 export async function issuePublisher(ctx: Context) {
   const user = await loginUser(ctx)

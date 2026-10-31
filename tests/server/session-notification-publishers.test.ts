@@ -45,6 +45,7 @@ beforeEach(async () => {
     ['workflow-1', 'default', 'workflow', '', null], ['group-1', 'default', 'group_chat', '', null],
     ['global-1', 'default', 'global_agent', '', null], ['person-main-1', 'default', 'cli', '', users.member.id],
     ['person-task-1', 'default', 'cli', '', users.member.id],
+    ['chat-admin', 'default', 'cli', '', users.admin.id], ['chat-member', 'default', 'cli', '', users.member.id],
   ] as const) {
     m.store.createSession({ id, profile, source, agent, studio_user_id: owner })
   }
@@ -227,12 +228,12 @@ describe('notice publisher grants', () => {
     db.prepare('UPDATE session_notice_publishers SET expires_at = ? WHERE id = ?').run(Date.now() - 1, expiring.publisher.id)
     expect((await publish(expiring.token, expiring.expected)).body.error).toBe('publisher_token_invalid')
 
-    const memberGrant = await issue({}, users.member.token)
+    const memberGrant = await issue({}, users.member.token, 'chat-member')
     expect(memberGrant.status).toBe(201)
     m.usersStore.updateUser({ userId: users.member.id, status: 'disabled' })
-    expect((await publish(memberGrant.body.token, memberGrant.body.publisher.session_generation)).status).toBe(401)
+    expect((await publish(memberGrant.body.token, memberGrant.body.publisher.session_generation, {}, 'chat-member')).status).toBe(401)
     m.usersStore.updateUser({ userId: users.member.id, status: 'active', profiles: ['other'] })
-    expect((await publish(memberGrant.body.token, memberGrant.body.publisher.session_generation)).status).toBe(401)
+    expect((await publish(memberGrant.body.token, memberGrant.body.publisher.session_generation, {}, 'chat-member')).status).toBe(401)
     expect(rows()).toHaveLength(0)
   })
 
@@ -259,6 +260,9 @@ describe('notice publisher grants', () => {
       missing: await request(publisherPath(), { method: 'POST', body: { profile: 'default', expected_session_generation: expected, sources: SOURCES } }),
       modelRun: await issue({}, await m.auth.issueModelRunJwt(member)),
       outsider: await issue({}, users.outsider.token),
+      // Profile access alone is not ownership: another account's session, or a legacy ownerless one.
+      otherOwner: await issue({ expected_session_generation: await generation('chat-admin') }, users.member.token, 'chat-admin'),
+      ownerless: await issue({}, users.member.token),
       staleGeneration: await issue({ expected_session_generation: 'stale' }),
       unsupported: await issue({ expected_session_generation: await generation('ekko-1') }, users.admin.token, 'ekko-1'),
       badSources: await issue({ sources: [] }),
@@ -267,9 +271,10 @@ describe('notice publisher grants', () => {
       unknownField: await issue({ scope: 'all' }),
     }
     expect(Object.fromEntries(Object.entries(results).map(([name, r]) => [name, r.status]))).toEqual({
-      missing: 401, modelRun: 403, outsider: 403, staleGeneration: 409, unsupported: 422,
+      missing: 401, modelRun: 403, outsider: 403, otherOwner: 403, ownerless: 403, staleGeneration: 409, unsupported: 422,
       badSources: 400, duplicateSources: 400, tooLong: 400, unknownField: 400,
     })
+    expect([results.otherOwner.body.error, results.ownerless.body.error]).toEqual(['session_owner_required', 'session_owner_required'])
     expect(grants()).toHaveLength(0)
   })
 

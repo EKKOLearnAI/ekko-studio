@@ -202,7 +202,8 @@ producer retries the same `event_id` with the same frozen generation.
 
 **Publisher grants (unattended producers).** A login token is account-wide and cannot be
 revoked on its own, so a recurring producer should use a publisher grant instead. The session
-owner issues one with a login token:
+owner issues one with a login token (a legacy session without an owner: a super admin only;
+profile access alone is not enough, `403 session_owner_required`):
 
 ```bash
 curl -X POST "http://127.0.0.1:8648/api/studio/sessions/<session-id>/notification-publishers" \
