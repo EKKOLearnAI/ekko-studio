@@ -2532,7 +2532,7 @@ describe('Person protocol selection', () => {
     const models = ['gpt-6.1-sol', 'claude-opus-4-6']
     catalog = createCatalogModelMetadataEnricher()([{ provider: 'custom:relay', base_url: 'https://relay.example.test', models }])
     const agents = models.map((model, index) => ({ id: `worker-${index}`, name: model, description: 'Execute tasks', selection: {
-      ...selection, runtime: runtimeId, provider: 'custom:relay', model, reasoningEffort: '',
+      ...selection, runtime: runtimeId, provider: 'custom:relay', model, apiMode: undefined, reasoningEffort: '',
     } }))
     const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
     await configurePerson(1, { agents, expected_revision: 1 })
