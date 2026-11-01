@@ -637,6 +637,9 @@ export default {
   },
 
   apiRelay: {
+    campaignSlogan: "雙十一儲值加贈11.11%額度，最高加贈1111額度",
+    campaignBadge: "雙11",
+    campaignLabel: "雙十一",
     title: "API 中轉",
     headline: "一站接入主流 AI 模型",
     description: "APIKEY.FAN 是 Ekko Studio 的合作中轉服務，統一接入 Claude、ChatGPT、Grok、Gemini、智譜、Kimi、DeepSeek 和 MiniMax，相容官方 API 與 SDK。",

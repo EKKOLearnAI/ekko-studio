@@ -649,6 +649,9 @@ export default {
   },
 
   apiRelay: {
+    campaignSlogan: "ダブルイレブン：チャージで11.11%の追加クレジット、最大1111クレジット",
+    campaignBadge: "11.11",
+    campaignLabel: "ダブルイレブン",
     title: "APIリレー",
     headline: "主要なAIモデルを一つの窓口で",
     description: "APIKEY.FANはEkko Studioの提携APIゲートウェイです。Claude、ChatGPT、Grok、Gemini、Zhipu、Kimi、DeepSeek、MiniMaxに統一APIで接続でき、公式APIとSDKに対応しています。",

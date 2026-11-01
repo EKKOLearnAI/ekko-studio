@@ -110,7 +110,7 @@ html.theme-has-custom-background {
   --theme-card-wallpaper-bg: rgba(var(--bg-card-rgb), 0.72);
 }
 
-html:is(.theme-card-bg, .theme-has-custom-background) :is(.app-download-meta span, .app-platform-icon, .api-relay-features span) {
+html:is(.theme-card-bg, .theme-has-custom-background) :is(.app-download-meta span, .app-platform-icon) {
   background: rgba(var(--text-primary-rgb), 0.04);
 }
 
