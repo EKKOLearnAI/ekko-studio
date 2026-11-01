@@ -1210,7 +1210,16 @@ for (const mode of ['light', 'dark'] as const) {
   test(`Person background-task island follows wallpaper, regional and reset themes in ${mode}`, async ({ page }) => {
     await setup(page, mode, true, false)
     const island = page.locator('.person-task-island')
-    async function open() { await page.goto('/#/person'); await backgroundTaskCount(page, 2); await expect(island).toBeVisible() }
+    async function open() {
+      await page.goto('/#/person')
+      await backgroundTaskCount(page, 2)
+      const toggle = island.locator('.person-task-island__toggle')
+      await toggle.focus()
+      await page.keyboard.press('Enter')
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+      await expect(toggle).toHaveCSS('outline-style', 'none')
+      await expect(toggle.locator('.person-task-island__chevron')).toHaveCSS('outline-style', 'solid')
+    }
     const wallpaper = mode === 'light' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(42, 42, 42, 0.72)'
     await open()
     await expect(island).toHaveCSS('background-color', wallpaper)
@@ -1260,6 +1269,79 @@ test('Person background-task island supports reduced motion and hides for main-c
   await expect(island).toHaveAttribute('aria-expanded', 'true')
   await expect(page.locator('.activity-details')).toBeVisible()
 })
+
+for (const [mode, wallpaper, width] of [['light', false, 1440], ['dark', false, 1440], ['light', true, 390], ['dark', true, 390]] as const) {
+  test(`Person capsule keeps keyboard focus local in ${mode} wallpaper=${wallpaper} at ${width}px`, async ({ page }, testInfo) => {
+    const { state } = await setup(page, mode, wallpaper)
+    state.tasks = Array.from({ length: 14 }, (_, index) => ({ ...state.tasks[0], id: `focus-${index}`, title: `Keyboard task ${index + 1}` }))
+    state.flows = [{ id: 'keyboard-flow', creator_session_id: state.session.id, title: 'Keyboard collaboration', goal: '', state: 'active', current_position: 0, revision: 0, error: '',
+      stages: [{ id: 'keyboard-stage', position: 0, group_position: 0, session_id: state.session.id, session_title: 'Creator', bot_type: 'zhezhe', goal: 'Check keyboard navigation', state: 'active', result_message_id: null, tasks: [] }] }]
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto('/#/person')
+    await backgroundTaskCount(page, state.tasks.length)
+    const island = page.locator('.person-task-island')
+    const toggle = island.locator('.person-task-island__toggle')
+    const chevron = toggle.locator('.person-task-island__chevron')
+    async function expectDisclosureFocus() {
+      await expect(toggle).toBeFocused()
+      await expect(toggle).toHaveCSS('outline-style', 'none')
+      await expect(chevron).toHaveCSS('outline-style', 'solid')
+      await expect(chevron).toHaveCSS('outline-width', '2px')
+    }
+    // Enter through the real Tab order, including when the details are inert.
+    await toggle.focus()
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Tab')
+    await expectDisclosureFocus()
+    await page.keyboard.press('Tab')
+    await expect(page.locator('.person-compose textarea')).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Enter')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expectDisclosureFocus()
+    await island.screenshot({ path: testInfo.outputPath('expanded-keyboard-focus.png'), animations: 'disabled' })
+    await page.keyboard.press('Space')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await page.keyboard.press('Space')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    // Tabbing through overflowing content must scroll each focused action into view.
+    for (const row of await island.locator('.activity-row').all()) {
+      await page.keyboard.press('Tab')
+      await expect(row).toBeFocused()
+      await expect(row).toBeInViewport()
+      await expect(row).toHaveCSS('outline-style', 'solid')
+      await expect(chevron).toHaveCSS('outline-style', 'none')
+    }
+    const details = island.locator('.activity-details')
+    expect(await details.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+    const preview = island.locator('.flow-preview-toggle')
+    await page.keyboard.press('Tab')
+    await expect(preview).toBeFocused()
+    await expect(preview).toHaveCSS('outline-style', 'solid')
+    await page.keyboard.press('Tab')
+    const bot = island.locator('.bot-sprite')
+    await expect(bot).toBeFocused()
+    await expect(bot).toHaveCSS('outline-style', 'solid')
+    await page.keyboard.press('Enter')
+    const drawer = page.locator('.person-workspace-drawer')
+    await expect(drawer.getByRole('button', { name: 'Keyboard collaboration', exact: true })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(drawer).not.toBeVisible()
+    // Pointer opening has no keyboard ring; Escape restores a visible keyboard cue.
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(chevron).toHaveCSS('outline-style', 'none')
+    await page.keyboard.press('Escape')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await expectDisclosureFocus()
+    await island.screenshot({ path: testInfo.outputPath('collapsed-keyboard-focus.png'), animations: 'disabled' })
+    if (mode === 'light' && !wallpaper) {
+      await page.emulateMedia({ forcedColors: 'active' })
+      await expectDisclosureFocus()
+      await island.screenshot({ path: testInfo.outputPath('forced-colors-keyboard-focus.png'), animations: 'disabled' })
+    }
+  })
+}
 
 test('Person general settings save independently, survive refresh and retain drafts across tabs', async ({ page }) => {
   const { state, operations } = await setup(page, 'light', false, false)
