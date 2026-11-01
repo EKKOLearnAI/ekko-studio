@@ -2,9 +2,8 @@ import { personError, personText } from '../../contracts/person'
 import type { PersonAgentPreset, PersonSelection } from '../../contracts/person'
 import { personSettings } from '../../repositories/person-store'
 import { getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
-import { personProfiles, validatePersonSelection, PERSON_REASONING_EFFORTS } from './catalog'
+import { personProfiles, personSelectionApiMode, validatePersonSelection, PERSON_REASONING_EFFORTS } from './catalog'
 import { isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
-import { resolveProviderCatalogApiMode } from '../../contracts/providers'
 
 export async function validatePersonAgents(userId: number, value: unknown): Promise<PersonAgentPreset[]> {
   if (!Array.isArray(value) || value.length > 20) throw personError('Use at most 20 execution agents')
@@ -24,7 +23,7 @@ export async function validatePersonAgents(userId: number, value: unknown): Prom
     if (selection.mode === 'scoped') {
       const group = (await getSessionAvailableModelGroups(selection.profile)).find(g => g.provider === selection.provider && g.models?.includes(selection.model))
       if (!group) throw personError('Model unavailable', 409)
-      selection.apiMode = group.api_mode_by_model?.[selection.model] || group.api_mode || resolveProviderCatalogApiMode(group.provider, selection.model)
+      selection.apiMode = personSelectionApiMode(group, selection.model, input.apiMode, selection.runtime)
       const meta = group.model_meta?.[selection.model]
       const efforts: readonly string[] = meta?.reasoning === false ? [] : meta?.reasoning_efforts || PERSON_REASONING_EFFORTS
       if (selection.reasoningEffort && !efforts.includes(selection.reasoningEffort)) throw personError('Model does not support this reasoning effort')

@@ -16,6 +16,21 @@ function input(signal: AbortSignal, runtime = 'ekko'): Parameters<PersonRuntimeP
 }
 beforeEach(() => { vi.resetAllMocks(); native.available = true; native.abortSession.mockResolvedValue(undefined) })
 
+it.each([
+  ['codex', 'gpt', 'codex_responses'],
+  ['codex', 'opus', 'anthropic_messages'],
+  ['claude-code', 'gpt', 'codex_responses'],
+  ['claude-code', 'opus', 'anthropic_messages'],
+])('forwards %s using %s with the selected %s protocol to Studio', async (runtime, model, apiMode) => {
+  native.runAndWait.mockResolvedValue({ ok: true, output: 'Done' })
+  const task = input(new AbortController().signal, runtime)
+  task.selection = { ...task.selection, model, apiMode }
+  await executePersonTask(task)
+  expect(native.runAndWait).toHaveBeenCalledWith(expect.objectContaining({
+    source: 'coding_agent', coding_agent_id: runtime, provider: 'test', model, apiMode,
+  }), expect.anything())
+})
+
 it.each(['ekko','hermes','codex'])('enables per-request automatic approvals on every %s task turn', async runtime => {
   native.runAndWait.mockResolvedValue({ ok: true, output: 'Done' })
   const task = input(new AbortController().signal, runtime)

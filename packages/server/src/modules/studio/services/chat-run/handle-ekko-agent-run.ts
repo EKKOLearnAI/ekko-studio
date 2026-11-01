@@ -669,7 +669,8 @@ export async function handleEkkoAgentRun(
   })
   const modelClient = createProviderModelClient(createModelClient(providerConfig, { fetch: authorizedProviderFetch }), {
     providerConfig,
-    fallback: fallbackProviderConfig
+    // BOT selections pin the upstream protocol, including delegated Ekko tasks.
+    fallback: fallbackProviderConfig && !isPrivatePersonSession(sessionId)
       ? {
           client: createModelClient(fallbackProviderConfig, { fetch: authorizedProviderFetch }),
           providerConfig: fallbackProviderConfig,
