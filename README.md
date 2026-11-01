@@ -418,6 +418,7 @@ These variables configure Ekko Studio, its local Hermes runtime integration, and
 | `HERMES_WEB_UI_ALLOW_TRANSIENT_MCP_AUTOINJECT` | unset | Allow managed MCP injection when `HERMES_WEB_UI_HOME` is under a temporary directory, such as Version Preview runtimes. |
 | `UPLOAD_DIR` | `$HERMES_WEB_UI_HOME/upload` | Upload root override. Files are stored below profile-scoped subdirectories. |
 | `CORS_ORIGINS` | same host only | Comma- or space-separated cross-origin allowlist for HTTP, Socket.IO, and WebSocket requests. Set `*` only when you intentionally need legacy wildcard CORS. |
+| `HERMES_WEB_UI_ALLOW_REMOTE_IMAGES` | unset (off) | Set to `1` or `true` to let the browser load remote `https:` images by adding `https:` to the Content-Security-Policy `img-src`. By default only same-origin, `data:` and `blob:` images load, so an image URL written into rendered model output is not fetched automatically. Enable it if you want remote images (for example badges in a previewed README or images in chat answers) to display. |
 | `AUTH_TOKEN` | auto-generated | Explicit bearer token. If unset, Studio creates one under `HERMES_WEB_UI_HOME`. |
 | `AUTH_JWT_SECRET` | `AUTH_TOKEN` | JWT signing secret override for username/password sessions. |
 | `HERMES_WEB_UI_AUTH_JWT_EXPIRES_IN` | `30d` | Username/password session JWT lifetime. Accepts seconds or `s`/`m`/`h`/`d` suffixes, for example `12h` or `7d`. |
