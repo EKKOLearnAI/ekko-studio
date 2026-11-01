@@ -5,21 +5,28 @@ import { join } from 'node:path'
 import sharp from 'sharp'
 
 let dir: string
-const records = vi.hoisted(() => ({ workspace: '', owner: 1, output: 'result '.repeat(1000) }))
+const records = vi.hoisted(() => ({ workspace: '', taskWorkspace: '', owner: 1, output: 'result '.repeat(1000) }))
 vi.mock('../../packages/server/src/modules/studio/repositories/person-store', () => ({
   getPersonExecution: (owner: number) => {
     if (owner !== records.owner) throw new Error('Execution not found')
-    return { task_id: 'task', output: records.output }
+    return { task_id: 'task', output: records.output, workspace: records.workspace }
   },
-  getPersonTask: () => ({ workspace: records.workspace }),
+  getPersonTask: () => ({ workspace: records.taskWorkspace }),
 }))
 import { readPersonArtifact } from '../../packages/server/src/modules/studio/services/person/tools'
 
 beforeEach(async () => {
   dir = await realpath(await mkdtemp(join(tmpdir(), 'person-artifact-')))
   records.workspace = dir
+  records.taskWorkspace = dir
 })
 afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
+
+it('reads a historical artifact using its execution snapshot after the task directory changes', async () => {
+  records.taskWorkspace = '/a/new/task/directory'
+  await writeFile(join(dir, 'original.txt'), 'original result')
+  expect(await readPersonArtifact(1, 'execution', 'original.txt')).toMatchObject({ content: 'original result', path: 'original.txt' })
+})
 
 it('returns a screenshot reference without decoding PNG bytes as text, including large screenshots', async () => {
   const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#f9ad42' } }).png().toBuffer()

@@ -10,6 +10,7 @@ import { recordSessionAttention } from '../../repositories/session-state-store'
 import { personRuntime } from '../../public/person-runtime'
 import { personUser } from './catalog'
 import { logger } from '../../public/logging'
+import { personTurnWorkspace, requirePersonWorkspace } from './workspace'
 
 const activeTurns = new Map<string, Set<AbortController>>()
 export function registerPersonStageTurn(context: PersonStageContext) {
@@ -47,6 +48,7 @@ export function createPersonFlow(userId: number, input: Record<string, unknown>,
       throw Object.assign(personError('A role cannot hand off to itself. Finish your own work here, then route only to another role.'),{code:'SELF_HANDOFF'})
   }
   const key = personText(input.idempotency_key,'idempotency_key',200)
+  const workspace = personTurnWorkspace(userId, creator, origin)
   const result = personOperation(userId, `flow:${key}`, { ...input, creator }, () => {
     requirePersonSession(userId,creator)
     const db = personDb(), id = randomUUID(), now = Date.now()
@@ -55,7 +57,8 @@ export function createPersonFlow(userId: number, input: Record<string, unknown>,
       AND t.status NOT IN ('completed','closed')`).get(userId,creator,origin.runId)) {
       throw Object.assign(personError('Wait for this turn\'s worker result before handing off its work.',409),{code:'WORK_PENDING'})
     }
-    db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(id,userId,creator,title,goal,now,now)
+    requirePersonWorkspace(workspace)
+    db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at,workspace) VALUES(?,?,?,?,?,?,?,?)').run(id,userId,creator,title,goal,now,now,workspace)
     steps.forEach((step, position) => {
       requirePersonSession(userId,step.session_id)
       db.prepare('INSERT INTO person_stages(id,flow_id,position,group_position,session_id,goal,return_expectation,state) VALUES(?,?,?,?,?,?,?,?)')
@@ -214,6 +217,7 @@ export async function deliverPersonStages() {
     try {
       const context = stageDeliveryContext(row.owner_user_id,row.id)
       const { flow, stage } = assertPersonStage(row.owner_user_id,context)
+      requirePersonWorkspace(flow.workspace)
       personStageSources(row.owner_user_id,context)
       const deliver = personRuntime().deliverStage
       if (!deliver) throw new Error('Stage delivery runtime unavailable')

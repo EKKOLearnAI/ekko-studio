@@ -6,6 +6,7 @@ import type { PersonSelection, PersonTaskOrigin } from '../contracts/person'
 import type { AuthenticatedUser } from '../middleware/auth'
 
 export interface PersonModelCall {
+  workspace?: string
   selection: PersonSelection
   messages: AgentMessage[]
   systemPrompt: string

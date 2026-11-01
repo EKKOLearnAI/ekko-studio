@@ -227,6 +227,7 @@ async function saveConversationName() {
   finally { creating.value = false }
 }
 async function createDraftConversation(text?: string, attachments?: Attachment[]) {
+  if (!newConversationWorkspace.value?.trim()) { openWorkspace(); return false }
   if (!newConversationName.value.trim() || creating.value || (!text?.trim() && !attachments?.length)) return false
   if (!checkExecutionAgent()) return false
   personDeployment?.cancel()
@@ -239,7 +240,7 @@ async function createDraftConversation(text?: string, attachments?: Attachment[]
     const created = createdConversation.value ?? await personRequest<SessionSummary>('/conversations', {
       title: newConversationName.value.trim(), bot_type: newConversationBot.value,
       ...(newConversationModel.value ? { model: newConversationModel.value } : {}), reasoning_effort: newConversationEffort.value,
-      ...(newConversationWorkspace.value !== null ? { workspace: newConversationWorkspace.value, expected_revision: draftDefaults.value?.revision } : {}),
+      workspace: newConversationWorkspace.value, expected_revision: draftDefaults.value?.revision,
     }, 'POST', lifetime.signal)
     createdConversation.value = created
     chatStore.ensureSessionLoaded(created)
@@ -438,7 +439,7 @@ function syncSession(snapshot: PersonSnapshot) {
 }
 function folderName(path: string) { return path.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || path }
 function openWorkspace() {
-  workspaceValue.value = isNewConversation.value ? newConversationWorkspace.value ?? draftDefaults.value?.settings.workspace ?? '' : data.value?.settings.workspace || ''
+  workspaceValue.value = isNewConversation.value ? newConversationWorkspace.value || '' : data.value?.settings.workspace || ''
   showWorkspace.value = true
   void workspaceDirectories.init().catch(e => { error.value = String(e) })
 }
@@ -449,8 +450,7 @@ async function saveWorkspace() {
     showWorkspace.value = false
     return true
   }
-  await saveSettings({ workspace })
-  if (data.value?.settings.workspace !== workspace) return false
+  if (!await saveSettings({ workspace })) return false
   await refresh()
   showWorkspace.value = false
   return true
@@ -627,7 +627,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
             {{ t('person.tasks') }}
           </NTooltip>
           <NTooltip trigger="hover">
-            <template #trigger><NButton quaternary circle size="small" :disabled="!data?.can_clear || busy || pending || settingsWrites > 0" :aria-label="t('chat.workspace')" :aria-expanded="showWorkspace" @click="openWorkspace"><FolderIcon /></NButton></template>
+            <template #trigger><NButton quaternary circle size="small" :disabled="busy || pending || settingsWrites > 0" :aria-label="t('chat.workspace')" :aria-expanded="showWorkspace" @click="openWorkspace"><FolderIcon /></NButton></template>
             {{ data?.settings.workspace || t('chat.workspace') }}
           </NTooltip>
           <PersonWorkspaceFiles :session-id="data?.session?.id" :workspace="data?.session?.workspace" :submit="sendMessage"
@@ -659,21 +659,21 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
             <NInput v-model:value="newConversationName" :maxlength="100" :disabled="draftLocked" :placeholder="t('person.botNamePlaceholder')" :status="duplicateBotName ? 'error' : undefined"
               :input-props="{ id: 'person-conversation-name', 'aria-label': t('person.botName'), 'aria-invalid': duplicateBotName, 'aria-describedby': duplicateBotName ? 'person-bot-name-error' : undefined }" />
             <NTooltip trigger="hover">
-              <template #trigger><NButton quaternary circle :disabled="draftLocked" :aria-label="t('chat.workspace')" :aria-expanded="showWorkspace" @click="openWorkspace"><FolderIcon /></NButton></template>
-              {{ (newConversationWorkspace ?? draftDefaults?.settings.workspace) || t('chat.workspace') }}
+              <template #trigger><NButton quaternary :disabled="draftLocked" :aria-label="t('chat.workspace')" :aria-expanded="showWorkspace" @click="openWorkspace"><FolderIcon /><span class="person-workspace-label">{{ newConversationWorkspace ? folderName(newConversationWorkspace) : t('chat.workspace') }}</span></NButton></template>
+              {{ newConversationWorkspace || t('person.workspaceHint') }}
             </NTooltip>
           </div>
           <span v-if="duplicateBotName" id="person-bot-name-error" class="person-name-error" role="alert">{{ t('person.botNameExists') }}</span>
         </div>
         <ChatInput draft hide-settings managed-reasoning-effort :persist-draft="false" :draft-config="draftConfig"
-          :send-disabled="!newConversationName.trim() || !currentModel || creating || settingsWrites > 0" :submit="createDraftConversation"
+          :send-disabled="!newConversationName.trim() || !newConversationWorkspace?.trim() || !currentModel || creating || settingsWrites > 0" :submit="createDraftConversation"
           :model-label="modelLabel" :model-disabled="draftLocked" :model-expanded="showModelPicker"
           :reasoning-effort="reasoningEffort" :reasoning-effort-disabled="draftLocked || !currentModel"
           :scoped-reasoning-efforts="draftReasoningEfforts" :default-effort-label="t('person.defaultEffort')"
           @update:reasoning-effort="selectEffort" @model-click="openModels" />
       </NewChatPage>
       <NModal v-model:show="showWorkspace" preset="dialog" :title="t('chat.setWorkspaceTitle')" :positive-text="t('common.ok')" :negative-text="t('common.cancel')"
-        :positive-button-props="{ loading: settingsWrites > 0, disabled: isNewConversation ? draftLocked : busy || pending || !data?.can_clear }" style="width: var(--studio-workspace-picker-width)" @positive-click="saveWorkspace">
+        :positive-button-props="{ loading: settingsWrites > 0, disabled: !workspaceValue?.trim() || (isNewConversation ? draftLocked : busy || pending) }" style="width: var(--studio-workspace-picker-width)" @positive-click="saveWorkspace">
         <p>{{ t('person.workspaceHint') }}</p>
         <div v-if="defaultWorkspaces.length" class="person-workspace-shortcuts">
           <NButton v-for="path in defaultWorkspaces" :key="path" size="tiny" :title="path" @click="workspaceValue = path">{{ folderName(path) }}</NButton>
@@ -770,6 +770,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
 .person-name-error { color: $error; }
 .person-new-name-input { display: flex; align-items: center; gap: 8px; }
 .person-new-name-input :deep(.n-input) { flex: 1; min-width: 0; }
+.person-workspace-label { max-width: min(160px, 30vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .person-view { flex: 1; display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; color: $text-primary; background: var(--card-container-bg, var(--bg-main-surface)); }
 .person-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; padding: calc(21px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1)); border-bottom: var(--border-width, 1px) solid $border-color; }
 .header-left { display: flex; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); overflow: hidden; flex: 1; min-width: 0; }

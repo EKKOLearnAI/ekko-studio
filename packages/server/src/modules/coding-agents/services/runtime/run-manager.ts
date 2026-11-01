@@ -1,3 +1,4 @@
+import { codingAgentWorkingDirectory } from './workspace'
 import { startOpenCodeTurn as startOpenCodeTurnProcess } from '../opencode/chat-turn'
 import { applyOpenCodeLine } from '../opencode/event-adapter'
 import type { OpenCodeTurnHost } from '../opencode/turn-host'
@@ -9,7 +10,6 @@ import { startDshChatTurn } from '../dsh/chat-turn'
 import { agentUpdateLocked, noteAgentActivity } from '../update-lock'
 import { dirname, join } from 'path'
 import { existsSync, accessSync, chmodSync, constants as fsConstants, readFileSync, writeFileSync } from 'fs'
-import { homedir } from 'os'
 import { spawn, type ChildProcess } from 'child_process'
 import { createSession, addMessage, getSession, updateSession, updateSessionStats } from '../../../studio/public/sessions'
 import type { ApiMode, CodingAgentImageInput } from '../../protocol/types'
@@ -833,7 +833,7 @@ export class CodingAgentRunManager {
       name: 'xterm-color',
       cols: 120,
       rows: 30,
-      cwd: existsSync(launch.workspaceDir) ? launch.workspaceDir : homedir(),
+      cwd: codingAgentWorkingDirectory(launch),
       env: {
         ...process.env,
         ...(launch.env || {}),
@@ -1635,7 +1635,7 @@ export class CodingAgentRunManager {
 
   private startPiRpcProcess(run: ManagedCodingAgentRun) {
     const child = spawnCodingAgentChild(run.launch.command, run.launch.args, {
-      cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
+      cwd: codingAgentWorkingDirectory(run.launch),
       env: run.launch.mode === 'global'
         ? { ...process.env, ...(run.launch.env || {}) }
         : isolatedCodingAgentChildEnv(run.launch.env),
@@ -2131,7 +2131,7 @@ export class CodingAgentRunManager {
       '--verbose',
     ]
     const child = spawnCodingAgentChild(run.launch.command, args, {
-      cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
+      cwd: codingAgentWorkingDirectory(run.launch),
       env: run.launch.mode === 'global'
         ? { ...process.env, ...(run.launch.env || {}) }
         : isolatedCodingAgentChildEnv(run.launch.env),
@@ -2750,7 +2750,7 @@ export class CodingAgentRunManager {
 
     const rootDir = String(run.launch.env?.GROK_HOME || '').trim()
     if (!rootDir) throw new Error('Grok runtime home is missing')
-    const workspaceDir = existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir()
+    const workspaceDir = codingAgentWorkingDirectory(run.launch)
     const nativeSessionId = String(run.launch.agentNativeSessionId || '')
     if (!run.nativeResumeReady && grokSessionExists(rootDir, workspaceDir, nativeSessionId)) {
       run.nativeResumeReady = true
@@ -2878,7 +2878,7 @@ export class CodingAgentRunManager {
     })
     if (run.launch.promptFile) updateManagedPromptFileSync(run.launch.promptFile, systemPrompt)
 
-    const workspaceDir = existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir()
+    const workspaceDir = codingAgentWorkingDirectory(run.launch)
     const nativeSessionId = String(run.launch.agentNativeSessionId || '')
     const turnInput = systemPrompt.trim()
       ? `${systemPrompt.trim()}\n\n${input}`
@@ -2996,7 +2996,7 @@ export class CodingAgentRunManager {
     })
     if (run.launch.promptFile) updateManagedPromptFileSync(run.launch.promptFile, systemPrompt)
 
-    const workspaceDir = existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir()
+    const workspaceDir = codingAgentWorkingDirectory(run.launch)
     const nativeSessionId = String(run.launch.agentNativeSessionId || '')
     const turnInput = systemPrompt.trim()
       ? `${systemPrompt.trim()}\n\n${input}`
@@ -3170,7 +3170,7 @@ export class CodingAgentRunManager {
       : ['exec', ...commonArgs, '--cd', run.launch.workspaceDir, '-']
 
     const child = spawnCodingAgentChild(run.launch.command, args, {
-      cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
+      cwd: codingAgentWorkingDirectory(run.launch),
       env: run.launch.mode === 'global'
         ? { ...process.env, ...(run.launch.env || {}) }
         : isolatedCodingAgentChildEnv(run.launch.env),
@@ -3790,7 +3790,7 @@ export class CodingAgentRunManager {
     let child: ChildProcess
     try {
       child = spawnCodingAgentChild('nmem', args, {
-        cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
+        cwd: codingAgentWorkingDirectory(run.launch),
         env,
       })
     } catch (err) {

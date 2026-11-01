@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { createCipheriv, randomBytes } from 'crypto'
 import * as childProcess from 'child_process'
 import { tmpdir } from 'os'
@@ -1841,6 +1841,19 @@ describe('coding agent launch preparation', () => {
     expect(result.shellCommand).toContain(workspace)
   })
 
+  it.each(['scoped', 'global'] as const)('never creates or substitutes a missing Person workspace in %s mode', async mode => {
+    const home = makeHome(), workspace = join(home, 'person-selected')
+    const input = { mode, profile: 'default', provider: 'openrouter', model: 'openai/gpt-oss-20b:free',
+      baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'sk-test', sessionId: 'person-task-workspace', workspace }
+    for (const value of [undefined, '', workspace]) {
+      await expect(prepareCodingAgentLaunch('codex', { ...input, workspace: value })).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
+    }
+    expect(existsSync(workspace)).toBe(false)
+    mkdirSync(workspace)
+    const launch = await prepareCodingAgentLaunch('codex', input)
+    expect(launch.workspaceDir).toBe(realpathSync(workspace))
+  })
+
   it('launches Claude Code with scoped settings instead of a CLI --model override', async () => {
     const home = makeHome()
 
@@ -2253,7 +2266,7 @@ describe('coding agent launch preparation', () => {
     const spawn = vi.spyOn(childProcess, 'spawn').mockImplementation(() => { throw stopAtSpawn })
     vi.spyOn(manager as any, 'handleClaudePrintResponseEvent').mockImplementation(() => {})
     const run: any = {
-      launch: { ...launch, agentNativeSessionId: '11111111-1111-4111-8111-111111111111' },
+      launch: { ...launch, sessionId: 'refresh-spawn', agentNativeSessionId: '11111111-1111-4111-8111-111111111111' },
       nativeResumeReady: false,
     }
     for (const [index, systemPrompt] of ['Initial managed prompt', 'Resumed managed prompt'].entries()) {

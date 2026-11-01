@@ -21,10 +21,10 @@ export function personTool(name: string, description: string, properties: Record
 }
 export async function readPersonArtifact(userId: number, executionId: string, path: string, offset = 0) {
   const execution = getPersonExecution(userId, executionId)
-  const task = getPersonTask(userId, execution.task_id)
+  getPersonTask(userId, execution.task_id)
   if (!path) return { content: execution.output.slice(offset, offset + 6000), next_offset: offset + 6000 < execution.output.length ? offset + 6000 : null }
-  if (!task.workspace) throw personError('Task has no authorized workspace')
-  const root = await realpath(task.workspace)
+  if (!execution.workspace) throw personError('Execution has no authorized workspace')
+  const root = await realpath(execution.workspace)
   const target = await realpath(resolve(root, path))
   const local = relative(root, target)
   if (isAbsolute(local) || local === '..' || local.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) throw personError('Artifact is outside the task workspace', 403)

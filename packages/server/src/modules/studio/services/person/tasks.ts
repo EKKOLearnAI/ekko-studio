@@ -5,8 +5,7 @@ import { personDb, personTransaction, getPersonExecution, replayPersonOperation,
 import { personRuntime } from '../../public/person-runtime'
 import { personUpdated } from '../../repositories/person-updates'
 import { logger } from '../../public/logging'
-import { personWorkspace } from './workspace'
-import { ensureDirectory } from '../workspace/directory'
+import { personTurnWorkspace } from './workspace'
 import { validatePersonSelection } from './catalog'
 import { selectPersonExecutionAgent } from './agents'
 import { savePersonTaskOrigin } from './delivery'
@@ -84,9 +83,8 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
     const task = getPersonTask(userId, String(input.task_id)), flow = personRequirements(task).flow
     if (flow?.steps[flow.index]) await validatePersonSelection(userId, JSON.parse(task.selection_json))
   }
-  const taskWorkspace = personWorkspace(userId)
+  const taskWorkspace = ['create','adopt'].includes(action) ? personTurnWorkspace(userId, targetSession, origin) : getPersonTask(userId, String(input.task_id)).workspace
   if (input.workspace && input.workspace !== taskWorkspace) throw personError('Task workspace is managed by Person settings')
-  if (['create','adopt'].includes(action)) await ensureDirectory(taskWorkspace)
   const result = personOperation(userId, `task:${key}`, operationInput, () => {
     if (origin?.stage) {
       const { stage } = assertPersonStage(userId,origin.stage,origin.sessionId)

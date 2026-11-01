@@ -14,8 +14,7 @@ import { tickPersonSchedules } from './schedules'
 import { deliverPersonResults, readyPersonDelivery } from './delivery'
 import { logger } from '../../public/logging'
 import { requirePersonSession } from '../../repositories/person-session-store'
-import { personWorkspace } from './workspace'
-import { ensureDirectory } from '../workspace/directory'
+import { requirePersonWorkspace } from './workspace'
 import { personRequirements } from '../../contracts/person-flow'
 import { assertPersonStageTask } from '../../repositories/person-stage-store'
 import { deliverPersonStages, recoverPersonStages } from './stage-flows'
@@ -80,7 +79,7 @@ async function coordinate(run: PersonExecution, nativeId: string, questionText: 
   const decisions = personDb().prepare("SELECT substr(question,1,300) AS question,substr(answer,1,600) AS answer,answered_by FROM person_interactions WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND session_id=?) AND state='answered' ORDER BY created_at DESC LIMIT 6").all(task.id,run.session_id)
   await runPersonModel(run.owner_user_id, 'coordinator', [{ role: 'user', content: JSON.stringify({ task: { title: task.title, requirements: JSON.parse(task.requirements_json) }, question: question.question, current_input: run.input_json ? JSON.parse(run.input_json) : undefined, choices, decisions }) }], tools, signal,
     'You answer a delegated agent on behalf of Person within the existing task scope. Use bot_interaction_reply once. Read relevant evidence when needed. Do not ask the human about routine implementation choices.',
-    event => personEvent(run, 'coordinator.event', event), () => { current(run) }, task.session_id)
+    event => personEvent(run, 'coordinator.event', event), () => { current(run); requirePersonWorkspace(run.workspace) }, task.session_id, run.workspace)
   current(run)
   const pending = personDb().prepare("SELECT id FROM person_interactions WHERE id=? AND revision=? AND state='pending'").get(question.id,question.revision)
   if (!pending) return
@@ -93,24 +92,25 @@ async function coordinate(run: PersonExecution, nativeId: string, questionText: 
 
 async function execute(run: PersonExecution, abort: AbortController) {
   const userId = run.owner_user_id
+  let workspaceError: Error | undefined
   const heartbeat = setInterval(() => {
     try {
       current(run)
+      try { requirePersonWorkspace(run.workspace) }
+      catch (error) { workspaceError = error as Error; throw error }
       const account = personUser(userId)
       const selection = JSON.parse(run.selection_json)
       if (account.role !== 'super_admin' && (!account.profiles.includes(selection.profile) || selection.mode === 'global')) throw personError('Execution permission revoked', 403)
       personDb().prepare('UPDATE person_executions SET lease_until=? WHERE id=? AND generation=?').run(Date.now() + 90_000, run.id, run.generation)
-    } catch { abort.abort(new Error('Execution lease revoked')) }
+    } catch (error) { abort.abort(error) }
   }, 15000)
   heartbeat.unref()
   try {
     const selection = JSON.parse(run.selection_json)
     await validatePersonSelection(userId, selection)
     const task = getPersonTask(userId, run.task_id)
-    const workspace = personWorkspace(userId)
-    await ensureDirectory(workspace)
+    const workspace = requirePersonWorkspace(run.workspace)
     current(run)
-    personDb().prepare('UPDATE session_tasks SET workspace=? WHERE id=?').run(workspace, task.id)
     personDb().prepare('UPDATE sessions SET workspace=? WHERE id=? AND CAST(studio_user_id AS TEXT)=?').run(workspace, run.session_id, String(userId))
     const decisions = personDb().prepare("SELECT question,answer,answered_by FROM person_interactions WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND session_id=?) AND state='answered' ORDER BY created_at DESC LIMIT 10").all(task.id,run.session_id) as unknown as Pick<PersonInteraction, 'question' | 'answer' | 'answered_by'>[]
     const requirements = personRequirements(task)
@@ -123,6 +123,8 @@ async function execute(run: PersonExecution, abort: AbortController) {
     current(run)
     const result = await personRuntime().execute({ user: personUser(userId), selection, sessionId: run.session_id, workspace, prompt, displayInput: input ? undefined : description, signal: abort.signal,
       onEvent: (kind, payload) => {
+        try { requirePersonWorkspace(workspace) }
+        catch (error) { workspaceError = error as Error; abort.abort(error); return }
         try {
           current(run)
           if (!kind.endsWith('.delta')) personEvent(run, kind, payload)
@@ -145,6 +147,7 @@ async function execute(run: PersonExecution, abort: AbortController) {
         } catch { /* Late native events must not revive a cancelled run. */ }
       },
     })
+    if (workspaceError) throw workspaceError
     current(run)
     const latestRun = current(run)
     if (result.interrupted && latestRun.insertion_queue_id) {

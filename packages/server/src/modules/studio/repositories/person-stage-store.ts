@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { PersonConversationFlow, PersonStage, PersonStageContext, PersonStageDelivery } from '../contracts/person-stage'
 import { personError } from '../contracts/person'
-import { getPersonTask, personDb, personTransaction, taskExecutionJoin } from './person-store'
+import { getPersonTask, personDb, personTransaction, personSettings, taskExecutionJoin } from './person-store'
 import { requirePersonSession } from './person-session-store'
 
 /** Only an outstanding handoff keeps its recipient active, never the waiting creator. */
@@ -117,8 +117,8 @@ export function enqueuePersonStage(userId: number, stage: PersonStage, generatio
 export function enqueuePersonScheduledStage(userId: number, sessionId: string, title: string, goal: string) {
   requirePersonSession(userId, sessionId)
   const db = personDb(), id = randomUUID(), now = Date.now()
-  db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
-    .run(id, userId, sessionId, title, goal, now, now)
+  db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at,workspace) VALUES(?,?,?,?,?,?,?,?)')
+    .run(id, userId, sessionId, title, goal, now, now, personSettings(userId, sessionId).settings.workspace)
   db.prepare("INSERT INTO person_stages(id,flow_id,position,session_id,goal,return_expectation,state) VALUES(?,?,0,?,?,?,'active')")
     .run(randomUUID(), id, sessionId, goal, 'Complete the saved scheduled goal and report the new result. Use a background worker only when needed.')
   const flow = getPersonFlow(userId, id)

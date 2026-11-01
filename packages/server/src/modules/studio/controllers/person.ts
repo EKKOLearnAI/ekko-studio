@@ -26,7 +26,7 @@ async function handle(ctx: Context, work: (id: number, body: Record<string, unkn
   } catch (error) {
     const status = Number((error as { status?: number }).status) || 500
     ctx.status = status; ctx.body = { error: status < 500 && error instanceof Error ? error.message : 'Person operation failed',
-      ...((error as { code?: string }).code === 'PERSON_BOT_NAME_EXISTS' ? { code: 'PERSON_BOT_NAME_EXISTS' } : {}) }
+      ...(['PERSON_BOT_NAME_EXISTS', 'BOT_WORKSPACE_REQUIRED', 'WORKSPACE_UNAVAILABLE'].includes(String((error as { code?: string }).code)) ? { code: (error as { code: string }).code } : {}) }
   }
 }
 export const snapshot = (ctx: Context) => handle(ctx, id => personSnapshot(id, String(ctx.query.session_id || '')))

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -18,7 +18,7 @@ const disposeSessionMock=vi.fn()
 const selection={runtime:'ekko',mode:'scoped' as const,profile:'default',provider:'test',model:'m',apiMode:'chat_completions'}
 const catalog=[{provider:'test',models:['m'],api_mode:'chat_completions'}]
 beforeEach(async()=>{
-  vi.resetModules();catalog.splice(0,catalog.length,{provider:'test',models:['m'],api_mode:'chat_completions'});db=new DatabaseSync(':memory:');dir=mkdtempSync(join(tmpdir(),'person-stage-test-'))
+  vi.resetModules();catalog.splice(0,catalog.length,{provider:'test',models:['m'],api_mode:'chat_completions'});db=new DatabaseSync(':memory:');dir=realpathSync(mkdtempSync(join(tmpdir(),'person-stage-test-')))
   vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index',()=>({getDb:()=>db,isSqliteAvailable:()=>true}))
   vi.doMock('../../packages/server/src/modules/studio/public/config',()=>({config:{appHome:dir},getWebUiHome:()=>dir}))
   vi.doMock('../../packages/server/src/modules/studio/public/provider-runtime',()=>({getModelContextLength:()=>16000}))
@@ -205,6 +205,36 @@ async function complete(current: ReturnType<typeof flow>, text: string) {
 }
 
 describe('independent Person stages', () => {
+  it('pins cooperation to the initiating directory across Bots and concurrent flows without changing their defaults', async () => {
+    const { personTurnWorkspace } = await import('../../packages/server/src/modules/studio/services/person/workspace')
+    const own = Object.fromEntries(['person-main-1', 'person-main-b', 'person-main-c'].map((id, i) => {
+      const path = join(dir, `bot-${i}`); mkdirSync(path)
+      const saved = store.personSettings(1, id)
+      store.savePersonSettings(1, { ...saved.settings, workspace: path }, saved.revision, path, id)
+      return [id, path]
+    }))
+    const first = flow()
+    const second = flows.createPersonFlow(1, { session_id: 'person-main-c', title: 'Concurrent project', goal: 'Use C project', idempotency_key: crypto.randomUUID(),
+      stages: [{ session_id: 'person-main-b', goal: 'Work', return_expectation: 'Result' }] })
+    expect(first.workspace).toBe(own['person-main-1'])
+    expect(second.workspace).toBe(own['person-main-c'])
+    expect(personTurnWorkspace(1, 'person-main-b', origin(first))).toBe(first.workspace)
+    expect(personTurnWorkspace(1, 'person-main-b', origin(second))).toBe(second.workspace)
+    const worker: any = await tasks.applyPersonTask(1, { action: 'create', title: 'Shared code', goal: 'Review shared code', idempotency_key: 'shared-code' }, undefined, origin(first))
+    expect(worker.task.workspace).toBe(first.workspace)
+    expect(worker.execution.workspace).toBe(first.workspace)
+    expect(personTurnWorkspace(1, 'person-main-b', { returnExecutionId: worker.execution.id })).toBe(first.workspace)
+    for (const [id, workspace] of Object.entries(own)) expect(store.personSettings(1, id).settings.workspace).toBe(workspace)
+    const state = store.personSettings(1, 'person-main-1')
+    store.savePersonSettings(1, { ...state.settings, workspace: own['person-main-b'] }, state.revision, own['person-main-b'], 'person-main-1')
+    expect(personTurnWorkspace(1, 'person-main-b', origin(first))).toBe(first.workspace)
+    rmSync(first.workspace, { recursive: true })
+    await flows.deliverPersonStages()
+    expect(stages.getPersonFlow(1, first.id)).toMatchObject({ error: expect.stringContaining('Workspace directory is unavailable') })
+    expect(vi.mocked(runtime.deliverStage).mock.calls.every(([input]) => input.context.flowId !== first.id)).toBe(true)
+    expect(personTurnWorkspace(1, 'person-main-b', origin(second))).toBe(second.workspace)
+  })
+
   it('lists the 50 most recently updated flows for a conversation and keeps older flows queryable', () => {
     const created=Array.from({length:51},(_,index)=>{
       const current=flow()
