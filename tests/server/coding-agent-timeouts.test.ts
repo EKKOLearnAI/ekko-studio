@@ -11,7 +11,7 @@ vi.mock('node:child_process', () => ({ spawn }))
 vi.mock('../../packages/server/src/modules/studio/public/process-tree', () => ({ killOwnedProcessTree: killTree }))
 
 const turns: Array<NativeAcpTurn | DshAcpTurn> = []
-const invalid = [undefined, '', ' ', '0', '-1', '1.5', 'NaN', 'Infinity', '240000ms', '2147483648']
+const invalid = [undefined, '', ' ', '0', '-1', '1.5', 'NaN', 'Infinity', '-Infinity', '240000ms', '2147483648', '1e309', 'true', 'null']
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   spawn.mockReset(); killTree.mockReset()
@@ -62,9 +62,12 @@ function connection(dsh: boolean, hold: string[] = []) {
   }
 }
 
-describe.each([false, true])('ACP request budgets (DSH: %s)', dsh => {
-  const variable = dsh ? 'HERMES_DSH_ACP_TIMEOUT_MS' : 'HERMES_ACP_TIMEOUT_MS'
-  const other = dsh ? 'HERMES_ACP_TIMEOUT_MS' : 'HERMES_DSH_ACP_TIMEOUT_MS'
+describe.each([
+  [false, 'EKKO_STUDIO_ACP_TIMEOUT_MS', 'EKKO_STUDIO_DSH_ACP_TIMEOUT_MS'],
+  [true, 'EKKO_STUDIO_DSH_ACP_TIMEOUT_MS', 'EKKO_STUDIO_ACP_TIMEOUT_MS'],
+  [false, 'HERMES_ACP_TIMEOUT_MS', 'HERMES_DSH_ACP_TIMEOUT_MS'],
+  [true, 'HERMES_DSH_ACP_TIMEOUT_MS', 'HERMES_ACP_TIMEOUT_MS'],
+] as const)('ACP request budgets (DSH: %s, variable: %s)', (dsh, variable, other) => {
   const prefix = dsh ? 'DSH ACP' : 'ACP'
 
   it.each(invalid)('uses the 60-second default for %s, independently of the other ACP budget', async value => {
@@ -151,8 +154,8 @@ describe.each([false, true])('ACP request budgets (DSH: %s)', dsh => {
   })
 })
 
-it('preserves the separate 10-second DSH close deadline', async () => {
-  vi.stubEnv('HERMES_DSH_ACP_TIMEOUT_MS', '240000')
+it.each(['EKKO_STUDIO_DSH_ACP_TIMEOUT_MS', 'HERMES_DSH_ACP_TIMEOUT_MS'])('preserves the separate 10-second DSH close deadline with %s', async variable => {
+  vi.stubEnv(variable, '240000')
   const rpc = connection(true, ['session/close']), pending = rpc.prompt()
   const rejected = expect(pending).rejects.toThrow('DSH ACP session/close timed out')
   await vi.advanceTimersByTimeAsync(9999)
@@ -162,17 +165,17 @@ it('preserves the separate 10-second DSH close deadline', async () => {
   await rejected
 })
 
-function discovery(timeoutMs?: number) {
+function discovery(timeoutMs?: number, env: NodeJS.ProcessEnv = {}) {
   const child = childProcess()
   spawn.mockReturnValue(child)
-  const context = createModelDiscoveryContext({ command: { command: 'fixture' }, cwd: '/workspace', home: '/workspace', env: {},
+  const context = createModelDiscoveryContext({ command: { command: 'fixture' }, cwd: '/workspace', home: '/workspace', env,
     host: { commandExecution: (command, args) => ({ command, args }), timeoutMs } })
   return { child, context }
 }
 
-describe('model discovery total deadline', () => {
+describe.each(['EKKO_STUDIO_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', 'HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS'])('model discovery total deadline: %s', variable => {
   it.each(invalid)('uses the 20-second default for %s', async value => {
-    vi.stubEnv('HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', value)
+    vi.stubEnv(variable, value)
     const { child, context } = discovery(), pending = context.run([])
     const rejected = expect(pending).rejects.toMatchObject({ status: 'timeout' })
     await vi.advanceTimersByTimeAsync(19_999)
@@ -184,7 +187,7 @@ describe('model discovery total deadline', () => {
   })
 
   it.each([1, 2_147_483_647])('accepts the Node timer boundary %s', async budget => {
-    vi.stubEnv('HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', String(budget))
+    vi.stubEnv(variable, String(budget))
     const { context } = discovery(), pending = context.run([])
     const rejected = expect(pending).rejects.toMatchObject({ status: 'timeout' })
     await vi.advanceTimersByTimeAsync(budget - 1)
@@ -194,7 +197,7 @@ describe('model discovery total deadline', () => {
   })
 
   it('allows a healthy process to finish after 20 seconds and clears its timer', async () => {
-    vi.stubEnv('HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', '240000')
+    vi.stubEnv(variable, '240000')
     const { child, context } = discovery(), pending = context.run([])
     void pending.catch(() => {})
     await vi.advanceTimersByTimeAsync(30_000)
@@ -205,7 +208,7 @@ describe('model discovery total deadline', () => {
   })
 
   it('keeps one total deadline across multiple RPC requests', async () => {
-    vi.stubEnv('HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', '240000')
+    vi.stubEnv(variable, '240000')
     const { child, context } = discovery(), sent: any[] = []
     child.stdin.on('data', chunk => sent.push(JSON.parse(chunk.toString())))
     const pending = context.rpc([], async rpc => { await rpc.request('initialize'); return rpc.request('session/new') })
@@ -221,11 +224,60 @@ describe('model discovery total deadline', () => {
   })
 
   it('lets the explicit host deadline take precedence over the environment', async () => {
-    vi.stubEnv('HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', '240000')
+    vi.stubEnv(variable, '240000')
+    vi.stubEnv(variable.startsWith('HERMES_') ? 'EKKO_STUDIO_AGENT_MODEL_DISCOVERY_TIMEOUT_MS' : 'HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', '360000')
     const { context } = discovery(1250), pending = context.run([])
     const rejected = expect(pending).rejects.toMatchObject({ status: 'timeout' })
     await vi.advanceTimersByTimeAsync(1250)
     await rejected
     expect(killTree).toHaveBeenCalledOnce()
   })
+})
+
+const settings = [
+  { kind: 'native', variable: 'EKKO_STUDIO_ACP_TIMEOUT_MS', legacy: 'HERMES_ACP_TIMEOUT_MS', fallback: 60_000 },
+  { kind: 'dsh', variable: 'EKKO_STUDIO_DSH_ACP_TIMEOUT_MS', legacy: 'HERMES_DSH_ACP_TIMEOUT_MS', fallback: 60_000 },
+  { kind: 'models', variable: 'EKKO_STUDIO_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', legacy: 'HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', fallback: 20_000 },
+] as const
+
+describe.each(settings)('$kind naming compatibility', ({ kind, variable, legacy, fallback }) => {
+  const cases = [
+    { name: 'valid Studio value wins', preferred: '1250', old: '240000', budget: 1250 },
+    { name: 'valid Studio value survives invalid legacy', preferred: '1250', old: 'invalid', budget: 1250 },
+    ...[' 1250 ', '1.25e3', '0x4e2'].map(value => ({ name: `preserves Number parsing for ${value}`, preferred: value, old: '240000', budget: 1250 })),
+    ...invalid.flatMap(value => [
+      { name: `invalid Studio ${String(value)} uses valid legacy`, preferred: value, old: '240000', budget: 240000 },
+      { name: `invalid Studio and legacy ${String(value)} use default`, preferred: 'invalid', old: value, budget: fallback },
+    ]),
+  ]
+
+  it.each(cases)('$name', async ({ preferred, old, budget }) => {
+    // Unrelated request, discovery and readiness settings cannot supply this budget.
+    for (const setting of settings) {
+      vi.stubEnv(setting.variable, '1'); vi.stubEnv(setting.legacy, '1')
+    }
+    vi.stubEnv('HERMES_DSH_READY_TIMEOUT_MS', '1')
+    vi.stubEnv(variable, preferred); vi.stubEnv(legacy, old)
+    const pending = kind === 'models' ? discovery().context.run([]) : connection(kind === 'dsh', ['initialize']).prompt()
+    const rejected = kind === 'models'
+      ? expect(pending).rejects.toMatchObject({ status: 'timeout' })
+      : expect(pending).rejects.toThrow(`${kind === 'dsh' ? 'DSH ACP' : 'ACP'} initialize timed out`)
+    await vi.advanceTimersByTimeAsync(budget - 1)
+    expect(vi.getTimerCount()).toBe(1)
+    expect(killTree).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await rejected
+    expect(vi.getTimerCount()).toBe(0)
+    if (kind === 'models') expect(killTree).toHaveBeenCalledOnce()
+  })
+})
+
+it('reads discovery timers from Studio rather than the agent subprocess environment', async () => {
+  vi.stubEnv('EKKO_STUDIO_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', '1250')
+  const { context } = discovery(undefined, { EKKO_STUDIO_AGENT_MODEL_DISCOVERY_TIMEOUT_MS: '1', HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS: '1' })
+  const pending = context.run([]), rejected = expect(pending).rejects.toMatchObject({ status: 'timeout' })
+  await vi.advanceTimersByTimeAsync(1249)
+  expect(killTree).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(1)
+  await rejected
 })

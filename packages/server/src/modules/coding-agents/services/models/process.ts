@@ -33,7 +33,7 @@ class DiscoveryProcess {
       ...(execution.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       stdio: ['pipe', 'pipe', 'pipe'],
     })
-    this.timer = setTimeout(() => this.fail(new ModelDiscoveryError('timeout')), host.timeoutMs ?? timeoutFromEnv('HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', 20_000))
+    this.timer = setTimeout(() => this.fail(new ModelDiscoveryError('timeout')), host.timeoutMs ?? timeoutFromEnv('EKKO_STUDIO_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', 'HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', 20_000))
     this.child.on('error', error => this.fail(discoveryError(error)))
     this.child.stdin?.on('error', error => this.fail(discoveryError(error)))
     this.child.stderr?.on('data', (chunk: Buffer) => {

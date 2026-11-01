@@ -60,7 +60,7 @@ export class NativeAcpTurn {
     this.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`)
   }
 
-  private request(method: string, params: object, timeout = timeoutFromEnv('HERMES_ACP_TIMEOUT_MS', 60_000)): Promise<any> {
+  private request(method: string, params: object, timeout = timeoutFromEnv('EKKO_STUDIO_ACP_TIMEOUT_MS', 'HERMES_ACP_TIMEOUT_MS', 60_000)): Promise<any> {
     const id = ++this.sequence
     return new Promise((resolve, reject) => {
       const timer = timeout ? setTimeout(() => {
