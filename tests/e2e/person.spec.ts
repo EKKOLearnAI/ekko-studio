@@ -15,7 +15,7 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
   await page.route('**/api/theme/background?*', route => route.request().method() === 'GET'
     ? route.fulfill({ contentType: 'image/png', body: image }) : route.fallback())
   const globalModel = { model: 'global-model', provider: 'provider', profile: 'default' }
-  const state: any = { settings: { workspace: '', model: globalModel, reasoningEffort: 'low', timezone: 'UTC', compressionThreshold: null, maxSteps: 12, maxConcurrentTasks: 6, agents: [{ id: 'worker', name: 'Research assistant', description: 'Research and write reports', selection: { runtime: 'ekko', mode: 'scoped', profile: 'default', provider: 'provider', model: 'global-model', reasoningEffort: '' } }] }, contextTokens: 200000, compression: { enabled: true, threshold: 0.5, globalThreshold: 0.5 }, inherits_global_model: true, reasoning_efforts: ['none', 'low', 'high'], revision: 0, busy: false, history_revision: 0, can_clear: false, tasks: [{ id: 'task1', title: 'Check report', summary: 'Verify a report', status: 'open', revision: 0, execution_id: 'execution1', execution_state: 'running', running: true }], schedules: [], memories: [], interactions: [] }
+  const state: any = { settings: { workspace: '', model: globalModel, reasoningEffort: 'low', timezone: 'UTC', compressionThreshold: null, maxSteps: 12, maxConcurrentTasks: 6, taskTimeoutMinutes: 60, agents: [{ id: 'worker', name: 'Research assistant', description: 'Research and write reports', selection: { runtime: 'ekko', mode: 'scoped', profile: 'default', provider: 'provider', model: 'global-model', reasoningEffort: '' } }] }, contextTokens: 200000, compression: { enabled: true, threshold: 0.5, globalThreshold: 0.5 }, inherits_global_model: true, reasoning_efforts: ['none', 'low', 'high'], revision: 0, busy: false, history_revision: 0, can_clear: false, tasks: [{ id: 'task1', title: 'Check report', summary: 'Verify a report', status: 'open', revision: 0, execution_id: 'execution1', execution_state: 'running', running: true }], schedules: [], memories: [], interactions: [] }
   state.session = { id: 'person-main-1', source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', agent_mode: 'scoped', profile: 'default', title: 'Person', workspace: '/tmp/person/default', model: 'global-model', provider: 'provider', started_at: 1, ended_at: null, message_count: 0, tool_call_count: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0, billing_provider: null, estimated_cost_usd: 0, actual_cost_usd: null, cost_status: '' }
   state.conversations = [state.session]
   state.conversationMessages = {}
@@ -82,7 +82,7 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
     if (path.endsWith('/models') || path.endsWith('/agent-models')) return route.fulfill({ json: { groups: state.modelGroups || [{ provider: 'provider', profile: 'default', label: 'My provider', models: ['global-model', 'fast-model'], model_meta: { 'global-model': { reasoning_efforts: ['none', 'low', 'high'] }, 'fast-model': { reasoning: false } } }] } })
     if (path.endsWith('/settings')) {
       if (body.expected_revision !== state.revision) return route.fulfill({ status: 409, json: { error: 'Settings changed' } })
-      for (const key of ['compressionThreshold', 'maxSteps', 'maxConcurrentTasks', 'timezone']) if (body[key] !== undefined) state.settings[key] = body[key]
+      for (const key of ['compressionThreshold', 'maxSteps', 'maxConcurrentTasks', 'taskTimeoutMinutes', 'timezone']) if (body[key] !== undefined) state.settings[key] = body[key]
       if (body.workspace !== undefined) { state.settings.workspace = body.workspace; state.session.workspace = body.workspace || '/tmp/person/default' }
       if (body.agents) state.settings.agents = body.agents
       if (body.model) { state.settings.model = body.model; state.inherits_global_model = false; state.reasoning_efforts = []; state.settings.reasoningEffort = '' }
@@ -1260,6 +1260,43 @@ test('Person background-task island supports reduced motion and hides for main-c
   await expect(island).toHaveAttribute('aria-expanded', 'true')
   await expect(page.locator('.activity-details')).toBeVisible()
 })
+
+for (const mode of ['light', 'dark'] as const) {
+  test(`Person single-run time limit saves minutes and unlimited in ${mode}`, async ({ page }, testInfo) => {
+    const { operations } = await setup(page, mode, mode === 'light')
+    await page.setViewportSize({ width: mode === 'dark' ? 390 : 1440, height: 900 })
+    await page.goto('/#/person')
+    const open = async () => page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
+    await open()
+    const panel = page.locator('.person-general-settings')
+    const limit = panel.getByRole('textbox', { name: 'Single-run time limit (minutes)', exact: true })
+    const save = panel.getByRole('button', { name: 'Save', exact: true })
+    await expect(limit).toHaveValue('60')
+    await expect(panel).toContainText('Use -1 for no time limit')
+    for (const invalid of ['', '0']) {
+      await limit.fill(invalid)
+      await limit.press('Tab')
+      await expect(save).toBeDisabled()
+    }
+    await panel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(limit).toHaveValue('60')
+    for (const minutes of [90, -1]) {
+      await limit.fill(String(minutes))
+      await page.getByRole('tab', { name: /^Agents/ }).click()
+      await page.getByRole('tab', { name: 'General', exact: true }).click()
+      await expect(limit).toHaveValue(String(minutes))
+      await save.click()
+      await expect(panel.getByRole('status')).toHaveText('Settings saved')
+      expect(operations.filter(op => op.path.endsWith('/settings')).at(-1).body).toMatchObject({ taskTimeoutMinutes: minutes })
+      await page.reload()
+      await open()
+      await expect(limit).toHaveValue(String(minutes))
+    }
+    await limit.scrollIntoViewIfNeeded()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`person-time-limit-${mode}.png`), animations: 'disabled' })
+  })
+}
 
 test('Person general settings save independently, survive refresh and retain drafts across tabs', async ({ page }) => {
   const { state, operations } = await setup(page, 'light', false, false)

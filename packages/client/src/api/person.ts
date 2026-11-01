@@ -14,7 +14,7 @@ export interface PersonSchedule { id: string; mode: 'assistant' | 'worker'; task
 export interface PersonMemory { id: string; content: string; revision: number }
 export interface PersonQuestion { id: string; task_id: string | null; question: string; kind: string; choices_json: string; revision: number }
 export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed' }
-export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; timezone: string }
+export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; taskTimeoutMinutes: number; timezone: string }
 export interface PersonFlow {
   creator_session_id?: string
   id: string; title: string; goal: string; revision: number; state: 'active' | 'failed' | 'stopped' | 'completed'; current_position: number; error: string

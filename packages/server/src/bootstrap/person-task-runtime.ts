@@ -41,7 +41,7 @@ export const executePersonTask: PersonRuntimePort['execute'] = async input => {
       ...(s.runtime !== 'hermes' ? { coding_agent_id: (s.runtime === 'ekko' ? 'ekko-agent' : s.runtime) as any } : {}),
       memory_write_policy: 'explicit-only', memory_recall_scopes: [], memory_write_scopes: [],
       instructions: 'This is a task delegated by Person. Tool execution approvals are handled automatically for this task. Ask clarifying questions normally: Person coordinates answers. Work only on the supplied goal and scope. Persist the deliverable or report and verification evidence as files in the supplied workspace and report their paths. Do not claim completion without checking results.',
-    }, { profile: s.profile, user: input.user, timeoutMs: 60 * 60_000, approvalChoice: 'once', onEvent: (event: string, payload: Record<string, unknown>) => {
+    }, { profile: s.profile, user: input.user, ...(input.taskTimeoutMinutes === -1 ? {} : { timeoutMs: input.taskTimeoutMinutes * 60_000 }), approvalChoice: 'once', onEvent: (event: string, payload: Record<string, unknown>) => {
       if (event === 'run.started') ready()
       input.onEvent(event, payload)
     } })

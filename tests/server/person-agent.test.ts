@@ -235,6 +235,78 @@ describe('Person task result memory requests', () => {
 })
 const wait = async (id: string, state: string) => vi.waitFor(() => expect(store.getPersonExecution(1, id).state).toBe(state), { timeout: 2000, interval: 10 })
 
+describe('Person task run time limits', () => {
+  it('defaults legacy and new accounts to 60 minutes without mutating stored settings', () => {
+    const legacy = store.personSettings(1)
+    const { taskTimeoutMinutes: _omitted, ...settings } = legacy.settings
+    const raw = JSON.stringify(settings)
+    db.prepare('UPDATE person_accounts SET settings_json=? WHERE user_id=1').run(raw)
+    expect(store.personSettings(1).settings.taskTimeoutMinutes).toBe(60)
+    expect(store.personSettings(2).settings.taskTimeoutMinutes).toBe(60)
+    expect(db.prepare('SELECT settings_json FROM person_accounts WHERE user_id=1').get()?.settings_json).toBe(raw)
+  })
+
+  it.each([1, 120, 35_791, -1])('persists %i minutes across Bots, isolates accounts and uses it for dispatch', async minutes => {
+    const { configurePerson, personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const { createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    createSession({ id: 'person-main-timeout', studio_user_id: 1, user_id: 1, title: 'Second Bot', source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', profile: 'default' })
+    const first = await create()
+    await configurePerson(1, { session_id: 'person-main-1', taskTimeoutMinutes: minutes, expected_revision: 1 })
+    expect(JSON.parse(String(db.prepare('SELECT settings_json FROM person_accounts WHERE user_id=1').get()!.settings_json)).taskTimeoutMinutes).toBe(minutes)
+    expect((await personSnapshot(1, 'person-main-timeout')).settings.taskTimeoutMinutes).toBe(minutes)
+    expect(store.personSettings(2).settings.taskTimeoutMinutes).toBe(60)
+    await runner.tickPersonWork()
+    await wait(first.execution.id, 'finished')
+    expect(runtime.execute).toHaveBeenLastCalledWith(expect.objectContaining({ taskTimeoutMinutes: minutes }))
+    await configurePerson(1, { taskTimeoutMinutes: 5, expected_revision: 2 })
+    const next = await create()
+    await runner.tickPersonWork()
+    await wait(next.execution.id, 'finished')
+    expect(runtime.execute).toHaveBeenLastCalledWith(expect.objectContaining({ taskTimeoutMinutes: 5 }))
+    await expect(configurePerson(1, { taskTimeoutMinutes: -1, expected_revision: 2 })).rejects.toMatchObject({ status: 409 })
+    expect(store.personSettings(1).settings.taskTimeoutMinutes).toBe(5)
+  })
+
+  it.each([0, -2, 1.5, '60', null, true, NaN, Infinity, 35_792, Number.MAX_SAFE_INTEGER])('rejects invalid timeout %s without saving', async taskTimeoutMinutes => {
+    const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const original = store.personSettings(1)
+    await expect(configurePerson(1, { taskTimeoutMinutes, expected_revision: original.revision })).rejects.toMatchObject({ status: 400 })
+    expect(store.personSettings(1)).toEqual(original)
+  })
+
+  it('keeps the running limit and applies changes to the next dispatch', async () => {
+    const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
+    let finish!: (result: { ok: boolean; output: string }) => void
+    runtime.execute = vi.fn(input => {
+      input.onEvent('run.started', {})
+      return new Promise(resolve => { finish = resolve })
+    })
+    const first = await create()
+    await runner.tickPersonWork()
+    await wait(first.execution.id, 'running')
+    await configurePerson(1, { taskTimeoutMinutes: -1, expected_revision: 1 })
+    expect(runtime.execute).toHaveBeenLastCalledWith(expect.objectContaining({ taskTimeoutMinutes: 60 }))
+    finish({ ok: true, output: 'Done' })
+    await wait(first.execution.id, 'finished')
+    const next = await create()
+    await runner.tickPersonWork()
+    await wait(next.execution.id, 'running')
+    expect(runtime.execute).toHaveBeenLastCalledWith(expect.objectContaining({ taskTimeoutMinutes: -1 }))
+    finish({ ok: true, output: 'Done' })
+    await wait(next.execution.id, 'finished')
+  })
+
+  it('treats the timeout as shared when another Bot is replying', async () => {
+    const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const { createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    createSession({ id: 'person-main-busy', studio_user_id: 1, user_id: 1, title: 'Busy Bot', source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', profile: 'default' })
+    mainBusy = 'person-main-busy'
+    const original = store.personSettings(1)
+    await expect(configurePerson(1, { session_id: 'person-main-1', taskTimeoutMinutes: -1, expected_revision: original.revision })).rejects.toMatchObject({ status: 409 })
+    expect(store.personSettings(1)).toEqual(original)
+  })
+})
+
 describe('Person account concurrency', () => {
   it.each([6, 12])('shares %i slots across Bots and starts queued work when a slot is released', async limit => {
     const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')

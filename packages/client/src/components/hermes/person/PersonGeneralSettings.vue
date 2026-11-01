@@ -16,10 +16,10 @@ const props = defineProps<{
   save: (patch: Partial<PersonGeneralSettings>) => Promise<boolean>
 }>()
 const { t } = useI18n()
-const keys = ['compressionThreshold', 'maxSteps', 'maxConcurrentTasks', 'timezone'] as const
+const keys = ['compressionThreshold', 'maxSteps', 'maxConcurrentTasks', 'taskTimeoutMinutes', 'timezone'] as const
 const pickSettings = (): PersonGeneralSettings => ({ maxSteps: props.settings.maxSteps,
-  maxConcurrentTasks: props.settings.maxConcurrentTasks, timezone: props.settings.timezone, compressionThreshold: props.settings.compressionThreshold })
-const draft = ref<{ compressionThreshold: number | null; maxSteps: number | null; maxConcurrentTasks: number | null; timezone: string }>(pickSettings())
+  maxConcurrentTasks: props.settings.maxConcurrentTasks, taskTimeoutMinutes: props.settings.taskTimeoutMinutes, timezone: props.settings.timezone, compressionThreshold: props.settings.compressionThreshold })
+const draft = ref<{ compressionThreshold: number | null; maxSteps: number | null; maxConcurrentTasks: number | null; taskTimeoutMinutes: number | null; timezone: string }>(pickSettings())
 const saved = ref(false)
 const dirty = computed(() => keys.some(key => draft.value[key] !== props.settings[key]))
 // Live updates refresh untouched fields without discarding this tab's draft.
@@ -38,6 +38,7 @@ const integerInRange = (value: number | null, min: number, max: number) => value
 const compressionPercent = computed(() => Math.round((draft.value.compressionThreshold ?? props.compression.globalThreshold) * 100))
 const compressionTokens = computed(() => Math.floor(props.contextTokens * compressionPercent.value / 100).toLocaleString())
 const valid = computed(() => integerInRange(draft.value.maxSteps, 2, 30) && integerInRange(draft.value.maxConcurrentTasks, 1, 12) && !!draft.value.timezone
+  && (draft.value.taskTimeoutMinutes === -1 || integerInRange(draft.value.taskTimeoutMinutes, 1, 35_791))
   && (draft.value.compressionThreshold === null || (draft.value.compressionThreshold >= 0.05 && draft.value.compressionThreshold <= 0.95)))
 function reset() { draft.value = pickSettings(); saved.value = false }
 async function submit() {
@@ -67,6 +68,7 @@ async function submit() {
         <div class="setting-heading"><span class="tile-icon"><PersonPanelIcon name="agents" /></span><h3 id="person-runtime-title">{{ t('person.runLimits') }}</h3></div>
         <div class="setting-fields">
           <label><span>{{ t('person.maxSteps') }}</span><NInputNumber v-model:value="draft.maxSteps" :min="2" :max="30" :precision="0" :disabled="saving" :input-props="{ 'aria-label': t('person.maxSteps') }" /><small>{{ t('person.maxStepsHint') }}</small></label>
+          <label><span>{{ t('person.taskTimeoutMinutes') }}</span><NInputNumber v-model:value="draft.taskTimeoutMinutes" :min="-1" :max="35791" :precision="0" :disabled="saving" :input-props="{ 'aria-label': t('person.taskTimeoutMinutes') }" /><small>{{ t('person.taskTimeoutMinutesHint') }}</small></label>
           <label><span>{{ t('person.maxConcurrentTasks') }}</span><NInputNumber v-model:value="draft.maxConcurrentTasks" :min="1" :max="12" :precision="0" :disabled="saving" :input-props="{ 'aria-label': t('person.maxConcurrentTasks') }" /><small>{{ t('person.maxConcurrentTasksHint') }}</small></label>
         </div>
       </section>

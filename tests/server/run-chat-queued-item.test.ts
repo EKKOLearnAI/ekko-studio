@@ -1413,6 +1413,28 @@ describe('ChatRunSocket queued bridge runs', () => {
     } finally { vi.useRealTimers() }
   })
 
+  it('keeps a Person task alive past one hour when no wall-clock timeout is supplied', async () => {
+    vi.useFakeTimers()
+    let complete!: () => void
+    handleBridgeRunMock.mockImplementationOnce(async (_namespace, _socket, data) => {
+      complete = () => data.onEvent('run.completed', { output: 'Unlimited task done' })
+    })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const abort = vi.spyOn(server, 'abortSession').mockResolvedValue(undefined)
+    let settled = false
+    try {
+      const result = server.runAndWait({ session_id: 'session-1', input: 'Person task', source: 'api_server' })
+      void result.then(() => { settled = true })
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000)
+      expect(settled).toBe(false)
+      expect(abort).not.toHaveBeenCalled()
+      complete()
+      await expect(result).resolves.toMatchObject({ ok: true, output: 'Unlimited task done' })
+    } finally { vi.useRealTimers() }
+  })
+
 
   it.each(['run.completed','run.failed'])('preserves task insertion interruption metadata on %s',async event=>{
     handleBridgeRunMock.mockImplementationOnce(async(_nsp,_socket,data)=>data.onEvent(event,{run_id:'native',interrupted:true,stop_reason:'queue_insertion',output:'partial'}))
