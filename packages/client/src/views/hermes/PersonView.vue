@@ -43,6 +43,7 @@ import { useSessionReadState } from '@/composables/useSessionReadState'
 import { useChatSurfaceReveal } from '@/composables/useChatSurfaceReveal'
 import type { AvailableModelGroup } from '@/api/hermes/system'
 import { personRequest, type PersonSnapshot, type PersonModel, type PersonModelGroup, type PersonTask, type PersonSchedule, type PersonMemory, type PersonFlow } from '@/api/person'
+import { clientUuid } from '@/utils/secure-uuid'
 import { DEFAULT_PERSON_BOT_TYPE, personBot } from '../../../../shared/person-bots'
 import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import { PERSON_AVATAR, chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
@@ -410,7 +411,7 @@ async function refresh() {
   }
 }
 function flowAction(flow: PersonFlow, action: 'stop' | 'resume') {
-  return act(() => personRequest('/flows/apply', { action, flow_id: flow.id, expected_revision: flow.revision, idempotency_key: crypto.randomUUID() }))
+  return act(() => personRequest('/flows/apply', { action, flow_id: flow.id, expected_revision: flow.revision, idempotency_key: clientUuid() }))
 }
 function openFlowResult(sessionId: string, messageId: number) {
   showPanel.value = false
@@ -527,7 +528,7 @@ function inheritModel() {
   showModelPicker.value = false
 }
 function memoryForget(memory: PersonMemory) { return act(() => personRequest('/memory', { id: memory.id, expected_revision: memory.revision, forget: true })) }
-function scheduleAction(schedule: PersonSchedule, action: string) { return act(() => personRequest('/schedules/apply', { schedule_id: schedule.id, action, expected_revision: schedule.revision, idempotency_key: crypto.randomUUID() })) }
+function scheduleAction(schedule: PersonSchedule, action: string) { return act(() => personRequest('/schedules/apply', { schedule_id: schedule.id, action, expected_revision: schedule.revision, idempotency_key: clientUuid() })) }
 function saveSchedule(input: Record<string, unknown>) { return act(() => personRequest('/schedules/apply', input)) }
 
 watch(busy, (running, wasRunning) => { if (wasRunning && !running) void refresh() })

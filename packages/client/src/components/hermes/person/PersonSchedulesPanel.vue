@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { NButton, NDatePicker, NInput, NModal, NSelect, NTag, NTimePicker } from 'naive-ui'
 import type { PersonSchedule, PersonTask } from '@/api/person'
 import PersonPanelIcon from './PersonPanelIcon.vue'
+import { clientUuid } from '@/utils/secure-uuid'
 
 const props = defineProps<{ sessionId: string; schedules: PersonSchedule[]; tasks: PersonTask[]; timezone: string; saving: boolean; save: (input: Record<string, unknown>) => Promise<boolean> }>()
 const emit = defineEmits<{ action: [schedule: PersonSchedule, action: string] }>()
@@ -54,7 +55,7 @@ const validTarget = computed(() => mode.value === 'worker' ? !!taskId.value : !!
 async function submit() {
   if (props.saving || !validTarget.value || !expression.value || !zone.value.trim()) return
   if (await props.save({ action: editing.value ? 'update' : 'create', mode: mode.value, ...(mode.value === 'worker' ? { task_id: taskId.value } : { session_id: props.sessionId, title: title.value, goal: goal.value }), schedule_id: editing.value?.id, expected_revision: editing.value?.revision,
-    kind: kind.value, expression: expression.value, timezone: zone.value, misfire: 'run_latest', idempotency_key: crypto.randomUUID() })) editorOpen.value = false
+    kind: kind.value, expression: expression.value, timezone: zone.value, misfire: 'run_latest', idempotency_key: clientUuid() })) editorOpen.value = false
 }
 function confirmDelete() {
   if (props.saving || !deleteTarget.value) return false

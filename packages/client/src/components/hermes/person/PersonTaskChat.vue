@@ -8,6 +8,7 @@ import PersonWorkspaceFiles from './PersonWorkspaceFiles.vue'
 import { buildContentBlocks, uploadFiles, type Attachment } from '@/stores/hermes/chat'
 import { personRequest, personTaskCanStop, stopPersonTask, removePersonTaskMessage, type PersonTask, type PersonExecutionSummary, type PersonTaskQueueState } from '@/api/person'
 import { onPersonUpdated } from '@/api/studio/chat'
+import { clientUuid } from '@/utils/secure-uuid'
 import type { SessionSummary } from '@/api/studio/sessions'
 import { createRefreshQueue } from '@/utils/refresh-queue'
 const props = defineProps<{ taskId: string; mainSessionId: string; executionId?: string }>()
@@ -72,7 +73,7 @@ async function send(text: string, attachments?: Attachment[]) {
   try {
     const input = await buildContentBlocks(text, attachments, await uploadFiles(attachments || []))
     const result = await personRequest<{ task: PersonTask; pending?: typeof pending.value }>(`/tasks/${encodeURIComponent(props.taskId)}/chat`, {
-      input, execution_id: selectedExecutionId.value || undefined, expected_execution_id: task.value.execution_id || null, expected_revision: task.value.revision, idempotency_key: crypto.randomUUID(),
+      input, execution_id: selectedExecutionId.value || undefined, expected_execution_id: task.value.execution_id || null, expected_revision: task.value.revision, idempotency_key: clientUuid(),
     }, 'POST', lifetime.signal)
     task.value = result.task; pending.value = result.pending || []
     await refresh()
@@ -90,7 +91,7 @@ async function insert(queueId: string) {
   requestingInsertion.value = queueId; error.value = ''; removalError.value = ''; reads.cancel()
   try {
     await personRequest(`/tasks/${encodeURIComponent(props.taskId)}/queue/insert`, {
-      queue_id: queueId, expected_execution_id: task.value.execution_id, expected_revision: task.value.revision, idempotency_key: crypto.randomUUID(),
+      queue_id: queueId, expected_execution_id: task.value.execution_id, expected_revision: task.value.revision, idempotency_key: clientUuid(),
     }, 'POST', lifetime.signal)
   } catch (e) { if (!lifetime.signal.aborted) error.value = String(e) }
   finally { if (!lifetime.signal.aborted) await refresh(); requestingInsertion.value = '' }
