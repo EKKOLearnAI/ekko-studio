@@ -500,10 +500,13 @@ for (const agent of ['Ekko', 'Codex', 'Claude']) test(`automatic relay selection
     .toMatchObject({ apiMode: 'codex_responses', apiModeManual: true })
   let releaseModels!: () => void
   const modelGate = new Promise<void>(resolve => { releaseModels = resolve })
-  await page.route('**/api/hermes/available-models*', async route => { await modelGate; await route.fallback() })
+  let sawModels!: () => void
+  const modelRequest = new Promise<void>(resolve => { sawModels = resolve })
+  await page.route('**/api/hermes/available-models*', async route => { sawModels(); await modelGate; await route.fallback() })
   await page.reload()
-  await expect(draft).toBeVisible()
+  await modelRequest
   releaseModels()
+  await expect(draft).toBeVisible()
   await expect(draft.locator('.input-model-button')).toContainText(models[1])
   await draft.locator('textarea').fill('Use my manual protocol')
   await draft.getByRole('button', { name: 'Send', exact: true }).click()
