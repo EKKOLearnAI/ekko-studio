@@ -64,7 +64,13 @@ export async function continuePersonTask(userId: number, taskId: string, body: R
   const task = getPersonTask(userId, taskId)
   await validatePersonSelection(userId, JSON.parse(task.selection_json))
   const replay = replayPersonOperation<{ task: PersonTask; execution: PersonExecution; pending: ReturnType<typeof pendingPersonInputs> }>(userId, key, request)
-  if (replay !== undefined) return replay
+  if (replay !== undefined) {
+    // The input was accepted once, but may since have finished or been cancelled
+    // by pause/stop. Return its current receipt instead of a stale "running" one.
+    const execution = getPersonExecution(userId, replay.execution.id)
+    const current = getPersonTask(userId, taskId)
+    return { task: { ...current, running: !!current.running }, execution, pending: pendingPersonInputs(userId, taskId, execution.session_id) }
+  }
   const input = chatInput(body.input)
   const result = personOperation(userId, key, request, () => {
     const stage = assertPersonStageTask(userId,taskId)

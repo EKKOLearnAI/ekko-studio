@@ -2575,16 +2575,25 @@ export class ChatRunSocket {
   }
 
   /** Person owns the durable queue; this internal port only interrupts the fenced native turn. */
-  async interruptTaskRun(sessionId: string, expectedRunId: string): Promise<{ status: string; phase?: string }> {
+  async interruptTaskRun(sessionId: string, expectedRunId: string, expectedRunMarker?: string): Promise<{ status: string; phase?: string }> {
     const state = this.sessionMap.get(sessionId)
-    if (!sessionId.startsWith('person-task-') || !state?.isWorking) return { status: 'not_running' }
-    if (state.runId !== expectedRunId) return { status: 'run_mismatch' }
+    if (!sessionId.startsWith('person-task-') || !state?.isWorking || state.isAborting) return { status: 'not_running' }
     const runtime = this.queueInsertionRuntime(sessionId, state, true)
     if (!runtime) return { status: 'unsupported' }
+    if (runtime !== 'hermes' && runtime !== 'ekko') {
+      // Coding Agent run.started identifies a response/turn, whereas state.runId
+      // identifies a manager that can survive several turns in this session.
+      const turn = state.responseRun
+      if (!state.runId || !expectedRunId || turn?.responseId !== expectedRunId
+        || (expectedRunMarker && turn.runMarker !== expectedRunMarker)) return { status: 'run_mismatch' }
+      return codingAgentRunManager.interruptForQueueInsertion(sessionId, state.runId, {
+        responseId: expectedRunId, runMarker: expectedRunMarker || turn.runMarker,
+      })
+    }
+    if (state.runId !== expectedRunId) return { status: 'run_mismatch' }
     if (runtime === 'hermes') return this.bridge.requestBoundaryInterrupt(sessionId, expectedRunId, state.profile)
-    if (runtime === 'ekko') return state.ekkoBoundaryInterrupt?.(expectedRunId)
+    return state.ekkoBoundaryInterrupt?.(expectedRunId)
       ?? getGlobalEkkoAgent(state.profile || 'default').requestBoundaryInterrupt({ sessionId, expectedRunId })
-    return codingAgentRunManager.interruptForQueueInsertion(sessionId, expectedRunId)
   }
 
   async waitForRunTermination(sessionId: string): Promise<void> {
