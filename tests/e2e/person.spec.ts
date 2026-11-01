@@ -4222,7 +4222,7 @@ for (const { width, mode } of [{ width:1440,mode:'light' },{ width:390,mode:'dar
     await expect(drawer.locator('.flow-card')).toHaveCount(0)
     await expect(rows.first()).toHaveAttribute('aria-expanded','false')
     await expect(rows.first().locator('.flow-route')).toHaveText(/程序员 ∥ 文案\s*→\s*负责人/)
-    await expect(rows.nth(1).locator('.flow-route')).toHaveText('程序员 ∥ 文案 ∥ 负责人')
+    await expect(rows.nth(1).locator('.flow-route')).toHaveText('业务流程 · 程序员 ∥ 文案 ∥ 负责人')
     await expect(rows.nth(4)).toContainText('等待你回答')
     await page.evaluate(async()=>{
       await document.fonts.ready
