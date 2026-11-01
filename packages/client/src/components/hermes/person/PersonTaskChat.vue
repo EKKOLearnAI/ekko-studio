@@ -128,9 +128,6 @@ onBeforeUnmount(() => { reads.dispose(); lifetime.abort(); stopUpdates() })
         <span>{{ task?.title || t('person.tasks') }}</span>
         <PersonWorkspaceFiles v-if="session" :session-id="session.id" :workspace="session.workspace" :submit="send"
           @attach="file => conversationRef?.addFiles([file])" />
-        <NButton v-if="selectedIsCurrent && personTaskCanStop(task)" size="small" :loading="stopping" :disabled="disabled" @click="stopTask">
-          {{ t(task?.execution_state === 'stopping' ? 'person.states.stopping' : 'person.stopTask') }}
-        </NButton>
       </div></template>
       <NAlert v-if="removalError || error || queueState.insertionError" type="error" class="task-chat-alert">{{ removalError || error || queueState.insertionError }}</NAlert>
       <NAlert v-if="loadError" type="error" class="task-chat-alert">

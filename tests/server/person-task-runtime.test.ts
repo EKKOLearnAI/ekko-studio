@@ -16,11 +16,37 @@ function deferred<T = void>() {
 let workspace: string
 function input(signal: AbortSignal, runtime = 'ekko'): Parameters<PersonRuntimePort['execute']>[0] {
   return { user: { id: 1, username: 'user', role: 'super_admin' } as any, selection: { runtime, mode: 'scoped', profile: 'default', provider: 'test', model: 'm' },
-    sessionId: 'person-task-1', workspace, prompt: 'Work', signal, onEvent: vi.fn() }
+    taskTimeoutMinutes: 60, sessionId: 'person-task-1', workspace, prompt: 'Work', signal, onEvent: vi.fn() }
 }
 beforeEach(() => { workspace = realpathSync(mkdtempSync(join(tmpdir(), 'person-task-runtime-'))); vi.resetAllMocks(); native.available = true; native.abortSession.mockResolvedValue(undefined) })
 
 afterEach(() => rmSync(workspace, { recursive: true, force: true }))
+
+it.each(['ekko', 'hermes', 'codex', 'claude-code'])('applies configured minutes and omits the unlimited timer for %s', async runtime => {
+  native.runAndWait.mockResolvedValue({ ok: true, output: 'Done' })
+  const task = input(new AbortController().signal, runtime)
+  for (const minutes of [60, 1, 120, 35_791, -1]) {
+    await executePersonTask({ ...task, taskTimeoutMinutes: minutes })
+    const options = native.runAndWait.mock.lastCall![1]
+    if (minutes === -1) expect(options).not.toHaveProperty('timeoutMs')
+    else expect(options.timeoutMs).toBe(minutes * 60_000)
+  }
+})
+
+it('keeps manual cancellation available for an unlimited run', async () => {
+  const worker = deferred<{ ok: boolean }>()
+  const controller = new AbortController()
+  native.runAndWait.mockImplementation((_request, options) => {
+    options.onEvent('run.started', {})
+    return worker.promise
+  })
+  const execution = executePersonTask({ ...input(controller.signal), taskTimeoutMinutes: -1 })
+  controller.abort()
+  await stopPersonTask('person-task-1')
+  expect(native.abortSession).toHaveBeenCalledExactlyOnceWith('person-task-1', 'Person task stopped', { waitForTermination: true })
+  worker.resolve({ ok: false })
+  await execution
+})
 
 it.each([
   ['codex', 'gpt', 'codex_responses'],

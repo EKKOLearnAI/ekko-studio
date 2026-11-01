@@ -42,8 +42,8 @@ export function personOperation<T>(userId: number, key: string, input: unknown, 
   })
 }
 function sharedPersonSettings(settings: Partial<PersonSettings>) {
-  const { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks } = { ...PERSON_DEFAULTS, ...settings }
-  return { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks }
+  const { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks, taskTimeoutMinutes } = { ...PERSON_DEFAULTS, ...settings }
+  return { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks, taskTimeoutMinutes }
 }
 export function personSettings(userId: number, sessionId?: string): { settings: PersonSettings; revision: number } {
   const session = sessionId ? requirePersonSession(userId, sessionId) : undefined
@@ -86,6 +86,7 @@ const taskExecutionColumns = `
   json_extract(t.requirements_json, '$.creator_session_id') AS creator_session_id,
   (SELECT title FROM sessions s WHERE s.id=t.session_id) AS session_title,
   selected_execution.id AS execution_id,
+  selected_execution.selection_json AS execution_selection_json,
   COALESCE(selected_execution.state,'idle') AS execution_state,
   (SELECT COUNT(*) FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state='pending') AS pending_count,
   EXISTS(SELECT 1 FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
