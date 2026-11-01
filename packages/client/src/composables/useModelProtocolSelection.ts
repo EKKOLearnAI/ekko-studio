@@ -1,5 +1,5 @@
 import { ref, watch, type Ref } from 'vue'
-import { normalizeCodingAgentApiMode, type CodingAgentApiMode } from '@/api/coding-agents'
+import { isCodingAgentApiMode, normalizeCodingAgentApiMode, type CodingAgentApiMode } from '@/api/coding-agents'
 import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
 
 type Selection = { provider: string; model: string; apiMode?: ProviderApiMode }
@@ -13,8 +13,7 @@ export function useModelProtocolSelection(apply: (selection: Selection) => void,
   function select(selection: Selection, current?: Selection, automatic = false) {
     if (disabled.value) return
     const sameModel = current?.provider === selection.provider && current.model === selection.model
-    if (automatic && selection.apiMode && !sameModel
-      && ['chat_completions', 'codex_responses', 'anthropic_messages'].includes(selection.apiMode)) {
+    if (automatic && !sameModel && isCodingAgentApiMode(selection.apiMode)) {
       cancel()
       apply(selection)
       return
