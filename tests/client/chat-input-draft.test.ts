@@ -784,6 +784,22 @@ describe('ChatInput draft persistence', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    ['hermes', ['usage', 'status', 'skill', 'plan', 'fork'], []],
+    ['ekko-agent', ['usage', 'status', 'context', 'compact'], ['skill', 'plan']],
+    ['claude-code', ['usage', 'status', 'context', 'compact'], ['skill', 'plan']],
+    ['cursor', ['usage', 'status'], ['context', 'compact', 'skill']],
+  ] as const)('shows the slash commands of the selected agent on the new-chat draft (%s)', async (agent, present, absent) => {
+    const wrapper = mountForSession('draft-commands', {}, {}, { draft: true, persistDraft: false, draftConfig: { agent, profile: 'default' } })
+    await wrapper.get('textarea').setValue('/')
+    await nextTick()
+    const commands = wrapper.findAll('.slash-command-item').map(item => item.text())
+    expect(commands.length).toBeGreaterThan(0)
+    for (const name of present) expect(commands.some(text => text.includes(`/${name}`))).toBe(true)
+    for (const name of absent) expect(commands.some(text => text.includes(`/${name}`))).toBe(false)
+    wrapper.unmount()
+  })
+
   it('opens the skill picker from /skill and inserts the selected skill command', async () => {
     fetchSkillsMock.mockResolvedValue({
       categories: [
