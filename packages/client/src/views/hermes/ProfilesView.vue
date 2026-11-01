@@ -2,7 +2,9 @@
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import { ref, onMounted } from 'vue'
-import { NButton } from 'naive-ui'
+import { NButton, NSwitch, useMessage } from 'naive-ui'
+import { fetchConfig, updateConfigSection } from '@/api/hermes/config'
+import { syncProfileCompression } from '@/api/hermes/profiles'
 import { useI18n } from 'vue-i18n'
 import ProfilesPanel from '@/components/hermes/profiles/ProfilesPanel.vue'
 import ProfileCreateModal from '@/components/hermes/profiles/ProfileCreateModal.vue'
@@ -11,15 +13,57 @@ import ProfileImportModal from '@/components/hermes/profiles/ProfileImportModal.
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
 const { t } = useI18n()
+const message = useMessage()
 const profilesStore = useProfilesStore()
 
 const showCreateModal = ref(false)
 const showImportModal = ref(false)
 const renamingProfile = ref<string | null>(null)
+const microCompactDefault = ref(false)
+const syncing = ref(false)
 
 onMounted(() => {
   profilesStore.fetchHermesProfiles()
+  void loadMicroCompactDefault()
 })
+
+async function loadMicroCompactDefault() {
+  try {
+    const data = await fetchConfig(['microCompactDefault'])
+    microCompactDefault.value = data.microCompactDefault?.microCompactDefault === true
+  } catch {
+    /* best-effort: leave the default off if the read fails */
+  }
+}
+
+async function setMicroCompactDefault(v: boolean) {
+  try {
+    await updateConfigSection('microCompactDefault', { microCompactDefault: v })
+    microCompactDefault.value = v
+  } catch {
+    message.error(t('profiles.microCompactSyncFailed'))
+  }
+}
+
+async function syncToAll() {
+  syncing.value = true
+  try {
+    const r = await syncProfileCompression()
+    if (r.skipped && r.skipped.length) {
+      message.warning(
+        t('profiles.microCompactSyncSuccess', { count: r.count }) +
+        ' · ' +
+        t('profiles.microCompactSyncSkipped', { count: r.skipped.length, list: r.skipped.join(', ') }),
+      )
+    } else {
+      message.success(t('profiles.microCompactSyncSuccess', { count: r.count }))
+    }
+  } catch {
+    message.error(t('profiles.microCompactSyncFailed'))
+  } finally {
+    syncing.value = false
+  }
+}
 
 function handleCreated() {
   showCreateModal.value = false
@@ -63,6 +107,25 @@ function handleImported() {
     </header>
     </PageHeader>
 
+    <section class="micro-compact-default">
+      <div class="mc-row">
+        <div class="mc-text">
+          <div class="mc-title">{{ t('profiles.microCompactDefault') }}</div>
+          <div class="mc-hint">{{ t('profiles.microCompactDefaultHint') }}</div>
+        </div>
+        <NSwitch
+          :value="microCompactDefault"
+          size="small"
+          @update:value="(v: boolean) => setMicroCompactDefault(v)"
+        />
+      </div>
+      <div class="mc-row mc-actions">
+        <NButton size="small" :loading="syncing" @click="syncToAll">
+          {{ t('profiles.microCompactSync') }}
+        </NButton>
+      </div>
+    </section>
+
     <div class="profiles-content">
       <div>
         <ProfilesPanel @rename="renamingProfile = $event" />
@@ -101,6 +164,38 @@ function handleImported() {
   display: flex;
   align-items: center;
   gap: calc(8px * var(--spacing-scale, 1));
+}
+
+.micro-compact-default {
+  margin: calc(12px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1)) 0;
+  padding: calc(12px * var(--spacing-scale, 1));
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--spacing-scale, 1));
+}
+
+.mc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(12px * var(--spacing-scale, 1));
+}
+
+.mc-actions {
+  justify-content: flex-start;
+}
+
+.mc-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mc-hint {
+  font-size: 12px;
+  opacity: 0.65;
+  margin-top: 2px;
 }
 
 .profiles-content {
