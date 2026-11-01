@@ -2626,7 +2626,7 @@ for (const { width, mode } of [{ width: 1440, mode: 'light' }, { width: 390, mod
     await expect(dialog).toContainText('个人助理至少需要一个执行智能体来处理任务')
     await page.screenshot({ path: `/tmp/person-agent-setup-zh-${mode}-${width}.png`, animations: 'disabled' })
     await dialog.getByRole('button', { name: '去设置', exact: true }).click()
-    await expect(page.getByRole('tab', { name: /^智能体/ })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('tab', { name: /^账户共享执行器/ })).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator('.person-workspace-drawer .panel-empty')).toBeVisible()
     await page.screenshot({ path: `/tmp/person-agent-setup-drawer-zh-${mode}-${width}.png`, animations: 'disabled' })
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
