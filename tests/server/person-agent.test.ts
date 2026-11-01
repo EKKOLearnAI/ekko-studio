@@ -2339,6 +2339,26 @@ it('retains a failed insertion receipt on retry without claiming success or cons
   expect(runtime.execute).not.toHaveBeenCalled()
 })
 
+it('rejects an old insertion replay after a different queued target supersedes it', async () => {
+  const { continuePersonTask } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
+  const { insertPersonTaskMessage } = await import('../../packages/server/src/modules/studio/services/person/task-queue')
+  const { task, execution } = await create()
+  store.setPersonExecution(execution, 'running')
+  store.personEvent(execution, 'run.started', { run_id: 'native' })
+  const first = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'First' }], expected_revision: 0, idempotency_key: 'first' })
+  const second = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'Second' }], expected_revision: 1, idempotency_key: 'second' })
+  runtime.interruptForInsertion = vi.fn().mockResolvedValueOnce({ status: 'run_mismatch' }).mockResolvedValue({ status: 'accepted', phase: 'model' })
+  const request = { queue_id: first.execution.id, expected_execution_id: execution.id, expected_revision: 2, idempotency_key: 'insert-first' }
+  await expect(insertPersonTaskMessage(1, task.id, request)).rejects.toMatchObject({ status: 409 })
+  await insertPersonTaskMessage(1, task.id, { ...request, queue_id: second.execution.id,
+    expected_revision: store.getPersonTask(1, task.id).revision, idempotency_key: 'insert-second' })
+  const selected = store.getPersonExecution(1, execution.id)
+  await expect(insertPersonTaskMessage(1, task.id, request)).rejects.toMatchObject({ status: 409, message: 'Task changed; refresh and try again' })
+  expect(runtime.interruptForInsertion).toHaveBeenCalledTimes(2)
+  expect(store.getPersonExecution(1, execution.id)).toEqual(selected)
+  expect(store.pendingPersonInputs(1, task.id).map(item => item.id)).toEqual([second.execution.id, first.execution.id])
+})
+
 it.each(['accepted', 'run_mismatch'])('rejects a late %s insertion acknowledgement after pause revokes the execution generation', async status => {
   const { continuePersonTask } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
   const { insertPersonTaskMessage } = await import('../../packages/server/src/modules/studio/services/person/task-queue')

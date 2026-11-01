@@ -57,7 +57,9 @@ export function dispatchPersonInsertion(run: PersonExecution): Promise<void> {
   if (pending) return pending
   const work = Promise.resolve().then(async () => {
     const actual = getPersonExecution(run.owner_user_id, run.id)
-    if (actual.generation !== run.generation) throw personError('Task changed; refresh and try again', 409)
+    if (actual.generation !== run.generation || actual.insertion_queue_id !== run.insertion_queue_id) {
+      throw personError('Task changed; refresh and try again', 409)
+    }
     if (actual.insertion_phase === 'failed') throw personError(actual.insertion_error || 'Task insertion failed', 409)
     if (!activeStates.includes(actual.state) || actual.insertion_phase !== 'requesting' || !actual.insertion_queue_id) return
     const task = getPersonTask(run.owner_user_id, run.task_id)
