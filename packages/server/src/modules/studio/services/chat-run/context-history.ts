@@ -48,6 +48,14 @@ export function buildDbHistoryFromContextRows(
         enumerable: false,
       })
     }
+    // Same treatment as the cursor: needed to split a transcript at a measured boundary, never sent.
+    const rowTimestamp = Number(row.timestamp)
+    if (Number.isSafeInteger(rowTimestamp)) {
+      Object.defineProperty(message, 'timestamp', {
+        value: rowTimestamp,
+        enumerable: false,
+      })
+    }
     if (row.reasoning_content != null) message.reasoning_content = row.reasoning_content
     if (row.reasoning_details != null) message.reasoning_details = row.reasoning_details
     if (row.tool_calls?.length) {

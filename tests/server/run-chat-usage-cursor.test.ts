@@ -118,4 +118,82 @@ describe('cursor-aware chat usage', () => {
     expect(result.nativeUsageAvailable).toBe(false)
     expect(emit).not.toHaveBeenCalled()
   })
+  it('reads the context window size from the recorded model usage row', async () => {
+    getUsageMock.mockReturnValue({
+      created_at: 5_000,
+      input_tokens: 1_000,
+      output_tokens: 250,
+      cache_read_tokens: 40_000,
+      cache_write_tokens: 7_000,
+    })
+    const { recordedContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    // Cached input occupies the window too, so all four counts are summed.
+    expect(recordedContextWindowTokens('session-1', 'hermes')).toBe(48_250)
+  })
+
+  it('ignores usage rows written before the current run started', async () => {
+    getUsageMock.mockReturnValue({ created_at: 100, input_tokens: 1_000, output_tokens: 250 })
+    const { recordedContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    expect(recordedContextWindowTokens('session-1', 'hermes', 1_000)).toBeUndefined()
+    expect(recordedContextWindowTokens('session-1', 'hermes', 50)).toBe(1_250)
+  })
+
+  it('returns nothing when no usage row exists', async () => {
+    getUsageMock.mockReturnValue(undefined)
+    const { recordedContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    expect(recordedContextWindowTokens('session-1', 'hermes')).toBeUndefined()
+  })
+  it('anchors on the last recorded usage and counts only later messages', async () => {
+    getUsageMock.mockReturnValue({
+      created_at: 1_700_000_500_000,
+      input_tokens: 1_000,
+      output_tokens: 250,
+      cache_read_tokens: 40_000,
+      cache_write_tokens: 0,
+    })
+    const { anchoredContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    const history = [
+      { role: 'user', content: 'before the anchor', timestamp: 1_700_000_400 },
+      { role: 'assistant', content: 'the anchored reply itself', timestamp: 1_700_000_500 },
+      { role: 'user', content: 'appended after the anchor', timestamp: 1_700_000_600 },
+    ]
+    const result = anchoredContextWindowTokens('session-1', 'hermes', history as any)
+    expect(result).toBeDefined()
+    expect(result!.anchorCreatedAt).toBe(1_700_000_500_000)
+    // The anchor call's own reply is already inside output_tokens, so only the newer turn counts.
+    expect(result!.contextTokens).toBeGreaterThan(41_250)
+    expect(result!.deltaTokens).toBe(result!.contextTokens - 41_250)
+    expect(result!.deltaTokens).toBeLessThan(20)
+  })
+
+  it('returns the anchor unchanged when nothing was appended after it', async () => {
+    getUsageMock.mockReturnValue({ created_at: 1_700_000_500_000, input_tokens: 900, output_tokens: 100 })
+    const { anchoredContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    const result = anchoredContextWindowTokens('session-1', 'hermes', [
+      { role: 'user', content: 'older', timestamp: 1_700_000_400 },
+      { role: 'assistant', content: 'newer text, same second as the anchor', timestamp: 1_700_000_500 },
+    ] as any)
+    expect(result).toEqual({ contextTokens: 1_000, anchorCreatedAt: 1_700_000_500_000, deltaTokens: 0, stale: false })
+  })
+
+  it('declines to anchor when the session has no recorded usage', async () => {
+    getUsageMock.mockReturnValue(undefined)
+    const { anchoredContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    expect(anchoredContextWindowTokens('session-1', 'hermes', [{ role: 'user', content: 'x', timestamp: 1 }] as any)).toBeUndefined()
+  })
+  it('marks an anchor older than the current run as stale', async () => {
+    getUsageMock.mockReturnValue({ created_at: 1_000, input_tokens: 900, output_tokens: 100 })
+    const { anchoredContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    const result = anchoredContextWindowTokens('session-1', 'hermes', [], 5_000)
+    expect(result).toEqual({ contextTokens: 1_000, anchorCreatedAt: 1_000, deltaTokens: 0, stale: true })
+    expect(anchoredContextWindowTokens('session-1', 'hermes', [], 500)!.stale).toBe(false)
+  })
+
+  it('clamps a derived window into the model limit and leaves it alone when the limit is unknown', async () => {
+    const { clampContextWindowTokens } = await import('../../packages/server/src/modules/studio/services/chat-run/usage')
+    expect(clampContextWindowTokens(688_100, 198_000)).toBe(198_000)
+    expect(clampContextWindowTokens(141_144, 198_000)).toBe(141_144)
+    expect(clampContextWindowTokens(688_100, undefined)).toBe(688_100)
+    expect(clampContextWindowTokens(688_100, 0)).toBe(688_100)
+  })
 })

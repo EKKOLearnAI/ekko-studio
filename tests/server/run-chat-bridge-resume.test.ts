@@ -58,6 +58,10 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () =
     state.contextTokens = tokens
     return tokens
   }),
+  recordedContextWindowTokens: vi.fn(() => undefined),
+  updateContextTokenUsage: vi.fn(),
+  anchoredContextWindowTokens: vi.fn(() => undefined),
+  clampContextWindowTokens: vi.fn((tokens: number) => tokens),
 }))
 
 function createNamespace() {
