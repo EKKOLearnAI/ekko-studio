@@ -3,6 +3,8 @@ import { existsSync } from 'fs'
 import { chmod, cp, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import { detectHermesRootHome, isPathWithin, isRealPathWithin } from '../runtime/path'
+import { readAppConfig } from '../../../studio/public/app-config'
+import { safeFileStore } from '../../../studio/public/safe-file-store'
 
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
@@ -222,6 +224,31 @@ export interface NativeProfileCreateResult {
   name: string
   path: string
   clonedFrom?: string
+}
+
+/**
+ * Apply the Studio-level `microCompactDefault` to a freshly created profile's
+ * config.yaml (`compression.micro_compact`). Best-effort: the profile already
+ * exists when this runs (commit succeeded), so any failure is logged and
+ * swallowed rather than failing the whole profile creation.
+ */
+export async function applyMicroCompactDefault(name: string): Promise<boolean> {
+  try {
+    const root = detectHermesRootHome()
+    const dir = name === 'default' ? root : join(root, 'profiles', name)
+    const configPath = join(dir, 'config.yaml')
+    if (!existsSync(configPath)) return false
+    const appConfig = await readAppConfig()
+    const enabled = appConfig.microCompactDefault === true
+    await safeFileStore.updateYaml(configPath, (config) => {
+      config.compression = { ...(config.compression || {}), micro_compact: enabled }
+      return config
+    }, { backup: true, dumpOptions: { forceQuotes: true } })
+    return true
+  } catch (err) {
+    console.warn('[profile] failed to apply microCompactDefault:', err)
+    return false
+  }
 }
 
 async function commitStagedProfile(
