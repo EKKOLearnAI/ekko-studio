@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { chmod, cp, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import { detectHermesRootHome, isPathWithin, isRealPathWithin } from '../runtime/path'
+import { parseDocument } from 'yaml'
 import { readAppConfig } from '../../../studio/public/app-config'
 import { safeFileStore } from '../../../studio/public/safe-file-store'
 
@@ -240,10 +241,23 @@ export async function applyMicroCompactDefault(name: string): Promise<boolean> {
     if (!existsSync(configPath)) return false
     const appConfig = await readAppConfig()
     const enabled = appConfig.microCompactDefault === true
-    await safeFileStore.updateYaml(configPath, (config) => {
-      config.compression = { ...(config.compression || {}), micro_compact: enabled }
-      return config
-    }, { backup: true, dumpOptions: { forceQuotes: true } })
+    // Comment-preserving, targeted edit: parse with eemeli/yaml (round-trips
+    // comments + untouched scalars such as dates), change only
+    // compression.micro_compact, write back. Deliberately NOT
+    // safeFileStore.updateYaml — that does a js-yaml full dump which strips
+    // every comment and rewrites date scalars to ISO form.
+    await safeFileStore.updateText(configPath, (raw) => {
+      const doc = parseDocument(raw)
+      const existing = doc.get('compression') as
+        | { type?: string; set?: (key: string, value: unknown) => void }
+        | undefined
+      if (existing?.type === 'MAP' && typeof existing.set === 'function') {
+        existing.set('micro_compact', enabled)
+      } else {
+        doc.set('compression', { micro_compact: enabled })
+      }
+      return doc.toString()
+    }, { backup: true })
     return true
   } catch (err) {
     console.warn('[profile] failed to apply microCompactDefault:', err)

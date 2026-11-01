@@ -137,5 +137,24 @@ describe('Studio-native profile lifecycle', () => {
       expect(ok).toBe(true)
       expect(readFileSync(join(r.path, 'config.yaml'), 'utf-8')).toContain('micro_compact: true')
     })
+
+    it('preserves comments and date scalars (no full yaml round-trip)', async () => {
+      const home = await makeHome('mc-apply-preserve-')
+      const r = await createProfileWithoutHermes('mc-preserve', false, home)
+      // Simulate a user-added comment + a date scalar (e.g. via `hermes config`).
+      await writeFile(
+        join(r.path, 'config.yaml'),
+        '# custom header comment\ncreated: 2026-11-01\nmodel:\n  default: foo\n',
+        'utf-8',
+      )
+      vi.mocked(readAppConfig).mockResolvedValueOnce({ microCompactDefault: true })
+      const ok = await applyMicroCompactDefault('mc-preserve')
+      const out = readFileSync(join(r.path, 'config.yaml'), 'utf-8')
+      expect(ok).toBe(true)
+      expect(out).toContain('# custom header comment')  // comment preserved
+      expect(out).toContain('created: 2026-11-01')      // date not mangled
+      expect(out).not.toContain('2026-11-01T00')        // ...into ISO form
+      expect(out).toContain('micro_compact: true')      // value still written
+    })
   })
 })
