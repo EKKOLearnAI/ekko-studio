@@ -5,6 +5,7 @@ import type { CodingAgentImageInput } from '../../protocol/types'
 import { dshReasoningEffort } from './runtime-config'
 import { DSH_STREAM_METHOD, DSH_USAGE_METHOD } from './stream-plugin'
 import { logger } from '../../../studio/public/logging'
+import { timeoutFromEnv } from '../../protocol/timeouts'
 
 interface StreamedText { agent_message_chunk: string; agent_thought_chunk: string }
 
@@ -66,7 +67,7 @@ export class DshAcpTurn {
     this.child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message as object })}\n`)
   }
 
-  private request(method: string, params: unknown, timeout = 60_000): Promise<any> {
+  private request(method: string, params: unknown, timeout = timeoutFromEnv('HERMES_DSH_ACP_TIMEOUT_MS', 60_000)): Promise<any> {
     const id = ++this.sequence
     return new Promise((resolve, reject) => {
       const timer = timeout ? setTimeout(() => {

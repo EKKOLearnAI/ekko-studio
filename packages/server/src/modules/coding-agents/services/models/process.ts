@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import { killOwnedProcessTree } from '../../../studio/public/process-tree'
 import { discoveryError, ModelDiscoveryError, type DiscoveryRpc, type ModelDiscoveryContext } from './types'
+import { timeoutFromEnv } from '../../protocol/timeouts'
 
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 export interface ModelCommand {
@@ -32,7 +33,7 @@ class DiscoveryProcess {
       ...(execution.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       stdio: ['pipe', 'pipe', 'pipe'],
     })
-    this.timer = setTimeout(() => this.fail(new ModelDiscoveryError('timeout')), host.timeoutMs ?? 20_000)
+    this.timer = setTimeout(() => this.fail(new ModelDiscoveryError('timeout')), host.timeoutMs ?? timeoutFromEnv('HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS', 20_000))
     this.child.on('error', error => this.fail(discoveryError(error)))
     this.child.stdin?.on('error', error => this.fail(discoveryError(error)))
     this.child.stderr?.on('data', (chunk: Buffer) => {
