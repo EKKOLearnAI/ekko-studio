@@ -58,7 +58,8 @@ const selectedDisplayName = computed(() => {
 
 function handleSelect(selection: { provider: string; model: string; apiMode?: ProviderApiMode }) {
   if (props.selectProtocol && !isAuthModelProvider(selection.provider)) {
-    protocol.select(selection, { provider: props.provider, model: props.model, apiMode: props.apiMode })
+    const group = props.groups.find(group => group.provider === selection.provider)
+    protocol.select(selection, { provider: props.provider, model: props.model, apiMode: props.apiMode }, !!group?.api_mode_by_model)
     return
   }
   showModels.value = false

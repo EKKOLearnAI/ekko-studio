@@ -518,7 +518,7 @@ function selectModel(selection: { provider: string; model: string; apiMode?: Pro
   const group = modelGroups.value.find(group => modelKey(group.profile, group.provider) === selection.provider)
   if (!group) return
   if (isAuthModelProvider(group.provider)) { applyModel(selection); return }
-  modelProtocol.select(selection, currentModel.value ? { ...currentModel.value, provider: pickerProvider.value } : undefined)
+  modelProtocol.select(selection, currentModel.value ? { ...currentModel.value, provider: pickerProvider.value } : undefined, !!group.api_mode_by_model)
 }
 function applyModel(selection: { provider: string; model: string; apiMode?: ProviderApiMode }) {
   const group = modelGroups.value.find(group => modelKey(group.profile, group.provider) === selection.provider)

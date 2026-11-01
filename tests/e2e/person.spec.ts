@@ -4364,7 +4364,57 @@ for(const mode of ['light','dark'] as const){
 }
 
 
+test('BOT automatic relay protocols follow the model and keep manual overrides available', async ({ page }) => {
+  const { state } = await setup(page, 'dark', true)
+  state.modelGroups = [{ provider: 'provider', profile: 'default', label: 'Shared provider',
+    models: ['global-model', 'gpt-6.1-sol', 'claude-opus-4-6', 'gpt-image-2'],
+    api_mode_by_model: { 'global-model': null, 'gpt-6.1-sol': 'codex_responses', 'claude-opus-4-6': 'anthropic_messages', 'gpt-image-2': null } }]
+  await page.goto('/#/person')
+  const choose = async (model: string) => {
+    await page.locator('.input-model-button').click()
+    await page.getByRole('menuitemradio').filter({ hasText: model }).click()
+  }
+  const dialog = page.getByRole('dialog', { name: 'Protocol', exact: true })
+  await choose('gpt-6.1-sol')
+  await expect.poll(() => state.settings.model).toMatchObject({ model: 'gpt-6.1-sol', apiMode: 'codex_responses' })
+  await expect(dialog).toBeHidden()
+  await choose('claude-opus-4-6')
+  await expect.poll(() => state.settings.model).toMatchObject({ model: 'claude-opus-4-6', apiMode: 'anthropic_messages' })
+  await expect(dialog).toBeHidden()
+  await choose('claude-opus-4-6')
+  await expect(dialog).toContainText('Anthropic Messages')
+  await dialog.locator('.n-select').click()
+  await page.locator('.n-base-select-option__content:visible').getByText('OpenAI Chat Completions (/v1/chat/completions)', { exact: true }).click()
+  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
+  await expect.poll(() => state.settings.model.apiMode).toBe('chat_completions')
+  await page.reload()
+  await choose('claude-opus-4-6')
+  await expect(dialog).toContainText('Chat Completions')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.getByRole('menuitemradio').filter({ hasText: 'gpt-image-2' }).click()
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  expect(state.settings.model).toMatchObject({ model: 'claude-opus-4-6', apiMode: 'chat_completions' })
+})
+
 for (const runtime of ['codex', 'claude-code']) {
+  test(`BOT executor automatically matches a new model protocol for ${runtime}`, async ({ page }) => {
+    const { state } = await setup(page, 'dark', true)
+    state.modelGroups = [{ provider: 'provider', profile: 'default', label: 'Shared provider', models: ['gpt', 'opus'],
+      api_mode_by_model: { gpt: 'codex_responses', opus: 'anthropic_messages' } }]
+    state.settings.agents[0].selection = { runtime, mode: 'scoped', profile: 'default', provider: 'provider', model: 'gpt', apiMode: 'codex_responses', reasoningEffort: '' }
+    await page.goto('/#/person')
+    await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('tab', { name: /^Agents/ }).click()
+    const settings = page.locator('.person-agent-settings')
+    await settings.getByRole('button', { name: 'Edit', exact: true }).click()
+    await settings.locator('.scoped-model-selector button').click()
+    await page.getByRole('menuitemradio').filter({ hasText: 'opus' }).click()
+    await expect(page.getByRole('dialog', { name: 'Protocol', exact: true })).toBeHidden()
+    await settings.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(() => state.settings.agents[0].selection).toMatchObject({ runtime, model: 'opus', apiMode: 'anthropic_messages' })
+  })
+
   test(`BOT saves independent GPT and Opus upstream protocols for ${runtime}`, async ({ page }) => {
     const { state, operations } = await setup(page, 'dark', true)
     state.modelGroups = [{ provider: 'provider', profile: 'default', label: 'Shared provider', models: ['gpt', 'opus'], api_mode: 'chat_completions' }]
@@ -4405,7 +4455,7 @@ for (const runtime of ['codex', 'claude-code']) {
 }
 
 for (const [mode, wallpaper, width] of [['light', false, 1440], ['dark', false, 1440], ['light', true, 390], ['dark', true, 390]] as const) {
-  test(`BOT conversation protocol confirmation ${mode} wallpaper=${wallpaper} width=${width}`, async ({ page }) => {
+  test(`BOT conversation protocol confirmation ${mode} wallpaper=${wallpaper} width=${width}`, async ({ page }, testInfo) => {
     const { state, operations } = await setup(page, mode, wallpaper)
     state.modelGroups = [{ provider: 'provider', profile: 'default', label: 'Shared provider', models: ['global-model', 'fast-model'], api_mode: 'chat_completions' }]
     await page.setViewportSize({ width, height: 900 })
@@ -4416,7 +4466,7 @@ for (const [mode, wallpaper, width] of [['light', false, 1440], ['dark', false, 
     await dialog.locator('.n-select').click()
     await page.locator('.n-base-select-option__content:visible').getByText('Anthropic Messages (/v1/messages)', { exact: true }).click()
     await expect(page.locator('.n-base-select-option__content:visible')).toHaveCount(0)
-    await page.screenshot({ path: `.git/bot-protocol-${mode}-${width}.png`, animations: 'disabled' })
+    await page.screenshot({ path: testInfo.outputPath(`bot-protocol-${mode}-${width}.png`), animations: 'disabled' })
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
     await expect.poll(() => state.settings.model).toMatchObject({ model: 'fast-model', apiMode: 'anthropic_messages' })

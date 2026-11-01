@@ -26,6 +26,23 @@ describe('model protocol confirmation', () => {
     expect(apply).toHaveBeenLastCalledWith({ provider: 'shared', model: 'opus', apiMode: 'anthropic_messages' })
     scope.stop()
   })
+  it('applies resolved automatic modes for new models and lets the current model be overridden', () => {
+    const { choice, apply, scope } = setup()
+    const gpt = { provider: 'shared', model: 'gpt', apiMode: 'codex_responses' as const }
+    const opus = { provider: 'shared', model: 'opus', apiMode: 'anthropic_messages' as const }
+    choice.select(opus, gpt, true)
+    expect(choice.show.value).toBe(false)
+    expect(apply).toHaveBeenLastCalledWith(opus)
+    choice.select(opus, { ...opus, apiMode: 'chat_completions' }, true)
+    expect(choice.show.value).toBe(true)
+    expect(choice.apiMode.value).toBe('chat_completions')
+    choice.cancel()
+    choice.select({ provider: 'shared', model: 'gpt-image-2' }, opus, true)
+    expect(choice.show.value).toBe(true)
+    expect(choice.apiMode.value).toBe('chat_completions')
+    expect(apply).toHaveBeenCalledTimes(1)
+    scope.stop()
+  })
   it('reopens the saved override and discards cancellation without applying a model', () => {
     const { choice, apply, scope } = setup()
     const current = { provider: 'shared', model: 'opus', apiMode: 'anthropic_messages' as const }

@@ -460,6 +460,46 @@ for (const mobile of [false, true]) test(`missing required connection fields fit
   })
 })
 
+for (const agent of ['Ekko', 'Codex', 'Claude']) test(`automatic relay selection rematches each model and retains manual overrides for ${agent}`, async ({ page }) => {
+  await authenticate(page, TEST_ACCESS_KEY, 'research')
+  const provider = 'custom:relay'
+  const models = ['gpt-6.1-sol', 'claude-opus-4-6', 'gpt-image-2']
+  await mockHermesApi(page, { modelGroups: [TEST_MODEL_GROUP, {
+    ...TEST_MODEL_GROUP, provider, label: 'Shared relay', base_url: 'https://relay.example.test', models,
+    api_mode_by_model: Object.fromEntries(models.map(model => [model,
+      resolveProviderConnectionApiMode(provider, 'https://relay.example.test', model) ?? null])),
+  }] })
+  await mockChatSocket(page)
+  await page.goto('/#/hermes/chat')
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click()
+  await selectNewChatAgent(page, agent)
+  const draft = page.locator('.new-chat-page')
+  const choose = async (model: string) => {
+    await draft.locator('.input-model-button').click()
+    await page.locator('.model-cascader-provider').filter({ hasText: 'Shared relay' }).click()
+    await page.getByRole('menuitemradio').filter({ hasText: model }).click()
+  }
+  const dialog = page.getByRole('dialog', { name: 'Protocol', exact: true })
+  await choose(models[0])
+  await expect(draft.locator('.input-model-button')).toContainText(models[0])
+  await expect(dialog).toBeHidden()
+  await choose(models[1])
+  await expect(draft.locator('.input-model-button')).toContainText(models[1])
+  await expect(dialog).toBeHidden()
+  await choose(models[2])
+  await expect(dialog).toContainText('Chat Completions')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.getByRole('menuitemradio').filter({ hasText: models[1] }).click()
+  await expect(dialog).toContainText('Anthropic Messages')
+  await dialog.locator('.n-select').click()
+  await page.locator('.n-base-select-option__content:visible').getByText('OpenAI Responses (/v1/responses)', { exact: true }).click()
+  await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
+  await draft.locator('textarea').fill('Use my manual protocol')
+  await draft.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).__PW_CHAT_SOCKET__?.emitted?.find((item: any) => item.event === 'run')?.payload))
+    .toMatchObject({ provider, model: models[1], apiMode: 'codex_responses' })
+})
+
 for (const { automatic, selectedModel, apiMode } of [
   { automatic: false, selectedModel: 'other-model', apiMode: 'anthropic_messages' },
   { automatic: true, selectedModel: 'claude/claude-opus-5.5', apiMode: 'anthropic_messages' },
@@ -469,8 +509,8 @@ for (const { automatic, selectedModel, apiMode } of [
   const api = await mockHermesApi(page, { modelGroups: [TEST_MODEL_GROUP, {
     ...TEST_MODEL_GROUP, provider: 'custom:other-provider', label: 'Other Provider', models: [selectedModel, 'disabled-model'],
     ...(automatic ? {
-      base_url: 'https://opencode.ai/zen/v1',
-      api_mode_by_model: { [selectedModel]: resolveProviderConnectionApiMode('custom:other-provider', 'https://opencode.ai/zen/v1', selectedModel) },
+      base_url: 'https://relay.example.test',
+      api_mode_by_model: { [selectedModel]: resolveProviderConnectionApiMode('custom:other-provider', 'https://relay.example.test', selectedModel) },
     } : { api_mode: apiMode }),
     model_meta: { 'disabled-model': { disabled: true } },
   }, { provider: 'moa', label: 'MoA', models: ['ensemble'] }] })

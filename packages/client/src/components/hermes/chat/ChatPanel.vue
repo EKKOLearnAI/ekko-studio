@@ -1270,7 +1270,7 @@ const newChatMissingCredentials = computed(() =>
 );
 
 const newChatConfiguredApiMode = computed(() => configuredProviderApiMode(selectedNewChatProviderGroup.value, newChatModel.value));
-watch([newChatConfiguredApiMode, newChatApiMode], ([mode]) => {
+watch(newChatConfiguredApiMode, (mode) => {
   if (mode && newChatApiMode.value !== mode) newChatApiMode.value = mode;
 }, { flush: "sync" });
 
@@ -2450,15 +2450,17 @@ async function selectSessionModel(model: string, provider: string) {
   const meta = sessionModelBaseGroups.value.find((group) => group.provider === provider)?.model_meta?.[model];
   if (meta?.disabled || (!sessionModelSessionId.value && !sessionModelIsDraft.value) || sessionModelSwitching.value) return;
   if (isSessionModelScopedCodingAgent.value) {
-    const mode = configuredProviderApiMode(sessionModelBaseGroups.value.find(group => group.provider === provider), model);
-    if (mode) {
+    const group = sessionModelBaseGroups.value.find(group => group.provider === provider);
+    const mode = configuredProviderApiMode(group, model);
+    const sameModel = sessionModelProvider.value === provider && sessionModelValue.value === model;
+    if (mode && !(group?.api_mode_by_model && sameModel)) {
       await applySessionModelSwitch(model, provider, mode);
       return;
     }
     pendingSessionModelSwitch.value = { model, provider };
-    sessionModelApiMode.value = sessionModelSession.value?.provider === provider && sessionModelSession.value.apiMode
-      ? normalizeCodingAgentApiMode(sessionModelSession.value.apiMode, defaultSessionModelApiMode(provider))
-      : defaultSessionModelApiMode(provider);
+    sessionModelApiMode.value = sameModel
+      ? normalizeCodingAgentApiMode(sessionModelIsDraft.value ? newChatApiMode.value : sessionModelSession.value?.apiMode, mode || defaultSessionModelApiMode(provider))
+      : mode || defaultSessionModelApiMode(provider);
     showSessionModelModeModal.value = true;
     return;
   }

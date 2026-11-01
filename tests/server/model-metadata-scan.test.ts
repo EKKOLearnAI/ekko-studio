@@ -23,6 +23,29 @@ beforeEach(() => {
 })
 
 describe('visible catalog metadata scans', () => {
+  it('matches an automatic relay per model while respecting fixed and explicit per-model modes', () => {
+    getModelCatalog.mockReturnValue(null)
+    const models = ['gpt-6.1-sol', 'claude-opus-4-6', 'gpt-image-2', 'codex-auto-review']
+    const input = { ...group, models }
+    const [automatic, fixed, explicit] = createCatalogModelMetadataEnricher()([
+      input,
+      { ...input, api_mode: 'chat_completions' as const },
+      { ...input, api_mode_by_model: { 'gpt-6.1-sol': 'anthropic_messages' as const } },
+    ])
+    expect(automatic.api_mode_by_model).toEqual({
+      'gpt-6.1-sol': 'codex_responses', 'claude-opus-4-6': 'anthropic_messages',
+      'gpt-image-2': null, 'codex-auto-review': null,
+    })
+    expect(fixed.api_mode_by_model).toBeUndefined()
+    expect(explicit.api_mode_by_model).toEqual({ 'gpt-6.1-sol': 'anthropic_messages' })
+  })
+
+  it('does not infer a conversation protocol when catalog output is exclusively non-text', () => {
+    resolveCatalogModel.mockReturnValue({ model: { modalities: { output: ['image'] } } })
+    const [result] = createCatalogModelMetadataEnricher()([{ ...group, models: ['gpt-6.1-sol'] }])
+    expect(result.api_mode_by_model?.['gpt-6.1-sol']).toBeFalsy()
+  })
+
   it('matches namespaced models while keeping complete IDs in the directory and protocol map', () => {
     const models = ['claude/claude-opus-5.5', 'backup/claude-opus-5.5', 'channel/openai/gpt-6.1-sol']
     const input = { ...group, base_url: 'https://opencode.ai/zen/v1', models }

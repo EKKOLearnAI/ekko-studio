@@ -253,7 +253,28 @@ describe('provider presets', () => {
     'not a URL',
   ])('leaves an unrecognized connection %s for manual selection', baseUrl => {
     expect(resolveProviderConnectionApiMode('custom:opencode-zen', baseUrl, 'gpt-next')).toBeUndefined()
-    expect(resolveProviderConnectionApiMode('custom:opencode-zen', baseUrl, 'openai/gpt-6.1-sol')).toBeUndefined()
+    expect(resolveProviderConnectionApiMode('custom:opencode-zen', baseUrl, 'gpt-image-2')).toBeUndefined()
+  })
+
+  it.each([
+    ['openai/gpt-6.1-sol', 'codex_responses'],
+    ['gpt-4o', 'codex_responses'],
+    ['gpt-5.6-terra', 'codex_responses'],
+    ['claude/claude-opus-4-6', 'anthropic_messages'],
+    ['claude-3-5-sonnet-20241022', 'anthropic_messages'],
+    ['claude-haiku-4-5', 'anthropic_messages'],
+    ...['gpt-image-1', 'gpt-image-2.5-flare', 'gpt-4o-audio-preview',
+      'gpt-4o-mini-tts', 'gpt-4o-transcribe', 'gpt-4o-realtime-preview',
+      'gpt-4o-search-preview', 'text-embedding-3-large', 'gpt-oss-120b',
+      'gpt-reserve', 'codex-auto-review', 'claude-custom', 'unknown'].map(id => [id, undefined]),
+  ])('matches conversation models on automatic custom relays: %s', (model, expected) => {
+    expect(resolveProviderConnectionApiMode('custom:relay', 'https://relay.example.test', model)).toBe(expected)
+  })
+
+  it('requires a valid endpoint and preserves known connection rules over family inference', () => {
+    expect(resolveProviderConnectionApiMode('custom:relay', 'not a URL', 'gpt-6.1-sol')).toBeUndefined()
+    expect(resolveProviderConnectionApiMode('custom:relay', 'https://relay.example.test/?route=x', 'gpt-6.1-sol')).toBeUndefined()
+    expect(resolveProviderConnectionApiMode('custom:relay', 'https://openrouter.ai/api/v1', 'gpt-6.1-sol')).toBe('chat_completions')
   })
 
   it.each(['opencode-zen', 'opencode-go', 'copilot'])('matches the final model ID segment for %s', provider => {

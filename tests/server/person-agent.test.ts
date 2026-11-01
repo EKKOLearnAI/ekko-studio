@@ -2527,6 +2527,24 @@ describe('Person task loading reads', () => {
 
 
 describe('Person protocol selection', () => {
+  it.each(['codex', 'claude-code', 'ekko'])('retains automatic relay protocols through task execution for %s', async runtimeId => {
+    const { createCatalogModelMetadataEnricher } = await import('../../packages/server/src/modules/hermes/services/models/metadata')
+    const models = ['gpt-6.1-sol', 'claude-opus-4-6']
+    catalog = createCatalogModelMetadataEnricher()([{ provider: 'custom:relay', base_url: 'https://relay.example.test', models }])
+    const agents = models.map((model, index) => ({ id: `worker-${index}`, name: model, description: 'Execute tasks', selection: {
+      ...selection, runtime: runtimeId, provider: 'custom:relay', model, reasoningEffort: '',
+    } }))
+    const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
+    await configurePerson(1, { agents, expected_revision: 1 })
+    for (const [index, agent] of agents.entries()) {
+      const expected = index ? 'anthropic_messages' : 'codex_responses'
+      const { task, execution } = await create({ agent_id: agent.id })
+      expect(JSON.parse(task.selection_json).apiMode).toBe(expected)
+      await runner.tickPersonWork(); await wait(execution.id, 'finished')
+      expect(vi.mocked(runtime.execute).mock.calls.at(-1)?.[0].selection.apiMode).toBe(expected)
+    }
+  })
+
   it.each(['codex', 'claude-code', 'ekko'])('persists independent GPT and Opus protocols for %s through execution', async runtimeId => {
     catalog[0].models = ['gpt', 'opus']
     const agents = ['gpt', 'opus'].map(model => ({ id: model, name: model, description: 'Execute tasks', selection: {

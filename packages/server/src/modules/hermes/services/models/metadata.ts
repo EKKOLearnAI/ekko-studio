@@ -19,27 +19,28 @@ export function createCatalogModelMetadataEnricher(
   const scannedByProvider = new Map<string, Map<string, ReturnType<typeof resolveCatalogModel>>>()
   return function applyCatalogModelMetadata<T extends CatalogModelGroup>(groups: T[]): T[] {
     return groups.map(group => {
+      const scanned = scannedByProvider.get(group.provider) ?? new Map<string, ReturnType<typeof resolveCatalogModel>>()
+      scannedByProvider.set(group.provider, scanned)
+      const lookup = (id: string) => {
+        if (!catalog) return undefined
+        const key = JSON.stringify([group.base_url, id])
+        if (!scanned.has(key)) {
+          scanned.set(key, resolveCatalogModel(catalog, { provider: group.provider, baseUrl: group.base_url, model: id }))
+        }
+        return scanned.get(key)?.model
+      }
       const protocol = PROVIDER_PRESETS.find(preset => preset.value === group.provider)?.catalog_api_mode
       if (protocol === 'per_model' || (!group.api_mode && !group.api_mode_by_model)) {
         const modes = Object.fromEntries(selectModels(group)
-          .map(id => [id, resolveProviderConnectionApiMode(group.provider, group.base_url, id) ?? null]))
+          .map(id => [id, resolveProviderConnectionApiMode(group.provider, group.base_url, id, lookup(id)?.modalities?.output) ?? null]))
         if (protocol === 'per_model' || Object.values(modes).some(Boolean)) {
           group = { ...group, api_mode_by_model: modes }
         }
       }
       if (!catalog) return group
-      let scanned = scannedByProvider.get(group.provider)
-      if (!scanned) {
-        scanned = new Map()
-        scannedByProvider.set(group.provider, scanned)
-      }
       const meta = { ...group.model_meta }
       for (const id of selectModels(group)) {
-        const key = JSON.stringify([group.base_url, id])
-        if (!scanned.has(key)) {
-          scanned.set(key, resolveCatalogModel(catalog, { provider: group.provider, baseUrl: group.base_url, model: id }))
-        }
-        const model = scanned.get(key)?.model
+        const model = lookup(id)
         if (!model) continue
         const efforts = catalogReasoningEfforts(model)
         meta[id] = {

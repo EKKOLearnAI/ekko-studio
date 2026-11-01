@@ -10,11 +10,18 @@ export function useModelProtocolSelection(apply: (selection: Selection) => void,
   const show = ref(false)
   const apiMode = ref<CodingAgentApiMode>('chat_completions')
   function cancel() { show.value = false; pending.value = null }
-  function select(selection: Selection, current?: Selection) {
+  function select(selection: Selection, current?: Selection, automatic = false) {
     if (disabled.value) return
+    const sameModel = current?.provider === selection.provider && current.model === selection.model
+    if (automatic && selection.apiMode && !sameModel
+      && ['chat_completions', 'codex_responses', 'anthropic_messages'].includes(selection.apiMode)) {
+      cancel()
+      apply(selection)
+      return
+    }
     pending.value = selection
     apiMode.value = normalizeCodingAgentApiMode(
-      current?.provider === selection.provider && current.model === selection.model ? current.apiMode : selection.apiMode,
+      sameModel ? current.apiMode : selection.apiMode,
       normalizeCodingAgentApiMode(selection.apiMode, 'chat_completions'),
     )
     show.value = true
