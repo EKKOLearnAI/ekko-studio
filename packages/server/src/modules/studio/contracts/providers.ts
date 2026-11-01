@@ -366,6 +366,21 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     ],
   },
   {
+    label: 'Runcrate',
+    value: 'runcrate',
+    builtin: true,
+    base_url: 'https://api.runcrate.ai/v1',
+    api_mode: 'chat_completions',
+    catalog_api_mode: 'chat_completions',
+    models: [
+      'deepseek-ai/DeepSeek-V4.1-Flash',
+      'moonshotai/Kimi-K2.6',
+      'zai-org/GLM-5.3',
+      'Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo',
+      'openai/gpt-oss-120b',
+    ],
+  },
+  {
     label: 'GMI Cloud',
     value: 'gmi',
     builtin: true,
