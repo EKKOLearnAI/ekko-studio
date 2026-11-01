@@ -6,11 +6,12 @@ import { personError } from '../../contracts/person'
 import { getPersonFlow, listPersonFlows } from '../../repositories/person-stage-store'
 import { createPersonFlow, controlPersonFlow } from './stage-flows'
 
-export function personFlowTools(userId: number, sessionId: string): PersonTool[] {
+export function personFlowTools(userId: number, sessionId: string, projectId = ''): PersonTool[] {
   const namespace = randomUUID()
   const references = new Map<string, { id: string; revision: number }>()
   const requests = new Map<string, Promise<unknown>>()
   const expose = (flow: PersonConversationFlow, origin?: PersonTaskOrigin) => {
+    if (projectId && flow.project_id !== projectId) throw personError('Flow is outside the project',403)
     const ref = `${flow.id}:${flow.revision}`
     references.set(ref,{ id:flow.id,revision:flow.revision })
     if (references.size > 100) references.delete(references.keys().next().value!)
@@ -18,7 +19,7 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
     const stage = current.find(item => item.id === origin?.stage?.stageId)
       || current.find(item => item.session_id === sessionId && item.state === 'active')
       || current.find(item => item.state === 'active') || current[0]
-    return { id:flow.id,flow_ref:ref,title:flow.title,state:flow.state,current_stage:stage.id,session_id:stage.session_id,
+    return { id:flow.id,flow_ref:ref,title:flow.title,project_id:flow.project_id,kind:flow.kind,state:flow.state,current_stage:stage.id,session_id:stage.session_id,
       creator_session_id:flow.creator_session_id,position:flow.current_position,total:flow.stages.length,error:flow.error,
       group_count:Math.max(...flow.stages.map(item => item.group_position)) + 1,
       current_stages:current.map(item => ({ id:item.id,session_id:item.session_id,state:item.state,goal:item.goal.slice(0,300),task_count:item.tasks.length })),
@@ -42,6 +43,11 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
     },
   })
   const mutate = async (args: Record<string,unknown>, origin: PersonTaskOrigin, create = false) => {
+    if (create && projectId) {
+      if (args.project_id && args.project_id !== projectId) throw personError('Flow must use the bound project',403)
+      args = { ...args, project_id:projectId }
+    }
+    if (!create && projectId && getPersonFlow(userId,String(args.flow_id)).project_id !== projectId) throw personError('Flow is outside the project',403)
     const normalized = Object.fromEntries(Object.entries(args).sort(([a],[b])=>a.localeCompare(b)))
     const key = createHash('sha256').update(JSON.stringify(normalized)).digest('hex')
     if (requests.has(key)) return requests.get(key)!
@@ -58,10 +64,10 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
       const offset = args.offset === undefined ? 0 : Number(args.offset)
       if (!Number.isSafeInteger(offset) || offset < 0) throw personError('Invalid offset')
       const rows = args.flow_id ? [getPersonFlow(userId,String(args.flow_id))] : listPersonFlows(userId,sessionId,offset)
-      return { flows:rows.slice(0,3).map(flow => expose(flow,origin)),next_offset:rows.length > 3 ? offset+3 : null }
+      return { flows:rows.slice(0,3).filter(flow => !projectId || flow.project_id === projectId).map(flow => expose(flow,origin)),next_offset:rows.length > 3 ? offset+3 : null }
     }),
     define('bot_flow_create','Role flow: equal groups=parallel, omitted=serial. 0,0,1=A+B then C.',{
-      title:string,goal:string,stages:{ type:'array',minItems:1,maxItems:13,items:{ type:'object',additionalProperties:false,
+      title:string,goal:string,project_id:string,kind:{ type:'string',enum:['business','acceptance'] },stages:{ type:'array',minItems:1,maxItems:13,items:{ type:'object',additionalProperties:false,
         properties:{ session_id:string,goal:string,return_expectation:string,group:{ type:'integer',minimum:0 } },required:['session_id','goal','return_expectation'] } },
     },['title','goal','stages'],(args,origin)=>mutate(args,origin!,true)),
     define('bot_flow_control','complete branch then reply; stop all; creator resumes unfinished.',{

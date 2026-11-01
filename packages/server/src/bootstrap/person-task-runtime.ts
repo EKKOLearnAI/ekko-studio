@@ -45,7 +45,7 @@ export const executePersonTask: PersonRuntimePort['execute'] = async input => {
       if (event === 'run.started') ready()
       input.onEvent(event, payload)
     } })
-    if (result.interrupted) await server.waitForRunTermination(input.sessionId)
+    await server.waitForRunTermination(input.sessionId)
     return result
   } finally {
     ready()

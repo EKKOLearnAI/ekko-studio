@@ -10,6 +10,7 @@ export type RunMessageDraft = Omit<SessionMessage, 'id' | 'session_id' | 'runMar
 
 interface PersistRunMessagesOptions {
   sessionId: string
+  personScope?: import('../../repositories/session-store').PersonMessageScope
   runMarker?: string | null
   messages: RunMessageDraft[]
   appendToState?: boolean
@@ -57,6 +58,7 @@ export function persistRunMessages(
   })
   const rows = messages.map(message => ({
     session_id: sessionId,
+    personScope: options.personScope,
     role: message.role,
     content: message.content,
     display_role: message.display_role ?? null,

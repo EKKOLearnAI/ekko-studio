@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NProgress } from 'naive-ui'
+import { NAlert, NButton, NProgress, NSelect } from 'naive-ui'
 import type { PersonFlow } from '@/api/person'
 import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
 import { chatSessionAgentAvatar, personAvatarStyle } from '@/utils/chat-agent-avatar'
 import { personFlowDependencies, personFlowGroups, personFlowStageStatus, personFlowState, personFlowStatusKey, type PersonFlowStage, type PersonFlowStatus } from '@/utils/person-flow'
 
 const props = defineProps<{ flow: PersonFlow; saving: boolean; embedded?: boolean }>()
-const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
+const emit = defineEmits<{ classify: [flow: PersonFlow, kind: 'business' | 'acceptance']; action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
 const { t, locale } = useI18n()
 const groups = computed(() => personFlowGroups(props.flow))
 const completed = computed(() => props.flow.stages.filter(stage => stage.state === 'completed').length)
@@ -36,6 +36,7 @@ function dependencyLabel(stage: PersonFlowStage) {
 
 <template>
   <article class="flow-card" :class="{ 'flow-card--embedded':embedded }" :aria-label="flow.title">
+    <NSelect v-if="['completed', 'stopped'].includes(flow.state)" class="flow-kind" size="small" :disabled="saving" :value="flow.kind || 'business'" :aria-label="t('person.flowKind')" :options="[{ label: t('person.businessFlow'), value: 'business' }, { label: t('person.acceptanceFlow'), value: 'acceptance' }]" @update:value="emit('classify', flow, $event)" />
     <header class="flow-header">
       <div class="flow-heading">
         <span v-if="!embedded" class="flow-status" :class="`flow-status--${flowState}`" role="status">
@@ -108,6 +109,7 @@ function dependencyLabel(stage: PersonFlowStage) {
 @use '@/styles/person-avatar' as person-avatar;
 @use '../tasks/task-status' as task-status;
 
+.flow-kind { max-width: 220px; margin-bottom: 12px; }
 .flow-card { padding: 26px; margin-bottom: 24px; border: var(--border-width, 1px) solid $border-light; border-radius: var(--radius-component, 16px); color: $text-primary; }
 .flow-card--embedded { padding: 18px; margin: 0; border: 0; border-radius: 0; }
 .flow-card--embedded .flow-description { margin-top: 0; }

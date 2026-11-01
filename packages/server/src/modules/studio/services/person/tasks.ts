@@ -14,6 +14,9 @@ import { requirePersonSession } from '../../repositories/person-session-store'
 import { personRequirements } from '../../contracts/person-flow'
 import { advancePersonFlow, assertPersonTaskActor, plannedPersonFlow, stopPersonFlow } from './task-flow'
 import { assertPersonStage, assertPersonStageTask, linkPersonStageTask, personTaskStage } from '../../repositories/person-stage-store'
+import { preparePersonContract, assertPersonContractCurrent } from './execution-contract'
+import { releasePersonResources } from '../../repositories/person-resource-store'
+import { acceptPersonCandidate } from './acceptance'
 
 const running = new Map<string, AbortController>()
 const stopping = new Map<string, Promise<void>>()
@@ -54,6 +57,7 @@ export function acknowledgePersonStop(run: PersonExecution): Promise<void> {
       const changed = personDb().prepare("UPDATE person_executions SET state='interrupted',lease_until=0,updated_at=? WHERE id=? AND generation=? AND state='stopping'")
         .run(Date.now(), run.id, run.generation)
       if (changed.changes && run.occurrence_id) personDb().prepare("UPDATE person_occurrences SET state='interrupted' WHERE id=?").run(run.occurrence_id)
+      if (changed.changes) releasePersonResources(run.id)
     })
     personUpdated(run.owner_user_id)
   }).finally(() => stopping.delete(run.id))
@@ -63,7 +67,7 @@ export function acknowledgePersonStop(run: PersonExecution): Promise<void> {
 export interface PersonTaskResult { task: PersonTask; execution?: PersonExecution }
 export async function applyPersonTask(userId: number, input: Record<string, unknown>, boundTask?: string, origin?: PersonTaskOrigin): Promise<PersonTaskResult> {
   const action = personText(input.action, 'action', 30)
-  if (!['create','adopt','update','start','stop','close','reopen','advance'].includes(action)) throw personError('Unsupported task action')
+  if (!['create','adopt','update','start','stop','close','reopen','advance','accept'].includes(action)) throw personError('Unsupported task action')
   if (Object.hasOwn(input, 'creator_session_id')) throw personError('Creator is assigned by the host')
   if (!['create','adopt'].includes(action) && (Object.hasOwn(input, 'next_steps') || Object.hasOwn(input, 'return_expectation'))) throw personError('Flow is fixed at creation')
   if (action === 'advance' && ['session_id','goal','agent_id','start'].some(key => Object.hasOwn(input, key))) throw personError('Advance uses the saved next step')
@@ -84,10 +88,17 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
     const task = getPersonTask(userId, String(input.task_id)), flow = personRequirements(task).flow
     if (flow?.steps[flow.index]) await validatePersonSelection(userId, JSON.parse(task.selection_json))
   }
-  const taskWorkspace = personWorkspace(userId)
-  if (input.workspace && input.workspace !== taskWorkspace) throw personError('Task workspace is managed by Person settings')
-  if (['create','adopt'].includes(action)) await ensureDirectory(taskWorkspace)
+  const creating = ['create','adopt'].includes(action)
+  if (!creating && ['workspace','project_id','access_mode','resources','dependencies','branch','acceptance','authorization'].some(key => Object.hasOwn(input,key)))
+    throw personError('The dispatch contract is fixed; create an independent task for a different scope')
+  if (creating) await ensureDirectory(personWorkspace(userId))
+  const stageProject = origin?.stage ? assertPersonStage(userId, origin.stage, origin.sessionId).flow.project_id : undefined
+  const contract = creating ? await preparePersonContract(userId, targetSession, input, stageProject) : undefined
+  if (contract && JSON.stringify(selection) !== JSON.stringify(contract.agent.selection))
+    throw personError('Execution preset changed; retry dispatch', 409)
+  const taskWorkspace = contract?.workspace || ''
   const result = personOperation(userId, `task:${key}`, operationInput, () => {
+    if (contract) assertPersonContractCurrent(userId, contract)
     if (origin?.stage) {
       const { stage } = assertPersonStage(userId,origin.stage,origin.sessionId)
       if (targetSession !== stage.session_id || ['adopt','advance'].includes(action)) throw personError('Stage workers must belong to the receiving role',403)
@@ -99,7 +110,7 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
     if (action === 'adopt') {
       const task = adoptPersonGoal(userId, personText(input.task_id,'task_id',100),personRevision(input.expected_revision),selection!,taskWorkspace,personText(input.goal,'goal',8000),targetSession)
       personDb().prepare('UPDATE session_tasks SET requirements_json=? WHERE id=?').run(JSON.stringify({ ...personRequirements(task), ...plan,
-        creator_session_id: requirePersonSession(userId, origin?.sessionId || targetSession).id }), task.id)
+        contract, creator_session_id: requirePersonSession(userId, origin?.sessionId || targetSession).id }), task.id)
       savePersonTaskOrigin(userId, task.id, origin)
       const execution = input.start === false ? undefined : enqueuePersonExecution(getPersonTask(userId, task.id))
       return { task: getPersonTask(userId, task.id), execution }
@@ -111,7 +122,7 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
         linkPersonStageTask(userId,task.id,origin.stage,targetSession)
       }
       personDb().prepare('UPDATE session_tasks SET requirements_json=? WHERE id=?').run(JSON.stringify({ ...personRequirements(task), ...plan,
-        creator_session_id: requirePersonSession(userId, origin?.sessionId || targetSession).id }), task.id)
+        contract, creator_session_id: requirePersonSession(userId, origin?.sessionId || targetSession).id }), task.id)
       savePersonTaskOrigin(userId, task.id, origin)
       const execution = input.start === false ? undefined : enqueuePersonExecution(getPersonTask(userId, task.id))
       return { task: getPersonTask(userId, task.id), execution }
@@ -122,6 +133,11 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
     // Check the observed execution in the same transaction as the mutation.
     if (input.expected_execution_id !== undefined && input.expected_execution_id !== (task.execution_id || null)) throw personError('Execution changed; query the task again', 409)
     const requirements = personRequirements(task)
+    if (action === 'accept') {
+      if (boundTask) throw personError('The worker cannot accept its own result', 403)
+      acceptPersonCandidate(task, input, origin)
+      return { task: getPersonTask(userId, task.id) }
+    }
     if (requirements.flow) {
       assertPersonTaskActor(task, origin, ['stop','reopen'].includes(action))
       if (action === 'stop') {

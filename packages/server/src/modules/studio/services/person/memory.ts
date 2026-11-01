@@ -7,15 +7,18 @@ import type { MemoryRuntimeIdentity } from '../../../../../../ekko-agent/src/mem
 import { getWebUiHome } from '../../public/config'
 import { personError } from '../../contracts/person'
 import { personUser } from './catalog'
+import { requirePersonProject } from './projects'
 import { personUpdated } from '../../repositories/person-updates'
 
 const stores = new Map<string, { service: MemoryService; store: SqliteMemoryStore }>()
 
-/** One physical store per account; model Profiles never select the memory owner. */
-export function personMemory(userId: number, sessionId = `person-memory-${userId}`) {
+/** Separate account and project stores; model Profiles never select their ownership. */
+export function personMemory(userId: number, sessionId = `person-memory-${userId}`, projectId = '') {
   if (!Number.isSafeInteger(userId) || userId < 1) throw personError('Invalid account', 403)
   personUser(userId)
-  const path = join(getWebUiHome(), 'person', String(userId), 'memory.db')
+  if (projectId) requirePersonProject(userId, projectId)
+  const path = projectId ? join(getWebUiHome(), 'person', String(userId), 'projects', projectId, 'memory.db')
+    : join(getWebUiHome(), 'person', String(userId), 'memory.db')
   let memory = stores.get(path)
   if (!memory) {
     const store = new SqliteMemoryStore(new EkkoDatabaseManager({ databasePath: path }))
@@ -23,20 +26,20 @@ export function personMemory(userId: number, sessionId = `person-memory-${userId
     stores.set(path, memory)
   }
   const identity: MemoryRuntimeIdentity = {
-    sessionId, profileId: `person:${userId}`,
+    sessionId, profileId: `person:${userId}${projectId ? `:project:${projectId}` : ''}`,
     origin: { host: 'ekko-studio', namespace: 'person', contextId: String(userId) },
     recallScopes: [{ type: 'profile' }], writeScopes: [{ type: 'profile' }], defaultWriteScope: { type: 'profile' },
   }
   return { service: memory.service, identity }
 }
 
-export async function personMemories(userId: number) {
-  const { service, identity } = personMemory(userId)
+export async function personMemories(userId: number, projectId = '') {
+  const { service, identity } = personMemory(userId, undefined, projectId)
   return service.list({ profileId: identity.profileId, scopes: identity.recallScopes, limit: 500 })
 }
 
-export async function forgetPersonMemory(userId: number, id: string, revision: number) {
-  const { service, identity } = personMemory(userId)
+export async function forgetPersonMemory(userId: number, id: string, revision: number, projectId = '') {
+  const { service, identity } = personMemory(userId, undefined, projectId)
   const result = await service.forget({ id, expectedRevision: revision, identity, mode: 'hard', actor: 'user', reason: 'User deleted this Person memory.' })
   if (!result.deletedIds.length) throw personError(result.reason || 'Memory not found or changed', 409)
   personUpdated(userId)
@@ -44,8 +47,8 @@ export async function forgetPersonMemory(userId: number, id: string, revision: n
 }
 
 /** Background coordinators can read the account memory, but cannot write it. */
-export function personMemoryReadTools(userId: number) {
-  const { service, identity } = personMemory(userId)
+export function personMemoryReadTools(userId: number, projectId = '') {
+  const { service, identity } = personMemory(userId, undefined, projectId)
   return createMemoryTools(service, { writable: false }).map(tool => ({ ...tool.definition,
     async execute(args: Record<string, unknown>) {
       personUser(userId)

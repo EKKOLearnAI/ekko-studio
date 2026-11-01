@@ -511,6 +511,7 @@ export async function handleEkkoAgentRun(
   const agent = isPersonSession(sessionId) ? personStageDeliveryId
     ? await createPersonChatAgent(Number(authenticatedUserId),sessionId,undefined,personStageDeliveryId)
     : await createPersonChatAgent(Number(authenticatedUserId), sessionId, personReturnId) : getGlobalEkkoAgent(profile)
+  const personScope = 'personProjectScope' in agent ? agent.personProjectScope : undefined
   const personStageContext = 'personStageContext' in agent ? agent.personStageContext as PersonStageContext : undefined
   state.ekkoBoundaryInterrupt = agent.requestBoundaryInterrupt
     ? (expectedRunId: string) => agent.requestBoundaryInterrupt({ sessionId, expectedRunId }) : undefined
@@ -614,6 +615,7 @@ export async function handleEkkoAgentRun(
   if (shouldPersistUserMessage) {
     const role = data.display_role === 'command' ? 'command' : 'user'
     const messageId = addMessage({
+      personScope,
       session_id: sessionId,
       role,
       content: storageText,
@@ -702,7 +704,7 @@ export async function handleEkkoAgentRun(
     if (!interruptedMessagePersisted && state.finalizeRunUsage !== finalizeInterruptedUsage) return undefined
     if (!interruptedMessagePersisted) {
       if (assistantText.trim() || assistantReasoning.trim() || !assistantMessageId) {
-        const { ids } = persistRunMessages(state, { sessionId, runMarker: runId, appendToState: true,
+        const { ids } = persistRunMessages(state, { personScope, sessionId, runMarker: runId, appendToState: true,
           messages: [{ role: 'assistant', content: assistantText, reasoning: assistantReasoning || null,
             reasoning_content: assistantReasoning || null, finish_reason: 'interrupted' }] })
         if (ids[0] != null) assistantMessageId = String(ids[0])
@@ -913,7 +915,7 @@ export async function handleEkkoAgentRun(
       }),
     ]
     try {
-      const { ids } = persistRunMessages(state, {
+      const { ids } = persistRunMessages(state, { personScope,
         sessionId,
         runMarker: group.runId,
         messages,
@@ -1590,7 +1592,7 @@ export async function handleEkkoAgentRun(
       }
     }
     if (unpersistedStepMessages.length) {
-      const persistedSteps = persistRunMessages(state, {
+      const persistedSteps = persistRunMessages(state, { personScope,
         sessionId,
         runMarker: persistedRunMarker,
         messages: unpersistedStepMessages,
@@ -1639,7 +1641,7 @@ export async function handleEkkoAgentRun(
     }
     if (assistantText.trim() || assistantReasoning.trim()) {
       const reasoningDetails = serializeAgentReasoningDetails(result.output.reasoning)
-      const { ids: [assistantId] } = persistRunMessages(state, {
+      const { ids: [assistantId] } = persistRunMessages(state, { personScope,
         sessionId,
         runMarker: persistedRunMarker,
         appendToState: true,

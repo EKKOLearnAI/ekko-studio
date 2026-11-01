@@ -6,7 +6,7 @@ import type { PersonMemory } from '@/api/person'
 import PersonPanelIcon from './PersonPanelIcon.vue'
 import { PERSON_AVATAR } from '@/utils/chat-agent-avatar'
 
-const props = defineProps<{ memories: PersonMemory[]; saving: boolean }>()
+const props = defineProps<{ projectName?: string; memories: PersonMemory[]; saving: boolean }>()
 const emit = defineEmits<{ forget: [memory: PersonMemory] }>()
 const { t } = useI18n()
 const search = ref('')
@@ -15,7 +15,7 @@ const filtered = computed(() => props.memories.filter(memory => memory.content.t
 
 <template>
   <section class="person-panel">
-    <header class="panel-heading"><div><h2>{{ t('person.memoryTitle') }}</h2><p>{{ t('person.memoryHint') }}</p></div></header>
+    <header class="panel-heading"><div><h2>{{ t('person.memoryTitle') }}</h2><p>{{ projectName ? t('person.projectMemoryLabel', { name: projectName }) : t('person.memoryHint') }}</p></div></header>
     <div class="panel-toolbar">
       <span class="panel-count"><strong>{{ memories.length }}</strong>{{ t('person.savedMemories') }}</span>
       <NInput v-model:value="search" class="panel-search" clearable :placeholder="t('person.search')" :input-props="{ 'aria-label': t('person.search') }"><template #prefix><PersonPanelIcon name="search" :size="16" /></template></NInput>

@@ -758,7 +758,7 @@ describe('parallel Person stage groups', () => {
   it('runs each branch worker independently and joins their actual result callbacks', async () => {
     const first = plan()
     const workers = await Promise.all(['person-main-b','person-main-c'].map(sessionId => tasks.applyPersonTask(1,{
-      action:'create',title:sessionId,goal:`Research for ${sessionId}`,idempotency_key:crypto.randomUUID(),
+      action:'create',workspace:mkdtempSync(join(dir,'worker-')),title:sessionId,goal:`Research for ${sessionId}`,idempotency_key:crypto.randomUUID(),
     },undefined,actor(first,sessionId))))
     runtime.deliver = vi.fn(async input => {
       expect(input.origin.stage?.stageId).toBe(actor(first,input.origin.sessionId).stage.stageId)
@@ -1112,4 +1112,16 @@ it('keeps an assistant occurrence and its result when its schedule is deleted', 
   expect(sessions.getSessionDetail('person-main-b')?.messages.some(message => message.content === 'Reminder delivered')).toBe(true)
   tickPersonSchedules(saved.next_at + 86400_000)
   expect(stages.listPersonFlows(1)).toHaveLength(1)
+})
+
+it('classifies an idle acceptance record without changing its route or results', async () => {
+  let plan = flow(['person-main-b'])
+  const classify = () => flows.controlPersonFlow(1, { action: 'classify', flow_id: plan.id, kind: 'acceptance',
+    expected_revision: plan.revision, idempotency_key: crypto.randomUUID() })
+  await expect(classify()).rejects.toThrow('idle')
+  plan = await complete(plan, 'Measured acceptance result')
+  const updated = await classify()
+  expect(updated.kind).toBe('acceptance')
+  expect(updated.stages).toEqual(plan.stages)
+  expect(updated.state).toBe('completed')
 })

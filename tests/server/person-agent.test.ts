@@ -32,7 +32,7 @@ beforeEach(async () => {
   vi.doMock('../../packages/server/src/modules/studio/public/provider-runtime', () => ({ getModelContextLength: ({ model }: { model: string }) => model === 'm2' ? 128000 : modelContextLength }))
   installedAgent = true; allowedProfiles = ['default']; mainBusy = false; clearHistoryMock.mockClear(); disposeSessionMock.mockClear()
   nativeTaskRun = vi.fn()
-  vi.doMock('../../packages/server/src/modules/studio/public/chat-run', () => ({ getChatRunServer: () => ({ isSessionRunning: (id: string) => mainBusy === true || mainBusy === id, clearSessionHistory: clearHistoryMock, disposeSession: disposeSessionMock, runAndWait: nativeTaskRun }) }))
+  vi.doMock('../../packages/server/src/modules/studio/public/chat-run', () => ({ getChatRunServer: () => ({ isSessionRunning: (id: string) => mainBusy === true || mainBusy === id, clearSessionHistory: clearHistoryMock, disposeSession: disposeSessionMock, runAndWait: nativeTaskRun, waitForRunTermination: vi.fn(async () => {}) }) }))
   vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({ getDb: () => db, isSqliteAvailable: () => true }))
   vi.doMock('../../packages/server/src/modules/studio/public/config', () => ({ config: { appHome: dir }, getWebUiHome: () => dir }))
   vi.doMock('../../packages/server/src/modules/studio/repositories/users-store', () => ({
@@ -255,7 +255,7 @@ describe('Person account concurrency', () => {
       })
     })
     const created = []
-    for (let index = 0; index < 13; index++) created.push(await create({ session_id: index % 2 ? 'person-main-second' : 'person-main-1' }))
+    for (let index = 0; index < 13; index++) created.push(await create({ access_mode: 'read', session_id: index % 2 ? 'person-main-second' : 'person-main-1' }))
     const executions = () => created.map(({ execution }) => store.getPersonExecution(1, execution.id))
     await runner.tickPersonWork()
     await vi.waitFor(() => expect(runtime.execute).toHaveBeenCalledTimes(limit))
@@ -521,15 +521,15 @@ describe('Person account-owned tasks and runtime', () => {
     runtime.chatAgent = vi.fn(async () => ({} as any))
     expect(await personSnapshot(1, 'person-main-1')).toMatchObject({ session: { id: 'person-main-1' }, settings: { agents: [], model: selection } })
     expect(await personExecutionAgents(1)).toEqual([])
-    await expect(createPersonChatAgent(1, 'person-main-1')).resolves.toEqual({})
+    await expect(createPersonChatAgent(1, 'person-main-1')).resolves.toMatchObject({ run: expect.any(Function) })
     await expect(create()).rejects.toThrow('Configure at least one Agent preset')
     expect(runtime.chatAgent).toHaveBeenCalledTimes(1)
     expect(store.listPersonTasks(1)).toEqual([])
     await configurePerson(1, { agents, expected_revision: 0 })
-    await expect(createPersonChatAgent(1, 'person-main-1')).resolves.toEqual({})
+    await expect(createPersonChatAgent(1, 'person-main-1')).resolves.toMatchObject({ run: expect.any(Function) })
     expect(runtime.chatAgent).toHaveBeenCalledTimes(2)
     await configurePerson(1, { agents: [], expected_revision: 1 })
-    await expect(createPersonChatAgent(1, 'person-main-1')).resolves.toEqual({})
+    await expect(createPersonChatAgent(1, 'person-main-1')).resolves.toMatchObject({ run: expect.any(Function) })
     expect(await personExecutionAgents(1)).toEqual([])
     expect(runtime.chatAgent).toHaveBeenCalledTimes(3)
   })
@@ -749,7 +749,7 @@ describe('Person account-owned tasks and runtime', () => {
     for (const action of ['close','reopen']) {
       await expect(tasks.applyPersonTask(1, { action, task_id: task.id, expected_revision: 1, idempotency_key: action })).rejects.toThrow('running')
     }
-    for (const action of ['accept','pause','resume','cancel','steer']) {
+    for (const action of ['pause','resume','cancel','steer']) {
       await expect(tasks.applyPersonTask(1, { action, task_id: task.id, expected_revision: 1, idempotency_key: action })).rejects.toThrow('Unsupported')
     }
   })
@@ -1145,10 +1145,10 @@ it('continues in the same hidden task session and delivers every turn to Person 
   expect(await continuePersonTask(1, task.id, request)).toEqual(next)
   await runner.tickPersonWork(); await wait(next.execution.id, 'finished')
   expect(vi.mocked(runtime.execute).mock.calls[0][0]).toMatchObject({
-    prompt: '# Compute result\n\nWrite 42 into result.txt',
-    displayInput: '# Compute result\n\nWrite 42 into result.txt',
+    prompt: expect.stringContaining('# Compute result\n\nWrite 42 into result.txt\n\n## Dispatch contract'),
+    displayInput: expect.stringContaining('## Dispatch contract'),
   })
-  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: execution.session_id, prompt: input, displayInput: undefined })
+  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: execution.session_id, prompt: [{ type: 'text', text: expect.stringContaining('## Dispatch contract') }, ...input], displayInput: undefined })
   await deliverPersonResults(); finishPersonDelivery(1, next.execution.id, true); await deliverPersonResults()
   expect(runtime.deliver).toHaveBeenCalledTimes(2)
   expect(vi.mocked(runtime.deliver).mock.calls[1][0]).toMatchObject({ origin: { sessionId: 'person-main-1' }, executionId: next.execution.id })
@@ -1170,12 +1170,12 @@ it('includes task context and keeps attachments intact on the first and subseque
   const first = await continuePersonTask(1, task.id, { input, expected_revision: task.revision, idempotency_key: 'first-with-files' })
   await runner.tickPersonWork(); await wait(first.execution.id, 'finished')
   expect(vi.mocked(runtime.execute).mock.calls[0][0]).toMatchObject({
-    prompt: [{ type: 'text', text: '# Compute result\n\nWrite 42 into result.txt' }, ...input], displayInput: undefined,
+    prompt: [{ type: 'text', text: expect.stringContaining('## Dispatch contract') }, ...input], displayInput: undefined,
   })
   expect(JSON.parse(store.getPersonExecution(1, first.execution.id).input_json!)).toEqual(input)
   const next = await continuePersonTask(1, task.id, { input, expected_revision: store.getPersonTask(1, task.id).revision, idempotency_key: 'followup-with-files' })
   await runner.tickPersonWork(); await wait(next.execution.id, 'finished')
-  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: first.execution.session_id, prompt: input, displayInput: undefined })
+  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: first.execution.session_id, prompt: [{ type: 'text', text: expect.stringContaining('## Dispatch contract') }, ...input], displayInput: undefined })
 })
 
 it.each([true, false])('queues same-task follow-ups in order exactly once after initial success=%s', async initialSuccess => {
@@ -1208,11 +1208,11 @@ it.each([true, false])('queues same-task follow-ups in order exactly once after 
   complete[0]({ ok: initialSuccess, output: 'Found the PR' }); await wait(execution.id, initialSuccess ? 'finished' : 'failed')
   expect(store.getPersonTask(1, task.id).status).toBe('open')
   await runner.tickPersonWork(); await wait(next.execution.id, 'running')
-  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: execution.session_id, prompt: [{ type: 'text', text: args.message }] })
+  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: execution.session_id, prompt: [{ type: 'text', text: expect.stringContaining('## Dispatch contract') }, { type: 'text', text: args.message }] })
   expect(store.getPersonExecution(1, last.execution.id).state).toBe('pending')
   complete[1]({ ok: true, output: 'CI passed' }); await wait(next.execution.id, 'finished')
   await runner.tickPersonWork(); await wait(last.execution.id, 'running')
-  expect(vi.mocked(runtime.execute).mock.calls[2][0]).toMatchObject({ sessionId: execution.session_id, prompt: input })
+  expect(vi.mocked(runtime.execute).mock.calls[2][0]).toMatchObject({ sessionId: execution.session_id, prompt: [{ type: 'text', text: expect.stringContaining('## Dispatch contract') }, ...input] })
   complete[2]({ ok: true, output: 'Included report' }); await wait(last.execution.id, 'finished')
   expect(store.getPersonTask(1, task.id)).toMatchObject({ status: 'completed', pending_count: 0 })
   expect(store.listPersonTasks(1)).toHaveLength(1)
@@ -1508,7 +1508,7 @@ it('removes the legacy Person memory table without changing ordinary messages', 
   expect(db.prepare('SELECT * FROM messages ORDER BY id').all()).toEqual(messages)
 })
 
-it('uses one account workspace for creation, adoption, scheduled runs and follow-up turns', async () => {
+it('pins task workspaces across account workspace changes, scheduled runs and follow-up turns', async () => {
   const { configurePerson, personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
   const { personTaskChat, continuePersonTask } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
   const sessions = await import('../../packages/server/src/modules/studio/repositories/session-store')
@@ -1526,7 +1526,7 @@ it('uses one account workspace for creation, adoption, scheduled runs and follow
   const second = await create({ start: false })
   expect(first.task.workspace).toBe(selected)
   expect(second.task.workspace).toBe(selected)
-  await expect(create({ workspace: join(dir, 'individual-override') })).rejects.toThrow('managed by Person')
+  await expect(create({ workspace: join(dir, 'individual-override') })).rejects.toThrow('ENOENT')
   await expect(configurePerson(1, { workspace: dir, expected_revision: 2 })).rejects.toThrow('Wait for Person tasks')
   await runner.tickPersonWork(); await wait(first.execution.id, 'finished')
   await delivery.deliverPersonResults(); delivery.finishPersonDelivery(1, first.execution.id, true)
@@ -1534,19 +1534,19 @@ it('uses one account workspace for creation, adoption, scheduled runs and follow
   const chat = await personTaskChat(1, first.task.id)
   const nextWorkspace = join(dir, 'next-workspace')
   await configurePerson(1, { workspace: nextWorkspace, expected_revision: 2 })
-  expect(store.getPersonTask(1, first.task.id).workspace).toBe(nextWorkspace)
-  expect(store.getPersonTask(1, adopted.task.id).workspace).toBe(nextWorkspace)
-  expect(sessions.getSession(chat.session.id)?.workspace).toBe(nextWorkspace)
+  expect(store.getPersonTask(1, first.task.id).workspace).toBe(selected)
+  expect(store.getPersonTask(1, adopted.task.id).workspace).toBe(selected)
+  expect(sessions.getSession(chat.session.id)?.workspace).toBe(selected)
   const next: any = await continuePersonTask(1, first.task.id, { input: [{ type: 'text', text: 'Continue the same work' }], expected_revision: store.getPersonTask(1, first.task.id).revision, idempotency_key: 'workspace-follow-up' })
   await runner.tickPersonWork(); await wait(next.execution.id, 'finished')
   await delivery.deliverPersonResults(); delivery.finishPersonDelivery(1, next.execution.id, true)
-  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: chat.session.id, workspace: nextWorkspace })
+  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: chat.session.id, workspace: selected })
   const at = Date.now() + 60_000
   schedules.applyPersonSchedule(1, { action: 'create', mode: 'worker', task_id: second.task.id, kind: 'once', expression: new Date(at).toISOString(), timezone: 'UTC', idempotency_key: 'workspace-schedule' })
   schedules.tickPersonSchedules(at)
   const occurrence = store.taskPersonExecutions(1, second.task.id)[0]
   await runner.tickPersonWork(); await wait(occurrence.id, 'finished')
-  expect(vi.mocked(runtime.execute).mock.calls[2][0].workspace).toBe(nextWorkspace)
+  expect(vi.mocked(runtime.execute).mock.calls[2][0].workspace).toBe(selected)
   expect((await personSnapshot(2, 'person-main-2')).session.workspace).not.toBe(nextWorkspace)
 })
 
@@ -2137,7 +2137,7 @@ describe('isolated scheduled worker conversations', () => {
     await runner.tickPersonWork(); await wait(second.id, 'finished')
     expect(vi.mocked(runtime.execute).mock.calls.slice(0, 2).map(([input]) => input.sessionId)).toEqual([first.session_id, second.session_id])
     expect(vi.mocked(runtime.execute).mock.calls[0][0].prompt).toContain('Old question\n\nAnswer (user): First run answer')
-    expect(vi.mocked(runtime.execute).mock.calls[1][0].prompt).toBe('# Compute result\n\nWrite 42 into result.txt')
+    expect(vi.mocked(runtime.execute).mock.calls[1][0].prompt).toContain('# Compute result\n\nWrite 42 into result.txt\n\n## Dispatch contract')
     expect(String(vi.mocked(runtime.execute).mock.calls[1][0].prompt)).not.toContain('First run answer')
     expect((await personTaskChat(1, task.id)).session?.id).toBe(second.session_id)
     expect((await personTaskChat(1, task.id, first.id)).session?.id).toBe(first.session_id)
@@ -2283,7 +2283,7 @@ it.each([true, false])('inserts a selected durable follow-up, preserves the rest
   expect(store.getPersonTask(1, task.id).status).toBe('open')
   await runner.tickPersonWork(); await wait(selected.execution.id, 'running')
   expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: execution.session_id, prompt: [
-    { type: 'text', text: 'Selected follow-up' }, { type: 'file', name: 'report.txt', path: '/tmp/report.txt' },
+    { type: 'text', text: expect.stringContaining('## Dispatch contract') }, { type: 'text', text: 'Selected follow-up' }, { type: 'file', name: 'report.txt', path: '/tmp/report.txt' },
   ] })
   expect(store.getPersonExecution(1, first.execution.id).state).toBe('pending')
   finish[1]({ ok: true, output: 'selected done' }); await wait(selected.execution.id, 'finished')
@@ -2358,7 +2358,7 @@ it('removes one durable follow-up idempotently, preserves the worker and remaini
   expect(runtime.stop).not.toHaveBeenCalled()
   finish[0]({ ok: true, output: 'original done' }); await wait(execution.id, 'finished')
   await runner.tickPersonWork(); await wait(second.execution.id, 'running')
-  expect(vi.mocked(runtime.execute).mock.calls[1][0].prompt).toEqual([{ type: 'file', name: 'keep.txt', path: '/tmp/keep.txt' }])
+  expect(vi.mocked(runtime.execute).mock.calls[1][0].prompt).toEqual([{ type: 'text', text: expect.stringContaining('## Dispatch contract') }, { type: 'file', name: 'keep.txt', path: '/tmp/keep.txt' }])
   finish[1]({ ok: true, output: 'remaining done' }); await wait(second.execution.id, 'finished')
   await runner.tickPersonWork()
   expect(vi.mocked(runtime.deliver).mock.calls.some(([item]) => item.executionId === first.execution.id)).toBe(false)
@@ -2523,4 +2523,52 @@ describe('Person task loading reads', () => {
     mainBusy = 'person-main-1'
     expect((await personSnapshot(1, 'person-main-1')).session).toMatchObject({ model: 'running-model', workspace: '/running' })
   })
+})
+
+it('keeps an explicit acceptance goal open until its owner checks the returned candidate', async () => {
+  const { personTools } = await import('../../packages/server/src/modules/studio/services/person/tools')
+  const { task, execution } = await create({ acceptance: 'Read result.txt and verify the value is 42.' })
+  await runner.tickPersonWork(); await wait(execution.id, 'finished')
+  const current = store.getPersonTask(1, task.id)
+  expect(current).toMatchObject({ status: 'open', completion_evidence: '' })
+  const tools = personTools(1, 'main', undefined, 'person-main-1')
+  const query: any = await tools.find(t => t.name === 'bot_tasks_query')!.execute({ task_id: task.id })
+  expect(query.task.allowed_actions).toContain('accept')
+  expect(query.task.verification).toMatchObject({ state: 'pending', execution_id: execution.id })
+  const result: any = await tools.find(t => t.name === 'bot_task_control')!.execute({ task_ref: query.task.task_ref, action: 'accept',
+    candidate: query.task.verification.candidate, evidence: 'Read result.txt; exactly 42.' })
+  expect(result).toMatchObject({ ok: true, task: { status: 'completed' } })
+  expect(store.getPersonTask(1, task.id).completion_evidence).toBe('Read result.txt; exactly 42.')
+})
+
+it('retains crash-left terminal resource claims until native stop is acknowledged', async () => {
+  const { claimPersonResources } = await import('../../packages/server/src/modules/studio/repositories/person-resource-store')
+  const { execution } = await create()
+  expect(claimPersonResources(execution)).toBe(true)
+  db.prepare("UPDATE person_executions SET state='finished' WHERE id=?").run(execution.id)
+  let acknowledge!: () => void
+  runtime.stop = vi.fn(() => new Promise<void>(resolve => { acknowledge = resolve }))
+  const next = await create()
+  await runner.tickPersonWork()
+  expect(runtime.stop).toHaveBeenCalledTimes(1)
+  expect(store.getPersonExecution(1, next.execution.id).state).toBe('queued')
+  acknowledge()
+  await vi.waitFor(() => expect(db.prepare('SELECT 1 FROM person_resource_claims WHERE execution_id=?').get(execution.id)).toBeUndefined())
+  await runner.tickPersonWork(); await wait(next.execution.id, 'finished')
+})
+
+it('returns project follow-ups with their task brief without replaying another project transcript', async () => {
+  const { configurePersonProject } = await import('../../packages/server/src/modules/studio/services/person/projects')
+  const { continuePersonTask } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
+  const { deliverPersonResults } = await import('../../packages/server/src/modules/studio/services/person/delivery')
+  const project = await configurePersonProject(1, { name: 'Alpha', workspace: dir, expected_revision: 0 })
+  const { task } = await create({ project_id: project.id, start: false })
+  const followup = await continuePersonTask(1, task.id, { input: [{ type: 'text', text: 'Also verify the result; do not deploy.' }],
+    expected_revision: task.revision, idempotency_key: 'project-followup' }, { sessionId: task.session_id, runId: 'request', messages: [{ role: 'user', content: 'Unrelated Beta project secret' }] })
+  await runner.tickPersonWork(); await wait(followup.execution.id, 'finished')
+  await deliverPersonResults()
+  const returned = JSON.stringify(vi.mocked(runtime.deliver).mock.calls[0][0].origin.messages)
+  expect(returned).toContain('Write 42 into result.txt')
+  expect(returned).toContain('Also verify the result; do not deploy.')
+  expect(returned).not.toContain('Unrelated Beta')
 })

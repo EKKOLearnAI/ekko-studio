@@ -14,17 +14,19 @@ import { tickPersonSchedules } from './schedules'
 import { deliverPersonResults, readyPersonDelivery } from './delivery'
 import { logger } from '../../public/logging'
 import { requirePersonSession } from '../../repositories/person-session-store'
-import { personWorkspace } from './workspace'
-import { ensureDirectory } from '../workspace/directory'
+import { verifyPersonTaskWorkspace, personContractHash, gitIdentity } from './execution-contract'
+import { claimPersonResources, releasePersonResources } from '../../repositories/person-resource-store'
 import { personRequirements } from '../../contracts/person-flow'
 import { assertPersonStageTask } from '../../repositories/person-stage-store'
 import { deliverPersonStages, recoverPersonStages } from './stage-flows'
 import { personTaskPrompt } from './task-prompt'
 import { dispatchPersonInsertion } from './task-queue'
+import { personCandidate } from './acceptance'
 
 const active = new Map<string, { run: PersonExecution; abort: AbortController }>()
 const busyTasks = new Set<string>()
 const coordinating = new Set<string>()
+const recoveringClaims = new Set<string>()
 let timer: ReturnType<typeof setInterval> | undefined
 let ticking = false
 
@@ -93,6 +95,8 @@ async function coordinate(run: PersonExecution, nativeId: string, questionText: 
 
 async function execute(run: PersonExecution, abort: AbortController) {
   const userId = run.owner_user_id
+  let terminated = false
+  let launched = false
   const heartbeat = setInterval(() => {
     try {
       current(run)
@@ -107,21 +111,25 @@ async function execute(run: PersonExecution, abort: AbortController) {
     const selection = JSON.parse(run.selection_json)
     await validatePersonSelection(userId, selection)
     const task = getPersonTask(userId, run.task_id)
-    const workspace = personWorkspace(userId)
-    await ensureDirectory(workspace)
+    const workspace = await verifyPersonTaskWorkspace(task)
     current(run)
     personDb().prepare('UPDATE session_tasks SET workspace=? WHERE id=?').run(workspace, task.id)
     personDb().prepare('UPDATE sessions SET workspace=? WHERE id=? AND CAST(studio_user_id AS TEXT)=?').run(workspace, run.session_id, String(userId))
     const decisions = personDb().prepare("SELECT question,answer,answered_by FROM person_interactions WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND session_id=?) AND state='answered' ORDER BY created_at DESC LIMIT 10").all(task.id,run.session_id) as unknown as Pick<PersonInteraction, 'question' | 'answer' | 'answered_by'>[]
     const requirements = personRequirements(task)
+    if (requirements.contract) personEvent(run, 'contract.bound', { workspace,
+      project_id: requirements.contract.project?.id || '', contract_hash: personContractHash(requirements.contract),
+      branch: requirements.contract.git?.branch || '', head: requirements.contract.git ? gitIdentity(workspace).head : '' })
     const description = personTaskPrompt(task, decisions)
     const input = run.input_json ? JSON.parse(run.input_json) as ContentBlock[] : undefined
     // A new conversation needs its task brief; an existing one already has that context.
     const prompt = input
       ? run.session_id === personExecutionSessionId(run.id) ? [{ type: 'text' as const, text: description }, ...input] : input
       : description
+    const scopedPrompt = input && requirements.contract ? [{ type: 'text' as const, text: description }, ...input] : prompt
     current(run)
-    const result = await personRuntime().execute({ user: personUser(userId), selection, sessionId: run.session_id, workspace, prompt, displayInput: input ? undefined : description, signal: abort.signal,
+    launched = true
+    const result = await personRuntime().execute({ user: personUser(userId), selection, sessionId: run.session_id, workspace, prompt: scopedPrompt, displayInput: input ? undefined : description, signal: abort.signal,
       onEvent: (kind, payload) => {
         try {
           current(run)
@@ -145,6 +153,7 @@ async function execute(run: PersonExecution, abort: AbortController) {
         } catch { /* Late native events must not revive a cancelled run. */ }
       },
     })
+    terminated = true
     current(run)
     const latestRun = current(run)
     if (result.interrupted && latestRun.insertion_queue_id) {
@@ -157,22 +166,42 @@ async function execute(run: PersonExecution, abort: AbortController) {
     }
     if (!result.ok) throw new Error(result.error || 'Execution failed')
     const output = (result.output || '').slice(0,2_000_000)
+    if (requirements.contract?.git) personEvent(run, 'candidate.returned', gitIdentity(workspace))
     personTransaction(() => {
       setPersonExecution(current(run), 'finished', { output })
+      if (requirements.contract?.acceptance) {
+        requirements.verification = personCandidate(task, run, output)
+        personDb().prepare('UPDATE session_tasks SET requirements_json=? WHERE id=?').run(JSON.stringify(requirements), task.id)
+        personEvent(run, 'candidate.pending', requirements.verification)
+      }
       const scheduled = personDb().prepare("SELECT id FROM person_schedules WHERE task_id=? AND state IN ('active','paused')").get(task.id)
       const pending = getPersonTask(userId, task.id).pending_count
+      const keepOpen = scheduled || pending || (requirements.flow && !requirements.flow.completed) || requirements.contract?.acceptance
       personDb().prepare("UPDATE session_tasks SET status=?,completion_evidence=?,completed_at=?,updated_at=?,revision=revision+1 WHERE id=?")
-        .run(scheduled || pending || (requirements.flow && !requirements.flow.completed) ? 'open' : 'completed', output.slice(0,2000), scheduled || pending || (requirements.flow && !requirements.flow.completed) ? null : Date.now(), Date.now(), task.id)
+        .run(keepOpen ? 'open' : 'completed', requirements.contract?.acceptance ? '' : output.slice(0,2000), keepOpen ? null : Date.now(), Date.now(), task.id)
       if (run.occurrence_id) personDb().prepare("UPDATE person_occurrences SET state='finished' WHERE id=?").run(run.occurrence_id)
     })
   } catch (error) {
-    try { setPersonExecution(current(run), 'failed', { error: error instanceof Error ? error.message : 'Task failed' }) } catch { /* cancellation wins */ }
+    if (!terminated) {
+      try {
+        const actual = getPersonExecution(userId, run.id)
+        if (actual.state === 'stopping') await acknowledgePersonStop(actual)
+        else if (launched) await personRuntime().stop(run.session_id)
+        terminated = true
+      }
+      catch {
+        personDb().prepare("UPDATE person_executions SET state='stopping',generation=generation+1,error=? WHERE id=? AND generation=?")
+          .run('Unable to confirm worker termination; resource claims retained', run.id, run.generation)
+      }
+    }
+    if (terminated) try { setPersonExecution(current(run), 'failed', { error: error instanceof Error ? error.message : 'Task failed' }) } catch { /* cancellation wins */ }
   } finally {
     const latest = personDb().prepare('SELECT * FROM person_executions WHERE owner_user_id=? AND id=?').get(userId, run.id) as unknown as PersonExecution | undefined
     if (latest && ['failed','finished','interrupted'].includes(latest.state)) personDb().prepare("UPDATE person_interactions SET state='expired',revision=revision+1 WHERE execution_id=? AND state='pending'").run(run.id)
     if (latest && ['failed','finished'].includes(latest.state)) readyPersonDelivery(latest)
     personUpdated(userId)
     clearInterval(heartbeat); active.delete(run.id); busyTasks.delete(run.task_id); releasePersonRun(run.id)
+    if (terminated) releasePersonResources(run.id)
   }
 }
 
@@ -185,6 +214,19 @@ export async function tickPersonWork() {
     promotePersonFollowups()
     tickPersonSchedules()
     const db = personDb()
+    // A crash can occur between committing a terminal result and releasing its claims.
+    // Confirm native exit before recovering those claims; never expire them by age.
+    const retained = db.prepare(`SELECT e.* FROM person_executions e WHERE e.state IN ('finished','failed','interrupted')
+      AND EXISTS (SELECT 1 FROM person_resource_claims c WHERE c.execution_id=e.id)
+      AND NOT EXISTS (SELECT 1 FROM person_executions other WHERE other.session_id=e.session_id AND other.id!=e.id
+        AND other.state IN ('starting','running','waiting_person','waiting_user','waiting_approval','stopping')) LIMIT 30`).all() as unknown as PersonExecution[]
+    for (const run of retained) {
+      if (active.has(run.id) || recoveringClaims.has(run.id)) continue
+      recoveringClaims.add(run.id)
+      void personRuntime().stop(run.session_id).then(() => releasePersonResources(run.id))
+        .catch(error => logger.warn(error, 'Person retained claims require native exit acknowledgement'))
+        .finally(() => recoveringClaims.delete(run.id))
+    }
     const inserting = db.prepare("SELECT * FROM person_executions WHERE insertion_phase='requesting' AND state IN ('starting','running','waiting_person','waiting_user','waiting_approval')").all() as unknown as PersonExecution[]
     for (const run of inserting) void dispatchPersonInsertion(run).catch(error => logger.warn(error, 'Person queue insertion dispatch failed'))
     const stopping = db.prepare("SELECT * FROM person_executions WHERE state='stopping' LIMIT 30").all() as unknown as PersonExecution[]
@@ -206,8 +248,7 @@ export async function tickPersonWork() {
       if (busyTasks.has(next.task_id)) continue
       const count = Number((db.prepare("SELECT COUNT(*) AS n FROM person_executions WHERE owner_user_id=? AND state IN ('starting','running','waiting_person','waiting_user','waiting_approval','stopping')").get(next.owner_user_id) as { n: number }).n)
       if (count >= personSettings(next.owner_user_id).settings.maxConcurrentTasks) continue
-      const claim = db.prepare("UPDATE person_executions SET state='starting',generation=generation+1,lease_until=?,updated_at=? WHERE id=? AND state='queued'").run(Date.now() + 90_000, Date.now(), next.id)
-      if (!claim.changes) continue
+      if (!claimPersonResources(next, true)) continue
       const run = getPersonExecution(next.owner_user_id, next.id)
       const abort = personRunSignal(run)
       active.set(run.id, { run, abort }); busyTasks.add(run.task_id)
@@ -227,7 +268,7 @@ export function startPersonWork() {
 export async function stopPersonWork() {
   if (timer) clearInterval(timer); timer = undefined
   for (const { run, abort } of active.values()) {
-    personDb().prepare("UPDATE person_executions SET state='interrupted',generation=generation+1 WHERE id=? AND generation=?").run(run.id, run.generation)
-    abort.abort(); await personRuntime().stop(run.session_id)
+    personDb().prepare("UPDATE person_executions SET state='stopping',generation=generation+1 WHERE id=? AND generation=?").run(run.id, run.generation)
+    abort.abort(); await acknowledgePersonStop(getPersonExecution(run.owner_user_id, run.id))
   }
 }

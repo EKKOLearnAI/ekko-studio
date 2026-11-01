@@ -114,11 +114,11 @@ export function enqueuePersonStage(userId: number, stage: PersonStage, generatio
 /** A saved timer starts its own role turn, rather than a role handing off to itself.
  * Caller owns the occurrence transaction. The usual stage lifecycle lets the role
  * answer directly or wait for its optional workers before completing. */
-export function enqueuePersonScheduledStage(userId: number, sessionId: string, title: string, goal: string) {
+export function enqueuePersonScheduledStage(userId: number, sessionId: string, title: string, goal: string, projectId = '') {
   requirePersonSession(userId, sessionId)
   const db = personDb(), id = randomUUID(), now = Date.now()
-  db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
-    .run(id, userId, sessionId, title, goal, now, now)
+  db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at,project_id) VALUES(?,?,?,?,?,?,?,?)')
+    .run(id, userId, sessionId, title, goal, now, now, projectId)
   db.prepare("INSERT INTO person_stages(id,flow_id,position,session_id,goal,return_expectation,state) VALUES(?,?,0,?,?,?,'active')")
     .run(randomUUID(), id, sessionId, goal, 'Complete the saved scheduled goal and report the new result. Use a background worker only when needed.')
   const flow = getPersonFlow(userId, id)

@@ -15,6 +15,7 @@ import { personConversations, createPersonConversation, deletePersonConversation
 import { requirePersonSession } from '../services/person/service'
 import { controlPersonFlow, createPersonFlow } from '../services/person/stage-flows'
 import { getPersonFlow, listPersonFlows } from '../services/person/service'
+import { configurePersonProject, configurePersonRole, personProjects, personRoleConfiguration } from '../services/person/projects'
 
 async function handle(ctx: Context, work: (id: number, body: Record<string, unknown>) => unknown) {
   ctx.set('Cache-Control', 'no-store')
@@ -49,9 +50,13 @@ export const schedules = (ctx: Context) => handle(ctx, (id, body) => applyPerson
 export const answer = (ctx: Context) => handle(ctx, (id, body) => replyPersonQuestion(id, ctx.params.id, personRevision(body.expected_revision), personText(body.answer, 'answer', 4000)))
 export const memory = (ctx: Context) => handle(ctx, (id, body) => {
   if (body.forget !== true) throw personError('Save or correct memories through the Person conversation.')
-  return forgetPersonMemory(id, personText(body.id, 'id', 100), personRevision(body.expected_revision))
+  const project = body.session_id ? personRoleConfiguration(id, personText(body.session_id,'session_id',100)).project_id : ''
+  return forgetPersonMemory(id, personText(body.id, 'id', 100), personRevision(body.expected_revision), project)
 })
 
 export const conversations = (ctx: Context) => handle(ctx, id => personConversations(id, String(ctx.query.search || ''), Math.max(0, Number(ctx.query.offset) || 0)))
 export const conversationCreate = (ctx: Context) => handle(ctx, (id, body) => createPersonConversation(id, body.title, body))
 export const conversationDelete = (ctx: Context) => handle(ctx, (id, body) => deletePersonConversation(id, ctx.params.id, body.expected_history_revision))
+export const projects = (ctx: Context) => handle(ctx, id => ({ projects: personProjects(id) }))
+export const projectConfigure = (ctx: Context) => handle(ctx, (id, body) => configurePersonProject(id, body))
+export const roleConfigure = (ctx: Context) => handle(ctx, (id, body) => configurePersonRole(id, ctx.params.id, body))

@@ -1279,7 +1279,7 @@ test('Person general settings save independently, survive refresh and retain dra
   await panel.locator('.n-select').click()
   await panel.locator('.n-base-selection-input').fill('Asia/Shanghai')
   await page.locator('.n-base-select-option__content:visible').getByText('Asia/Shanghai', { exact: true }).click()
-  await page.getByRole('tab', { name: /^Agents/ }).click()
+  await page.getByRole('tab', { name: /^Account shared executors/ }).click()
   await expect(page.locator('.agent-card')).toHaveCount(1)
   await page.getByRole('tab', { name: 'General', exact: true }).click()
   await expect(panel.getByRole('textbox', { name: 'Compression Threshold' })).toHaveValue('60')
@@ -1906,7 +1906,7 @@ test('Person saves agent presets, preserves unsaved edits and only offers openin
   const { state, operations } = await setup(page, 'light')
   await page.goto('/#/person')
   await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
-  await page.getByRole('tab', { name: /^Agents/ }).click()
+  await page.getByRole('tab', { name: /^Account shared executors/ }).click()
   await expect(page.locator('.agent-card')).toContainText('Research assistant')
   await page.getByRole('button', { name: 'Add agent', exact: true }).click()
   await page.getByRole('textbox', { name: 'Agent name', exact: true }).fill('Research assistant')
@@ -1928,7 +1928,7 @@ test('Person saves agent presets, preserves unsaved edits and only offers openin
   await page.screenshot({ path: '/tmp/person-agent-settings.png', animations: 'disabled' })
   await page.reload()
   await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
-  await page.getByRole('tab', { name: /^Agents/ }).click()
+  await page.getByRole('tab', { name: /^Account shared executors/ }).click()
   await expect(page.locator('.agent-card').last()).toContainText('Research assistant')
   await page.locator('.agent-card').last().getByRole('button', { name: 'Edit', exact: true }).click()
   await expect(page.getByRole('textbox', { name: 'Agent name', exact: true })).toHaveValue('Research assistant')
@@ -2487,7 +2487,7 @@ for (const width of [1440, 390]) {
     await settings.click()
     await expect(settings).toHaveAttribute('aria-expanded', 'true')
     const drawer = page.locator('.person-workspace-drawer')
-    await drawer.getByRole('tab', { name: /^Agents/ }).click()
+    await drawer.getByRole('tab', { name: /^Account shared executors/ }).click()
     const names = drawer.locator('.agent-card h3')
     await expect(names.first()).toHaveText(longName)
     await expect(names.first()).toHaveAttribute('title', longName)
@@ -2547,7 +2547,7 @@ for (const width of [1440, 390]) {
     await dialog.getByRole('button', { name: 'Go to settings', exact: true }).click()
     await expect(dialog).not.toBeVisible()
     const drawer = page.locator('.person-workspace-drawer')
-    await expect(drawer.getByRole('tab', { name: /^Agents/ })).toHaveAttribute('aria-selected', 'true')
+    await expect(drawer.getByRole('tab', { name: /^Account shared executors/ })).toHaveAttribute('aria-selected', 'true')
     await expect(drawer.getByText('No Agents yet', { exact: true })).toBeVisible()
     await addExecutionAgent(page)
     await expect.poll(() => state.settings.agents.length).toBe(1)
@@ -2596,7 +2596,7 @@ for (const existing of [false, true]) {
     expect(operations.filter(op => op.path.endsWith('/conversations') && op.body)).toHaveLength(0)
     expect(await emitted(page, 'run')).toHaveLength(0)
     await dialog.getByRole('button', { name: 'Go to settings', exact: true }).click()
-    await expect(page.getByRole('tab', { name: /^Agents/ })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('tab', { name: /^Account shared executors/ })).toHaveAttribute('aria-selected', 'true')
     // Another window changed shared settings; retry must retain the Agent draft.
     state.revision++
     await addExecutionAgent(page, true)
@@ -4589,3 +4589,75 @@ for (const width of [1440, 360]) {
     await page.screenshot({path:testInfo.outputPath(`located-flow-${width}.png`),animations:'disabled'})
   })
 }
+
+for (const mode of ['light', 'dark'] as const) {
+  test(`role appearance and project settings persist independently of shared executors in ${mode}`, async ({ page }, testInfo) => {
+    const { state, operations } = await setup(page, mode)
+    state.tasks = []
+    state.role = { session_id: state.session.id, project_id: '', instructions: 'Coordinate the requested work.', allowed_agents: [], revision: 0 }
+    state.projects = [{ id: 'alpha', name: 'Alpha', workspace: '/work/alpha', repository: '', worktree_root: '', instructions: 'Alpha only', revision: 1 }]
+    const agents = structuredClone(state.settings.agents)
+    await page.route('**/api/studio/person/conversations/*/role', async route => {
+      const body = route.request().postDataJSON()
+      operations.push({ path: '/role', body })
+      if (state.roleConflict) return route.fulfill({ status: 409, json: { error: 'Role changed; reload and retry' } })
+      expect(body.expected_revision).toBe(state.role.revision)
+      state.session.title = body.title; state.session.bot_type = body.bot_type
+      state.role = { ...state.role, ...body, revision: state.role.revision + 1 }
+      return route.fulfill({ json: state.role })
+    })
+    await page.setViewportSize({ width: mode === 'light' ? 390 : 1440, height: 900 })
+    await page.goto('/#/person')
+    await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('tab', { name: 'Role settings', exact: true }).click()
+    const panel = page.locator('.person-panel').filter({ has: page.getByRole('heading', { name: 'Role settings', exact: true }) })
+    await panel.getByLabel('BOT name', { exact: true }).fill('Operations')
+    await panel.getByLabel('Responsibilities and boundaries', { exact: true }).fill('Own runtime operations; route software defects to engineering.')
+    await panel.locator('.role-avatars button').nth(8).click()
+    await expect(panel.locator('.role-avatars button').nth(8)).toHaveAttribute('aria-pressed', 'true')
+    await panel.getByLabel('Project context', { exact: true }).click()
+    await page.locator('.n-base-select-option').filter({ hasText: /^Alpha$/ }).click()
+    state.roleConflict = true
+    await panel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(panel.getByRole('alert')).toContainText('Role changed')
+    await expect(panel.getByLabel('BOT name', { exact: true })).toHaveValue('Operations')
+    state.roleConflict = false
+    await panel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(() => state.role.revision).toBe(1)
+    expect(state.role.project_id).toBe('alpha')
+    expect(state.session.bot_type).toBe('erji')
+    expect(state.settings.agents).toEqual(agents)
+    await page.screenshot({ path: testInfo.outputPath(`role-project-${mode}.png`), animations: 'disabled' })
+    await page.keyboard.press('Escape')
+    await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.getByRole('tab', { name: 'Role settings', exact: true }).click()
+    await expect(panel.getByLabel('Responsibilities and boundaries', { exact: true })).toHaveValue('Own runtime operations; route software defects to engineering.')
+    await expect(panel.locator('.role-avatars button').nth(8)).toHaveAttribute('aria-pressed', 'true')
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  })
+}
+
+test('registers project rules without changing account defaults', async ({ page }) => {
+  const { state } = await setup(page, 'light')
+  state.tasks = []; state.projects = []
+  const before = structuredClone(state.settings)
+  await page.route('**/api/studio/person/projects', async route => {
+    const body = route.request().postDataJSON()
+    expect(body.expected_revision).toBe(0)
+    state.projects = [{ ...body, id: 'new-project', revision: 1 }]
+    return route.fulfill({ json: state.projects[0] })
+  })
+  await page.goto('/#/person')
+  await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('tab', { name: 'Projects', exact: true }).click()
+  await page.getByRole('button', { name: 'New project', exact: true }).click()
+  const panel = page.locator('.person-panel').filter({ has: page.getByRole('heading', { name: 'Projects', exact: true }) })
+  await panel.getByLabel('Project name', { exact: true }).fill('Alpha')
+  await panel.getByLabel('Project directory', { exact: true }).fill('/work/alpha')
+  await panel.getByLabel('Project rules and sources', { exact: true }).fill('Use the confirmed requirements document.')
+  await panel.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(panel.getByRole('heading', { name: 'Alpha', exact: true })).toBeVisible()
+  expect(state.settings).toEqual(before)
+  await panel.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(panel.getByLabel('Project directory', { exact: true })).toHaveValue('/work/alpha')
+})

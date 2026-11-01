@@ -8,11 +8,12 @@ import { personFlowGroups, personFlowState, personFlowStatusKey, type PersonFlow
 import PersonFlowCard from './PersonFlowCard.vue'
 
 const props = defineProps<{ flows: PersonFlow[]; saving: boolean; focus?: { flow: PersonFlow; request: number } | null }>()
-const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
+const emit = defineEmits<{ classify: [flow: PersonFlow, kind: 'business' | 'acceptance']; action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
 const { t } = useI18n()
 const expanded = ref<string | null>(null)
 const panel = ref<HTMLElement>()
 const search = ref('')
+const kind = ref('all')
 const filter = ref<'all' | PersonFlow['state']>('all')
 const visibleFlows = computed(() => {
   const latest = props.flows.slice(0,50)
@@ -31,14 +32,14 @@ const filters = computed(() => [
 const name = (stage: PersonFlowStage) => stage.session_title || t('person.chat')
 const rows = computed(() => visibleFlows.value.filter(flow => {
   const query = search.value.trim().toLocaleLowerCase()
-  return (filter.value === 'all' || flow.state === filter.value) && (!query || [flow.title,flow.goal,...flow.stages.map(name)].some(text => text.toLocaleLowerCase().includes(query)))
+  return (kind.value === 'all' || (flow.kind || 'business') === kind.value) && (filter.value === 'all' || flow.state === filter.value) && (!query || [flow.title,flow.goal,...flow.stages.map(name)].some(text => text.toLocaleLowerCase().includes(query)))
 }).map(flow => ({ flow,groups:personFlowGroups(flow),status:personFlowState(flow),completed:flow.stages.filter(stage => stage.state === 'completed').length })))
 watch(rows,value => { if (!value.some(row => row.flow.id === expanded.value)) expanded.value=null })
 const toggle = (id: string) => { expanded.value=expanded.value === id ? null : id }
 async function revealFocus() {
   if (!props.focus) return
   const id = props.focus.flow.id
-  filter.value='all';search.value='';expanded.value=id
+  filter.value='all';kind.value='all';search.value='';expanded.value=id
   await nextTick()
   if (props.focus?.flow.id !== id) return
   const button = panel.value?.querySelector<HTMLButtonElement>(`[data-flow-id="${CSS.escape(id)}"] > .flow-row`)
@@ -54,6 +55,9 @@ defineExpose({ revealFocus })
     <header class="panel-heading"><div><h2>{{ t('person.flows') }}</h2><p>{{ t('person.flowHint') }}</p></div></header>
     <div v-if="!visibleFlows.length" class="panel-empty">{{ t('person.empty') }}</div>
     <template v-else>
+      <div class="flow-filters" role="group" :aria-label="t('person.flowKind')">
+        <button v-for="item in ['all', 'business', 'acceptance']" :key="item" type="button" :aria-pressed="kind === item" :class="{ selected: kind === item }" @click="kind = item">{{ t(item === 'all' ? 'person.flowAll' : item === 'business' ? 'person.businessFlow' : 'person.acceptanceFlow') }}</button>
+      </div>
       <div class="flow-toolbar">
         <div class="flow-filters" role="group" :aria-label="t('person.flows')">
           <button v-for="item in filters" :key="item.value" type="button" :class="{ selected:filter === item.value }" :aria-pressed="filter === item.value" @click="filter=item.value">
@@ -71,6 +75,7 @@ defineExpose({ revealFocus })
             <span class="flow-row-main">
               <span :id="`flow-title-${row.flow.id}`" class="flow-row-title">{{ row.flow.title }}</span>
               <span class="flow-route" :title="row.groups.map(group => group.stages.map(name).join(' ∥ ')).join(' → ')">
+                {{ t(row.flow.kind === 'acceptance' ? 'person.acceptanceFlow' : 'person.businessFlow') }} ·
                 <template v-for="(group,index) in row.groups" :key="group.position">
                   <span v-if="index" class="flow-route-arrow" aria-hidden="true">→</span>
                   <span class="flow-route-group" :class="{ 'flow-route-group--current':row.flow.state === 'active' && group.position === row.flow.current_position }" :title="group.stages.map(name).join(' ∥ ')">
@@ -87,7 +92,7 @@ defineExpose({ revealFocus })
           </button>
           <div v-show="expanded === row.flow.id" :id="`flow-detail-${row.flow.id}`" class="flow-detail">
             <PersonFlowCard v-if="expanded === row.flow.id" :flow="row.flow" :saving="saving" embedded
-              @action="(item,action) => emit('action',item,action)" @open-result="(sessionId,messageId) => emit('openResult',sessionId,messageId)"
+              @classify="(item,kind) => emit('classify',item,kind)" @action="(item,action) => emit('action',item,action)" @open-result="(sessionId,messageId) => emit('openResult',sessionId,messageId)"
               @open-task="emit('openTask',$event)" @open-conversation="emit('openConversation',$event)" />
           </div>
         </li>

@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 const runAndWait = vi.hoisted(() => vi.fn(async () => ({ ok: true, output: 'Done' })))
 const getRunInfo = vi.hoisted(() => vi.fn())
 const stop = vi.hoisted(() => vi.fn())
-vi.mock('../../packages/server/src/modules/studio/public/chat-run', () => ({ getChatRunServer: () => ({ runAndWait }) }))
+vi.mock('../../packages/server/src/modules/studio/public/chat-run', () => ({ getChatRunServer: () => ({ runAndWait, waitForRunTermination: vi.fn(async () => {}) }) }))
 vi.mock('../../packages/server/src/bootstrap/person-chat-agent', () => ({ createPersonAgent: vi.fn() }))
 vi.mock('../../packages/ekko-agent/src', () => ({ AgentRuntime: vi.fn(), AgentToolRegistry: vi.fn(), createModelClient: vi.fn(), resolveModelProviderConfigs: vi.fn(), countTextTokens: vi.fn() }))
 vi.mock('../../packages/server/src/modules/ekko/services/provider-runtime', () => ({ createEkkoAuthorizedProviderFetch: vi.fn(), resolveEkkoProviderRuntimeConfig: vi.fn() }))

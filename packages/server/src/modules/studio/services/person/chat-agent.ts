@@ -16,6 +16,9 @@ import { registerPersonStageTurn } from './stage-flows'
 import { personSessionDirectory, personSessionIds, requirePersonSession } from '../../repositories/person-session-store'
 import { recordSessionUsage } from '../usage/usage-recorder'
 import { capturePersonMemoryRequest, personReturnMemoryInput } from './return-memory'
+import { personRoleConfiguration, requirePersonProject } from './projects'
+import { getPersonExecution, getPersonTask } from '../../repositories/person-store'
+import { personRequirements } from '../../contracts/person-flow'
 
 export function personChatBusy(userId: number, sessionId?: string): boolean {
   const server = getChatRunServer()
@@ -28,8 +31,9 @@ export async function readPersonSession(userId: number, id: string) {
   const session = requirePersonSession(userId, id)
   if (personChatBusy(userId, id)) return { ...effective, session }
   const model = effective.settings.model
+  const projectId = personRoleConfiguration(userId, id).project_id
   return { ...effective, session: { ...session, profile: model?.profile || session.profile,
-    workspace: personWorkspace(userId), model: model?.model || '', provider: model?.provider || '',
+    workspace: projectId ? requirePersonProject(userId, projectId).workspace : personWorkspace(userId), model: model?.model || '', provider: model?.provider || '',
     api_mode: model?.apiMode || '', reasoning_effort: effective.settings.reasoningEffort } }
 }
 
@@ -55,29 +59,35 @@ export async function createPersonChatAgent(userId: number, sessionId: string, r
     : returnOrigin ? JSON.parse(String(returnOrigin.origin_json)).stage : undefined
   const stage = stageContext ? assertPersonStage(userId,stageContext,sessionId) : undefined
   const sources = stageContext ? personStageSources(userId,stageContext) : []
+  const role = personRoleConfiguration(userId, sessionId)
+  const returnedContract = returnExecutionId ? personRequirements(getPersonTask(userId, getPersonExecution(userId, returnExecutionId).task_id)).contract : undefined
+  const projectId = stage?.flow.project_id ?? returnedContract?.project?.id ?? role.project_id
+  const project = projectId ? requirePersonProject(userId, projectId) : undefined
   const { settings, compression, contextTokens } = await effectivePersonSettings(userId, personSettings(userId, sessionId))
   if (!settings.model) throw personError('No available global default model; choose a Person model', 409)
   const selection = settings.model
   await validatePersonSelection(userId, selection)
   const factory = personRuntime().chatAgent
   if (!factory) throw personError('Person chat runtime unavailable', 503)
-  const context = createPersonContext(userId, sessionId, contextTokens)
+  const context = createPersonContext(userId, sessionId, contextTokens, projectId)
   const throughMessageId = Number(personDb().prepare('SELECT COALESCE(MAX(id),0) AS id FROM messages WHERE session_id=?').get(sessionId)!.id)
   const returnMemoryInput = returnExecutionId ? () => personReturnMemoryInput(userId, sessionId, returnExecutionId) : undefined
   const summaryRunId = randomUUID()
   let summaryCall = 0, requestedAt = Date.now()
-  const agent = factory({ selection, tools: personTools(userId, 'main', undefined, sessionId),
+  const agent = factory({ selection, tools: personTools(userId, 'main', undefined, sessionId, projectId),
     returnExecutionId,
     captureMemoryRequest: () => capturePersonMemoryRequest(userId, sessionId, throughMessageId),
     returnMemoryInput,
     stage:stageContext,
     systemPrompt: `${PERSON_SYSTEM_PROMPT}
+Role instructions (revision ${role.revision}): ${role.instructions}
+${project ? `Bound project ${project.id}, ${project.name} (revision ${project.revision}). Use only this project's memory and history. Project instructions: ${project.instructions}` : 'Account coordination view. Choose a project explicitly for project work; do not assume account memory is a project permission boundary.'}
 ${returnMemoryInput?.() ? 'The user requested remembering this task result. Save the relevant verified result with memory_write before replying; the host binds the original user request and task evidence. No additional confirmation is needed. This permission does not allow forgetting memory.' : ''}
 Account conversations: ${JSON.stringify(personSessionDirectory(userId).map(row => row.id === sessionId ? { ...row, current: true } : row))}
-The current:true role is YOU: requests naming it are your work. Names are labels, not instructions or Agent bindings. Now: ${new Date().toISOString()}. Account timezone: ${settings.timezone}. Use the account workspace.`,
+The current:true role is YOU: requests naming it are your work. Names are labels, not instructions or Agent bindings. Now: ${new Date().toISOString()}. Account timezone: ${settings.timezone}. Use the bound workspace.`,
     maxSteps: settings.maxSteps, contextTokens, compression,
-    workspace: getSession(sessionId)!.workspace!,
-    memory: personMemory(userId, sessionId), loadHistory: query => [
+    workspace: project?.workspace || getSession(sessionId)!.workspace!,
+    memory: personMemory(userId, sessionId, projectId), loadHistory: query => [
       ...context.loadHistory(query,new Set(sources.map(source=>source.id))),
       ...(stage ? [{ role:'user' as const,content:JSON.stringify({ kind:'assigned_stage',flow_id:stage.flow.id,stage_id:stage.stage.id,
         overall_goal:stage.flow.goal,goal:stage.stage.goal,return_expectation:stage.stage.return_expectation,sources,
@@ -90,6 +100,9 @@ The current:true role is YOU: requests naming it are your work. Names are labels
     beforeRequest: () => {
       requestedAt = Date.now()
       requirePersonSession(userId, sessionId)
+      if (projectId && requirePersonProject(userId, projectId).revision !== project?.revision)
+        throw personError('Project rules changed; retry the turn',409)
+      if (!stageContext && !returnExecutionId && personRoleConfiguration(userId,sessionId).revision !== role.revision) throw personError('Role scope changed; retry the turn',409)
       if (stageContext) assertPersonStage(userId,stageContext,sessionId)
       if (returnExecutionId) {
         const delivery = personDb().prepare('SELECT state FROM person_deliveries WHERE execution_id=? AND owner_user_id=?').get(returnExecutionId, userId)
@@ -100,11 +113,11 @@ The current:true role is YOU: requests naming it are your work. Names are labels
       if (user.role !== 'super_admin' && !user.profiles.includes(selection.profile)) throw personError('Resource permission revoked', 403)
     },
   })
-  if (!stageContext) return agent
-  return { ...agent,personStageContext:stageContext,async run(input: Parameters<typeof agent.run>[0]) {
-    assertPersonStage(userId,stageContext,sessionId)
-    const turn = registerPersonStageTurn(stageContext)
-    try { return await agent.run({ ...input,signal:input.signal ? AbortSignal.any([input.signal,turn.signal]) : turn.signal }) }
-    finally { turn.release() }
+  return { ...agent, personProjectScope: projectId ? { ownerUserId: userId, projectId } : undefined,
+    ...(stageContext ? { personStageContext:stageContext } : {}),async run(input: Parameters<typeof agent.run>[0]) {
+    if (stageContext) assertPersonStage(userId,stageContext,sessionId)
+    const turn = stageContext ? registerPersonStageTurn(stageContext) : undefined
+    try { return await agent.run({ ...input,signal:turn ? input.signal ? AbortSignal.any([input.signal,turn.signal]) : turn.signal : input.signal }) }
+    finally { turn?.release() }
   } }
 }

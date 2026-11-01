@@ -915,8 +915,19 @@ export function getSessionDetail(id: string): HermesSessionDetailRow | null {
 
 // --- Message CRUD ---
 
+export interface PersonMessageScope { ownerUserId: number; projectId: string }
+function savePersonMessageScope(db: NonNullable<ReturnType<typeof getDb>>, id: number, sessionId: string, scope?: PersonMessageScope) {
+  if (!scope) return
+  const result = db.prepare(`INSERT INTO person_message_projects(message_id,owner_user_id,project_id)
+    SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM sessions WHERE id=? AND CAST(studio_user_id AS TEXT)=?)
+    AND EXISTS (SELECT 1 FROM person_projects WHERE id=? AND owner_user_id=?)`)
+    .run(id, scope.ownerUserId, scope.projectId, sessionId, String(scope.ownerUserId), scope.projectId, scope.ownerUserId)
+  if (!result.changes) throw new Error('Project message scope is no longer available')
+}
+
 export function addMessage(msg: {
   session_id: string
+  personScope?: PersonMessageScope
   role: string
   content: string
   display_role?: string | null
@@ -934,27 +945,36 @@ export function addMessage(msg: {
 }): number | undefined {
   if (!isSqliteAvailable()) return undefined
   const db = getDb()!
-  const toolCallsJson = msg.tool_calls ? JSON.stringify(msg.tool_calls) : null
-  const result = db.prepare(
-    `INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, display_role, display_content, tool_call_id, tool_calls, tool_name, run_marker, timestamp, token_count, finish_reason, reasoning, reasoning_details, reasoning_content)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.session_id, msg.role, normalizeMessageContentForStorageRole(msg.role, msg.content),
-    msg.display_role ?? null, msg.display_content ?? null,
-    msg.tool_call_id ?? null, toolCallsJson, msg.tool_name ?? null,
-    msg.run_marker ?? null,
-    msg.timestamp ?? Math.floor(Date.now() / 1000),
-    msg.token_count ?? null, msg.finish_reason ?? null,
-    msg.reasoning ?? null, msg.reasoning_details ?? null,
-    msg.reasoning_content ?? null,
-  )
-  const messageId = Number(result.lastInsertRowid)
-  recordSkillUsageMessage(messageId, msg)
-  return messageId
+  if (msg.personScope) db.exec('SAVEPOINT person_message_scope')
+  try {
+    const toolCallsJson = msg.tool_calls ? JSON.stringify(msg.tool_calls) : null
+    const result = db.prepare(
+      `INSERT INTO ${MESSAGES_TABLE} (session_id, role, content, display_role, display_content, tool_call_id, tool_calls, tool_name, run_marker, timestamp, token_count, finish_reason, reasoning, reasoning_details, reasoning_content)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      msg.session_id, msg.role, normalizeMessageContentForStorageRole(msg.role, msg.content),
+      msg.display_role ?? null, msg.display_content ?? null,
+      msg.tool_call_id ?? null, toolCallsJson, msg.tool_name ?? null,
+      msg.run_marker ?? null,
+      msg.timestamp ?? Math.floor(Date.now() / 1000),
+      msg.token_count ?? null, msg.finish_reason ?? null,
+      msg.reasoning ?? null, msg.reasoning_details ?? null,
+      msg.reasoning_content ?? null,
+    )
+    const messageId = Number(result.lastInsertRowid)
+    savePersonMessageScope(db, messageId, msg.session_id, msg.personScope)
+    recordSkillUsageMessage(messageId, msg)
+    if (msg.personScope) db.exec('RELEASE person_message_scope')
+    return messageId
+  } catch (error) {
+    if (msg.personScope) { db.exec('ROLLBACK TO person_message_scope'); db.exec('RELEASE person_message_scope') }
+    throw error
+  }
 }
 
 export function addMessages(msgs: Array<{
   session_id: string
+  personScope?: PersonMessageScope
   role: string
   content: string
   display_role?: string | null
@@ -992,6 +1012,7 @@ export function addMessages(msgs: Array<{
         msg.reasoning_content ?? null,
       )
       const messageId = Number(result.lastInsertRowid)
+      savePersonMessageScope(db, messageId, msg.session_id, msg.personScope)
       ids.push(messageId)
       recordSkillUsageMessage(messageId, msg)
     }

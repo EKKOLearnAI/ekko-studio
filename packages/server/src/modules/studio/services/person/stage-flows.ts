@@ -10,6 +10,7 @@ import { recordSessionAttention } from '../../repositories/session-state-store'
 import { personRuntime } from '../../public/person-runtime'
 import { personUser } from './catalog'
 import { logger } from '../../public/logging'
+import { personRoleConfiguration, requirePersonProject } from './projects'
 
 const activeTurns = new Map<string, Set<AbortController>>()
 export function registerPersonStageTurn(context: PersonStageContext) {
@@ -20,9 +21,15 @@ export function registerPersonStageTurn(context: PersonStageContext) {
 }
 
 export function createPersonFlow(userId: number, input: Record<string, unknown>, origin?: PersonTaskOrigin) {
-  if (Object.keys(input).some(key => !['action','session_id','title','goal','stages','idempotency_key'].includes(key))) throw personError('Unknown flow field')
+  if (Object.keys(input).some(key => !['action','session_id','title','goal','stages','idempotency_key','project_id','kind'].includes(key))) throw personError('Unknown flow field')
   if (origin && input.session_id && input.session_id !== origin.sessionId) throw personError('Creator is assigned by the host',403)
   const creator = requirePersonSession(userId, origin?.sessionId || personText(input.session_id, 'session_id',100)).id
+  const bound = personRoleConfiguration(userId,creator).project_id
+  const projectId = input.project_id ? personText(input.project_id,'project id',100) : bound
+  if (bound && projectId !== bound) throw personError('Flow must use the bound project',403)
+  if (projectId) requirePersonProject(userId,projectId)
+  const kind = String(input.kind || 'business')
+  if (!['business','acceptance'].includes(String(kind))) throw personError('Invalid flow kind')
   if (origin?.stage) throw personError('Continue this flow instead of creating a replacement',403)
   const title = personText(input.title,'title',200), goal = personText(input.goal,'goal',8000)
   if (!Array.isArray(input.stages) || !input.stages.length || input.stages.length > 13 || JSON.stringify(input.stages).length > 32000) throw personError('Use 1 to 13 stages (at most 32000 characters)')
@@ -55,7 +62,7 @@ export function createPersonFlow(userId: number, input: Record<string, unknown>,
       AND t.status NOT IN ('completed','closed')`).get(userId,creator,origin.runId)) {
       throw Object.assign(personError('Wait for this turn\'s worker result before handing off its work.',409),{code:'WORK_PENDING'})
     }
-    db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(id,userId,creator,title,goal,now,now)
+    db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at,project_id,kind) VALUES(?,?,?,?,?,?,?,?,?)').run(id,userId,creator,title,goal,now,now,projectId,kind)
     steps.forEach((step, position) => {
       requirePersonSession(userId,step.session_id)
       db.prepare('INSERT INTO person_stages(id,flow_id,position,group_position,session_id,goal,return_expectation,state) VALUES(?,?,?,?,?,?,?,?)')
@@ -76,9 +83,10 @@ function stageHasWork(stageId: string) {
 }
 
 export async function controlPersonFlow(userId: number, input: Record<string, unknown>, origin?: PersonTaskOrigin) {
-  if (Object.keys(input).some(key => !['action','flow_id','expected_revision','idempotency_key'].includes(key))) throw personError('Flow route and creator are fixed',403)
+  if (Object.keys(input).some(key => !['action','flow_id','expected_revision','idempotency_key','kind'].includes(key))) throw personError('Flow route and creator are fixed',403)
   const action = personText(input.action,'action',30), id = personText(input.flow_id,'flow_id',100)
-  if (!['complete','stop','resume'].includes(action)) throw personError('Unsupported flow action')
+  if (!['complete','stop','resume','classify'].includes(action)) throw personError('Unsupported flow action')
+  if (input.kind !== undefined && action !== 'classify') throw personError('Use classify to change the record type')
   const result = personOperation(userId,`flow:${personText(input.idempotency_key,'idempotency_key',200)}`, { ...input, actor: origin?.sessionId || null, stage: origin?.stage || null }, () => {
     const flow = getPersonFlow(userId,id)
     const active = flow.stages.filter(stage => stage.group_position === flow.current_position && ['active','failed'].includes(stage.state))
@@ -96,7 +104,12 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
       }
     }
     const db = personDb(), now = Date.now()
-    if (action === 'complete') {
+    if (action === 'classify') {
+      if (!['business','acceptance'].includes(String(input.kind))) throw personError('Invalid flow kind')
+      if (!['completed','stopped'].includes(flow.state) || personFlowHasPendingWork(userId,id)) throw personError('Classify only an idle finished or stopped record',409)
+      if (origin && origin.sessionId !== flow.creator_session_id) throw personError('Only the creator may classify this record',403)
+      db.prepare('UPDATE person_flows SET kind=? WHERE id=?').run(String(input.kind),id)
+    } else if (action === 'complete') {
       if (!origin?.stage || origin.stage.flowId !== id || !origin.runId) throw personError('Complete the stage from its assigned live turn',403)
       const { stage } = assertPersonStage(userId,origin.stage,origin.sessionId)
       if (stageHasWork(stage.id)) throw personError('Finish or explicitly close the stage subtask before completing',409)
@@ -129,7 +142,7 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
   })
   const latest = getPersonFlow(userId,id)
   if (latest.generation !== result.generation || latest.state !== result.state) return result
-  if (action !== 'complete') {
+  if (action === 'stop' || action === 'resume') {
     for (const abort of activeTurns.get(id) || []) abort.abort(new Error('Flow turn superseded or stopped'))
   }
   if (action === 'stop') await stopFlowWorkers(userId,id,'',result.generation)

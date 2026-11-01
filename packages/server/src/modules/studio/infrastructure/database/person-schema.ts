@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { initPersonContextTables } from './person-context-schema'
 import { initPersonStageTables } from './person-stage-schema'
+import { initPersonProjectTables } from './person-project-schema'
 
 /** Models and goals belong to a conversation; memory and execution presets belong to the account. */
 export function initPersonTables(db: DatabaseSync): void {
@@ -97,6 +98,7 @@ export function initPersonTables(db: DatabaseSync): void {
   }
   initPersonContextTables(db)
   initPersonStageTables(db)
+  initPersonProjectTables(db)
   // Discard account-wide model choices; never copy them into conversations.
   db.exec(`UPDATE person_accounts
     SET settings_json=json_remove(settings_json,'$.model','$.reasoningEffort','$.contextTokens'),revision=revision+1

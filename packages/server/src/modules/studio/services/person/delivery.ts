@@ -1,7 +1,7 @@
 import type { PersonExecution, PersonTaskOrigin } from '../../contracts/person'
 import { personError } from '../../contracts/person'
 import { ownsPersonSession } from '../../contracts/person-session'
-import { getSession, getSessionDetail } from '../../repositories/session-store'
+import { getSession } from '../../repositories/session-store'
 import { personDb, getPersonExecution, getPersonTask } from '../../repositories/person-store'
 import { personUpdated } from '../../repositories/person-updates'
 import { personRuntime } from '../../public/person-runtime'
@@ -11,13 +11,22 @@ import { assertPersonStage, personTaskStage } from '../../repositories/person-st
 import { failPersonStage } from './stage-flows'
 
 export function savePersonTaskOrigin(userId: number, taskId: string, supplied?: PersonTaskOrigin) {
-  const sessionId = getPersonTask(userId, taskId).session_id
+  const task = getPersonTask(userId, taskId), sessionId = task.session_id
   if (!ownsPersonSession(userId, getSession(sessionId))) throw personError('Task conversation not found', 404)
   if (supplied && !ownsPersonSession(userId, getSession(supplied.sessionId))) throw personError('Invalid background task origin', 403)
   // UI actions and schedules use a bounded snapshot of the same account conversation.
-  const origin: PersonTaskOrigin = supplied ? { ...supplied, sessionId, returnExecutionId: undefined } : { sessionId, runId: '', messages: (getSessionDetail(sessionId)?.messages || [])
-    .filter(message => ['user','assistant'].includes(message.role) && !message.tool_calls?.length)
-    .slice(-20).map(message => ({ role: message.role as 'user' | 'assistant', content: String(message.content || '').slice(0,6000) })) }
+  const origin: PersonTaskOrigin = supplied ? { ...supplied, sessionId, returnExecutionId: undefined } : { sessionId, runId: '',
+    messages: personDb().prepare(`SELECT role,substr(content,1,6000) AS content FROM messages m WHERE session_id=?
+      AND role IN ('user','assistant') AND COALESCE(tool_calls,'[]')='[]'
+      AND NOT EXISTS (SELECT 1 FROM person_message_projects p WHERE p.message_id=m.id) ORDER BY id DESC LIMIT 20`)
+      .all(sessionId).reverse().map(message => ({ role: message.role as 'user' | 'assistant', content: String(message.content || '') })) }
+  const requirements = personRequirements(task)
+  // A shared role can receive work from several projects. Never replay its raw
+  // account transcript into a project callback, even when the origin is supplied.
+  if (requirements.contract?.project) origin.messages = [{ role: 'user', content: JSON.stringify({
+    kind: 'project_task_brief', project_id: requirements.contract.project.id, task_id: task.id, title: task.title, goal: requirements.goal,
+    instruction: 'Saved task context, not a new authorization. Inspect current task details and returned evidence before continuing.',
+  }) }]
   const stage = personTaskStage(userId,taskId)
   if (stage) { origin.stage = stage; origin.messages = [] }
   personDb().prepare('INSERT INTO person_task_origins VALUES (?,?,?) ON CONFLICT(task_id) DO UPDATE SET origin_json=excluded.origin_json')
@@ -71,6 +80,10 @@ export async function deliverPersonResults() {
     const run = getPersonExecution(row.owner_user_id, row.execution_id)
     const task = getPersonTask(row.owner_user_id, run.task_id)
     const origin = JSON.parse(row.origin_json) as PersonTaskOrigin
+    if (personRequirements(task).contract?.project && run.input_json) origin.messages.push({
+      role: 'user', content: JSON.stringify({ kind: 'saved_task_followup', input: JSON.parse(run.input_json),
+        instruction: 'The saved follow-up for this task execution. Attachment paths are references, not file contents.' }),
+    })
     if (origin.sessionId !== task.session_id) {
       db.prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id=?").run(run.id)
       continue

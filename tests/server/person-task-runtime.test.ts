@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { PersonRuntimePort } from '../../packages/server/src/modules/studio/public/person-runtime'
 
-const native = vi.hoisted(() => ({ runAndWait: vi.fn(), abortSession: vi.fn(), available: true }))
+const native = vi.hoisted(() => ({ runAndWait: vi.fn(), waitForRunTermination: vi.fn(async () => {}), abortSession: vi.fn(), available: true }))
 vi.mock('../../packages/server/src/modules/studio/public/chat-run', () => ({ getChatRunServer: () => native.available ? native : undefined }))
 import { executePersonTask, stopPersonTask } from '../../packages/server/src/bootstrap/person-task-runtime'
 
@@ -81,16 +81,16 @@ it('unblocks a pending stop when initialization fails without emitting run.start
 })
 
 
-it('waits for the interrupted native handler to unwind before releasing the Person lease', async () => {
+it.each([true, false])('waits for the native handler to unwind before releasing the Person lease (interrupted=%s)', async interrupted => {
   const termination = deferred()
   const waitForRunTermination = vi.fn(() => termination.promise)
   ;(native as any).waitForRunTermination = waitForRunTermination
-  native.runAndWait.mockResolvedValue({ ok: false, interrupted: true, stop_reason: 'queue_insertion' })
+  native.runAndWait.mockResolvedValue({ ok: !interrupted, interrupted, stop_reason: interrupted ? 'queue_insertion' : undefined })
   let released = false
   const result = executePersonTask(input(new AbortController().signal)).then(value => { released = true; return value })
   await vi.waitFor(() => expect(waitForRunTermination).toHaveBeenCalledWith('person-task-1'))
   expect(released).toBe(false)
   expect(native.abortSession).not.toHaveBeenCalled()
   termination.resolve()
-  expect(await result).toMatchObject({ interrupted:true, stop_reason:'queue_insertion' })
+  expect(await result).toMatchObject({ ok: !interrupted, interrupted })
 })

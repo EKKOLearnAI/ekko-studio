@@ -28,6 +28,8 @@ import PersonMemoryPanel from '@/components/hermes/person/PersonMemoryPanel.vue'
 import PersonPanelIcon from '@/components/hermes/person/PersonPanelIcon.vue'
 import { useTaskDrawerLayout } from '@/components/hermes/tasks/useTaskDrawerLayout'
 import PersonAgentSettings from '@/components/hermes/person/PersonAgentSettings.vue'
+import PersonRoleSettings from '@/components/hermes/person/PersonRoleSettings.vue'
+import PersonProjectSettings from '@/components/hermes/person/PersonProjectSettings.vue'
 import PersonGeneralSettings from '@/components/hermes/person/PersonGeneralSettings.vue'
 import PersonTaskActivity from '@/components/hermes/person/PersonTaskActivity.vue'
 import { onPersonUpdated } from '@/api/studio/chat'
@@ -409,6 +411,9 @@ async function refresh() {
     }
   }
 }
+function classifyFlow(flow: PersonFlow, kind: 'business' | 'acceptance') {
+  return act(() => personRequest('/flows/apply', { action: 'classify', kind, flow_id: flow.id, expected_revision: flow.revision, idempotency_key: crypto.randomUUID() }))
+}
 function flowAction(flow: PersonFlow, action: 'stop' | 'resume') {
   return act(() => personRequest('/flows/apply', { action, flow_id: flow.id, expected_revision: flow.revision, idempotency_key: crypto.randomUUID() }))
 }
@@ -526,7 +531,7 @@ function inheritModel() {
   else void saveSettings({ use_global_default: true })
   showModelPicker.value = false
 }
-function memoryForget(memory: PersonMemory) { return act(() => personRequest('/memory', { id: memory.id, expected_revision: memory.revision, forget: true })) }
+function memoryForget(memory: PersonMemory) { return act(() => personRequest('/memory', { session_id: selectedSessionId.value, id: memory.id, expected_revision: memory.revision, forget: true })) }
 function scheduleAction(schedule: PersonSchedule, action: string) { return act(() => personRequest('/schedules/apply', { schedule_id: schedule.id, action, expected_revision: schedule.revision, idempotency_key: crypto.randomUUID() })) }
 function saveSchedule(input: Record<string, unknown>) { return act(() => personRequest('/schedules/apply', input)) }
 
@@ -708,13 +713,19 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="settings" :size="17" />{{ t('person.generalSettings') }}</span></template>
                 <PersonGeneralSettings :settings="data.settings" :compression="data.compression" :context-tokens="data.contextTokens" :model-label="modelLabel" :save-error="error" :saving="settingsWrites > 0" :busy="busy || data.busy" :save="saveSettings" />
               </NTabPane>
+              <NTabPane name="role" :tab-props="{ role: 'tab', 'aria-selected': tab === 'role' }" display-directive="show:lazy" :tab="t('person.roleSettings')">
+                <PersonRoleSettings v-if="data.session" :session="data.session" :role="data.role" :projects="data.projects || []" :agents="data.settings.agents" :busy="busy || data.busy || pending" @saved="refresh(); loadConversations()" />
+              </NTabPane>
+              <NTabPane name="projects" :tab-props="{ role: 'tab', 'aria-selected': tab === 'projects' }" display-directive="show:lazy" :tab="t('person.projects')">
+                <PersonProjectSettings :projects="data.projects || []" @saved="refresh()" />
+              </NTabPane>
               <NTabPane name="agents" display-directive="show:lazy" :tab-props="{ role: 'tab', 'aria-selected': tab === 'agents' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="agents" :size="17" />{{ t('person.agentsTab') }}<span class="workspace-tab-count">{{ data.settings.agents.length }}</span></span></template>
                 <PersonAgentSettings :agents="data.settings.agents" :save-error="error" :saving="settingsWrites > 0" @save="saveSettings({ agents: JSON.parse(JSON.stringify($event)) })" />
               </NTabPane>
               <NTabPane name="flows" :tab-props="{ role: 'tab', 'aria-selected': tab === 'flows' }">
                 <template #tab><span class="workspace-tab"><SessionTaskIcon :size="17" />{{ t('person.flows') }}</span></template>
-                <PersonFlowsPanel ref="flowsPanelRef" :flows="data.flows || []" :focus="flowFocus" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
+                <PersonFlowsPanel ref="flowsPanelRef" :flows="data.flows || []" :focus="flowFocus" :saving="pending" @classify="classifyFlow" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
               </NTabPane>
               <NTabPane name="schedules" :tab-props="{ role: 'tab', 'aria-selected': tab === 'schedules' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="schedule" :size="17" />{{ t('person.schedules') }}<span class="workspace-tab-count">{{ data.schedules.length }}</span></span></template>
@@ -722,7 +733,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
               </NTabPane>
               <NTabPane name="memory" :tab-props="{ role: 'tab', 'aria-selected': tab === 'memory' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="memory" :size="17" />{{ t('person.memory') }}<span class="workspace-tab-count">{{ data.memories.length }}</span></span></template>
-                <PersonMemoryPanel :memories="data.memories" :saving="pending" @forget="memoryForget" />
+                <PersonMemoryPanel :project-name="data.projects?.find(p => p.id === data?.role?.project_id)?.name" :memories="data.memories" :saving="pending" @forget="memoryForget" />
               </NTabPane>
             </NTabs>
           </div>

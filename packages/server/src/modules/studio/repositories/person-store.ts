@@ -66,9 +66,9 @@ export function savePersonSettingsInTransaction(userId: number, settings: Person
   personDb().prepare('INSERT INTO person_accounts VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json,revision=excluded.revision')
     .run(userId, JSON.stringify(sharedPersonSettings(settings)), revision + 1)
   if (workspace) {
-    personDb().prepare('UPDATE session_tasks SET workspace=? WHERE owner_user_id=? AND bot_id=?').run(workspace, userId, `person:${userId}`)
+    personDb().prepare("UPDATE session_tasks SET workspace=? WHERE owner_user_id=? AND bot_id=? AND json_type(requirements_json,'$.contract') IS NULL").run(workspace, userId, `person:${userId}`)
     personDb().prepare(`UPDATE sessions SET workspace=? WHERE CAST(studio_user_id AS TEXT)=? AND
-      (id LIKE 'person-main-%' OR id IN (SELECT session_id FROM person_executions WHERE owner_user_id=?))`)
+      (id LIKE 'person-main-%' OR id IN (SELECT e.session_id FROM person_executions e JOIN session_tasks t ON t.id=e.task_id WHERE e.owner_user_id=? AND json_type(t.requirements_json,'$.contract') IS NULL))`)
       .run(workspace, String(userId), userId)
   }
   personUpdated(userId)

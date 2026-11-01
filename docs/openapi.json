@@ -19573,6 +19573,82 @@
         }
       }
     },
+    "/api/studio/person/conversations/{id}/role": {
+      "put": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Update role",
+        "description": "Edit an owned BOT name, registered avatar, role instructions, bound project and allowed shared executors. Empty allowed_agents permits all account presets. Active replies, tasks, flows and deliveries block edits. Project memory/history remain separate and are not migrated by rebinding.",
+        "operationId": "roleConfigure",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "bot_type": {
+                    "type": "string"
+                  },
+                  "project_id": {
+                    "type": "string"
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "maxLength": 8000
+                  },
+                  "allowed_agents": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "expected_revision"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/person/executions/{id}/events": {
       "get": {
         "tags": [
@@ -19615,7 +19691,7 @@
           "Person"
         ],
         "summary": "Create apply",
-        "description": "Create a flow with session_id (creator), title, goal and stages (session_id, goal, return_expectation). Omit group on all stages for serial execution, or set ordered contiguous group numbers from zero on every stage: 0,0,1 runs A and B in parallel then C. Each role appears once per group; the creator may join a first parallel group. The next group receives every previous-group result only after all are saved. No execution preset is required. Stop/resume require flow_id and current expected_revision. Stop cancels all stage turns, deliveries and workers; resume requeues only unfinished branches with a new generation, preserving completed results. Only an assigned live model turn may prepare its branch completion; its stage and generation fence the operation, so peer revision changes do not require retries. The host commits it after saving its final result. Route and creator are immutable.",
+        "description": "Create a flow with session_id (creator), title, goal and stages (session_id, goal, return_expectation). Omit group on all stages for serial execution, or set ordered contiguous group numbers from zero on every stage: 0,0,1 runs A and B in parallel then C. Each role appears once per group; the creator may join a first parallel group. The next group receives every previous-group result only after all are saved. No execution preset is required. Stop/resume require flow_id and current expected_revision. Stop cancels all stage turns, deliveries and workers; resume requeues only unfinished branches with a new generation, preserving completed results. Only an assigned live model turn may prepare its branch completion; its stage and generation fence the operation, so peer revision changes do not require retries. The host commits it after saving its final result. Classify an idle completed/stopped record using action=classify and kind=business|acceptance; preserves its history. Route and creator are immutable.",
         "operationId": "flowApply",
         "security": [
           {
@@ -19645,7 +19721,8 @@
                     "enum": [
                       "create",
                       "stop",
-                      "resume"
+                      "resume",
+                      "classify"
                     ]
                   },
                   "idempotency_key": {
@@ -19670,6 +19747,17 @@
                   "goal": {
                     "type": "string",
                     "maxLength": 8000
+                  },
+                  "project_id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "business",
+                      "acceptance"
+                    ],
+                    "default": "business"
                   },
                   "stages": {
                     "type": "array",
@@ -19827,7 +19915,7 @@
           "Person"
         ],
         "summary": "Delete Person memory",
-        "description": "Studio user login required. Permanently delete one account-owned memory card at its current revision. New memories and corrections are made through the Person conversation.",
+        "description": "Studio user login required. Permanently delete one owned memory card at its current revision. session_id selects the current role project; omit it for account memory. New memories and corrections are made through the Person conversation.",
         "operationId": "memory",
         "security": [
           {
@@ -19852,6 +19940,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "description": "Owning Person conversation ID. Required for new work; continuations preserve the existing task conversation."
+                  },
                   "id": {
                     "type": "string"
                   },
@@ -19899,6 +19991,95 @@
           },
           "404": {
             "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/studio/person/projects": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get projects",
+        "description": "List account-owned project identities, confirmed directories and rules. Does not create or move filesystem data.",
+        "operationId": "projects",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Update projects",
+        "description": "Register an existing project directory and optional main repository/worktree root within the account workspace. New project expected_revision is 0; updates require the current revision. Does not clone, migrate or delete directories.",
+        "operationId": "projectConfigure",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "workspace": {
+                    "type": "string"
+                  },
+                  "repository": {
+                    "type": "string"
+                  },
+                  "worktree_root": {
+                    "type": "string"
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "maxLength": 8000
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "expected_revision"
+                ]
+              }
+            }
           }
         }
       }
@@ -20051,7 +20232,7 @@
                   "workspace": {
                     "type": "string",
                     "maxLength": 4000,
-                    "description": "Shared absolute working directory for all Person background tasks; empty restores the account private workspace. Requires all tasks and deliveries to be idle. Existing tasks use it on their next execution."
+                    "description": "Account workspace used as the default for new tasks. Contract-bound tasks retain their saved workspace. Empty restores the account private workspace. Changes require idle tasks and deliveries."
                   },
                   "agents": {
                     "type": "array",
@@ -20276,7 +20457,9 @@
                       "start",
                       "stop",
                       "close",
-                      "reopen"
+                      "reopen",
+                      "advance",
+                      "accept"
                     ]
                   },
                   "idempotency_key": {
@@ -20312,6 +20495,56 @@
                   "start": {
                     "type": "boolean",
                     "default": true
+                  },
+                  "project_id": {
+                    "type": "string"
+                  },
+                  "workspace": {
+                    "type": "string",
+                    "description": "Existing canonical directory within the account and selected project roots. Fixed for the task and its resumptions."
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "access_mode": {
+                    "type": "string",
+                    "enum": [
+                      "read",
+                      "write"
+                    ],
+                    "default": "write",
+                    "description": "Resource scheduling mode and worker instruction; not an OS sandbox."
+                  },
+                  "acceptance": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "description": "Explicit criteria keep returned candidates open until the owning controller accepts them with evidence."
+                  },
+                  "authorization": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "description": "Existing authorization reference; does not grant new permission."
+                  },
+                  "resources": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "dependencies": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "candidate": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "type": "string",
+                    "maxLength": 4000
                   }
                 },
                 "required": [

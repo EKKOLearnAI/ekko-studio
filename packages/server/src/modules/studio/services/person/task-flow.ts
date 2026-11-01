@@ -3,6 +3,7 @@ import { personError, personText } from '../../contracts/person'
 import { personRequirements, type PersonFlowStep } from '../../contracts/person-flow'
 import { enqueuePersonExecution, getPersonExecution, getPersonTask, personDb, personEvent } from '../../repositories/person-store'
 import { requirePersonSession } from '../../repositories/person-session-store'
+import { personRoleConfiguration } from './projects'
 import { savePersonTaskOrigin } from './delivery'
 
 /** The first planner fixes the remaining route; later operations cannot replace it. */
@@ -32,6 +33,7 @@ export function assertPersonTaskActor(task: PersonTask, origin?: PersonTaskOrigi
 export function advancePersonFlow(task: PersonTask, message: unknown, origin?: PersonTaskOrigin) {
   assertPersonTaskActor(task, origin)
   const requirements = personRequirements(task), flow = requirements.flow
+  if (requirements.verification?.state === 'pending') throw personError('Verify and accept the current candidate first', 409)
   if (!flow || flow.stopped || flow.completed || task.status === 'closed') throw personError('Flow is stopped, complete or unavailable', 409)
   const db = personDb(), now = Date.now()
   if (db.prepare("SELECT 1 FROM person_executions WHERE task_id=? AND state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')").get(task.id)) throw personError('Wait for current execution and follow-ups', 409)
@@ -50,6 +52,11 @@ export function advancePersonFlow(task: PersonTask, message: unknown, origin?: P
       .run(JSON.stringify(requirements), evidence, now, now, task.id)
     personEvent(run, 'flow.completed', { message: evidence, session_id: task.session_id })
     return { task: getPersonTask(task.owner_user_id, task.id) }
+  }
+  if (requirements.contract) {
+    const role = personRoleConfiguration(task.owner_user_id, next.session_id)
+    if (role.allowed_agents.length && !role.allowed_agents.includes(requirements.contract.agent.id)) throw personError('Receiving role does not permit this executor',403)
+    requirements.contract = { ...requirements.contract, role: { ...role, project_id: requirements.contract.project?.id || '' } }
   }
   flow.index++
   requirements.goal = next.goal

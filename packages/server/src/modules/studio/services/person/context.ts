@@ -4,9 +4,9 @@ import type { PersonContextEvidence } from '../../repositories/person-context-st
 import type { AgentMessage } from '../../../../../../ekko-agent/src/model/types'
 import { queuePersonContextIndex } from './context-indexer'
 
-export function createPersonContext(userId: number, sessionId: string, budget: number) {
+export function createPersonContext(userId: number, sessionId: string, budget: number, projectId = '') {
   // Called before the current user message is persisted: it must never be recalled twice.
-  const store = openPersonContextStore(userId, sessionId)
+  const store = openPersonContextStore(userId, sessionId, undefined, projectId)
   const historyBudget = Math.min(3000, Math.floor(budget * 0.3))
   return {
     assertCurrent: store.assertCurrent,

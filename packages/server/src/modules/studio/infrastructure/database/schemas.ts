@@ -1233,6 +1233,7 @@ export const GC_SESSION_PROFILES_SCHEMA: Record<string, string> = {
 // ============================================================================
 
 import { getDb, getStoragePath } from './index'
+import { initPersonProjectTriggers } from './person-project-schema'
 import { initPersonTables } from './person-schema'
 import { initSessionStateTables } from './session-state-schema'
 import { BUILTIN_EKKO_AGENT_IDS, BUILTIN_HISTORY_SOURCES } from '../../contracts/history-source'
@@ -1768,6 +1769,7 @@ export function initAllHermesTables(): void {
     createIndexes(db, SESSION_CATEGORIES_INDEXES)
     createIndexes(db, SESSIONS_INDEXES)
     syncTable(MESSAGES_TABLE, MESSAGES_SCHEMA)
+    initPersonProjectTriggers(db)
     initSessionStateTables(db)
     db.exec(MESSAGES_INDEX)
     syncTable(SKILL_USAGE_EVENTS_TABLE, SKILL_USAGE_EVENTS_SCHEMA, {

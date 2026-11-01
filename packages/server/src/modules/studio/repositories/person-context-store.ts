@@ -21,7 +21,14 @@ export function personSearchTerms(text: string): string[] {
   }))]
 }
 
-export function openPersonContextStore(userId: number, sessionId: string, db: DatabaseSync = personDb()) {
+export function openPersonContextStore(userId: number, sessionId: string, db: DatabaseSync = personDb(), projectId = '') {
+  const scoped = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='person_message_projects'").get()
+  if (projectId && !scoped) throw personError('Project history storage is unavailable', 503)
+  // Scope is host-bound. Untagged legacy history stays in the account view.
+  const scopeFilter = (column: string) => !scoped ? '' : projectId
+    ? ` AND ${column} IN (SELECT message_id FROM person_message_projects WHERE project_id=$project AND owner_user_id=$owner)`
+    : ` AND ${column} NOT IN (SELECT message_id FROM person_message_projects)`
+  const scopeParams: Record<string, string | number> = projectId && scoped ? { project: projectId, owner: userId } : {}
   const session = () => db.prepare('SELECT id,studio_user_id,history_revision FROM sessions WHERE id=?').get(sessionId) as
     { id: string; studio_user_id: string; history_revision: number } | undefined
   const original = session()
@@ -30,7 +37,7 @@ export function openPersonContextStore(userId: number, sessionId: string, db: Da
   const revision = original!.history_revision
   const throughId = Number(db.prepare("SELECT COALESCE(MAX(m.id),0) AS id FROM messages m JOIN sessions s ON s.id=m.session_id WHERE CAST(s.studio_user_id AS TEXT)=? AND s.id LIKE 'person-main-%'").get(String(userId))!.id)
   const scope = `person${userId}`
-  const snapshotKey = JSON.stringify(snapshots.map(row => [row.id, row.history_revision]).sort())
+  const snapshotKey = projectId + JSON.stringify(snapshots.map(row => [row.id, row.history_revision]).sort())
   function assertCurrent() {
     for (const snapshot of snapshots) {
       const current = db.prepare('SELECT id,studio_user_id,history_revision FROM sessions WHERE id=?').get(snapshot.id) as typeof original
@@ -89,14 +96,14 @@ export function openPersonContextStore(userId: number, sessionId: string, db: Da
     assertCurrent()
     offset = Math.max(0, Math.floor(offset))
     const row = db.prepare(`SELECT id,role,substr(content,?,?) AS content,length(content) AS source_length,timestamp*1000 AS created_at,session_id,(SELECT title FROM sessions WHERE id=messages.session_id) AS session_title
-      FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%') AND id=? AND id<=? AND role IN ('user','assistant') AND COALESCE(finish_reason,'')!='streaming'`)
-      .get(offset + 1, CHUNK_CHARS, String(userId), messageId, throughId) as Omit<PersonContextEvidence, 'offset' | 'next_offset'> | undefined
+      FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%') AND id=? AND id<=? AND role IN ('user','assistant') AND COALESCE(finish_reason,'')!='streaming'${scopeFilter('id')}`)
+      .get(scopeParams, offset + 1, CHUNK_CHARS, String(userId), messageId, throughId) as Omit<PersonContextEvidence, 'offset' | 'next_offset'> | undefined
     return row ? { ...row, offset, next_offset: offset + CHUNK_CHARS < row.source_length ? offset + CHUNK_CHARS : null } : undefined
   }
   function recent() {
     assertCurrent()
     const ids = db.prepare(`SELECT id FROM messages WHERE session_id=? AND id<=? AND role IN ('user','assistant')
-      AND COALESCE(finish_reason,'')!='streaming' AND content!='' ORDER BY id DESC LIMIT 8`).all(sessionId, throughId)
+      AND COALESCE(finish_reason,'')!='streaming' AND content!=''${scopeFilter('id')} ORDER BY id DESC LIMIT 8`).all(scopeParams, sessionId, throughId)
     return ids.map(row => read(Number(row.id))!).reverse()
   }
   function search(query: string, offset = 0) {
@@ -109,8 +116,8 @@ export function openPersonContextStore(userId: number, sessionId: string, db: Da
     // FTS must drive the query. A session-index-first join repeats MATCH per history row.
     const candidates = db.prepare(`SELECT c.message_id,c.source_offset,c.content FROM person_context_search
       CROSS JOIN person_context_chunks c ON c.id=person_context_search.rowid
-      WHERE person_context_search MATCH ? AND c.session_id IN (SELECT id FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%') AND c.message_id<=? ORDER BY rank LIMIT 7 OFFSET ?`)
-      .all(match, String(userId), throughId, offset) as Array<{ message_id: number; source_offset: number; content: string }>
+      WHERE person_context_search MATCH ? AND c.session_id IN (SELECT id FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%') AND c.message_id<=?${scopeFilter('c.message_id')} ORDER BY rank LIMIT 7 OFFSET ?`)
+      .all(scopeParams, match, String(userId), throughId, offset) as Array<{ message_id: number; source_offset: number; content: string }>
     // Verify retrieved data against current originals, including an out-of-band edit.
     const evidence = candidates.slice(0,6).flatMap(candidate => {
       const actual = read(candidate.message_id, candidate.source_offset)

@@ -1,6 +1,8 @@
 import type { SessionSummary } from './studio/sessions'
 import { request } from './client'
 import type { AvailableModelGroup } from './hermes/system'
+export interface PersonProject { id: string; name: string; workspace: string; repository: string; worktree_root: string; instructions: string; revision: number }
+export interface PersonRoleConfiguration { session_id: string; project_id: string; instructions: string; allowed_agents: string[]; revision: number }
 export interface PersonModel { profile: string; provider: string; model: string }
 export interface PersonModelGroup extends Pick<AvailableModelGroup, 'provider' | 'label' | 'models' | 'model_meta'> { profile: string }
 export interface PersonAgentPreset { id: string; name: string; description: string; selection: PersonModel & { runtime: string; mode: 'scoped' | 'global'; reasoningEffort: string } }
@@ -14,11 +16,13 @@ export interface PersonQuestion { id: string; task_id: string | null; question: 
 export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed' }
 export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; timezone: string }
 export interface PersonFlow {
+  project_id?: string; kind?: 'business' | 'acceptance'
   creator_session_id?: string
   id: string; title: string; goal: string; revision: number; state: 'active' | 'failed' | 'stopped' | 'completed'; current_position: number; error: string
   stages: Array<{ id: string; position: number; group_position: number; session_id: string; session_title?: string; bot_type?: string | null; delivery_state?: string; delivery_error?: string; goal: string; state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; tasks: Array<{ id: string; title: string; status: string; execution_state?: string; agent?: string }> }>
 }
 export interface PersonSnapshot {
+  role?: PersonRoleConfiguration; projects?: PersonProject[]
   session: SessionSummary | null
   settings: PersonGeneralSettings & { model: PersonModel | null; reasoningEffort: string; agents: PersonAgentPreset[]; workspace: string }; revision: number; busy: boolean
   history_revision: number; can_clear: boolean

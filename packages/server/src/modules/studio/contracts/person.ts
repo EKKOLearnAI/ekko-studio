@@ -79,6 +79,7 @@ export interface PersonInteraction {
   revision: number; created_at: number
 }
 export interface PersonSchedule {
+  project_id?: string
   id: string; owner_user_id: number; mode: 'assistant' | 'worker'; task_id: string | null
   session_id: string; title: string; goal: string; kind: 'once' | 'cron'; expression: string
   timezone: string; next_at: number; state: 'active' | 'paused' | 'cancelled' | 'exhausted'

@@ -10,15 +10,15 @@ import { personFlowSummary, personRequirements } from '../../contracts/person-fl
 import { personDeliveryCurrent } from './delivery'
 import { assertPersonStage, personTaskStage } from '../../repositories/person-stage-store'
 
-type Field = { type: 'string' | 'boolean' | 'integer' | 'array' | ['string', 'null']; maxLength?: number; minLength?: number; minimum?: number; enum?: string[]; description?: string; maxItems?: number; items?: { type: 'object'; properties: Record<string, Field>; required: string[]; additionalProperties: false } }
-type Action = 'adopt' | 'update' | 'start' | 'continue' | 'stop' | 'close' | 'reopen' | 'advance'
+type Field = { type: 'string' | 'boolean' | 'integer' | 'array' | ['string', 'null']; maxLength?: number; minLength?: number; minimum?: number; enum?: string[]; description?: string; maxItems?: number; items?: Field | { type: 'object'; properties: Record<string, Field>; required: string[]; additionalProperties: false } }
+type Action = 'adopt' | 'update' | 'start' | 'continue' | 'stop' | 'close' | 'reopen' | 'advance' | 'accept'
 type Snapshot = Pick<PersonTask, 'id' | 'session_id' | 'session_title' | 'title' | 'summary' | 'status' | 'revision' | 'execution_id' | 'execution_state' | 'running' | 'pending_count'> & { requirements_json?: string }
 type Reference = { task: Snapshot; assignable: boolean; expiresAt: number }
 const text = (maxLength: number): Field => ({ type: 'string', minLength: 1, maxLength })
 const actionFields: Record<Action, string[]> = {
-  adopt: ['goal', 'agent_id', 'start', 'session_id', 'remember_result'], update: ['goal'], continue: ['message', 'remember_result'], start: ['remember_result'], stop: [], close: [], reopen: [], advance: ['message'],
+  adopt: ['goal', 'agent_id', 'start', 'session_id', 'remember_result'], update: ['goal'], continue: ['message', 'remember_result'], start: ['remember_result'], stop: [], close: [], reopen: [], advance: ['message'], accept: ['candidate', 'evidence'],
 }
-const actionRequired: Partial<Record<Action, string[]>> = { adopt: ['goal'], update: ['goal'], continue: ['message'], advance: ['message'] }
+const actionRequired: Partial<Record<Action, string[]>> = { adopt: ['goal'], update: ['goal'], continue: ['message'], advance: ['message'], accept: ['candidate', 'evidence'] }
 const queryAgain = 'Call bot_tasks_query again and reconsider the action using its current task_ref and allowed_actions.'
 const listAgain = 'List tasks with bot_tasks_query {"search":"","offset":0}, or put keywords in search. Omit task_id; never guess all/recent/0. For details, copy an exact id from the list.'
 
@@ -37,6 +37,7 @@ function validate(input: Record<string, unknown>, fields: Record<string, Field>,
     if (types.includes('array')) {
       if (!Array.isArray(value) || value.length > field.maxItems!) throw personError(`Invalid ${key}`)
       for (const item of value) {
+        if (field.items?.type !== 'object') { validate({ value: item }, { value: field.items as Field }, ['value']); continue }
         if (!item || typeof item !== 'object' || Array.isArray(item)) throw personError(`Invalid ${key} item`)
         validate(item, field.items!.properties, field.items!.required)
       }
@@ -49,6 +50,9 @@ function failure(code: string, message: string, recovery: string, taskId?: strin
 function actions(task: Snapshot, assignable = false, sessionId = '', staged = false): Action[] {
   if (assignable) return ['adopt']
   const requirements = task.requirements_json ? personRequirements({ requirements_json: task.requirements_json }) : undefined
+  if (requirements?.verification?.state === 'pending' && task.execution_id === requirements.verification.execution_id
+    && task.execution_state === 'finished' && !task.pending_count && task.status === 'open' && task.session_id === sessionId)
+    return ['accept', 'continue', 'close']
   if (requirements?.flow) {
     const own = sessionId === task.session_id, creator = sessionId === requirements.creator_session_id
     if (!own && !creator) return []
@@ -65,7 +69,7 @@ function actions(task: Snapshot, assignable = false, sessionId = '', staged = fa
 }
 
 /** One instance per Person main turn. References never grant ownership or outlive this toolset. */
-export function personTaskTools(userId: number, currentSessionId: string): PersonTool[] {
+export function personTaskTools(userId: number, currentSessionId: string, projectId = ''): PersonTool[] {
   const namespace = randomUUID()
   const references = new Map<string, Reference>()
   const requests = new Map<string, Promise<unknown>>()
@@ -87,6 +91,9 @@ export function personTaskTools(userId: number, currentSessionId: string): Perso
   }
   const execute = async (input: Record<string, unknown>, origin?: PersonTaskOrigin) => {
     origin ||= { sessionId: currentSessionId, runId: '', messages: [] }
+    if (projectId && input.project_id && input.project_id !== projectId) throw personError('Task must use the bound project',403)
+    if (input.task_id && projectId && personRequirements(getPersonTask(userId,String(input.task_id))).contract?.project?.id !== projectId) throw personError('Task is outside the project',403)
+    if (input.action === 'create' && projectId) input = { ...input, project_id: projectId }
     if (input.remember_result === true && (!origin.memoryRequest || origin.returnExecutionId || origin.memoryRequest.sessionId !== currentSessionId)) {
       throw personError('remember_result requires the current user request; background results cannot grant memory writes', 403)
     }
@@ -140,22 +147,30 @@ export function personTaskTools(userId: number, currentSessionId: string): Perso
     session_id: { ...text(100), description: 'Conversation filter.' },
     task_id: { ...text(100), type: ['string', 'null'], minLength: 0 }, search: { ...text(200), minLength: 0 }, offset: { type: 'integer', minimum: 0 }, assignable: { type: 'boolean' },
   }, [], async args => {
-    if (args.assignable) return { tasks: (listAssignablePersonGoals(userId, String(args.search || '')) as Snapshot[]).map(task => expose(task, true)) }
+    if (args.assignable) return { tasks: projectId ? [] : (listAssignablePersonGoals(userId, String(args.search || '')) as Snapshot[]).map(task => expose(task, true)) }
     const taskId = String(args.task_id || '').trim()
     if (taskId) {
       const task = getPersonTask(userId, taskId)
       const requirements = personRequirements(task)
-      return { task: { ...expose(task), goal: requirements.goal, return_expectation: requirements.return_expectation || '' }, executions: taskPersonExecutions(userId, task.id).slice(0, 5).map(run => ({ id: run.id, state: run.state, output_preview: run.output.slice(0, 500) })) }
+      if (projectId && requirements.contract?.project?.id !== projectId) throw personError('Task is outside the project',403)
+      return { task: { ...expose(task), goal: requirements.goal, contract: requirements.contract, verification: requirements.verification, return_expectation: requirements.return_expectation || '' }, executions: taskPersonExecutions(userId, task.id).slice(0, 5).map(run => ({ id: run.id, state: run.state, output_preview: run.output.slice(0, 500) })) }
     }
     const offset = Number(args.offset) || 0
     const tasks = listPersonTasks(userId, String(args.search || ''), offset, { limit: 11, sessionId: args.session_id ? requirePersonSession(userId, String(args.session_id)).id : undefined })
-    return { tasks: tasks.slice(0, 10).map(task => expose(task)), next_offset: tasks.length > 10 ? offset + 10 : null }
+    return { tasks: tasks.slice(0, 10).filter(task => !projectId || personRequirements(task).contract?.project?.id === projectId).map(task => expose(task)), next_offset: tasks.length > 10 ? offset + 10 : null }
   })
   const create = define('bot_task_create', 'New background task for THIS role only, never message forwarding. For additions, changes, fixes or feedback on existing work, query and continue the original task, even if completed. Create only for an independent goal, an explicit separate-task request, or verified inability to continue (explain why). agent_id from bot_agents_list. Starts unless start=false. Other roles: bot_flow_create.', {
     session_id: { ...text(100), description: 'Omit; only the current conversation is allowed.' }, title: text(200), goal: text(8000), agent_id: text(100), start: { type: 'boolean' },
     remember_result: { type: 'boolean', description: 'Remember at current user request.' },
+    project_id: text(100), workspace: text(4000), branch: text(200),
+    access_mode: { ...text(10), enum: ['read','write'], description: 'Read tasks share resource claims; write tasks claim an exclusive workspace.' },
+    acceptance: text(4000), authorization: text(4000),
+    resources: { type: 'array', maxItems: 20, items: text(200), description: 'Shared deployment or device resource IDs. Conflicting writes queue.' },
+    dependencies: { type: 'array', maxItems: 20, items: text(200), description: 'Existing task IDs in this project that must complete first.' },
   }, ['title', 'goal'], (args, origin) => execute({ action: 'create', session_id: currentSessionId, ...args }, origin))
   const control = define('bot_task_control', 'Use fresh task_ref/allowed_actions. Default to continue for follow-ups on existing work, including completed tasks; it preserves the original Agent, owner and conversation. advance follows legacy route. Only creator reopens stopped legacy flows.', {
+    candidate: { ...text(64), description: 'accept only: exact candidate hash from task details.' },
+    evidence: { ...text(4000), description: 'accept only: observed checks against acceptance criteria, with artifact or commit evidence. Inspect results first; model success alone is insufficient.' },
     task_ref: text(100), action: { ...text(30), enum: Object.keys(actionFields) }, session_id: { ...text(100), description: 'Adopt only, current conversation only.' }, goal: { ...text(8000), description: 'Adopt/update only.' }, message: { ...text(32000), description: 'continue: new requirements, changes, fixes or feedback for the original Agent in its existing conversation; advance: outcome and artifacts (max 4000).' }, agent_id: text(100), start: { type: 'boolean' },
     remember_result: { type: 'boolean', description: 'adopt/start/continue only.' },
   }, ['task_ref', 'action'], async (args, origin) => {

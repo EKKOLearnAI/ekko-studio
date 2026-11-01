@@ -5,9 +5,10 @@ import { personDb, personTransaction, getPersonTask, enqueuePersonExecution, lis
 import { requirePersonSession } from '../../repositories/person-session-store'
 import { nextWorkflowScheduleAt } from '../workflow/schedule'
 import { enqueuePersonScheduledStage, personTaskStage, PERSON_STAGE_PENDING_WORK_SQL } from '../../repositories/person-stage-store'
+import { personRoleConfiguration, requirePersonProject } from './projects'
 import { personRequirements } from '../../contracts/person-flow'
 
-export function applyPersonSchedule(userId: number, input: Record<string, unknown>) {
+export function applyPersonSchedule(userId: number, input: Record<string, unknown>, boundProjectId?: string) {
   const key = personText(input.idempotency_key, 'idempotency_key', 200)
   return personOperation(userId, `schedule:${key}`, input, () => {
     const db = personDb(); const now = Date.now()
@@ -18,6 +19,8 @@ export function applyPersonSchedule(userId: number, input: Record<string, unknow
       if (task && task.status !== 'open') throw personError('Task must be open')
       if (input.mode === 'assistant' && input.task_id) throw personError('Assistant schedules use a goal, not a worker task')
       const sessionId = requirePersonSession(userId, task?.session_id || personText(input.session_id,'session_id',100)).id
+      const projectId = task ? personRequirements(task).contract?.project?.id || '' : boundProjectId ?? personRoleConfiguration(userId,sessionId).project_id
+      if (projectId) requirePersonProject(userId,projectId)
       const title = task?.title || personText(input.title,'title',200)
       const goal = task ? '' : personText(input.goal,'goal',8000)
       const timezone = personText(input.timezone, 'timezone', 100)
@@ -28,8 +31,8 @@ export function applyPersonSchedule(userId: number, input: Record<string, unknow
       if (!Number.isFinite(next) || next <= now) throw personError('Next occurrence must be in the future')
       if (input.kind === 'once' && !/(Z|[+-]\d{2}:\d{2})$/.test(expression)) throw personError('One-time schedule must include a timezone offset')
       const id = randomUUID()
-      db.prepare('INSERT INTO person_schedules(id,owner_user_id,mode,task_id,session_id,title,goal,kind,expression,timezone,next_at,misfire,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-        .run(id, userId, String(input.mode), task?.id || null, sessionId, title, goal, String(input.kind), expression, timezone, next, input.misfire === 'run_latest' ? 'run_latest' : 'skip', now)
+      db.prepare('INSERT INTO person_schedules(id,owner_user_id,mode,task_id,session_id,title,goal,kind,expression,timezone,next_at,misfire,created_at,project_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id, userId, String(input.mode), task?.id || null, sessionId, title, goal, String(input.kind), expression, timezone, next, input.misfire === 'run_latest' ? 'run_latest' : 'skip', now, projectId)
       return listPersonSchedules(userId).find(s => s.id === id)!
     }
     const id = personText(input.schedule_id, 'schedule_id', 100)
@@ -90,7 +93,7 @@ export function tickPersonSchedules(now = Date.now()) {
           WHERE s.flow_id=f.id AND s.group_position=f.current_position AND ${PERSON_STAGE_PENDING_WORK_SQL}))) LIMIT 1`).get(schedule.id)
       const recent = now - schedule.next_at <= (schedule.misfire === 'run_latest' ? 86400_000 : 60_000)
       if (recent && !active && !activeFlow && (!task || task.status === 'open')) {
-        if (schedule.mode === 'assistant') flow = enqueuePersonScheduledStage(schedule.owner_user_id, schedule.session_id, schedule.title, schedule.goal)
+        if (schedule.mode === 'assistant') flow = enqueuePersonScheduledStage(schedule.owner_user_id, schedule.session_id, schedule.title, schedule.goal, schedule.project_id || '')
         else if (task) execution = enqueuePersonExecution(task, id).id
         state = 'queued'
       }

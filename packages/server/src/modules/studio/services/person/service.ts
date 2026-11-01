@@ -10,12 +10,14 @@ import { getWebUiHome } from '../../public/config'
 import { ensureDirectory, normalizeDirectoryTarget } from '../workspace/directory'
 import { personHasPendingWork } from '../../repositories/person-history-store'
 import { listPersonFlows, personFlowActivity } from '../../repositories/person-stage-store'
+import { personProjects, personRoleConfiguration } from './projects'
 
 export async function personSnapshot(userId: number, sessionId = '') {
   personUser(userId)
   const session = sessionId ? await readPersonSession(userId, sessionId) : { ...await effectivePersonSettings(userId), session: null }
   const busy = personChatBusy(userId, sessionId || undefined)
-  return { ...session, tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [], memories: await personMemories(userId),
+  const role = sessionId ? personRoleConfiguration(userId, sessionId) : null
+  return { ...session, role, projects: personProjects(userId), tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [], memories: await personMemories(userId, role?.project_id),
     flows:sessionId ? listPersonFlows(userId,sessionId) : [],
     ...(sessionId ? personFlowActivity(userId,sessionId) : { active_flow_count:0,active_flows:[] }),
     schedules: sessionId ? listPersonSchedules(userId, sessionId) : [], interactions: personInteractions(userId), busy,

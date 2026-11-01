@@ -15,6 +15,7 @@ export function personHasPendingWork(userId: number, sessionId = ''): boolean {
     .get(userId,sessionId,sessionId,sessionId,sessionId,sessionId,sessionId)) return true
   return !!personDb().prepare(`SELECT 1 FROM person_executions e JOIN session_tasks t ON t.id=e.task_id WHERE e.owner_user_id=? AND (?='' OR t.session_id=?) AND
     (e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')
+    OR EXISTS(SELECT 1 FROM person_resource_claims c WHERE c.execution_id=e.id)
     OR EXISTS(SELECT 1 FROM person_deliveries d WHERE d.execution_id=e.id AND d.state IN ('pending','queued'))) LIMIT 1`).get(userId, sessionId, sessionId)
 }
 
