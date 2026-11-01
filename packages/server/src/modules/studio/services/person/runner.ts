@@ -128,6 +128,7 @@ async function execute(run: PersonExecution, abort: AbortController) {
       : description
     current(run)
     const result = await personRuntime().execute({ user: personUser(userId), selection, sessionId: run.session_id, workspace, prompt, displayInput: input ? undefined : description, signal: abort.signal,
+      taskTimeoutMinutes: personSettings(userId).settings.taskTimeoutMinutes,
       onEvent: (kind, payload) => {
         try { requirePersonWorkspace(workspace) }
         catch (error) { workspaceError = error as Error; abort.abort(error); return }

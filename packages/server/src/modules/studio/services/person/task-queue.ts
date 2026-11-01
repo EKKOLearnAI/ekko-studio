@@ -57,17 +57,29 @@ export function dispatchPersonInsertion(run: PersonExecution): Promise<void> {
   if (pending) return pending
   const work = Promise.resolve().then(async () => {
     const actual = getPersonExecution(run.owner_user_id, run.id)
-    if (actual.generation !== run.generation || !activeStates.includes(actual.state) || actual.insertion_phase !== 'requesting' || !actual.insertion_queue_id) return
+    if (actual.generation !== run.generation || actual.insertion_queue_id !== run.insertion_queue_id) {
+      throw personError('Task changed; refresh and try again', 409)
+    }
+    if (actual.insertion_phase === 'failed') throw personError(actual.insertion_error || 'Task insertion failed', 409)
+    if (!activeStates.includes(actual.state) || actual.insertion_phase !== 'requesting' || !actual.insertion_queue_id) return
     const task = getPersonTask(run.owner_user_id, run.task_id)
     if (task.status !== 'open' || task.execution_id !== actual.id || personRequirements(task).flow?.stopped) return
     const target = getPersonExecution(run.owner_user_id, actual.insertion_queue_id)
     if (target.state !== 'pending' || target.session_id !== actual.session_id || target.task_id !== actual.task_id) return
     const started = personDb().prepare("SELECT payload FROM person_events WHERE execution_id=? AND kind='run.started' ORDER BY id DESC LIMIT 1").get(run.id)
-    const nativeId = started ? String(JSON.parse(String(started.payload)).run_id || '') : ''
+    const identity = started ? JSON.parse(String(started.payload)) : {}
+    const nativeId = String(identity.run_id || '')
     if (!nativeId) return // Initialization has not published its native run identity yet.
     const interrupt = personRuntime().interruptForInsertion
     if (!interrupt) throw personError('Task insertion is unavailable', 503)
-    const result = await interrupt(actual.session_id, nativeId)
+    const marker = String(identity.run_marker || '')
+    const result = await (marker ? interrupt(actual.session_id, nativeId, marker) : interrupt(actual.session_id, nativeId))
+    // A stop revokes the generation while native cancellation is in flight.
+    // Its late acknowledgement must neither claim success nor revive the queue.
+    const latest = getPersonExecution(run.owner_user_id, run.id)
+    if (latest.generation !== run.generation || latest.insertion_queue_id !== actual.insertion_queue_id) {
+      throw personError('Task changed; refresh and try again', 409)
+    }
     if (result.status === 'not_running') return // The natural terminal event or lease recovery owns completion.
     if (!['accepted', 'already_pending', 'interrupted'].includes(result.status)) {
       const changed = personDb().prepare("UPDATE person_executions SET insertion_phase='failed',insertion_error=? WHERE id=? AND generation=? AND insertion_phase='requesting'")

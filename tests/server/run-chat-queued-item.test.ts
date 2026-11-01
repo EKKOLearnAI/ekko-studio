@@ -1413,6 +1413,28 @@ describe('ChatRunSocket queued bridge runs', () => {
     } finally { vi.useRealTimers() }
   })
 
+  it('keeps a Person task alive past one hour when no wall-clock timeout is supplied', async () => {
+    vi.useFakeTimers()
+    let complete!: () => void
+    handleBridgeRunMock.mockImplementationOnce(async (_namespace, _socket, data) => {
+      complete = () => data.onEvent('run.completed', { output: 'Unlimited task done' })
+    })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const abort = vi.spyOn(server, 'abortSession').mockResolvedValue(undefined)
+    let settled = false
+    try {
+      const result = server.runAndWait({ session_id: 'session-1', input: 'Person task', source: 'api_server' })
+      void result.then(() => { settled = true })
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000)
+      expect(settled).toBe(false)
+      expect(abort).not.toHaveBeenCalled()
+      complete()
+      await expect(result).resolves.toMatchObject({ ok: true, output: 'Unlimited task done' })
+    } finally { vi.useRealTimers() }
+  })
+
 
   it.each(['run.completed','run.failed'])('preserves task insertion interruption metadata on %s',async event=>{
     handleBridgeRunMock.mockImplementationOnce(async(_nsp,_socket,data)=>data.onEvent(event,{run_id:'native',interrupted:true,stop_reason:'queue_insertion',output:'partial'}))
@@ -1430,6 +1452,37 @@ describe('ChatRunSocket queued bridge runs', () => {
     expect(await server.interruptTaskRun('person-task-owned','native')).toMatchObject({status:'accepted'})
     expect(bridgeMock.requestBoundaryInterrupt).toHaveBeenCalledExactlyOnceWith('person-task-owned','native','default')
     expect((server as any).sessionMap.get('person-task-owned').queue).toEqual([])
+  })
+
+  it.each(['codex', 'claude-code', 'pi', 'opencode'])('resolves a %s task response to its manager while fencing the current turn', async runtime => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { applyResponseStreamEvent } = await import('../../packages/server/src/modules/studio/services/chat-run/response-stream')
+    const { io } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+    const sessionId = 'person-task-owned'
+    const state = { isWorking: true, runId: 'manager-1', webhookAgent: runtime, source: 'coding_agent', queue: [], messages: [] } as any
+    ;(server as any).sessionMap.set(sessionId, state)
+    // Use the actual response mapping: the event run_id must differ from state.runId.
+    const started = applyResponseStreamEvent(state, sessionId, 'turn-1', 'response.created', { response: { id: 'response-1' } })!
+    codingAgentRunManagerMock.interruptForQueueInsertion.mockResolvedValueOnce({ status: 'interrupted' })
+    const before = codingAgentRunManagerMock.interruptForQueueInsertion.mock.calls.length
+    await expect(server.interruptTaskRun(sessionId, started.payload.run_id, started.payload.run_marker))
+      .resolves.toEqual({ status: 'interrupted' })
+    expect(codingAgentRunManagerMock.interruptForQueueInsertion).toHaveBeenLastCalledWith(sessionId, 'manager-1', {
+      responseId: 'response-1', runMarker: 'turn-1',
+    })
+    expect(codingAgentRunManagerMock.interruptForQueueInsertion.mock.calls.length).toBe(before + 1)
+    expect(state.queue).toEqual([])
+
+    // Old persisted events cannot interrupt a later turn of the same manager.
+    applyResponseStreamEvent(state, sessionId, 'turn-2', 'response.created', { response: { id: 'response-2' } })
+    for (const [response, marker] of [['response-1', 'turn-1'], ['response-2', 'turn-1'], ['manager-1', 'turn-2']]) {
+      await expect(server.interruptTaskRun(sessionId, response, marker)).resolves.toEqual({ status: 'run_mismatch' })
+    }
+    expect(codingAgentRunManagerMock.interruptForQueueInsertion.mock.calls.length).toBe(before + 1)
+    state.isAborting = true
+    await expect(server.interruptTaskRun(sessionId, 'response-2', 'turn-2')).resolves.toEqual({ status: 'not_running' })
+    expect(codingAgentRunManagerMock.interruptForQueueInsertion.mock.calls.length).toBe(before + 1)
   })
 
   it('tags a task boundary completion before its observer and drawer receive an empty result',async()=>{

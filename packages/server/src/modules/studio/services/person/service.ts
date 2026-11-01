@@ -24,7 +24,7 @@ export async function configurePerson(userId: number, input: Record<string, unkn
   const sessionId = input.session_id === undefined ? undefined : personText(input.session_id, 'session_id', 100)
   if (!sessionId && ['model', 'reasoning_effort', 'use_global_default', 'workspace'].some(key => input[key] !== undefined))
     throw personError('session_id is required for Bot settings')
-  const sharedChange = ['timezone', 'agents', 'compressionThreshold', 'maxSteps', 'maxConcurrentTasks'].some(key => input[key] !== undefined)
+  const sharedChange = ['timezone', 'agents', 'compressionThreshold', 'maxSteps', 'maxConcurrentTasks', 'taskTimeoutMinutes'].some(key => input[key] !== undefined)
   const busySession = sharedChange ? undefined : sessionId
   const old = personSettings(userId, sessionId)
   if (personChatBusy(userId, busySession)) throw personError('Wait for the current reply before changing settings', 409)
@@ -61,6 +61,12 @@ export async function configurePerson(userId: number, input: Record<string, unkn
       if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) throw personError(`Invalid ${key}`)
       settings[key] = Number(value)
     }
+  }
+  if (input.taskTimeoutMinutes !== undefined) {
+    const value = input.taskTimeoutMinutes
+    // Node timers overflow above 2^31-1 ms; -1 deliberately omits the timer.
+    if (!Number.isSafeInteger(value) || (value !== -1 && (Number(value) < 1 || Number(value) > 35_791))) throw personError('Invalid taskTimeoutMinutes: use -1 or 1–35791 minutes')
+    settings.taskTimeoutMinutes = Number(value)
   }
   if (personChatBusy(userId, busySession)) throw personError('Wait for the current reply before changing settings', 409)
   const workspace = input.workspace !== undefined ? requireExistingWorkspaceDirectory(settings.workspace) : undefined

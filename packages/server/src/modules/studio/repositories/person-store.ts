@@ -42,8 +42,8 @@ export function personOperation<T>(userId: number, key: string, input: unknown, 
   })
 }
 function sharedPersonSettings(settings: Partial<PersonSettings>) {
-  const { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks } = { ...PERSON_DEFAULTS, ...settings }
-  return { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks }
+  const { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks, taskTimeoutMinutes } = { ...PERSON_DEFAULTS, ...settings }
+  return { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks, taskTimeoutMinutes }
 }
 export function personSettings(userId: number, sessionId?: string): { settings: PersonSettings; revision: number } {
   const session = sessionId ? requirePersonSession(userId, sessionId) : undefined

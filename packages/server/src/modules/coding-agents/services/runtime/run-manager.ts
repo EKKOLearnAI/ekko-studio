@@ -1069,10 +1069,15 @@ export class CodingAgentRunManager {
   async interruptForQueueInsertion(
     sessionId: string,
     expectedRunId?: string,
+    expectedTurn?: { responseId: string; runMarker?: string },
   ): Promise<CodingAgentQueueInsertionInterruptResult> {
     const run = this.getBySession(sessionId)
     if (!run || run.exited) return { status: 'not_found' }
     if (expectedRunId && run.id !== expectedRunId) return { status: 'run_mismatch' }
+    // printResponseId can change on Claude message_start within a single turn.
+    // Fence the response identity published by run.started, plus the turn marker.
+    if (expectedTurn && (run.state.responseRun?.responseId !== expectedTurn.responseId
+      || (expectedTurn.runMarker && run.runMarker !== expectedTurn.runMarker))) return { status: 'run_mismatch' }
     const isRunning = run.launch.agentId === 'pi'
       ? run.turnActive === true
       : childIsRunning(run.currentChild)

@@ -20171,6 +20171,24 @@
                     "maximum": 12,
                     "default": 6,
                     "description": "Account-shared concurrency across all Person BOTs; additional tasks queue."
+                  },
+                  "taskTimeoutMinutes": {
+                    "type": "integer",
+                    "default": 60,
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "enum": [
+                          -1
+                        ]
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 35791
+                      }
+                    ],
+                    "description": "Account-shared wall-clock limit in minutes for each subsequent Person background task run. Defaults to 60 for existing and new accounts; -1 disables the wall-clock timer. Current runs retain their starting limit."
                   }
                 },
                 "required": [

@@ -31,7 +31,7 @@ function managedRun(agentId: 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode
       isWorking: true,
       events: [],
       queue: [{ queue_id: 'queue-1', input: 'insert me' }],
-      responseRun: { runMarker, insertedKeys: new Set(), toolCalls: new Map() },
+      responseRun: { responseId: 'response-1', runMarker, insertedKeys: new Set(), toolCalls: new Map() },
     },
     runMarker,
     printResponseId: 'response-1',
@@ -54,6 +54,8 @@ describe('coding-agent immediate queue insertion', () => {
     async (agentId) => {
       const manager = new CodingAgentRunManager()
       const run = managedRun(agentId)
+      // Claude may publish a provider message id after the turn started.
+      if (agentId === 'claude-code') run.printResponseId = 'claude-message-2'
       const persistTerminalResponse = vi.fn(() => 'assistant-1')
       const completeWorkspaceRunDiff = vi.fn(() => ({ change_id: 'change-1' }))
       const cleanupRun = vi.fn((target: any) => { target.exited = true })
@@ -67,16 +69,18 @@ describe('coding-agent immediate queue insertion', () => {
       ;(manager as any).emitToChat = emitToChat
       ;(manager as any).markChatRunCompleted = markChatRunCompleted
 
-      await expect(manager.interruptForQueueInsertion('session-1', 'agent-session-1')).resolves.toEqual({
+      await expect(manager.interruptForQueueInsertion('session-1', 'agent-session-1', {
+        responseId: 'response-1', runMarker: 'coding-agent-turn-1',
+      })).resolves.toEqual({
         status: 'interrupted',
         runId: 'agent-session-1',
-        responseId: 'response-1',
+        responseId: agentId === 'claude-code' ? 'claude-message-2' : 'response-1',
       })
       expect(run.state.messages[0].finish_reason).toBe('interrupted')
       expect(persistTerminalResponse).toHaveBeenCalledWith(run)
       expect(cleanupRun).toHaveBeenCalledWith(run, { kill: true, reportClosed: false })
       expect(emitToChat).toHaveBeenCalledWith('session-1', 'run.failed', expect.objectContaining({
-        run_id: 'response-1',
+        run_id: agentId === 'claude-code' ? 'claude-message-2' : 'response-1',
         message_id: 'assistant-1',
         interrupted: true,
         stop_reason: 'queue_insertion',
@@ -101,6 +105,25 @@ describe('coding-agent immediate queue insertion', () => {
       status: 'run_mismatch',
     })
     expect(cleanupRun).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { responseId: 'old-response', runMarker: 'coding-agent-turn-1' },
+    { responseId: 'response-1', runMarker: 'old-turn' },
+    { responseId: 'old-response' },
+  ])('rejects a replaced turn in the same manager: %j', async expectedTurn => {
+    const manager = new CodingAgentRunManager()
+    const run = managedRun()
+    const cleanupRun = vi.fn()
+    ;(manager as any).runs.set(run.id, run)
+    ;(manager as any).sessionIndex.set(run.launch.sessionId, run.id)
+    ;(manager as any).cleanupRun = cleanupRun
+
+    await expect(manager.interruptForQueueInsertion('session-1', run.id, expectedTurn))
+      .resolves.toEqual({ status: 'run_mismatch' })
+    expect(cleanupRun).not.toHaveBeenCalled()
+    expect(run.state.messages[0].finish_reason).toBeNull()
+    expect(run.exited).toBe(false)
   })
 
   it('waits for the interrupted child streams to close before persisting and releasing the queued run', async () => {
