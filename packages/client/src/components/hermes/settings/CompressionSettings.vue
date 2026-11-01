@@ -1,12 +1,60 @@
 <script setup lang="ts">
-import { NInputNumber, NSwitch, useMessage } from 'naive-ui'
+import { ref, onMounted } from 'vue'
+import { NButton, NInputNumber, NPopconfirm, NSwitch, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
+import { fetchConfig, updateConfigSection } from '@/api/hermes/config'
+import { syncProfileCompression } from '@/api/hermes/profiles'
 import SettingRow from './SettingRow.vue'
 
 const settingsStore = useSettingsStore()
 const message = useMessage()
 const { t } = useI18n()
+
+const microCompactDefault = ref(false)
+const syncing = ref(false)
+
+async function loadMicroCompactDefault() {
+  try {
+    const data = await fetchConfig(['microCompactDefault'])
+    microCompactDefault.value = data.microCompactDefault?.microCompactDefault === true
+  } catch {
+    /* best-effort: leave the default off if the read fails */
+  }
+}
+
+async function setMicroCompactDefault(v: boolean) {
+  try {
+    await updateConfigSection('microCompactDefault', { microCompactDefault: v })
+    microCompactDefault.value = v
+  } catch {
+    message.error(t('settings.compression.microCompactSyncFailed'))
+  }
+}
+
+async function syncToAll() {
+  syncing.value = true
+  try {
+    const r = await syncProfileCompression()
+    if (r.skipped && r.skipped.length) {
+      message.warning(
+        t('settings.compression.microCompactSyncSuccess', { count: r.count }) +
+        ' · ' +
+        t('settings.compression.microCompactSyncSkipped', { count: r.skipped.length, list: r.skipped.join(', ') }),
+      )
+    } else {
+      message.success(t('settings.compression.microCompactSyncSuccess', { count: r.count }))
+    }
+  } catch {
+    message.error(t('settings.compression.microCompactSyncFailed'))
+  } finally {
+    syncing.value = false
+  }
+}
+
+onMounted(() => {
+  void loadMicroCompactDefault()
+})
 
 const defaults = {
   enabled: true,
@@ -43,6 +91,32 @@ function debouncedSave(key: string, value: any) {
 
 <template>
   <section class="settings-section">
+    <div class="global-default-block">
+      <div class="gd-row">
+        <div class="gd-text">
+          <div class="gd-title">{{ t('settings.compression.microCompactDefault') }}</div>
+          <div class="gd-hint">{{ t('settings.compression.microCompactDefaultHint') }}</div>
+        </div>
+        <NSwitch
+          :value="microCompactDefault"
+          size="small"
+          @update:value="(v: boolean) => setMicroCompactDefault(v)"
+        />
+      </div>
+      <div class="gd-row gd-actions">
+        <NPopconfirm
+          :content="t('settings.compression.microCompactSyncConfirm', { value: microCompactDefault ? 'true' : 'false' })"
+          :positive-text="t('settings.compression.microCompactSyncYes')"
+          :negative-text="t('settings.compression.microCompactSyncNo')"
+          @positive-click="syncToAll"
+        >
+          <NButton size="small" :loading="syncing">
+            {{ t('settings.compression.microCompactSync') }}
+          </NButton>
+        </NPopconfirm>
+      </div>
+    </div>
+    <div class="section-divider"></div>
     <SettingRow :label="t('settings.compression.enabled')" :hint="t('settings.compression.enabledHint')">
       <NSwitch
         :value="settingsStore.compression.enabled ?? defaults.enabled"
@@ -102,5 +176,43 @@ function debouncedSave(key: string, value: any) {
 
 .settings-section {
   margin-top: 16px;
+}
+
+.global-default-block {
+  margin-bottom: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.gd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gd-actions {
+  justify-content: flex-start;
+}
+
+.gd-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gd-hint {
+  font-size: 12px;
+  opacity: 0.65;
+  margin-top: 2px;
+}
+
+.section-divider {
+  height: 1px;
+  background: rgba(127, 127, 127, 0.2);
+  margin: 4px 0 12px;
 }
 </style>
