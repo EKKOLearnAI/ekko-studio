@@ -4405,7 +4405,7 @@ for (const runtime of ['codex', 'claude-code']) {
 }
 
 for (const [mode, wallpaper, width] of [['light', false, 1440], ['dark', false, 1440], ['light', true, 390], ['dark', true, 390]] as const) {
-  test(`BOT conversation protocol confirmation ${mode} wallpaper=${wallpaper} width=${width}`, async ({ page }) => {
+  test(`BOT conversation protocol confirmation ${mode} wallpaper=${wallpaper} width=${width}`, async ({ page }, testInfo) => {
     const { state, operations } = await setup(page, mode, wallpaper)
     state.modelGroups = [{ provider: 'provider', profile: 'default', label: 'Shared provider', models: ['global-model', 'fast-model'], api_mode: 'chat_completions' }]
     await page.setViewportSize({ width, height: 900 })
@@ -4416,7 +4416,7 @@ for (const [mode, wallpaper, width] of [['light', false, 1440], ['dark', false, 
     await dialog.locator('.n-select').click()
     await page.locator('.n-base-select-option__content:visible').getByText('Anthropic Messages (/v1/messages)', { exact: true }).click()
     await expect(page.locator('.n-base-select-option__content:visible')).toHaveCount(0)
-    await page.screenshot({ path: `.git/bot-protocol-${mode}-${width}.png`, animations: 'disabled' })
+    await page.screenshot({ path: testInfo.outputPath(`bot-protocol-${mode}-${width}.png`), animations: 'disabled' })
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await dialog.getByRole('button', { name: 'Confirm', exact: true }).click()
     await expect.poll(() => state.settings.model).toMatchObject({ model: 'fast-model', apiMode: 'anthropic_messages' })
