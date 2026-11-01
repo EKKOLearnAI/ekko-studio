@@ -147,6 +147,20 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     models: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
   },
   {
+    label: 'IO Intelligence (io.net)',
+    value: 'ionet',
+    builtin: true,
+    base_url: 'https://api.intelligence.io.solutions/api/v1',
+    models: [
+      'meta-llama/Llama-3.3-70B-Instruct',
+      'deepseek-ai/DeepSeek-R1-0528',
+      'deepseek-ai/DeepSeek-V4.1-Flash',
+      'moonshotai/Kimi-K2.7-Code',
+      'zai-org/GLM-5.3',
+      'openai/gpt-oss-120b',
+    ],
+  },
+  {
     label: 'Z.AI / GLM',
     value: 'zai',
     builtin: true,
