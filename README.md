@@ -439,6 +439,9 @@ These variables configure Ekko Studio, its local Hermes runtime integration, and
 | `HERMES_AGENT_BRIDGE_CONNECT_RETRY_MS` | `5000` | Short retry window for connecting to the bridge socket. |
 | `HERMES_AGENT_BRIDGE_STARTUP_TIMEOUT_MS` | `120000` | Timeout while waiting for the Python bridge to become ready. |
 | `HERMES_DSH_READY_TIMEOUT_MS` | `180000` | DSH configuration helper startup/readiness budget in milliseconds, including its native authentication/frontend probes. Set a positive integer up to `2147483647`; invalid values use the default. For slower plugin-heavy starts, use e.g. `360000`. The two per-request probe timeouts stay at 5 seconds. |
+| `EKKO_STUDIO_DSH_ACP_TIMEOUT_MS` | `60000` | Per-request budget for DSH ACP initialization, session creation/restoration and configuration. For slow starts, use e.g. `240000`. Prompt generation has no request timeout; session close keeps its separate 10-second budget. Compatibility alias: `HERMES_DSH_ACP_TIMEOUT_MS`. |
+| `EKKO_STUDIO_ACP_TIMEOUT_MS` | `60000` | Independent per-request budget for other native ACP agents' initialization, session creation/restoration and model/effort selection. Prompt generation has no request timeout. Compatibility alias: `HERMES_ACP_TIMEOUT_MS`. |
+| `EKKO_STUDIO_AGENT_MODEL_DISCOVERY_TIMEOUT_MS` | `20000` | Total deadline for each native model-discovery subprocess, across all request/response exchanges, independent of both ACP chat request budgets. For slow discovery, use e.g. `240000`. An explicit internal `timeoutMs` override takes precedence over both environment names. Compatibility alias: `HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS`. |
 | `HERMES_AGENT_BRIDGE_STOP_ON_SHUTDOWN` | enabled | Stop the bridge broker during Studio shutdown and restart. Set `0`, `false`, `no`, or `off` to keep the bridge across restarts. |
 | `HERMES_AGENT_BRIDGE_AUTO_RESTART` | enabled | Auto-restart the bridge broker after unexpected exit. Set `0`, `false`, `no`, or `off` to disable. |
 | `HERMES_AGENT_BRIDGE_RESTART_DELAY_MS` | `1000` | Base delay for bridge auto-restart backoff. |
@@ -466,6 +469,25 @@ These variables configure Ekko Studio, its local Hermes runtime integration, and
 | `HERMES_WEB_UI_PREVIEW_AGENT_BRIDGE_ENDPOINT` | isolated preview endpoint | Directly overrides the Version Preview broker endpoint. |
 | `HERMES_WEB_UI_BACKEND_PORT` | `8648` | Backend port used by the Vite dev proxy. |
 | `HERMES_WEB_UI_FRONTEND_PORT` | `8649` | Frontend Vite dev server port. |
+
+For the three `EKKO_STUDIO_*_TIMEOUT_MS` settings above, Studio uses the first
+valid value: the new name, then its `HERMES_*` compatibility alias, then the
+listed default. Values are converted with `Number` and must be integer
+milliseconds in `1..2147483647`; missing, empty, zero, negative, fractional,
+non-finite or overflowing values are skipped. This preserves legacy numeric
+parsing (including surrounding whitespace, scientific notation and hexadecimal).
+The old names remain supported; existing `HERMES_DSH_READY_TIMEOUT_MS`, state
+paths, authentication and Hermes Agent settings are unchanged. The new prefix
+identifies these budgets as Studio-owned Coding Agent settings.
+
+Set them in the **Studio server process environment** and restart the server.
+For npm, for example: `EKKO_STUDIO_DSH_ACP_TIMEOUT_MS=240000 ekko-studio-web restart`.
+For Desktop, fully quit the app and launch it with the variables in its environment;
+remote Desktop clients must configure the remote server. Adding them only to a
+Hermes profile's `.env` or to an agent subprocess does not configure Studio's
+parent-process timers. The supplied [Docker Compose setup](docs/docker.md)
+forwards both new and legacy names from the shell or Compose `.env`; recreate the
+container after changing them. With `docker run`, pass them explicitly using `-e`.
 
 ### CLI Commands
 

@@ -10,6 +10,7 @@ import { isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import { agentReasoningEffortOptions, agentReasoningEffortValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
+import { clientUuid } from '@/utils/secure-uuid'
 import PersonPanelIcon from './PersonPanelIcon.vue'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
@@ -52,7 +53,7 @@ function changeRuntime(agent: PersonAgentPreset, runtime: string) {
   resetModel(agent)
 }
 function add() {
-  editingId.value = crypto.randomUUID()
+  editingId.value = clientUuid()
   draft.value.push({ id: editingId.value, name: '', description: '', selection: { runtime: '', mode: 'scoped',
     profile: profiles.value[0]?.value || '', provider: '', model: '', reasoningEffort: '' } })
 }

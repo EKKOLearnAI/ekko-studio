@@ -2,6 +2,7 @@ import type { SessionSummary } from './studio/sessions'
 import { request } from './client'
 import type { AvailableModelGroup } from './hermes/system'
 import type { ProviderApiMode } from './studio/provider-api-mode'
+import { clientUuid } from '../utils/secure-uuid'
 export interface PersonModel { profile: string; provider: string; model: string; apiMode?: ProviderApiMode }
 export interface PersonModelGroup extends Pick<AvailableModelGroup, 'provider' | 'label' | 'models' | 'model_meta' | 'api_mode' | 'api_mode_by_model'> { profile: string }
 export interface PersonAgentPreset { id: string; name: string; description: string; selection: PersonModel & { runtime: string; mode: 'scoped' | 'global'; reasoningEffort: string } }
@@ -36,10 +37,10 @@ export function personTaskCanStop(task?: PersonTask | null) {
 }
 export function stopPersonTask(task: PersonTask, signal?: AbortSignal) {
   return personRequest<{ task: PersonTask }>('/tasks/apply', { action: 'stop', task_id: task.id,
-    execution_id: task.execution_id, expected_revision: task.revision, idempotency_key: crypto.randomUUID() }, 'POST', signal)
+    execution_id: task.execution_id, expected_revision: task.revision, idempotency_key: clientUuid() }, 'POST', signal)
 }
 export function removePersonTaskMessage(task: PersonTask, queueId: string, signal?: AbortSignal) {
   return personRequest<PersonTaskQueueSnapshot>(`/tasks/${encodeURIComponent(task.id)}/queue/remove`, {
-    queue_id: queueId, expected_execution_id: task.execution_id, expected_revision: task.revision, idempotency_key: crypto.randomUUID(),
+    queue_id: queueId, expected_execution_id: task.execution_id, expected_revision: task.revision, idempotency_key: clientUuid(),
   }, 'POST', signal)
 }
