@@ -94,14 +94,8 @@ describe('ChatPanel session clicks', () => {
     expect(source).toContain('codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value')
   })
 
-  it('persists Ekko API mode and offers manual selection only when the Provider mode is unknown', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
-
-    expect(source).toContain('apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined')
-    expect(source).toContain('v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === \'scoped\' && !newChatConfiguredApiMode"')
-    expect(source).toContain('if (isSessionModelScopedCodingAgent.value)')
-    expect(source).toContain('await applySessionModelSwitch(pending.model, pending.provider, sessionModelApiMode.value)')
-  })
+  // Protocol persistence, configured/unknown provider modes and confirmation are
+  // covered by the automatic relay and Provider protocol cases in new-chat-page.spec.ts.
 
   // Inline composer creation is exercised by tests/e2e/new-chat-page.spec.ts,
   // including its first message, model settings and cancellation.

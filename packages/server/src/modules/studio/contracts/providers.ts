@@ -765,11 +765,23 @@ const PROVIDER_ENDPOINTS = PROVIDER_PRESETS.map(preset => ({
   endpoint: normalizedProviderEndpoint(preset.base_url),
 })).filter(candidate => candidate.endpoint)
 
-/** Match known connection rules without treating an unknown relay as Chat Completions. */
+/** Conservative defaults for automatic custom relays, never a claim of endpoint support. */
+function resolveConversationModelApiMode(model: string, outputModalities?: string[]): ProviderApiMode | undefined {
+  const id = model.slice(model.lastIndexOf('/') + 1).trim().toLowerCase()
+  if (outputModalities?.length && !outputModalities.includes('text')) return undefined
+  // Numeric GPT families include conversation aliases, but also dedicated media APIs.
+  if (/(?:^|[-_.])(image|audio|realtime|transcribe|transcription|tts|embedding|search)(?:[-_.]|$)/.test(id)) return undefined
+  if (/^gpt-(?:[4-9]|\d{2,})(?:\.\d+)*o?(?:-|$)/.test(id)) return 'codex_responses'
+  if (/^claude-(?:(?:\d+-)*)(?:opus|sonnet|haiku)(?:-|$)/.test(id)) return 'anthropic_messages'
+  return undefined
+}
+
+/** Known connection rules take priority over automatic custom-relay model defaults. */
 export function resolveProviderConnectionApiMode(
   provider: string,
   baseUrl: string,
   model = '',
+  outputModalities?: string[],
 ): ProviderApiMode | undefined {
   if (PROVIDER_PRESETS.some(preset => preset.value === provider)) {
     return resolveProviderCatalogApiMode(provider, model)
@@ -782,5 +794,6 @@ export function resolveProviderConnectionApiMode(
     candidate.endpoint!.replace(/\/v1$/, '') === endpoint.replace(/\/v1$/, '')
   ))
   const modes = new Set(matches.map(candidate => resolveProviderCatalogApiMode(candidate.provider, model)))
-  return modes.size === 1 ? modes.values().next().value : undefined
+  if (matches.length) return modes.size === 1 ? modes.values().next().value : undefined
+  return provider.startsWith('custom:') ? resolveConversationModelApiMode(model, outputModalities) : undefined
 }

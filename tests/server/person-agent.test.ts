@@ -40,7 +40,7 @@ beforeEach(async () => {
     listUserProfiles: () => allowedProfiles.map(profile_name => ({ profile_name })), userCanAccessProfile: (_id: number, p: string) => allowedProfiles.includes(p),
   }))
   vi.doMock('../../packages/server/src/modules/studio/public/profile-config', () => ({ listProfileNamesFromDisk: () => ['default'], getActiveProfileName: () => 'default', readConfigYamlForProfile: async () => ({ compression: globalCompression }) }))
-  vi.doMock('../../packages/server/src/modules/studio/public/agent-status-registry', () => ({ getAgentAvailabilitySnapshot: () => ({ agents: [{ id: 'hermes', installed: true }, { id: 'ekko-agent', installed: installedAgent }, { id: 'codex', installed: true }, { id: 'pi', installed: false }] }) }))
+  vi.doMock('../../packages/server/src/modules/studio/public/agent-status-registry', () => ({ getAgentAvailabilitySnapshot: () => ({ agents: [{ id: 'hermes', installed: true }, { id: 'ekko-agent', installed: installedAgent }, { id: 'codex', installed: true }, { id: 'claude-code', installed: true }, { id: 'pi', installed: false }] }) }))
   catalog = [{ provider: 'test', models: ['m'], api_mode: 'chat_completions' }]
   vi.doMock('../../packages/server/src/modules/studio/public/session-agent-runtime', () => ({ getSessionAvailableModelGroups: async () => catalog, validateCodingAgentModelEffort: vi.fn(async () => {}) }))
   vi.doMock('../../packages/server/src/modules/studio/services/usage/usage-recorder', () => ({ recordSessionUsage: vi.fn() }))
@@ -2522,5 +2522,81 @@ describe('Person task loading reads', () => {
     db.prepare("UPDATE sessions SET model='running-model',workspace='/running' WHERE id='person-main-1'").run()
     mainBusy = 'person-main-1'
     expect((await personSnapshot(1, 'person-main-1')).session).toMatchObject({ model: 'running-model', workspace: '/running' })
+  })
+})
+
+
+describe('Person protocol selection', () => {
+  it.each(['codex', 'claude-code', 'ekko'])('retains automatic relay protocols through task execution for %s', async runtimeId => {
+    const { createCatalogModelMetadataEnricher } = await import('../../packages/server/src/modules/hermes/services/models/metadata')
+    const models = ['gpt-6.1-sol', 'claude-opus-4-6']
+    catalog = createCatalogModelMetadataEnricher()([{ provider: 'custom:relay', base_url: 'https://relay.example.test', models }])
+    const agents = models.map((model, index) => ({ id: `worker-${index}`, name: model, description: 'Execute tasks', selection: {
+      ...selection, runtime: runtimeId, provider: 'custom:relay', model, apiMode: undefined, reasoningEffort: '',
+    } }))
+    const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
+    await configurePerson(1, { agents, expected_revision: 1 })
+    for (const [index, agent] of agents.entries()) {
+      const expected = index ? 'anthropic_messages' : 'codex_responses'
+      const { task, execution } = await create({ agent_id: agent.id })
+      expect(JSON.parse(task.selection_json).apiMode).toBe(expected)
+      await runner.tickPersonWork(); await wait(execution.id, 'finished')
+      expect(vi.mocked(runtime.execute).mock.calls.at(-1)?.[0].selection.apiMode).toBe(expected)
+    }
+  })
+
+  it.each(['codex', 'claude-code', 'ekko'])('persists independent GPT and Opus protocols for %s through execution', async runtimeId => {
+    catalog[0].models = ['gpt', 'opus']
+    const agents = ['gpt', 'opus'].map(model => ({ id: model, name: model, description: 'Execute tasks', selection: {
+      ...selection, runtime: runtimeId, model, apiMode: model === 'gpt' ? 'codex_responses' : 'anthropic_messages', reasoningEffort: '',
+    } }))
+    const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
+    await configurePerson(1, { agents, expected_revision: 1 })
+    expect(store.personSettings(1).settings.agents).toEqual(agents)
+    for (const agent of agents) {
+      const { task, execution } = await create({ agent_id: agent.id })
+      expect(JSON.parse(task.selection_json)).toEqual(agent.selection)
+      await runner.tickPersonWork(); await wait(execution.id, 'finished')
+      expect(vi.mocked(runtime.execute).mock.calls.at(-1)?.[0].selection).toEqual(agent.selection)
+    }
+  })
+
+  it('persists a conversation protocol independently of the provider default', async () => {
+    const { configurePerson, personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    await configurePerson(1, { session_id: 'person-main-1', model: { ...selection, apiMode: 'anthropic_messages' }, expected_revision: 1 })
+    expect((await personSnapshot(1, 'person-main-1')).settings.model?.apiMode).toBe('anthropic_messages')
+    const { validatePersonSelection } = await import('../../packages/server/src/modules/studio/services/person/catalog')
+    await expect(validatePersonSelection(1, store.personSettings(1, 'person-main-1').settings.model!)).resolves.toBeUndefined()
+  })
+
+  it('preserves the selected protocol when creating a BOT and follows defaults on reset', async () => {
+    const { createPersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
+    const { configurePerson, personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
+    const session = await createPersonConversation(1, 'Protocol BOT', { model: { ...selection, apiMode: 'codex_responses' } })
+    expect((await personSnapshot(1, session.id)).settings.model?.apiMode).toBe('codex_responses')
+    await configurePerson(1, { session_id: session.id, use_global_default: true, expected_revision: store.personSettings(1).revision })
+    expect((await personSnapshot(1, session.id)).settings.model?.apiMode).toBe('chat_completions')
+  })
+
+  it.each(['invented', 'bedrock_converse', 'codex_app_server', 42])('rejects unsupported protocol %s rather than silently replacing it', async apiMode => {
+    const { validatePersonAgents } = await import('../../packages/server/src/modules/studio/services/person/agents')
+    await expect(validatePersonAgents(1, [{ id: 'worker', name: 'Worker', description: 'Tasks', selection: { ...selection, runtime: 'codex', apiMode } }])).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('keeps catalog defaults for older clients and Hermes protocol ownership', async () => {
+    const { validatePersonAgents } = await import('../../packages/server/src/modules/studio/services/person/agents')
+    const preset = { id: 'worker', name: 'Worker', description: 'Tasks', selection: { ...selection, runtime: 'codex', apiMode: undefined } }
+    expect((await validatePersonAgents(1, [preset]))[0].selection.apiMode).toBe('chat_completions')
+    await expect(validatePersonAgents(1, [{ ...preset, selection: { ...selection, runtime: 'hermes', apiMode: 'anthropic_messages' } }])).rejects.toMatchObject({ status: 409 })
+    catalog[0].model_meta = { m: { disabled: true } }
+    await expect(validatePersonAgents(1, [preset])).rejects.toMatchObject({ status: 409 })
+  })
+
+  it('preserves native-only Hermes protocols and rejects converting them into coding connections', async () => {
+    const { personSelectionApiMode } = await import('../../packages/server/src/modules/studio/services/person/catalog')
+    const group = { provider: 'bedrock', api_mode: 'bedrock_converse' }
+    expect(personSelectionApiMode(group, 'm', 'bedrock_converse', 'hermes')).toBe('bedrock_converse')
+    expect(() => personSelectionApiMode(group, 'm', 'anthropic_messages', 'codex')).toThrow('protocol')
+    expect(() => personSelectionApiMode({ provider: 'claude-oauth', api_mode: 'anthropic_messages' }, 'm', 'codex_responses')).toThrow('protocol')
   })
 })

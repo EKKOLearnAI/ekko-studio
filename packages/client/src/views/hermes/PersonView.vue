@@ -32,6 +32,10 @@ import PersonGeneralSettings from '@/components/hermes/person/PersonGeneralSetti
 import PersonTaskActivity from '@/components/hermes/person/PersonTaskActivity.vue'
 import { onPersonUpdated } from '@/api/studio/chat'
 import ModelCascader from '@/components/hermes/models/ModelCascader.vue'
+import ModelProtocolModal from '@/components/hermes/models/ModelProtocolModal.vue'
+import { useModelProtocolSelection } from '@/composables/useModelProtocolSelection'
+import { isAuthModelProvider } from '@/utils/codingAgentProviders'
+import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
 import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
 import FolderIcon from '@/components/common/FolderIcon.vue'
 import BroomIcon from '@/components/common/BroomIcon.vue'
@@ -508,10 +512,19 @@ function saveSettings(patch: Record<string, unknown>) {
     .finally(() => { settingsWrites.value--; if (!settingsWrites.value) optimisticEffort.value = null })
   return settingsChain.then(() => saved)
 }
-function selectModel(selection: { provider: string; model: string }) {
+const modelProtocol = useModelProtocolSelection(applyModel, computed(() => modelsLoading.value || settingsWrites.value > 0 || busy.value || creating.value))
+const { show: showModelProtocol, apiMode: selectedModelApiMode } = modelProtocol
+watch(showModelPicker, value => { if (!value) modelProtocol.cancel() })
+function selectModel(selection: { provider: string; model: string; apiMode?: ProviderApiMode }) {
   const group = modelGroups.value.find(group => modelKey(group.profile, group.provider) === selection.provider)
   if (!group) return
-  const model = { profile: group.profile, provider: group.provider, model: selection.model }
+  if (isAuthModelProvider(group.provider)) { applyModel(selection); return }
+  modelProtocol.select(selection, currentModel.value ? { ...currentModel.value, provider: pickerProvider.value } : undefined, !!group.api_mode_by_model)
+}
+function applyModel(selection: { provider: string; model: string; apiMode?: ProviderApiMode }) {
+  const group = modelGroups.value.find(group => modelKey(group.profile, group.provider) === selection.provider)
+  if (!group) return
+  const model = { profile: group.profile, provider: group.provider, model: selection.model, apiMode: selection.apiMode }
   if (isNewConversation.value) {
     newConversationModel.value = model
     if (!draftReasoningEfforts.value.includes(newConversationEffort.value)) newConversationEffort.value = ''
@@ -694,11 +707,13 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       </NModal>
       <ModelCascader v-model:show="showModelPicker" :groups="pickerGroups" :custom-models="{}" :display-name="displayModel"
         :provider="pickerProvider" :model="currentModel?.model" :loading="modelsLoading || settingsWrites > 0" :trigger-element="modelTrigger"
-        :title="t('chat.setModelTitle')" @select="selectModel">
+        :close-on-select="false" :title="t('chat.setModelTitle')" @select="selectModel">
         <template #footer>
           <NButton size="small" quaternary :disabled="creating || (!isNewConversation && (busy || settingsWrites > 0))" @click="inheritModel">{{ (isNewConversation ? !newConversationModel : data.inherits_global_model) ? t('person.followingGlobalModel') : t('person.useGlobalModel') }}</NButton>
         </template>
       </ModelCascader>
+      <ModelProtocolModal v-model:show="showModelProtocol" v-model:value="selectedModelApiMode"
+        @confirm="modelProtocol.confirm" @cancel="modelProtocol.cancel" />
       <NDrawer v-model:show="showPanel" :width="drawerWidth" placement="right" :close-on-esc="true" class="person-workspace-drawer" @after-enter="flowsPanelRef?.revealFocus()">
         <NDrawerContent closable :native-scrollbar="false" :body-content-style="{ padding: '0' }">
           <template #header><div class="workspace-heading"><span class="workspace-brand">{{ PERSON_AVATAR.label }}</span><span class="workspace-divider">/</span><span>{{ t('person.title') }}</span></div></template>

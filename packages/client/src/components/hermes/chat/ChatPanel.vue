@@ -25,6 +25,7 @@ import {
   type SessionCategory,
 } from "@/api/studio/sessions";
 import type { AvailableModelGroup } from "@/api/hermes/system";
+import ModelProtocolModal from '@/components/hermes/models/ModelProtocolModal.vue'
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
 import { nativeCatalogModel, nativeModelLabel, nativeModelFamilies, nativeModelPickerId, nativeModelEffortChoices, selectNativeModelEffort } from "@/utils/native-model-families";
 import { agentInstallationState, fetchAgentAvailabilitySnapshot, type AgentAvailabilitySnapshot } from "@/api/agent-status";
@@ -936,6 +937,7 @@ const newChatNativeSelections = ref<Record<string, { model: string; reasoningEff
 const newChatBaseUrl = ref<string>("");
 const newChatApiKey = ref<string>("");
 const newChatApiMode = ref<CodingAgentApiMode>("codex_responses");
+const newChatApiModeManual = ref(false);
 const newChatWorkspace = ref("");
 const newChatAgentPreset = ref<string>();
 const newChatPresetReady = ref(false);
@@ -958,7 +960,7 @@ function persistNewChatForm() {
   saveNewChatFormPreferences(getStoredUserId(), {
     agent: preferredNewChatAgent, mode: newChatAgentMode.value, profile: newChatProfile.value,
     provider: newChatProvider.value, model: newChatModel.value, customModel: newChatCustomModel.value,
-    apiMode: newChatApiMode.value, reasoningEffort: newChatReasoningEffort.value,
+    apiMode: newChatApiMode.value, apiModeManual: newChatApiModeManual.value, reasoningEffort: newChatReasoningEffort.value,
     workspace: newChatWorkspace.value, categoryId: newChatCategoryId.value,
     agentPreset: newChatAgentPreset.value, baseUrl: newChatBaseUrl.value, apiKey: newChatApiKey.value,
     nativeModels: newChatNativeSelections.value,
@@ -966,7 +968,7 @@ function persistNewChatForm() {
 }
 
 watch([newChatAgent, newChatAgentMode, newChatProfile, newChatProvider, newChatModel, newChatCustomModel,
-  newChatApiMode, newChatReasoningEffort, newChatWorkspace, newChatCategoryId, newChatAgentPreset, newChatBaseUrl, newChatApiKey],
+  newChatApiMode, newChatApiModeManual, newChatReasoningEffort, newChatWorkspace, newChatCategoryId, newChatAgentPreset, newChatBaseUrl, newChatApiKey],
   () => { if (showNewChatPage.value) persistNewChatForm(); }, { flush: "post" });
 watch(newChatNativeSelections, () => { if (showNewChatPage.value) persistNewChatForm(); }, { deep: true });
 
@@ -1269,8 +1271,8 @@ const newChatMissingCredentials = computed(() =>
 );
 
 const newChatConfiguredApiMode = computed(() => configuredProviderApiMode(selectedNewChatProviderGroup.value, newChatModel.value));
-watch([newChatConfiguredApiMode, newChatApiMode], ([mode]) => {
-  if (mode && newChatApiMode.value !== mode) newChatApiMode.value = mode;
+watch(newChatConfiguredApiMode, (mode) => {
+  if (!restoringNewChatForm && !newChatApiModeManual.value && mode && newChatApiMode.value !== mode) newChatApiMode.value = mode;
 }, { flush: "sync" });
 
 function defaultNewChatApiMode(group?: AvailableModelGroup): CodingAgentApiMode {
@@ -1287,6 +1289,7 @@ function syncNewChatApiMode() {
 }
 
 function syncNewChatModelSelection() {
+  newChatApiModeManual.value = false;
   const defaults = getDefaultModelForProfile(newChatProfile.value);
   newChatProvider.value = defaults.provider;
   newChatModel.value = defaults.model;
@@ -1382,6 +1385,7 @@ async function openNewChatPage(options: { preserveSidebar?: boolean } = {}) {
   showBatchDeleteConfirm.value = false;
   const saved = loadNewChatFormPreferences(getStoredUserId());
   restoringNewChatForm = true;
+  newChatApiModeManual.value = saved?.apiModeManual ?? !!saved?.apiMode;
   preferredNewChatAgent = saved?.agent || loadNewChatAgent();
   newChatAgent.value = preferredNewChatAgent;
   newChatAgentMode.value = saved?.mode || "scoped";
@@ -2398,7 +2402,7 @@ function defaultSessionModelApiMode(provider: string): CodingAgentApiMode {
   );
 }
 
-async function applySessionModelSwitch(model: string, provider: string, apiMode?: CodingAgentApiMode) {
+async function applySessionModelSwitch(model: string, provider: string, apiMode?: CodingAgentApiMode, manualApiMode = false) {
   if (sessionModelSwitching.value) return;
   if (sessionModelIsDraft.value) {
     if (!showNewChatPage.value || newChatLoading.value) return;
@@ -2411,6 +2415,7 @@ async function applySessionModelSwitch(model: string, provider: string, apiMode?
       showSessionModelPicker.value = false;
       return;
     }
+    newChatApiModeManual.value = manualApiMode;
     if (newChatProvider.value !== provider) {
       newChatBaseUrl.value = "";
       newChatApiKey.value = "";
@@ -2449,15 +2454,17 @@ async function selectSessionModel(model: string, provider: string) {
   const meta = sessionModelBaseGroups.value.find((group) => group.provider === provider)?.model_meta?.[model];
   if (meta?.disabled || (!sessionModelSessionId.value && !sessionModelIsDraft.value) || sessionModelSwitching.value) return;
   if (isSessionModelScopedCodingAgent.value) {
-    const mode = configuredProviderApiMode(sessionModelBaseGroups.value.find(group => group.provider === provider), model);
-    if (mode) {
+    const group = sessionModelBaseGroups.value.find(group => group.provider === provider);
+    const mode = configuredProviderApiMode(group, model);
+    const sameModel = sessionModelProvider.value === provider && sessionModelValue.value === model;
+    if (mode && !(group?.api_mode_by_model && sameModel)) {
       await applySessionModelSwitch(model, provider, mode);
       return;
     }
     pendingSessionModelSwitch.value = { model, provider };
-    sessionModelApiMode.value = sessionModelSession.value?.provider === provider && sessionModelSession.value.apiMode
-      ? normalizeCodingAgentApiMode(sessionModelSession.value.apiMode, defaultSessionModelApiMode(provider))
-      : defaultSessionModelApiMode(provider);
+    sessionModelApiMode.value = sameModel
+      ? normalizeCodingAgentApiMode(sessionModelIsDraft.value ? newChatApiMode.value : sessionModelSession.value?.apiMode, mode || defaultSessionModelApiMode(provider))
+      : mode || defaultSessionModelApiMode(provider);
     showSessionModelModeModal.value = true;
     return;
   }
@@ -2472,7 +2479,7 @@ async function selectSessionMoaPreset(preset: string) {
 async function confirmSessionModelMode() {
   const pending = pendingSessionModelSwitch.value;
   if (!pending) return;
-  await applySessionModelSwitch(pending.model, pending.provider, sessionModelApiMode.value);
+  await applySessionModelSwitch(pending.model, pending.provider, sessionModelApiMode.value, true);
 }
 
 function cancelSessionModelMode() {
@@ -2759,6 +2766,7 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
               <NSelect
                 v-bind="newChatSettingsSelectProps"
                 v-model:value="newChatApiMode"
+                @update:value="newChatApiModeManual = true"
                 :options="newChatApiModeOptions"
                 :disabled="newChatLoading"
               />
@@ -2937,29 +2945,13 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
       </template>
     </ModelCascader>
 
-    <NModal
+    <ModelProtocolModal
       v-model:show="showSessionModelModeModal"
-      preset="dialog"
-      :title="t('codingAgents.protocolScope')"
-      :mask-closable="!sessionModelSwitching"
-      :close-on-esc="!sessionModelSwitching"
-      :closable="!sessionModelSwitching"
-      style="width: min(420px, calc(100vw - 32px))"
-    >
-      <NSelect
-        v-model:value="sessionModelApiMode"
-        :options="newChatApiModeOptions"
-        :disabled="sessionModelSwitching"
-      />
-      <template #action>
-        <NButton size="small" :disabled="sessionModelSwitching" @click="cancelSessionModelMode">
-          {{ t('common.cancel') }}
-        </NButton>
-        <NButton size="small" type="primary" :loading="sessionModelSwitching" @click="confirmSessionModelMode">
-          {{ sessionModelSwitching ? t('chat.modelSwitching') : t('common.confirm') }}
-        </NButton>
-      </template>
-    </NModal>
+      v-model:value="sessionModelApiMode"
+      :loading="sessionModelSwitching"
+      @cancel="cancelSessionModelMode"
+      @confirm="confirmSessionModelMode"
+    />
 
 
 

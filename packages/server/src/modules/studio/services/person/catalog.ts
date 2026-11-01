@@ -32,8 +32,26 @@ export function personCapabilities(userId: number) {
     controls: ['start', 'cancel', 'checkpoint_resume'], interaction: 'person',
   }))
 }
-function apiMode(group: any, model: string): string | undefined {
+type PersonProtocolGroup = { provider: string; api_mode?: string; api_mode_by_model?: Record<string, string | null> }
+
+function apiMode(group: PersonProtocolGroup, model: string): string | undefined {
   return group.api_mode_by_model?.[model] || group.api_mode || resolveProviderCatalogApiMode(group.provider, model)
+}
+
+const SELECTABLE_API_MODES = ['chat_completions', 'codex_responses', 'anthropic_messages']
+
+export function personSelectionApiMode(group: PersonProtocolGroup, model: string, requested: unknown, runtime = 'ekko'): string | undefined {
+  const configured = apiMode(group, model)
+  if (requested === undefined) return configured
+  if (runtime === 'hermes' && requested === configured) return configured
+  if (typeof requested !== 'string' || !SELECTABLE_API_MODES.includes(requested)) throw personError('Unsupported model protocol')
+  // Hermes and subscription transports own their protocol; an override cannot make
+  // a native-only connection usable by a different runtime.
+  if (runtime === 'hermes' || isScopedCodingAgentAuthProvider(group.provider)
+    || ['bedrock_converse', 'codex_app_server'].includes(configured || '')) {
+    if (requested !== configured) throw personError('Runtime does not support this model protocol', 409)
+  }
+  return requested
 }
 
 function personModelAllowed(group: any, model: string) {
@@ -50,6 +68,7 @@ export async function personModelCatalog(userId: number) {
       const models = group.models.filter(model => personModelAllowed(group, model))
       if (!models.length) continue
       groups.push({ profile, provider: group.provider, label: group.label || group.provider, models,
+        api_mode: group.api_mode, api_mode_by_model: group.api_mode_by_model,
         model_meta: Object.fromEntries(models.map(model => [model, group.model_meta?.[model] || {}])) })
     }
   }
@@ -85,7 +104,7 @@ export async function personModelSelection(userId: number, input: Record<string,
   const model = String(input.model || '')
   const group = (await personRuntime().modelConfig(profile)).groups.find(group => group.provider === provider && group.models.includes(model))
   if (!group || !personModelAllowed(group, model)) throw personError('Model unavailable or changed', 409)
-  return { runtime: 'ekko', mode: 'scoped', profile, provider, model, apiMode: apiMode(group, model) }
+  return { runtime: 'ekko', mode: 'scoped', profile, provider, model, apiMode: personSelectionApiMode(group, model, input.apiMode) }
 }
 export async function validatePersonSelection(userId: number, selection: PersonSelection) {
   const user = personUser(userId)
@@ -107,5 +126,6 @@ export async function validatePersonSelection(userId: number, selection: PersonS
   const groups = await getSessionAvailableModelGroups(selection.profile)
   const group = groups.find(g => g.provider === selection.provider && g.models?.includes(selection.model))
   if (selection.runtime !== 'hermes' && ['bedrock_converse','codex_app_server'].includes(selection.apiMode || '')) throw personError('Runtime does not support this model protocol', 409)
-  if (!group || group.model_meta?.[selection.model]?.disabled || apiMode(group, selection.model) !== selection.apiMode) throw personError('Model unavailable or changed', 409)
+  if (!group || group.model_meta?.[selection.model]?.disabled) throw personError('Model unavailable or changed', 409)
+  if (personSelectionApiMode(group, selection.model, selection.apiMode, selection.runtime) !== selection.apiMode) throw personError('Model unavailable or changed', 409)
 }

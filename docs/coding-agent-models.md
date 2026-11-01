@@ -1,5 +1,29 @@
 # Native Coding Agent model discovery
 
+## Studio provider protocol selection
+
+Scoped chats and BOT selections use Studio's provider catalog. An explicit
+selection keeps its saved protocol; automatic inference never replaces a fixed provider API mode.
+In **Auto (match model)** mode, known provider/endpoint rules take priority.
+Other custom HTTP(S) endpoints use conservative conversation-model defaults:
+numeric GPT conversation families use Responses, and Claude Opus, Sonnet and
+Haiku families use Anthropic Messages. Namespaces are ignored for matching,
+but the original model ID is sent unchanged.
+
+Dedicated image, audio, realtime, transcription, speech, embedding and search
+model names do not receive these generic conversation defaults. Catalog entries
+whose output modalities exclude text are also left unresolved. Unknown aliases
+require manual protocol selection. These defaults do not probe endpoint support
+or guarantee cache hits; use a fixed provider mode or a manual selection when a
+relay requires another protocol.
+
+Switching models recomputes the automatic protocol. Select the current model
+again to open the shared protocol dialog and override it; cancelling leaves the
+saved selection unchanged. This applies to scoped single chats and BOT main
+conversations and execution agents. Native Global mode retains CLI configuration.
+
+## Native model directory
+
 `GET /api/coding-agents/models` is the single authenticated API for the native
 model directories of all fourteen Coding Agents. It does not read Studio's
 Hermes Profile model picker or start a Studio chat/run. The server's global CLI
