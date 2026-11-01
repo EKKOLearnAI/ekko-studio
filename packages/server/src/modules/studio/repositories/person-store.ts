@@ -2,6 +2,8 @@ import { personUpdated } from './person-updates'
 import { requirePersonSession } from './person-session-store'
 import { recordPersonOutcome } from './person-presence-store'
 import { createHash, randomUUID } from 'node:crypto'
+import { join } from 'node:path'
+import { getWebUiHome } from '../public/config'
 import { personExecutionSessionId } from '../contracts/person-session'
 import { createSession } from './session-store'
 import { getDb } from '../infrastructure/database'
@@ -44,32 +46,35 @@ function sharedPersonSettings(settings: Partial<PersonSettings>) {
   return { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks }
 }
 export function personSettings(userId: number, sessionId?: string): { settings: PersonSettings; revision: number } {
-  if (sessionId) requirePersonSession(userId, sessionId)
+  const session = sessionId ? requirePersonSession(userId, sessionId) : undefined
   const row = personDb().prepare('SELECT * FROM person_accounts WHERE user_id=?').get(userId) as { settings_json: string; revision: number } | undefined
   const shared = sharedPersonSettings(row ? JSON.parse(row.settings_json) : {})
   const conversation = sessionId ? personDb().prepare('SELECT settings_json FROM person_conversation_settings WHERE session_id=? AND owner_user_id=?').get(sessionId, userId) : undefined
   const local = conversation ? JSON.parse(String(conversation.settings_json)) : {}
-  return { settings: { ...shared, model: local.model ?? null, reasoningEffort: local.reasoningEffort ?? '' }, revision: row?.revision || 0 }
+  // Missing local data is the pre-upgrade contract. Explicit empty bindings must not fall back.
+  const workspace = !sessionId ? shared.workspace
+    : Object.hasOwn(local, 'workspace') ? String(local.workspace ?? '')
+      : session?.workspace || shared.workspace || join(getWebUiHome(), 'person', String(userId), 'workspace')
+  return { settings: { ...shared, workspace, model: local.model ?? null, reasoningEffort: local.reasoningEffort ?? '' }, revision: row?.revision || 0 }
 }
 export function savePersonSettings(userId: number, settings: PersonSettings, revision: number, workspace?: string, sessionId?: string) {
   return personTransaction(() => savePersonSettingsInTransaction(userId, settings, revision, workspace, sessionId))
 }
-/** Used when settings and a new BOT must commit together. Caller owns the transaction. */
+/** Caller owns the settings transaction and revision fence. */
 export function savePersonSettingsInTransaction(userId: number, settings: PersonSettings, revision: number, workspace?: string, sessionId?: string) {
   const account = personSettings(userId)
   if (account.revision !== revision) throw personError('Settings changed; reload and retry', 409)
   if (sessionId) {
     requirePersonSession(userId, sessionId)
     personDb().prepare('INSERT INTO person_conversation_settings VALUES (?,?,?) ON CONFLICT(session_id) DO UPDATE SET settings_json=excluded.settings_json')
-      .run(sessionId, userId, JSON.stringify({ model: settings.model, reasoningEffort: settings.reasoningEffort }))
+      .run(sessionId, userId, JSON.stringify({ model: settings.model, reasoningEffort: settings.reasoningEffort, workspace: settings.workspace }))
   }
   personDb().prepare('INSERT INTO person_accounts VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json,revision=excluded.revision')
-    .run(userId, JSON.stringify(sharedPersonSettings(settings)), revision + 1)
+    .run(userId, JSON.stringify(sharedPersonSettings(sessionId ? { ...settings, workspace: account.settings.workspace } : settings)), revision + 1)
   if (workspace) {
-    personDb().prepare('UPDATE session_tasks SET workspace=? WHERE owner_user_id=? AND bot_id=?').run(workspace, userId, `person:${userId}`)
-    personDb().prepare(`UPDATE sessions SET workspace=? WHERE CAST(studio_user_id AS TEXT)=? AND
-      (id LIKE 'person-main-%' OR id IN (SELECT session_id FROM person_executions WHERE owner_user_id=?))`)
-      .run(workspace, String(userId), userId)
+    if (!sessionId) throw personError('session_id is required for workspace settings')
+    personDb().prepare('UPDATE sessions SET workspace=? WHERE id=? AND CAST(studio_user_id AS TEXT)=?')
+      .run(workspace, sessionId, String(userId))
   }
   personUpdated(userId)
   return personSettings(userId, sessionId)
@@ -124,6 +129,10 @@ export function enqueuePersonExecution(task: PersonTask, occurrence: string | nu
   if (Number(task.pending_count) >= 20) throw personError('Task follow-up queue is full', 409)
   const previous = followup && task.execution_id ? getPersonExecution(task.owner_user_id, task.execution_id) : undefined
   const sessionId = followup ? resumeSessionId || previous?.session_id || personExecutionSessionId(id) : personExecutionSessionId(id)
+  const resumed = sessionId === personExecutionSessionId(id) ? undefined : personDb().prepare(
+    'SELECT workspace FROM person_executions WHERE task_id=? AND owner_user_id=? AND session_id=? AND requirements_revision=? ORDER BY created_at DESC,rowid DESC LIMIT 1')
+    .get(task.id, task.owner_user_id, sessionId, task.requirements_revision)
+  const workspace = resumed ? String(resumed.workspace) : task.workspace
   if (sessionId === personExecutionSessionId(id)) {
     const selection = JSON.parse(task.selection_json) as PersonSelection
     createSession({ id: sessionId, user_id: task.owner_user_id, studio_user_id: task.owner_user_id, title: task.title,
@@ -131,10 +140,9 @@ export function enqueuePersonExecution(task: PersonTask, occurrence: string | nu
       agent: selection.runtime === 'ekko' ? 'ekko-agent' : selection.runtime, agent_mode: selection.mode,
       profile: selection.profile, provider: selection.provider, model: selection.model,
       reasoning_effort: selection.reasoningEffort, workspace: task.workspace, push_enabled: false })
-  } else if (!personDb().prepare('SELECT 1 FROM person_executions WHERE task_id=? AND owner_user_id=? AND session_id=? AND requirements_revision=?')
-    .get(task.id, task.owner_user_id, sessionId, task.requirements_revision)) throw personError('Execution conversation is unavailable or its requirements changed', 409)
-  personDb().prepare(`INSERT INTO person_executions(id,task_id,owner_user_id,requirements_revision,state,session_id,selection_json,created_at,updated_at,occurrence_id,input_json)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(id, task.id, task.owner_user_id, task.requirements_revision, active ? 'pending' : 'queued', sessionId, task.selection_json, now, now, occurrence, input ? JSON.stringify(input) : '')
+  } else if (!resumed) throw personError('Execution conversation is unavailable or its requirements changed', 409)
+  personDb().prepare(`INSERT INTO person_executions(id,task_id,owner_user_id,requirements_revision,state,session_id,selection_json,created_at,updated_at,occurrence_id,input_json,workspace)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, task.id, task.owner_user_id, task.requirements_revision, active ? 'pending' : 'queued', sessionId, task.selection_json, now, now, occurrence, input ? JSON.stringify(input) : '', workspace)
   personDb().prepare(`INSERT INTO person_deliveries(execution_id,owner_user_id,origin_json,updated_at)
     SELECT ?,owner_user_id,${occurrence ? "json_remove(origin_json,'$.memoryRequest')" : 'origin_json'},? FROM person_task_origins WHERE task_id=?`).run(id, now, task.id)
   personDb().prepare("UPDATE person_task_origins SET origin_json=json_remove(origin_json,'$.memoryRequest') WHERE task_id=?").run(task.id)

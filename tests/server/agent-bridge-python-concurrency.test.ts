@@ -2566,4 +2566,28 @@ assert terminal_tool._task_env_overrides["session-b"] == {"cwd": "/repo/b"}, ter
 assert runtime_cwd.resolve_agent_cwd() == "", runtime_cwd.resolve_agent_cwd()
 `)
   })
+
+  it('fails Person tasks before execution if the workspace or Hermes cwd binding is unavailable', () => {
+    runPython(String.raw`
+${harness}
+import tempfile
+with tempfile.TemporaryDirectory() as workspace:
+    assert bridge._pool._bind_session_workspace_cwd("person-task-valid", workspace)
+    bridge._pool._clear_session_workspace_cwd()
+    for path in [None, "", "relative", os.path.join(workspace, "missing")]:
+        try:
+            bridge._pool._bind_session_workspace_cwd("person-task-missing", path)
+            raise AssertionError("missing workspace accepted")
+        except RuntimeError as error:
+            assert "Workspace directory is unavailable" in str(error), error
+    del runtime_cwd.set_session_cwd
+    try:
+        bridge._pool._bind_session_workspace_cwd("person-task-unsupported", workspace)
+        raise AssertionError("unsupported cwd binding accepted")
+    except RuntimeError as error:
+        assert "cannot bind" in str(error), error
+    assert not bridge._pool._bind_session_workspace_cwd("ordinary-session", workspace)
+    assert runtime_cwd.resolve_agent_cwd() == ""
+`)
+  })
 })

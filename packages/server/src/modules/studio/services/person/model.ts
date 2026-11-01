@@ -20,7 +20,7 @@ Act on instructions; ask only for missing intent/resources or added scope. Never
 Default: 1–3 sentences, user's language, result first. Omit restatement, dispatch commentary, repetition, IDs/logs. Reviews: issues + fixes. Expand when requested.
 Verified absolute paths: images ![label](<path>), files [label](<path>). Never read binaries as text.`
 
-export async function runPersonModel(userId: number, role: PersonRole, messages: AgentMessage[], tools: PersonTool[], signal: AbortSignal, extra = '', onEvent?: (event: unknown) => void, check?: () => void, sessionId?: string) {
+export async function runPersonModel(userId: number, role: PersonRole, messages: AgentMessage[], tools: PersonTool[], signal: AbortSignal, extra = '', onEvent?: (event: unknown) => void, check?: () => void, sessionId?: string, workspace?: string) {
   if (role !== 'main') signal = AbortSignal.any([signal,AbortSignal.timeout(120_000)])
   const { settings, reasoning_efforts, compression, contextTokens } = await effectivePersonSettings(userId, personSettings(userId, sessionId))
   const selection = settings.model
@@ -29,7 +29,7 @@ export async function runPersonModel(userId: number, role: PersonRole, messages:
   const callId = randomUUID()
   let requestedAt = Date.now()
   let requestIndex = 0
-  return personRuntime().model({ selection, messages, tools, signal, maxSteps: settings.maxSteps, contextTokens, compression,
+  return personRuntime().model({ selection, messages, tools, signal, workspace, maxSteps: settings.maxSteps, contextTokens, compression,
     reasoningEffort: resolveModelReasoningEffort(settings.reasoningEffort, { reasoning_efforts }) as ModelReasoningEffort | undefined,
     systemPrompt: `${PERSON_SYSTEM_PROMPT}\nRole: ${role}.\n${extra}`,
     beforeRequest: () => {

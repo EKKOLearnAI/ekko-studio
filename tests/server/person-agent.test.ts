@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PERSON_BOTS } from '../../packages/shared/person-bots'
@@ -27,7 +27,7 @@ let installedAgent = true
 let allowedProfiles: string[] = ['default']
 
 beforeEach(async () => {
-  vi.resetModules(); db = new DatabaseSync(':memory:'); dir = mkdtempSync(join(tmpdir(), 'person-test-')); activeAccount = true
+  vi.resetModules(); db = new DatabaseSync(':memory:'); dir = realpathSync(mkdtempSync(join(tmpdir(), 'person-test-'))); activeAccount = true
   modelContextLength = 16000; globalCompression = {}
   vi.doMock('../../packages/server/src/modules/studio/public/provider-runtime', () => ({ getModelContextLength: ({ model }: { model: string }) => model === 'm2' ? 128000 : modelContextLength }))
   installedAgent = true; allowedProfiles = ['default']; mainBusy = false; clearHistoryMock.mockClear(); disposeSessionMock.mockClear()
@@ -47,7 +47,7 @@ beforeEach(async () => {
   const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
   initAllHermesTables()
   const { createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
-  for (const owner of [1, 2]) createSession({ id: `person-main-${owner}`, studio_user_id: owner, user_id: owner, title: `Conversation ${owner}`, source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', profile: 'default' })
+  for (const owner of [1, 2]) createSession({ id: `person-main-${owner}`, studio_user_id: owner, user_id: owner, title: `Conversation ${owner}`, workspace: dir, source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', profile: 'default' })
   store = await import('../../packages/server/src/modules/studio/repositories/person-store')
   tasks = await import('../../packages/server/src/modules/studio/services/person/tasks')
   schedules = await import('../../packages/server/src/modules/studio/services/person/schedules')
@@ -309,7 +309,7 @@ describe('Person session model isolation', () => {
     const { createPersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
     const { configurePerson, personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
     const { createPersonChatAgent } = await import('../../packages/server/src/modules/studio/services/person/chat-agent')
-    const second = await createPersonConversation(1, 'Second')
+    const second = await createPersonConversation(1, 'Second', { workspace: dir })
     catalog[0].models.push('m2')
     catalog[0].model_meta = { m: { reasoning_efforts: ['low', 'high'] }, m2: { reasoning_efforts: ['low', 'high'] } }
     runtime.chatAgent = vi.fn(() => ({ run: vi.fn(), dispose: vi.fn() } as any))
@@ -1331,7 +1331,7 @@ it('uses the complete native memory toolset within a 10k Person model budget', a
   const { countTextTokens } = await import('../../packages/ekko-agent/src/model/tokens')
   runtime.chatAgent = createPersonAgent
   modelContextLength = 10000
-  const conversation = await createPersonConversation(1, '旅行计划'.repeat(25))
+  const conversation = await createPersonConversation(1, '旅行计划'.repeat(25), { workspace: dir })
   const account = personMemory(1)
   await account.service.write({operation:'create',kind:'profile_name',identity:account.identity,reason:'User name',node:{title:'Name',content:'用户的名字是 ekko',valueJson:'ekko'}})
   const requests: any[] = []
@@ -1508,58 +1508,110 @@ it('removes the legacy Person memory table without changing ordinary messages', 
   expect(db.prepare('SELECT * FROM messages ORDER BY id').all()).toEqual(messages)
 })
 
-it('uses one account workspace for creation, adoption, scheduled runs and follow-up turns', async () => {
+it('keeps Bot directories independent and pins old tasks, conversations and scheduled workers', async () => {
   const { configurePerson, personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
   const { personTaskChat, continuePersonTask } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
+  const { createPersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
   const sessions = await import('../../packages/server/src/modules/studio/repositories/session-store')
   const delivery = await import('../../packages/server/src/modules/studio/services/person/delivery')
-  const selected = join(dir, 'selected-workspace')
-  await configurePerson(1, { workspace: selected, expected_revision: 1 })
-  expect((await personSnapshot(1, 'person-main-1')).session.workspace).toBe(selected)
+  const selected = join(dir, 'selected'), nextWorkspace = join(dir, 'next'), otherWorkspace = join(dir, 'other')
+  for (const path of [selected, nextWorkspace, otherWorkspace]) mkdirSync(path)
+  const other = await createPersonConversation(1, 'Other workspace', { workspace: otherWorkspace })
+  await configurePerson(1, { session_id: 'person-main-1', workspace: selected, expected_revision: 1 })
+  expect((await personSnapshot(1, other.id)).settings.workspace).toBe(otherWorkspace)
   sessions.createSession({ id: 'workspace-owned', profile: 'default', studio_user_id: '1', source: 'coding_agent' })
   sessions.addMessage({ session_id: 'workspace-owned', role: 'user', content: 'Take over this goal' })
   const goals = await import('../../packages/server/src/modules/studio/services/session-tasks')
   const original = goals.updateSessionTasks('workspace-owned', 'default', { revision: 0, changes: [{ title: 'Existing goal', summary: 'Take over', status: 'open' }] }).tasks[0]
-  const adopted = await create({ action: 'adopt', session_id: 'person-main-1', task_id: original.id, expected_revision: original.updated_at, start: false })
+  const adopted = await create({ action: 'adopt', task_id: original.id, expected_revision: original.updated_at, start: false })
+  const first = await create(), second = await create({ start: false })
   expect(adopted.task.workspace).toBe(selected)
-  const first = await create()
-  const second = await create({ start: false })
-  expect(first.task.workspace).toBe(selected)
-  expect(second.task.workspace).toBe(selected)
-  await expect(create({ workspace: join(dir, 'individual-override') })).rejects.toThrow('managed by Person')
-  await expect(configurePerson(1, { workspace: dir, expected_revision: 2 })).rejects.toThrow('Wait for Person tasks')
+  await expect(create({ workspace: otherWorkspace })).rejects.toThrow('managed by Person')
+  await configurePerson(1, { session_id: 'person-main-1', workspace: nextWorkspace, expected_revision: 2 })
   await runner.tickPersonWork(); await wait(first.execution.id, 'finished')
   await delivery.deliverPersonResults(); delivery.finishPersonDelivery(1, first.execution.id, true)
-  expect(vi.mocked(runtime.execute).mock.calls[0][0].workspace).toBe(selected)
   const chat = await personTaskChat(1, first.task.id)
-  const nextWorkspace = join(dir, 'next-workspace')
-  await configurePerson(1, { workspace: nextWorkspace, expected_revision: 2 })
-  expect(store.getPersonTask(1, first.task.id).workspace).toBe(nextWorkspace)
-  expect(store.getPersonTask(1, adopted.task.id).workspace).toBe(nextWorkspace)
-  expect(sessions.getSession(chat.session.id)?.workspace).toBe(nextWorkspace)
-  const next: any = await continuePersonTask(1, first.task.id, { input: [{ type: 'text', text: 'Continue the same work' }], expected_revision: store.getPersonTask(1, first.task.id).revision, idempotency_key: 'workspace-follow-up' })
+  expect((await personSnapshot(1, 'person-main-1')).settings.workspace).toBe(nextWorkspace)
+  expect(store.getPersonTask(1, first.task.id).workspace).toBe(selected)
+  expect(store.getPersonExecution(1, first.execution.id).workspace).toBe(selected)
+  expect(sessions.getSession(chat.session.id)?.workspace).toBe(selected)
+  expect((await create({ start: false })).task.workspace).toBe(nextWorkspace)
+  const next = await continuePersonTask(1, first.task.id, { input: [{ type: 'text', text: 'Continue' }], expected_revision: store.getPersonTask(1, first.task.id).revision, idempotency_key: 'workspace-follow-up' })
   await runner.tickPersonWork(); await wait(next.execution.id, 'finished')
   await delivery.deliverPersonResults(); delivery.finishPersonDelivery(1, next.execution.id, true)
-  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: chat.session.id, workspace: nextWorkspace })
+  expect(vi.mocked(runtime.execute).mock.calls[1][0]).toMatchObject({ sessionId: chat.session.id, workspace: selected })
   const at = Date.now() + 60_000
   schedules.applyPersonSchedule(1, { action: 'create', mode: 'worker', task_id: second.task.id, kind: 'once', expression: new Date(at).toISOString(), timezone: 'UTC', idempotency_key: 'workspace-schedule' })
   schedules.tickPersonSchedules(at)
   const occurrence = store.taskPersonExecutions(1, second.task.id)[0]
   await runner.tickPersonWork(); await wait(occurrence.id, 'finished')
-  expect(vi.mocked(runtime.execute).mock.calls[2][0].workspace).toBe(nextWorkspace)
-  expect((await personSnapshot(2, 'person-main-2')).session.workspace).not.toBe(nextWorkspace)
+  expect(vi.mocked(runtime.execute).mock.calls[2][0].workspace).toBe(selected)
+  expect((await personSnapshot(1, other.id)).settings.workspace).toBe(otherWorkspace)
 })
 
-it('restores a shared private workspace when the selected workspace is cleared', async () => {
-  const { configurePerson, personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
-  await expect(configurePerson(1, { workspace: '../relative', expected_revision: 1 })).rejects.toThrow('absolute')
-  await configurePerson(1, { workspace: '', expected_revision: 1 })
-  const snapshot = await personSnapshot(1, 'person-main-1')
-  const a = await create({ start: false }); const b = await create({ start: false })
-  expect(a.task.workspace).toBe(snapshot.session.workspace)
-  expect(b.task.workspace).toBe(a.task.workspace)
-  expect(existsSync(a.task.workspace)).toBe(true)
-  await expect(configurePerson(1, { workspace: dir, expected_revision: 1 })).rejects.toThrow('changed')
+it('rejects empty, missing and unscoped Bot directory changes without creating a replacement', async () => {
+  const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
+  await expect(configurePerson(1, { workspace: dir, expected_revision: 1 })).rejects.toThrow('session_id')
+  for (const workspace of ['', join(dir, 'missing')]) {
+    await expect(configurePerson(1, { session_id: 'person-main-1', workspace, expected_revision: 1 })).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
+  }
+  await expect(configurePerson(1, { session_id: 'person-main-1', workspace: '../relative', expected_revision: 1 })).rejects.toThrow('absolute')
+  expect(existsSync(join(dir, 'missing'))).toBe(false)
+  expect(store.personSettings(1).revision).toBe(1)
+  db.prepare('INSERT INTO person_conversation_settings VALUES(?,?,?)').run('person-main-1', 1, '{"workspace":null}')
+  expect(store.personSettings(1, 'person-main-1').settings.workspace).toBe('')
+  await expect(create()).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
+})
+
+it('fails a queued execution when its directory disappears instead of switching to the current Bot directory', async () => {
+  const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
+  const selected = join(dir, 'deleted'); mkdirSync(selected)
+  await configurePerson(1, { session_id: 'person-main-1', workspace: selected, expected_revision: 1 })
+  const task = await create()
+  rmSync(selected, { recursive: true })
+  await runner.tickPersonWork(); await wait(task.execution.id, 'failed')
+  expect(runtime.execute).not.toHaveBeenCalled()
+  expect(store.getPersonExecution(1, task.execution.id).error).toContain('Workspace directory is unavailable')
+  expect(existsSync(selected)).toBe(false)
+})
+
+it('aborts and records a directory error when a running worker loses its effective directory', async () => {
+  const { configurePerson } = await import('../../packages/server/src/modules/studio/services/person/service')
+  const selected = join(dir, 'lost-during-run'); mkdirSync(selected)
+  await configurePerson(1, { session_id: 'person-main-1', workspace: selected, expected_revision: 1 })
+  vi.mocked(runtime.execute).mockImplementation(async input => {
+    input.onEvent('run.started', {})
+    rmSync(selected, { recursive: true })
+    input.onEvent('tool.started', {})
+    expect(input.signal.aborted).toBe(true)
+    return { ok: true, output: 'late success' }
+  })
+  const task = await create()
+  await runner.tickPersonWork(); await wait(task.execution.id, 'failed')
+  expect(store.getPersonExecution(1, task.execution.id)).toMatchObject({ error: expect.stringContaining('Workspace directory is unavailable') })
+  expect(existsSync(selected)).toBe(false)
+})
+
+it('freezes an admitted legacy symlink execution root for callbacks and artifacts', async () => {
+  const original = join(dir, 'original'), replacement = join(dir, 'replacement'), alias = join(dir, 'legacy-link')
+  mkdirSync(original); mkdirSync(replacement)
+  symlinkSync(original, alias, process.platform === 'win32' ? 'junction' : 'dir')
+  const task = await create()
+  db.prepare('UPDATE person_executions SET workspace=? WHERE id=?').run(alias, task.execution.id)
+  vi.mocked(runtime.execute).mockImplementation(async input => {
+    expect(input.workspace).toBe(original)
+    input.onEvent('run.started', {})
+    writeFileSync(join(original, 'artifact.txt'), 'original result')
+    writeFileSync(join(replacement, 'artifact.txt'), 'wrong project')
+    unlinkSync(alias); symlinkSync(replacement, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    return { ok: true, output: 'artifact.txt' }
+  })
+  await runner.tickPersonWork(); await wait(task.execution.id, 'finished')
+  expect(store.getPersonExecution(1, task.execution.id).workspace).toBe(original)
+  const { readPersonArtifact } = await import('../../packages/server/src/modules/studio/services/person/tools')
+  expect(await readPersonArtifact(1, task.execution.id, 'artifact.txt')).toMatchObject({ content: 'original result' })
+  const { personTurnWorkspace } = await import('../../packages/server/src/modules/studio/services/person/workspace')
+  expect(personTurnWorkspace(1, 'person-main-1', { returnExecutionId: task.execution.id })).toBe(original)
 })
 
 it('atomically clears only Person history and tasks, retaining memory, preferences, ordinary chats and files', async () => {
@@ -1699,11 +1751,11 @@ describe('Person multi-conversation ownership', () => {
   it('refreshes the directory and current name on the next turn after create, rename and delete', async () => {
     const { createPersonConversation, deletePersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
     const { updateSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
-    const b = await createPersonConversation(1, '文案')
+    const b = await createPersonConversation(1, '文案', { workspace: dir })
     expect((await requestWithDirectory()).directory).toContainEqual({ id: b.id, title: '文案' })
     updateSession('person-main-1', { title: '老板' })
     updateSession(b.id, { title: '新的会话名' })
-    const c = await createPersonConversation(1, '程序员')
+    const c = await createPersonConversation(1, '程序员', { workspace: dir })
     const updated = await requestWithDirectory()
     expect(updated.directory).toEqual(expect.arrayContaining([
       { id: 'person-main-1', title: '老板' }, { id: b.id, title: '新的会话名' }, { id: c.id, title: '程序员' },
@@ -1717,7 +1769,7 @@ describe('Person multi-conversation ownership', () => {
 
   it('binds an implicit task destination before checking idempotent retries', async () => {
     const { createPersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
-    const b = await createPersonConversation(1, 'B')
+    const b = await createPersonConversation(1, 'B', { workspace: dir })
     const request = { action: 'create', title: 'Same request', goal: 'Do work', start: false, idempotency_key: 'same-key' }
     const origin = { sessionId: 'person-main-1', runId: 'A-run', messages: [] }
     const first = await tasks.applyPersonTask(1, request, undefined, origin)
@@ -1731,7 +1783,7 @@ describe('Person multi-conversation ownership', () => {
     const { beginPersonSessionDeletion } = await import('../../packages/server/src/modules/studio/repositories/person-session-store')
     const { clearPerson } = await import('../../packages/server/src/modules/studio/services/person/history')
     const { addMessage, getSessionDetail } = await import('../../packages/server/src/modules/studio/repositories/session-store')
-    const b = await createPersonConversation(1, 'B')
+    const b = await createPersonConversation(1, 'B', { workspace: dir })
     addMessage({ session_id: 'person-main-1', role: 'user', content: 'Keep A' })
     addMessage({ session_id: b.id, role: 'user', content: 'Clear B' })
     mainBusy = 'person-main-1'
@@ -1748,8 +1800,8 @@ describe('Person multi-conversation ownership', () => {
     const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
     const { createSession, addMessage } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     expect((await personSnapshot(1)).session).toBeNull()
-    const a = await createPersonConversation(1, '研发')
-    const b = await createPersonConversation(1, '旅行')
+    const a = await createPersonConversation(1, '研发', { workspace: dir })
+    const b = await createPersonConversation(1, '旅行', { workspace: dir })
     expect(a.id).not.toBe(b.id)
     expect(a.id).toMatch(/^person-main-[a-f0-9-]{36}$/)
     expect(a.bot_type).toBe('zhezhe')
@@ -1760,7 +1812,7 @@ describe('Person multi-conversation ownership', () => {
     expect(personConversations(1, 'NEEDLE-MULTI').sessions.map(session => session.id)).toEqual([b.id])
     expect((await personSnapshot(1, a.id)).settings.agents).toEqual((await personSnapshot(1, b.id)).settings.agents)
     expect(personConversations(2, 'NEEDLE-MULTI').sessions.map(session => session.id)).toEqual(['person-main-2'])
-    await expect(createPersonConversation(1, '  ')).rejects.toThrow('conversation name')
+    await expect(createPersonConversation(1, '  ', { workspace: dir })).rejects.toThrow('conversation name')
   })
 
   it('rejects duplicate BOT names across all owned pages and concurrent creates', async () => {
@@ -1768,11 +1820,11 @@ describe('Person multi-conversation ownership', () => {
     const { createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     for (let i = 0; i < 55; i++) createSession({ id: `person-main-page-${i}`, studio_user_id: 1, title: `Bot ${i}` })
     const count = db.prepare('SELECT COUNT(*) AS n FROM sessions').get()!.n
-    await expect(createPersonConversation(1, '  ＢＯＴ ０  ')).rejects.toMatchObject({ status: 409, code: 'PERSON_BOT_NAME_EXISTS' })
+    await expect(createPersonConversation(1, '  ＢＯＴ ０  ', { workspace: dir })).rejects.toMatchObject({ status: 409, code: 'PERSON_BOT_NAME_EXISTS' })
     expect(db.prepare('SELECT COUNT(*) AS n FROM sessions').get()!.n).toBe(count)
-    await expect(createPersonConversation(2, 'Bot 0')).resolves.toMatchObject({ title: 'Bot 0' })
+    await expect(createPersonConversation(2, 'Bot 0', { workspace: dir })).resolves.toMatchObject({ title: 'Bot 0' })
     createSession({ id: 'ordinary-same-name', studio_user_id: 1, title: 'Helper' })
-    const results = await Promise.allSettled([createPersonConversation(1, 'Helper'), createPersonConversation(1, 'helper')])
+    const results = await Promise.allSettled([createPersonConversation(1, 'Helper', { workspace: dir }), createPersonConversation(1, 'helper', { workspace: dir })])
     expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { status: 409, code: 'PERSON_BOT_NAME_EXISTS' } })
     const { conversationCreate } = await import('../../packages/server/src/modules/studio/controllers/person')
@@ -1781,35 +1833,27 @@ describe('Person multi-conversation ownership', () => {
     expect(ctx).toMatchObject({ status: 409, body: { code: 'PERSON_BOT_NAME_EXISTS' } })
   })
 
-  it('commits a selected shared workspace with creation and rejects stale or busy changes', async () => {
+  it('creates a Bot with its chosen directory without changing another busy Bot', async () => {
     const { createPersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
-    const { getSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     const old = store.personSettings(1)
-    const workspace = join(dir, 'chosen')
+    const workspace = join(dir, 'chosen'); mkdirSync(workspace)
+    const task = await create()
+    mainBusy = 'person-main-1'
     const created = await createPersonConversation(1, 'Workspace bot', { workspace, expected_revision: old.revision })
     expect(created.workspace).toBe(workspace)
-    expect(store.personSettings(1)).toMatchObject({ settings: { workspace }, revision: old.revision + 1 })
-    expect(getSession('person-main-1')?.workspace).toBe(workspace)
-    expect(existsSync(workspace)).toBe(true)
-    const before = db.prepare('SELECT id,workspace FROM sessions ORDER BY id').all()
-    await expect(createPersonConversation(1, 'Stale', { workspace: dir, expected_revision: old.revision })).rejects.toThrow('Settings changed')
-    await expect(createPersonConversation(1, 'Relative', { workspace: 'relative' })).rejects.toThrow('absolute')
-    mainBusy = true
-    await expect(createPersonConversation(1, 'Busy', { workspace: dir, expected_revision: old.revision + 1 })).rejects.toThrow('Wait for Person')
-    mainBusy = false
-    await expect(createPersonConversation(1, 'workspace bot', { workspace: dir, expected_revision: old.revision + 1 })).rejects.toMatchObject({ code: 'PERSON_BOT_NAME_EXISTS' })
-    expect(db.prepare('SELECT id,workspace FROM sessions ORDER BY id').all()).toEqual(before)
-    expect(store.personSettings(1).settings.workspace).toBe(workspace)
-    const task = await create()
-    await expect(createPersonConversation(1, 'Pending task', { workspace: dir, expected_revision: old.revision + 1 })).rejects.toThrow('Wait for Person')
-    expect(store.getPersonTask(1, task.task.id).workspace).toBe(workspace)
+    expect(store.personSettings(1)).toEqual(old)
+    expect(store.getPersonTask(1, task.task.id).workspace).toBe(dir)
+    await expect(createPersonConversation(1, 'Stale', { workspace, expected_revision: old.revision - 1 })).rejects.toThrow('Settings changed')
+    await expect(createPersonConversation(1, 'Missing', { workspace: join(dir, 'missing') })).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
+    await expect(createPersonConversation(1, 'Not selected')).rejects.toMatchObject({ code: 'BOT_WORKSPACE_REQUIRED' })
+    expect(existsSync(join(dir, 'missing'))).toBe(false)
   })
 
   it('creates and reloads every supplied character without coupling its identity to the conversation name', async () => {
     const { createPersonConversation, personConversations } = await import('../../packages/server/src/modules/studio/services/person/conversations')
     const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
     for (const bot of PERSON_BOTS) {
-      const created = await createPersonConversation(1, `My ${bot.type} companion`, { bot_type: bot.type })
+      const created = await createPersonConversation(1, `My ${bot.type} companion`, { workspace: dir, bot_type: bot.type })
       expect(created.bot_type).toBe(bot.type)
       expect((await personSnapshot(1, created.id)).session?.bot_type).toBe(bot.type)
       expect(personConversations(1).sessions.find(session => session.id === created.id)?.bot_type).toBe(bot.type)
@@ -1821,14 +1865,14 @@ describe('Person multi-conversation ownership', () => {
     const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
     catalog[0].models.push('m2')
     const before = store.personSettings(1, 'person-main-1')
-    const created = await createPersonConversation(1, '我的旅行搭子', { bot_type: 'zhezhe', model: { profile: 'default', provider: 'test', model: 'm2' }, reasoning_effort: 'high' })
+    const created = await createPersonConversation(1, '我的旅行搭子', { workspace: dir, bot_type: 'zhezhe', model: { profile: 'default', provider: 'test', model: 'm2' }, reasoning_effort: 'high' })
     expect(created).toMatchObject({ title: '我的旅行搭子', bot_type: 'zhezhe', model: 'm2', reasoning_effort: 'high' })
     expect(personConversations(1).sessions.find(session => session.id === created.id)?.bot_type).toBe('zhezhe')
     expect((await personSnapshot(1, created.id)).settings.model?.model).toBe('m2')
     expect(store.personSettings(1, 'person-main-1')).toEqual(before)
     const count = personConversations(1).sessions.length
     for (const input of [{ bot_type: 'unknown' }, { model: { profile: 'default', provider: 'test', model: 'missing' } }, { reasoning_effort: 'invalid' }]) {
-      await expect(createPersonConversation(1, 'Invalid', input)).rejects.toThrow()
+      await expect(createPersonConversation(1, 'Invalid', { workspace: dir, ...input })).rejects.toThrow()
     }
     expect(personConversations(1).sessions).toHaveLength(count)
   })
@@ -1852,8 +1896,8 @@ describe('Person multi-conversation ownership', () => {
     const { personTools } = await import('../../packages/server/src/modules/studio/services/person/tools')
     const { continuePersonTask } = await import('../../packages/server/src/modules/studio/services/person/task-chat')
     const delivery = await import('../../packages/server/src/modules/studio/services/person/delivery')
-    const a = await createPersonConversation(1, 'A')
-    const b = await createPersonConversation(1, 'B')
+    const a = await createPersonConversation(1, 'A', { workspace: dir })
+    const b = await createPersonConversation(1, 'B', { workspace: dir })
     const origin = { sessionId: a.id, runId: 'from-A', messages: [{ role: 'user' as const, content: '让 B 做报告' }] }
     const toolset = personTools(1, 'main', undefined, a.id)
     const sessions: any = await toolset.find(tool => tool.name === 'bot_sessions_query')!.execute({ search: 'B' })
@@ -1888,8 +1932,8 @@ describe('Person multi-conversation ownership', () => {
     const { getSession, addMessage } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     const { personMemory, personMemories } = await import('../../packages/server/src/modules/studio/services/person/memory')
     const { createPersonContext } = await import('../../packages/server/src/modules/studio/services/person/context')
-    const a = await createPersonConversation(1, 'A')
-    const b = await createPersonConversation(1, 'B')
+    const a = await createPersonConversation(1, 'A', { workspace: dir })
+    const b = await createPersonConversation(1, 'B', { workspace: dir })
     addMessage({ session_id: b.id, role: 'user', content: 'B-only old topic' })
     const context = createPersonContext(1, a.id, 16000)
     const account = personMemory(1)
@@ -1911,7 +1955,7 @@ describe('Person multi-conversation ownership', () => {
   it('waits for native stop before deleting running work and rejects dispatch into a deleting conversation', async () => {
     const { createPersonConversation, deletePersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
     const { getSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
-    const b = await createPersonConversation(1, 'Running B')
+    const b = await createPersonConversation(1, 'Running B', { workspace: dir })
     let acknowledge!: () => void
     runtime.stop = vi.fn(() => new Promise<void>(resolve => { acknowledge = resolve }))
     runtime.execute = vi.fn(input => new Promise(resolve => input.signal.addEventListener('abort', () => resolve({ ok: true, output: 'Late output must be ignored' }), { once: true })))
@@ -1931,7 +1975,7 @@ describe('Person multi-conversation ownership', () => {
     const { createPersonConversation, deletePersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
     const { getSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     const { requirePersonSession } = await import('../../packages/server/src/modules/studio/repositories/person-session-store')
-    const b = await createPersonConversation(1, 'Retry B')
+    const b = await createPersonConversation(1, 'Retry B', { workspace: dir })
     const { task, execution } = await create({ session_id: b.id })
     db.prepare("UPDATE person_executions SET state='running',generation=1 WHERE id=?").run(execution.id)
     vi.mocked(runtime.stop).mockRejectedValueOnce(new Error('Native stop unavailable'))
@@ -1960,7 +2004,9 @@ describe('legacy Person planned role flow', () => {
   async function fixture() {
     const { createPersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
     const { personTools } = await import('../../packages/server/src/modules/studio/services/person/tools')
-    const b = await createPersonConversation(1, '文案'), c = await createPersonConversation(1, '程序员')
+    const bRoot = join(dir, 'copy-root'), cRoot = join(dir, 'code-root')
+    mkdirSync(bRoot); mkdirSync(cRoot)
+    const b = await createPersonConversation(1, '文案', { workspace: bRoot }), c = await createPersonConversation(1, '程序员', { workspace: cRoot })
     const role = (id: string, executionId?: string) => {
       const tools = personTools(1, 'main', undefined, id)
       const origin = { sessionId: id, runId: `role-${id}`, messages: [{ role: 'user' as const, content: '按保存的流程处理同一份成果' }], ...(executionId ? { returnExecutionId: executionId } : {}) }
@@ -1986,6 +2032,9 @@ describe('legacy Person planned role flow', () => {
     let executionId = created.execution.id
     for (const [index, current, target] of [[0, b.id, c.id], [1, c.id, 'person-main-1'], [2, 'person-main-1', null]] as const) {
       await runner.tickPersonWork(); await wait(executionId, 'finished')
+      expect(store.getPersonExecution(1, executionId).workspace).toBe(b.workspace)
+      expect(vi.mocked(runtime.execute).mock.calls.at(-1)![0].workspace).toBe(b.workspace)
+      expect(store.personSettings(1, c.id).settings.workspace).toBe(c.workspace)
       expect(store.getPersonTask(1, taskId).status).toBe('open')
       await delivery.deliverPersonResults()
       expect(vi.mocked(runtime.deliver).mock.calls.at(-1)![0]).toMatchObject({ origin: { sessionId: current }, flow: { index, next_session_id: target }, returnExpectation: expect.any(String) })
@@ -2499,6 +2548,8 @@ describe('Person task loading reads', () => {
   it('reads an effective snapshot with SQLite writes disabled and synchronizes only changed run metadata', async () => {
     const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
     const { ensurePersonSession } = await import('../../packages/server/src/modules/studio/services/person/chat-agent')
+    const current = store.personSettings(1, 'person-main-1')
+    store.savePersonSettings(1, current.settings, current.revision, undefined, 'person-main-1')
     db.prepare("UPDATE sessions SET model='old',provider='old',workspace='/old' WHERE id='person-main-1'").run()
     const stored = db.prepare("SELECT * FROM sessions WHERE id='person-main-1'").get()
     const changes = () => Number(db.prepare('SELECT total_changes() AS n').get()!.n)
@@ -2572,7 +2623,7 @@ describe('Person protocol selection', () => {
   it('preserves the selected protocol when creating a BOT and follows defaults on reset', async () => {
     const { createPersonConversation } = await import('../../packages/server/src/modules/studio/services/person/conversations')
     const { configurePerson, personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')
-    const session = await createPersonConversation(1, 'Protocol BOT', { model: { ...selection, apiMode: 'codex_responses' } })
+    const session = await createPersonConversation(1, 'Protocol BOT', { workspace: dir, model: { ...selection, apiMode: 'codex_responses' } })
     expect((await personSnapshot(1, session.id)).settings.model?.apiMode).toBe('codex_responses')
     await configurePerson(1, { session_id: session.id, use_global_default: true, expected_revision: store.personSettings(1).revision })
     expect((await personSnapshot(1, session.id)).settings.model?.apiMode).toBe('chat_completions')

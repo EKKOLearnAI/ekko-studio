@@ -66,6 +66,8 @@ export interface PersonTask {
   pending_count?: number
 }
 export interface PersonExecution {
+  /** Fixed at admission; Bot settings and role transfers never rewrite this path. */
+  workspace: string
   id: string; task_id: string; owner_user_id: number; requirements_revision: number
   state: PersonRunState; input_json: string; session_id: string; selection_json: string; output: string
   error: string; generation: number

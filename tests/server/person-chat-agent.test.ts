@@ -26,6 +26,24 @@ describe('Person agent in the shared chat runtime', () => {
     expect(prompt).not.toContain('Use terminal_exec')
     expect(prompt).not.toContain('## Command Environment')
     expect(prompt).not.toContain('use code_exec')
+    expect(prompt).toContain('/tmp/person-test')
+  })
+  it('injects only the effective workspace even when a caller supplies a stale tool context', async () => {
+    const requests: ModelRequest[] = []
+    const client: ModelClient = {
+      provider: 'test', capabilities: { streaming: true, tools: true, vision: false, jsonMode: false, systemPrompt: true },
+      create: vi.fn(async () => ({ content: '' })),
+      async *stream(request) { requests.push(request); yield { type: 'done', response: { content: 'Done' } } },
+    }
+    const agent = createPersonAgent({ workspace: '/project/effective', selection: { runtime: 'ekko', mode: 'scoped', profile: 'default', provider: 'test', model: 'm' },
+      contextTokens: 8000, maxSteps: 3, systemPrompt: 'You are Person', tools: [] })
+    await agent.run({ messages: [{ role: 'user', content: 'Work' }], modelClient: client,
+      toolContext: { cwd: '/bot/default', workspaceRoot: '/other/bot', workspaceId: '/stale/id' } })
+    const prompt = requests[0].messages.filter(message => message.role === 'system').map(message => message.content).join('\n')
+    expect(prompt).toContain('/project/effective')
+    expect(prompt).not.toContain('/bot/default')
+    expect(prompt).not.toContain('/other/bot')
+    expect(prompt).not.toContain('/stale/id')
   })
   it('captures the initiating turn before task creation and forwards the runtime origin', async () => {
     const execute = vi.fn(async () => ({ execution: { state: 'queued' } }))

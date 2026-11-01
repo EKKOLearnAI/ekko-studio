@@ -80,7 +80,8 @@ export function createPersonAgent(options: PersonChatAgentOptions) {
       recallScopes: options.memory.identity.recallScopes, writeScopes: options.memory.identity.writeScopes,
       defaultWriteScope: options.memory.identity.defaultWriteScope,
     } : undefined,
-    toolContext: options.memory ? { ...input.toolContext, sessionId: options.memory.identity.sessionId, profileId: options.memory.identity.profileId } : input.toolContext,
+    toolContext: { ...input.toolContext, cwd: options.workspace, workspaceRoot: options.workspace, workspaceId: options.workspace,
+      ...(options.memory ? { sessionId: options.memory.identity.sessionId, profileId: options.memory.identity.profileId } : {}) },
     skillReviewEnabled: false, backgroundDelegationEnabled: false,
     ephemeralContext: true, contextKey: undefined,
   })

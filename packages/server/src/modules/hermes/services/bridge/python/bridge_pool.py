@@ -50,6 +50,11 @@ CLARIFY_TIMEOUT_SECONDS = 300
 
 def _bind_session_workspace_cwd(session_id: str, workspace: str | None) -> bool:
     workspace_cwd = str(workspace or "").strip()
+    required = session_id.startswith("person-task-")
+    if required and (not workspace_cwd or not os.path.isabs(workspace_cwd)
+                     or not os.path.isdir(workspace_cwd)
+                     or not os.access(workspace_cwd, os.R_OK | os.W_OK | os.X_OK)):
+        raise RuntimeError(f"Workspace directory is unavailable: {workspace_cwd or '(not selected)'}")
     if not workspace_cwd:
         return False
     bound = False
@@ -63,8 +68,12 @@ def _bind_session_workspace_cwd(session_id: str, workspace: str | None) -> bool:
 
             register_task_env_overrides(session_id, {"cwd": workspace_cwd})
         except Exception:
-            pass
+            if required:
+                raise
     except Exception:
+        if required:
+            _clear_session_workspace_cwd()
+            raise RuntimeError("Hermes runtime cannot bind the required Person workspace")
         return bound
     return bound
 
