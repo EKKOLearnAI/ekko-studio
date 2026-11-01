@@ -14,8 +14,8 @@ describe('packaged desktop update source', () => {
 
   it('preserves production primary and fallback feeds for normal packages', () => {
     expect(resolveDesktopUpdateSource({ name: 'hermes-studio', version: '1.0.0' })).toEqual({
-      channel: 'stable', url: 'https://download.ekkolearnai.com/latest',
-      fallbackUrl: 'https://github.com/EKKOLearnAI/ekko-studio/releases/latest/download',
+      channel: 'stable', url: 'https://download.ekkolearnai.com/latest/',
+      fallbackUrl: 'https://github.com/EKKOLearnAI/ekko-studio/releases/latest/download/',
     })
   })
 

@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const PRIMARY_FEED = 'https://download.ekkolearnai.com/latest'
-const FALLBACK_FEED = 'https://github.com/EKKOLearnAI/ekko-studio/releases/latest/download'
+const PRIMARY_FEED = 'https://download.ekkolearnai.com/latest/'
+const FALLBACK_FEED = 'https://github.com/EKKOLearnAI/ekko-studio/releases/latest/download/'
 
 export function desktopUpdateChannel(platform = process.platform, arch = process.arch): string {
   return platform === 'win32' && arch === 'arm64' ? 'latest-arm64' : 'latest'
