@@ -99,6 +99,12 @@ describe('native session goal queries', () => {
     expect(reader).toHaveBeenCalledWith()
   })
 
+  it('documents on the tool schema that a new goal omits id', () => {
+    const definition = new UpdateSessionTasksTool().definition
+    const idSchema = (definition.parameters.properties.changes.items as any).properties.id
+    expect(idSchema.description).toContain('Omit it to create a new goal')
+  })
+
   it('exposes closed goals to the model while keeping closed out of model writes', async () => {
     const ledger = snapshot()
     ledger.tasks[0].status = 'closed'
@@ -145,6 +151,7 @@ describe('native session goal queries', () => {
         expect(request.tools?.some(tool => tool.name === 'update_plan')).toBe(true)
         expect(request.messages[0].content).toContain('## Session Goals')
         expect(request.messages[0].content).toContain('At the beginning of every turn')
+        expect(request.messages[0].content).toContain('Create a new goal without id')
         return calls % 2 ? { content: '', toolCalls: [{ id: `goals-${calls}`, name: 'list_session_tasks', arguments: {} }] }
           : { content: 'The session has one unfinished goal.' }
       }),
