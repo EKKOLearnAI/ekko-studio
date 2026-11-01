@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
+import { join } from 'node:path'
 
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ getWebUiHome: () => '/state' }))
 import { initPersonWorkspaceBindings } from '../../packages/server/src/modules/studio/infrastructure/database/person-workspace-schema'
@@ -29,7 +30,7 @@ it('preserves legacy Bot settings and historical execution roots without moving 
   const local = (id: string) => JSON.parse(String(db.prepare('SELECT settings_json FROM person_conversation_settings WHERE session_id=?').get(id)!.settings_json))
   expect(local('person-main-a')).toEqual({ model: { model: 'm' }, reasoningEffort: 'high', workspace: '/legacy/session' })
   expect(local('person-main-b').workspace).toBe('/legacy/account')
-  expect(local('person-main-c').workspace).toBe('/state/person/2/workspace')
+  expect(local('person-main-c').workspace).toBe(join('/state', 'person', '2', 'workspace'))
   expect(db.prepare('SELECT workspace FROM person_executions ORDER BY id').all()).toEqual([{ workspace: '/historical/execution' }, { workspace: '/legacy/task' }])
   expect(db.prepare('SELECT workspace FROM person_flows').get()).toEqual({ workspace: '/legacy/account' })
   db.prepare('UPDATE sessions SET workspace=? WHERE id=?').run('/temporary/cooperation', 'person-main-a')

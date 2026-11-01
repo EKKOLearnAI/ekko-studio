@@ -11,7 +11,7 @@ function root() { const dir = realpathSync(mkdtempSync(join(tmpdir(), 'person-di
 
 it('canonicalizes a selected directory and rejects missing, empty, relative and file paths without fallback or mkdir', () => {
   const dir = root(), alias = join(dir, 'alias'), selected = join(dir, 'selected'), file = join(dir, 'file')
-  mkdirSync(selected); symlinkSync(selected, alias, 'dir'); writeFileSync(file, 'data')
+  mkdirSync(selected); symlinkSync(selected, alias, process.platform === 'win32' ? 'junction' : 'dir'); writeFileSync(file, 'data')
   expect(requireExistingWorkspaceDirectory(alias)).toBe(selected)
   for (const value of ['', 'relative', file, join(dir, 'missing')]) {
     expect(() => requireExistingWorkspaceDirectory(value)).toThrow('Workspace directory is unavailable')
