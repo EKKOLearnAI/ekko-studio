@@ -606,6 +606,62 @@ test('Person previews task files with the task session and leaves the main conve
   expect(requests.filter(request => request.endpoint === 'list').every(request => request.sessionId === 'person-task-task1')).toBe(true)
 })
 
+for (const [width, mode] of [[1440, 'light'], [900, 'dark'], [390, 'dark']] as const) {
+  test(`Person opens tools from the expanded Agent task conversation at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    await installDesktopBridge(page, 'darwin', true)
+    const { state } = await setup(page, mode, mode === 'dark', mode === 'dark')
+    state.tasks[0].selection_json = JSON.stringify({ runtime: 'codex', profile: 'default' })
+    const requests = await mockPersonWorkspace(page)
+    await mockTerminalWebSocket(page)
+    await page.addInitScript(() => {
+      (window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1'] = {
+        session_id: 'person-task-task1', messages: [
+          { id: 'task-output', role: 'assistant', content: 'Task conversation remains visible.', timestamp: 1 },
+        ], isWorking: true, events: [],
+      }
+    })
+    await page.goto('/#/person?session=person-main-1')
+    await backgroundTaskCount(page, 1)
+    const island = page.locator('.person-task-island')
+    await island.locator('.person-task-island__toggle').click()
+    const taskButton = island.getByRole('button', { name: 'Check report', exact: true })
+    await expect(taskButton.getByRole('img', { name: 'Codex', exact: true })).toHaveAttribute('src', '/coding-agents/codex-openai.png')
+    await taskButton.click()
+
+    const task = page.locator('.person-task-chat')
+    const toggle = task.getByRole('button', { name: 'Side panel', exact: true })
+    await expect(toggle).toBeEnabled()
+    const original = (await task.locator('.task-chat-main').boundingBox())!
+    await toggle.click()
+    const tools = task.locator('.person-tools-panel')
+    await expect(tools.locator('.file-tree')).toBeVisible()
+    expect(requests.filter(request => request.endpoint === 'list').every(request => request.sessionId === 'person-task-task1')).toBe(true)
+    const panelBounds = (await tools.boundingBox())!
+    const layoutBounds = (await task.locator('.task-chat-layout').boundingBox())!
+    expect(Math.abs(panelBounds.y - layoutBounds.y)).toBeLessThan(2)
+    expect(Math.abs(panelBounds.height - layoutBounds.height)).toBeLessThan(2)
+    if (width > 768) {
+      const chatBounds = (await task.locator('.task-chat-main').boundingBox())!
+      expect(chatBounds.x + chatBounds.width).toBeLessThanOrEqual(panelBounds.x + 1)
+      expect(chatBounds.width).toBeLessThan(original.width - 100)
+      await expect(task.getByText('Task conversation remains visible.', { exact: true })).toBeVisible()
+    }
+    await tools.getByRole('tab', { name: 'Terminal', exact: true }).click()
+    await expect(tools.getByRole('button', { name: 'zsh #1', exact: true })).toBeVisible()
+    await tools.getByRole('tab', { name: 'Browser', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => (window as any).__PW_DESKTOP_BROWSER__.viewportCalls.at(-1)?.visible)).toBe(true)
+    await expect(page.locator('.person-tools-panel')).toHaveCount(1)
+    await page.screenshot({ path: testInfo.outputPath('expanded-agent-task-tools.png'), animations: 'disabled' })
+    await tools.locator('.person-tools-close').click()
+    await expect(tools).toHaveCount(0)
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(task.locator('.input-textarea')).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    expect(await page.evaluate(() => localStorage.getItem('hermes_active_session_default'))).toBe('person-main-1')
+  })
+}
+
 test('Person retains workspace attachments and unsaved edits when returning to the conversation', async ({ page }) => {
   const { state } = await setup(page, 'light', false, false)
   state.tasks = []
@@ -2150,11 +2206,13 @@ for (const [width, mode] of [[1440, 'light'], [390, 'dark']] as const) {
     await page.getByRole('button', { name: 'Tasks', exact: true }).click()
     const drawer = page.locator('.session-tasks-drawer')
     await expect(drawer.locator('.task-row')).toHaveCount(3)
+    await expect(drawer.locator('.task-count')).toHaveText('3')
     for (const [runtime, label, asset] of [['hermes', 'Hermes', 'hermes.png'], ['ekko', 'Ekko', 'ekko-agent.png'], ['claude-code', 'Claude', 'claude-code.svg']]) {
       const row = drawer.locator('.task-row').filter({ hasText: `Work by ${runtime}` })
       const source = row.locator(width === 390 ? '.mobile-source' : '.source-session')
       if (width === 1440) await expect(source).toContainText(label)
       await expect(source.locator('img')).toHaveAttribute('src', `/coding-agents/${asset}`)
+      await expect(row.locator('.task-title img')).toHaveAttribute('src', `/coding-agents/${asset}`)
       await expect.poll(() => source.locator('img').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true)
     }
     await page.screenshot({ path: `/tmp/person-task-agent-avatars-${width}.png`, animations: 'disabled' })
