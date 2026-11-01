@@ -3,7 +3,7 @@ import { manageModelApiCloudLink } from '../services/model-api/cloud-link'
 import { Readable } from 'node:stream'
 import type { Context } from 'koa'
 import { listProfileNamesFromDisk } from '../public/profile-config'
-import { listApiModels, prepareModelResponse } from '../services/model-api/service'
+import { listApiModels, prepareChatCompletion, prepareModelResponse } from '../services/model-api/service'
 import { ModelApiError, modelApiErrorBody } from '../services/model-api/errors'
 import { listModelApiKeys, revokeModelApiKey } from '../services/model-api/keys'
 import { createAccountModelApiKey, editAccountModelApiKey } from '../services/model-api/key-management'
@@ -74,6 +74,46 @@ export async function modelApiResponses(ctx: Context) {
       try {
         for await (const event of request.events()) yield `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
       } finally {
+        abort.abort()
+        ctx.res.off('close', onClose)
+      }
+    })())
+  } catch (error) {
+    const result = modelApiErrorBody(error)
+    ctx.status = result.status; ctx.body = result.body
+  } finally {
+    if (!streaming) ctx.res.off('close', onClose)
+  }
+}
+
+export async function modelApiChatCompletions(ctx: Context) {
+  const abort = new AbortController()
+  const onClose = () => { if (!ctx.res.writableEnded) abort.abort() }
+  ctx.res.once('close', onClose)
+  let streaming = false
+  try {
+    const request = await prepareChatCompletion({
+      onUsage: claimCloudUsageReceipt(ctx.get('x-studio-cloud-usage'), ctx.state.user?.id, ctx.state.modelApiKey?.id),
+      profiles: profilesForRequest(ctx), accountId: ctx.state.user ? String(ctx.state.user.id) : undefined,
+      allowedModels: ctx.state.modelApiKey?.models,
+      apiKeyId: ctx.state.modelApiKey?.id,
+      body: ctx.request.body, signal: abort.signal,
+    })
+    ctx.set('x-request-id', request.id)
+    if (!request.stream) { ctx.body = await request.create(); return }
+    ctx.set('Content-Type', 'text/event-stream; charset=utf-8')
+    ctx.set('Cache-Control', 'no-cache')
+    ctx.set('X-Accel-Buffering', 'no')
+    streaming = true
+    const signal = abort.signal
+    ctx.body = Readable.from((async function* () {
+      try {
+        for await (const chunk of request.chunks()) yield `data: ${JSON.stringify(chunk)}\n\n`
+      } catch (error) {
+        // Headers are already sent, so a provider failure becomes an SSE error frame.
+        if (!signal.aborted) yield `data: ${JSON.stringify(modelApiErrorBody(error).body)}\n\n`
+      } finally {
+        yield 'data: [DONE]\n\n'
         abort.abort()
         ctx.res.off('close', onClose)
       }

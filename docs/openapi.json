@@ -138,7 +138,7 @@
     },
     {
       "name": "Model API",
-      "description": "OpenAI Responses-compatible inference across configured providers; external usage accounting"
+      "description": "OpenAI Responses and Chat Completions inference across configured providers; external usage accounting"
     },
     {
       "name": "Session Shares",
@@ -4125,6 +4125,65 @@
         }
       }
     },
+    "/api/ekko-studio/models/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Request a configured model using OpenAI Chat Completions format",
+        "description": "OpenAI Chat Completions inference for clients that do not speak Responses (Cline, Continue, the OpenAI SDKs). Same unified catalog, Model API key budget, allowed-model scope, external usage accounting and error codes as POST /responses. Supports JSON and SSE, function calling in the OpenAI shape, base64 image inputs and reasoning_content passthrough. Rejects n>1, logprobs, stop, structured response_format, audio/modalities, legacy functions, named tool_choice and strict tool schemas instead of approximating them. See docs/model-api.md for the supported subset.",
+        "operationId": "modelApiChatCompletions",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or unsupported Responses feature"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "499": {
+            "description": "Caller disconnected before the provider answered (request_cancelled)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed; code is provider_rate_limited, provider_unauthorized, provider_unavailable, provider_rejected_request, provider_unreachable, provider_tls_error or provider_request_failed"
+          },
+          "504": {
+            "description": "Upstream model provider did not answer within the configured timeout (provider_timeout)"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ekko-studio/models/v1/models": {
       "get": {
         "tags": [
@@ -4203,11 +4262,17 @@
           "429": {
             "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
           },
+          "499": {
+            "description": "Caller disconnected before the provider answered (request_cancelled)"
+          },
           "501": {
             "description": "Provider requires an unsupported direct-request runtime"
           },
           "502": {
-            "description": "Upstream model request failed"
+            "description": "Upstream model request failed; code is provider_rate_limited, provider_unauthorized, provider_unavailable, provider_rejected_request, provider_unreachable, provider_tls_error or provider_request_failed"
+          },
+          "504": {
+            "description": "Upstream model provider did not answer within the configured timeout (provider_timeout)"
           }
         },
         "parameters": []
@@ -4300,11 +4365,17 @@
           "429": {
             "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
           },
+          "499": {
+            "description": "Caller disconnected before the provider answered (request_cancelled)"
+          },
           "501": {
             "description": "Provider requires an unsupported direct-request runtime"
           },
           "502": {
-            "description": "Upstream model request failed"
+            "description": "Upstream model request failed; code is provider_rate_limited, provider_unauthorized, provider_unavailable, provider_rejected_request, provider_unreachable, provider_tls_error or provider_request_failed"
+          },
+          "504": {
+            "description": "Upstream model provider did not answer within the configured timeout (provider_timeout)"
           }
         },
         "requestBody": {

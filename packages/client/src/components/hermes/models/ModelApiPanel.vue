@@ -63,7 +63,24 @@ const modelOptions = computed(() => models.value.map(model => ({
   value: model.id, disabled: !model.responses_supported,
 })))
 const availableCount = computed(() => models.value.filter(model => model.responses_supported).length)
-const example = computed(() => `from openai import OpenAI
+const protocol = ref<'chat' | 'responses'>('chat')
+const protocolOptions = computed(() => [
+  { label: t('modelApi.protocolChat'), value: 'chat' },
+  { label: t('modelApi.protocolResponses'), value: 'responses' },
+])
+const example = computed(() => protocol.value === 'chat'
+  ? `from openai import OpenAI
+
+client = OpenAI(
+    base_url=${JSON.stringify(baseUrl.value)},
+    api_key="YOUR_MODEL_API_KEY",
+)
+reply = client.chat.completions.create(
+    model=${JSON.stringify(selectedModel.value || 'provider/model')},
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(reply.choices[0].message.content)`
+  : `from openai import OpenAI
 
 client = OpenAI(
     base_url=${JSON.stringify(baseUrl.value)},
@@ -192,7 +209,7 @@ async function copy(value: string) {
               <NPopconfirm @positive-click="changeCloudLink('revoke')"><template #trigger><NButton :disabled="cloudBusy">{{ t('modelApi.revokeCloudLink') }}</NButton></template>{{ t('modelApi.cloudRevokeHint') }}</NPopconfirm>
             </template>
           </div>
-          <dl class="endpoints"><dt>GET</dt><dd>/models</dd><dt>POST</dt><dd>/responses</dd></dl>
+          <dl class="endpoints"><dt>GET</dt><dd>/models</dd><dt>POST</dt><dd>/responses</dd><dt>POST</dt><dd>/chat/completions</dd></dl>
         </section>
 
         <section class="api-card" data-theme-surface="card">
@@ -235,10 +252,12 @@ async function copy(value: string) {
           <div v-if="selectedModel" class="model-id"><code>{{ selectedModel }}</code><NButton size="small" @click="copy(selectedModel)">{{ t('modelApi.copyModel') }}</NButton></div>
           <NEmpty v-if="!loading && !catalogError && !models.length" :description="t('modelApi.noModels')" size="small" />
           <template v-if="selectedModel">
+            <p class="field-label">{{ t('modelApi.protocol') }}</p>
+            <NSelect v-model:value="protocol" :options="protocolOptions" class="protocol-select" :aria-label="t('modelApi.protocol')" />
             <div class="example-heading"><h4>{{ t('modelApi.example') }}</h4><NButton size="small" @click="copy(example)">{{ t('common.copy') }}</NButton></div>
             <pre class="request-example"><code>{{ example }}</code></pre>
           </template>
-          <p class="hint">{{ t('modelApi.historyHint') }}</p>
+          <p class="hint">{{ t(protocol === 'responses' ? 'modelApi.historyHint' : 'modelApi.chatHint') }}</p>
         </section>
 
         <section class="api-card" data-theme-surface="card">
@@ -282,6 +301,7 @@ h4 { font-size: var(--font-size-base, 14px); }
 .key-info { min-width: 0; overflow-wrap: anywhere; }
 .key-info code { color: $text-secondary; margin-inline-start: 8px; }
 .key-info .hint { margin-bottom: 0; font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
+.protocol-select { max-width: 280px; }
 .model-id { margin-top: 12px; overflow-wrap: anywhere; }
 .model-id code { min-width: 0; }
 .example-heading { margin-top: 24px; }
