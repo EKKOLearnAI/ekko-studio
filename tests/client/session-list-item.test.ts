@@ -94,7 +94,7 @@ describe('SessionListItem', () => {
     })
   })
 
-  it('renders normal mode as a link to the session route', () => {
+  it('renders normal mode as a link and allows hiding its timestamp', async () => {
     const wrapper = mount(SessionListItem, {
       props: {
         session,
@@ -114,6 +114,15 @@ describe('SessionListItem', () => {
     expect(link.attributes('href')).toBe('/session/s1')
     expect(wrapper.find('button.session-item').exists()).toBe(false)
     expect(wrapper.get('.session-item-delete').attributes('aria-label')).toBe('common.delete Session One')
+    expect(wrapper.get('.session-item-time').text()).toBe('now')
+
+    await wrapper.setProps({ showTime: false })
+    expect(wrapper.find('.session-item-time').exists()).toBe(false)
+    expect(wrapper.get('.session-item-title').text()).toBe(session.title)
+    expect(link.attributes('href')).toBe('/session/s1')
+
+    await wrapper.setProps({ showTime: true })
+    expect(wrapper.get('.session-item-time').text()).toBe('now')
   })
 
   it('renders selectable mode as a button and does not expose row href', () => {
