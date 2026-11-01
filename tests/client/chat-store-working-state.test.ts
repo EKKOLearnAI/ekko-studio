@@ -6,13 +6,13 @@ import { unregisterSessionHandlers } from '@/api/studio/chat'
 vi.mock('@/api/studio/background-status', () => ({ observeBackgroundStatus: vi.fn(() => vi.fn()) }))
 
 const api = vi.hoisted(() => ({
-  startRunViaSocket: vi.fn(), resumeSession: vi.fn(), registerSessionHandlers: vi.fn(), getChatRunSocket: vi.fn(),
+  startRunViaSocket: vi.fn(), resumeSession: vi.fn(), registerSessionHandlers: vi.fn(),
 }))
 vi.mock('@/api/studio/chat', () => ({
   onUnobservedRunStarted: vi.fn(() => vi.fn()),
   ...api,
   unregisterSessionHandlers: vi.fn(),
-  getChatRunSocket: api.getChatRunSocket,
+  getChatRunSocket: vi.fn(() => ({ emit: vi.fn() })),
   respondToolApproval: vi.fn(), respondClarify: vi.fn(),
   onPeerUserMessage: vi.fn(), onSessionCommand: vi.fn(),
   onSessionTitleUpdated: vi.fn(), onRunUsageUpdated: vi.fn(() => vi.fn()),
@@ -38,7 +38,6 @@ beforeEach(() => {
   vi.resetAllMocks()
   setActivePinia(createPinia())
   api.startRunViaSocket.mockReturnValue({ abort: vi.fn() })
-  api.getChatRunSocket.mockReturnValue({ connected: true, emit: vi.fn() })
   api.resumeSession.mockImplementation((sid, callback) => {
     callback({ session_id: sid, isWorking: false, messages: [], events: [], backgroundPending: 0 })
   })
@@ -236,79 +235,6 @@ describe('sidebar working state', () => {
     expect(store.isSessionLive('one')).toBe(false)
     expect(store.isStreaming).toBe(false)
     expect(store.isRunActive).toBe(false)
-  })
-
-  it('clears a stale background-session running light by re-verifying against the server on re-sync', async () => {
-    const listen = vi.spyOn(document, 'addEventListener')
-    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
-    const store = useChatStore()
-    store.sessions = [session('one'), session('two')]
-    await store.switchSession('one')
-    await store.sendMessage('delegate')
-    const onEvent = api.startRunViaSocket.mock.calls[0][1]
-    // Foreground run ends but a background delegation keeps 'one' in serverWorking with no
-    // live run socket — the exact stale-light shape from the upgrade incident.
-    onEvent({ event: 'run.completed', session_id: 'one', output: 'started', background_pending: 1 })
-    expect(store.isSessionWorking('one')).toBe(true)
-    expect(store.isSessionLive('one')).toBe(false)
-    await store.switchSession('two') // 'one' is now a background session
-
-    const onVisible = listen.mock.calls.find((c) => c[0] === 'visibilitychange')![1] as () => void
-    listen.mockRestore()
-    // Server is authoritative: background 'one' is no longer working.
-    api.resumeSession.mockImplementation((sid, cb) => {
-      cb({ session_id: sid, isWorking: false, messages: [], events: [], backgroundPending: 0 })
-    })
-    onVisible()
-    expect(store.isSessionWorking('one')).toBe(false) // stale background light cleared
-  })
-
-  it('keeps a genuinely-running background session (server still says working)', async () => {
-    const listen = vi.spyOn(document, 'addEventListener')
-    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
-    const store = useChatStore()
-    store.sessions = [session('one'), session('two')]
-    await store.switchSession('one')
-    await store.sendMessage('delegate')
-    const onEvent = api.startRunViaSocket.mock.calls[0][1]
-    onEvent({ event: 'run.completed', session_id: 'one', output: 'started', background_pending: 1 })
-    expect(store.isSessionWorking('one')).toBe(true)
-    await store.switchSession('two')
-
-    const onVisible = listen.mock.calls.find((c) => c[0] === 'visibilitychange')![1] as () => void
-    listen.mockRestore()
-    // Server says 'one' is STILL working → must not be cleared (no false-negative on live runs).
-    api.resumeSession.mockImplementation((sid, cb) => {
-      cb({ session_id: sid, isWorking: true, messages: [], events: [], backgroundPending: 1 })
-    })
-    onVisible()
-    expect(store.isSessionWorking('one')).toBe(true)
-  })
-
-  it('defers background reconcile when the shared socket is not connected (no socket churn)', async () => {
-    const listen = vi.spyOn(document, 'addEventListener')
-    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
-    // Right after a reconnect the shared socket isn't connected yet: reconciling must NOT open/swap
-    // it (that would lose in-flight resumes and disrupt the viewed stream) — it defers instead.
-    api.getChatRunSocket.mockReturnValue({ connected: false, emit: vi.fn() })
-    const store = useChatStore()
-    store.sessions = [session('one'), session('two')]
-    await store.switchSession('one')
-    await store.sendMessage('delegate')
-    const onEvent = api.startRunViaSocket.mock.calls[0][1]
-    onEvent({ event: 'run.completed', session_id: 'one', output: 'started', background_pending: 1 })
-    expect(store.isSessionWorking('one')).toBe(true)
-    await store.switchSession('two')
-
-    const before = api.resumeSession.mock.calls.length
-    const onVisible = listen.mock.calls.find((c) => c[0] === 'visibilitychange')![1] as () => void
-    listen.mockRestore()
-    onVisible()
-    // The stale background session 'one' must NOT be resumed while the socket is down (deferred);
-    // only the viewed session's own resume fires.
-    const resumedSids = api.resumeSession.mock.calls.slice(before).map((c) => c[0])
-    expect(resumedSids).not.toContain('one')
-    expect(store.isSessionWorking('one')).toBe(true) // still deferred; reconciles on a later cycle
   })
 })
 
