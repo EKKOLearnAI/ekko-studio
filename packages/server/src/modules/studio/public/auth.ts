@@ -1,4 +1,5 @@
 export {
+  authenticateLoginUserToken,
   authenticateUserToken,
   inspectAppUserToken,
   getUserJwtExpiresSeconds,
