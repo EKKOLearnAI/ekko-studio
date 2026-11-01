@@ -15,7 +15,7 @@ const PLATFORM_SECTIONS = new Set([
   'approvals',
 ])
 
-const APP_CONFIG_SECTIONS = new Set(['gatewayAutoStart'])
+const APP_CONFIG_SECTIONS = new Set(['gatewayAutoStart', 'microCompactDefault'])
 const PROXY_ENV_KEYS = ['HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY'] as const
 
 function requestedProfile(ctx: any): string {
@@ -449,6 +449,10 @@ export async function getConfig(ctx: any) {
         ctx.body = { proxy }
         return
       }
+      if (key === 'microCompactDefault') {
+        ctx.body = { microCompactDefault: (await readAppConfig()).microCompactDefault === true }
+        return
+      }
       ctx.body = { [key]: config[key] || {} }
     } else if (sections) {
       const keys = (sections as string).split(',')
@@ -459,7 +463,9 @@ export async function getConfig(ctx: any) {
           ? gatewayAutoStart
           : trimmed === 'proxy'
             ? proxy
-            : (config[trimmed] || {})
+            : trimmed === 'microCompactDefault'
+              ? { microCompactDefault: (await readAppConfig()).microCompactDefault === true }
+              : (config[trimmed] || {})
       }
       ctx.body = result
     } else {
@@ -517,6 +523,11 @@ export async function updateConfig(ctx: any) {
           if (gatewayManagement.changed) body.gatewayManagement = gatewayManagement
         }
         ctx.body = body
+        return
+      } else if (section === 'microCompactDefault') {
+        const next = values.microCompactDefault === true
+        await writeAppConfig({ microCompactDefault: next })
+        ctx.body = { success: true, microCompactDefault: next }
         return
       }
     }

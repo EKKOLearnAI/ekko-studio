@@ -9794,6 +9794,32 @@
         }
       }
     },
+    "/api/hermes/profiles/compression/sync": {
+      "post": {
+        "tags": [
+          "Profiles"
+        ],
+        "summary": "Create sync",
+        "description": "POST /api/hermes/profiles/compression/sync",
+        "operationId": "syncCompression",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/hermes/profiles/import": {
       "post": {
         "tags": [
