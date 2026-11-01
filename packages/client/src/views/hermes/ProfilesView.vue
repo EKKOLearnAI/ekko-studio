@@ -2,7 +2,7 @@
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import { ref, onMounted } from 'vue'
-import { NButton, NSwitch, useMessage } from 'naive-ui'
+import { NButton, NPopconfirm, NSwitch, useMessage } from 'naive-ui'
 import { fetchConfig, updateConfigSection } from '@/api/hermes/config'
 import { syncProfileCompression } from '@/api/hermes/profiles'
 import { useI18n } from 'vue-i18n'
@@ -120,9 +120,16 @@ function handleImported() {
         />
       </div>
       <div class="mc-row mc-actions">
-        <NButton size="small" :loading="syncing" @click="syncToAll">
-          {{ t('profiles.microCompactSync') }}
-        </NButton>
+        <NPopconfirm
+          :content="t('profiles.microCompactSyncConfirm', { value: microCompactDefault ? 'true' : 'false' })"
+          :positive-text="t('profiles.microCompactSyncYes')"
+          :negative-text="t('profiles.microCompactSyncNo')"
+          @positive-click="syncToAll"
+        >
+          <NButton size="small" :loading="syncing">
+            {{ t('profiles.microCompactSync') }}
+          </NButton>
+        </NPopconfirm>
       </div>
     </section>
 
