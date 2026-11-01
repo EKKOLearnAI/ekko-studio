@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PERSON_BOTS } from '../../packages/shared/person-bots'
@@ -1590,6 +1590,28 @@ it('aborts and records a directory error when a running worker loses its effecti
   await runner.tickPersonWork(); await wait(task.execution.id, 'failed')
   expect(store.getPersonExecution(1, task.execution.id)).toMatchObject({ error: expect.stringContaining('Workspace directory is unavailable') })
   expect(existsSync(selected)).toBe(false)
+})
+
+it('freezes an admitted legacy symlink execution root for callbacks and artifacts', async () => {
+  const original = join(dir, 'original'), replacement = join(dir, 'replacement'), alias = join(dir, 'legacy-link')
+  mkdirSync(original); mkdirSync(replacement)
+  symlinkSync(original, alias, process.platform === 'win32' ? 'junction' : 'dir')
+  const task = await create()
+  db.prepare('UPDATE person_executions SET workspace=? WHERE id=?').run(alias, task.execution.id)
+  vi.mocked(runtime.execute).mockImplementation(async input => {
+    expect(input.workspace).toBe(original)
+    input.onEvent('run.started', {})
+    writeFileSync(join(original, 'artifact.txt'), 'original result')
+    writeFileSync(join(replacement, 'artifact.txt'), 'wrong project')
+    unlinkSync(alias); symlinkSync(replacement, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    return { ok: true, output: 'artifact.txt' }
+  })
+  await runner.tickPersonWork(); await wait(task.execution.id, 'finished')
+  expect(store.getPersonExecution(1, task.execution.id).workspace).toBe(original)
+  const { readPersonArtifact } = await import('../../packages/server/src/modules/studio/services/person/tools')
+  expect(await readPersonArtifact(1, task.execution.id, 'artifact.txt')).toMatchObject({ content: 'original result' })
+  const { personTurnWorkspace } = await import('../../packages/server/src/modules/studio/services/person/workspace')
+  expect(personTurnWorkspace(1, 'person-main-1', { returnExecutionId: task.execution.id })).toBe(original)
 })
 
 it('atomically clears only Person history and tasks, retaining memory, preferences, ordinary chats and files', async () => {

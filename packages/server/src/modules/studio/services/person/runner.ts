@@ -111,6 +111,12 @@ async function execute(run: PersonExecution, abort: AbortController) {
     const task = getPersonTask(userId, run.task_id)
     const workspace = requirePersonWorkspace(run.workspace)
     current(run)
+    // Legacy bindings may be symlinks. Artifact authorization must retain the
+    // physical directory admitted for this execution even if that link moves.
+    if (run.workspace !== workspace) {
+      personDb().prepare('UPDATE person_executions SET workspace=? WHERE id=? AND generation=?').run(workspace, run.id, run.generation)
+      run.workspace = workspace
+    }
     personDb().prepare('UPDATE sessions SET workspace=? WHERE id=? AND CAST(studio_user_id AS TEXT)=?').run(workspace, run.session_id, String(userId))
     const decisions = personDb().prepare("SELECT question,answer,answered_by FROM person_interactions WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND session_id=?) AND state='answered' ORDER BY created_at DESC LIMIT 10").all(task.id,run.session_id) as unknown as Pick<PersonInteraction, 'question' | 'answer' | 'answered_by'>[]
     const requirements = personRequirements(task)
