@@ -23,12 +23,14 @@ const props = withDefaults(defineProps<{
   selectable?: boolean
   selected?: boolean
   showProfile?: boolean
+  showTime?: boolean
   singleLine?: boolean
   categoryLabel?: string
   to?: string
   interceptModifiedNavigation?: boolean
 }>(), {
   showProfile: true,
+  showTime: true,
 })
 
 const emit = defineEmits<{
@@ -146,7 +148,7 @@ onUnmounted(() => {
             {{ t('chat.profileMissingModelsTip', { profile: profileName }) }}
           </NTooltip>
         </span>
-        <span class="session-item-time">{{ formatTimestampMs(session.createdAt) }}</span>
+        <span v-if="showTime" class="session-item-time">{{ formatTimestampMs(session.createdAt) }}</span>
       </span>
       <span class="session-item-agent-row">
         <span class="session-item-agent-logo-wrap" :class="{ streaming }">
