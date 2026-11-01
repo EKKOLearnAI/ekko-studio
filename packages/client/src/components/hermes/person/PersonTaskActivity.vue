@@ -4,12 +4,13 @@ import { useI18n } from 'vue-i18n'
 import type { PersonFlow, PersonTask } from '@/api/person'
 import { usePageLoadingState } from '@/composables/usePageLoading'
 import { useReducedMotion } from '@/composables/useReducedMotion'
-import { PERSON_ANIMATIONS, PERSON_AVATAR, personAvatarAnimation, type ChatAgentAvatar } from '@/utils/chat-agent-avatar'
+import { PERSON_ANIMATIONS, PERSON_AVATAR, chatSessionAgentAvatar, personAvatarAnimation, type ChatAgentAvatar } from '@/utils/chat-agent-avatar'
 import { personFlowAnimation, personFlowState, personFlowVisibleInActivity } from '@/utils/person-flow'
 import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
 import PersonFlowGraph from './PersonFlowGraph.vue'
+import PersonPanelIcon from './PersonPanelIcon.vue'
 
-const props = defineProps<{ sessionId: string; count: number; tasks: PersonTask[]; flows: PersonFlow[]; flowCount?: number; avatar?: ChatAgentAvatar; name?: string }>()
+const props = defineProps<{ sessionId: string; count: number; agentCount?: number; tasks: PersonTask[]; flows: PersonFlow[]; flowCount?: number; avatar?: ChatAgentAvatar; name?: string }>()
 const emit = defineEmits<{ openTask: [task: PersonTask]; openFlow: [flow: PersonFlow]; refresh: [] }>()
 const { t, locale } = useI18n()
 const pageLoading = usePageLoadingState()
@@ -20,10 +21,11 @@ const animation = computed(() => personAvatarAnimation(avatar.value, 'searching'
 const activeFlows = computed(() => props.flows.filter(flow => personFlowVisibleInActivity(flow, props.sessionId)))
 const flowsCount = computed(() => props.flowCount ?? activeFlows.value.length)
 const activeTasks = computed(() => props.tasks.filter(task => task.status === 'open' && (task.running || ['pending','queued','starting','running','stopping','waiting_user','waiting_person','waiting_approval'].includes(task.execution_state))))
-const visible = computed(() => (props.count > 0 || flowsCount.value > 0) && !pageLoading.value)
+const agentCount = computed(() => props.agentCount ?? activeTasks.value.length)
+const visible = computed(() => (props.count > 0 || agentCount.value > 0 || flowsCount.value > 0) && !pageLoading.value)
 const formatted = (count: number) => count.toLocaleString(locale.value)
 const compact = (count: number) => count > 99 ? `${formatted(99)}+` : formatted(count)
-const label = computed(() => [name.value, ...(props.count ? [t('person.backgroundTasks'), formatted(props.count)] : []), ...(flowsCount.value ? [t('person.flows'), formatted(flowsCount.value)] : [])].join(' · '))
+const label = computed(() => [name.value, ...(agentCount.value ? [t('person.agentRuntime'), formatted(agentCount.value)] : []), ...(props.count ? [t('person.backgroundTasks'), formatted(props.count)] : []), ...(flowsCount.value ? [t('person.flows'), formatted(flowsCount.value)] : [])].join(' · '))
 const expanded = ref(false), expandedFlow = ref<string | null>(null)
 const activity = ref<HTMLElement>(), content = ref<HTMLElement>(), toggle = ref<HTMLButtonElement>(), nameElement = ref<HTMLElement>()
 const width = ref(440), bodyHeight = ref(0), bodyMax = ref(460), truncatedName = ref(false)
@@ -49,14 +51,19 @@ function open() {
 function close(focus = false) { expanded.value = false; if (focus) toggle.value?.focus() }
 function toggleFlow(id: string) { expandedFlow.value = expandedFlow.value === id ? null : id }
 function openFlow(flow: PersonFlow) { close(); emit('openFlow',flow) }
+function openTask(task: PersonTask) { close(); emit('openTask', task) }
 function outside(event: PointerEvent) { if (expanded.value && !activity.value?.contains(event.target as Node)) close() }
 function escape(event: KeyboardEvent) {
   if (event.key === 'Escape' && expanded.value) { event.stopPropagation(); close(true) }
 }
 function flowAnimation(flow: PersonFlow) { return personAvatarAnimation(avatar.value, personFlowAnimation(personFlowState(flow))) || animation.value }
-function taskAnimation(task: PersonTask) {
-  const state = ['starting','running','stopping'].includes(task.execution_state) ? 'searching' : 'sleeping'
-  return personAvatarAnimation(avatar.value, state) || animation.value
+function taskAvatar(task: PersonTask): ChatAgentAvatar | null {
+  try {
+    const selection = JSON.parse(task.execution_selection_json || task.selection_json || '{}')
+    const runtime = typeof selection.runtime === 'string' ? selection.runtime.trim().toLowerCase() : ''
+    const known = ['hermes', 'ekko', 'ekko-agent', 'claude', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode', 'antigravity']
+    return known.includes(runtime) ? chatSessionAgentAvatar({ agent: runtime }) : null
+  } catch { return null }
 }
 watch(visible, value => { if (!value) close() })
 watch(name, () => { void nextTick(measure) })
@@ -100,6 +107,7 @@ onBeforeUnmount(() => {
           <span class="person-task-island__label" aria-hidden="true">
             <strong ref="nameElement" :title="name">{{ name }}</strong>
             <span class="person-task-island__counters">
+              <span v-if="agentCount > 0" class="activity-counter" :title="`${t('person.agentRuntime')} · ${formatted(agentCount)}`"><PersonPanelIcon name="agents" :size="13" /><span>{{ compact(agentCount) }}</span></span>
               <span v-if="count > 0" class="activity-counter" :title="`${t('person.backgroundTasks')} · ${formatted(count)}`"><SessionTaskIcon :size="13" /><span>{{ compact(count) }}</span></span>
               <span v-if="flowsCount > 0" class="activity-counter" :title="`${t('person.flows')} · ${formatted(flowsCount)}`">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 6v6M5 17v-5h14v5" /><rect x="9" y="1" width="6" height="5" rx="1" /><rect x="2" y="17" width="6" height="5" rx="1" /><rect x="16" y="17" width="6" height="5" rx="1" /></svg>
@@ -114,8 +122,9 @@ onBeforeUnmount(() => {
             <p v-if="truncatedName" class="activity-full-name">{{ name }}</p>
             <ul class="activity-list">
               <li v-for="task in activeTasks" :key="`task-${task.id}`">
-                <button type="button" class="activity-row" :title="task.title" @click="close(); emit('openTask', task)">
-                  <img class="row-gif" :src="reducedMotion ? avatar.src : taskAnimation(task)" alt="" width="38" height="38" />
+                <button type="button" class="activity-row" :title="task.title" @click="openTask(task)">
+                  <img v-if="taskAvatar(task)" class="row-gif" :src="taskAvatar(task)!.src" :alt="taskAvatar(task)!.label" width="38" height="38" />
+                  <PersonPanelIcon v-else class="row-gif" name="agents" :size="38" />
                   <span class="row-title">{{ task.title }}</span>
                 </button>
               </li>

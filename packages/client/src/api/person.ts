@@ -6,7 +6,7 @@ import { clientUuid } from '../utils/secure-uuid'
 export interface PersonModel { profile: string; provider: string; model: string; apiMode?: ProviderApiMode }
 export interface PersonModelGroup extends Pick<AvailableModelGroup, 'provider' | 'label' | 'models' | 'model_meta' | 'api_mode' | 'api_mode_by_model'> { profile: string }
 export interface PersonAgentPreset { id: string; name: string; description: string; selection: PersonModel & { runtime: string; mode: 'scoped' | 'global'; reasoningEffort: string } }
-export interface PersonTask { session_id: string; session_title?: string; updated_at: number; selection_json: string; id: string; title: string; summary: string; status: string; revision: number; execution_id?: string | null; execution_state: string; running: boolean | number; completion_evidence: string }
+export interface PersonTask { session_id: string; session_title?: string; updated_at: number; selection_json: string; execution_selection_json?: string | null; id: string; title: string; summary: string; status: string; revision: number; execution_id?: string | null; execution_state: string; running: boolean | number; completion_evidence: string }
 export interface PersonExecutionSummary { id: string; session_id: string; state: string; created_at: number; occurrence_id?: string | null }
 export interface PersonTaskQueueState { canInsert?: boolean; canRemove?: boolean; insertion?: { queueId: string; phase: string } | null; insertionError?: string }
 export interface PersonTaskQueueSnapshot extends PersonTaskQueueState { task: PersonTask; pending: { id: string; input: { type: string; text?: string; name?: string }[] }[] }
@@ -21,6 +21,7 @@ export interface PersonFlow {
   stages: Array<{ id: string; position: number; group_position: number; session_id: string; session_title?: string; bot_type?: string | null; delivery_state?: string; delivery_error?: string; goal: string; state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; tasks: Array<{ id: string; title: string; status: string; execution_state?: string; agent?: string }> }>
 }
 export interface PersonSnapshot {
+  active_agent_task_count?: number
   session: SessionSummary | null
   settings: PersonGeneralSettings & { model: PersonModel | null; reasoningEffort: string; agents: PersonAgentPreset[]; workspace: string }; revision: number; busy: boolean
   history_revision: number; can_clear: boolean

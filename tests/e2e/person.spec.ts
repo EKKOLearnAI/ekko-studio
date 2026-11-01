@@ -20,6 +20,7 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
   state.conversations = [state.session]
   state.conversationMessages = {}
   state.tasks[0].session_id = state.session.id
+  state.active_agent_task_count = 0
   await page.addInitScript(() => { (window as any).__PW_CHAT_SOCKET_RESUMES__ = { 'person-main-1': { session_id: 'person-main-1', messages: [], isWorking: false, events: [] }, ...(window as any).__PW_CHAT_SOCKET_RESUMES__ } })
   const operations: any[] = []
   function removeConversation(id: string) {
@@ -1298,6 +1299,28 @@ for (const mode of ['light', 'dark'] as const) {
   })
 }
 
+test('Person activity shows execution agent icons and authoritative agent count before task count', async ({ page }, testInfo) => {
+  const { state } = await setup(page, 'light', false, false)
+  state.active_agent_task_count = 125
+  state.tasks = [
+    { ...state.tasks[0], title: 'Codex task', selection_json: '{"runtime":"hermes"}', execution_selection_json: '{"runtime":"codex"}' },
+    { ...state.tasks[0], id: 'task2', title: 'Unknown task', execution_selection_json: '{"runtime":"unknown"}' },
+  ]
+  await page.goto('/#/person')
+  await backgroundTaskCount(page, 2)
+  const island = page.locator('.person-task-island')
+  const counters = island.locator('.activity-counter')
+  await expect(counters).toHaveCount(2)
+  await expect(counters.nth(0)).toContainText('99+')
+  await expect(counters.nth(1)).toContainText('2')
+  await island.locator('.person-task-island__toggle').click()
+  await expect(island.locator('.activity-row').first().locator('img')).toHaveAttribute('src', '/coding-agents/codex-openai.png')
+  await expect(island.locator('.activity-row').nth(1).locator('svg')).toBeVisible()
+  await island.screenshot({ path: testInfo.outputPath('agent-task-activity.png'), animations: 'disabled' })
+  await island.locator('.activity-row').first().click()
+  await expect(page.locator('.person-task-island__toggle')).toHaveAttribute('aria-expanded', 'false')
+})
+
 test('Person background-task island supports reduced motion and hides for main-chat activity alone', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await setup(page, 'light', false, false)
@@ -2075,6 +2098,7 @@ test('Person saves agent presets, preserves unsaved edits and only offers openin
   await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('tab', { name: /^Agents/ }).click()
   await expect(page.locator('.agent-card')).toContainText('Research assistant')
+  await expect(page.locator('.agent-card').first().locator('.agent-reasoning')).toHaveText('Reasoning effortDefault')
   await page.getByRole('button', { name: 'Add agent', exact: true }).click()
   await page.getByRole('textbox', { name: 'Agent name', exact: true }).fill('Research assistant')
   await page.getByRole('textbox', { name: 'Purpose', exact: true }).fill('Research and write reports')
@@ -2093,11 +2117,13 @@ test('Person saves agent presets, preserves unsaved edits and only offers openin
   await page.locator('.person-agent-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => state.settings.agents.length).toBe(2)
   expect(state.settings.agents[1]).toMatchObject({ name: 'Research assistant', description: 'Research and write reports', selection: { runtime: 'codex', mode: 'scoped', provider: 'provider', model: 'global-model', reasoningEffort: 'high' } })
+  await expect(page.locator('.agent-card').last().locator('.agent-reasoning')).toHaveText('Reasoning effortHigh')
   await page.screenshot({ path: '/tmp/person-agent-settings.png', animations: 'disabled' })
   await page.reload()
   await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('tab', { name: /^Agents/ }).click()
   await expect(page.locator('.agent-card').last()).toContainText('Research assistant')
+  await expect(page.locator('.agent-card').last().locator('.agent-reasoning')).toHaveText('Reasoning effortHigh')
   await page.locator('.agent-card').last().getByRole('button', { name: 'Edit', exact: true }).click()
   await expect(page.getByRole('textbox', { name: 'Agent name', exact: true })).toHaveValue('Research assistant')
   await page.setViewportSize({ width: 390, height: 844 })
