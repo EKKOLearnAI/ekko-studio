@@ -11,6 +11,10 @@ const form: NewChatFormPreferences = {
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.restoreAllMocks() })
 
 describe('new-chat form preferences', () => {
+  it.each([true, false])('retains whether the draft protocol was explicitly selected: %s', apiModeManual => {
+    saveNewChatFormPreferences(107, { ...form, apiModeManual })
+    expect(loadNewChatFormPreferences(107)).toMatchObject({ apiMode: 'anthropic_messages', apiModeManual })
+  })
   it('remembers native model and effort choices separately for each agent and scoped provider', () => {
     const nativeModels = { codex: { model: 'native-codex', reasoningEffort: 'high' }, pi: { model: 'provider/native-pi', reasoningEffort: 'low' },
       dsh: { model: '["native","model"]', reasoningEffort: 'off' } }
