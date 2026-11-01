@@ -50,6 +50,9 @@ All key runtime settings are configured from compose variables.
 | `HERMES_AGENT_IMAGE` | `nousresearch/hermes-agent:latest` | Hermes Agent base image (used only during build) |
 | `WEBUI_IMAGE` | `hermes-web-ui-local:latest` | Web UI image (set to `ekkoye8888/hermes-web-ui` to use pre-built) |
 | `HERMES_DATA_DIR` | `./hermes_data` | Hermes runtime data directory |
+| `EKKO_STUDIO_DSH_ACP_TIMEOUT_MS` | `60000` (server) | DSH ACP control-request budget; legacy alias `HERMES_DSH_ACP_TIMEOUT_MS` |
+| `EKKO_STUDIO_ACP_TIMEOUT_MS` | `60000` (server) | Other native ACP control-request budget; legacy alias `HERMES_ACP_TIMEOUT_MS` |
+| `EKKO_STUDIO_AGENT_MODEL_DISCOVERY_TIMEOUT_MS` | `20000` (server) | Total budget per native model-discovery subprocess; legacy alias `HERMES_AGENT_MODEL_DISCOVERY_TIMEOUT_MS` |
 
 Override variables directly from shell:
 
@@ -63,6 +66,23 @@ Or create a `.env` file in the project root:
 WEBUI_IMAGE=ekkoye8888/hermes-web-ui
 PORT=6060
 ```
+
+The supplied Compose file explicitly forwards all six timeout names from the
+shell or the project-root Compose `.env`. Studio selects the first valid positive
+integer in `1..2147483647`: the `EKKO_STUDIO_*` name, then its `HERMES_*` alias,
+then the server default. Compose leaves unset values empty so a legacy override
+still works. These settings require an image containing this change; older images
+do not recognize the new names. Recreate the container after changing values:
+
+```bash
+EKKO_STUDIO_DSH_ACP_TIMEOUT_MS=240000 EKKO_STUDIO_AGENT_MODEL_DISCOVERY_TIMEOUT_MS=240000 docker compose up -d --force-recreate
+```
+
+For a local source build, include `--build`. With `docker run`, pass the variables
+using `-e`; setting them only on the host or in a Hermes profile's `.env` is not
+enough. These are Studio server timers. Prompt generation remains unbounded and
+DSH session close keeps its 10-second budget; the existing
+`HERMES_DSH_READY_TIMEOUT_MS` setting is unchanged.
 
 ## Data Persistence
 
