@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NDrawer, NDrawerContent, NSpin, NSelect } from 'naive-ui'
 import { useTaskDrawerLayout } from '@/components/hermes/tasks/useTaskDrawerLayout'
@@ -15,6 +15,7 @@ const props = defineProps<{ taskId: string; mainSessionId: string; executionId?:
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
 const { drawerWidth } = useTaskDrawerLayout()
+const toolsTargetId = `task-tools-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 const selectedExecutionId = ref(props.executionId || '')
 const executions = ref<PersonExecutionSummary[]>([])
 const executionOptions = computed(() => {
@@ -126,12 +127,14 @@ onBeforeUnmount(() => { reads.dispose(); lifetime.abort(); stopUpdates() })
       :body-content-style="{ padding: '0', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }">
       <template #header><div class="task-chat-heading">
         <span>{{ task?.title || t('person.tasks') }}</span>
-        <PersonWorkspaceFiles v-if="session" :session-id="session.id" :workspace="session.workspace" :submit="send"
+        <PersonWorkspaceFiles v-if="session" :panel-target="`#${toolsTargetId}`" :session-id="session.id" :workspace="session.workspace" :submit="send"
           @attach="file => conversationRef?.addFiles([file])" />
         <NButton v-if="selectedIsCurrent && personTaskCanStop(task)" size="small" :loading="stopping" :disabled="disabled" @click="stopTask">
           {{ t(task?.execution_state === 'stopping' ? 'person.states.stopping' : 'person.stopTask') }}
         </NButton>
       </div></template>
+      <div :id="toolsTargetId" class="task-chat-layout">
+      <div class="task-chat-main">
       <NAlert v-if="removalError || error || queueState.insertionError" type="error" class="task-chat-alert">{{ removalError || error || queueState.insertionError }}</NAlert>
       <NAlert v-if="loadError" type="error" class="task-chat-alert">
         {{ t('sessionTasks.loadFailed') }} <NButton size="small" :disabled="sending || stopping || !!requestingInsertion || !!requestingRemoval || refreshing" @click="refresh()">{{ t('sessionTasks.retry') }}</NButton>
@@ -145,11 +148,15 @@ onBeforeUnmount(() => { reads.dispose(); lifetime.abort(); stopUpdates() })
           :disabled="disabled" :stop-control="stopControl" />
         <p v-else class="task-chat-alert">{{ t('person.noExecution') }}</p>
       </template>
+      </div>
+      </div>
     </NDrawerContent>
   </NDrawer>
 </template>
 
 <style scoped lang="scss">
+.task-chat-layout { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.task-chat-main { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .task-executions { flex-shrink: 0; padding: 8px 16px; }
 .task-chat-alert { margin: 12px; flex-shrink: 0; }
 .task-chat-loading { flex: 1; display: grid; place-items: center; }
