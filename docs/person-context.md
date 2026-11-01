@@ -25,6 +25,60 @@ Memory, Agent presets and execution settings remain account-scoped. Each main tu
 
 Every Person task has a required owning `session_tasks.session_id`. A model can create or adopt background work only in its current conversation; cross-role attempts fail with `ROLE_HANDOFF_REQUIRED` before Agent selection or task creation. Use `bot_flow_create` to let another role receive the request in its main conversation and choose its own execution needs. Continuing an existing task preserves its task, runtime conversation and owner. Existing legacy planned task flows can still transfer ownership using `advance`. The task's current owning conversation is authoritative for result delivery, even when another conversation supplied the follow-up instruction. Durable questions and completion links also target that conversation. Task and schedule drawers are filtered to the selected conversation.
 
+### Bot workspaces
+
+Creating a Bot requires selecting an existing, absolute directory. Its default is
+stored with its model/effort in `person_conversation_settings`, requires an owned
+`session_id` to change, and never changes another Bot's default. The directory
+picker can create a directory explicitly; execution never creates a missing one.
+The server checks directory type and read/write/search access and canonicalizes
+the selected path. A missing or inaccessible binding fails with
+`WORKSPACE_UNAVAILABLE`; no account, process cwd or HOME fallback is permitted.
+
+New tasks and adopted goals pin the initiating turn's effective directory in
+`session_tasks.workspace`. Each execution also snapshots it in
+`person_executions.workspace`. Follow-ups, scheduled worker occurrences and legacy
+role transfers keep their project's directory. Editing a Bot's default affects
+new work and is allowed while background work runs; the current main reply must
+finish before editing. Historical artifact reads use the execution snapshot.
+
+A conversation flow pins the initiating turn's directory in `person_flows.workspace`.
+Every serial/parallel recipient and its workers uses that directory, including
+worker result callbacks. A flow created from a task result inherits that result's
+execution directory. Scheduled main-role stages select the Bot's current default
+when the occurrence is created. Users and models do not supply a collaboration
+workspace argument. A recipient's own default remains unchanged, and concurrent
+flows keep separate bindings even when they address the same recipient. The chat
+runtime serializes turns for a given main Bot session; parallel workers can still
+write concurrently to a shared directory.
+
+At startup an atomic, idempotent migration records existing Bots' prior session
+workspace (then legacy account/default binding), preserving local model/effort.
+It snapshots old executions from their child session or task, and old flows from
+their creator. Files are not moved or copied. Old Bots can therefore initially
+share the same legacy directory until their defaults are individually edited.
+Unrecoverable historical bindings remain empty and fail explicitly when executed.
+Clients creating Bots must now send `workspace`; workspace setting writes must
+include `session_id`. Unscoped shared Agent/timezone/quota settings remain supported.
+
+The host injects the active directory into Runtime Context/tool configuration for
+Ekko main/worker/coordinator runs and into external worker instructions plus cwd.
+Other Bots' default paths are not added to the role directory. Existing history,
+user messages and artifact contents can still contain paths. Summaries are context
+processing and do not gain filesystem tools. Directory checks run at admission,
+model/tool boundaries where supported and worker lease heartbeats. Native workers
+must retain a valid cwd on initial/resumed launches; Hermes Person workers require
+session cwd binding support and fail explicitly on incompatible runtimes.
+
+These bindings are **not a security sandbox**. They do not confine filesystem
+access, isolate account memory/history, implement per-Bot OS permissions, or lock
+shared files/Git operations. Native tool approval modes and runtime permissions
+remain as configured; an external process can access other paths allowed by the
+server's OS user. Running native tools can outlive a directory change until an
+abort is observed; the heartbeat interval is 15 seconds. The human terminal UI
+still uses its terminal configuration. Use independent OS/container permissions
+for hard isolation, and coordinate shared file changes at the task level.
+
 ### Conversation stages and optional workers
 
 Use `bot_flow_create` for fixed serial and parallel groups of roles, including a single stage to relay a message to one recipient. Praise, greetings and word games are conversation, not background execution. Flows and stages are separate from background tasks: a stage can answer directly with zero executions, or choose its own configured Agent using `bot_agents_list` and `bot_task_create`. Main chat and pure dialogue stages need an available interaction model, but no execution Agent preset. New task tools no longer advertise the legacy `next_steps` contract; existing legacy task flows retain their compatibility path.
@@ -67,7 +121,7 @@ Handoff instructions are transient model context (`displayInput: null`, no user-
 
 The creator or current role can stop a flow. Stop cancels durable handoffs and worker callbacks, aborts only flow-tagged main turns and stops its child work. Other ordinary turns in those conversations keep their normal behavior. Late callbacks are fenced by the flow generation. Only the creator or authenticated account API can resume a stopped or failed flow; this increments the generation and requeues only unfinished branches after all their workers finish stopping. Completed branches and their saved results remain intact. Replaying an old stop request cannot stop a resumed flow.
 
-A failed handoff, assigned role turn or stage-worker result callback automatically marks that branch and flow failed, settles its deliveries and stops only its own remaining workers. It preserves messages, original results, task records and error details. Parallel peers retain their generation and can finish normally; dependent groups stay pending. Failed deliveries do not retry on a timer or require the user to clear history to release a role. Resume is explicit and waits for live peers and worker shutdown before requeuing unfinished branches. History/workspace checks continue to protect actual live work and upstream results currently in use, while an idle failed flow holds no lock. Startup recovery also settles legacy errored handoffs that older versions left pending. The drawer displays failed flows with their error and Resume action.
+A failed handoff, assigned role turn or stage-worker result callback automatically marks that branch and flow failed, settles its deliveries and stops only its own remaining workers. It preserves messages, original results, task records and error details. Parallel peers retain their generation and can finish normally; dependent groups stay pending. Failed deliveries do not retry on a timer or require the user to clear history to release a role. Resume is explicit and waits for live peers and worker shutdown before requeuing unfinished branches. History checks continue to protect actual live work and upstream results currently in use, while an idle failed flow holds no lock. Workspace defaults can change independently because flows and tasks retain their pinned roots. Startup recovery also settles legacy errored handoffs that older versions left pending. The drawer displays failed flows with their error and Resume action.
 
 The Person settings drawer defaults to a compact list of at most the 50 most recently updated flows for the selected conversation, with status filters, title/goal/role search, completion counts and a short route (`A ∥ B → C`). Search and status counts apply to those same 50 flows. Older flows remain saved and available through offset-based API queries. Only one flow can be expanded at a time; filtering out the selected flow closes its detail. Expanding reveals the role collaboration graph: parallel role cards sit side by side on desktop, serial groups are connected through a handoff, and phones stack roles inside a labeled parallel group. Each card shows the saved Bot appearance, role goal and status, opens its conversation, and links to original results. Background workers are collapsed under their owning role with their actual execution states and Agent logos. Pending roles name their unfinished upstream dependencies instead of appearing to be queued for execution. Saved completions remain completed while their peers work; delivery errors and failed open workers require attention, and settled unfinished role turns show that a follow-up is pending. The header counts completed roles and retains stop/resume controls. The account API exposes `/api/studio/person/flows/query` and `/flows/apply`. Completion is restricted to the trusted assigned model turn and cannot be forged through that API. Deleting any involved conversation stops its active flows; clearing history is blocked while an involved flow remains active. Missing original results leave a visible delivery error instead of silently reconstructing lost context.
 

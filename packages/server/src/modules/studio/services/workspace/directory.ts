@@ -1,4 +1,20 @@
 import { mkdir, stat } from 'fs/promises'
+import { accessSync, constants, realpathSync, statSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
+
+/** Execution admission must never recreate a missing selected directory or use another cwd. */
+export function requireExistingWorkspaceDirectory(value: string): string {
+  const directory = normalizeDirectoryTarget(String(value || '').trim())
+  try {
+    if (!directory || !isAbsolute(directory) || !statSync(directory).isDirectory()) throw new Error('Invalid directory')
+    accessSync(directory, constants.R_OK | constants.W_OK | constants.X_OK)
+    return realpathSync(directory)
+  } catch {
+    throw Object.assign(new Error(`Workspace directory is unavailable: ${directory || '(not selected)'}`), {
+      status: 409, code: 'WORKSPACE_UNAVAILABLE',
+    })
+  }
+}
 
 /**
  * `D:`, `D:\\` and `D:/` all name the root of a Windows drive, but only the

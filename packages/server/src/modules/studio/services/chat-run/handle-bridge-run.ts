@@ -1,4 +1,6 @@
 import { studioSessionAccount } from '../../contracts/runs/usage'
+import { isPrivatePersonSession } from '../../contracts/person-session'
+import { requirePersonWorkspace } from '../person/workspace'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { hermesStudioMcpCapabilities } from './studio-mcp'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
@@ -510,7 +512,8 @@ export async function handleBridgeRun(
   const requestedWorkspace = callbackContext
     ? callbackContext.workspace
     : sessionRow?.workspace || data.workspace
-  const workspace = await ensureHermesRunWorkspace(profile, requestedWorkspace)
+  const workspace = isPrivatePersonSession(session_id)
+    ? requirePersonWorkspace(String(requestedWorkspace || '')) : await ensureHermesRunWorkspace(profile, requestedWorkspace)
   const shouldEmitWorkspaceUpdate = Boolean(workspace && !sessionRow?.workspace)
   if (sessionRow && !sessionRow.workspace) updateSession(session_id, { workspace })
   const sessionModel = callbackContext?.model || sessionRow?.model || ''

@@ -148,7 +148,10 @@ onBeforeUnmount(() => {
 .person-task-island { width: min(280px, 100%); margin-inline: auto; padding: 0; border: 0; border-radius: 30px; background: $bg-card; color: $text-primary; overflow: hidden; pointer-events: auto; box-shadow: 0 6px 22px rgba(var(--text-primary-rgb), .05); transition: width 440ms cubic-bezier(.22, 1, .36, 1), height 440ms cubic-bezier(.22, 1, .36, 1), border-radius 440ms cubic-bezier(.22, 1, .36, 1), box-shadow 440ms ease; }
 .person-task-island--expanded { width: 100%; border-radius: 24px; box-shadow: 0 14px 40px rgba(var(--text-primary-rgb), .07); }
 .person-task-island__toggle { display: grid; grid-template-columns: 52px minmax(0, 1fr) 14px; align-items: center; gap: 8px; width: 100%; height: 60px; padding: 4px 14px 4px 6px; border: 0; border-radius: inherit; background: transparent; color: inherit; cursor: pointer; -webkit-app-region: no-drag; font: inherit; text-align: start; -webkit-tap-highlight-color: transparent; }
-.person-task-island__toggle:focus-visible, .activity-row:focus-visible, .flow-preview-toggle:focus-visible { outline: 2px solid $accent-primary; outline-offset: -3px; }
+// Keep the keyboard cue on the disclosure control instead of outlining the capsule header.
+.person-task-island__toggle:focus-visible { outline: none; }
+.person-task-island__toggle:focus-visible .person-task-island__chevron { color: $accent-primary; outline: 2px solid $accent-primary; outline-offset: 5px; border-radius: 50%; }
+.activity-row:focus-visible, .flow-preview-toggle:focus-visible { outline: 2px solid $accent-primary; outline-offset: -3px; }
 .person-task-island__avatar-slot { position: relative; width: 52px; height: 52px; }
 .person-task-island__avatar { display: block; width: 52px; height: 52px; object-fit: contain; }
 .person-task-island__label { display: flex; min-width: 0; flex-direction: column; gap: 3px; }

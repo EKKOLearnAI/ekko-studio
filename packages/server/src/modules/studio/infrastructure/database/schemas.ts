@@ -1234,6 +1234,7 @@ export const GC_SESSION_PROFILES_SCHEMA: Record<string, string> = {
 
 import { getDb, getStoragePath } from './index'
 import { initPersonTables } from './person-schema'
+import { initPersonWorkspaceBindings } from './person-workspace-schema'
 import { initSessionStateTables } from './session-state-schema'
 import { BUILTIN_EKKO_AGENT_IDS, BUILTIN_HISTORY_SOURCES } from '../../contracts/history-source'
 
@@ -1756,6 +1757,7 @@ export function initAllHermesTables(): void {
     syncTable(SESSIONS_TABLE, SESSIONS_SCHEMA, {
       indexes: SESSIONS_INDEXES,
     })
+    initPersonWorkspaceBindings(db)
     db.prepare(`UPDATE ${SESSIONS_TABLE} SET bot_type = 'zhezhe'
       WHERE id LIKE 'person-main-%' AND bot_type = ''`).run()
     // Idempotent classification migration. Messages, timestamps and metadata

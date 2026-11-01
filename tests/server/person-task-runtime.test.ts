@@ -1,4 +1,7 @@
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { PersonRuntimePort } from '../../packages/server/src/modules/studio/public/person-runtime'
 
 const native = vi.hoisted(() => ({ runAndWait: vi.fn(), abortSession: vi.fn(), available: true }))
@@ -10,11 +13,14 @@ function deferred<T = void>() {
   const promise = new Promise<T>(done => { resolve = done })
   return { promise, resolve }
 }
+let workspace: string
 function input(signal: AbortSignal, runtime = 'ekko'): Parameters<PersonRuntimePort['execute']>[0] {
   return { user: { id: 1, username: 'user', role: 'super_admin' } as any, selection: { runtime, mode: 'scoped', profile: 'default', provider: 'test', model: 'm' },
-    taskTimeoutMinutes: 60, sessionId: 'person-task-1', workspace: '/tmp/person-task', prompt: 'Work', signal, onEvent: vi.fn() }
+    taskTimeoutMinutes: 60, sessionId: 'person-task-1', workspace, prompt: 'Work', signal, onEvent: vi.fn() }
 }
-beforeEach(() => { vi.resetAllMocks(); native.available = true; native.abortSession.mockResolvedValue(undefined) })
+beforeEach(() => { workspace = realpathSync(mkdtempSync(join(tmpdir(), 'person-task-runtime-'))); vi.resetAllMocks(); native.available = true; native.abortSession.mockResolvedValue(undefined) })
+
+afterEach(() => rmSync(workspace, { recursive: true, force: true }))
 
 it.each(['ekko', 'hermes', 'codex', 'claude-code'])('applies configured minutes and omits the unlimited timer for %s', async runtime => {
   native.runAndWait.mockResolvedValue({ ok: true, output: 'Done' })
@@ -134,4 +140,11 @@ it('waits for the interrupted native handler to unwind before releasing the Pers
   expect(native.abortSession).not.toHaveBeenCalled()
   termination.resolve()
   expect(await result).toMatchObject({ interrupted:true, stop_reason:'queue_insertion' })
+})
+
+it('fails before dispatch when the admitted workspace disappears', async () => {
+  const task = input(new AbortController().signal)
+  rmSync(workspace, { recursive: true })
+  await expect(executePersonTask(task)).rejects.toMatchObject({ code: 'WORKSPACE_UNAVAILABLE' })
+  expect(native.runAndWait).not.toHaveBeenCalled()
 })

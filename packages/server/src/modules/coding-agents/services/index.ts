@@ -57,7 +57,7 @@ import { updateAgentStatus } from '../../studio/public/agent-status-registry'
 import { logger } from '../../studio/public/logging'
 import { assertScopedCodingAgentProviderAllowed } from '../protocol/provider-policy'
 import type { CodingAgentRuntime } from '../../studio/contracts/agents/runtime'
-import { defaultCodingAgentWorkspace } from '../../studio/public/workspace-manager'
+import { defaultCodingAgentWorkspace, requireExistingWorkspaceDirectory } from '../../studio/public/workspace-manager'
 import { isolateUnhealthyRuntimeMcpServers } from './mcp-runtime-isolation'
 import { getCodingAgentGlobalHome } from '../../studio/public/coding-agent-global-home'
 import { codingAgentContextPolicy, compactionPercent, claudeCompactionPercent, piCompactionSettings, type CodingAgentContextPolicy } from './context-policy'
@@ -3078,8 +3078,10 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     }
     input = { ...input, model, reasoningEffort }
     const scope = normalizeConfigScope({ profile: input.profile, provider: 'global' })
-    const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
-    await mkdir(workspaceDir, { recursive: true })
+    const workspaceDir = input.sessionId?.startsWith('person-task-')
+      ? requireExistingWorkspaceDirectory(input.workspace || '')
+      : resolveLaunchWorkspaceRoot(scope, input.workspace)
+    if (!input.sessionId?.startsWith('person-task-')) await mkdir(workspaceDir, { recursive: true })
     if (tool.id === 'pi' && input.piOutputMode === 'rpc') {
       const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, input)
       const dynamicPromptPath = join(rootDir, PI_DYNAMIC_PROMPT_FILE)
@@ -3322,9 +3324,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       }
     : input
   const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, isolatedInput)
-  const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
+  const workspaceDir = input.sessionId?.startsWith('person-task-')
+    ? requireExistingWorkspaceDirectory(input.workspace || '')
+    : resolveLaunchWorkspaceRoot(scope, input.workspace)
   await mkdir(rootDir, { recursive: true })
-  await mkdir(workspaceDir, { recursive: true })
+  if (!input.sessionId?.startsWith('person-task-')) await mkdir(workspaceDir, { recursive: true })
 
   const files: Array<{ key: string; path: string; absolutePath: string }> = []
   const writeScopedFile = async (key: string, content: string) => {

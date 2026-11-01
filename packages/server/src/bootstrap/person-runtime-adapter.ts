@@ -30,6 +30,7 @@ configurePersonRuntime({
     const runtime = new AgentRuntime({ modelClient: guarded, tools: registry, skillsEnabled: false, backgroundDelegationEnabled: false,
       systemPrompt: input.systemPrompt, maxSteps: input.maxSteps, maxModelRetries: 1, modelDefaults: { maxTokens: 2048 } })
     const result = await runtime.run({ messages: input.messages, signal: input.signal, memoryEnabled: false, skillReviewEnabled: false,
+      ...(input.workspace ? { toolContext: { cwd: input.workspace, workspaceRoot: input.workspace } } : {}),
       ephemeralContext: true, reasoningEffort: input.reasoningEffort, onEvent: input.onEvent })
     return result.output.content
   },
