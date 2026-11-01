@@ -261,6 +261,14 @@ const sessionEventHandlers = new Map<string, {
 
 const peerUserMessageHandlers = new Set<(event: RunEvent) => void>()
 const sessionCommandHandlers = new Set<(event: RunEvent) => void>()
+export interface SessionNoticeEvent {
+  event: 'session.notice'
+  session_id: string
+  profile?: string
+  attention?: boolean
+  message: import('./sessions').HermesMessage & { id: string | number }
+}
+const sessionNoticeHandlers = new Set<(event: SessionNoticeEvent) => void>()
 const unobservedRunStartedHandlers = new Set<(event: RunEvent) => void>()
 const personUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionTitleUpdatedHandlers = new Set<(event: RunEvent) => void>()
@@ -732,6 +740,13 @@ export function onPeerUserMessage(handler: (event: RunEvent) => void): () => voi
   }
 }
 
+export function onSessionNotice(handler: (event: SessionNoticeEvent) => void): () => void {
+  sessionNoticeHandlers.add(handler)
+  return () => {
+    sessionNoticeHandlers.delete(handler)
+  }
+}
+
 export function onSessionCommand(handler: (event: RunEvent) => void): () => void {
   sessionCommandHandlers.add(handler)
   return () => {
@@ -913,6 +928,7 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
     on('agent.event', globalAgentEventHandler)
     on('run.reattach_failed', globalRunReattachFailedHandler)
     on('session.command', globalSessionCommandHandler)
+    on('session.notice', (event: any) => { for (const handler of sessionNoticeHandlers) handler(event as SessionNoticeEvent) })
     on('session.title.updated', globalSessionTitleUpdatedHandler)
     on('session.workspace.updated', globalSessionWorkspaceUpdatedHandler)
     on('session.settings.updated', globalSessionSettingsUpdatedHandler)

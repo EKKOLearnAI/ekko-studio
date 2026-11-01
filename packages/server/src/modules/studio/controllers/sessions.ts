@@ -1,5 +1,6 @@
 import { personDisplayMessages, personDisplayPage, personDisplayMetadata, PERSON_DISPLAY_PROJECTION } from '../services/chat-run/person-display'
 import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
+import { withSessionNotices } from '../services/session-notifications/presentation'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage } from '../public/usage'
 import { withPersonTaskReturns } from '../services/person/service'
@@ -46,7 +47,7 @@ import {
   updateSessionStats as localUpdateSessionStats,
 } from '../public/sessions'
 import { buildDbExportHistory, ExportCompressor } from '../services/context-compressor/export-compressor'
-import { getUsage, getUsageBatch } from '../public/sessions'
+import { getSessionGeneration, getUsage, getUsageBatch } from '../public/sessions'
 import {
   SESSION_CATEGORY_NAME_MAX_LENGTH,
   createSessionCategory,
@@ -800,7 +801,8 @@ export async function get(ctx: any) {
   if (ctx.state?.sessionShare) {
     delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
   }
-  ctx.body = { session: personDisplaySession(session) }
+  // Producers freeze this to fence delayed writes to this incarnation.
+  ctx.body = { session: { ...personDisplaySession(session), session_generation: getSessionGeneration(session.id) } }
 }
 
 export async function listWorkspaceRunChanges(ctx: any) {
@@ -2351,7 +2353,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       input_tokens: session.input_tokens,
       output_tokens: session.output_tokens,
     },
-    messages: personDisplayMessages(session.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages))),
+    messages: withSessionNotices(ctx.params.id, personDisplayMessages(session.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages as any[]))), { offset, storedCount: result.messages.length }),
     ...(isPersonSession(session.id) ? { projection: PERSON_DISPLAY_PROJECTION, consumedCount: result.messages.length, nextOffset: result.offset + result.messages.length } : {}),
     taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
