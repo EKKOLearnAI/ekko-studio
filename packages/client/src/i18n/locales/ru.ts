@@ -563,6 +563,9 @@ export default {
 
 
   apiRelay: {
+    campaignSlogan: "Двойная 11: бонус 11.11% при пополнении, до 1111 бонусных кредитов",
+    campaignBadge: "11.11",
+    campaignLabel: "Двойная 11",
     title: "API-реле",
     headline: "Ведущие модели ИИ через единый шлюз",
     description: "APIKEY.FAN — партнёрский API-шлюз Ekko Studio. Он предоставляет единый доступ к Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek и MiniMax и совместим с официальными API и SDK.",

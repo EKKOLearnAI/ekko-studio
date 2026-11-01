@@ -7,6 +7,7 @@ import { NTooltip } from 'naive-ui'
 import { isStoredSuperAdmin } from '@/api/client'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import PageSidebarFooter from './PageSidebarFooter.vue'
+import RelayCampaignBadge from '@/components/hermes/RelayCampaignBadge.vue'
 import { useMobileNavigation } from '@/composables/usePageSidebar'
 
 const route = useRoute()
@@ -55,11 +56,12 @@ function handleNavigate(key: string) {
       </NTooltip>
       <NTooltip placement="right" trigger="hover">
         <template #trigger>
-          <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: 'hermes.apiRelay' }" :active="activeKey === 'apiRelay'" :aria-label="t('sidebar.apiRelay')" @click="handleNavigate('apiRelay')">
+          <RouteLinkItem class="studio-navigation-rail__item studio-navigation-rail__item--relay" :to="{ name: 'hermes.apiRelay' }" :active="activeKey === 'apiRelay'" :aria-label="t('sidebar.apiRelay')" :aria-description="t('apiRelay.campaignLabel')" @click="handleNavigate('apiRelay')">
             <img class="api-relay-logo" :src="deploymentUrl('/relay-logo.png')" width="24" height="24" alt="" aria-hidden="true" />
+            <RelayCampaignBadge compact />
           </RouteLinkItem>
         </template>
-        {{ t('sidebar.apiRelay') }}
+        {{ t('sidebar.apiRelay') }} · {{ t('apiRelay.campaignLabel') }}
       </NTooltip>
     </nav>
     <div class="studio-navigation-rail__bottom">
@@ -106,6 +108,15 @@ function handleNavigate(key: string) {
 }
 .studio-navigation-rail__bottom { display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); padding-top: 12px; }
 .api-relay-logo { border-radius: var(--radius-component, 4px); }
+.studio-navigation-rail__item--relay {
+  position: relative;
+  :deep(.relay-campaign-badge) {
+    position: absolute;
+    right: -2px;
+    bottom: calc(50% + 9px);
+    pointer-events: none;
+  }
+}
 .studio-navigation-rail__avatar { aspect-ratio: 1; flex-shrink: 0; border-radius: 4px; object-fit: contain; }
 .studio-navigation-rail__item {
   display: grid;

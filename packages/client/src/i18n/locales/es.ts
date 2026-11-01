@@ -649,6 +649,9 @@ export default {
 
   // Sidebar
   apiRelay: {
+    campaignSlogan: "Doble 11: 11.11% de crédito adicional al recargar, hasta 1111 de crédito adicional",
+    campaignBadge: "11.11",
+    campaignLabel: "Doble 11",
     title: "Relay de API",
     headline: "Los principales modelos de IA en una sola puerta de enlace",
     description: "APIKEY.FAN es la puerta de enlace de API asociada de Ekko Studio. Ofrece acceso unificado a Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek y MiniMax, y es compatible con las API y los SDK oficiales.",

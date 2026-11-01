@@ -31,6 +31,11 @@ const writeApprovalMessages = {
 }
 
 export default {
+  apiRelay: {
+    campaignSlogan: "Çifte 11: yüklemelerde %11.11 ek kredi, en fazla 1111 ek kredi",
+    campaignBadge: "11.11",
+    campaignLabel: "Çifte 11",
+  },
   person: personMessages['tr'],
   sessionTasks: {
       "title": "Görevler",

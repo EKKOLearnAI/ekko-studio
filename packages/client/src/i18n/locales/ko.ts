@@ -649,6 +649,9 @@ export default {
   },
 
   apiRelay: {
+    campaignSlogan: "더블 일레븐 충전 시 11.11% 추가 크레딧, 최대 1111 크레딧 증정",
+    campaignBadge: "11.11",
+    campaignLabel: "더블 일레븐",
     title: "API 릴레이",
     headline: "주요 AI 모델을 하나의 게이트웨이로",
     description: "APIKEY.FAN은 Ekko Studio의 제휴 API 게이트웨이입니다. Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek, MiniMax에 통합 API로 접근할 수 있으며, 공식 API 및 SDK와 호환됩니다.",

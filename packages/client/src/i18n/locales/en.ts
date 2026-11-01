@@ -637,6 +637,9 @@ export default {
 
   // Sidebar
   apiRelay: {
+    campaignSlogan: "Double 11: 11.11% bonus credit on recharges, up to 1111 in bonus credit",
+    campaignBadge: "11.11",
+    campaignLabel: "Double 11",
     title: "API Relay",
     headline: "Leading AI models, one gateway",
     description: "APIKEY.FAN is Ekko Studio’s partner API gateway, offering unified access to Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek, and MiniMax. It is compatible with official APIs and SDKs.",

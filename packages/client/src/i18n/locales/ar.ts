@@ -637,6 +637,9 @@ export default {
 
   // Sidebar
   apiRelay: {
+    campaignSlogan: "الحادي عشر المزدوج: رصيد إضافي بنسبة 11.11% عند الشحن، بحد أقصى 1111 من الرصيد الإضافي",
+    campaignBadge: "11.11",
+    campaignLabel: "الحادي عشر المزدوج",
     title: "بوابة API",
     headline: "نماذج الذكاء الاصطناعي الرائدة عبر بوابة واحدة",
     description: "APIKEY.FAN هي بوابة API الشريكة لـ Ekko Studio. توفر وصولًا موحدًا إلى Claude وChatGPT وGrok وGemini وZhipu وKimi وDeepSeek وMiniMax، وهي متوافقة مع واجهات API وحزم SDK الرسمية.",
