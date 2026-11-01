@@ -5554,51 +5554,6 @@ function createChatState(scopedSessionId?: string) {
     }
   }
 
-  // A background session's run can finish — or its completion event be lost across a
-  // disconnect/reconnect — while the tab is hidden. It has no live run socket, so the
-  // per-session reconnect resume never fires for it and its list "running" light (driven
-  // by streamStates || serverWorking) sticks. On re-sync, re-verify every non-active
-  // session the client still thinks is working against the server's authoritative state
-  // and drop the stale ones.
-  function reconcileBackgroundWorkingSessions() {
-    if (scopedSessionId) return
-    const active = activeSessionId.value
-    // Never tear down the shared run socket during a background reconcile — connectChatRun swaps
-    // (removeAllListeners + disconnect) whenever the socket isn't already connected + same-profile,
-    // which would lose in-flight resumes and disrupt the viewed session's live stream. Reuse only:
-    // require an already-connected socket and a candidate on the viewed session's profile. Defer the
-    // rest to the next re-sync.
-    const socket = getChatRunSocket(runtimeTransport())
-    if (!socket || !socket.connected) return
-    const activeProfile = activeSession.value?.profile
-    // Anything the client still shows as working: a known-working/live session
-    // (serverWorking / streamStates) or one with background pending (delegations).
-    const candidates = new Set<string>([...serverWorking.value, ...streamStates.value.keys()])
-    for (const [sid, n] of backgroundPendingBySession.value) if ((n || 0) > 0) candidates.add(sid)
-    for (const sid of candidates) {
-      if (sid === active) continue
-      // A live run socket reconciles itself on its own reconnect; only verify the
-      // stale-risk ones: no live socket and not the session being viewed.
-      if (streamStates.value.has(sid)) continue
-      const profile = sessions.value.find(s => s.id === sid)?.profile
-      // A candidate on a different profile would force connectChatRun to swap the socket — skip it;
-      // the next re-sync, or viewing that session, reconciles it safely.
-      if (!activeProfile || profile !== activeProfile) continue
-      resumeSession(sid, (data) => {
-        if (data.session_id !== sid) return
-        // Reconcile background pending to the server's authoritative count (clears a stale
-        // delegation whose terminal event was lost — the stuck-light shape from the incident).
-        applyResumedRunActivity(sid, data)
-        // Clear the stale "live" state only when the server says no foreground run is active.
-        if (data.isWorking) return
-        streamStates.value.delete(sid)
-        serverWorking.value.delete(sid)
-        clearRunStartedAt(sid)
-        setAbortState(sid, null)
-      }, profile, runtimeTransport())
-    }
-  }
-
   // Tab visibility: re-sync when returning to foreground
   if (typeof document !== 'undefined') {
     const onVisibilityChange = () => {
@@ -5606,7 +5561,6 @@ function createChatState(scopedSessionId?: string) {
         // Live-sync the session list so sessions created elsewhere (CLI,
         // Telegram, another device) appear without a manual reload.
         void refreshSessionListOnly()
-        reconcileBackgroundWorkingSessions()
       }
       if (document.visibilityState === 'visible' && activeSessionId.value && !isStreaming.value) {
         const sid = activeSessionId.value
@@ -5662,7 +5616,6 @@ function createChatState(scopedSessionId?: string) {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
       if (isStreaming.value) return
       void refreshSessionListOnly()
-      reconcileBackgroundWorkingSessions()
     }, 12_000)
     onScopeDispose(() => window.clearInterval(refreshTimer))
   }
