@@ -113,6 +113,83 @@ describe('resolveEkkoProviderRuntimeConfig', () => {
     })
   })
 
+  it('expands ${VAR} references in custom provider credentials instead of sending the placeholder', async () => {
+    mocks.readConfigYamlForProfile.mockResolvedValue({
+      providers: {
+        'uge-proxy': {
+          api: 'https://${UGE_PROXY_HOST}/v1',
+          name: 'uge-proxy',
+          api_key: '${UGE_PROXY_KEY}',
+        },
+      },
+    })
+    mocks.safeReadFile.mockResolvedValue([
+      'UGE_PROXY_KEY="real-gateway-key"',
+      'UGE_PROXY_HOST=gw.example',
+    ].join('\n'))
+    const { resolveEkkoProviderRuntimeConfig } = await import(
+      '../../packages/server/src/modules/ekko/services/provider-runtime'
+    )
+
+    await expect(resolveEkkoProviderRuntimeConfig({
+      profile: 'default',
+      provider: 'custom:uge-proxy',
+    })).resolves.toEqual({
+      provider: 'custom:uge-proxy',
+      baseUrl: 'https://gw.example/v1',
+      apiKey: 'real-gateway-key',
+    })
+  })
+
+  it('prefers process.env over the profile .env when expanding references', async () => {
+    const key = 'EKKO_TEST_PROCESS_ENV_KEY'
+    process.env[key] = 'from-process-env'
+    try {
+      mocks.readConfigYamlForProfile.mockResolvedValue({
+        providers: {
+          'env-proxy': {
+            api: 'https://gw.example/v1',
+            name: 'env-proxy',
+            api_key: `\${${key}}`,
+          },
+        },
+      })
+      mocks.safeReadFile.mockResolvedValue(`${key}=from-profile-env`)
+      const { resolveEkkoProviderRuntimeConfig } = await import(
+        '../../packages/server/src/modules/ekko/services/provider-runtime'
+      )
+
+      await expect(resolveEkkoProviderRuntimeConfig({
+        profile: 'default',
+        provider: 'custom:env-proxy',
+      })).resolves.toMatchObject({ apiKey: 'from-process-env' })
+    } finally {
+      delete process.env[key]
+    }
+  })
+
+  it('falls back to key_env when a referenced variable is not defined anywhere', async () => {
+    mocks.readConfigYamlForProfile.mockResolvedValue({
+      providers: {
+        'missing-proxy': {
+          api: 'https://gw.example/v1',
+          name: 'missing-proxy',
+          api_key: '${DEFINITELY_UNDEFINED_EKKO_KEY}',
+          key_env: 'MISSING_PROXY_FALLBACK_KEY',
+        },
+      },
+    })
+    mocks.safeReadFile.mockResolvedValue("MISSING_PROXY_FALLBACK_KEY='fallback-key'")
+    const { resolveEkkoProviderRuntimeConfig } = await import(
+      '../../packages/server/src/modules/ekko/services/provider-runtime'
+    )
+
+    await expect(resolveEkkoProviderRuntimeConfig({
+      profile: 'default',
+      provider: 'custom:missing-proxy',
+    })).resolves.toMatchObject({ apiKey: 'fallback-key' })
+  })
+
   it('forces a Studio refresh and retries once when an opaque token receives 401', async () => {
     mocks.resolveAuthorized.mockResolvedValue({
       baseUrl: 'https://chatgpt.com/backend-api/codex',

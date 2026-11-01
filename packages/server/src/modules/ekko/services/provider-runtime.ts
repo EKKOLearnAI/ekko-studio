@@ -72,8 +72,8 @@ export async function resolveEkkoProviderRuntimeConfig(input: {
     return providerLookupCandidates(provider).some(candidate => entryKeys.includes(candidate))
   })
   if (customEntry) {
-    if (!baseUrl) baseUrl = String(customEntry.base_url || '').trim()
-    if (!apiKey) apiKey = String(customEntry.api_key || '').trim()
+    if (!baseUrl) baseUrl = expandEnvReferences(String(customEntry.base_url || ''), envContent).trim()
+    if (!apiKey) apiKey = expandEnvReferences(String(customEntry.api_key || ''), envContent).trim()
     if (!apiKey && customEntry.key_env) apiKey = parseEnvValue(envContent, customEntry.key_env)
     if (!apiMode) apiMode = String(customEntry.api_mode || '').trim()
   }
@@ -158,6 +158,28 @@ function providerLookupCandidates(provider: string): string[] {
     withoutCustom ? `custom:${withoutCustom}` : '',
     withoutCustom ? `custom_${withoutCustom}` : '',
   ].filter(Boolean))]
+}
+
+const ENV_REFERENCE_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g
+
+/**
+ * Expand `${VAR}` / `$VAR` references the same way Hermes Agent expands
+ * `config.yaml` values on load. Agent resolves them against `process.env`;
+ * Studio also falls back to the profile `.env` because the Web UI is usually
+ * started by a service manager that never exports those variables.
+ *
+ * Without this, a provider entry written as `api_key: ${MY_KEY}` keeps the
+ * literal placeholder and the literal string is sent as the bearer token,
+ * which every gateway rejects with 401.
+ */
+export function expandEnvReferences(value: string, envContent: string): string {
+  if (!value.includes('$')) return value
+  return value.replace(ENV_REFERENCE_PATTERN, (_match, braced?: string, bare?: string) => {
+    const name = braced || bare || ''
+    if (!name) return ''
+    const fromProcess = String(process.env[name] ?? '').trim()
+    return fromProcess || parseEnvValue(envContent, name)
+  })
 }
 
 function parseEnvValue(envContent: string, key: string): string {
