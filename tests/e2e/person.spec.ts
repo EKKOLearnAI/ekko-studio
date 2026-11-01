@@ -3724,31 +3724,27 @@ test('Person search uses the shared search dialog and only requests assistant co
 for (const [mode, wallpaper] of [['light', false], ['dark', true]] as const) {
 test(`Person uses the same desktop and mobile sidebar layout as single chat in ${mode}`, async ({ page }) => {
   const { state } = await setup(page, mode, wallpaper, false)
-  state.session.title = '旅行计划与工作安排：需要保持时间完整显示的长会话名称'
+  state.session.title = '旅行计划与工作安排：需要保持头像与名称布局的长会话名称'
   async function expectSingleLineSession() {
     const row = page.locator('.person-sidebar .session-item')
+    await expect(row.locator('.session-item-time')).toHaveCount(0)
+    await expect(row.locator('.session-item-title')).toHaveText(state.session.title)
     const layout = await row.evaluate(el => {
       const avatar = el.querySelector('.session-item-agent-logo')!.getBoundingClientRect()
       const title = el.querySelector<HTMLElement>('.session-item-title')!
       const name = title.getBoundingClientRect()
-      const time = el.querySelector('.session-item-time')!.getBoundingClientRect()
       return {
         avatarBeforeName: avatar.right < name.left,
-        nameBeforeTime: name.right < time.left,
         avatarCenter: avatar.y + avatar.height / 2,
         nameCenter: name.y + name.height / 2,
-        timeCenter: time.y + time.height / 2,
         nameTruncated: title.scrollWidth > title.clientWidth,
-        fitsRow: time.right <= el.getBoundingClientRect().right && el.scrollWidth <= el.clientWidth,
+        fitsRow: name.right <= el.getBoundingClientRect().right && el.scrollWidth <= el.clientWidth,
       }
     })
     expect(layout.avatarBeforeName).toBe(true)
-    expect(layout.nameBeforeTime).toBe(true)
     expect(Math.abs(layout.avatarCenter - layout.nameCenter)).toBeLessThan(1)
-    expect(Math.abs(layout.avatarCenter - layout.timeCenter)).toBeLessThan(1)
     expect(layout.nameTruncated).toBe(true)
     expect(layout.fitsRow).toBe(true)
-    await expect(row.locator('.session-item-time')).not.toBeEmpty()
   }
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/#/hermes/chat')
