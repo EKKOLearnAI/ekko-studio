@@ -32,7 +32,6 @@ const avatar = computed(() => chatSessionAgentAvatar({ agent: props.result.agent
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-@use '@/styles/agent-avatar' as *;
 @use '../tasks/task-status' as task-status;
 .person-task-return-card {
   box-sizing: border-box;
@@ -49,7 +48,7 @@ const avatar = computed(() => chatSessionAgentAvatar({ agent: props.result.agent
   font: inherit;
   text-align: start;
 }
-.task-return-logo { @include agent-avatar(32px); }
+.task-return-logo { width: 56px; height: 56px; object-fit: contain; border-radius: 22%; flex-shrink: 0; }
 .task-return-content { min-width: 0; flex: 1; }
 .task-return-header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
 .task-return-title { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; color: $text-primary; text-align: start; font-weight: 550; line-height: 1.6; overflow-wrap: anywhere; cursor: pointer; }
