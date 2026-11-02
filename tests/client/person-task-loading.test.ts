@@ -22,6 +22,7 @@ vi.mock('@/components/hermes/tasks/useTaskDrawerLayout', () => ({ useTaskDrawerL
 vi.mock('@/utils/chat-agent-avatar', () => ({ PERSON_AVATAR: { label: 'Person' }, chatSessionAgentAvatar: () => ({ src: '/logo.png', label: 'Person' }) }))
 vi.mock('vue-router', () => ({ useRoute: () => mocks.route, useRouter: () => ({ replace: vi.fn() }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'en' } }) }))
+vi.mock('@/composables/useReducedMotion', () => ({ useReducedMotion: () => ({ value: true }) }))
 vi.mock('naive-ui', () => {
   const pass = { template: '<section><slot name="header" /><slot /></section>' }
   return { NDrawer: pass, NDrawerContent: pass, NButton: { template: '<button><slot /></button>' }, NAlert: { template: '<div role="alert"><slot /></div>' },
@@ -44,6 +45,23 @@ beforeEach(() => {
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Person task loading and recovery', () => {
+  it('cancels reads on close and rejects late data and repeated close actions', async () => {
+    const read = deferred<typeof response>()
+    mocks.request.mockReturnValueOnce(read.promise)
+    wrapper = mount(PersonTaskChat, { attachTo: document.body, props: { taskId: 'task', mainSessionId: 'main' }, global: { stubs: { transition: false } } })
+    await flushPromises()
+    const close = wrapper.get('header button')
+    ;(close.element as HTMLButtonElement).focus()
+    await close.trigger('click')
+    expect(mocks.request.mock.calls[0][3].aborted).toBe(true)
+    expect(mocks.subscribers.size).toBe(0)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+    read.resolve(response); await flushPromises()
+    expect(wrapper.emitted('close')).toEqual([[true]])
+    expect(wrapper.find('aside').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Loaded task')
+  })
+
   it('replaces a failed initial detail spinner with retry and recovers without reopening', async () => {
     mocks.request.mockRejectedValueOnce(new Error('HTTP 503')).mockResolvedValueOnce(response)
     wrapper = mount(PersonTaskChat, { props: { taskId: 'task', mainSessionId: 'main' } })

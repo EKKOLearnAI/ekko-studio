@@ -10,9 +10,11 @@ import { onPersonUpdated } from '@/api/studio/chat'
 import { clientUuid } from '@/utils/secure-uuid'
 import type { SessionSummary } from '@/api/studio/sessions'
 import { createRefreshQueue } from '@/utils/refresh-queue'
+import { useReducedMotion } from '@/composables/useReducedMotion'
 const props = defineProps<{ taskId: string; mainSessionId: string; executionId?: string }>()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const { t } = useI18n()
+const reducedMotion = useReducedMotion()
 const taskPanel = useTemplateRef<HTMLElement>('taskPanel')
 const { isMobile, width, maxWidth, startResize, resizeWithKeyboard } = usePersonTaskPanel(taskPanel)
 const selectedExecutionId = ref(props.executionId || '')
@@ -36,6 +38,8 @@ const ready = ref(false)
 const loading = ref(true)
 const loadError = ref(false)
 const closing = ref(false)
+let restoreFocus = false
+let disposed = false
 const sending = ref(false)
 const stopping = ref(false)
 const error = ref('')
@@ -81,10 +85,19 @@ async function send(text: string, attachments?: Attachment[]) {
   } catch (e) { if (!lifetime.signal.aborted) { error.value = String(e); await refresh() }; return false }
   finally { sending.value = false }
 }
-async function close() {
+function close() {
   if (closing.value) return
+  restoreFocus = !!taskPanel.value?.contains(document.activeElement)
   closing.value = true; reads.dispose(); lifetime.abort(); stopUpdates()
-  emit('close')
+}
+function disablePanel(element: Element) {
+  // Keep the leaving panel visible without accepting focus or further actions.
+  const panel = element as HTMLElement
+  panel.inert = true
+  element.setAttribute('aria-hidden', 'true')
+}
+function finishClose() {
+  if (!disposed) emit('close', restoreFocus)
 }
 async function insert(queueId: string) {
   if (queueDisabled.value || !task.value || !selectedIsCurrent.value || !queueState.value.canInsert || requestingInsertion.value || queueState.value.insertion) return
@@ -128,6 +141,7 @@ function handleEscape(event: KeyboardEvent) {
 }
 onMounted(() => window.addEventListener('keydown', handleEscape))
 onBeforeUnmount(() => {
+  disposed = true
   reads.dispose(); lifetime.abort(); stopUpdates()
   window.removeEventListener('keydown', handleEscape)
 })
@@ -135,8 +149,9 @@ defineExpose({ session, send, panelWidth: width, addFiles: (files: File[]) => co
 </script>
 
 <template>
-  <aside ref="taskPanel" class="person-task-chat" data-theme-surface="card" role="complementary"
-    :aria-label="task?.title || t('person.tasks')" :style="{ width: `${width}px` }">
+  <Transition name="person-task-panel" appear :css="!reducedMotion" @before-leave="disablePanel" @after-leave="finishClose">
+  <aside v-if="!closing" ref="taskPanel" class="person-task-chat" data-theme-surface="card" role="complementary"
+    :aria-label="task?.title || t('person.tasks')" :style="{ '--person-task-panel-width': `${width}px` }">
       <div v-if="!isMobile" class="task-chat-resize" role="separator" tabindex="0" aria-orientation="vertical"
         :aria-label="t('person.tasks')" :aria-valuemin="320" :aria-valuemax="maxWidth" :aria-valuenow="Math.round(width)"
         @pointerdown="startResize" @keydown="resizeWithKeyboard" />
@@ -162,11 +177,18 @@ defineExpose({ session, send, panelWidth: width, addFiles: (files: File[]) => co
       </div>
       </div>
   </aside>
+  </Transition>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-.person-task-chat { position: relative; display: flex; flex-direction: column; flex-shrink: 0; min-width: 0; min-height: 0; height: 100%; border-inline-start: var(--border-width, 1px) solid $border-color; }
+.person-task-chat { position: relative; display: flex; flex-direction: column; flex-shrink: 0; width: var(--person-task-panel-width); min-width: 0; min-height: 0; height: 100%; border-inline-start: var(--border-width, 1px) solid $border-color; }
+.person-task-panel-enter-active, .person-task-panel-leave-active {
+  overflow: hidden;
+  pointer-events: none;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.16s ease;
+}
+.person-task-panel-enter-from, .person-task-panel-leave-to { width: 0; opacity: 0; }
 .task-chat-resize { position: absolute; inset-inline-start: -3px; top: 0; bottom: 0; width: 6px; z-index: 3; cursor: col-resize; touch-action: none; }
 .task-chat-resize:focus-visible { outline: 2px solid $accent-primary; outline-offset: -2px; }
 .task-chat-layout { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
@@ -178,5 +200,11 @@ defineExpose({ session, send, panelWidth: width, addFiles: (files: File[]) => co
 .task-chat-heading > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 768px) {
   .person-task-chat { position: absolute; inset: 0; z-index: 80; border-inline-start: 0; }
+  .person-task-panel-enter-active, .person-task-panel-leave-active { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.16s ease; }
+  .person-task-panel-enter-from, .person-task-panel-leave-to { width: var(--person-task-panel-width); transform: translateX(100%); }
+  .person-task-panel-enter-from:dir(rtl), .person-task-panel-leave-to:dir(rtl) { transform: translateX(-100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .person-task-panel-enter-active, .person-task-panel-leave-active { transition: none; }
 }
 </style>

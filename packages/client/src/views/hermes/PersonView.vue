@@ -333,6 +333,13 @@ function attachToolFile(file: File) {
 }
 const chatExecutionId = ref<string>()
 function openTask(task: PersonTask) { showTasks.value = false; chatExecutionId.value = undefined; chatTaskId.value = task.id }
+async function closeTaskChat(restoreFocus: boolean) {
+  chatTaskId.value = null
+  void refresh()
+  if (!restoreFocus) return
+  await nextTick()
+  if (!chatTaskId.value && !toolsOpen.value && !showPanel.value && !showTasks.value && !isNewConversation.value) chatInputRef.value?.focusComposer()
+}
 provide(personTaskNavigation, (taskId, executionId) => { showTasks.value = false; chatExecutionId.value = executionId; chatTaskId.value = taskId })
 const showModelPicker = ref(false)
 const modelsLoading = ref(false)
@@ -715,7 +722,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       </div>
       </div>
       <PersonTaskChat v-if="chatTaskId && data.session" ref="taskChatRef" :inert="isMobile && toolsOpen || undefined"
-        :key="`${chatTaskId}:${chatExecutionId || ''}`" :execution-id="chatExecutionId" :task-id="chatTaskId" :main-session-id="data.session.id" @close="chatTaskId = null; refresh()" />
+        :key="`${chatTaskId}:${chatExecutionId || ''}`" :execution-id="chatExecutionId" :task-id="chatTaskId" :main-session-id="data.session.id" @close="closeTaskChat" />
       </div>
       <NModal v-model:show="showAgentSetup" preset="dialog" :title="t('person.agentSetupTitle')" :aria-label="t('person.agentSetupTitle')"
         :positive-text="t('person.configureAgents')" :negative-text="t('common.cancel')"

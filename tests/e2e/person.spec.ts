@@ -4,6 +4,7 @@ import { installDesktopBridge } from './desktop-bridge-fixture'
 import sharp from 'sharp'
 import { PERSON_BOTS, personBotNameKey } from '../../packages/shared/person-bots'
 import { createServer } from 'node:http'
+import { writeFile } from 'node:fs/promises'
 import { Server } from 'socket.io'
 import type { SessionListState } from '../../packages/shared/session-state'
 import { personDisplayPage } from '../../packages/server/src/modules/studio/services/chat-run/person-display'
@@ -632,6 +633,7 @@ test('Person previews task files with the task session and leaves the main conve
   })
   await files.locator('.file-preview').getByRole('button', { name: 'Close', exact: true }).click()
   await taskDrawer.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(taskDrawer).toHaveCount(0)
   await page.getByRole('button', { name: 'Side panel', exact: true }).click()
   await expect(files.locator('.file-tree')).toBeVisible()
   expect(requests.filter(request => request.endpoint === 'list').at(-1)?.sessionId).toBe('person-main-1')
@@ -662,6 +664,7 @@ for (const [width, mode] of [[1440, 'light'], [900, 'dark'], [390, 'dark']] as c
 
     const task = page.locator('.person-task-chat')
     const toggle = page.getByRole('button', { name: 'Side panel', exact: true })
+    await expect(task).toHaveCSS('pointer-events', 'auto')
     await expect(toggle).toBeEnabled()
     await expect(page.getByRole('button', { name: 'Side panel', exact: true })).toHaveCount(1)
     if (width > 768) {
@@ -729,6 +732,7 @@ for (const direction of ['ltr', 'rtl'] as const) {
     const task = page.locator('.person-task-chat')
     const handle = task.getByRole('separator')
     await expect(task).toBeVisible()
+    await expect(task).toHaveCSS('pointer-events', 'auto')
     const initial = (await task.boundingBox())!.width
     expect(initial).toBeCloseTo(480, 0)
     await handle.hover()
@@ -2418,6 +2422,7 @@ test('opens a hidden task in a right column, continues it and restores the Perso
   await expect(dialog.locator('.message.tool')).toBeVisible()
   await expect(dialog.locator('.assistant-message-author .message-author-name')).toHaveText('Ekko')
   await expect(page.locator('.n-modal')).toHaveCount(0)
+  await expect(dialog).toHaveCSS('pointer-events', 'auto')
   const bounds = (await dialog.boundingBox())!
   const layout = (await page.locator('.person-chat-layout').boundingBox())!
   const main = (await page.locator('.person-chat-surface').boundingBox())!
@@ -5122,3 +5127,221 @@ for (const width of [1440, 360]) {
     await page.screenshot({path:testInfo.outputPath(`located-flow-${width}.png`),animations:'disabled'})
   })
 }
+
+// Sample real browser transitions synchronously; Vue's teardown timer keeps
+// running even while a Web Animation is paused, so assertions use captured state.
+async function sampleTaskPanelMotion(page: Page, leaving: boolean) {
+  await page.evaluate(leaving => {
+    ;(window as any).__TASK_PANEL_MOTION__ = null
+    const onRun = (event: TransitionEvent) => {
+      const panel = event.target as HTMLElement
+      if (!panel.matches('.person-task-chat') || panel.inert !== leaving) return
+      document.removeEventListener('transitionrun', onRun)
+      const animations = panel.getAnimations()
+      const snapshot = () => {
+        const style = getComputedStyle(panel)
+        return { width: panel.getBoundingClientRect().width, opacity: Number(style.opacity),
+          x: style.transform === 'none' ? 0 : new DOMMatrixReadOnly(style.transform).m41,
+          inert: panel.inert, ariaHidden: panel.getAttribute('aria-hidden'),
+          mainInert: document.querySelector<HTMLElement>('.person-chat-surface')!.inert }
+      }
+      for (const animation of animations) { animation.pause(); animation.currentTime = 0 }
+      const from = snapshot()
+      for (const animation of animations) animation.currentTime = Number(animation.effect!.getComputedTiming().duration) / 2
+      const middle = snapshot()
+      if (leaving) window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+      ;(window as any).__TASK_PANEL_MOTION__ = { from, middle, mountedAfterRepeatedEscape: panel.isConnected,
+        durations: animations.map(animation => animation.effect!.getComputedTiming().duration) }
+      for (const animation of animations) { animation.currentTime = 0; animation.play() }
+    }
+    document.addEventListener('transitionrun', onRun)
+  }, leaving)
+}
+
+async function readTaskPanelMotion(page: Page) {
+  await expect.poll(() => page.evaluate(() => !!(window as any).__TASK_PANEL_MOTION__)).toBe(true)
+  return page.evaluate(() => (window as any).__TASK_PANEL_MOTION__)
+}
+
+async function mockMotionTaskConversation(page: Page) {
+  await page.addInitScript(() => {
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1'] = {
+      session_id: 'person-task-task1', messages: [], isWorking: false, events: [],
+    }
+  })
+}
+
+test.describe('Person task panel motion', () => {
+  for (const [mode, width, wallpaper, direction] of [
+    ['light', 1440, false, 'ltr'], ['dark', 1440, true, 'ltr'],
+    ['light', 390, true, 'ltr'], ['dark', 390, false, 'rtl'],
+  ] as const) {
+    test(`animates entry and defers teardown in ${mode} at ${width}px ${direction}`, async ({ page }, testInfo) => {
+      await page.emulateMedia({ reducedMotion: 'no-preference' })
+      await page.setViewportSize({ width, height: 900 })
+      await setup(page, mode, wallpaper, wallpaper)
+      await mockMotionTaskConversation(page)
+      await page.goto('/#/person')
+      await page.evaluate(direction => { document.documentElement.dir = direction }, direction)
+      const main = page.locator('.person-chat-surface')
+      const mainInput = page.locator('.person-compose .input-textarea')
+      await mainInput.fill('Keep my original draft')
+      await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+      await sampleTaskPanelMotion(page, false)
+      await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+      const entry = await readTaskPanelMotion(page)
+      const panel = page.locator('.person-task-chat')
+      if (width > 768) {
+        expect(entry.from.width).toBeLessThan(2)
+        expect(entry.middle.width).toBeGreaterThan(entry.from.width + 50)
+        expect(entry.middle.width).toBeLessThan(width / 3)
+      } else {
+        expect(Math.abs(entry.middle.x)).toBeGreaterThan(1)
+        expect(Math.abs(entry.middle.x)).toBeLessThan(Math.abs(entry.from.x))
+        expect(Math.sign(entry.middle.x)).toBe(direction === 'rtl' ? -1 : 1)
+        await expect(main).toHaveAttribute('inert', '')
+      }
+      expect(entry.middle.opacity).toBeGreaterThan(0)
+      expect(entry.middle.opacity).toBeLessThan(1)
+      await page.screenshot({ path: testInfo.outputPath('opening.png'), animations: 'allow' })
+      await expect(panel).toHaveCSS('opacity', '1')
+      await expect.poll(() => panel.evaluate(element => element.getAnimations().length)).toBe(0)
+      await expect(panel.locator('.input-textarea')).toBeVisible()
+      await expect(page.locator('.n-drawer-mask:visible, .n-modal-mask:visible')).toHaveCount(0)
+      await page.screenshot({ path: testInfo.outputPath('opened.png'), animations: 'allow' })
+      if (wallpaper) {
+        await page.evaluate(async () => {
+          const path = '/src/composables/useTheme.ts'
+          const { useTheme } = await import(path)
+          await useTheme().saveThemeCustomization({ appearance: { global: { opacity: 0.4 }, regions: {
+            card: { backgroundColor: '#336699', opacity: 0.25, blur: 8, radius: 18 },
+          } } })
+        })
+        await expect(panel).toHaveCSS('background-color', 'rgba(51, 102, 153, 0.25)')
+        await expect(panel).toHaveCSS('border-radius', '18px')
+        await page.evaluate(async () => {
+          const path = '/src/composables/useTheme.ts'
+          const { useTheme } = await import(path)
+          await useTheme().saveThemeCustomization({ appearance: { global: { opacity: 0.4 }, regions: { card: { backgroundColor: '#336699', opacity: 0 } } } })
+        })
+        await expect(panel).toHaveCSS('background-color', 'rgba(51, 102, 153, 0)')
+        await expect(panel).toHaveCSS('opacity', '1')
+        await page.screenshot({ path: testInfo.outputPath('transparent-theme.png'), animations: 'allow' })
+        await page.evaluate(async () => {
+          const path = '/src/composables/useTheme.ts'
+          const { useTheme } = await import(path)
+          const theme = useTheme()
+          await theme.resetCustomization(); await theme.removeBackground()
+        })
+        // Without custom fills, this native panel shares the containing chat surface.
+        await expect(panel).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+        await expect(panel).toHaveCSS('opacity', '1')
+        await expect(page.locator('html')).not.toHaveClass(/theme-has-custom-background/)
+      }
+      await sampleTaskPanelMotion(page, true)
+      if (width > 768) await panel.getByRole('button', { name: 'Close', exact: true }).click()
+      else { await panel.locator('.input-textarea').focus(); await page.keyboard.press('Escape') }
+      const exit = await readTaskPanelMotion(page)
+      expect(exit.middle.inert).toBe(true)
+      expect(exit.middle.ariaHidden).toBe('true')
+      if (width > 768) expect(exit.middle.width).toBeLessThan(exit.from.width)
+      else {
+        expect(Math.abs(exit.middle.x)).toBeGreaterThan(Math.abs(exit.from.x))
+        expect(exit.middle.mainInert).toBe(true)
+      }
+      // Duplicate dismissal was dispatched synchronously during the real transition.
+      expect(exit.mountedAfterRepeatedEscape).toBe(true)
+      await expect(panel).toHaveCount(0)
+      await expect(main).not.toHaveAttribute('inert', '')
+      await expect(mainInput).toHaveValue('Keep my original draft')
+      if (width > 768) await expect(mainInput).toBeFocused()
+      const samplesPath = testInfo.outputPath('motion-samples.json')
+      await writeFile(samplesPath, JSON.stringify({ entry, exit }, null, 2))
+      await testInfo.attach('actual-motion-samples', { path: samplesPath, contentType: 'application/json' })
+      // Reopening mounts a fresh usable conversation after the previous teardown.
+      await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+      await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+      await expect(panel.locator('.input-textarea')).toBeVisible()
+      await expect(panel).toHaveCSS('opacity', '1')
+      await expect.poll(() => panel.evaluate(element => element.getAnimations().length)).toBe(0)
+      await panel.getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(panel).toHaveCount(0)
+    })
+  }
+
+  for (const width of [1440, 390]) {
+    test(`honors reduced motion and live preference changes at ${width}px`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await page.setViewportSize({ width, height: 900 })
+      await setup(page, 'dark', true)
+      await mockMotionTaskConversation(page)
+      await page.goto('/#/person')
+      async function open() {
+        await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+        await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+      }
+      await open()
+      const panel = page.locator('.person-task-chat')
+      await expect(panel.locator('.input-textarea')).toBeVisible()
+      expect(await panel.evaluate(element => element.getAnimations().length)).toBe(0)
+      await expect(panel).toHaveCSS('opacity', '1')
+      await page.keyboard.press('Escape')
+      await expect(panel).toHaveCount(0)
+      await expect(page.locator('.person-chat-surface')).not.toHaveAttribute('inert', '')
+      await page.emulateMedia({ reducedMotion: 'no-preference' })
+      await open()
+      await expect(panel.locator('.input-textarea')).toBeVisible()
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await expect.poll(() => panel.evaluate(element => element.getAnimations().length)).toBe(0)
+      await panel.getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(panel).toHaveCount(0)
+    })
+  }
+
+  test('can dismiss during entry without leaving an inert background', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.setViewportSize({ width: 390, height: 900 })
+    await setup(page, 'light', false, false)
+    await mockMotionTaskConversation(page)
+    await page.goto('/#/person')
+    await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+    await page.evaluate(() => {
+      const dismiss = (event: TransitionEvent) => {
+        if (!(event.target as HTMLElement).matches('.person-task-chat')) return
+        document.removeEventListener('transitionrun', dismiss)
+        ;(window as any).__DISMISSED_DURING_ENTRY__ = true
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+      }
+      document.addEventListener('transitionrun', dismiss)
+    })
+    await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => (window as any).__DISMISSED_DURING_ENTRY__)).toBe(true)
+    await expect(page.locator('.person-task-chat')).toHaveCount(0)
+    await expect(page.locator('.person-chat-surface')).not.toHaveAttribute('inert', '')
+    await page.locator('.person-compose .input-textarea').fill('The main chat is usable again')
+  })
+
+  test('preserves mobile tools focus isolation and Escape priority', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 })
+    await setup(page, 'dark', true)
+    await mockMotionTaskConversation(page)
+    await mockPersonWorkspace(page)
+    await page.goto('/#/person')
+    await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+    await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+    const panel = page.locator('.person-task-chat')
+    await expect(panel).toHaveCSS('pointer-events', 'auto')
+    await page.getByRole('button', { name: 'Side panel', exact: true }).click()
+    const tools = page.locator('.person-tools-panel')
+    await expect(tools.locator('.file-tree')).toBeVisible()
+    await expect(panel).toHaveAttribute('inert', '')
+    await tools.locator('.person-tools-close').focus()
+    await page.keyboard.press('Escape')
+    await expect(tools).toHaveCount(0)
+    await expect(panel).toHaveCount(1)
+    await expect(panel).not.toHaveAttribute('inert', '')
+    await panel.locator('.input-textarea').focus()
+    await page.keyboard.press('Escape')
+    await expect(panel).toHaveCount(0)
+  })
+})
