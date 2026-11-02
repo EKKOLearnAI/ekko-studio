@@ -4,6 +4,8 @@ export interface PersonFlowStep { session_id: string; goal: string; return_expec
 export interface PersonFlow { steps: PersonFlowStep[]; index: number; stopped: boolean; completed: boolean }
 export interface PersonRequirements {
   goal: string
+  acceptance?: import('./person-acceptance').PersonAcceptanceConfig
+  verification_for?: { task_id: string }
   creator_session_id?: string
   return_expectation?: string
   flow?: PersonFlow

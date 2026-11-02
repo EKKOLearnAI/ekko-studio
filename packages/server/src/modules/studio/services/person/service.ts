@@ -15,7 +15,9 @@ export async function personSnapshot(userId: number, sessionId = '') {
   personUser(userId)
   const session = sessionId ? await readPersonSession(userId, sessionId) : { ...await effectivePersonSettings(userId), session: null }
   const busy = personChatBusy(userId, sessionId || undefined)
-  return { ...session, tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [], active_agent_task_count: sessionId ? personBackgroundTaskCount(userId, sessionId) : 0, memories: await personMemories(userId),
+  return { ...session, tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [],
+    active_tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100, activeOnly: true }) : [],
+    active_agent_task_count: sessionId ? personBackgroundTaskCount(userId, sessionId) : 0, memories: await personMemories(userId),
     flows:sessionId ? listPersonFlows(userId,sessionId) : [],
     ...(sessionId ? personFlowActivity(userId,sessionId) : { active_flow_count:0,active_flows:[] }),
     schedules: sessionId ? listPersonSchedules(userId, sessionId) : [], interactions: personInteractions(userId), busy,

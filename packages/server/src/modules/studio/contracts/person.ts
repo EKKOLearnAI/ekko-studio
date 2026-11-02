@@ -22,6 +22,8 @@ export interface PersonTaskOrigin {
   runId: string
   messages: AgentMessage[]
   returnExecutionId?: string
+  /** Host identity for an acceptance decision returned after the initial worker callback. */
+  acceptanceReturnId?: string
   stage?: import('./person-stage').PersonStageContext
   /** Host-bound user request; copied into exactly one execution's delivery. */
   memoryRequest?: PersonTaskMemoryRequest
@@ -62,6 +64,8 @@ export interface PersonTask {
   created_at: number
   updated_at: number
   running?: boolean | number
+  acceptance_state?: import('./person-acceptance').PersonAcceptanceState | null
+  acceptance_reason?: string | null
   execution_id?: string | null
   execution_selection_json?: string | null
   execution_state?: PersonRunState | 'idle'

@@ -25,7 +25,7 @@ export function createPersonAgent(options: PersonChatAgentOptions) {
           instruction: 'Only an actual user response supplies a decision. An empty response is not approval.' }
       : await tool.execute(args, context.sessionId ? { sessionId: context.sessionId, runId: context.runId || '', messages: originMessages,
         ...(options.stage ? { stage:options.stage } : {}),
-        ...(options.returnExecutionId ? { returnExecutionId: options.returnExecutionId } : {}),
+        ...(options.returnExecutionId ? { returnExecutionId: options.returnExecutionId, acceptanceReturnId: options.acceptanceReturnId } : {}),
         ...(memoryRequest ? { memoryRequest } : {}) } : undefined)
     const content = JSON.stringify(value)
     if (content.length > 18000) throw new Error('Tool result too large; request a smaller page')

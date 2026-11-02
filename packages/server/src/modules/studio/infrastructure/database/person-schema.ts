@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { initPersonAcceptanceTables } from './person-acceptance-schema'
 import { initPersonContextTables } from './person-context-schema'
 import { initPersonStageTables } from './person-stage-schema'
 
@@ -95,6 +96,7 @@ export function initPersonTables(db: DatabaseSync): void {
   })) {
     if (!executionColumns.some(column => column.name === name)) db.exec(`ALTER TABLE person_executions ADD COLUMN ${name} ${definition}`)
   }
+  initPersonAcceptanceTables(db)
   initPersonContextTables(db)
   initPersonStageTables(db)
   // Discard account-wide model choices; never copy them into conversations.

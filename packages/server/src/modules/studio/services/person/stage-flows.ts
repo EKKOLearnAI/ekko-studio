@@ -21,6 +21,7 @@ export function registerPersonStageTurn(context: PersonStageContext) {
 }
 
 export function createPersonFlow(userId: number, input: Record<string, unknown>, origin?: PersonTaskOrigin) {
+  if (Object.hasOwn(input,'acceptance') || (Array.isArray(input.stages) && input.stages.some(stage => stage && Object.hasOwn(stage,'acceptance')))) throw personError('Direct stage acceptance is unavailable; enable acceptance on background subtasks')
   if (Object.keys(input).some(key => !['action','session_id','title','goal','stages','idempotency_key'].includes(key))) throw personError('Unknown flow field')
   if (origin && input.session_id && input.session_id !== origin.sessionId) throw personError('Creator is assigned by the host',403)
   const creator = requirePersonSession(userId, origin?.sessionId || personText(input.session_id, 'session_id',100)).id
@@ -74,7 +75,7 @@ export function createPersonFlow(userId: number, input: Record<string, unknown>,
 
 function stageHasWork(stageId: string) {
   return !!personDb().prepare(`SELECT 1 FROM person_stage_tasks l JOIN session_tasks t ON t.id=l.task_id WHERE l.stage_id=? AND
-    (t.status NOT IN ('completed','closed') OR EXISTS(SELECT 1 FROM person_executions e WHERE e.task_id=t.id
+    (t.status NOT IN ('completed','closed') OR (json_extract(t.requirements_json,'$.acceptance.enabled')=1 AND NOT EXISTS(SELECT 1 FROM person_executions ae JOIN person_acceptance_passes a ON a.execution_id=ae.id WHERE ae.task_id=t.id AND ae.requirements_revision=t.requirements_revision AND ae.rowid=(SELECT MAX(last.rowid) FROM person_executions last WHERE last.task_id=t.id) AND ae.state='finished')) OR EXISTS(SELECT 1 FROM person_executions e WHERE e.task_id=t.id
       AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')))`).get(stageId)
 }
 
@@ -102,7 +103,7 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
     if (action === 'complete') {
       if (!origin?.stage || origin.stage.flowId !== id || !origin.runId) throw personError('Complete the stage from its assigned live turn',403)
       const { stage } = assertPersonStage(userId,origin.stage,origin.sessionId)
-      if (stageHasWork(stage.id)) throw personError('Finish or explicitly close the stage subtask before completing',409)
+      if (stageHasWork(stage.id)) throw personError('Finish or explicitly close the stage subtask before completing; acceptance-enabled children must pass independent verification',409)
       if (stage.completion_run_id && stage.completion_run_id !== origin.runId) throw personError('Stage completion is already being saved',409)
       db.prepare('UPDATE person_stages SET completion_run_id=? WHERE id=?').run(origin.runId,stage.id)
     } else {

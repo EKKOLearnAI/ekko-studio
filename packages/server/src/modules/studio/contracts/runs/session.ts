@@ -62,7 +62,7 @@ export interface SessionMessage {
 export interface QueuedRun {
   personStageDelivery?: { userId: number; deliveryId: string }
   /** Internal account-bound Person result delivery. */
-  personDelivery?: { userId: number; executionId: string }
+  personDelivery?: { userId: number; executionId: string; acceptanceReturnId?: string }
   /** Internal admission check, never serialized or supplied by the client. */
   authorize?: () => Promise<void>
   /** Captured at admission, independent of whichever socket drains the queue. */

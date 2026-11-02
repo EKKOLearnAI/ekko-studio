@@ -5,6 +5,7 @@ import { COMPRESSION_SNAPSHOT_TABLE, TASK_PLANS_TABLE, RUN_USAGE_TABLE, SESSION_
 import { personDb, personTransaction } from './person-store'
 import { getSession } from './session-store'
 import { PERSON_STAGE_PENDING_WORK_SQL } from './person-stage-store'
+import { PERSON_TASK_RUNNING_SQL } from './person-presence-store'
 
 export function personHasPendingWork(userId: number, sessionId = ''): boolean {
   if (personDb().prepare(`SELECT 1 FROM person_flows f JOIN person_stages member ON member.flow_id=f.id
@@ -13,15 +14,14 @@ export function personHasPendingWork(userId: number, sessionId = ''): boolean {
       AND (?='' OR s.session_id=? OR (member.session_id=? AND member.group_position<f.current_position AND member.result_message_id IS NOT NULL))
       AND ${PERSON_STAGE_PENDING_WORK_SQL})) LIMIT 1`)
     .get(userId,sessionId,sessionId,sessionId,sessionId,sessionId,sessionId)) return true
-  return !!personDb().prepare(`SELECT 1 FROM person_executions e JOIN session_tasks t ON t.id=e.task_id WHERE e.owner_user_id=? AND (?='' OR t.session_id=?) AND
-    (e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')
-    OR EXISTS(SELECT 1 FROM person_deliveries d WHERE d.execution_id=e.id AND d.state IN ('pending','queued'))) LIMIT 1`).get(userId, sessionId, sessionId)
+  return !!personDb().prepare(`SELECT 1 FROM session_tasks t WHERE t.owner_user_id=? AND t.bot_id=? AND (?='' OR t.session_id=?) AND (${PERSON_TASK_RUNNING_SQL}) LIMIT 1`)
+    .get(userId, `person:${userId}`, sessionId, sessionId)
 }
 
 export function personHistorySessions(userId: number, sessionId: string) {
   return personDb().prepare(`SELECT id FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND
-    (id=? OR id IN (SELECT e.session_id FROM person_executions e JOIN session_tasks t ON t.id=e.task_id WHERE t.owner_user_id=? AND t.session_id=?))`)
-    .all(String(userId), sessionId, userId, sessionId) as { id: string }[]
+    (id=? OR id IN (SELECT e.session_id FROM person_executions e JOIN session_tasks t ON t.id=e.task_id WHERE t.owner_user_id=? AND t.session_id=?) OR id IN (SELECT a.session_id FROM person_acceptance_attempts a JOIN person_executions e ON e.id=a.execution_id JOIN session_tasks t ON t.id=e.task_id WHERE t.owner_user_id=? AND t.session_id=?))`)
+    .all(String(userId), sessionId, userId, sessionId, userId, sessionId) as { id: string }[]
 }
 
 /** Remove one conversation's task graph atomically; account resources and other conversations remain. */
@@ -38,7 +38,8 @@ export function clearPersonHistory(userId: number, mainId: string, historyRevisi
     const tasks = db.prepare('SELECT id FROM session_tasks WHERE owner_user_id=? AND session_id=?').all(userId, mainId)
     for (const task of tasks) {
       db.prepare('DELETE FROM person_occurrences WHERE schedule_id IN (SELECT id FROM person_schedules WHERE task_id=?)').run(task.id)
-      for (const table of ['person_task_returns', 'person_deliveries', 'person_events'])
+      db.prepare('DELETE FROM person_acceptance_tasks WHERE development_task_id IN (SELECT id FROM session_tasks WHERE owner_user_id=? AND session_id=?) OR verification_task_id IN (SELECT id FROM session_tasks WHERE owner_user_id=? AND session_id=?)').run(userId,mainId,userId,mainId)
+      for (const table of ['person_acceptance_attempts', 'person_acceptance', 'person_task_returns', 'person_deliveries', 'person_events'])
         db.prepare(`DELETE FROM ${table} WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=?)`).run(task.id)
       db.prepare("DELETE FROM person_operations WHERE owner_user_id=? AND (json_extract(result_json,'$.task.id')=? OR json_extract(result_json,'$.task_id')=?)").run(userId, task.id, task.id)
       for (const table of ['person_interactions', 'person_schedules', 'person_task_origins', 'person_executions', 'person_stage_tasks'])

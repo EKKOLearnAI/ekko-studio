@@ -5,8 +5,9 @@ export function personTaskPrompt(
   task: Pick<PersonTask, 'title' | 'requirements_json'>,
   decisions: Pick<PersonInteraction, 'question' | 'answer' | 'answered_by'>[],
 ): string {
-  const { goal, handoff } = personRequirements(task)
+  const { goal, handoff, acceptance } = personRequirements(task)
   const sections = [`# ${task.title}`, goal]
+  if (acceptance) sections.push('## Development handoff\n\nDeliver runnable artifacts, their paths, startup instructions and known limitations. Your assignment is implementation and development checks. The host assigns independent acceptance to a separate verifier; do not perform or report that acceptance.')
   if (handoff) {
     const context = [
       handoff.execution_id ? `Source execution: ${handoff.execution_id}` : '',

@@ -1649,9 +1649,18 @@ function migrateSessionTaskSchema(db: NonNullable<ReturnType<typeof getDb>>): vo
         .replace(/^(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:"session_tasks"|session_tasks)(?=\s*\()/i, `$1${quoteIdentifier(temporary)}`)
       db.exec(createSql)
       db.exec(`INSERT INTO ${quoteIdentifier(temporary)} (${columns}) SELECT ${columns} FROM ${quoteIdentifier(SESSION_TASKS_TABLE)}`)
+      // This cross-table gate references session_tasks from person_executions.
+      // SQLite validates all triggers during RENAME, including the short gap after DROP.
+      // Retire and restore only our gate inside this same transaction; rollback preserves it on failure.
+      const acceptanceGate = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name='person_acceptance_execution_gate'").get() as { sql: string } | undefined
+      const acceptanceView = db.prepare("SELECT sql FROM sqlite_master WHERE type='view' AND name='person_acceptance_passes'").get() as {sql:string} | undefined
+      if (acceptanceGate) db.exec('DROP TRIGGER person_acceptance_execution_gate')
+      if (acceptanceView) db.exec('DROP VIEW person_acceptance_passes')
       db.exec(`DROP TABLE ${quoteIdentifier(SESSION_TASKS_TABLE)}`)
       db.exec(`ALTER TABLE ${quoteIdentifier(temporary)} RENAME TO ${quoteIdentifier(SESSION_TASKS_TABLE)}`)
       for (const object of objects) db.exec(object.sql)
+      if (acceptanceView) db.exec(acceptanceView.sql)
+      if (acceptanceGate) db.exec(acceptanceGate.sql)
     }
     db.exec('COMMIT')
   } catch (error) { db.exec('ROLLBACK'); throw error }
