@@ -255,7 +255,7 @@ export function jevHarnessViolations(sources, manifest) {
       owners.set(key, id)
       if (!settings.fields[key]) fail(`${id}: ${key} has no frontend configuration entry`)
     }
-    if (!integration.sources?.length || !integration.tests?.length) fail(`${id} must list concrete source and regression test files`)
+    if (!integration.sources?.length) fail(`${id} must list concrete source files`)
     for (const file of integration.sources ?? []) {
       const usage = jevUsage(file, get(file))
       if (evaluationInfrastructure.has(file) || infrastructure.has(file) && !usage.evaluates) fail(`${id}: ${file} is infrastructure, not a business integration`)

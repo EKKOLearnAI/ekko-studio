@@ -1,88 +1,30 @@
 # Validation Guide
 
-Run the smallest relevant checks while iterating. Escalate to the broad checks
-when touching shared behavior, release automation, auth, persistence, or chat.
-
-When running unit tests from a Desktop-hosted shell, use a regular Node process
-with `NODE_ENV=test` and clear inherited `HERMES_*`, `EKKO_*`, `ELECTRON_*`,
-`AUTH_TOKEN`, and `PORT` from that test process's environment. Production Vue,
-locked runtime selection and the live server port otherwise cause unrelated
-assertion failures. Keep the running app's environment unchanged.
-Use the development shell's `PATH` as well: Desktop's bundled Hermes Python can
-import its installed agent instead of the Python fixtures used by bridge tests.
-
-## Keep tests small
-
-- Put exhaustive data, protocol and state-transition cases in unit/integration
-  tests. Browser tests cover user journeys and representative request families.
-- Cover every page's responsive layout once. Test shared OS chrome with a chat,
-  crowded toolbar and configuration sidebar; platform controls and RTL belong
-  in `desktop-window-chrome.spec.ts`. Avoid multiplying every route by every OS.
-- Check appearance in the browser and theme ownership in the theme harness.
-  Do not add tests that match CSS declarations, SVG paths, class names or exact
-  Vue source strings. Keep behavior tests for navigation, permissions and state.
-- Use minimal isolated fixtures for harness rejection cases. Loading complete
-  business runtimes into every fixture duplicates the repository-wide harness.
-- Before removing coverage, identify its remaining owner. Layout/theme tests
-  live in the relevant browser suites; catalog and adapter matrices stay in
-  `native-coding-agents.test.ts` and `coding-agents-launch.test.ts`.
-
-Behavioral coverage owns the former source-layout checks:
-
-| Surface | Coverage owner |
-| --- | --- |
-| Chat navigation, menus, drawers and responsive headers | `navigation-rail`, `session-action-menu`, `desktop-window-chrome`, `header-actions-layout` browser suites |
-| File and terminal controls | `file-tree-collapse`, `terminal` browser suites |
-| Configuration navigation | all-route header sweep, `dsh-plugins`, `ekko-computer-use-settings` browser suites |
-| Workflow history, snapshot and evidence interactions | `workflow-ui` browser suite |
-| Colors, opacity, wallpaper and surfaces | theme harness and `theme-*.spec.ts` browser suites |
-| Modified session clicks and Agent identity | `session-list-item-navigation`, `chat-agent-avatar`, `native-coding-agents` unit tests |
+The legacy automated tests and fixtures have been removed. Add small, focused
+tests for new features and run only the relevant files. See `tests/README.md`.
+Do not restore full coverage, browser sweeps or cross-platform test matrices as a
+routine PR requirement.
 
 ## Always Run For PRs
 
 ```bash
 npm run harness:check
-```
-
-For broad or shared changes, also run:
-
-```bash
-npm run test:coverage
-npm run test:e2e
 npm run build
 ```
 
-Run full coverage and browser suites sequentially on local workstations. Their
-compilation and coverage work can compete for resources and trigger unrelated
-default timeouts when run together.
+For a new feature, also run the focused Vitest tests added for that behavior.
+Add a focused Playwright test only when a new browser journey needs coverage.
+The generic test commands allow an empty suite; existing assertions still fail.
 
-## Change-Type Matrix
+## Keep new tests small
 
-| Change | Minimum local validation |
-| --- | --- |
-| Docs only | `npm run harness:check` |
-| Client component/store/API | focused `npm run test -- <pattern>`, then `npm run build` |
-| UI surfaces/theme | `npm run harness:check`, relevant theme browser checks and `npm run build`; follow `frontend-ui.md` |
-| UI theme harness | `npx vitest run tests/client/ui-theme-harness.test.ts`, then `npm run harness:check` |
-| User-visible browser flow | focused Vitest plus `npm run test:e2e` |
-| Server controller/service/db | focused `npm run test -- tests/server/<file>` |
-| Server module move or dependency change | focused server boundary tests, then `npm run harness:check` |
-| Auth, profile, or credential behavior | focused server tests plus relevant e2e auth tests |
-| Chat, Socket.IO, group chat | focused server tests plus relevant e2e chat tests |
-| Chat session chain, Agent Bridge, compression, or Group Chat | `npm run harness:check` plus focused chat/bridge/group-chat tests |
-| Desktop packaging | `npm run harness:check`, `npm run build`, and a platform-specific desktop build when practical |
-| GitHub workflow | `npm run harness:check` and `actionlint` when available |
-| Package manifests | `npm ci --ignore-scripts` and lockfile workflow expectations |
-| JEV consumers/settings | `npm run harness:check`, `tests/server/jev-harness.test.ts`, focused feature tests and JEV settings e2e |
-
-## JEV integration controls
-
-Follow [the JEV integration contract](jev-integrations.md) for every new consumer
-or setting. Each feature needs a registered integration point, its own switch with
-an explicitly registered Studio default, and frontend controls for user-adjustable
-options. `harness:check` detects
-unregistered consumers and missing configuration wiring; feature tests must prove
-that disabling the switch prevents upstream requests and preserves the old flow.
+- Cover behavior with local fixtures, mocked external APIs/sockets and temporary state.
+- Keep setup local to the feature; avoid loading complete business runtimes for
+  simple cases and duplicating source-level architecture checks.
+- Avoid exact source-string/CSS assertions and exhaustive OS/theme/viewport products.
+- Add CI test automation only when new features need it, scoped to those features.
+- For workflow changes, run `actionlint` when available. For dependency changes,
+  run `npm ci --ignore-scripts` and keep the lockfile synchronized.
 
 ## Managed MCP launch environment
 
@@ -112,26 +54,14 @@ state and does not require a running Gateway.
 
 ## CI Mapping
 
-- Build workflow: installs dependencies, runs coverage, and builds production
-  assets on pushes and pull requests.
-- Coding agent platforms workflow: runs environment/discovery checks and real
-  CLI protocol fixtures on Windows, Linux and macOS, including long stdin prompts,
-  non-ASCII installation paths and process cancellation. Vendor authentication
-  and paid API calls are not required.
-- Playwright workflow: runs all browser tests across six independent shards,
-  then merges their blob reports into the `playwright-report` HTML artifact.
-  Each shard has a 23-minute Playwright global timeout before the 25-minute
-  test-step hard limit within a 30-minute job limit,
-  leaving time for dependency setup and report upload. CI logs each test result
-  so an interrupted shard still shows which cases completed.
-  The final `e2e` check requires every shard to pass. Keep route/viewport sweeps
-  as independent route tests so they can be distributed across runners.
-  Mock both HTTP and WebSocket channels: `page.route` does not intercept native
-  WebSockets, and the test Vite server has no backend on port 8648.
-- NPM lockfile workflow: verifies `package-lock.json` is synchronized.
-- Desktop release and manual desktop build workflows build and upload
-  platform-specific desktop artifacts.
-- Docker workflow: builds and publishes release images.
+- Build installs dependencies, runs `npm run harness:check`, and builds production
+  assets on pushes and pull requests. It no longer runs test coverage.
+- The old Playwright shards and coding-agent, P2P and desktop-isolation test
+  workflows have been removed.
+- The NPM lockfile workflow still verifies dependency lockfile synchronization.
+- Desktop/runtime/release workflows retain packaging, signing, artifact and
+  isolated update-feed verification, without calls into the removed test suites.
+- Docker publishing remains unchanged.
 
 ## Desktop startup failure evidence
 
@@ -143,10 +73,7 @@ the existing executable on Windows, Linux, and plain Node hosts. Do not silently
 fall back to the GUI executable if the Helper is missing. Startup diagnostics
 record the selected executable.
 
-`tests/desktop/webui-node-executable.test.ts` covers platform selection and, when
-macOS Electron is installed, real Helper IPC, SQLite and nested Node execution.
-Set `EKKO_TEST_ELECTRON_EXECUTABLE` to a packaged app's main executable to run that
-same smoke test against its signed Helper. Before release, also verify real
+Before release, verify real Helper IPC, SQLite, nested Node execution, and
 Computer Use input, permissions, focus preservation and Dock registration, plus
 backend restart, PTY, local STT and managed MCP launches from an isolated state
 directory. Mocked tests do not establish OS permission or input compatibility.
@@ -155,19 +82,14 @@ The macOS Computer Use permission guide reads Electron's host-app permissions vi
 trusted local-window IPC. Reads must use `isTrustedAccessibilityClient(false)` and
 `getMediaAccessStatus('screen')`; only the user's Authorize action may request a
 grant or open a fixed System Settings pane. Remote-server pages must not query or
-change local permissions. Run `tests/desktop/computer-use-permissions.test.ts`,
-`tests/desktop/preload-auth.test.ts`, and `tests/e2e/computer-use-permissions.spec.ts`
-for changes. Verify missing/granted/restricted/error states, returning from Settings,
+change local permissions. Verify missing/granted/restricted/error states, returning from Settings,
 light/dark and wallpaper themes, and narrow windows. On a disposable macOS install,
 also verify first-time grants and any system-requested restart; never reset a user's
 TCC database to simulate a fresh install.
 
 The chat reminder uses only live tool-start events from the active Ekko session,
 never replayed history. Its native claim must stay atomic across all windows and
-renderer reloads, with one reminder per desktop launch. Run
-`tests/client/computer-use-permission-prompt.test.ts` and
-`tests/e2e/computer-use-permission-prompt.spec.ts` for notification changes, plus
-chat store regression tests. Verify both new runs and reattached live runs,
+renderer reloads, with one reminder per desktop launch. Verify both new runs and reattached live runs,
 standalone chat windows, dismissal, settings navigation, and silence in other
 agents/platforms/remote mode. No reminder check may request an OS grant.
 
@@ -194,12 +116,8 @@ the child-process exception to distinguish missing modules, native DLL loading,
 permissions, and port conflicts. This check preserves the original data and is
 not a complete reset of Electron userData, Hermes profiles, or system environment.
 
-Focused regression coverage:
-
-```bash
-npm run test -- tests/desktop/webui-startup-diagnostics.test.ts tests/desktop/runtime-bootstrap-lazy.test.ts tests/server/crash-isolation.test.ts
-npm --prefix packages/desktop run build:main
-```
+Build the desktop main process with `npm --prefix packages/desktop run build:main`
+and inspect startup diagnostics from an isolated state directory.
 
 ## Release Workflow Guardrail
 
@@ -228,29 +146,18 @@ Expected desktop release outputs:
 
 ### Desktop updater changes
 
-For Windows ARM64 packaging changes, also run
-`npm run test -- tests/desktop/windows-arm64-packaging.test.ts tests/desktop/packaged-webui.test.ts`
-and build `win32` / `arm64` through the manual workflow without a release tag.
-Follow [Windows ARM64 acceptance](../../packages/desktop/WINDOWS-ARM64.md) before
+For Windows ARM64 packaging changes, build `win32` / `arm64` through the manual
+workflow without a release tag. Follow
+[Windows ARM64 acceptance](../../packages/desktop/WINDOWS-ARM64.md) before
 publishing; the installer and its first-launch Hermes runtime ship separately.
 
-Run `npm --prefix packages/desktop run test:updater` after installing desktop
-dependencies. This builds the production main process and exercises the installed
-`electron-updater` against a temporary local HTTP feed, with no release downloads
-or installer execution. It verifies cancellation closes HTTP requests and file
-handles, interrupted and unknown-length transfers, differential Range-download
-retry, SHA-512 rejection, signature-verification failure handling, verified-cache
-retry, AppImage embedded-blockmap cancellation/retry on both Linux channels,
-and macOS native readiness. The OS signature verifier and installer are simulated.
-All desktop packaging workflows run it before producing artifacts. The release
-workflow uses `--if-present` because its requested tag may predate this test
-script; existing test failures must still stop packaging. It also checks
-test-feed isolation and verifies the test build configuration and artifact
-checks against generated package fixtures.
+The legacy `test:updater` suite has been removed from desktop packaging workflows.
+Build the desktop main process and validate actual update artifacts and manual
+upgrade behavior for the affected platform.
 
 The updater's request-cancellation adapter accesses the upstream HTTP executor
 because its cancellation token alone does not abort a full-download request.
-Keep this integration check when upgrading `electron-updater`. macOS must wait
+Verify cancellation when upgrading `electron-updater`. macOS must wait
 for Electron's native `update-downloaded` event before stopping local services;
 the `electron-updater` event only indicates that the ZIP can be served to Squirrel.
 
@@ -289,8 +196,7 @@ DSH Web patches, permission defaults or ACP construction. DSH modules receive
 platform helpers rather than importing the shared agent registry.
 `npm run harness:check` runs `scripts/dsh-module-harness.mjs` to enforce this.
 
-Web/ACP adapter upgrades additionally require the opt-in `dsh-web-real.test.ts`
-against each supported installed DSH version, including new/resumed presets,
+For Web/ACP adapter upgrades, verify supported installed DSH versions, including new/resumed presets,
 scoped/global model routing, Web bundle tool execution, child inheritance and
 unrestricted filesystem/shell access. Do not reject an otherwise compatible
 installation by version number or whole-file hash. Validate the required adapter integration points and dependencies before
@@ -305,13 +211,10 @@ The harness rejects obsolete `managedPluginPatches` / `getDshPluginStore` runtim
 references. Keep native profile operations, the owned settings host and plugin
 adapters in server `services/dsh`.
 
-For settings changes, run `DSH_WEB_COMMAND=/absolute/path/to/dsh npx vitest run
-tests/server/dsh-settings-real.test.ts`. Optionally set `DSH_MODLENS_PACKAGE` to
-an installed ModLens package directory. This opens the real native slot in
-Chromium through the production HTTP/WebSocket transport, verifies native form
-saving and ModLens engine-dependent fields, and only mutates fixture homes.
-Browser coverage in `tests/e2e/dsh-plugins.spec.ts` verifies the two Studio tabs,
-native frame preservation, names/descriptions and native package removal.
+For new settings features, add focused tests for the new behavior and inspect the
+real native slot through the production HTTP/WebSocket transport from isolated
+state. Verify form saving, engine-dependent fields, tab navigation and native
+package removal as applicable.
 
 For packaging changes run the Web build and `npm --prefix packages/desktop run
 build`. The slot browser code must also be exercised from a minified server
@@ -319,22 +222,17 @@ bundle; runtime serialization must not capture build-generated helper closures.
 
 The DSH Agent presets page is a Studio Vue component, separate from the native
 plugin configuration iframe. Preset operations stay in `services/dsh/agent-presets.ts`
-and use the existing management host. Run `dsh-agent-presets.test.ts`, the DSH route
-and Web profile tests, `dsh-settings-real.test.ts` with the installed CLI, and
-`tests/e2e/dsh-plugins.spec.ts` for changes. The real test covers native RPC, source
-directory persistence, default updates, restart retention and read-only shipped
-presets as well as plugin UI startup (including native directory-picker dependencies).
+and use the existing management host. For new preset features, verify native RPC,
+source directory persistence, default updates, restart retention, read-only
+shipped presets and plugin UI startup with isolated state.
 
-For DSH chat, group-member and workflow modes, keep the selector and roster API in the DSH client module,
-and validation/ACP metadata in `services/dsh`. Shared chat code may carry and store
-only the generic preset identifier. Run `dsh-session-presets.spec.ts`, the DSH
-preset/runner tests and the real Web-to-ACP test on both supported releases. The
-real test must select a non-default preset, contrast a second session’s tools,
-and retain the original selection after resume and a default change.
+For DSH chat, group-member and workflow modes, keep the selector and roster API
+in the DSH client module, and validation/ACP metadata in `services/dsh`. Shared
+chat code may carry and store only the generic preset identifier. For new preset
+behavior, add focused tests and verify a non-default preset, session tool
+isolation, resume and default changes.
 
-For shared Coding Agent skill permissions, run `skills-controller.test.ts`,
-`shared-skills-access.test.ts`, `skills-view.test.ts`, `skill-list.test.ts` and
-`shared-coding-agent-skills.spec.ts`. Verify shared directory and file aliases
-remain read-only, rejected deletion cannot fall back to Hermes, and DSH-private
-skills stay writable. Register native skill formats from bootstrap; agent modules
-must not import another agent’s implementation.
+For new shared Coding Agent skill permissions, add focused tests for read-only
+shared aliases, rejected deletion without Hermes fallback and writable DSH-private
+skills. Register native skill formats from bootstrap; agent modules must not
+import another agent's implementation.

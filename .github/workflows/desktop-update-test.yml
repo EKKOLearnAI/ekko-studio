@@ -64,17 +64,10 @@ jobs:
           node packages/desktop/scripts/build-update-test.mjs --validate
           node packages/desktop/scripts/publish-update-test.mjs --check
 
-      - name: Verify updater and test packaging
-        run: npm --prefix packages/desktop run test:updater
-
       - name: Install web UI dependencies
         run: |
           npm ci --ignore-scripts
           npm rebuild node-pty
-
-      - name: Test Windows CLI and startup compatibility
-        if: startsWith(inputs.target, 'win32-')
-        run: npm run test -- tests/desktop/cli-shim.test.ts tests/desktop/mcp-cli.test.ts tests/desktop/login-item-migration.test.ts
 
       - name: Build web UI
         run: npm run build

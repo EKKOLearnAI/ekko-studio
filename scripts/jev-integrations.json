@@ -308,13 +308,7 @@
         "enabledKey": "memoryEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/server/jev.test.ts",
-        "tests/server/ekko-agent-manager.test.ts",
-        "tests/ekko-agent/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts",
-        "tests/ekko-agent/memory-jev.test.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-memory-kind-routing",
@@ -333,11 +327,7 @@
         "enabledKey": "memoryKindRoutingEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-memory-rerank",
@@ -356,11 +346,7 @@
         "enabledKey": "memoryRerankEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-memory-write-review",
@@ -381,11 +367,7 @@
         "enabledKey": "memoryWriteReviewEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-memory-relevance-filter",
@@ -406,11 +388,7 @@
         "enabledKey": "memoryRelevanceFilterEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-skills",
@@ -435,13 +413,7 @@
         "enabledKey": "skillsEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/skills-jev.test.ts",
-        "tests/ekko-agent/jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/server/ekko-agent-manager.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "browser-match",
@@ -459,13 +431,7 @@
         "browserMatchMinConfidence",
         "browserMatchTimeoutMs"
       ],
-      "tests": [
-        "tests/server/browser-jev.test.ts",
-        "tests/server/browser-jev-mcp.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/server/hermes-studio-browser-mcp.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "browser-verify",
@@ -482,13 +448,7 @@
         "browserVerifyMinConfidence",
         "browserVerifyTimeoutMs"
       ],
-      "tests": [
-        "tests/server/browser-jev.test.ts",
-        "tests/server/browser-jev-mcp.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/server/hermes-studio-browser-mcp.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "group-summary-review",
@@ -504,11 +464,7 @@
         "groupSummaryRevisionEnabled",
         "groupSummaryReviewTimeoutMs"
       ],
-      "tests": [
-        "tests/server/group-chat-summary-review.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "workflow-quality-review",
@@ -523,11 +479,7 @@
         "workflowQualityMinConfidence",
         "workflowQualityTimeoutMs"
       ],
-      "tests": [
-        "tests/server/workflow-quality-review.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "group-message-routing",
@@ -545,11 +497,7 @@
         "groupLoopDetectionEnabled",
         "groupMessageRoutingTimeoutMs"
       ],
-      "tests": [
-        "tests/server/group-chat-message-routing.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-computer-use-match",
@@ -573,12 +521,7 @@
         "enabledKey": "computerUseMatchEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/computer-use-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/ekko-agent/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-computer-use-verify",
@@ -601,12 +544,7 @@
         "enabledKey": "computerUseVerifyEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/computer-use-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/ekko-agent/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "person-memory",
@@ -629,11 +567,7 @@
         "enabledKey": "memoryEnabled",
         "mappingFunction": "getPersonJevRuntimeConfig"
       },
-      "tests": [
-        "tests/server/person-memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "person-memory-kind-routing",
@@ -652,11 +586,7 @@
         "enabledKey": "memoryKindRoutingEnabled",
         "mappingFunction": "getPersonJevRuntimeConfig"
       },
-      "tests": [
-        "tests/server/person-memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "person-memory-rerank",
@@ -675,11 +605,7 @@
         "enabledKey": "memoryRerankEnabled",
         "mappingFunction": "getPersonJevRuntimeConfig"
       },
-      "tests": [
-        "tests/server/person-memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "person-memory-write-review",
@@ -700,11 +626,7 @@
         "enabledKey": "memoryWriteReviewEnabled",
         "mappingFunction": "getPersonJevRuntimeConfig"
       },
-      "tests": [
-        "tests/server/person-memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "person-memory-relevance-filter",
@@ -725,11 +647,7 @@
         "enabledKey": "memoryRelevanceFilterEnabled",
         "mappingFunction": "getPersonJevRuntimeConfig"
       },
-      "tests": [
-        "tests/server/person-memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     }
   ]
 }

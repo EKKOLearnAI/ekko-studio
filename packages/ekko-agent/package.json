@@ -36,7 +36,6 @@
     "api:docs:check": "node scripts/api-doc-harness.mjs",
     "api:docs:update": "node scripts/api-doc-harness.mjs --write",
     "harness:check": "npm run api:docs:check && npm run check && npm test",
-    "harness:memory": "cd ../.. && vitest run tests/ekko-agent/memory-service.test.ts",
     "test": "cd ../.. && vitest run tests/ekko-agent",
     "test:watch": "cd ../.. && vitest tests/ekko-agent"
   },

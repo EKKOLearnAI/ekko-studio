@@ -10,12 +10,10 @@ const BROWSER_CHANNEL = process.env.PLAYWRIGHT_CHANNEL as 'chrome' | 'msedge' | 
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: true,
-  // Finish gracefully before the Actions 25-minute hard kill so reporters flush.
-  globalTimeout: process.env.CI ? 23 * 60 * 1000 : undefined,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['list'], ['blob']] : [['list']],
+  reporter: [['list']],
   use: {
     baseURL: BASE_URL,
     locale: 'en-US',

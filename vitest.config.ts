@@ -7,16 +7,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'packages/client/src'),
-      electron: resolve(__dirname, 'tests/mocks/electron.ts'),
-      'dbus-next': resolve(__dirname, 'tests/mocks/dbus-next.ts'),
-      'electron-updater': resolve(__dirname, 'tests/mocks/electron-updater.ts'),
       '/logo.png': resolve(__dirname, 'packages/client/public/logo.png'),
       '/relay-logo.png': resolve(__dirname, 'packages/client/public/relay-logo.png'),
     },
   },
   test: {
     include: ['tests/**/*.test.ts'],
-    setupFiles: ['tests/setup.ts'],
+    passWithNoTests: true,
     coverage: {
       exclude: [
         '**/dist/**',

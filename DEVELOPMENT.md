@@ -15,7 +15,7 @@ npm run build
 
 - `npm run dev` starts the Vite client and Koa server together.
 - `npm run test` runs Vitest unit tests.
-- `npm run test:coverage` is what the Build workflow runs before `npm run build`.
+- `npm run test:coverage` is an optional local command; CI does not run coverage.
 - `npm run test:e2e` runs Playwright browser tests against a mocked BFF API.
 - `npm run build` type-checks and builds both client and server.
 
@@ -61,17 +61,18 @@ npm run build
 
 ## Testing Rules
 
-- Add focused Vitest coverage for server and store logic changes.
-- Add Playwright coverage for browser-visible flows and routing/auth regressions.
-- For frontend browser tests, prefer API/socket mocks over real external services.
-- Before opening a PR, run the smallest relevant tests plus `npm run build`.
-- For broad changes, run:
-
-```bash
-npm run test:coverage
-npm run test:e2e
-npm run build
-```
+- The legacy tests and fixtures have been removed. Add small, focused tests for
+  newly introduced features; do not rebuild a full regression suite by default.
+- Keep tests scoped to the new behavior. Use Vitest for local logic and add
+  Playwright only when the new browser journey needs it.
+- Use local fixtures and mocked external APIs/sockets. Avoid global setup,
+  source-string assertions and repeated platform/theme/viewport matrices.
+- Run `npm run harness:check` and `npm run build` before opening a PR, plus the
+  specific tests added for new functionality.
+- `npm test`, `npm run test:coverage` and `npm run test:e2e` allow an empty suite
+  while continuing to fail on assertions in any tests that are present.
+- CI keeps harness, build and lockfile checks. The previous coverage step and
+  browser/platform test workflows have been removed. See `tests/README.md`.
 
 ## npm Publishing
 
@@ -144,6 +145,7 @@ Use this PR body shape by default:
 Closes #123
 
 ## Validation
-- `npm run test:coverage`
+- `npm run harness:check`
 - `npm run build`
+- Focused tests for new features, if applicable
 ```

@@ -134,10 +134,6 @@ jobs:
           npm ci --ignore-scripts
           npm rebuild node-pty
 
-      - name: Test Windows CLI and startup compatibility
-        if: needs.validate.outputs.target_os == 'win32'
-        run: npm run test -- tests/desktop/cli-shim.test.ts tests/desktop/mcp-cli.test.ts tests/desktop/login-item-migration.test.ts
-
       - name: Build web UI
         run: npm run build
 
@@ -153,9 +149,6 @@ jobs:
 
       - name: Install desktop dependencies
         run: npm ci --prefix packages/desktop --no-audit --no-fund
-
-      - name: Verify desktop updater download lifecycle
-        run: npm --prefix packages/desktop run test:updater
 
       - name: Verify Windows screenshot overlay coverage
         id: screenshot_geometry

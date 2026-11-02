@@ -89,10 +89,4 @@ npm --prefix packages/desktop run dist:update-test
 
 本地构建不会自动上传。需要上传时，先用 `gh auth login` 登录具有测试仓库写权限的账号，再设置相同 target/version 运行 `node packages/desktop/scripts/publish-update-test.mjs`；`--check` 只检查配置和仓库访问。本地构建仍可指定其他独立 HTTPS 目录，但 GitHub 上传命令只接受上表的固定地址。
 
-```sh
-npm ci --prefix packages/desktop --include=dev
-npm --prefix packages/desktop run test:updater
-npm run test -- tests/desktop/updater-source.test.ts tests/desktop/updater-download.test.ts
-```
-
-自动化验证覆盖配置隔离、真实 HTTP 下载/取消/重试、AppImage 内嵌 blockmap 差分下载、包内容校验、跨仓库上传顺序和失败恢复；不能代替 macOS/Windows/Linux 测试机上的实际覆盖安装和重启。
+旧版自动化测试集已清空，`test:updater` 及其工作流调用已删除。新增更新功能时再补对应的小范围测试；打包仍校验配置隔离、签名和产物，发布前仍需在 macOS/Windows/Linux 测试机上验证实际覆盖安装和重启。
