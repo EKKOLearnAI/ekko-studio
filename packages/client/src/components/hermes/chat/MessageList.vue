@@ -1393,6 +1393,10 @@ defineExpose({
 
 .approval-float-panel {
   border-color: rgba(var(--accent-primary-rgb), 0.24);
+  max-height: min(70dvh, calc(100dvh - 170px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .approval-float-panel--global {
@@ -1447,6 +1451,7 @@ defineExpose({
   font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   line-height: var(--line-height, 1.45);
   color: $text-secondary;
+  overflow-wrap: anywhere;
 }
 
 .approval-float-command {
@@ -1473,11 +1478,38 @@ defineExpose({
 .approval-float-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   justify-content: flex-start;
   gap: calc(8px * var(--spacing-scale, 1));
   margin-top: 10px;
   padding: calc(10px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) 0;
   border-top: var(--border-width, 1px) solid $border-color;
+
+  // Choice labels are free-form sentences. Naive UI buttons are nowrap and
+  // flex-shrink: 0, so a long choice widens the button past the panel edge
+  // instead of wrapping. Let the buttons shrink and wrap instead.
+  :deep(.n-button) {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    height: auto;
+    padding-top: calc(5px * var(--spacing-scale, 1));
+    padding-bottom: calc(5px * var(--spacing-scale, 1));
+    line-height: var(--line-height, 1.45);
+    white-space: normal;
+    text-align: start;
+  }
+
+  :deep(.n-button__content) {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    line-height: var(--line-height, 1.45);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    text-align: start;
+  }
 }
 
 .clarify-float-input-row {

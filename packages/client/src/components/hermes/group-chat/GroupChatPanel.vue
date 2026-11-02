@@ -3591,12 +3591,16 @@ export default defineComponent({ components: { CreateRoomForm } })
     bottom: 16px;
     z-index: 8;
     width: min(720px, calc(100% - 32px));
+    max-height: min(70dvh, calc(100dvh - 170px));
     padding: calc(10px * var(--spacing-scale, 1));
     border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.24);
     border-radius: var(--radius-component, 16px);
     background: #ffffff;
     box-shadow: 0 14px 40px rgba(0, 0, 0, 0.14);
     backdrop-filter: blur(14px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 
     .dark & {
         background: #262626;
@@ -3642,6 +3646,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     line-height: var(--line-height, 1.45);
     color: $text-secondary;
+    overflow-wrap: anywhere;
 }
 
 .approval-float-command {
@@ -3668,11 +3673,38 @@ export default defineComponent({ components: { CreateRoomForm } })
 .approval-float-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: flex-start;
     justify-content: flex-start;
     gap: calc(8px * var(--spacing-scale, 1));
     margin-top: 10px;
     padding: calc(10px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) 0;
     border-top: var(--border-width, 1px) solid $border-color;
+
+    // Choice labels are free-form sentences. Naive UI buttons are nowrap and
+    // flex-shrink: 0, so a long choice widens the button past the panel edge
+    // instead of wrapping. Let the buttons shrink and wrap instead.
+    :deep(.n-button) {
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 100%;
+        height: auto;
+        padding-top: calc(5px * var(--spacing-scale, 1));
+        padding-bottom: calc(5px * var(--spacing-scale, 1));
+        line-height: var(--line-height, 1.45);
+        white-space: normal;
+        text-align: start;
+    }
+
+    :deep(.n-button__content) {
+        display: block;
+        min-width: 0;
+        max-width: 100%;
+        line-height: var(--line-height, 1.45);
+        white-space: normal;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        text-align: start;
+    }
 }
 
 .clarify-float-input-row {
