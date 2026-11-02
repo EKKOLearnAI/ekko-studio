@@ -1,4 +1,5 @@
 import { createPersonAgent } from './person-chat-agent'
+import { createPersonDefaultWorkspace } from './person-workspace'
 import { AgentRuntime, AgentToolRegistry } from '../../../ekko-agent/src'
 import { personBudgetedClient } from './person-model-context'
 import { configurePersonRuntime } from '../modules/studio/public/person-runtime'
@@ -10,6 +11,7 @@ import { executePersonTask, stopPersonTask } from './person-task-runtime'
 import { getAvailableModelConfigForProfile } from '../modules/hermes/controllers/models'
 
 configurePersonRuntime({
+  createDefaultWorkspace: createPersonDefaultWorkspace,
   modelConfig: getAvailableModelConfigForProfile,
   chatAgent: createPersonAgent,
   async model(input) {

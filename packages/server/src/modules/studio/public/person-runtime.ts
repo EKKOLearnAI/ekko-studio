@@ -45,6 +45,7 @@ export interface PersonResultDelivery {
   flow?: { index: number; total: number; stopped: boolean; completed: boolean; next_session_id: string | null }
 }
 export interface PersonRuntimePort {
+  createDefaultWorkspace?(profile: string, sessionId: string): string
   deliver(input: PersonResultDelivery): Promise<void>
   deliverStage?(input: { user: AuthenticatedUser; context: import('../contracts/person-stage').PersonStageContext; sessionId: string; input: string }): Promise<void>
   chatAgent?(input: PersonChatAgentOptions): {
