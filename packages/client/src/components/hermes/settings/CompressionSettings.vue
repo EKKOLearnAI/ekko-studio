@@ -92,18 +92,14 @@ function debouncedSave(key: string, value: any) {
 <template>
   <section class="settings-section">
     <div class="global-default-block">
-      <div class="gd-row">
-        <div class="gd-text">
-          <div class="gd-title">{{ t('settings.compression.microCompactDefault') }}</div>
-          <div class="gd-hint">{{ t('settings.compression.microCompactDefaultHint') }}</div>
-        </div>
+      <div class="gd-title">{{ t('settings.compression.microCompactDefault') }}</div>
+      <div class="gd-hint">{{ t('settings.compression.microCompactDefaultHint') }}</div>
+      <div class="gd-controls">
         <NSwitch
           :value="microCompactDefault"
           size="small"
           @update:value="(v: boolean) => setMicroCompactDefault(v)"
         />
-      </div>
-      <div class="gd-row gd-actions">
         <NPopconfirm
           :content="t('settings.compression.microCompactSyncConfirm', { value: microCompactDefault ? 'true' : 'false' })"
           :positive-text="t('settings.compression.microCompactSyncYes')"
@@ -183,20 +179,6 @@ function debouncedSave(key: string, value: any) {
   padding: 12px;
   border-radius: 8px;
   background: rgba(127, 127, 127, 0.08);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.gd-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.gd-actions {
-  justify-content: flex-start;
 }
 
 .gd-title {
@@ -207,7 +189,15 @@ function debouncedSave(key: string, value: any) {
 .gd-hint {
   font-size: 12px;
   opacity: 0.65;
-  margin-top: 2px;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.gd-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 10px;
 }
 
 .section-divider {
