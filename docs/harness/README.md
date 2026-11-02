@@ -18,6 +18,7 @@ agent can discover without chat history.
 - `docs/harness/validation.md` maps change types to checks.
 - `docs/harness/worktree-runbook.md` explains isolated worktree development.
 - `docs/harness/pr-review.md` provides a PR self-review checklist.
+- `docs/harness/screenshots.md` documents repeatable Playwright captures with mock data or real login.
 - `docs/harness/startup-tasks.md` describes one-time startup operations and their persistent execution records.
 - `docs/harness/server-module-boundaries.md` defines backend ownership and the migration target.
 - `docs/harness/jev-integrations.md` defines JEV feature switches, frontend configuration and integration registration.
