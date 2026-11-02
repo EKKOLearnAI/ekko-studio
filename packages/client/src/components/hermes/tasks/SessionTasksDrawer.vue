@@ -253,6 +253,7 @@ onUnmounted(() => {
 <style scoped lang="scss">
 
 @use '@/styles/variables' as *;
+@use '@/styles/agent-avatar' as *;
 @use './task-status' as task-status;
 
 .drawer-title { display: flex; align-items: center; gap: 10px; color: $text-primary; font-size: calc(var(--font-size-base, 14px) * 16 / 14); font-weight: 600; }
@@ -277,7 +278,7 @@ th:last-child, td:last-child { padding-inline: 4px 20px; }
 .search-action { width: 28px; }
 .task-row { vertical-align: top; }
 .task-row:hover, .task-row:focus-within { background: rgba(var(--accent-primary-rgb), 0.025); }
-.task-agent-icon { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; }
+.task-agent-icon { @include agent-avatar(20px); }
 .task-count { font-variant-numeric: tabular-nums; }
 .task-title > span { overflow: hidden; text-overflow: ellipsis; }
 .task-title { display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: $text-primary; text-decoration: none; font-size: calc(var(--font-size-base, 14px) * 15 / 14); font-weight: 550; line-height: 1.6; }

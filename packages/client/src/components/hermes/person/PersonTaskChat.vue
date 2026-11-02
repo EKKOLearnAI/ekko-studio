@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref, useId } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NDrawer, NDrawerContent, NSpin, NSelect } from 'naive-ui'
-import { useTaskDrawerLayout } from '@/components/hermes/tasks/useTaskDrawerLayout'
+import { NAlert, NButton, NSpin, NSelect } from 'naive-ui'
+import { usePersonTaskPanel } from './usePersonTaskPanel'
 import PersonTaskConversation from './PersonTaskConversation.vue'
-import PersonWorkspaceFiles from './PersonWorkspaceFiles.vue'
 import { buildContentBlocks, uploadFiles, type Attachment } from '@/stores/hermes/chat'
 import { personRequest, personTaskCanStop, stopPersonTask, removePersonTaskMessage, type PersonTask, type PersonExecutionSummary, type PersonTaskQueueState } from '@/api/person'
 import { onPersonUpdated } from '@/api/studio/chat'
@@ -14,8 +13,8 @@ import { createRefreshQueue } from '@/utils/refresh-queue'
 const props = defineProps<{ taskId: string; mainSessionId: string; executionId?: string }>()
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
-const { drawerWidth } = useTaskDrawerLayout()
-const toolsTargetId = `task-tools-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+const taskPanel = useTemplateRef<HTMLElement>('taskPanel')
+const { isMobile, width, maxWidth, startResize, resizeWithKeyboard } = usePersonTaskPanel(taskPanel)
 const selectedExecutionId = ref(props.executionId || '')
 const executions = ref<PersonExecutionSummary[]>([])
 const executionOptions = computed(() => {
@@ -118,19 +117,34 @@ async function stopTask() {
   } catch (e) { if (!lifetime.signal.aborted) error.value = String(e) }
   finally { if (!lifetime.signal.aborted) await refresh(); stopping.value = false }
 }
-onBeforeUnmount(() => { reads.dispose(); lifetime.abort(); stopUpdates() })
+function handleEscape(event: KeyboardEvent) {
+  // Let dialogs and the shared tools drawer handle their own Escape first.
+  if (event.key !== 'Escape' || event.defaultPrevented
+    || [...document.querySelectorAll('.person-tools-panel, .n-drawer, .n-modal, .n-dialog, [role="listbox"]')]
+      .some(element => element.getClientRects().length > 0
+        && ![...element.classList].some(name => name.endsWith('-leave-active')))) return
+  event.preventDefault()
+  void close()
+}
+onMounted(() => window.addEventListener('keydown', handleEscape))
+onBeforeUnmount(() => {
+  reads.dispose(); lifetime.abort(); stopUpdates()
+  window.removeEventListener('keydown', handleEscape)
+})
+defineExpose({ session, send, panelWidth: width, addFiles: (files: File[]) => conversationRef.value?.addFiles(files) })
 </script>
 
 <template>
-  <NDrawer :show="!closing" placement="right" :width="drawerWidth" class="person-task-chat" :aria-label="task?.title || t('person.tasks')" @update:show="value => { if (!value) void close() }">
-    <NDrawerContent :title="task?.title || t('person.tasks')" closable :native-scrollbar="true"
-      :body-content-style="{ padding: '0', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }">
-      <template #header><div class="task-chat-heading">
+  <aside ref="taskPanel" class="person-task-chat" data-theme-surface="card" role="complementary"
+    :aria-label="task?.title || t('person.tasks')" :style="{ width: `${width}px` }">
+      <div v-if="!isMobile" class="task-chat-resize" role="separator" tabindex="0" aria-orientation="vertical"
+        :aria-label="t('person.tasks')" :aria-valuemin="320" :aria-valuemax="maxWidth" :aria-valuenow="Math.round(width)"
+        @pointerdown="startResize" @keydown="resizeWithKeyboard" />
+      <header class="task-chat-heading">
         <span>{{ task?.title || t('person.tasks') }}</span>
-        <PersonWorkspaceFiles v-if="session" :panel-target="`#${toolsTargetId}`" :session-id="session.id" :workspace="session.workspace" :submit="send"
-          @attach="file => conversationRef?.addFiles([file])" />
-      </div></template>
-      <div :id="toolsTargetId" class="task-chat-layout">
+        <NButton quaternary circle size="small" :aria-label="t('common.close')" @click="close">×</NButton>
+      </header>
+      <div class="task-chat-layout">
       <div class="task-chat-main">
       <NAlert v-if="removalError || error || queueState.insertionError" type="error" class="task-chat-alert">{{ removalError || error || queueState.insertionError }}</NAlert>
       <NAlert v-if="loadError" type="error" class="task-chat-alert">
@@ -147,16 +161,22 @@ onBeforeUnmount(() => { reads.dispose(); lifetime.abort(); stopUpdates() })
       </template>
       </div>
       </div>
-    </NDrawerContent>
-  </NDrawer>
+  </aside>
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/variables' as *;
+.person-task-chat { position: relative; display: flex; flex-direction: column; flex-shrink: 0; min-width: 0; min-height: 0; height: 100%; border-inline-start: var(--border-width, 1px) solid $border-color; }
+.task-chat-resize { position: absolute; inset-inline-start: -3px; top: 0; bottom: 0; width: 6px; z-index: 3; cursor: col-resize; touch-action: none; }
+.task-chat-resize:focus-visible { outline: 2px solid $accent-primary; outline-offset: -2px; }
 .task-chat-layout { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .task-chat-main { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .task-executions { flex-shrink: 0; padding: 8px 16px; }
 .task-chat-alert { margin: 12px; flex-shrink: 0; }
 .task-chat-loading { flex: 1; display: grid; place-items: center; }
-.task-chat-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.task-chat-heading > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-chat-heading { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 16px; border-bottom: var(--border-width, 1px) solid $border-color; }
+.task-chat-heading > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 768px) {
+  .person-task-chat { position: absolute; inset: 0; z-index: 80; border-inline-start: 0; }
+}
 </style>
