@@ -1,7 +1,7 @@
 import { createPersonDisplayStream } from './person-display'
 import { studioModelReasoningEffort } from '../../public/model-reasoning-effort'
 import { personBackgroundPendingCount } from '../../repositories/person-store'
-import { isPersonSession, isPrivatePersonSession } from '../../contracts/person-session'
+import { isPersonSession, isPrivatePersonSession, parsePersonResultQueueId } from '../../contracts/person-session'
 import { finishPersonStageTurn } from '../person/stage-flows'
 import type { PersonStageContext } from '../../contracts/person-stage'
 import { createPersonChatAgent } from '../person/chat-agent'
@@ -150,7 +150,7 @@ function parseJsonRecord(value: unknown): Record<string, unknown> | null {
 function ekkoBackgroundPendingCount(state: SessionState, sessionId: string, delegationId?: string): number {
   return Object.values(state.backgroundTasks || {}).filter(task =>
     task.runtime === 'ekko' && task.status === 'running',
-  ).length + personBackgroundPendingCount(sessionId, delegationId?.startsWith('person-result:') ? delegationId.slice('person-result:'.length) : '')
+  ).length + personBackgroundPendingCount(sessionId, parsePersonResultQueueId(delegationId)?.executionId)
 }
 
 function parseToolArguments(raw: unknown): { arguments: Record<string, unknown>; rawArguments?: string } {
@@ -503,16 +503,15 @@ export async function handleEkkoAgentRun(
   const reasoningEffort = studioModelReasoningEffort({ ...modelConfig, baseUrl, reasoningEffort: persistedReasoningEffort,
     metadata: data.model_groups?.find(group => group.provider === modelConfig.provider)?.model_meta?.[modelConfig.model],
   }) as ModelReasoningEffort | undefined
-  const personReturnId = backgroundContinuationContext?.runtime === 'ekko'
+  const personReturn = backgroundContinuationContext?.runtime === 'ekko'
     && backgroundContinuationContext.subagentId === data.background_delegation_id
-    && data.background_delegation_id?.startsWith('person-result:')
-    ? data.background_delegation_id.slice('person-result:'.length) : undefined
+    ? parsePersonResultQueueId(data.background_delegation_id) : undefined
   const personStageDeliveryId = isPersonSession(sessionId) && backgroundContinuationContext?.runtime === 'ekko'
     && backgroundContinuationContext.subagentId === data.background_delegation_id && data.background_delegation_id?.startsWith('person-stage:')
     ? data.background_delegation_id.slice('person-stage:'.length) : undefined
   const agent = isPersonSession(sessionId) ? personStageDeliveryId
     ? await createPersonChatAgent(Number(authenticatedUserId),sessionId,undefined,personStageDeliveryId)
-    : await createPersonChatAgent(Number(authenticatedUserId), sessionId, personReturnId) : getGlobalEkkoAgent(profile)
+    : await createPersonChatAgent(Number(authenticatedUserId), sessionId, personReturn) : getGlobalEkkoAgent(profile)
   const personStageContext = 'personStageContext' in agent ? agent.personStageContext as PersonStageContext : undefined
   state.ekkoBoundaryInterrupt = agent.requestBoundaryInterrupt
     ? (expectedRunId: string) => agent.requestBoundaryInterrupt({ sessionId, expectedRunId }) : undefined
@@ -1705,6 +1704,7 @@ export async function handleEkkoAgentRun(
       message_id: assistantMessageId || undefined,
       output: assistantText,
       context: result.context,
+      ...(result.output.finishReason === 'max_steps' ? { stop_reason: 'max_steps' } : {}),
       interrupted: boundaryInterrupted,
       boundary_interrupt: boundaryInterrupted,
       contextTokens: contextEstimate?.contextTokens,

@@ -1,3 +1,6 @@
+import { initialPersonAcceptanceRequest, parsePersonAcceptance } from './acceptance-config'
+import { validateBotVerifier, queueBotVerification, cancelBotAcceptance, interruptBotVerification, botAcceptance, prepareBotAcceptanceDecision, recordBotAcceptanceDecision } from './bot-acceptance'
+import { interruptPersonAcceptance, personAcceptanceSessions } from '../../repositories/person-acceptance-store'
 import { randomUUID } from 'node:crypto'
 import { personError, personRevision, personText } from '../../contracts/person'
 import type { PersonExecution, PersonTask, PersonTaskOrigin } from '../../contracts/person'
@@ -12,7 +15,7 @@ import { savePersonTaskOrigin } from './delivery'
 import { requirePersonSession } from '../../repositories/person-session-store'
 import { personRequirements } from '../../contracts/person-flow'
 import { advancePersonFlow, assertPersonTaskActor, plannedPersonFlow, stopPersonFlow } from './task-flow'
-import { assertPersonStage, assertPersonStageTask, linkPersonStageTask, personTaskStage } from '../../repositories/person-stage-store'
+import { getPersonFlow, assertPersonStage, assertPersonStageTask, linkPersonStageTask, personTaskStage } from '../../repositories/person-stage-store'
 
 const running = new Map<string, AbortController>()
 const stopping = new Map<string, Promise<void>>()
@@ -32,6 +35,8 @@ function requestStop(userId: number, taskId: string, executionId: string) {
       .run(['pending','queued'].includes(run.state) ? 'interrupted' : 'stopping', now, run.id)
     db.prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND state='pending')").run(now, taskId)
     db.prepare("UPDATE person_executions SET state='interrupted',generation=generation+1,updated_at=? WHERE task_id=? AND state='pending'").run(now, taskId)
+    const cancelled = db.prepare("SELECT e.* FROM person_executions e JOIN person_acceptance a ON a.execution_id=e.id WHERE e.task_id=? AND e.state='interrupted' AND a.state='pending'").all(taskId) as unknown as PersonExecution[]
+    for (const cancelledRun of cancelled) interruptPersonAcceptance(cancelledRun,'Queued task input stopped before execution')
     db.prepare('UPDATE session_tasks SET revision=revision+1,updated_at=? WHERE id=?').run(now, taskId)
     db.prepare("UPDATE person_interactions SET state='expired',revision=revision+1 WHERE execution_id=? AND state='pending'").run(run.id)
     db.prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id=? AND state IN ('waiting','pending','queued')").run(now, run.id)
@@ -48,7 +53,9 @@ export function acknowledgePersonStop(run: PersonExecution): Promise<void> {
   if (actual.state !== 'stopping' || actual.generation !== run.generation) return Promise.resolve()
   const result = Promise.resolve().then(async () => {
     running.get(run.id)?.abort(new Error('Person task stopped'))
-    await personRuntime().stop(run.session_id)
+    for (const session of personAcceptanceSessions(run)) await personRuntime().stop(session)
+    interruptPersonAcceptance(run, 'Task stopped; acceptance is incomplete')
+    interruptBotVerification(run,'Verification task stopped; acceptance is incomplete')
     personTransaction(() => {
       const changed = personDb().prepare("UPDATE person_executions SET state='interrupted',lease_until=0,updated_at=? WHERE id=? AND generation=? AND state='stopping'")
         .run(Date.now(), run.id, run.generation)
@@ -62,7 +69,7 @@ export function acknowledgePersonStop(run: PersonExecution): Promise<void> {
 export interface PersonTaskResult { task: PersonTask; execution?: PersonExecution }
 export async function applyPersonTask(userId: number, input: Record<string, unknown>, boundTask?: string, origin?: PersonTaskOrigin): Promise<PersonTaskResult> {
   const action = personText(input.action, 'action', 30)
-  if (!['create','adopt','update','start','stop','close','reopen','advance'].includes(action)) throw personError('Unsupported task action')
+  if (!['create','adopt','update','start','stop','close','reopen','advance','configure_acceptance','verify','record_acceptance'].includes(action)) throw personError('Unsupported task action')
   if (Object.hasOwn(input, 'creator_session_id')) throw personError('Creator is assigned by the host')
   if (!['create','adopt'].includes(action) && (Object.hasOwn(input, 'next_steps') || Object.hasOwn(input, 'return_expectation'))) throw personError('Flow is fixed at creation')
   if (action === 'advance' && ['session_id','goal','agent_id','start'].some(key => Object.hasOwn(input, key))) throw personError('Advance uses the saved next step')
@@ -76,15 +83,22 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
   const operationInput = ['create', 'adopt'].includes(action) ? { ...input, session_id: targetSession } : input
   const replay = replayPersonOperation<PersonTaskResult>(userId, `task:${key}`, operationInput)
   if (replay !== undefined) return replay
+  if (Object.hasOwn(input,'acceptance') && !['create','adopt','configure_acceptance'].includes(action)) throw personError('Acceptance is configured before the first execution and cannot be removed later')
+  if (action === 'configure_acceptance' && !Object.hasOwn(input,'acceptance')) throw personError('acceptance is required')
+  const acceptance = await parsePersonAcceptance(userId, input.acceptance, ['create','adopt'].includes(action) ? personText(input.goal,'goal',8000) : getPersonTask(userId,String(input.task_id)).summary)
+  if (acceptance && (input.next_steps !== undefined || input.return_expectation !== undefined)) throw personError('Acceptance is unavailable for legacy task routes; use standalone background tasks')
   const selection = ['create','adopt'].includes(action) ? await selectPersonExecutionAgent(userId, input.agent_id) : null
   if (selection) await validatePersonSelection(userId, selection)
   if (action === 'start') await validatePersonSelection(userId, JSON.parse(getPersonTask(userId, String(input.task_id)).selection_json))
+  if (action === 'verify') await validateBotVerifier(userId,getPersonTask(userId,String(input.task_id)))
   if (action === 'advance') {
     const task = getPersonTask(userId, String(input.task_id)), flow = personRequirements(task).flow
     if (flow?.steps[flow.index]) await validatePersonSelection(userId, JSON.parse(task.selection_json))
   }
   const taskWorkspace = ['create','adopt'].includes(action) ? personTurnWorkspace(userId, targetSession, origin) : getPersonTask(userId, String(input.task_id)).workspace
   if (input.workspace && input.workspace !== taskWorkspace) throw personError('Task workspace is managed by Person settings')
+  if(action==='record_acceptance' && boundTask) throw personError('Only the user-facing Bot can record acceptance',403)
+  const decision=action==='record_acceptance' ? await prepareBotAcceptanceDecision(userId,getPersonTask(userId,String(input.task_id)),input,origin) : undefined
   const result = personOperation(userId, `task:${key}`, operationInput, () => {
     if (origin?.stage) {
       const { stage } = assertPersonStage(userId,origin.stage,origin.sessionId)
@@ -94,9 +108,10 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
     if (!['create','adopt','stop'].includes(action)) assertPersonStageTask(userId,String(input.task_id))
     if (action !== 'stop') requirePersonSession(userId, targetSession)
     const plan = ['create','adopt'].includes(action) ? plannedPersonFlow(userId, input) : undefined
+    if (acceptance && ['create','adopt'].includes(action)) acceptance.initial_request = initialPersonAcceptanceRequest(origin?.stage ? getPersonFlow(userId,origin.stage.flowId).creator_session_id : targetSession)
     if (action === 'adopt') {
       const task = adoptPersonGoal(userId, personText(input.task_id,'task_id',100),personRevision(input.expected_revision),selection!,taskWorkspace,personText(input.goal,'goal',8000),targetSession)
-      personDb().prepare('UPDATE session_tasks SET requirements_json=? WHERE id=?').run(JSON.stringify({ ...personRequirements(task), ...plan,
+      personDb().prepare('UPDATE session_tasks SET requirements_json=? WHERE id=?').run(JSON.stringify({ ...personRequirements(task), ...plan, ...(acceptance ? { acceptance } : {}),
         creator_session_id: requirePersonSession(userId, origin?.sessionId || targetSession).id }), task.id)
       savePersonTaskOrigin(userId, task.id, origin)
       const execution = input.start === false ? undefined : enqueuePersonExecution(getPersonTask(userId, task.id))
@@ -108,7 +123,7 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
         if (input.next_steps !== undefined || input.return_expectation !== undefined) throw personError('Use the current stage; nested worker flows are unavailable')
         linkPersonStageTask(userId,task.id,origin.stage,targetSession)
       }
-      personDb().prepare('UPDATE session_tasks SET requirements_json=? WHERE id=?').run(JSON.stringify({ ...personRequirements(task), ...plan,
+      personDb().prepare('UPDATE session_tasks SET requirements_json=? WHERE id=?').run(JSON.stringify({ ...personRequirements(task), ...plan, ...(acceptance ? { acceptance } : {}),
         creator_session_id: requirePersonSession(userId, origin?.sessionId || targetSession).id }), task.id)
       savePersonTaskOrigin(userId, task.id, origin)
       const execution = input.start === false ? undefined : enqueuePersonExecution(getPersonTask(userId, task.id))
@@ -120,6 +135,11 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
     // Check the observed execution in the same transaction as the mutation.
     if (input.expected_execution_id !== undefined && input.expected_execution_id !== (task.execution_id || null)) throw personError('Execution changed; query the task again', 409)
     const requirements = personRequirements(task)
+    if (requirements.verification_for && !['stop','close','reopen'].includes(action)) throw personError('Continue the linked acceptance task for rechecks; its scope and Agent are fixed',409)
+    const currentAcceptance=botAcceptance(task)
+    if(action==='update'&&currentAcceptance?.orchestration==='bot_tasks'&&!['passed','failed','blocked','interrupted'].includes(currentAcceptance.state))throw personError('Finish or stop acceptance before revising development requirements',409)
+    if (action === 'verify') return queueBotVerification(userId,task,origin)
+    if (action === 'record_acceptance') return recordBotAcceptanceDecision(userId,task,decision!)
     if (requirements.flow) {
       assertPersonTaskActor(task, origin, ['stop','reopen'].includes(action))
       if (action === 'stop') {
@@ -130,7 +150,10 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
       if (requirements.flow.stopped && action !== 'reopen') throw personError('Flow is stopped; its creator must reopen it', 409)
     }
     if (action === 'advance') return advancePersonFlow(task, input.message, origin)
-    if (action === 'stop') return requestStop(userId, task.id, personText(input.execution_id, 'execution_id', 100))
+    if (action === 'stop') {
+      if (task.execution_state==='finished' && cancelBotAcceptance(task,'Acceptance stopped by user')) return {task:getPersonTask(userId,task.id)}
+      return requestStop(userId, task.id, personText(input.execution_id, 'execution_id', 100))
+    }
     const closingReturnedStageChild = action === 'close' && personTaskStage(userId,task.id)
       && ['finished','failed','interrupted'].includes(task.execution_state || '') && !task.pending_count
       && !personDb().prepare("SELECT 1 FROM person_executions WHERE task_id=? AND state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')").get(task.id)
@@ -146,6 +169,10 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
         db.prepare('UPDATE session_tasks SET requirements_json=? WHERE id=?').run(JSON.stringify(requirements), task.id)
       }
       db.prepare("UPDATE session_tasks SET status='open',completion_evidence='',completed_at=NULL,revision=revision+1,updated_at=? WHERE id=?").run(Date.now(),task.id)
+    } else if (action === 'configure_acceptance') {
+      if (personDb().prepare('SELECT 1 FROM person_executions WHERE task_id=?').get(task.id) || task.status !== 'open' || requirements.flow) throw personError('Configure acceptance on an open task before its first execution',409)
+      const configured = acceptance ? { ...acceptance, initial_goal: requirements.goal, initial_request: requirements.acceptance?.initial_request } : undefined
+      db.prepare('UPDATE session_tasks SET requirements_json=?,revision=revision+1,requirements_revision=requirements_revision+1,updated_at=? WHERE id=?').run(JSON.stringify({ ...requirements, acceptance: configured }),Date.now(),task.id)
     } else if (action === 'update') {
       savePersonTaskOrigin(userId, task.id, origin)
       return { task: updatePersonTask(userId, task.id, task.revision, personText(input.goal, 'goal', 8000)) }
@@ -155,6 +182,8 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
       db.prepare('UPDATE session_tasks SET revision=revision+1,updated_at=? WHERE id=?').run(Date.now(), task.id)
       return { task: getPersonTask(userId, task.id), execution }
     } else if (action === 'close') {
+      cancelBotAcceptance(task,'Task closed before acceptance completed')
+      if(requirements.verification_for&&task.execution_id)interruptBotVerification(getPersonExecution(userId,task.execution_id),'Acceptance task closed by user')
       if (boundTask) throw personError('Only the user-facing controller can close a goal', 403)
       db.prepare("UPDATE session_tasks SET status='closed',revision=revision+1,updated_at=? WHERE id=?").run(Date.now(),task.id)
       db.prepare("UPDATE person_schedules SET state='cancelled',revision=revision+1 WHERE task_id=? AND state IN ('active','paused')").run(task.id)

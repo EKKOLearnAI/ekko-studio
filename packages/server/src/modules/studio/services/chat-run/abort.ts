@@ -70,7 +70,7 @@ export async function handleAbort(
     state.backgroundWakeStopped = true
     const dropped = state.queue.filter(item => item.goalContinuation || item.autonomous || item.backgroundDelegationId)
     state.queue = state.queue.filter(item => !dropped.includes(item))
-    for (const item of dropped) if (item.personDelivery) cancelPersonDelivery(item.personDelivery.userId, item.personDelivery.executionId)
+    for (const item of dropped) if (item.personDelivery) cancelPersonDelivery(item.personDelivery.userId, item.personDelivery.executionId,item.personDelivery.acceptanceReturnId)
     for (const item of dropped) {
       if (item.backgroundDelegationId && item.backgroundClaimId) {
         // Releasing a claim requeues it, undoing the user's Stop.

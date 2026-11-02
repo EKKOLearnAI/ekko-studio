@@ -1,3 +1,6 @@
+import { executePersonAcceptance } from './acceptance'
+import { executeBotVerification, keepsAcceptanceOpen, finishBotVerification, expireBotAcceptances, failBotVerification, interruptBotVerification, recoverBotVerifications } from './bot-acceptance'
+import { getPersonAcceptance, setPersonAcceptance, interruptPersonAcceptance, personAcceptanceSessions, recoverPersonAcceptances } from '../../repositories/person-acceptance-store'
 import { personUpdated } from '../../repositories/person-updates'
 import { personRuntime } from '../../public/person-runtime'
 import { personError } from '../../contracts/person'
@@ -20,6 +23,7 @@ import { assertPersonStageTask } from '../../repositories/person-stage-store'
 import { deliverPersonStages, recoverPersonStages } from './stage-flows'
 import { personTaskPrompt } from './task-prompt'
 import { dispatchPersonInsertion } from './task-queue'
+import { advanceAutomaticAcceptances } from './automatic-acceptance'
 
 const active = new Map<string, { run: PersonExecution; abort: AbortController }>()
 const busyTasks = new Set<string>()
@@ -127,7 +131,8 @@ async function execute(run: PersonExecution, abort: AbortController) {
       ? run.session_id === personExecutionSessionId(run.id) ? [{ type: 'text' as const, text: description }, ...input] : input
       : description
     current(run)
-    const result = await personRuntime().execute({ user: personUser(userId), selection, sessionId: run.session_id, workspace, prompt, displayInput: input ? undefined : description, signal: abort.signal,
+    const executeTask = requirements.verification_for ? executeBotVerification : executePersonAcceptance
+    const result = await executeTask(run, { user: personUser(userId), selection, sessionId: run.session_id, workspace, prompt, displayInput: input ? undefined : description, signal: abort.signal,
       taskTimeoutMinutes: personSettings(userId).settings.taskTimeoutMinutes,
       onEvent: (kind, payload) => {
         try { requirePersonWorkspace(workspace) }
@@ -153,7 +158,7 @@ async function execute(run: PersonExecution, abort: AbortController) {
           }
         } catch { /* Late native events must not revive a cancelled run. */ }
       },
-    })
+    }, () => { current(run); requirePersonWorkspace(workspace) })
     if (workspaceError) throw workspaceError
     current(run)
     const latestRun = current(run)
@@ -165,18 +170,30 @@ async function execute(run: PersonExecution, abort: AbortController) {
       })
       return // The selected durable follow-up owns the next run and its result delivery.
     }
-    if (!result.ok) throw new Error(result.error || 'Execution failed')
+    if (!result.ok) {
+      if (result.output) personDb().prepare('UPDATE person_executions SET output=? WHERE id=? AND generation=?').run(result.output,run.id,run.generation)
+      throw new Error(result.error || 'Execution failed')
+    }
     const output = (result.output || '').slice(0,2_000_000)
     personTransaction(() => {
       setPersonExecution(current(run), 'finished', { output })
       const scheduled = personDb().prepare("SELECT id FROM person_schedules WHERE task_id=? AND state IN ('active','paused')").get(task.id)
       const pending = getPersonTask(userId, task.id).pending_count
+      const needsAcceptance = keepsAcceptanceOpen(task,run)
       personDb().prepare("UPDATE session_tasks SET status=?,completion_evidence=?,completed_at=?,updated_at=?,revision=revision+1 WHERE id=?")
-        .run(scheduled || pending || (requirements.flow && !requirements.flow.completed) ? 'open' : 'completed', output.slice(0,2000), scheduled || pending || (requirements.flow && !requirements.flow.completed) ? null : Date.now(), Date.now(), task.id)
-      if (run.occurrence_id) personDb().prepare("UPDATE person_occurrences SET state='finished' WHERE id=?").run(run.occurrence_id)
+        .run(scheduled || pending || needsAcceptance || (requirements.flow && !requirements.flow.completed) ? 'open' : 'completed', output.slice(0,2000), scheduled || pending || needsAcceptance || (requirements.flow && !requirements.flow.completed) ? null : Date.now(), Date.now(), task.id)
+      finishBotVerification(run)
+      if (run.occurrence_id) personDb().prepare('UPDATE person_occurrences SET state=? WHERE id=?').run(needsAcceptance?'awaiting_acceptance':'finished',run.occurrence_id)
     })
   } catch (error) {
-    try { setPersonExecution(current(run), 'failed', { error: error instanceof Error ? error.message : 'Task failed' }) } catch { /* cancellation wins */ }
+    try {
+      const actual = current(run)
+      const reason = error instanceof Error ? error.message : 'Task failed'
+      failBotVerification(run,reason)
+      const acceptance = getPersonAcceptance(run.id)
+      if (acceptance && !['passed','failed','blocked','interrupted'].includes(acceptance.state)) setPersonAcceptance(run,'blocked',reason)
+      setPersonExecution(actual, 'failed', { error: reason })
+    } catch { /* cancellation wins */ }
   } finally {
     const latest = personDb().prepare('SELECT * FROM person_executions WHERE owner_user_id=? AND id=?').get(userId, run.id) as unknown as PersonExecution | undefined
     if (latest && ['failed','finished','interrupted'].includes(latest.state)) personDb().prepare("UPDATE person_interactions SET state='expired',revision=revision+1 WHERE execution_id=? AND state='pending'").run(run.id)
@@ -190,6 +207,8 @@ export async function tickPersonWork() {
   if (ticking) return
   ticking = true
   try {
+    expireBotAcceptances()
+    await advanceAutomaticAcceptances()
     await deliverPersonResults()
     await deliverPersonStages()
     promotePersonFollowups()
@@ -206,6 +225,7 @@ export async function tickPersonWork() {
     const expired = db.prepare("SELECT * FROM person_executions WHERE state IN ('starting','running','waiting_person','waiting_user','waiting_approval') AND lease_until<?").all(Date.now()) as unknown as PersonExecution[]
     for (const run of expired) {
       if (active.has(run.id)) continue
+      interruptPersonAcceptance(run,'Execution lease expired; inspect and explicitly continue')
       const fenced = db.prepare("UPDATE person_executions SET state='stopping',generation=generation+1,error='Execution interrupted; inspect and resume',updated_at=? WHERE id=? AND generation=? AND lease_until<?").run(Date.now(), run.id, run.generation, Date.now())
       if (!fenced.changes) continue
       db.prepare("UPDATE person_interactions SET state='expired',revision=revision+1 WHERE execution_id=? AND state='pending'").run(run.id)
@@ -227,6 +247,8 @@ export async function tickPersonWork() {
 }
 export function startPersonWork() {
   if (timer) return
+  recoverPersonAcceptances()
+  recoverBotVerifications()
   recoverPersonStages()
   // Queue entries are process-local; recover delivery receipts after restart.
   personDb().prepare("UPDATE person_deliveries SET state='pending',error='' WHERE state='queued'").run()
@@ -238,6 +260,8 @@ export async function stopPersonWork() {
   if (timer) clearInterval(timer); timer = undefined
   for (const { run, abort } of active.values()) {
     personDb().prepare("UPDATE person_executions SET state='interrupted',generation=generation+1 WHERE id=? AND generation=?").run(run.id, run.generation)
-    abort.abort(); await personRuntime().stop(run.session_id)
+    interruptPersonAcceptance(run,'Studio stopped during acceptance; inspect and explicitly continue')
+    interruptBotVerification(run,'Studio stopped during verification; inspect and explicitly continue')
+    abort.abort(); for (const session of personAcceptanceSessions(run)) await personRuntime().stop(session)
   }
 }

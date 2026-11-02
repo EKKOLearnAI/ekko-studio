@@ -16,6 +16,7 @@ import { registerPersonStageTurn } from './stage-flows'
 import { personSessionDirectory, personSessionIds, requirePersonSession } from '../../repositories/person-session-store'
 import { recordSessionUsage } from '../usage/usage-recorder'
 import { capturePersonMemoryRequest, personReturnMemoryInput } from './return-memory'
+import type { PersonResultIdentity } from '../../contracts/person-session'
 
 export function personChatBusy(userId: number, sessionId?: string): boolean {
   const server = getChatRunServer()
@@ -48,7 +49,8 @@ export async function ensurePersonSession(userId: number, id: string) {
 }
 
 /** Called only after account ownership has been checked at the transport boundary. */
-export async function createPersonChatAgent(userId: number, sessionId: string, returnExecutionId?: string, stageDeliveryId?: string) {
+export async function createPersonChatAgent(userId: number, sessionId: string, returned?: PersonResultIdentity, stageDeliveryId?: string) {
+  const returnExecutionId = returned?.executionId
   requirePersonSession(userId, sessionId)
   const returnOrigin = returnExecutionId ? personDb().prepare('SELECT origin_json FROM person_deliveries WHERE execution_id=? AND owner_user_id=?').get(returnExecutionId,userId) : undefined
   const stageContext: PersonStageContext | undefined = stageDeliveryId ? stageDeliveryContext(userId,stageDeliveryId)
@@ -69,6 +71,7 @@ export async function createPersonChatAgent(userId: number, sessionId: string, r
   let summaryCall = 0, requestedAt = Date.now()
   const agent = factory({ selection, tools: personTools(userId, 'main', undefined, sessionId),
     returnExecutionId,
+    acceptanceReturnId: returned?.acceptanceReturnId,
     captureMemoryRequest: () => capturePersonMemoryRequest(userId, sessionId, throughMessageId),
     returnMemoryInput,
     stage:stageContext,
@@ -94,8 +97,10 @@ The current:true role is YOU: requests naming it are your work. Names are labels
       requirePersonSession(userId, sessionId)
       if (stageContext) assertPersonStage(userId,stageContext,sessionId)
       if (returnExecutionId) {
-        const delivery = personDb().prepare('SELECT state FROM person_deliveries WHERE execution_id=? AND owner_user_id=?').get(returnExecutionId, userId)
-        if (!delivery || delivery.state === 'cancelled') throw personError('Task result callback was cancelled', 409)
+        const delivery = personDb().prepare('SELECT state,origin_json FROM person_deliveries WHERE execution_id=? AND owner_user_id=?').get(returnExecutionId, userId)
+        const origin = delivery ? JSON.parse(String(delivery.origin_json)) : undefined
+        if (!delivery || ['cancelled','handled','failed'].includes(String(delivery.state)) || origin.sessionId !== sessionId
+          || (origin.acceptanceReturnId || '') !== (returned?.acceptanceReturnId || '')) throw personError('Task result callback was cancelled or superseded', 409)
       }
       context.assertCurrent()
       const user = personUser(userId)

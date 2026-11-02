@@ -1,3 +1,4 @@
+import { interruptPersonAcceptance } from '../../repositories/person-acceptance-store'
 import { personError, personRevision, personText, type PersonExecution } from '../../contracts/person'
 import { personRequirements } from '../../contracts/person-flow'
 import { getPersonTask, getPersonExecution, personDb, personOperation, pendingPersonInputs } from '../../repositories/person-store'
@@ -15,7 +16,7 @@ export function personTaskQueue(userId: number, taskId: string, sessionId: strin
   const run = task.execution_id ? getPersonExecution(userId, task.execution_id) : undefined
   const current = run?.session_id === sessionId && activeStates.includes(run.state)
   return {
-    canInsert: !!(current && task.status === 'open' && personRuntime().interruptForInsertion),
+    canInsert: !!(!personRequirements(task).acceptance?.enabled && current && task.status === 'open' && personRuntime().interruptForInsertion),
     canRemove: !!(run?.session_id === sessionId && task.status === 'open' && ['pending', 'queued', ...activeStates].includes(run.state)),
     insertion: current && run.insertion_queue_id && run.insertion_phase !== 'failed'
       ? { queueId: run.insertion_queue_id, phase: run.insertion_phase } : null,
@@ -43,6 +44,7 @@ export function removePersonTaskMessage(userId: number, taskId: string, body: Re
     const db = personDb(), now = Date.now()
     db.prepare("UPDATE person_executions SET state='interrupted',generation=generation+1,queue_priority=0,updated_at=? WHERE id=? AND state IN ('pending','queued')")
       .run(now, target.id)
+    interruptPersonAcceptance(target,'Queued input removed before execution')
     db.prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id=? AND state IN ('waiting','pending','queued')").run(now, target.id)
     db.prepare("UPDATE person_interactions SET state='expired',revision=revision+1 WHERE execution_id=? AND state='pending'").run(target.id)
     db.prepare('UPDATE session_tasks SET revision=revision+1,updated_at=? WHERE id=?').run(now, taskId)
@@ -98,6 +100,7 @@ export function dispatchPersonInsertion(run: PersonExecution): Promise<void> {
 
 export async function insertPersonTaskMessage(userId: number, taskId: string, body: Record<string, unknown>) {
   const task = getPersonTask(userId, taskId)
+  if (personRequirements(task).acceptance?.enabled) throw personError('Acceptance tasks queue follow-ups after the current cycle; mid-cycle insertion is unavailable',409)
   await validatePersonSelection(userId, JSON.parse(task.selection_json))
   if (!personRuntime().interruptForInsertion) throw personError('Task insertion is unavailable', 503)
   const key = `task-insert:${personText(body.idempotency_key, 'idempotency_key', 200)}`

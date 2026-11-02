@@ -25,6 +25,7 @@ export interface PersonModelCall {
 }
 export interface PersonChatAgentOptions extends Pick<PersonModelCall, 'selection' | 'tools' | 'systemPrompt' | 'maxSteps' | 'contextTokens' | 'compression' | 'beforeRequest' | 'summaryCache' | 'onSummaryUsage'> {
   returnExecutionId?: string
+  acceptanceReturnId?: string
   stage?: import('../contracts/person-stage').PersonStageContext
   workspace: string
   memory?: { service: MemoryService; identity: MemoryRuntimeIdentity }
@@ -41,6 +42,7 @@ export interface PersonResultDelivery {
   status: string
   output: string
   error: string
+  acceptance?: Record<string, unknown>
   returnExpectation?: string
   flow?: { index: number; total: number; stopped: boolean; completed: boolean; next_session_id: string | null }
 }
@@ -60,7 +62,7 @@ export interface PersonRuntimePort {
   }> }>
   model(input: PersonModelCall): Promise<string>
   nativeModels(runtime: string): Promise<{ status: string; models: Array<{ id: string; name: string; isDefault?: boolean; reasoningEffort?: string; reasoningEfforts?: string[] }> }>
-  execute(input: { user: AuthenticatedUser; selection: PersonSelection; sessionId: string; workspace: string; taskTimeoutMinutes: number; prompt: string | import('../contracts/runs/session').ContentBlock[]; displayInput?: string; signal: AbortSignal; onEvent(event: string, payload: Record<string, unknown>): void }): Promise<{ ok: boolean; output?: string; error?: string; interrupted?: boolean; stop_reason?: string }>
+  execute(input: { purpose?: 'development' | 'verification'; waitForTermination?: boolean; user: AuthenticatedUser; selection: PersonSelection; sessionId: string; workspace: string; taskTimeoutMinutes: number; prompt: string | import('../contracts/runs/session').ContentBlock[]; displayInput?: string; signal: AbortSignal; onEvent(event: string, payload: Record<string, unknown>): void }): Promise<{ ok: boolean; output?: string; error?: string; interrupted?: boolean; stop_reason?: string }>
   interruptForInsertion?(sessionId: string, expectedRunId: string, expectedRunMarker?: string): Promise<{ status: string; phase?: string }>
   answer(sessionId: string, id: string, response: string, approval: boolean): Promise<boolean>
   stop(sessionId: string): Promise<void>

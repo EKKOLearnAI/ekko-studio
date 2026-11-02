@@ -1,3 +1,6 @@
+import { personAcceptanceDetail, getPersonAcceptance } from '../../repositories/person-acceptance-store'
+import { queueBotVerification, automaticAcceptance, consumeAcceptanceDelivery } from './bot-acceptance'
+import { acceptanceFindings } from './acceptance-prompt'
 import { personError, personRevision, personText } from '../../contracts/person'
 import type { ContentBlock } from '../../contracts/runs/session'
 import type { PersonExecution, PersonTask, PersonTaskOrigin } from '../../contracts/person'
@@ -11,11 +14,12 @@ import { personRequirements } from '../../contracts/person-flow'
 import { assertPersonTaskActor } from './task-flow'
 import { assertPersonStage, assertPersonStageTask } from '../../repositories/person-stage-store'
 import { personTaskQueue } from './task-queue'
+import { resolve } from 'node:path'
 
 /** Hidden task conversations are account-owned, never shared by Profile. */
 export function ownedPersonTaskSession(userId: number | undefined, sessionId: string) {
   if (userId === undefined || !sessionId.startsWith('person-task-')) throw personError('Session not found', 404)
-  const execution = personDb().prepare('SELECT task_id FROM person_executions WHERE owner_user_id=? AND session_id=? LIMIT 1').get(userId, sessionId)
+  const execution = personDb().prepare('SELECT task_id FROM person_executions WHERE owner_user_id=? AND session_id=? UNION ALL SELECT e.task_id FROM person_acceptance_attempts a JOIN person_executions e ON e.id=a.execution_id WHERE e.owner_user_id=? AND a.session_id=? LIMIT 1').get(userId, sessionId, userId, sessionId)
   if (!execution) throw personError('Session not found', 404)
   const task = getPersonTask(userId, String(execution.task_id))
   const user = personUser(userId)
@@ -42,7 +46,7 @@ export async function personTaskChat(userId: number, taskId: string, executionId
   if (current && !executions.some(run => run.id === current.id)) executions.unshift(current)
   // Include a selected older conversation even when it falls outside the recent page.
   if (execution && !executions.some(run => run.session_id === execution.session_id)) executions.push(execution)
-  return { task: { ...task, running: !!task.running }, session, execution: execution || null, executions, pending: pendingPersonInputs(userId, taskId, session?.id), ...personTaskQueue(userId, taskId, session?.id || '') }
+  return { task: { ...task, running: !!task.running }, session, execution: execution || null, executions, acceptance: personAcceptanceDetail(userId,taskId,execution?.id), pending: pendingPersonInputs(userId, taskId, session?.id), ...personTaskQueue(userId, taskId, session?.id || '') }
 }
 
 function chatInput(value: unknown): ContentBlock[] {
@@ -80,6 +84,19 @@ export async function continuePersonTask(userId: number, taskId: string, body: R
     }
     const current = getPersonTask(userId, taskId)
     const requirements = personRequirements(current)
+    if (requirements.verification_for) {
+      if (current.revision!==personRevision(body.expected_revision)) throw personError('Task changed; query it again',409)
+      const result=queueBotVerification(userId,getPersonTask(userId,requirements.verification_for.task_id),origin)
+      return {...result,pending:pendingPersonInputs(userId,result.task.id,result.execution.session_id)}
+    }
+    const acceptance=current.execution_id?getPersonAcceptance(current.execution_id):undefined
+    if(acceptance?.orchestration==='bot_tasks'&&acceptance.state==='repair_required') {
+      const report=JSON.parse(acceptance.reason)
+      const config=JSON.parse(acceptance.snapshot_json).requirements.acceptance
+      if (automaticAcceptance(acceptance) && (acceptance.deadline<=Date.now() || acceptance.attempt>=config.max_attempts)) throw personError('Acceptance budget exhausted; inspect and explicitly continue',409)
+      const directory=resolve(getPersonExecution(userId,acceptance.execution_id).workspace,'.studio-acceptance',acceptance.execution_id,String(acceptance.attempt))
+      input.unshift({type:'text',text:`## Independent review feedback\n\nContinue this same development task and fix the specific defects below. Deliver updated artifacts, paths and development checks. Independent re-verification follows your result.\n\n${acceptanceFindings(report,config,true,directory)}`})
+    }
     if (requirements.flow) {
       assertPersonTaskActor(current, origin)
       if (requirements.flow.stopped) throw personError('Flow is stopped; its creator must reopen it', 409)
@@ -97,7 +114,13 @@ export async function continuePersonTask(userId: number, taskId: string, body: R
     const next = getPersonTask(userId, taskId)
     const target = body.execution_id ? getPersonExecution(userId, personText(body.execution_id, 'execution_id', 100)) : undefined
     if (target && target.task_id !== taskId) throw personError('Execution not found', 404)
-    const execution = enqueuePersonExecution(next, null, input, true, target?.session_id)
+    const automaticRepair=automaticAcceptance(acceptance) && acceptance?.state==='repair_required'
+    const execution = enqueuePersonExecution(next, automaticRepair ? getPersonExecution(userId,acceptance.execution_id).occurrence_id : null, input, true, target?.session_id)
+    if (automaticRepair) {
+      consumeAcceptanceDelivery(acceptance.execution_id)
+      const verification=personDb().prepare('SELECT verification_execution_id FROM person_acceptance_attempts WHERE execution_id=? AND ordinal=?').get(acceptance.execution_id,acceptance.attempt)
+      if (verification) consumeAcceptanceDelivery(String(verification.verification_execution_id))
+    }
     return { task: { ...getPersonTask(userId, taskId), running: true }, execution, pending: pendingPersonInputs(userId, taskId, execution.session_id) }
   })
   personUpdated(userId)

@@ -1,6 +1,6 @@
 import { personUpdated } from './person-updates'
 import { requirePersonSession } from './person-session-store'
-import { recordPersonOutcome } from './person-presence-store'
+import { recordPersonOutcome, PERSON_TASK_RUNNING_SQL } from './person-presence-store'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { getWebUiHome } from '../public/config'
@@ -86,22 +86,24 @@ const taskExecutionColumns = `
   json_extract(t.requirements_json, '$.creator_session_id') AS creator_session_id,
   (SELECT title FROM sessions s WHERE s.id=t.session_id) AS session_title,
   selected_execution.id AS execution_id,
+  (SELECT a.state FROM person_acceptance a WHERE a.execution_id=selected_execution.id) AS acceptance_state,
+  (SELECT a.reason FROM person_acceptance a WHERE a.execution_id=selected_execution.id) AS acceptance_reason,
   selected_execution.selection_json AS execution_selection_json,
   COALESCE(selected_execution.state,'idle') AS execution_state,
   (SELECT COUNT(*) FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state='pending') AS pending_count,
-  EXISTS(SELECT 1 FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
-    OR EXISTS(SELECT 1 FROM person_deliveries d JOIN person_executions e ON e.id=d.execution_id WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND d.state IN ('pending','queued')) AS running`
+  (${PERSON_TASK_RUNNING_SQL}) AS running`
 export function getPersonTask(userId: number, id: string): PersonTask {
   const task = personDb().prepare(`SELECT t.*, ${taskExecutionColumns} FROM session_tasks t ${taskExecutionJoin} WHERE t.id=? AND t.owner_user_id=? AND t.bot_id=?`).get(id, userId, `person:${userId}`) as unknown as PersonTask | undefined
   if (!task) throw personError('Task not found', 404)
   return task
 }
-export function listPersonTasks(userId: number, search = '', offset = 0, options: { status?: string; order?: string; limit?: number; sessionId?: string } = {}): PersonTask[] {
+export function listPersonTasks(userId: number, search = '', offset = 0, options: { status?: string; order?: string; limit?: number; sessionId?: string; activeOnly?: boolean } = {}): PersonTask[] {
   const filters = ['t.owner_user_id=?', 't.bot_id=?']
   const params: (string | number)[] = [userId, `person:${userId}`]
   if (search) { filters.push('(instr(lower(t.title),lower(?))>0 OR instr(lower(t.summary),lower(?))>0)'); params.push(search, search) }
   if (options.sessionId) { filters.push('t.session_id=?'); params.push(options.sessionId) }
   if (options.status) { filters.push('t.status=?'); params.push(options.status) }
+  if (options.activeOnly) filters.push(`(${PERSON_TASK_RUNNING_SQL})`)
   return personDb().prepare(`SELECT t.*, ${taskExecutionColumns}
     FROM session_tasks t ${taskExecutionJoin} WHERE ${filters.join(' AND ')}
     ORDER BY t.updated_at ${options.order === 'oldest' ? 'ASC' : 'DESC'},t.id LIMIT ? OFFSET ?`).all(...params, Math.max(1, Math.min(100, Number(options.limit) || 20)), offset) as unknown as PersonTask[]
@@ -124,6 +126,11 @@ export function enqueuePersonExecution(task: PersonTask, occurrence: string | nu
   if (JSON.parse(task.requirements_json).flow?.stopped) throw personError('Flow is stopped', 409)
   requirePersonSession(task.owner_user_id, task.session_id)
   if (task.status !== 'open') throw personError('Task must be open', 409)
+  const previousAcceptance = task.execution_id ? personDb().prepare('SELECT * FROM person_acceptance WHERE execution_id=?').get(task.execution_id) : undefined
+  if (previousAcceptance?.orchestration === 'bot_tasks' && !['passed','failed','blocked','interrupted'].includes(String(previousAcceptance.state))
+    && !(followup && previousAcceptance.state === 'repair_required')) throw personError('Finish or stop the current acceptance before starting more development; use verify for pending acceptance',409)
+  const priorInputs = JSON.parse(task.requirements_json).acceptance?.enabled ? personDb().prepare("SELECT input_json FROM person_executions WHERE task_id=? AND requirements_revision=? AND input_json!='' AND (state!='interrupted' OR EXISTS(SELECT 1 FROM person_acceptance a WHERE a.execution_id=person_executions.id AND a.deadline>0)) ORDER BY rowid").all(task.id,task.requirements_revision).map(row => JSON.parse(String(row.input_json))) : []
+  if (JSON.stringify(priorInputs).length > 200_000) throw personError('Acceptance follow-up history is too large; consolidate requirements with an explicit task update',409)
   const id = randomUUID(); const now = Date.now()
   const active = personDb().prepare("SELECT id FROM person_executions WHERE task_id=? AND state IN ('pending','queued','starting','stopping','running','waiting_person','waiting_user','waiting_approval')").get(task.id)
   if (active && !followup) throw personError('Task already has an active execution', 409)
@@ -144,6 +151,13 @@ export function enqueuePersonExecution(task: PersonTask, occurrence: string | nu
   } else if (!resumed) throw personError('Execution conversation is unavailable or its requirements changed', 409)
   personDb().prepare(`INSERT INTO person_executions(id,task_id,owner_user_id,requirements_revision,state,session_id,selection_json,created_at,updated_at,occurrence_id,input_json,workspace)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, task.id, task.owner_user_id, task.requirements_revision, active ? 'pending' : 'queued', sessionId, task.selection_json, now, now, occurrence, input ? JSON.stringify(input) : '', workspace)
+  const requirements = JSON.parse(task.requirements_json)
+  if (requirements.acceptance?.enabled) {
+    const carry = followup && previousAcceptance?.orchestration === 'bot_tasks' && previousAcceptance.state === 'repair_required'
+    personDb().prepare('INSERT INTO person_acceptance(execution_id,task_id,state,snapshot_json,updated_at,orchestration,cycle_id,attempt,deadline) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(id,task.id,'pending',JSON.stringify({ requirements, prior_inputs: priorInputs, input: input || [], requirements_revision: task.requirements_revision, developer_selection: JSON.parse(task.selection_json), workspace }),now,
+        requirements.acceptance.orchestration || 'bot_tasks',carry ? previousAcceptance.cycle_id : id,carry ? previousAcceptance.attempt : 0,carry ? previousAcceptance.deadline : 0)
+  }
   personDb().prepare(`INSERT INTO person_deliveries(execution_id,owner_user_id,origin_json,updated_at)
     SELECT ?,owner_user_id,${occurrence ? "json_remove(origin_json,'$.memoryRequest')" : 'origin_json'},? FROM person_task_origins WHERE task_id=?`).run(id, now, task.id)
   personDb().prepare("UPDATE person_task_origins SET origin_json=json_remove(origin_json,'$.memoryRequest') WHERE task_id=?").run(task.id)
