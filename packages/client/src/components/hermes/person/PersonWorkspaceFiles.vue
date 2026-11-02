@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NDrawer, NDrawerContent, NSpin, useMessage } from 'naive-ui'
+import { NSpin, useMessage } from 'naive-ui'
 import { useFilesStore } from '@/stores/hermes/files'
 import { isPreviewableFile } from '@/utils/hermes/file-preview'
 import { useTaskDrawerLayout } from '@/components/hermes/tasks/useTaskDrawerLayout'
@@ -17,13 +17,41 @@ const props = withDefaults(defineProps<{
   sessionId?: string | null
   workspace?: string | null
   active?: boolean
+  panelTarget?: string
   submit: (text: string, attachments?: Attachment[]) => Promise<boolean>
 }>(), { active: true })
 const emit = defineEmits<{ attach: [file: File] }>()
 const { t } = useI18n()
 const message = useMessage()
 const filesStore = useFilesStore()
-const { drawerWidth } = useTaskDrawerLayout()
+const { isMobile } = useTaskDrawerLayout()
+const width = ref(loadWidth())
+function loadWidth() {
+  try { return Math.max(320, Number(localStorage.getItem('hermes.chat.toolPanelWidth')) || 560) }
+  catch { return 560 }
+}
+let resizeStart: { x: number; width: number } | undefined
+function resize(event: PointerEvent) {
+  if (!resizeStart) return
+  const direction = document.documentElement.dir === 'rtl' ? 1 : -1
+  width.value = Math.max(320, Math.min(window.innerWidth * .8, resizeStart.width + (event.clientX - resizeStart.x) * direction))
+}
+function stopResize() {
+  if (!resizeStart) return
+  resizeStart = undefined
+  window.removeEventListener('pointermove', resize)
+  window.removeEventListener('pointerup', stopResize)
+  window.removeEventListener('pointercancel', stopResize)
+  try { localStorage.setItem('hermes.chat.toolPanelWidth', String(width.value)) } catch { /* Storage may be unavailable. */ }
+}
+function startResize(event: PointerEvent) {
+  if (isMobile.value) return
+  event.preventDefault()
+  resizeStart = { x: event.clientX, width: width.value }
+  window.addEventListener('pointermove', resize)
+  window.addEventListener('pointerup', stopResize)
+  window.addEventListener('pointercancel', stopResize)
+}
 const panelId = `person-files-panel-${useId()}`
 const show = ref(false)
 const panelReady = ref(false)
@@ -35,6 +63,7 @@ const loading = ref(false)
 let requestSequence = 0
 
 function reset() {
+  stopResize()
   requestSequence++
   show.value = false
   panelReady.value = false
@@ -134,6 +163,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('hermes:preview-workspace-file', handlePreview)
   window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, openBrowser)
+  stopResize()
   reset()
 })
 </script>
@@ -141,10 +171,12 @@ onBeforeUnmount(() => {
 <template>
   <HeaderToolPanelToggle :expanded="show" :controls="panelId" :tooltip="tooltip"
     :disabled="!active || !sessionId" @toggle="show ? close() : openPanel()" />
-  <NDrawer :show="show" :width="drawerWidth" placement="right" class="person-files-drawer" @after-enter="panelReady = true"
-    @update:show="value => { if (!value) close() }">
-    <NDrawerContent :id="panelId" :title="workspace || t('drawer.files')" closable :native-scrollbar="true"
-      :body-content-style="{ padding: '0', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }">
+  <Teleport v-if="show" :to="panelTarget || 'body'" :disabled="!panelTarget">
+    <Transition appear @after-enter="panelReady = true">
+    <aside v-if="show" :id="panelId" class="person-files-drawer person-tools-panel" data-theme-surface="card" role="region" :aria-label="tooltip"
+      :style="{ width: isMobile ? '100%' : `min(${width}px, 70%)` }" @keydown.esc.stop="close">
+      <div class="person-tools-resize" @pointerdown="startResize" />
+      <button class="person-tools-close" type="button" :aria-label="t('common.close')" @click="close">×</button>
       <template v-if="show">
         <template v-if="previewOnly">
           <div v-if="loading" class="person-file-loading"><NSpin size="small" /></div>
@@ -154,10 +186,16 @@ onBeforeUnmount(() => {
           :visible="show" :browser-visible="panelReady" :browser-available="browserAvailable"
           :submit="submitBrowserAnnotations" @attach="file => emit('attach', file)" />
       </template>
-    </NDrawerContent>
-  </NDrawer>
+    </aside>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped lang="scss">
+@use '@/styles/variables' as *;
+.person-tools-panel { position: relative; display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; height: 100%; border-inline-start: var(--border-width, 1px) solid $border-color; }
+.person-tools-resize { position: absolute; inset-inline-start: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 3; }
+.person-tools-close { position: absolute; inset-inline-end: 8px; bottom: 8px; z-index: 3; border: 0; border-radius: 4px; color: $text-secondary; background: transparent; font-size: 24px; cursor: pointer; }
+@media (max-width: 768px) { .person-tools-panel { position: absolute; inset: 0; z-index: 90; } .person-tools-resize { display: none; } }
 .person-file-loading { flex: 1; display: grid; place-items: center; }
 </style>

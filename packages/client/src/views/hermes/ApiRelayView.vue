@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import ApiRelayUsageCard from '@/components/hermes/ApiRelayUsageCard.vue'
+import RelayCampaignBadge from '@/components/hermes/RelayCampaignBadge.vue'
 import { fetchApiRelayUsage, type ApiRelayAccount } from '@/api/hermes/api-relay'
 
 const { t } = useI18n()
@@ -48,34 +49,26 @@ onBeforeUnmount(() => { requestController?.abort() })
     </PageHeader>
     <div class="api-relay-content">
       <section class="api-relay-hero" data-theme-surface="card" aria-labelledby="api-relay-heading">
+        <span class="api-relay-watermark" aria-hidden="true">11.11</span>
+        <img
+          class="api-relay-logo"
+          :src="deploymentUrl('/relay-logo.png')"
+          width="64"
+          height="64"
+          alt=""
+          @load="logoLoading = false"
+          @error="logoLoading = false"
+        >
         <div class="api-relay-intro">
           <div class="api-relay-brand">
-            <img
-              class="api-relay-logo"
-              :src="deploymentUrl('/relay-logo.png')"
-              width="54"
-              height="54"
-              alt=""
-              @load="logoLoading = false"
-              @error="logoLoading = false"
-            >
-            <div>
-              <span>APIKEY.FAN</span>
-              <h3 id="api-relay-heading">{{ t('apiRelay.headline') }}</h3>
-            </div>
+            <RelayCampaignBadge />
+            <span class="api-relay-wordmark">APIKEY.FAN</span>
           </div>
-          <p>{{ t('apiRelay.description') }}</p>
-          <NButton
-            class="api-relay-action"
-            tag="a"
-            href="https://apikey.fan/register?aff=LIBAPI"
-            target="_blank"
-            rel="noopener noreferrer"
-            size="small"
-            type="primary"
-          >
-            {{ t('apiRelay.viewNow') }}
-          </NButton>
+          <h3 id="api-relay-heading">{{ t('apiRelay.campaignSlogan') }}</h3>
+          <p>
+            <span class="api-relay-service-headline">{{ t('apiRelay.headline') }}</span>
+            {{ t('apiRelay.description') }}
+          </p>
           <div class="api-relay-features">
             <span>Claude</span>
             <span>ChatGPT</span>
@@ -88,6 +81,12 @@ onBeforeUnmount(() => { requestController?.abort() })
             <span>{{ t('apiRelay.apiCompatible') }}</span>
           </div>
         </div>
+        <a class="api-relay-action" href="https://apikey.fan/activities/double11-2026?aff=LIBAPI" target="_blank" rel="noopener noreferrer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 3h6v6M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+          </svg>
+          {{ t('apiRelay.viewNow') }}
+        </a>
       </section>
       <section v-if="accounts.length || loadFailed" class="api-relay-usage" aria-labelledby="api-relay-usage-heading" :aria-busy="usageLoading">
         <div class="api-relay-usage-header">
@@ -110,7 +109,6 @@ onBeforeUnmount(() => { requestController?.abort() })
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-@use '@/styles/promo-hero' as *;
 
 .api-relay-view {
   height: 100%;
@@ -129,21 +127,62 @@ onBeforeUnmount(() => { requestController?.abort() })
 }
 
 .api-relay-hero {
-  @include promo-hero;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(24px * var(--spacing-scale, 1));
   width: 100%;
   max-width: 1180px;
+  min-height: 256px;
   margin: 0 auto;
+  padding: calc(32px * var(--spacing-scale, 1));
+  overflow: hidden;
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 22px);
+  background: var(--theme-card-bg, var(--theme-card-wallpaper-bg,
+    radial-gradient(ellipse at 100% 0%, #95652f 0%, transparent 58%),
+    linear-gradient(110deg, #241a2d, #492a27 76%, #603c24)));
+  color: $text-primary;
+}
+
+.api-relay-watermark {
+  position: absolute;
+  z-index: -1;
+  inset-inline-end: 0;
+  top: -32px;
+  font-size: clamp(120px, 18vw, 240px);
+  font-weight: 900;
+  letter-spacing: -0.08em;
+  line-height: 1;
+  opacity: 0.045;
+  pointer-events: none;
+  user-select: none;
+}
+
+// Custom card surfaces use the shared text palette; the default campaign is artwork.
+html:not(.theme-card-bg):not(.theme-has-custom-background) .api-relay-hero {
+  /* theme-exception: artwork -- Cream lettering contrasts with the default dark campaign artwork. */
+  color: #fff1cb;
+  border-color: var(--theme-card-border, #a68149);
 }
 
 .api-relay-intro {
-  position: relative;
-  z-index: 1;
-  max-width: 600px;
+  min-width: 0;
+
+  h3 {
+    margin: 14px 0 0;
+    font-size: clamp(21px, 2.2vw, 29px);
+    font-weight: 750;
+    letter-spacing: -0.025em;
+    line-height: var(--line-height, 1.3);
+    overflow-wrap: anywhere;
+  }
 
   > p {
-    max-width: 560px;
-    margin: 18px 0 0;
-    color: $text-secondary;
+    margin: 14px 0 0;
+    color: color-mix(in srgb, currentColor 86%, transparent);
     font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     line-height: var(--line-height, calc(var(--font-size-base, 14px) * 22 / 14));
   }
@@ -152,36 +191,52 @@ onBeforeUnmount(() => { requestController?.abort() })
 .api-relay-brand {
   display: flex;
   align-items: center;
-  gap: calc(14px * var(--spacing-scale, 1));
+  flex-wrap: wrap;
+  gap: calc(12px * var(--spacing-scale, 1));
 
-  span {
+  .api-relay-wordmark {
     display: block;
-    margin-bottom: 2px;
-    color: $text-muted;
-    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
-    font-weight: 650;
-    letter-spacing: 0.09em;
-    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
-  }
-
-  h3 {
-    margin: 0;
-    color: $text-primary;
-    font-size: clamp(21px, 2.5vw, 28px);
-    font-weight: 650;
-    letter-spacing: -0.03em;
-    line-height: var(--line-height, 1.2);
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    font-weight: 750;
+    letter-spacing: 0.08em;
   }
 }
+
+.api-relay-service-headline { display: block; margin-bottom: 6px; font-weight: 650; }
 
 .api-relay-logo {
   display: block;
-  flex: 0 0 auto;
+  align-self: start;
+  margin-top: 6px;
   object-fit: contain;
-  border-radius: var(--radius-component, 6px);
+  border-radius: 14px;
 }
 
-.api-relay-action { margin-top: 14px; }
+.api-relay-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 11px 20px;
+  /* theme-exception: artwork -- The campaign action uses the reference artwork's gold treatment. */
+  background: linear-gradient(110deg, #ffe9a3, #edb664);
+  /* theme-exception: artwork -- Dark action text maintains contrast on the gold artwork. */
+  color: #49290f;
+  /* theme-exception: artwork -- A pale gold edge defines the campaign action against the dark artwork. */
+  border: 1px solid #ffe4a0;
+  border-radius: var(--radius-component, 12px);
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  font-weight: 750;
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  transition: filter $transition-fast;
+
+  svg { flex-shrink: 0; }
+  &:hover { filter: brightness(1.07); }
+  &:focus-visible { outline: 3px solid currentColor; outline-offset: 4px; box-shadow: 0 0 0 6px var(--text-on-overlay); }
+}
 
 .api-relay-usage { width: 100%; max-width: 1180px; margin: 24px auto 0; }
 .api-relay-usage-header {
@@ -201,23 +256,30 @@ onBeforeUnmount(() => { requestController?.abort() })
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  margin-top: 18px;
-  gap: calc(7px * var(--spacing-scale, 1));
+  margin-top: 16px;
+  gap: calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
 
   span {
-    padding: calc(5px * var(--spacing-scale, 1)) calc(9px * var(--spacing-scale, 1));
-    color: $text-secondary;
-    background: $bg-secondary;
-    border: var(--border-width, 1px) solid $border-light;
-    border-radius: 999px;
+    color: inherit;
     font-size: calc(var(--font-size-base, 14px) * 10 / 14);
     line-height: var(--line-height, calc(var(--font-size-base, 14px) * 14 / 14));
   }
 }
 
+@media (max-width: 1100px) {
+  .api-relay-hero { grid-template-columns: auto minmax(0, 1fr); }
+  .api-relay-action { grid-column: 2; justify-self: start; }
+}
+
 @media (max-width: $breakpoint-mobile) {
   .api-relay-content { padding: calc(12px * var(--spacing-scale, 1)); }
-  .api-relay-hero { padding: calc(20px * var(--spacing-scale, 1)); }
+  .api-relay-hero { grid-template-columns: minmax(0, 1fr); gap: 18px; padding: calc(24px * var(--spacing-scale, 1)); }
+  .api-relay-logo { width: 52px; height: 52px; margin-top: 0; }
+  .api-relay-action { grid-column: 1; justify-self: stretch; }
   .api-relay-usage-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .api-relay-action { transition: none; }
 }
 </style>

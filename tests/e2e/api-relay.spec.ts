@@ -1,5 +1,27 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import { authenticate, mockChatSocket, mockHermesApi } from './fixtures'
+
+async function expectRelayBadgeInCorner(entry: Locator) {
+  const target = (await entry.boundingBox())!
+  const logo = (await entry.locator('.api-relay-logo').boundingBox())!
+  const badge = (await entry.locator('.relay-campaign-badge').boundingBox())!
+  const navigation = await entry.evaluate(element => {
+    const rect = element.closest('nav')!.getBoundingClientRect()
+    return { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom }
+  })
+  expect(logo.width).toBe(24)
+  expect(logo.height).toBe(24)
+  expect(logo.x + logo.width / 2).toBeCloseTo(target.x + target.width / 2, 1)
+  expect(logo.y + logo.height / 2).toBeCloseTo(target.y + target.height / 2, 1)
+  const overlap = badge.y + badge.height - logo.y
+  expect(overlap).toBeGreaterThan(0)
+  expect(overlap).toBeLessThanOrEqual(logo.height / 6)
+  expect(badge.x + badge.width / 2).toBeGreaterThan(logo.x + logo.width / 2)
+  expect(badge.x).toBeGreaterThanOrEqual(navigation.x)
+  expect(badge.x + badge.width).toBeLessThanOrEqual(navigation.right)
+  expect(badge.y).toBeGreaterThanOrEqual(navigation.y)
+  expect(badge.y + badge.height).toBeLessThanOrEqual(navigation.bottom)
+}
 
 test.beforeEach(async ({ page }) => {
   await authenticate(page, undefined, 'research')
@@ -10,18 +32,25 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/hermes/write-gate/pending**', route => route.fulfill({ json: { pending: [] } }))
 })
 
-test('opens the partner page below Usage and visits the website only from its action', async ({ page, context }) => {
+test('opens the partner page below Usage and visits the website only from its action', async ({ page, context }, testInfo) => {
   await page.goto('/#/hermes/chat')
   const rail = page.locator('.studio-navigation-rail')
   const relay = rail.getByRole('link', { name: 'API Relay', exact: true })
+  await expect(relay).toHaveAttribute('aria-description', 'Double 11')
+  await expect(relay.locator('.relay-campaign-badge')).toBeVisible()
+  await expectRelayBadgeInCorner(relay)
   await expect(relay).toHaveAttribute('href', '#/hermes/api-relay')
   expect(await relay.evaluate(el => el.previousElementSibling?.getAttribute('href'))).toBe('#/hermes/usage')
   await relay.click()
   await expect(page).toHaveURL(/#\/hermes\/api-relay$/)
   await expect(relay).toHaveAttribute('aria-current', 'page')
+  await expectRelayBadgeInCorner(relay)
+  const entryBox = (await relay.boundingBox())!
+  await page.screenshot({ path: testInfo.outputPath('relay-entry-corner.png'), clip: { x: entryBox.x - 8, y: entryBox.y - 14, width: 60, height: 68 } })
   expect(context.pages()).toHaveLength(1)
   await expect(page.locator('aside.sidebar, .session-list')).toHaveCount(0)
-  await expect(page.getByRole('heading', { name: 'Leading AI models, one gateway' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Double 11: 11.11% bonus credit on recharges, up to 1111 in bonus credit' })).toBeVisible()
+  await expect(page.getByText('Leading AI models, one gateway', { exact: true })).toBeVisible()
   const card = page.locator('.api-relay-hero')
   await expect(card).toHaveCount(1)
   await expect(card).toContainText('Ekko Studio’s partner API gateway')
@@ -30,20 +59,10 @@ test('opens the partner page below Usage and visits the website only from its ac
     await expect(card.locator('.api-relay-features')).toContainText(provider)
   }
   await expect.poll(() => card.locator('img').evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true)
-  await expect(card.locator('img')).toHaveCSS('border-radius', '6px')
-
-  const cardStyle = () => ({
-    borderRadius: getComputedStyle(document.querySelector('section.api-relay-hero, section.app-download-hero')!).borderRadius,
-    backgroundImage: getComputedStyle(document.querySelector('section.api-relay-hero, section.app-download-hero')!).backgroundImage,
-    padding: getComputedStyle(document.querySelector('section.api-relay-hero, section.app-download-hero')!).padding,
-  })
-  const relayStyle = await page.evaluate(cardStyle)
-  await page.goto('/#/hermes/connections?view=download')
-  await expect(page.locator('.app-download-hero')).toBeVisible()
-  expect(await page.evaluate(cardStyle)).toEqual(relayStyle)
-  await page.goto('/#/hermes/api-relay')
+  await expect(card.locator('.relay-campaign-badge')).toContainText('Double 11')
+  await expect(card).not.toContainText(/2026|limited.time|USD/i)
   const action = page.getByRole('link', { name: 'View now', exact: true })
-  await expect(action).toHaveAttribute('href', 'https://apikey.fan/register?aff=LIBAPI')
+  await expect(action).toHaveAttribute('href', 'https://apikey.fan/activities/double11-2026?aff=LIBAPI')
   await expect(action).toHaveAttribute('target', '_blank')
   await expect(action).toHaveAttribute('rel', 'noopener noreferrer')
   await context.route('https://apikey.fan/**', route => route.fulfill({ contentType: 'text/html', body: '<title>APIKEY.FAN</title>' }))
@@ -51,11 +70,11 @@ test('opens the partner page below Usage and visits the website only from its ac
   await action.click()
   const popup = await popupPromise
   await popup.waitForLoadState()
-  await expect(popup).toHaveURL('https://apikey.fan/register?aff=LIBAPI')
+  await expect(popup).toHaveURL('https://apikey.fan/activities/double11-2026?aff=LIBAPI')
   await popup.close()
 })
 
-test('closes mobile navigation on the partner page and keeps the card within the viewport', async ({ page }) => {
+test('closes mobile navigation on the partner page and keeps the card within the viewport', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 800 })
   await page.goto('/#/hermes/chat')
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
@@ -70,10 +89,13 @@ test('closes mobile navigation on the partner page and keeps the card within the
   await expect(page.locator('.api-relay-hero')).toBeVisible()
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await expect(drawer).toHaveCSS('width', '64px')
+  await expect.poll(async () => (await drawer.locator('.studio-navigation-rail').boundingBox())?.x).toBe(0)
   await expect(drawer.getByRole('link', { name: 'API Relay', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expectRelayBadgeInCorner(drawer.getByRole('link', { name: 'API Relay', exact: true }))
+  await page.screenshot({ path: testInfo.outputPath('relay-mobile-drawer-corner.png') })
 })
 
-test('shows the shared page loading surface until the partner logo is ready', async ({ page }) => {
+test('shows the shared page loading surface until the partner logo is ready', async ({ page }, testInfo) => {
   let releaseLogo!: () => void
   const logoGate = new Promise<void>(resolve => { releaseLogo = resolve })
   await page.route('**/relay-logo.png', async route => {
@@ -85,6 +107,7 @@ test('shows the shared page loading surface until the partner logo is ready', as
   await expect(surface).toHaveAttribute('aria-busy', 'true')
   await expect(surface.locator('.page-loading-overlay')).toBeVisible()
   await expect(surface.locator('.api-relay-hero')).not.toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('campaign-loading.png') })
   releaseLogo()
   await expect(surface).toHaveAttribute('aria-busy', 'false')
   await expect(surface.locator('.page-loading-overlay')).toHaveCount(0)
@@ -97,6 +120,119 @@ test('reveals the partner card when the logo cannot load', async ({ page }) => {
   await expect(page.locator('.api-relay-view')).toHaveAttribute('aria-busy', 'false')
   await expect(page.locator('.api-relay-hero')).toBeVisible()
   await expect(page.getByRole('link', { name: 'View now', exact: true })).toBeInViewport()
+})
+
+for (const brightness of ['light', 'dark']) {
+  test(`campaign respects wallpaper, regional opacity and reset in ${brightness} mode`, async ({ page }, testInfo) => {
+    await mockHermesApi(page, { theme: { brightness } })
+    await page.route('**/api/hermes/api-relay/usage', route => route.fulfill({ json: { configured: false, accounts: [] } }))
+    const card = page.locator('.api-relay-hero')
+    const action = page.getByRole('link', { name: 'View now', exact: true })
+    const openRelay = async () => {
+      await page.goto('/#/hermes/api-relay')
+      await expect(card).toBeVisible()
+      await expect(action).toBeInViewport()
+      await expect(card).toHaveCSS('opacity', '1')
+    }
+    await openRelay()
+    await expect(card).toHaveCSS('color', 'rgb(255, 241, 203)')
+    await page.screenshot({ path: testInfo.outputPath(`campaign-${brightness}.png`) })
+
+    await page.goto('/#/hermes/theme')
+    await page.locator('.file-input').setInputFiles({
+      name: 'wall.png', mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2V9sAAAAASUVORK5CYII=', 'base64'),
+    })
+    await expect(page.locator('.app-shell')).toHaveClass(/app-shell--custom-background/)
+    await openRelay()
+    await expect(card).toHaveCSS('background-color', brightness === 'dark' ? 'rgba(42, 42, 42, 0.72)' : 'rgba(255, 255, 255, 0.72)')
+    await expect(card).toHaveCSS('color', brightness === 'dark' ? 'rgb(224, 224, 224)' : 'rgb(26, 26, 26)')
+    await page.screenshot({ path: testInfo.outputPath(`campaign-${brightness}-wallpaper.png`) })
+
+    await page.goto('/#/hermes/theme')
+    await page.getByTestId('theme-global-opacity').fill('0.4')
+    await page.getByTestId('theme-global-opacity').dispatchEvent('change')
+    await page.getByTestId('theme-scope').selectOption('card')
+    await page.getByTestId('theme-card-backgroundColor').fill('#8c8070')
+    await page.getByTestId('theme-card-borderColor').fill('#6688aa')
+    for (const [key, value] of [['opacity', '0.25'], ['blur', '12'], ['radius', '16']]) {
+      await page.getByTestId(`theme-card-${key}`).fill(value)
+      await page.getByTestId(`theme-card-${key}`).dispatchEvent('change')
+    }
+    await openRelay()
+    await expect(card).toHaveCSS('background-color', 'rgba(140, 128, 112, 0.25)')
+    await expect(card).toHaveCSS('backdrop-filter', 'blur(12px) saturate(1.1)')
+    await expect(card).toHaveCSS('border-radius', '16px')
+    await expect(card).toHaveCSS('border-top-color', 'rgba(102, 136, 170, 0.25)')
+    await page.screenshot({ path: testInfo.outputPath(`campaign-${brightness}-custom.png`) })
+
+    await page.goto('/#/hermes/theme')
+    await page.getByTestId('theme-scope').selectOption('card')
+    await page.getByTestId('theme-card-opacity').fill('0')
+    await page.getByTestId('theme-card-opacity').dispatchEvent('change')
+    await openRelay()
+    await expect(card).toHaveCSS('background-color', 'rgba(140, 128, 112, 0)')
+    await page.goto('/#/hermes/theme')
+    await page.getByTestId('theme-scope').selectOption('card')
+    await page.getByRole('button', { name: 'Reset Background opacity', exact: true }).click()
+    await openRelay()
+    await expect(card).toHaveCSS('background-color', 'rgba(140, 128, 112, 0.4)')
+    await page.goto('/#/hermes/theme')
+    await page.getByRole('button', { name: 'Remove', exact: true }).click()
+    await page.getByRole('button', { name: 'Restore defaults', exact: true }).click()
+    await openRelay()
+    await expect(card).toHaveCSS('color', 'rgb(255, 241, 203)')
+    await expect(card).toHaveCSS('background-image', /linear-gradient/)
+  })
+}
+
+test('campaign fits narrow screens and enlarged text with keyboard access', async ({ page }, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem('hermes_locale', 'zh'))
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/#/hermes/api-relay')
+  const card = page.locator('.api-relay-hero')
+  const action = page.getByRole('link', { name: '立即查看', exact: true })
+  await expect(card.getByRole('heading')).toHaveText('双十一充值加赠11.11%额度，最高加赠1111额度')
+  for (const width of [1600, 1024, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(card).toBeVisible()
+    await expect(action).toBeInViewport()
+    expect(await card.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`campaign-zh-${width}.png`) })
+  }
+  await page.goto('/#/hermes/theme')
+  await page.locator('.font-size-input input').fill('20')
+  await page.locator('.font-size-input input').press('Tab')
+  await page.goto('/#/hermes/api-relay')
+  await expect(card).toBeVisible()
+  await expect(card).toHaveCSS('font-size', '20px')
+  expect(await card.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await action.scrollIntoViewIfNeeded()
+  await expect(action).toBeInViewport()
+  await page.screenshot({ path: testInfo.outputPath('campaign-zh-320-large-text.png') })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await expectRelayBadgeInCorner(page.locator('.studio-navigation-rail').getByRole('link', { name: '中转站', exact: true }))
+  await page.locator('.studio-navigation-rail').getByRole('link', { name: '中转站', exact: true }).focus()
+  for (let i = 0; i < 12 && !await action.evaluate(el => el === document.activeElement); i++) {
+    await page.keyboard.press('Tab')
+  }
+  await expect(action).toBeFocused()
+  await expect(action).toHaveCSS('outline-width', '3px')
+  await expect(action).toHaveCSS('transition-duration', '0s')
+  await page.screenshot({ path: testInfo.outputPath('campaign-keyboard-focus.png') })
+})
+
+test('campaign supports right-to-left navigation and content', async ({ page }, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem('hermes_locale', 'ar'))
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto('/#/hermes/api-relay')
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl')
+  const card = page.locator('.api-relay-hero')
+  await expect(card).toBeVisible()
+  await expect(card.locator('.api-relay-action')).toBeInViewport()
+  expect(await card.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('campaign-ar-390.png') })
 })
 
 const relayUsage = {
@@ -121,7 +257,7 @@ const relayAccount = {
   usage: relayUsage,
 }
 
-test('shows separate keys with merged profile sources, zero balance and model usage', async ({ page }) => {
+test('shows separate keys with merged profile sources, zero balance and model usage', async ({ page }, testInfo) => {
   await page.route('**/api/hermes/api-relay/usage', route => route.fulfill({ json: {
     configured: true,
     checkedAt: '2026-10-02T08:00:00Z',
@@ -139,6 +275,7 @@ test('shows separate keys with merged profile sources, zero balance and model us
   await expect(cards.last()).toContainText('Key inactive')
   await cards.first().locator('summary').click()
   await expect(cards.first().getByRole('row', { name: /gpt-test/ })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('campaign-populated.png') })
   await page.setViewportSize({ width: 390, height: 800 })
   await cards.last().scrollIntoViewIfNeeded()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

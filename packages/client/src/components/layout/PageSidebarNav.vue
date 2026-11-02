@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router'
 import { isStoredSuperAdmin } from '@/api/client'
 import { useSessionSearch } from '@/composables/useSessionSearch'
 import DesktopUpdateDownloadTab from './DesktopUpdateDownloadTab.vue'
+import RelayCampaignBadge from '@/components/hermes/RelayCampaignBadge.vue'
 import { useNavigationRail } from '@/composables/useNavigationRail'
 
 type ActiveSection = 'person' | 'chat' | 'history' | 'connections' | 'agents' | 'models' | 'usage' | 'apiRelay' | 'group' | 'global' | 'workflow'
@@ -198,9 +199,10 @@ function openApiRelay() {
         </svg>
         <span>{{ t('sidebar.usage') }}</span>
       </button>
-      <button v-if="!hasNavigationRail" class="page-sidebar-tab" :class="{ active: active === 'apiRelay' }" type="button" :aria-current="active === 'apiRelay' ? 'page' : undefined" @click="openApiRelay">
+      <button v-if="!hasNavigationRail" class="page-sidebar-tab" :class="{ active: active === 'apiRelay' }" type="button" :aria-label="t('sidebar.apiRelay')" :aria-description="t('apiRelay.campaignLabel')" :aria-current="active === 'apiRelay' ? 'page' : undefined" @click="openApiRelay">
         <img class="api-relay-logo" :src="deploymentUrl('/relay-logo.png')" width="18" height="18" alt="" aria-hidden="true" />
         <span>{{ t('sidebar.apiRelay') }}</span>
+        <RelayCampaignBadge compact class="page-sidebar-relay-badge" />
       </button>
     </div>
     <div v-if="!hasNavigationRail" class="conversation-switch conversation-switch--four" role="tablist" aria-label="Conversation type">
@@ -330,6 +332,7 @@ function openApiRelay() {
 }
 
 .api-relay-logo { border-radius: var(--radius-component, 4px); }
+.page-sidebar-relay-badge { margin-inline-start: auto; }
 
 .page-sidebar-tab {
   width: 100%;
@@ -354,7 +357,7 @@ function openApiRelay() {
     flex-shrink: 0;
   }
 
-  span {
+  span:not(.page-sidebar-relay-badge) {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;

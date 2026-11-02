@@ -75,3 +75,13 @@ describe('single chat Agent avatars', () => {
     })
   })
 })
+
+import { personTaskAgentAvatar } from '../../packages/client/src/utils/chat-agent-avatar'
+describe('task execution identity', () => {
+  it.each(['hermes', 'ekko-agent', 'claude-code', 'codex'])('uses selected runtime %s', runtime => {
+    expect(personTaskAgentAvatar({ selection_json: JSON.stringify({ runtime, bot_type: 'zhezhe' }) })).toEqual(chatSessionAgentAvatar({ agent: runtime }))
+  })
+  it.each(['', '{', 'null'])('handles invalid or missing selection %s', selection_json => {
+    expect(personTaskAgentAvatar({ selection_json }).label).toBe('Ekko')
+  })
+})

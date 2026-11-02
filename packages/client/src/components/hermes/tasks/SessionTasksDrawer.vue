@@ -186,7 +186,7 @@ onUnmounted(() => {
 <template>
   <NDrawer :show="show" :width="drawerWidth" placement="right" display-directive="show" class="session-tasks-drawer" :aria-label="t('sessionTasks.title')" @update:show="emit('update:show', $event)">
     <NDrawerContent closable :native-scrollbar="true" :body-content-style="{ padding: '0', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }">
-      <template #header><div class="drawer-title"><SessionTaskIcon :size="18" /><span>{{ t('sessionTasks.title') }}</span></div></template>
+      <template #header><div class="drawer-title"><SessionTaskIcon :size="18" /><span>{{ t('sessionTasks.title') }}</span><span class="task-count">{{ total }}</span></div></template>
       <section class="session-tasks" :aria-label="t('sessionTasks.title')">
         <div class="task-list-scroll">
           <table class="task-list" :class="{ 'task-list--empty': loading || error || !tasks.length }" :aria-label="t('sessionTasks.title')" :aria-busy="loading">
@@ -215,7 +215,7 @@ onUnmounted(() => {
             </td></tr></tbody>
             <tbody v-else><tr v-for="task in tasks" :key="task.id" class="task-row" :class="{ 'task-row--completed': task.status === 'completed', 'task-row--closed': task.status === 'closed' }">
               <td class="task-cell">
-                <a class="task-title" :role="task.personTask ? 'button' : undefined" :tabindex="task.personTask ? 0 : undefined" @click="openTask(task)" @keydown.enter="openTask(task)" @keydown.space.prevent="openTask(task)" :href="taskHref(task)" :aria-label="t('sessionTasks.openTask', { title: task.title })">{{ task.title }}</a>
+                <a class="task-title" :role="task.personTask ? 'button' : undefined" :tabindex="task.personTask ? 0 : undefined" @click="openTask(task)" @keydown.enter="openTask(task)" @keydown.space.prevent="openTask(task)" :href="taskHref(task)" :aria-label="t('sessionTasks.openTask', { title: task.title })"><img class="task-agent-icon" :src="taskAvatar(task).src" :alt="taskAvatar(task).label" /><span>{{ task.title }}</span></a>
                 <details class="task-description"><summary><span class="description-text">{{ task.summary }}</span><SessionTaskIcon name="chevron-down" :size="13" /></summary></details>
                 <NButton v-if="personTaskCanStop(task.personTask)" class="task-stop" size="tiny" :loading="savingIds.has(task.id)" :disabled="savingIds.has(task.id) || task.personTask?.execution_state === 'stopping'" @click="stopTask(task)">
                   {{ t(task.personTask?.execution_state === 'stopping' ? 'person.states.stopping' : 'person.stopTask') }}
@@ -277,7 +277,10 @@ th:last-child, td:last-child { padding-inline: 4px 20px; }
 .search-action { width: 28px; }
 .task-row { vertical-align: top; }
 .task-row:hover, .task-row:focus-within { background: rgba(var(--accent-primary-rgb), 0.025); }
-.task-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: $text-primary; text-decoration: none; font-size: calc(var(--font-size-base, 14px) * 15 / 14); font-weight: 550; line-height: 1.6; }
+.task-agent-icon { width: 20px; height: 20px; object-fit: contain; flex-shrink: 0; }
+.task-count { font-variant-numeric: tabular-nums; }
+.task-title > span { overflow: hidden; text-overflow: ellipsis; }
+.task-title { display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: $text-primary; text-decoration: none; font-size: calc(var(--font-size-base, 14px) * 15 / 14); font-weight: 550; line-height: 1.6; }
 .task-title[role="button"], .task-open[role="button"] { cursor: pointer; }
 .task-title:hover { text-decoration: underline; text-underline-offset: 4px; }
 .task-description { margin-top: 5px; color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 13 / 14); line-height: 1.65; }

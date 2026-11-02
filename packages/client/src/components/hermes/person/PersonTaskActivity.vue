@@ -122,7 +122,7 @@ onBeforeUnmount(() => {
             <p v-if="truncatedName" class="activity-full-name">{{ name }}</p>
             <ul class="activity-list">
               <li v-for="task in activeTasks" :key="`task-${task.id}`">
-                <button type="button" class="activity-row" :title="task.title" @click="openTask(task)">
+                <button type="button" class="activity-row" :title="task.title" :aria-label="task.title" @click="openTask(task)">
                   <img v-if="taskAvatar(task)" class="row-gif" :src="taskAvatar(task)!.src" :alt="taskAvatar(task)!.label" width="38" height="38" />
                   <PersonPanelIcon v-else class="row-gif" name="agents" :size="38" />
                   <span class="row-title">{{ task.title }}</span>
