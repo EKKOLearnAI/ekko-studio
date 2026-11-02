@@ -1,3 +1,4 @@
+import { personDisplayMessages, personDisplayPage, personDisplayMetadata, PERSON_DISPLAY_PROJECTION } from '../services/chat-run/person-display'
 import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage } from '../public/usage'
@@ -477,7 +478,7 @@ export async function getConversationMessages(ctx: any) {
     return
   }
   if (denySessionAccess(ctx, detail)) return
-  const messages = (detail.messages || [])
+  const messages = personDisplayMessages(detail.id, detail.messages || [])
     .filter(m => {
       if (humanOnly && m.role !== 'user' && m.role !== 'assistant') return false
       if (!m.content) return false
@@ -784,6 +785,10 @@ export async function search(ctx: any) {
   }
 }
 
+function personDisplaySession<T extends { id: string; messages?: any[] }>(session: T): T {
+  return isPersonSession(session.id) ? personDisplayPage(session.id, { ...personDisplayMetadata(session), messages: withPersonTaskReturns(session.id, withRunUsage(session.id, session.messages || [])) }) : session
+}
+
 export async function get(ctx: any) {
   const session = localGetSessionDetail(ctx.params.id)
   if (!session) {
@@ -795,7 +800,7 @@ export async function get(ctx: any) {
   if (ctx.state?.sessionShare) {
     delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
   }
-  ctx.body = { session }
+  ctx.body = { session: personDisplaySession(session) }
 }
 
 export async function listWorkspaceRunChanges(ctx: any) {
@@ -1226,7 +1231,7 @@ export async function getContext(ctx: any) {
   }
   if (denySessionAccess(ctx, session)) return
 
-  const messages = cleanSessionContextMessages(session.messages || [])
+  const messages = cleanSessionContextMessages(personDisplayMessages(session.id, session.messages || []))
   ctx.body = {
     session_id: session.id,
     profile: session.profile || null,
@@ -1251,7 +1256,7 @@ export async function getHermesSession(ctx: any) {
   const localSessionProfile = (localSession?.profile || 'default') as string
   if (localSession && isHermesHistorySessionSource(localSession.source) && (!profile || localSessionProfile === profile)) {
     if (denySessionAccess(ctx, localSession)) return
-    ctx.body = { session: localSession }
+    ctx.body = { session: personDisplaySession(localSession) }
     return
   }
 
@@ -2247,7 +2252,8 @@ export async function exportSession(ctx: any) {
   const filename = `${safeName}_${ctx.params.id.slice(0, 8)}.${ext}`
 
   if (mode === 'compressed') {
-    const result = await compressSession(session)
+    const compressed = await compressSession(session)
+    const result = { ...compressed, messages: personDisplayMessages(session.id, compressed.messages) }
     if (ext === 'json') {
       ctx.set('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
       ctx.set('Content-Type', 'application/json')
@@ -2261,11 +2267,11 @@ export async function exportSession(ctx: any) {
     if (ext === 'txt') {
       ctx.set('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
       ctx.set('Content-Type', 'text/plain; charset=utf-8')
-      ctx.body = serializeAsText(session.title, (session as any).messages || [])
+      ctx.body = serializeAsText(session.title, (personDisplaySession(session) as { messages?: any[] }).messages || [])
     } else {
       ctx.set('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
       ctx.set('Content-Type', 'application/json')
-      ctx.body = JSON.stringify(session, null, 2)
+      ctx.body = JSON.stringify(personDisplaySession(session), null, 2)
     }
   }
 }
@@ -2335,7 +2341,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       parent_session_id: (session as any).parent_session_id,
       fork_point_message_id: (session as any).fork_point_message_id,
       parent_title: ctx.state?.sessionShare ? undefined : (session as any).parent_title,
-      parent_last_message: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message,
+      parent_last_message: ctx.state?.sessionShare || isPersonSession(session.id) ? undefined : (session as any).parent_last_message,
       parent_last_message_role: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message_role,
       started_at: session.started_at,
       ended_at: session.ended_at,
@@ -2345,7 +2351,8 @@ export async function getConversationMessagesPaginated(ctx: any) {
       input_tokens: session.input_tokens,
       output_tokens: session.output_tokens,
     },
-    messages: withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages)),
+    messages: personDisplayMessages(session.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages))),
+    ...(isPersonSession(session.id) ? { projection: PERSON_DISPLAY_PROJECTION, consumedCount: result.messages.length, nextOffset: result.offset + result.messages.length } : {}),
     taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
     total: result.total,

@@ -1,4 +1,5 @@
 import { forgetPersonMemory } from '../services/person/memory'
+import { personDisplayResponse } from '../services/chat-run/person-display'
 import type { Context } from 'koa'
 import { personError, personRevision, personText } from '../contracts/person'
 import { personSnapshot, configurePerson } from '../services/person/service'
@@ -22,7 +23,7 @@ async function handle(ctx: Context, work: (id: number, body: Record<string, unkn
     if (!ctx.state.user) throw personError('Studio login is required', 401)
     const body = ctx.request.body || {}
     if (typeof body !== 'object' || Array.isArray(body)) throw personError('Expected object')
-    ctx.body = await work(ctx.state.user.id, body)
+    ctx.body = personDisplayResponse(await work(ctx.state.user.id, body))
   } catch (error) {
     const status = Number((error as { status?: number }).status) || 500
     ctx.status = status; ctx.body = { error: status < 500 && error instanceof Error ? error.message : 'Person operation failed',

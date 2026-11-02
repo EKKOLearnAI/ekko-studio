@@ -2,7 +2,8 @@ import { personSessionId } from '../../contracts/person-session'
 import { personError, personRevision, personText } from '../../contracts/person'
 import { isAbsolute } from 'node:path'
 import { normalizeDirectoryTarget, requireExistingWorkspaceDirectory } from '../workspace/directory'
-import { createSession } from '../../repositories/session-store'
+import { createSession, getSessionContextMessage } from '../../repositories/session-store'
+import { personDisplayMessages } from '../chat-run/person-display'
 import { assertPersonBotNameAvailable, beginPersonSessionDeletion, listPersonSessions, requirePersonSession } from '../../repositories/person-session-store'
 import { clearPersonHistory } from '../../repositories/person-history-store'
 import { personUpdated } from '../../repositories/person-updates'
@@ -17,7 +18,15 @@ import { personDb, personSettings, personTransaction } from '../../repositories/
 export function personConversations(userId: number, query = '', offset = 0) {
   personUser(userId)
   const sessions = listPersonSessions(userId, query.slice(0, 200), offset, 51)
-  return { sessions: sessions.slice(0, 50), next_offset: sessions.length > 50 ? offset + 50 : null }
+  return { sessions: sessions.slice(0, 50).map(session => {
+    if (!session.matched_message_id) return session
+    // Sanitize the complete source, never a substring that may start inside thinking.
+    const source = getSessionContextMessage(session.id, Number(session.matched_message_id))
+    const content = source ? personDisplayMessages(session.id, [source])[0].content : ''
+    const index = content.toLowerCase().indexOf(query.toLowerCase())
+    return { ...session, matched_message_id: index >= 0 ? session.matched_message_id : null,
+      snippet: index >= 0 ? content.slice(Math.max(0, index - 80), index + 160) : null }
+  }), next_offset: sessions.length > 50 ? offset + 50 : null }
 }
 
 export async function createPersonConversation(userId: number, title: unknown, input: Record<string, unknown> = {}) {

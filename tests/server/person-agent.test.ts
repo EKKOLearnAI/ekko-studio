@@ -1884,6 +1884,13 @@ describe('Person multi-conversation ownership', () => {
     expect(personConversations(1, 'NEEDLE-MULTI').sessions.map(session => session.id)).toEqual([b.id])
     expect((await personSnapshot(1, a.id)).settings.agents).toEqual((await personSnapshot(1, b.id)).settings.agents)
     expect(personConversations(2, 'NEEDLE-MULTI').sessions.map(session => session.id)).toEqual(['person-main-2'])
+    addMessage({ session_id: b.id, role: 'tool', content: 'PRIVATE-TOOL-SEARCH', tool_call_id: 'c' })
+    addMessage({ session_id: b.id, role: 'assistant', content: '<think>PRIVATE-THOUGHT-SEARCH</think>Public search answer' })
+    for (const query of ['PRIVATE-TOOL-SEARCH', 'PRIVATE-THOUGHT-SEARCH']) {
+      const hit = personConversations(1, query).sessions.find(session => session.id === b.id)
+      expect(hit).toMatchObject({ matched_message_id: null, snippet: null })
+    }
+    expect(personConversations(1, 'Public search answer').sessions.find(session => session.id === b.id)?.snippet).toBe('Public search answer')
     await expect(createPersonConversation(1, '  ', { workspace: dir })).rejects.toThrow('conversation name')
   })
 

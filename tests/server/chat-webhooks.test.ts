@@ -226,7 +226,7 @@ describe('chat run webhooks', () => {
     const enqueue=vi.spyOn(service.getChatWebhookDispatcher(),'enqueue').mockReturnValue(true)
     const received:any[]=[]
     const stop=businessEvents.subscribe('person-test',event=>{received.push(event);return true})
-    const base={sessionId:'person-main-1',profile:'default',source:'builtin_agent',agent:'ekko' as const,payload:{run_id:'r',output:'Report ready'}}
+    const base={sessionId:'person-main-1',profile:'default',source:'builtin_agent',agent:'ekko' as const,payload:{run_id:'r',output:'<think>PRIVATE</think>Report ready',context:{raw:'PRIVATE'},reasoning:'PRIVATE'}}
     try {
       for(const event of ['run.completed','run.failed','approval.requested','approval.resolved','clarify.requested','clarify.resolved']) {
         expect(service.observeChatRunWebhookEvent({...base,event})).toBe(true)
@@ -234,6 +234,8 @@ describe('chat run webhooks', () => {
       expect(received.map(event=>event.type)).toEqual(['person.run.completed','person.run.failed','person.approval.requested',
         'person.approval.resolved','person.clarification.requested','person.clarification.resolved'])
       expect(received.every(event=>event.source==='person' && !event.chat)).toBe(true)
+      expect(JSON.stringify(received)).not.toContain('PRIVATE')
+      expect(base.payload.context.raw).toBe('PRIVATE')
       expect(enqueue).not.toHaveBeenCalled()
       received.length=0
       for(const event of ['run.completed','clarify.requested']) expect(service.observeChatRunWebhookEvent({...base,sessionId:'person-task-private',event})).toBe(false)

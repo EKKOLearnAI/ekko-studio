@@ -96,6 +96,7 @@ vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', ()
   parseChatCodingAgentSessionCommand: sessionCommandMocks.parseSessionCommand,
   getChatEkkoAgent: vi.fn(() => ({ requestBoundaryInterrupt: ekkoBoundaryInterruptMock })),
   hasChatEkkoBackgroundTasks: vi.fn(() => false),
+  pendingChatEkkoInteractions: vi.fn(() => []),
   respondToChatEkkoToolApproval: respondToEkkoToolApprovalMock,
   respondToChatEkkoClarification: vi.fn(() => ({ handled: false, resolved: false })),
 }))
@@ -1148,6 +1149,54 @@ describe('ChatRunSocket queued bridge runs', () => {
       reasoning_effort: 'high',
       push_enabled: true,
     }))
+  })
+
+  it('projects Person resume and App cache hits while leaving internal events and task details complete', async () => {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const sessions = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    const plans = await import('../../packages/server/src/modules/studio/services/task-plans')
+    const returns = await import('../../packages/server/src/modules/studio/repositories/person-return-store')
+    const attachReturns = vi.spyOn(returns, 'withPersonTaskReturns').mockImplementation((_sid, messages) => messages)
+    const { io, socket } = makeServerHarness()
+    const server: any = new ChatRunSocket(io as any)
+    vi.spyOn(server, 'backgroundPendingCount').mockReturnValue(1)
+    socket.data = { user: { id: 1, role: 'super_admin' } }
+    const sid = 'person-main-projected'
+    const raw = {
+      messages: [{ id: 1, session_id: sid, role: 'assistant', content: 'Visible', reasoning: 'PRIVATE', tool_calls: [{ arguments: 'PRIVATE' }], runMarker: 'old-run', timestamp: 1 },
+        { id: 2, session_id: sid, role: 'tool', content: 'PRIVATE', runMarker: 'tool-run', timestamp: 2 }],
+      isWorking: true, events: [{ event: 'tool.completed', data: { output: 'PRIVATE' } },
+        { event: 'reasoning.delta', data: { delta: 'PRIVATE' } },
+        { event: 'context.updated', data: { context: { raw: 'PRIVATE' }, contextTokens: 42 } }],
+      backgroundTasks: { child: { subagent_id: 'child', status: 'running', preview: 'PRIVATE', arguments: 'PRIVATE' } },
+      queue: [], runId: 'active', messageTotal: 301, messageStateBaselineCount: 2,
+    }
+    server.sessionMap.set(sid, raw)
+    const previous = vi.mocked(sessions.getSession).getMockImplementation()!
+    vi.mocked(sessions.getSession).mockReturnValue({ id: sid, studio_user_id: '1', source: 'builtin_agent', profile: 'default', agent: 'ekko-agent' } as any)
+    const before = JSON.stringify(raw)
+    try {
+      await server.resumeSession(socket, sid)
+      const resumed = socket.emit.mock.calls.find(([event]) => event === 'resumed')?.[1]
+      expect(resumed).toMatchObject({ projection: 'person-display-v1', messageTotal: 301, messageLoadedCount: 150, isWorking: true })
+      expect(JSON.stringify(resumed)).not.toContain('PRIVATE')
+      expect(plans.getSessionTaskPlans).toHaveBeenCalledWith(sid, expect.arrayContaining([expect.objectContaining({ runMarker: 'tool-run' })]), true, 'active')
+      expect(JSON.stringify(raw)).toBe(before)
+      socket.emit.mockClear()
+      await server.resumeSession(socket, sid, { event: 'app.resumed', cachedId: '' })
+      const full = socket.emit.mock.calls.find(([event]) => event === 'app.resumed')?.[1]
+      socket.emit.mockClear()
+      await server.resumeSession(socket, sid, { event: 'app.resumed', cachedId: full.id })
+      const hit = socket.emit.mock.calls.find(([event]) => event === 'app.resumed')?.[1]
+      expect(hit).toMatchObject({ projection: 'person-display-v1', messagesCached: true })
+      expect(JSON.stringify(hit)).not.toContain('PRIVATE')
+      socket.emit.mockClear()
+      server.sessionMap.set('person-task-full', raw)
+      await server.resumeSession(socket, 'person-task-full')
+      const detail = socket.emit.mock.calls.find(([event]) => event === 'resumed')?.[1]
+      expect(JSON.stringify(detail)).toContain('PRIVATE')
+      expect(detail).not.toHaveProperty('projection')
+    } finally { vi.mocked(sessions.getSession).mockImplementation(previous); attachReturns.mockRestore() }
   })
 
   it('serves App resume messages once and then accepts their cache id', async () => {
