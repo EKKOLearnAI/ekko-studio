@@ -42,13 +42,15 @@ export function personVisibleText(input: string, streaming = false): string {
   }
   let body = ''
   let end = 0
-  let depth = 0
+  const tags: string[] = []
   for (const match of text.matchAll(/<(\/?)(think|thinking|reasoning)>/gi)) {
-    if (depth === 0) body += text.slice(end, match.index)
-    depth = match[1] ? Math.max(0, depth - 1) : depth + 1
+    if (tags.length === 0) body += text.slice(end, match.index)
+    const tag = match[2].toLowerCase()
+    if (!match[1]) tags.push(tag)
+    else if (tags.at(-1) === tag) tags.pop()
     end = match.index! + match[0].length
   }
-  text = body + (depth === 0 ? text.slice(end) : '')
+  text = body + (tags.length === 0 ? text.slice(end) : '')
   return text.replace(/\u0000PERSONCODE(\d+)\u0000/g, (_, index) => code[Number(index)] || '')
 }
 
@@ -68,7 +70,7 @@ function displayContent(value: unknown, assistant: boolean, streaming = false): 
     if (typeof parsed === 'string') {
       if ((streaming && parsed.trimStart().startsWith('['))
         || /^\s*\[\s*\{[\s\S]*?"type"\s*:\s*"(?:thinking|redacted_thinking|reasoning|tool_use|tool_result|text)"/.test(parsed)) return ''
-      return personVisibleText(parsed, streaming)
+      return personVisibleText(value as string, streaming)
     }
   }
   if (!Array.isArray(parsed)) return ''

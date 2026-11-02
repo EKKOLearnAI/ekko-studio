@@ -52,6 +52,7 @@ describe('Person outbound display projection', () => {
     const code = '```xml\n<think>literal</think>\n```'
     expect(personVisibleText(`${code}\n<thinking>PRIVATE<think>PRIVATE</think>PRIVATE</thinking>Done`)).toBe(`${code}\nDone`)
     expect(personVisibleText('Done<reasoning>PRIVATE')).toBe('Done')
+    expect(personVisibleText('Done<think>PRIVATE</reasoning>PRIVATE')).toBe('Done')
     expect(personVisibleText('`<think>literal</think>`')).toBe('`<think>literal</think>`')
   })
 
