@@ -25,10 +25,12 @@ npm run test:e2e
 npm run build
 ```
 
-The legacy test suite has been removed. Add small, focused tests only for new
-features; do not restore blanket coverage or browser sweeps. See `tests/README.md`.
+The legacy test suite has been removed. Every new feature must include small,
+focused tests; new browser journeys must include Playwright coverage. Do not
+restore blanket coverage or browser sweeps. See `tests/README.md`.
 For PRs, run `npm run harness:check` and `npm run build`, plus tests for any new
-feature introduced by the change. Empty test suites are allowed.
+feature introduced by the change. CI runs Vitest and Playwright automatically.
+Empty suites are allowed during the reset; this does not waive new-feature tests.
 
 ## Code Ownership Map
 

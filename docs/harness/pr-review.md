@@ -23,9 +23,12 @@ Use this checklist before pushing or updating a pull request.
 
 ## Tests And Validation
 
-- New features have small tests scoped to the new behavior.
-- New browser journeys have focused e2e coverage when needed; do not require
+- Every new feature includes small tests scoped to the new behavior, and those
+  tests have been run locally.
+- New browser journeys include focused e2e coverage that has been run; do not require
   blanket coverage or restore the legacy regression suites.
+- Build CI runs the current Vitest and Playwright suites; an empty suite during
+  the reset does not waive the requirement to test new features.
 - `npm run harness:check` passes.
 - The PR body lists validation commands that actually ran.
 - Known limitations or follow-ups are called out.

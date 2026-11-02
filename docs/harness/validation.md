@@ -1,7 +1,8 @@
 # Validation Guide
 
-The legacy automated tests and fixtures have been removed. Add small, focused
-tests for new features and run only the relevant files. See `tests/README.md`.
+The legacy automated tests and fixtures have been removed. Every new feature
+must include small, focused tests; run the relevant files locally. See
+`tests/README.md`.
 Do not restore full coverage, browser sweeps or cross-platform test matrices as a
 routine PR requirement.
 
@@ -12,9 +13,10 @@ npm run harness:check
 npm run build
 ```
 
-For a new feature, also run the focused Vitest tests added for that behavior.
-Add a focused Playwright test only when a new browser journey needs coverage.
-The generic test commands allow an empty suite; existing assertions still fail.
+For a new feature, add and run focused Vitest tests for that behavior. New browser
+journeys must also have focused Playwright tests, run locally before the PR.
+The generic test commands allow an empty suite during the reset; existing
+assertions still fail. This does not exempt new features from adding tests.
 
 ## Keep new tests small
 
@@ -22,7 +24,8 @@ The generic test commands allow an empty suite; existing assertions still fail.
 - Keep setup local to the feature; avoid loading complete business runtimes for
   simple cases and duplicating source-level architecture checks.
 - Avoid exact source-string/CSS assertions and exhaustive OS/theme/viewport products.
-- Add CI test automation only when new features need it, scoped to those features.
+- Build CI automatically runs all current Vitest and Playwright tests; no separate
+  workflow is needed when adding new feature tests.
 - For workflow changes, run `actionlint` when available. For dependency changes,
   run `npm ci --ignore-scripts` and keep the lockfile synchronized.
 
@@ -54,8 +57,10 @@ state and does not require a running Gateway.
 
 ## CI Mapping
 
-- Build installs dependencies, runs `npm run harness:check`, and builds production
-  assets on pushes and pull requests. It no longer runs test coverage.
+- Build installs dependencies, runs `npm run harness:check`, `npm test`, the
+  production build and `npm run test:e2e` on pushes to `main` and pull requests
+  targeting `main` or `base`. Chromium is installed only when browser test files
+  are present. Any test failure fails the job. Coverage is not required.
 - The old Playwright shards and coding-agent, P2P and desktop-isolation test
   workflows have been removed.
 - The NPM lockfile workflow still verifies dependency lockfile synchronization.
