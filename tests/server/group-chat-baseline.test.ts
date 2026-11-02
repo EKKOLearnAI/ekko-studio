@@ -1264,6 +1264,59 @@ describe('group chat baseline behavior', () => {
       .toThrowError(expect.objectContaining({ code: 'ROOM_PARTICIPANT_NAME_CONFLICT' }))
   })
 
+  it('persists the native model and effort of global CLI agents while Hermes records stay native-free', () => {
+    const storage = groupServer.getStorage()
+    storage.saveRoom('room-native', 'Native Room', 'NATIVE1')
+
+    const codebuddy = storage.addRoomAgent('room-native', 'agent-codebuddy', 'research', 'PI', '', 0, {
+      agent: 'codebuddy',
+      agentMode: 'global',
+      provider: 'must-not-persist',
+      model: 'deepseek-v4.1-flash',
+      apiMode: 'chat_completions',
+      reasoningEffort: 'max',
+    })
+    expect(codebuddy).toMatchObject({
+      agent: 'codebuddy',
+      agentMode: 'global',
+      provider: '',
+      model: 'deepseek-v4.1-flash',
+      apiMode: '',
+      reasoningEffort: 'max',
+    })
+
+    const updated = storage.updateRoomAgent('room-native', codebuddy.id, 'research', 'PI', '', {
+      agent: 'codebuddy',
+      agentMode: 'global',
+      model: 'minimax-m3.1-flash',
+      reasoningEffort: 'xhigh',
+    })
+    expect(updated).toMatchObject({ model: 'minimax-m3.1-flash', reasoningEffort: 'xhigh', provider: '' })
+    expect(storage.getRoomAgent('room-native', codebuddy.id)).toMatchObject({
+      model: 'minimax-m3.1-flash',
+      reasoningEffort: 'xhigh',
+    })
+
+    // Hermes/Ekko have no native model identity, so a global record keeps native
+    // fields empty; scoped records keep the Studio binding they were saved with.
+    const hermes = storage.addRoomAgent('room-native', 'agent-hermes', 'default', 'Worker', '', 0, {
+      agent: 'hermes',
+      agentMode: 'global',
+      model: 'must-not-persist',
+      reasoningEffort: 'max',
+    })
+    expect(hermes).toMatchObject({ model: '', reasoningEffort: '' })
+    const scoped = storage.addRoomAgent('room-native', 'agent-scoped', 'default', 'Scoped Worker', '', 0, {
+      agent: 'codebuddy',
+      agentMode: 'scoped',
+      provider: 'xiaomi',
+      model: 'mimo-v2.6-pro',
+      apiMode: 'chat_completions',
+      reasoningEffort: 'none',
+    })
+    expect(scoped).toMatchObject({ provider: 'xiaomi', model: 'mimo-v2.6-pro', apiMode: 'chat_completions', reasoningEffort: 'none' })
+  })
+
   it('keeps one credential-free Agent record for historical avatars until chat history is cleared', () => {
     const storage = groupServer.getStorage()
     const avatar = JSON.stringify({ type: 'generated', seed: 'historical-worker' })
