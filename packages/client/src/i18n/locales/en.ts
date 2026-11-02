@@ -3985,6 +3985,22 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_12_1: "The assistant activity capsule shows background tasks and healthy collaboration flows started by the current creator, with expandable previews and navigation to historical flows; improves sequential/parallel connectors, long names, mobile layouts and reduced motion (#3617)",
+    new_0_8_12_2: "Move the capsule keyboard focus ring to its expand arrow while preserving independent task, flow and Bot focus, keyboard controls and themes (#3630)",
+    new_0_8_12_3: "Require an existing workspace when creating a Bot and allow later changes; pin collaborations to the initiating turn's directory and retain old task/schedule directories. Migrate bindings atomically without moving files; reject invalid directories instead of falling back home. Directory binding is not a security sandbox (#3627)",
+    new_0_8_12_4: "Select and persist model protocols for Bot conversations and execution Agents. Automatic mode matches GPT/Claude conversation models to Responses/Anthropic Messages, preserves explicit choices, excludes dedicated media models and restores choices after model switches or reloads (#3618)",
+    new_0_8_12_5: "Add an account-shared single-run limit: 60 minutes by default, -1 for unlimited, or 1–35791 whole minutes. New dispatches use current settings; active runs keep their original limit (#3629)",
+    new_0_8_12_6: "Remove the task-detail header stop button while retaining list and composer controls; strengthen turn identity, stop acknowledgement and idempotency checks to prevent late or duplicate queue insertions (#3629)",
+    new_0_8_12_7: "Use a resizable right column for Bot workspace, terminal and browser on desktop and an overlay on narrow screens; fix tools and session binding inside expanded tasks, and show executing Agent icons and task totals (#3635)",
+    new_0_8_12_8: "Filter tool and reasoning text server-side from assistant main-session events, resume, history and search previews. Preserve approvals, questions, task cards, receipts, legacy App pagination and full internal records; existing App caches are not automatically cleared (#3639)",
+    new_0_8_12_9: "Improve requirement breakdown and per-item verification guidance, preserving features, dependencies and unfinished items; ask the user and wait when execution Agent capabilities are unclear or no suitable Agent exists (#3642)",
+    new_0_8_12_10: "Hide dates beside assistant names in its sidebar while retaining other session-list dates and existing ordering (#3625)",
+    new_0_8_12_11: "Add a UUID fallback for assistant flows to fix unresponsive Agent creation, schedules, collaborations and task actions over insecure contexts such as LAN HTTP (#3614)",
+    new_0_8_12_12: "Exclude dot directories from Profile lists so .deleted tombstones are not offered as resource Profiles or opened as databases (#3615)",
+    new_0_8_12_13: "Preserve committed group-chat summaries, anchors and reviews when retracting queued messages after the anchor. Invalidate in-flight summaries, reject late writes and broadcast authoritative state; previously lost summaries are not restored (#3624)",
+    new_0_8_12_14: "Configure ACP control and model-discovery timeouts through EKKO_STUDIO_* variables with HERMES_* aliases and first-valid-value precedence. Defaults remain 60s/20s; document Compose forwarding and restarts (#3623)",
+    new_0_8_12_15: "Refresh relay navigation and banners for Double 11, linking to the campaign with an 11.11% top-up bonus capped at 1111 credits across all languages, mobile layouts and themes (#3638)",
+    new_0_8_12_16: "Revert background-session running-state reconciliation on reconnect or foreground return; the fix from #3620 is not included in this release (#3622)",
     new_0_8_11_1: "Prioritize a selected queued Person task message: interrupt and drain the current turn, run that input next, preserve the remaining queue and attachments, and suppress delivery of the interrupted result (#3607)",
     new_0_8_11_2: "Safely remove one unstarted task message and its result delivery without stopping the active worker or clearing other inputs; validate ownership, revisions and idempotency, and protect the active insertion target (#3610)",
     new_0_8_11_3: "Add per-message task queue removal when supported by the server; disable conflicting actions, recover from failures, retain the confirmed queue if a later refresh fails, and resync when the drawer reopens (#3611)",
