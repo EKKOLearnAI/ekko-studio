@@ -12,6 +12,7 @@ playwright-report
 blob-report
 all-blob-reports
 test-results
+.playwright/
 dist-ssr
 coverage
 __pycache__/
