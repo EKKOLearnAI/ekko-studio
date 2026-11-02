@@ -1,3 +1,4 @@
+import { personDisplayPage, personDisplayEvents, personDisplayBackgroundTasks, personDisplayEvent } from '../services/chat-run/person-display'
 import { personSessionIds } from '../repositories/person-session-store'
 import type { PersonResultDelivery } from '../public/person-runtime'
 import { personUser } from '../services/person/catalog'
@@ -2396,7 +2397,7 @@ export class ChatRunSocket {
         .map(message => message.id),
     )
     const taskPlans = getSessionTaskPlans(sid, messagePage.messages, true, state.runId)
-    const resumePage = { ...messagePage, messages: withPersonTaskReturns(sid, withRunUsage(sid, messagePage.messages)), workspaceRunChanges, taskPlans }
+    const resumePage = personDisplayPage(sid, { ...messagePage, messages: withPersonTaskReturns(sid, withRunUsage(sid, messagePage.messages)), workspaceRunChanges, taskPlans })
     const appMessagePage = options
       ? buildAppResumeMessagePage(resumePage, options.cachedId)
       : null
@@ -2408,7 +2409,7 @@ export class ChatRunSocket {
       parentSessionId: sessionDetail?.parent_session_id || null,
       forkPointMessageId: sessionDetail?.fork_point_message_id || null,
       parentTitle: socket.data?.sessionShare ? null : sessionDetail?.parent_title || null,
-      parentLastMessage: socket.data?.sessionShare ? null : sessionDetail?.parent_last_message || null,
+      parentLastMessage: socket.data?.sessionShare || isPersonSession(sid) ? null : sessionDetail?.parent_last_message || null,
       parentLastMessageRole: socket.data?.sessionShare ? null : sessionDetail?.parent_last_message_role || null,
       workspace: sessionDetail?.workspace || null,
       model: sessionDetail?.model || '',
@@ -2419,9 +2420,9 @@ export class ChatRunSocket {
       isWorking: state.isWorking,
       runStartedAt: state.runStartedAt,
       isAborting: state.isAborting || false,
-      events: buildResumeEvents(resumeEvents.filter(entry =>
+      events: personDisplayEvents(sid, buildResumeEvents(resumeEvents.filter(entry =>
         !['calendar.requested', 'reminder.requested', 'calendar.resolved', 'reminder.resolved', 'health.requested', 'health.resolved'].includes(entry.event)
-        || mobileEventAllowed(entry.data, socket.data.mobileDeviceTarget))),
+        || mobileEventAllowed(entry.data, socket.data.mobileDeviceTarget)))),
       inputTokens: state.inputTokens,
       outputTokens: state.outputTokens,
       cacheReadTokens: state.cacheReadTokens,
@@ -2438,7 +2439,7 @@ export class ChatRunSocket {
         guarantee: state.queueInsertion.guarantee,
         requested_at: state.queueInsertion.requestedAt,
       } : null,
-      backgroundTasks: Object.values(state.backgroundTasks || {}),
+      backgroundTasks: personDisplayBackgroundTasks(sid, Object.values(state.backgroundTasks || {})),
       backgroundPending: this.backgroundPendingCount(state, sid),
     })
 
@@ -3313,7 +3314,8 @@ export class ChatRunSocket {
       state.events.push({ event, data: tagged })
       if (state.events.length > 200) state.events.splice(0, state.events.length - 200)
     }
-    this.nsp.to(`session:${sessionId}`).emit(event, buildOutboundRunEvent(event, tagged))
+    const display = personDisplayEvent(sessionId, event, tagged)
+    if (display !== null) this.nsp.to(`session:${sessionId}`).emit(event, buildOutboundRunEvent(event, display))
     const waiters = this.runWaiters.get(sessionId)
     if (waiters) {
       for (const waiter of waiters) waiter(event, tagged)
@@ -3631,9 +3633,11 @@ export class ChatRunSocket {
     if (!isPrivatePersonSession(sessionId)) this.observePetEvent(profile, event, tagged)
     observePersonPresenceEvent(sessionId, event, tagged)
     this.emitPendingInteraction(profile, event, tagged)
-    this.nsp.to(`session:${sessionId}`).emit(event, tagged)
+    const display = personDisplayEvent(sessionId, event, tagged)
+    if (display === null) return
+    this.nsp.to(`session:${sessionId}`).emit(event, display)
     if (!this.nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
-      socket.emit(event, tagged)
+      socket.emit(event, display)
     }
   }
 
@@ -3648,9 +3652,10 @@ export class ChatRunSocket {
       const notice = foregroundNotification(event, payload)
       if (!interaction && (!notice || ['cancelled', 'canceled'].includes(payload.stop_reason))) return
       const name = `person.${event.replace('clarify.', 'clarification.')}`
-      const preview = event === 'run.completed' ? { ...payload, output: chatCompletionText({ type: name,
-        subject: { session_id: session!.id, message_id: payload.message_id }, payload }) } : payload
-      const data = interaction ? { ...payload, event: name }
+      const display = personDisplayEvent(payload.session_id, event, payload) || {}
+      const preview = event === 'run.completed' ? { ...display, output: chatCompletionText({ type: name,
+        subject: { session_id: session!.id, message_id: payload.message_id }, payload: display }) } : display
+      const data = interaction ? { ...display, event: name }
         : { event: name, session_id: session!.id, run_id: payload.run_id, notification_id: notice!.id,
           timestamp: Date.now(), output: foregroundNotificationPreview(notice!.kind, session, preview).content }
       // Reuse the authenticated chat transports and their existing notification handlers.

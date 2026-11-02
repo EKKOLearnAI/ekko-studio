@@ -6,6 +6,7 @@ import { PERSON_BOTS, personBotNameKey } from '../../packages/shared/person-bots
 import { createServer } from 'node:http'
 import { Server } from 'socket.io'
 import type { SessionListState } from '../../packages/shared/session-state'
+import { personDisplayPage } from '../../packages/server/src/modules/studio/services/chat-run/person-display'
 
 async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, customAppearance = true) {
   await authenticate(page)
@@ -2045,6 +2046,25 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(page.locator('.studio-mobile-drawer .person-sidebar .session-item')).toBeVisible()
   })
 }
+
+test('Person renders the server display projection and keeps an empty-body receipt without exposing hidden slots', async ({ page }, testInfo) => {
+  await setup(page, 'light', false, false)
+  const snapshot = personDisplayPage('person-main-1', { session_id: 'person-main-1', isWorking: false, events: [], messages: [
+    { id: 1, role: 'assistant', content: '<think>PRIVATE analysis</think>Public answer', reasoning: 'PRIVATE analysis', timestamp: 1 },
+    { id: 2, role: 'tool', content: 'PRIVATE result', tool_call_id: 'PRIVATE call', timestamp: 2 },
+    { id: 3, role: 'assistant', content: '', timestamp: 3,
+      person_task_return: { taskId: 'task1', executionId: 'execution1', assistantMessageId: '3', title: 'Check report', agent: 'ekko', state: 'finished' } },
+  ] })
+  expect(JSON.stringify(snapshot)).not.toContain('PRIVATE')
+  await page.addInitScript(snapshot => { (window as any).__PW_CHAT_SOCKET_RESUMES__['person-main-1'] = snapshot }, snapshot)
+  await page.goto('/#/person')
+  await expect(page.getByText('Public answer', { exact: true })).toBeVisible()
+  await expect(page.locator('.person-task-return-card')).toHaveCount(1)
+  await expect(page.locator('.person-task-return-card')).toContainText('Check report')
+  await expect(page.getByText(/PRIVATE/)).toHaveCount(0)
+  await expect(page.locator('.thinking-block, .message.tool')).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('person-display.png'), animations: 'disabled' })
+})
 
 for (const mode of ['light', 'dark'] as const) {
   test(`Person keeps task results without usage or reasoning and opens the task drawer in ${mode}`, async ({ page }) => {
