@@ -21,7 +21,7 @@ import MessageList from '@/components/hermes/chat/MessageList.vue'
 import SessionTasksDrawer from '@/components/hermes/tasks/SessionTasksDrawer.vue'
 import PersonTaskChat from '@/components/hermes/person/PersonTaskChat.vue'
 import PersonWorkspaceFiles from '@/components/hermes/person/PersonWorkspaceFiles.vue'
-import { personTaskNavigation } from '@/components/hermes/person/task-navigation'
+import { personTaskNavigation, personWorkspacePreviewContext } from '@/components/hermes/person/task-navigation'
 import PersonSchedulesPanel from '@/components/hermes/person/PersonSchedulesPanel.vue'
 import PersonFlowsPanel from '@/components/hermes/person/PersonFlowsPanel.vue'
 import PersonMemoryPanel from '@/components/hermes/person/PersonMemoryPanel.vue'
@@ -287,6 +287,8 @@ function confirmDeleteConversation() {
   return deleteConversationId.value ? deleteConversation(deleteConversationId.value) : false
 }
 const data = ref<PersonSnapshot | null>(null)
+provide(personWorkspacePreviewContext, computed(() => data.value?.session
+  ? { sessionId: data.value.session.id, workspace: data.value.session.workspace } : null))
 const initializing = ref(true)
 const chatSurface = ref<HTMLElement | null>(null)
 useChatSurfaceReveal(chatSurface, () => selectedSessionId.value, () => !initializing.value
@@ -319,6 +321,16 @@ const workspaceDirectories = useDefaultWorkspace()
 const { defaultWorkspaces, recentWorkspaces } = workspaceDirectories
 const chatTaskId = ref<string | null>(null)
 const chatInputRef = ref<InstanceType<typeof ChatInput> | null>(null)
+const taskChatRef = ref<InstanceType<typeof PersonTaskChat> | null>(null)
+const toolsOpen = ref(false)
+const toolsSession = computed(() => chatTaskId.value ? taskChatRef.value?.session : data.value?.session)
+function submitTools(text: string, attachments?: Attachment[]) {
+  return chatTaskId.value ? taskChatRef.value?.send(text, attachments) ?? Promise.resolve(false) : sendMessage(text, attachments)
+}
+function attachToolFile(file: File) {
+  if (chatTaskId.value) taskChatRef.value?.addFiles([file])
+  else chatInputRef.value?.addFiles([file])
+}
 const chatExecutionId = ref<string>()
 function openTask(task: PersonTask) { showTasks.value = false; chatExecutionId.value = undefined; chatTaskId.value = task.id }
 provide(personTaskNavigation, (taskId, executionId) => { showTasks.value = false; chatExecutionId.value = executionId; chatTaskId.value = taskId })
@@ -630,8 +642,9 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
             <template #trigger><NButton quaternary circle size="small" :disabled="busy || pending || settingsWrites > 0" :aria-label="t('chat.workspace')" :aria-expanded="showWorkspace" @click="openWorkspace"><FolderIcon /></NButton></template>
             {{ data?.settings.workspace || t('chat.workspace') }}
           </NTooltip>
-          <PersonWorkspaceFiles panel-target="#person-tools-target" :session-id="data?.session?.id" :workspace="data?.session?.workspace" :submit="sendMessage"
-            :active="!chatTaskId && data?.session?.id === selectedSessionId" @attach="file => chatInputRef?.addFiles([file])" />
+          <PersonWorkspaceFiles panel-target="#person-tools-target" :reserved-width="chatTaskId ? taskChatRef?.panelWidth || 0 : 0"
+            :session-id="toolsSession?.id" :workspace="toolsSession?.workspace" :submit="submitTools"
+            :active="data?.session?.id === selectedSessionId" @attach="attachToolFile" @update:show="toolsOpen = $event" />
           <NPopconfirm v-model:show="showClearConfirm" :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" :positive-button-props="{ loading: pending }" :disabled="!data?.can_clear || busy || pending || settingsWrites > 0" @positive-click="clearHistory">
             <template #trigger>
               <NTooltip trigger="hover">
@@ -685,9 +698,9 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
         </div>
       </NModal>
       <div v-if="!isNewConversation" id="person-tools-target" class="person-chat-layout">
-      <div ref="chatSurface" class="person-chat-surface">
+      <div ref="chatSurface" class="person-chat-surface" :inert="isMobile && (!!chatTaskId || toolsOpen) || undefined">
       <div v-if="data.session" class="person-chat-messages">
-      <PersonTaskActivity :key="selectedSessionId" :session-id="data.session.id" :count="sessionStates.backgroundCount(selectedSessionId)" :tasks="data.tasks" :flows="data.active_flows || data.flows || []" :flow-count="data.active_flow_count"
+      <PersonTaskActivity :key="selectedSessionId" :session-id="data.session.id" :count="sessionStates.backgroundCount(selectedSessionId)" :agent-count="data.active_agent_task_count" :tasks="data.tasks" :flows="data.active_flows || data.flows || []" :flow-count="data.active_flow_count"
         :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :name="data.session.title || undefined"
         @refresh="refresh" @open-task="openTask" @open-flow="openActivityFlow" />
       <MessageList v-if="data.session" :user-label="t('person.you')" hide-tool-calls hide-run-usage hide-reasoning :activity-label="t('person.executing')" />
@@ -701,6 +714,8 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           :scoped-reasoning-efforts="data.reasoning_efforts" @update:reasoning-effort="selectEffort" @model-click="openModels" />
       </div>
       </div>
+      <PersonTaskChat v-if="chatTaskId && data.session" ref="taskChatRef" :inert="isMobile && toolsOpen || undefined"
+        :key="`${chatTaskId}:${chatExecutionId || ''}`" :execution-id="chatExecutionId" :task-id="chatTaskId" :main-session-id="data.session.id" @close="chatTaskId = null; refresh()" />
       </div>
       <NModal v-model:show="showAgentSetup" preset="dialog" :title="t('person.agentSetupTitle')" :aria-label="t('person.agentSetupTitle')"
         :positive-text="t('person.configureAgents')" :negative-text="t('common.cancel')"
@@ -747,7 +762,6 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
         </NDrawerContent>
       </NDrawer>
       <SessionTasksDrawer v-if="data.session" v-model:show="showTasks" person :person-session-id="data.session.id" @open-person-task="openTask" />
-      <PersonTaskChat v-if="chatTaskId && data.session" :key="`${chatTaskId}:${chatExecutionId || ''}`" :execution-id="chatExecutionId" :task-id="chatTaskId" :main-session-id="data.session.id" @close="chatTaskId = null; refresh()" />
     </template>
   </PageLoading>
     <NDropdown trigger="manual" placement="bottom-start" :show="showConversationMenu" :x="conversationMenuX" :y="conversationMenuY" :options="conversationMenuOptions"
@@ -795,6 +809,8 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
 .person-workspace :deep(.n-tab-pane) { padding-top: 28px; }
 @media (max-width: 640px) { .person-workspace { padding: 0 16px 24px; } .workspace-tab { gap: 6px; } .workspace-tab-count { display: none; } }
 @media (max-width: 768px) {
+  .person-chat-layout:has(.person-task-chat, .person-tools-panel) .person-chat-surface { visibility: hidden; }
+  .person-chat-layout:has(.person-tools-panel) :deep(.person-task-chat) { visibility: hidden; }
   .person-sidebar :deep(.session-item) { -webkit-touch-callout: none; user-select: none; }
   .person-header { padding: calc(16px + env(safe-area-inset-top, 0px)) 12px 16px 52px; }
   .person-title { font-size: 14px; }

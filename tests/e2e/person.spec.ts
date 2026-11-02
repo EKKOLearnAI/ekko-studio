@@ -21,6 +21,7 @@ async function setup(page: Page, mode: 'light' | 'dark', wallpaper = true, custo
   state.conversations = [state.session]
   state.conversationMessages = {}
   state.tasks[0].session_id = state.session.id
+  state.active_agent_task_count = 0
   await page.addInitScript(() => { (window as any).__PW_CHAT_SOCKET_RESUMES__ = { 'person-main-1': { session_id: 'person-main-1', messages: [], isWorking: false, events: [] }, ...(window as any).__PW_CHAT_SOCKET_RESUMES__ } })
   const operations: any[] = []
   function removeConversation(id: string) {
@@ -517,11 +518,12 @@ async function mockPersonWorkspace(page: Page) {
 for (const { mode, width, wallpaper } of [
   { mode: 'light' as const, width: 1440, wallpaper: false },
   { mode: 'dark' as const, width: 1440, wallpaper: true },
+  { mode: 'dark' as const, width: 2048, wallpaper: true },
   { mode: 'light' as const, width: 390, wallpaper: true },
   { mode: 'dark' as const, width: 390, wallpaper: false },
 ]) {
   test(`Person browses workspace files and previews message links in ${mode} at ${width}px`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: 900 })
+    await page.setViewportSize({ width, height: width === 2048 ? 1152 : 900 })
     await setup(page, mode, wallpaper, wallpaper)
     const requests = await mockPersonWorkspace(page)
     await page.addInitScript(() => {
@@ -543,15 +545,28 @@ for (const { mode, width, wallpaper } of [
     await expect(drawer).toHaveAttribute('id', (await panelToggle.getAttribute('aria-controls'))!)
     await expect(drawer.locator('.file-tree')).toBeVisible()
     if (width > 768) {
-      expect((await page.locator('.person-chat-surface').boundingBox())!.width).toBeLessThan(originalWidth - 100)
-      expect((await page.locator('.person-compose').boundingBox())!.width).toBeLessThan(originalWidth - 100)
+      const main = (await page.locator('.person-chat-surface').boundingBox())!
+      expect(main.width).toBeLessThan(originalWidth - 100)
+      expect((await page.locator('.person-compose').boundingBox())!.width).toBeCloseTo(main.width, 0)
       const before = (await drawer.boundingBox())!
+      expect(main.x + main.width).toBeLessThanOrEqual(before.x + 1)
+      await expect(page.locator('.n-drawer-mask:visible')).toHaveCount(0)
+      await page.locator('.person-compose .input-textarea').fill('Keep this main draft')
+      await page.screenshot({ path: testInfo.outputPath('bot-tools-inline.png'), animations: 'disabled' })
+      await drawer.locator('.person-tools-resize').hover()
       const handle = (await drawer.locator('.person-tools-resize').boundingBox())!
-      await page.mouse.move(handle.x + 3, handle.y + 100)
+      await page.mouse.move(handle.x + handle.width / 2, handle.y + 100)
       await page.mouse.down()
-      await page.mouse.move(handle.x - 70, handle.y + 100)
+      await page.mouse.move(handle.x + 100, handle.y + 100)
       await page.mouse.up()
-      expect((await drawer.boundingBox())!.width).toBeGreaterThan(before.width + 40)
+      await expect.poll(async () => (await drawer.boundingBox())!.width).toBeLessThan(before.width - 70)
+      const smaller = (await drawer.boundingBox())!.width
+      const nextHandle = (await drawer.locator('.person-tools-resize').boundingBox())!
+      await page.mouse.move(nextHandle.x + nextHandle.width / 2, nextHandle.y + 100)
+      await page.mouse.down()
+      await page.mouse.move(nextHandle.x - 70, nextHandle.y + 100)
+      await page.mouse.up()
+      await expect.poll(async () => (await drawer.boundingBox())!.width).toBeGreaterThan(smaller + 40)
     }
     await expect(drawer.locator('.n-drawer-header')).toHaveCount(0)
     await drawer.getByText('README.md', { exact: true }).click()
@@ -582,7 +597,10 @@ test('Person previews task files with the task session and leaves the main conve
   Object.assign(state.tasks[0], { status: 'completed', running: false, execution_state: 'finished' })
   const requests = await mockPersonWorkspace(page)
   await page.addInitScript(() => {
-    (window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1'] = {
+    (window as any).__PW_CHAT_SOCKET_RESUMES__['person-main-1'].messages = [
+      { id: 'main-file', role: 'assistant', content: '[Bot output](/tmp/person/default/main.txt)', timestamp: 1 },
+    ]
+    ;(window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1'] = {
       session_id: 'person-task-task1', messages: [
         { id: 'task-file', role: 'assistant', content: '[Task output](/tmp/external-task/report.txt)', timestamp: 1 },
       ], isWorking: false, events: [],
@@ -601,10 +619,22 @@ test('Person previews task files with the task session and leaves the main conve
   expect(await page.evaluate(() => localStorage.getItem('hermes_active_session_default'))).toBe('person-main-1')
   await files.locator('.file-preview').getByRole('button', { name: 'Close', exact: true }).click()
   await expect(files).toBeHidden()
-  await taskDrawer.getByRole('button', { name: 'Side panel', exact: true }).click()
+  await page.getByRole('button', { name: 'Side panel', exact: true }).click()
   await expect(files.locator('.file-tree')).toBeVisible()
-  expect((await taskDrawer.locator('.task-chat-main').boundingBox())!.width).toBeLessThan((await taskDrawer.boundingBox())!.width - 100)
+  const taskBounds = (await taskDrawer.boundingBox())!
+  expect(taskBounds.x + taskBounds.width).toBeLessThanOrEqual((await files.boundingBox())!.x + 1)
   expect(requests.filter(request => request.endpoint === 'list').every(request => request.sessionId === 'person-task-task1')).toBe(true)
+  await files.locator('.person-tools-close').click()
+  await page.locator('.person-chat-surface .markdown-file-link').click()
+  await expect(files.locator('.preview-code')).toContainText('line two')
+  expect(requests.filter(request => request.endpoint === 'content').at(-1)).toEqual({
+    sessionId: 'person-main-1', path: 'main.txt', endpoint: 'content',
+  })
+  await files.locator('.file-preview').getByRole('button', { name: 'Close', exact: true }).click()
+  await taskDrawer.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'Side panel', exact: true }).click()
+  await expect(files.locator('.file-tree')).toBeVisible()
+  expect(requests.filter(request => request.endpoint === 'list').at(-1)?.sessionId).toBe('person-main-1')
 })
 
 for (const [width, mode] of [[1440, 'light'], [900, 'dark'], [390, 'dark']] as const) {
@@ -631,22 +661,37 @@ for (const [width, mode] of [[1440, 'light'], [900, 'dark'], [390, 'dark']] as c
     await taskButton.click()
 
     const task = page.locator('.person-task-chat')
-    const toggle = task.getByRole('button', { name: 'Side panel', exact: true })
+    const toggle = page.getByRole('button', { name: 'Side panel', exact: true })
     await expect(toggle).toBeEnabled()
-    const original = (await task.locator('.task-chat-main').boundingBox())!
+    await expect(page.getByRole('button', { name: 'Side panel', exact: true })).toHaveCount(1)
+    if (width > 768) {
+      const taskBounds = (await task.boundingBox())!
+      const mainBounds = (await page.locator('.person-chat-surface').boundingBox())!
+      expect(taskBounds.width).toBeCloseTo(Math.max(320, width / 3), 0)
+      expect(mainBounds.x + mainBounds.width).toBeLessThanOrEqual(taskBounds.x + 1)
+      const layout = (await page.locator('.person-chat-layout').boundingBox())!
+      expect(taskBounds.x + taskBounds.width).toBeCloseTo(layout.x + layout.width, 0)
+      await page.locator('.person-compose .input-textarea').fill('Main conversation stays usable')
+      await expect(page.locator('.person-compose .input-textarea')).toHaveValue('Main conversation stays usable')
+      await expect(page.locator('.n-drawer-mask')).toHaveCount(0)
+    }
+    await page.screenshot({ path: testInfo.outputPath('agent-right-column.png'), animations: 'disabled' })
     await toggle.click()
-    const tools = task.locator('.person-tools-panel')
+    const tools = page.locator('.person-tools-panel')
     await expect(tools.locator('.file-tree')).toBeVisible()
     expect(requests.filter(request => request.endpoint === 'list').every(request => request.sessionId === 'person-task-task1')).toBe(true)
     const panelBounds = (await tools.boundingBox())!
-    const layoutBounds = (await task.locator('.task-chat-layout').boundingBox())!
-    expect(Math.abs(panelBounds.y - layoutBounds.y)).toBeLessThan(2)
-    expect(Math.abs(panelBounds.height - layoutBounds.height)).toBeLessThan(2)
+    const layoutBounds = (await page.locator('.person-chat-layout').boundingBox())!
+    expect(panelBounds.y).toBeCloseTo(layoutBounds.y, 0)
+    expect(panelBounds.height).toBeCloseTo(layoutBounds.height, 0)
     if (width > 768) {
-      const chatBounds = (await task.locator('.task-chat-main').boundingBox())!
-      expect(chatBounds.x + chatBounds.width).toBeLessThanOrEqual(panelBounds.x + 1)
-      expect(chatBounds.width).toBeLessThan(original.width - 100)
-      await expect(task.getByText('Task conversation remains visible.', { exact: true })).toBeVisible()
+      const taskBounds = (await task.boundingBox())!
+      const mainBounds = (await page.locator('.person-chat-surface').boundingBox())!
+      expect(taskBounds.width).toBeCloseTo(Math.max(320, width / 3), 0)
+      expect(mainBounds.width).toBeGreaterThan(100)
+      expect(mainBounds.x + mainBounds.width).toBeLessThanOrEqual(taskBounds.x + 1)
+      expect(taskBounds.x + taskBounds.width).toBeLessThanOrEqual(panelBounds.x + 1)
+      await expect(page.locator('.n-drawer-mask:visible')).toHaveCount(0)
     }
     await tools.getByRole('tab', { name: 'Terminal', exact: true }).click()
     await expect(tools.getByRole('button', { name: 'zsh #1', exact: true })).toBeVisible()
@@ -660,6 +705,57 @@ for (const [width, mode] of [[1440, 'light'], [900, 'dark'], [390, 'dark']] as c
     await expect(task.locator('.input-textarea')).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     expect(await page.evaluate(() => localStorage.getItem('hermes_active_session_default'))).toBe('person-main-1')
+  })
+}
+
+for (const direction of ['ltr', 'rtl'] as const) {
+  test(`Person resizes the Agent column in both directions and remembers its width in ${direction}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await setup(page, 'light', false, false)
+    await page.addInitScript(() => {
+      (window as any).__PW_CHAT_SOCKET_RESUMES__['person-task-task1'] = {
+        session_id: 'person-task-task1', messages: [], isWorking: false, events: [],
+      }
+    })
+    await page.goto('/#/person?session=person-main-1')
+    await page.evaluate(dir => { document.documentElement.dir = dir }, direction)
+    const mainInput = page.locator('.person-compose .input-textarea')
+    await mainInput.fill('Retain the Bot draft')
+    async function openTask() {
+      await page.getByRole('button', { name: 'Tasks', exact: true }).click()
+      await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
+    }
+    await openTask()
+    const task = page.locator('.person-task-chat')
+    const handle = task.getByRole('separator')
+    await expect(task).toBeVisible()
+    const initial = (await task.boundingBox())!.width
+    expect(initial).toBeCloseTo(480, 0)
+    await handle.hover()
+    const bounds = (await handle.boundingBox())!
+    const sign = direction === 'rtl' ? 1 : -1
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 150)
+    await page.mouse.down()
+    await page.mouse.move(bounds.x + bounds.width / 2 + sign * 100, bounds.y + 150, { steps: 5 })
+    await page.mouse.up()
+    await expect.poll(async () => (await task.boundingBox())!.width).toBeCloseTo(initial + 100, 0)
+    await handle.press(direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight')
+    await expect.poll(async () => (await task.boundingBox())!.width).toBeCloseTo(initial + 68, 0)
+    await expect(mainInput).toHaveValue('Retain the Bot draft')
+    await page.screenshot({ path: testInfo.outputPath(`resized-agent-${direction}.png`), animations: 'disabled' })
+    await task.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(task).toHaveCount(0)
+    await openTask()
+    await expect.poll(async () => (await task.boundingBox())!.width).toBeCloseTo(initial + 68, 0)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(task.getByRole('separator')).toHaveCount(0)
+    const mobileLayout = (await page.locator('.person-chat-layout').boundingBox())!
+    expect((await task.boundingBox())!.width).toBeCloseTo(mobileLayout.width, 0)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await expect.poll(async () => (await task.boundingBox())!.width).toBeCloseTo(initial + 68, 0)
+    await page.keyboard.press('Escape')
+    await expect(task).toHaveCount(0)
+    await expect(mainInput).toHaveValue('Retain the Bot draft')
   })
 }
 
@@ -725,6 +821,7 @@ for (const mode of ['light', 'dark'] as const) {
 }
 
 test('Person opens the shared browser from links, hides it behind overlays and sends annotations to the main conversation', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 2048, height: 1152 })
   await installDesktopBridge(page, 'darwin', true)
   await setup(page, 'light', false, false)
   await mockPersonWorkspace(page)
@@ -784,7 +881,7 @@ test('Person task conversations share the terminal and browser and submit annota
   await page.getByRole('button', { name: 'Tasks', exact: true }).click()
   await page.getByRole('button', { name: 'View in conversation: Check report', exact: true }).click()
   const task = page.locator('.person-task-chat')
-  await task.getByRole('button', { name: 'Side panel', exact: true }).click()
+  await page.getByRole('button', { name: 'Side panel', exact: true }).click()
   const panel = page.locator('.person-files-drawer')
   await panel.getByRole('tab', { name: 'Terminal', exact: true }).click()
   await expect(panel.getByRole('button', { name: 'zsh #1', exact: true })).toBeVisible()
@@ -1368,6 +1465,28 @@ for (const mode of ['light', 'dark'] as const) {
     await expect(island).toHaveCSS('background-color', mode === 'light' ? 'rgb(255, 255, 255)' : 'rgb(42, 42, 42)')
   })
 }
+
+test('Person activity shows execution agent icons and authoritative agent count before task count', async ({ page }, testInfo) => {
+  const { state } = await setup(page, 'light', false, false)
+  state.active_agent_task_count = 125
+  state.tasks = [
+    { ...state.tasks[0], title: 'Codex task', selection_json: '{"runtime":"hermes"}', execution_selection_json: '{"runtime":"codex"}' },
+    { ...state.tasks[0], id: 'task2', title: 'Unknown task', execution_selection_json: '{"runtime":"unknown"}' },
+  ]
+  await page.goto('/#/person')
+  await backgroundTaskCount(page, 2)
+  const island = page.locator('.person-task-island')
+  const counters = island.locator('.activity-counter')
+  await expect(counters).toHaveCount(2)
+  await expect(counters.nth(0)).toContainText('99+')
+  await expect(counters.nth(1)).toContainText('2')
+  await island.locator('.person-task-island__toggle').click()
+  await expect(island.locator('.activity-row').first().locator('img')).toHaveAttribute('src', '/coding-agents/codex-openai.png')
+  await expect(island.locator('.activity-row').nth(1).locator('svg')).toBeVisible()
+  await island.screenshot({ path: testInfo.outputPath('agent-task-activity.png'), animations: 'disabled' })
+  await island.locator('.activity-row').first().click()
+  await expect(page.locator('.person-task-island__toggle')).toHaveAttribute('aria-expanded', 'false')
+})
 
 test('Person background-task island supports reduced motion and hides for main-chat activity alone', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -2165,6 +2284,7 @@ test('Person saves agent presets, preserves unsaved edits and only offers openin
   await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('tab', { name: /^Agents/ }).click()
   await expect(page.locator('.agent-card')).toContainText('Research assistant')
+  await expect(page.locator('.agent-card').first().locator('.agent-reasoning')).toHaveText('Reasoning effortDefault')
   await page.getByRole('button', { name: 'Add agent', exact: true }).click()
   await page.getByRole('textbox', { name: 'Agent name', exact: true }).fill('Research assistant')
   await page.getByRole('textbox', { name: 'Purpose', exact: true }).fill('Research and write reports')
@@ -2183,11 +2303,13 @@ test('Person saves agent presets, preserves unsaved edits and only offers openin
   await page.locator('.person-agent-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => state.settings.agents.length).toBe(2)
   expect(state.settings.agents[1]).toMatchObject({ name: 'Research assistant', description: 'Research and write reports', selection: { runtime: 'codex', mode: 'scoped', provider: 'provider', model: 'global-model', reasoningEffort: 'high' } })
+  await expect(page.locator('.agent-card').last().locator('.agent-reasoning')).toHaveText('Reasoning effortHigh')
   await page.screenshot({ path: '/tmp/person-agent-settings.png', animations: 'disabled' })
   await page.reload()
   await page.locator('.person-header-actions').getByRole('button', { name: 'Settings', exact: true }).click()
   await page.getByRole('tab', { name: /^Agents/ }).click()
   await expect(page.locator('.agent-card').last()).toContainText('Research assistant')
+  await expect(page.locator('.agent-card').last().locator('.agent-reasoning')).toHaveText('Reasoning effortHigh')
   await page.locator('.agent-card').last().getByRole('button', { name: 'Edit', exact: true }).click()
   await expect(page.getByRole('textbox', { name: 'Agent name', exact: true })).toHaveValue('Research assistant')
   await page.setViewportSize({ width: 390, height: 844 })
@@ -2272,7 +2394,7 @@ for (const scenario of ['after-request', 'reconnect', 'idle-schedule'] as const)
   })
 }
 
-test('opens a hidden task in a right drawer, continues it and restores the Person window', async ({ page }) => {
+test('opens a hidden task in a right column, continues it and restores the Person window', async ({ page }) => {
   const { state, operations } = await setup(page, 'light', false)
   Object.assign(state.tasks[0], { status: 'completed', running: false, execution_state: 'finished', updated_at: Date.now() })
   await page.addInitScript(() => {
@@ -2296,10 +2418,15 @@ test('opens a hidden task in a right drawer, continues it and restores the Perso
   await expect(dialog.locator('.message.tool')).toBeVisible()
   await expect(dialog.locator('.assistant-message-author .message-author-name')).toHaveText('Ekko')
   await expect(page.locator('.n-modal')).toHaveCount(0)
-  const bounds = await dialog.boundingBox()
-  expect(bounds?.y).toBeLessThanOrEqual(48)
-  expect(bounds?.height).toBeGreaterThanOrEqual(page.viewportSize()!.height - 48)
-  expect(bounds && Math.round(bounds.x + bounds.width)).toBe(page.viewportSize()!.width)
+  const bounds = (await dialog.boundingBox())!
+  const layout = (await page.locator('.person-chat-layout').boundingBox())!
+  const main = (await page.locator('.person-chat-surface').boundingBox())!
+  expect(bounds.y).toBeCloseTo(layout.y, 0)
+  expect(bounds.height).toBeCloseTo(layout.height, 0)
+  expect(bounds.x + bounds.width).toBeCloseTo(layout.x + layout.width, 0)
+  expect(bounds.width).toBeCloseTo(page.viewportSize()!.width / 3, 0)
+  expect(main.x + main.width).toBeLessThanOrEqual(bounds.x + 1)
+  await page.locator('.person-compose .input-textarea').fill('Keep my main conversation draft')
   await expect(page.locator('.person-compose')).toHaveCount(1)
   await expect(page.locator('.person-compose .input-textarea')).toHaveValue('Keep my main conversation draft')
   await expect(page.locator('.person-view').getByText('The report task has finished.', { exact: true })).toBeVisible()
@@ -2323,7 +2450,7 @@ test('opens a hidden task in a right drawer, continues it and restores the Perso
   await emit(page, 'run.started', { run_id: 'return-to-main', autonomous: true })
   await emit(page, 'message.delta', { run_id: 'return-to-main', delta: 'The follow-up result is LIME-42.' })
   await emit(page, 'run.completed', { run_id: 'return-to-main', output: 'The follow-up result is LIME-42.', background_pending: 0 })
-  await expect(page.locator('.person-view').getByText('The follow-up result is LIME-42.', { exact: true })).toBeVisible()
+  await expect(page.locator('.person-view').getByText('The follow-up result is LIME-42.', { exact: true })).toBeAttached()
   await expect(dialog.getByText('Your code was LIME-42.', { exact: true })).toBeVisible()
   await expect(dialog.getByText('The follow-up result is LIME-42.', { exact: true })).toHaveCount(0)
   await page.keyboard.press('Escape')

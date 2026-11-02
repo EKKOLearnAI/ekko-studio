@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NSpin } from 'naive-ui'
 import type { SessionSummary } from '@/api/studio/sessions'
@@ -8,6 +8,7 @@ import ChatInput from '@/components/hermes/chat/ChatInput.vue'
 import MessageQueueFloatPanel from '@/components/hermes/chat/MessageQueueFloatPanel.vue'
 import type { PersonTaskQueueState } from '@/api/person'
 import { provideScopedChatStore, type Attachment } from '@/stores/hermes/chat'
+import { personWorkspacePreviewContext } from './task-navigation'
 const props = defineProps<{
   session: SessionSummary
   pending: { id: string; input: { type: string; text?: string; name?: string }[] }[]
@@ -25,6 +26,7 @@ const props = defineProps<{
 }>()
 const { t } = useI18n()
 const store = provideScopedChatStore(props.session.id)
+provide(personWorkspacePreviewContext, computed(() => ({ sessionId: props.session.id, workspace: props.session.workspace })))
 const ready = ref(false)
 const loading = ref(true)
 const failed = ref(false)

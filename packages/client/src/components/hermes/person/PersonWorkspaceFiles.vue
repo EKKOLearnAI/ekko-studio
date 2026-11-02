@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NSpin, useMessage } from 'naive-ui'
 import { useFilesStore } from '@/stores/hermes/files'
@@ -17,24 +17,37 @@ const props = withDefaults(defineProps<{
   sessionId?: string | null
   workspace?: string | null
   active?: boolean
-  panelTarget?: string
+  panelTarget: string
+  reservedWidth?: number
   submit: (text: string, attachments?: Attachment[]) => Promise<boolean>
-}>(), { active: true })
-const emit = defineEmits<{ attach: [file: File] }>()
+}>(), { active: true, reservedWidth: 0 })
+const emit = defineEmits<{ attach: [file: File]; 'update:show': [show: boolean] }>()
 const { t } = useI18n()
 const message = useMessage()
 const filesStore = useFilesStore()
 const { isMobile } = useTaskDrawerLayout()
+const layoutWidth = ref(window.innerWidth)
 const width = ref(loadWidth())
 function loadWidth() {
-  try { return Math.max(320, Number(localStorage.getItem('hermes.chat.toolPanelWidth')) || 560) }
-  catch { return 560 }
+  try {
+    const saved = Number(localStorage.getItem('hermes.person.toolDrawerWidth'))
+    return Number.isFinite(saved) && saved >= 320 ? saved : 1200
+  } catch { return 1200 }
 }
+const maxWidth = computed(() => Math.max(80, Math.min(layoutWidth.value * .8,
+  layoutWidth.value - props.reservedWidth - Math.min(320, layoutWidth.value * .25))))
+const panelWidth = computed(() => isMobile.value ? layoutWidth.value : Math.min(maxWidth.value, width.value))
 let resizeStart: { x: number; width: number } | undefined
+let observer: ResizeObserver | undefined
+function measure() {
+  const target = document.querySelector(props.panelTarget)
+  layoutWidth.value = target?.clientWidth || window.innerWidth
+}
 function resize(event: PointerEvent) {
   if (!resizeStart) return
   const direction = document.documentElement.dir === 'rtl' ? 1 : -1
-  width.value = Math.max(320, Math.min(window.innerWidth * .8, resizeStart.width + (event.clientX - resizeStart.x) * direction))
+  width.value = Math.max(Math.min(320, maxWidth.value), Math.min(maxWidth.value,
+    resizeStart.width + (event.clientX - resizeStart.x) * direction))
 }
 function stopResize() {
   if (!resizeStart) return
@@ -42,12 +55,12 @@ function stopResize() {
   window.removeEventListener('pointermove', resize)
   window.removeEventListener('pointerup', stopResize)
   window.removeEventListener('pointercancel', stopResize)
-  try { localStorage.setItem('hermes.chat.toolPanelWidth', String(width.value)) } catch { /* Storage may be unavailable. */ }
+  try { localStorage.setItem('hermes.person.toolDrawerWidth', String(width.value)) } catch { /* Storage may be unavailable. */ }
 }
 function startResize(event: PointerEvent) {
-  if (isMobile.value) return
+  if (isMobile.value || event.button !== 0) return
   event.preventDefault()
-  resizeStart = { x: event.clientX, width: width.value }
+  resizeStart = { x: event.clientX, width: panelWidth.value }
   window.addEventListener('pointermove', resize)
   window.addEventListener('pointerup', stopResize)
   window.addEventListener('pointercancel', stopResize)
@@ -77,6 +90,13 @@ function close() {
     return
   }
   reset()
+}
+function handleEscape(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || event.defaultPrevented || !show.value
+    || [...document.querySelectorAll('.n-drawer, .n-modal, .n-dialog, [role="listbox"]')]
+      .some(element => element.getClientRects().length > 0)) return
+  event.preventDefault()
+  close()
 }
 
 function openPanel(panel = activePanel.value) {
@@ -111,7 +131,7 @@ async function submitBrowserAnnotations(submission: BrowserAnnotationSubmission)
 }
 
 function handlePreview(event: Event) {
-  const request = event as CustomEvent<{ path?: string; fileName?: string; startLine?: number; endLine?: number }>
+  const request = event as CustomEvent<{ path?: string; fileName?: string; startLine?: number; endLine?: number; workspaceContext?: { sessionId: string; workspace?: string | null } }>
   if (event.defaultPrevented || !props.active || !props.sessionId) return
   let path = request.detail?.path
   if (typeof path !== 'string') return
@@ -125,7 +145,8 @@ function handlePreview(event: Event) {
     message.warning(t('files.unsavedChanges'))
     return
   }
-  const workspace = props.workspace?.replace(/\\/g, '/').replace(/\/+$/, '')
+  const sessionId = request.detail.workspaceContext?.sessionId || props.sessionId
+  const workspace = (request.detail.workspaceContext ? request.detail.workspaceContext.workspace : props.workspace)?.replace(/\\/g, '/').replace(/\/+$/, '')
   const ignoreCase = workspace && /^[a-zA-Z]:\//.test(workspace)
   if (workspace && (ignoreCase ? path.toLowerCase().startsWith(`${workspace.toLowerCase()}/`) : path.startsWith(`${workspace}/`))) {
     path = path.slice(workspace.length + 1)
@@ -141,7 +162,7 @@ function handlePreview(event: Event) {
   previewOnly.value = true
   loading.value = true
   show.value = true
-  void filesStore.openSessionWorkspacePreview(props.sessionId, path, fileName, -1,
+  void filesStore.openSessionWorkspacePreview(sessionId, path, fileName, -1,
     startLine ? { startLine, endLine } : undefined)
     .catch(error => {
       if (sequence !== requestSequence) return
@@ -156,14 +177,28 @@ watch(() => [props.sessionId, props.workspace, props.active] as const, (_, previ
   activePanel.value = 'files'
   if (filesStore.previewFile?.workspaceSessionId === previous[0]) filesStore.closePreview()
 })
+watch(show, async value => {
+  emit('update:show', value)
+  observer?.disconnect()
+  if (!value) return
+  await nextTick()
+  measure()
+  const target = document.querySelector(props.panelTarget)
+  if (target) observer?.observe(target)
+})
 onMounted(() => {
+  observer = new ResizeObserver(measure)
+  window.addEventListener('resize', measure)
+  window.addEventListener('keydown', handleEscape)
   window.addEventListener('hermes:preview-workspace-file', handlePreview)
   window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, openBrowser)
 })
 onBeforeUnmount(() => {
+  observer?.disconnect()
+  window.removeEventListener('resize', measure)
+  window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('hermes:preview-workspace-file', handlePreview)
   window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, openBrowser)
-  stopResize()
   reset()
 })
 </script>
@@ -171,11 +206,11 @@ onBeforeUnmount(() => {
 <template>
   <HeaderToolPanelToggle :expanded="show" :controls="panelId" :tooltip="tooltip"
     :disabled="!active || !sessionId" @toggle="show ? close() : openPanel()" />
-  <Teleport v-if="show" :to="panelTarget || 'body'" :disabled="!panelTarget">
+  <Teleport v-if="show" :to="panelTarget">
     <Transition appear @after-enter="panelReady = true">
-    <aside v-if="show" :id="panelId" class="person-files-drawer person-tools-panel" data-theme-surface="card" role="region" :aria-label="tooltip"
-      :style="{ width: isMobile ? '100%' : `min(${width}px, 70%)` }" @keydown.esc.stop="close">
-      <div class="person-tools-resize" @pointerdown="startResize" />
+    <aside v-if="show" :id="panelId" class="person-files-drawer person-tools-panel" data-theme-surface="card"
+      role="region" :aria-label="tooltip" :style="{ width: `${panelWidth}px` }" @keydown.esc.stop.prevent="close">
+      <div v-if="!isMobile" class="person-tools-resize" @pointerdown="startResize" />
       <button class="person-tools-close" type="button" :aria-label="t('common.close')" @click="close">×</button>
       <template v-if="show">
         <template v-if="previewOnly">
@@ -193,9 +228,9 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-.person-tools-panel { position: relative; display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; height: 100%; border-inline-start: var(--border-width, 1px) solid $border-color; }
-.person-tools-resize { position: absolute; inset-inline-start: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 3; }
+.person-tools-panel { position: relative; display: flex; flex-direction: column; flex-shrink: 0; min-width: 0; min-height: 0; height: 100%; border-inline-start: var(--border-width, 1px) solid $border-color; }
+.person-tools-resize { position: absolute; inset-inline-start: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; touch-action: none; z-index: 3; }
 .person-tools-close { position: absolute; inset-inline-end: 8px; bottom: 8px; z-index: 3; border: 0; border-radius: 4px; color: $text-secondary; background: transparent; font-size: 24px; cursor: pointer; }
-@media (max-width: 768px) { .person-tools-panel { position: absolute; inset: 0; z-index: 90; } .person-tools-resize { display: none; } }
 .person-file-loading { flex: 1; display: grid; place-items: center; }
+@media (max-width: 768px) { .person-tools-panel { position: absolute; inset: 0; z-index: 90; border-inline-start: 0; } }
 </style>
