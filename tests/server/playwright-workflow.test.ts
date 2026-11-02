@@ -6,12 +6,12 @@ import { parse } from 'yaml'
 const workflow = parse(readFileSync(resolve('.github/workflows/playwright.yml'), 'utf8'))
 
 describe('Playwright shard budget', () => {
-  it('keeps every test distributed over six independently required shards', () => {
+  it('keeps every test distributed over six independently required shards with two workers each', () => {
     const job = workflow.jobs['e2e-shard']
     expect(job.strategy.matrix.shard).toEqual([1, 2, 3, 4, 5, 6])
     expect(job.strategy['fail-fast']).toBe(false)
     const run = job.steps.find((step: any) => step.name === 'Run Playwright tests')
-    expect(run.run).toBe('npm run test:e2e -- --shard=${{ matrix.shard }}/6')
+    expect(run.run).toBe('npm run test:e2e -- --shard=${{ matrix.shard }}/6 --workers=2')
     expect(workflow.jobs.e2e.needs).toBe('e2e-shard')
     expect(workflow.jobs.e2e.steps.at(-1).run).toBe('test "$SHARD_RESULT" = success')
   })

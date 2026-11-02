@@ -47,7 +47,8 @@ jobs:
 
       - name: Run Playwright tests
         timeout-minutes: 25
-        run: npm run test:e2e -- --shard=${{ matrix.shard }}/6
+        # Keep the Person-heavy shard within the existing 23-minute suite budget.
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/6 --workers=2
 
       - name: Upload shard report
         if: ${{ !cancelled() }}
