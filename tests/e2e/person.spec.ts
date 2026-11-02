@@ -517,11 +517,12 @@ async function mockPersonWorkspace(page: Page) {
 for (const { mode, width, wallpaper } of [
   { mode: 'light' as const, width: 1440, wallpaper: false },
   { mode: 'dark' as const, width: 1440, wallpaper: true },
+  { mode: 'dark' as const, width: 2048, wallpaper: true },
   { mode: 'light' as const, width: 390, wallpaper: true },
   { mode: 'dark' as const, width: 390, wallpaper: false },
 ]) {
   test(`Person browses workspace files and previews message links in ${mode} at ${width}px`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: 900 })
+    await page.setViewportSize({ width, height: width === 2048 ? 1152 : 900 })
     await setup(page, mode, wallpaper, wallpaper)
     const requests = await mockPersonWorkspace(page)
     await page.addInitScript(() => {
@@ -543,19 +544,23 @@ for (const { mode, width, wallpaper } of [
     await expect(drawer).toHaveAttribute('id', (await panelToggle.getAttribute('aria-controls'))!)
     await expect(drawer.locator('.file-tree')).toBeVisible()
     if (width > 768) {
-      expect((await page.locator('.person-chat-surface').boundingBox())!.width).toBeCloseTo(originalWidth, 0)
-      expect((await page.locator('.person-compose').boundingBox())!.width).toBeCloseTo(originalWidth, 0)
+      const main = (await page.locator('.person-chat-surface').boundingBox())!
+      expect(main.width).toBeLessThan(originalWidth - 100)
+      expect((await page.locator('.person-compose').boundingBox())!.width).toBeCloseTo(main.width, 0)
       const before = (await drawer.boundingBox())!
-      expect(before.width).toBeCloseTo(1200, 0)
-      await drawer.locator('.n-drawer__resize-trigger').hover()
-      const handle = (await drawer.locator('.n-drawer__resize-trigger').boundingBox())!
+      expect(main.x + main.width).toBeLessThanOrEqual(before.x + 1)
+      await expect(page.locator('.n-drawer-mask:visible')).toHaveCount(0)
+      await page.locator('.person-compose .input-textarea').fill('Keep this main draft')
+      await page.screenshot({ path: testInfo.outputPath('bot-tools-inline.png'), animations: 'disabled' })
+      await drawer.locator('.person-tools-resize').hover()
+      const handle = (await drawer.locator('.person-tools-resize').boundingBox())!
       await page.mouse.move(handle.x + handle.width / 2, handle.y + 100)
       await page.mouse.down()
       await page.mouse.move(handle.x + 100, handle.y + 100)
       await page.mouse.up()
       await expect.poll(async () => (await drawer.boundingBox())!.width).toBeLessThan(before.width - 70)
       const smaller = (await drawer.boundingBox())!.width
-      const nextHandle = (await drawer.locator('.n-drawer__resize-trigger').boundingBox())!
+      const nextHandle = (await drawer.locator('.person-tools-resize').boundingBox())!
       await page.mouse.move(nextHandle.x + nextHandle.width / 2, nextHandle.y + 100)
       await page.mouse.down()
       await page.mouse.move(nextHandle.x - 70, nextHandle.y + 100)
@@ -615,7 +620,8 @@ test('Person previews task files with the task session and leaves the main conve
   await expect(files).toBeHidden()
   await page.getByRole('button', { name: 'Side panel', exact: true }).click()
   await expect(files.locator('.file-tree')).toBeVisible()
-  expect((await files.boundingBox())!.width).toBeGreaterThan((await taskDrawer.boundingBox())!.width)
+  const taskBounds = (await taskDrawer.boundingBox())!
+  expect(taskBounds.x + taskBounds.width).toBeLessThanOrEqual((await files.boundingBox())!.x + 1)
   expect(requests.filter(request => request.endpoint === 'list').every(request => request.sessionId === 'person-task-task1')).toBe(true)
   await files.locator('.person-tools-close').click()
   await page.locator('.person-chat-surface .markdown-file-link').click()
@@ -674,10 +680,17 @@ for (const [width, mode] of [[1440, 'light'], [900, 'dark'], [390, 'dark']] as c
     await expect(tools.locator('.file-tree')).toBeVisible()
     expect(requests.filter(request => request.endpoint === 'list').every(request => request.sessionId === 'person-task-task1')).toBe(true)
     const panelBounds = (await tools.boundingBox())!
-    expect(panelBounds.y).toBeCloseTo(width > 768 ? 40 : 0, 0)
-    expect(panelBounds.height).toBeCloseTo(width > 768 ? 860 : 900, 0)
+    const layoutBounds = (await page.locator('.person-chat-layout').boundingBox())!
+    expect(panelBounds.y).toBeCloseTo(layoutBounds.y, 0)
+    expect(panelBounds.height).toBeCloseTo(layoutBounds.height, 0)
     if (width > 768) {
-      expect(panelBounds.width).toBeCloseTo(Math.min(1200, width - 64), 0)
+      const taskBounds = (await task.boundingBox())!
+      const mainBounds = (await page.locator('.person-chat-surface').boundingBox())!
+      expect(taskBounds.width).toBeCloseTo(Math.max(320, width / 3), 0)
+      expect(mainBounds.width).toBeGreaterThan(100)
+      expect(mainBounds.x + mainBounds.width).toBeLessThanOrEqual(taskBounds.x + 1)
+      expect(taskBounds.x + taskBounds.width).toBeLessThanOrEqual(panelBounds.x + 1)
+      await expect(page.locator('.n-drawer-mask:visible')).toHaveCount(0)
     }
     await tools.getByRole('tab', { name: 'Terminal', exact: true }).click()
     await expect(tools.getByRole('button', { name: 'zsh #1', exact: true })).toBeVisible()
@@ -807,6 +820,7 @@ for (const mode of ['light', 'dark'] as const) {
 }
 
 test('Person opens the shared browser from links, hides it behind overlays and sends annotations to the main conversation', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 2048, height: 1152 })
   await installDesktopBridge(page, 'darwin', true)
   await setup(page, 'light', false, false)
   await mockPersonWorkspace(page)
