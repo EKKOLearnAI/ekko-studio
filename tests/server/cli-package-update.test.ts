@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -48,5 +50,33 @@ describe('CLI npm package updates', () => {
     expect(spawn).toHaveBeenLastCalledWith(process.execPath,
       [join(globalRoot, name, 'bin', 'hermes-web-ui.mjs'), 'restart', '--port', expect.any(String)],
       expect.objectContaining({ windowsHide: true }))
+  })
+
+  describe.skipIf(process.platform !== 'win32')('npm.cmd under a path with spaces', () => {
+    const withNpmShim = async (run: (npm: string, readLog: () => string[]) => Promise<void>) => {
+      vi.resetModules()
+      const dir = mkdtempSync(join(tmpdir(), 'npm shim '))
+      const npm = join(dir, 'npm.cmd')
+      const log = join(dir, 'args.log')
+      try {
+        writeFileSync(npm, `@echo off\r\necho %*>> "${log}"\r\nexit /b 0\r\n`)
+        await run(npm, () => readFileSync(log, 'utf-8').trim().split(/\r?\n/))
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+
+    it('runs the cache clean', () => withNpmShim(async (npm, readLog) => {
+      const { execCliSync } = await import('../../bin/hermes-web-ui.mjs')
+      execCliSync(npm, ['cache', 'clean', '--force'], { stdio: 'ignore' })
+      expect(readLog()).toEqual(['cache clean --force'])
+    }))
+
+    it('runs the install', () => withNpmShim(async (npm, readLog) => {
+      const { spawnCli } = await import('../../bin/hermes-web-ui.mjs')
+      const code = await new Promise(done => spawnCli(npm, ['install', '-g', 'ekko-studio@latest'], { stdio: 'ignore' }).on('exit', done))
+      expect(code).toBe(0)
+      expect(readLog()).toEqual(['install -g ekko-studio@latest'])
+    }))
   })
 })
