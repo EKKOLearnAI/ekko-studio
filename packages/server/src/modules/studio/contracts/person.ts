@@ -63,6 +63,7 @@ export interface PersonTask {
   updated_at: number
   running?: boolean | number
   execution_id?: string | null
+  execution_selection_json?: string | null
   execution_state?: PersonRunState | 'idle'
   pending_count?: number
 }

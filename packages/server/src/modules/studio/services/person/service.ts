@@ -9,12 +9,13 @@ import { isAbsolute } from 'node:path'
 import { normalizeDirectoryTarget, requireExistingWorkspaceDirectory } from '../workspace/directory'
 import { personHasPendingWork } from '../../repositories/person-history-store'
 import { listPersonFlows, personFlowActivity } from '../../repositories/person-stage-store'
+import { personBackgroundTaskCount } from '../../repositories/person-presence-store'
 
 export async function personSnapshot(userId: number, sessionId = '') {
   personUser(userId)
   const session = sessionId ? await readPersonSession(userId, sessionId) : { ...await effectivePersonSettings(userId), session: null }
   const busy = personChatBusy(userId, sessionId || undefined)
-  return { ...session, tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [], memories: await personMemories(userId),
+  return { ...session, tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [], active_agent_task_count: sessionId ? personBackgroundTaskCount(userId, sessionId) : 0, memories: await personMemories(userId),
     flows:sessionId ? listPersonFlows(userId,sessionId) : [],
     ...(sessionId ? personFlowActivity(userId,sessionId) : { active_flow_count:0,active_flows:[] }),
     schedules: sessionId ? listPersonSchedules(userId, sessionId) : [], interactions: personInteractions(userId), busy,
