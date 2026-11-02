@@ -1,7 +1,7 @@
 import { personSessionId } from '../../contracts/person-session'
 import { personError, personRevision, personText } from '../../contracts/person'
-import { isAbsolute } from 'node:path'
-import { normalizeDirectoryTarget, requireExistingWorkspaceDirectory } from '../workspace/directory'
+import { requireExistingWorkspaceDirectory } from '../workspace/directory'
+import { personCreationWorkspace } from './workspace'
 import { createSession, getSessionContextMessage } from '../../repositories/session-store'
 import { personDisplayMessages } from '../chat-run/person-display'
 import { assertPersonBotNameAvailable, beginPersonSessionDeletion, listPersonSessions, requirePersonSession } from '../../repositories/person-session-store'
@@ -37,10 +37,6 @@ export async function createPersonConversation(userId: number, title: unknown, i
   if (!bot) throw personError('Unknown bot type')
   const stored = personSettings(userId)
   const initial = { ...stored.settings }
-  if (typeof input.workspace !== 'string' || !input.workspace.trim() || input.workspace.length > 4000) throw Object.assign(personError('Choose a workspace directory for this Bot'), { code: 'BOT_WORKSPACE_REQUIRED' })
-  initial.workspace = normalizeDirectoryTarget(input.workspace.trim())
-  if (!isAbsolute(initial.workspace)) throw personError('Workspace must be an absolute path')
-  const workspace = requireExistingWorkspaceDirectory(initial.workspace)
   const checkRevision = () => {
     if (input.expected_revision !== undefined && personSettings(userId).revision !== personRevision(input.expected_revision)) throw personError('Settings changed; reload and retry', 409)
   }
@@ -57,7 +53,10 @@ export async function createPersonConversation(userId: number, title: unknown, i
   const { settings, reasoning_efforts } = await effectivePersonSettings(userId, { ...stored, settings: initial })
   if (input.reasoning_effort && !reasoning_efforts.includes(input.reasoning_effort as any)) throw personError('Model does not support this reasoning effort')
   personUser(userId)
+  checkRevision()
+  assertPersonBotNameAvailable(userId, name)
   const id = personSessionId()
+  const workspace = personCreationWorkspace(input.workspace, settings.model?.profile || 'default', id)
   personTransaction(() => {
     // Recheck after model/directory awaits, under the same write lock as insertion.
     assertPersonBotNameAvailable(userId, name)

@@ -19443,7 +19443,7 @@
           "Person"
         ],
         "summary": "Create conversations",
-        "description": "Create an account-owned, user-named conversation with a generated session ID and a persisted bot_type (defaults to zhezhe). Duplicate BOT names return HTTP 409 with code PERSON_BOT_NAME_EXISTS; concurrent creates are checked in the insertion transaction. Optional model and reasoning_effort apply only to the new conversation. Optional workspace changes the account-shared workspace atomically with creation and requires current expected_revision and idle work. Unknown bot types are rejected. Memory and Agent presets remain shared across the account.",
+        "description": "Create an account-owned, user-named conversation with a generated session ID and a persisted bot_type (defaults to zhezhe). Duplicate BOT names return HTTP 409 with code PERSON_BOT_NAME_EXISTS; concurrent creates are checked in the insertion transaction. Optional model and reasoning_effort apply only to the new conversation. Omitted, null or blank workspace creates an independent default directory using the Ekko single-chat directory manager. A nonblank workspace must be an existing accessible absolute directory. Its real path is persisted only for this Bot; old bindings and account settings are unchanged. Directory provisioning or access failures return HTTP 409 with code WORKSPACE_UNAVAILABLE. Workspace files survive conversation deletion; running an existing Bot never silently changes or recreates its bound directory. Optional expected_revision is checked before creation. Unknown bot types are rejected. Memory and Agent presets remain shared across the account.",
         "operationId": "conversationCreate",
         "security": [
           {
@@ -19503,13 +19503,14 @@
                   },
                   "workspace": {
                     "type": "string",
+                    "nullable": true,
                     "maxLength": 4000,
-                    "description": "Optional account-shared absolute workspace; empty restores the account private workspace. A change requires expected_revision and idle replies, tasks and deliveries, and commits atomically with BOT creation."
+                    "description": "Optional existing absolute directory for this Bot. Omitted, null or blank creates an independent per-session workspace using the Ekko single-chat directory manager. The effective real path is persisted; invalid manual paths and default provisioning failures return WORKSPACE_UNAVAILABLE without creating a Bot. Other Bot bindings and account settings are unchanged."
                   },
                   "expected_revision": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Current account settings revision, required when workspace changes."
+                    "description": "Optional current account settings revision; when supplied, stale values return HTTP 409 before creation."
                   }
                 },
                 "required": [
