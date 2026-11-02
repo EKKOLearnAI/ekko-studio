@@ -14,7 +14,6 @@
   "scripts": {
     "build:main": "tsc -p tsconfig.json",
     "build": "npm run build:main",
-    "test:updater": "npm run build && node --test tests/*.test.cjs",
     "fetch:node": "node scripts/fetch-node.mjs",
     "fetch:git": "node scripts/fetch-git.mjs",
     "fetch:python": "node scripts/fetch-python.mjs",

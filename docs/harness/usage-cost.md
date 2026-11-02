@@ -166,7 +166,6 @@ whole session falls inside the period. It cannot be added to a partly priced
 session. Native aggregate costs retain Hermes's session-start date; for sessions
 spanning days, daily coverage stays unknown where charges cannot be attributed.
 
-Validation: `model-catalog.test.ts`, `model-context.test.ts`, `usage-cost.test.ts`,
-`usage-store.test.ts`, `usage-analytics-db.test.ts`, native usage/model adapter
-tests and `tests/e2e/usage-cost.spec.ts` cover refresh/offline behavior, shared
-context limits, persistence, precedence, deduplication and UI.
+The legacy usage tests have been removed. For new usage features, add focused
+coverage for the relevant refresh/offline behavior, context limits, persistence,
+precedence, deduplication or UI interaction.

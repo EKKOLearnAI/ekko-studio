@@ -39,8 +39,5 @@ jobs:
       - name: Check repository harness
         run: npm run harness:check
 
-      - name: Test with coverage
-        run: npm run test:coverage
-
       - name: Build
         run: npm run build

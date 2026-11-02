@@ -1,2 +1,0 @@
-# Unified-diff context prefixes precede the upstream module's tab indentation.
-*.patch whitespace=-space-before-tab

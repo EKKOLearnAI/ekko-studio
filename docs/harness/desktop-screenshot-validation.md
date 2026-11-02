@@ -30,12 +30,14 @@ matrix yet. Hidden requests fail explicitly without falling back to ordinary cap
 Windows and macOS save opacity and hide only visible, non-minimized Studio windows;
 cleanup restores only affected windows. Ordinary capture does not change opacity.
 
-## Automated checks
+## Current validation
+
+The legacy unit/browser suites described in the implementation record below
+have been removed. Add focused tests for new screenshot features; keep the
+packaging checks and manual platform acceptance below.
 
 ```bash
 npm run harness:check
-npm run test -- tests/desktop/screenshot*.test.ts tests/client/screenshot*.test.ts tests/client/group-chat-input-mentions.test.ts
-npm run test:e2e -- tests/e2e/desktop-screenshot.spec.ts
 npm run build
 npm --prefix packages/desktop run build
 npm ci --prefix packages/desktop --ignore-scripts --omit=optional
@@ -47,7 +49,7 @@ optional addons omitted, creates an asar, and imports D-Bus messages in Electron
 If Electron was installed with scripts disabled, pass `--electron=/absolute/binary`.
 This verifies the dependency closure; it is not a Windows/Linux installation test.
 
-109 focused unit tests passed after failure-isolation hardening. The earlier 14 screenshot
+Before the suite reset, 109 focused unit tests passed after failure-isolation hardening. The earlier 14 screenshot
 browser tests and focused coverage run also passed. Browser tests cover original pixels through zoom, scroll, resize, and
 image switching, plus selection, all annotation tools, undo/redo, and composer attachment.
 Portal tests cover v1/v2/v3, early responses, changed handles, sender checks, cancellation,

@@ -117,8 +117,7 @@ loading/disabled and empty states where relevant:
 3. Regional color/blur/radius, inheritance reset and removal of wallpaper.
 4. Teleported menus/dialogs and narrow layout; verify controls still work.
 
-Use the relevant existing `tests/e2e/theme-*.spec.ts` suites and browser mocks.
-Add focused regression coverage for a shared theme behavior change or a new
-adapter; do not add a source-string test for each cosmetic edit. Run the build and
-harness. Changes to this checker need `tests/client/ui-theme-harness.test.ts`,
-including negative cases proving invalid UI is actually rejected.
+The legacy theme/browser suites have been removed. Add focused tests only for
+new UI functionality or a new checker capability, using local fixtures and
+browser mocks where needed. Do not add source-string tests for cosmetic edits.
+Run the build and harness; inspect the affected surface directly.

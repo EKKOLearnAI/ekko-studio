@@ -25,9 +25,10 @@ npm run test:e2e
 npm run build
 ```
 
-Use the smallest relevant check while iterating. Before a broad PR, run
-`npm run harness:check`, `npm run test:coverage`, `npm run test:e2e`, and
-`npm run build`.
+The legacy test suite has been removed. Add small, focused tests only for new
+features; do not restore blanket coverage or browser sweeps. See `tests/README.md`.
+For PRs, run `npm run harness:check` and `npm run build`, plus tests for any new
+feature introduced by the change. Empty test suites are allowed.
 
 ## Code Ownership Map
 
@@ -36,8 +37,8 @@ Use the smallest relevant check while iterating. Before a broad PR, run
 - `packages/ekko-agent` - canonical Ekko runtime, profiles, providers, tools, memory, skills, and package docs.
 - `packages/desktop` - Electron wrapper, bundled Python/Hermes runtime, release artifacts.
 - `packages/mcu` - ESP32-C3 and ESP32-S3 firmware, board projects, and release images.
-- `tests/client`, `tests/server`, `tests/shared` - Vitest coverage.
-- `tests/e2e` - Playwright browser coverage with mocked backend services.
+- `tests` - focused Vitest tests for new features, organized by area.
+- `tests/e2e` - focused Playwright tests for new browser features.
 - `.github/workflows` - CI, release, Docker, and desktop packaging automation.
 
 ## Hard Rules

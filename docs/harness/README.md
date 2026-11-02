@@ -41,7 +41,8 @@ npm run harness:check
 
 1. Read the root map and the specific doc for the task.
 2. Make the smallest scoped change.
-3. Add or update focused tests when behavior changes.
+3. Add small, focused tests for newly introduced features; the legacy suite has
+   been removed. Follow `tests/README.md` instead of restoring full regression sweeps.
 4. Run `npm run harness:check` and the relevant validation commands.
 5. If a failure pattern repeats, improve this harness with docs, tests, scripts,
    or CI instead of relying on a longer prompt.

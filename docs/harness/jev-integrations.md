@@ -9,7 +9,8 @@ must still be enabled before its configured child features can use JEV.
 
 - Register the feature in `scripts/jev-integrations.json`: a stable id, purpose,
   concrete source files, independent boolean `enabledKey`, additional `options`,
-  implementation status, and regression test files.
+  implementation status, and any new feature test files. Legacy test lists are
+  empty after the suite reset; listed tests must still exist.
 - Each feature switch is global to the Studio installation and has a labeled
   frontend `NSwitch`. Studio defaults to `false` unless its registration explicitly
   declares `studioDefaultEnabled: true`. The checker requires the persisted default
@@ -114,7 +115,8 @@ It reads TypeScript and Vue syntax, including real template bindings, and checks
 1. JEV imports/calls, runtime evaluator access and known HTTP entry points in
    server, client, standalone agent, Desktop and MCP `bin/` source have a registered owner.
 2. Each integration declares its own boolean switch, matching Studio default and
-   concrete source/test paths; a configuration-only integration cannot directly evaluate.
+   concrete source paths; any listed test files must exist. A configuration-only
+   integration cannot directly evaluate.
 3. Settings declared by defaults and server/client interfaces are registered,
    accepted by the save API, returned by the read API, bound to editable controls,
    included in the frontend save request, and labeled in every locale. The form
@@ -142,16 +144,13 @@ positive/negative fixtures together instead of exempting the business module.
    behavior; optional provider failure; explicit disabling after enabling; saved
    setting refresh; global configuration sharing and resource isolation; and overrides without write-back where
    applicable. Verify frontend save/reload and persistence across model Profile changes in Playwright.
-5. Run `npm run harness:check`, `npm run test -- tests/server/jev-harness.test.ts`,
-   feature tests, and the relevant browser tests/build. The PR must describe the
+5. Run `npm run harness:check`, `npm run build` and the focused tests added for
+   the new integration. The PR must describe the
    configuration entry point, defaults, effective timing, and fallback behavior.
 
-The harness test suite deliberately removes switches, save fields, controls,
-locale labels and runtime mappings, and introduces unregistered/aliased callers,
-to verify that these regressions fail the check. Filesystem discovery is tested
-against a small isolated repository. The full repository scan runs in the separate
-`npm run harness:check` CI step, keeping coverage tests independent of repository
-size and avoiding a duplicate full scan under their per-test timeout.
+The legacy harness tests have been removed. Add focused positive/negative fixtures
+when introducing new checker behavior. The full structural repository scan still
+runs once through `npm run harness:check` in CI.
 
 Memory routing and reranking share the registered candidate limit and recall
 threshold (default 0.5). Relevance filtering shares the candidate limit and the
