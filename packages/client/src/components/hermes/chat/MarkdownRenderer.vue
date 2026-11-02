@@ -23,6 +23,9 @@ import { getBaseUrlValue } from '@/api/client'
 import { isPreviewableFile } from '@/utils/hermes/file-preview'
 import { openUrlInDesktopBrowser } from '@/utils/desktop-browser'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
+import { personWorkspacePreviewContext } from '@/components/hermes/person/task-navigation'
+
+const personWorkspaceContext = inject(personWorkspacePreviewContext, null)
 
 const LATEX_FENCE_LANGS = new Set(['latex', 'tex', 'math', 'katex'])
 function getFenceLanguage(info: string): string {
@@ -210,6 +213,7 @@ function requestWorkspaceFilePreview(
     detail: {
       path,
       fileName,
+      ...(personWorkspaceContext?.value ? { workspaceContext: personWorkspaceContext.value } : {}),
       ...(previewOnly ? { previewOnly: true } : {}),
       ...(startLine ? { startLine, endLine: endLine || startLine } : {}),
     },
