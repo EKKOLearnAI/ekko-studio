@@ -79,6 +79,17 @@ describe('conversation-maintained session goals', () => {
     expect(service.getSessionTasks('s1')).toEqual(first)
   })
 
+  it('tells the caller to omit id when creating a goal instead of failing opaquely', () => {
+    message('user', 'Add export')
+    const first = write([goal()])
+    const attempt = () => write([goal({ id: 'invented-goal-id', title: 'Another task' })])
+    expect(attempt).toThrow('Unknown session goal id "invented-goal-id"')
+    expect(attempt).toThrow('omit id to create a new goal')
+    expect(service.getSessionTasks('s1')).toEqual(first)
+    expect(write([goal({ title: 'Another task' })]).tasks.map(task => task.title))
+      .toEqual(['Add data export', 'Another task'])
+  })
+
   it('rejects history changes even when the caller supplies the latest task revision', () => {
     message('user', 'Add export')
     write([goal()])

@@ -89,10 +89,10 @@ export class UpdateSessionTasksTool implements AgentTool {
     parameters: {
       type: 'object', additionalProperties: false, required: ['revision', 'changes'],
       properties: {
-        revision: { type: 'integer', minimum: 0 },
+        revision: { type: 'integer', minimum: 0, description: 'Exact revision returned by list_session_tasks. Never self-increment it; re-read the list after a conflict.' },
         changes: { type: 'array', minItems: 1, maxItems: 30, items: {
           type: 'object', additionalProperties: false, required: ['title', 'summary', 'status'], properties: {
-            id: { type: 'string', minLength: 1, maxLength: 100 },
+            id: { type: 'string', minLength: 1, maxLength: 100, description: 'Id of an existing goal returned by list_session_tasks. Omit it to create a new goal; an id that is not in the ledger is rejected.' },
             title: { type: 'string', minLength: 1, maxLength: 200, description: 'Concise user outcome; reuse the existing goal for refinements and corrections.' },
             summary: { type: 'string', minLength: 1, maxLength: 1000, description: 'One or two short sentences about results and remaining blockers. Keep implementation and test logs in the conversation.' },
             status: { type: 'string', enum: ['open', 'completed'] },

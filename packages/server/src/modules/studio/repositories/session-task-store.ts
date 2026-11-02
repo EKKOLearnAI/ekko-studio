@@ -90,7 +90,7 @@ export function commitSessionTasks(
   const tasks: SessionTask[] = []
   for (const change of changes) {
     const old = change.id ? byId.get(change.id) : byTitle.get(titleKey(change.title))
-    if (change.id && !old) throw new Error('Unknown session goal id')
+    if (change.id && !old) throw new Error(`Unknown session goal id "${change.id}"; omit id to create a new goal, or reuse an id returned by list_session_tasks`)
     if (old?.status === 'closed') throw new Error('This goal was closed by the user; only the user can reopen it from the task list')
     const sameTitle = byTitle.get(titleKey(change.title))
     if (sameTitle && old && sameTitle.id !== old.id) throw new Error('Goal title belongs to another goal')

@@ -1268,10 +1268,10 @@ const tools = [
     description: 'Persist changed/new goals worth tracking: independent deliverables, ongoing follow-up or explicit user-requested tracking. Skip simple questions, one-off lookups and trivial edits without lasting tracking value. Keep one goal per user outcome: reuse its id for follow-ups, refinements, corrections, constraints and reopening. Create distinct goals before execution; save changed progress and verified completion before the final response. Use concise outcome titles and one or two short summary sentences about results and remaining blockers; keep implementation and test logs in the conversation, verification in completion_evidence. Omitted goals remain; unchanged ledgers need no write. Use the latest revision; reread on conflict. open includes blocked/interrupted work. Closed goals were closed by the user. Leave them unchanged; only the user can reopen them from the task list. Turn end or finished plan steps never proves goal completion. Independent of ekko_studio_update_plan; no page card. The server binds the session through the latest context_id.',
     inputSchema: inputSchema({
       context_id: { type: 'string', description: 'Current turn context supplied by Studio.' },
-      revision: { type: 'integer', minimum: 0 },
+      revision: { type: 'integer', minimum: 0, description: 'Exact revision returned by ekko_studio_list_session_tasks. Never self-increment it; re-read the list after a conflict.' },
       changes: { type: 'array', minItems: 1, maxItems: 30, items: {
         type: 'object', additionalProperties: false, required: ['title', 'summary', 'status'], properties: {
-          id: { type: 'string', minLength: 1, maxLength: 100 },
+          id: { type: 'string', minLength: 1, maxLength: 100, description: 'Id of an existing goal returned by ekko_studio_list_session_tasks. Omit it to create a new goal; an id that is not in the ledger is rejected.' },
           title: { type: 'string', minLength: 1, maxLength: 200, description: 'Concise user outcome; reuse the existing goal for refinements and corrections.' },
           summary: { type: 'string', minLength: 1, maxLength: 1000, description: 'One or two short sentences about results and remaining blockers. Keep implementation and test logs in the conversation.' },
           status: { type: 'string', enum: ['open', 'completed'] },
