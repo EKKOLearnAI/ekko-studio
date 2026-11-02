@@ -120,7 +120,7 @@ async function stopTask() {
 function handleEscape(event: KeyboardEvent) {
   // Let dialogs and the shared tools drawer handle their own Escape first.
   if (event.key !== 'Escape' || event.defaultPrevented
-    || [...document.querySelectorAll('.n-drawer, .n-modal, .n-dialog, [role="listbox"]')]
+    || [...document.querySelectorAll('.person-tools-panel, .n-drawer, .n-modal, .n-dialog, [role="listbox"]')]
       .some(element => element.getClientRects().length > 0
         && ![...element.classList].some(name => name.endsWith('-leave-active')))) return
   event.preventDefault()
@@ -131,7 +131,7 @@ onBeforeUnmount(() => {
   reads.dispose(); lifetime.abort(); stopUpdates()
   window.removeEventListener('keydown', handleEscape)
 })
-defineExpose({ session, send, addFiles: (files: File[]) => conversationRef.value?.addFiles(files) })
+defineExpose({ session, send, panelWidth: width, addFiles: (files: File[]) => conversationRef.value?.addFiles(files) })
 </script>
 
 <template>

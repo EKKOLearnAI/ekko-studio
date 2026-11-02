@@ -1,4 +1,5 @@
 import { isPersonSession, isPrivatePersonSession } from '../../contracts/person-session'
+import { personDisplayEvent } from '../chat-run/person-display'
 import { randomUUID } from 'crypto'
 import { businessEvents } from './business-events'
 import { ensureBusinessConsumers } from './business-consumers'
@@ -98,7 +99,7 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
   if (isPrivatePersonSession(input.sessionId) && (!person || ![
     'run.completed', 'run.failed', 'approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved',
   ].includes(input.event))) return false
-  const payload = input.payload || {}
+  const payload = person ? personDisplayEvent(input.sessionId, input.event, input.payload) || {} : input.payload || {}
   const sessionId = stringValue(input.sessionId)
   const plan = input.event === 'plan.updated' ? taskPlanWebhookSnapshot(payload, sessionId) : null
   // Group cards publish only after their message snapshot has been persisted.

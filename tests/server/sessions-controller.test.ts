@@ -516,6 +516,49 @@ describe('session conversations controller', () => {
     expect(ctx.body.session.parent_title).toBeUndefined()
   })
 
+  it('filters Person raw history pages and full-history fallbacks without changing raw pagination', async () => {
+    const changes = await import('../../packages/server/src/modules/studio/repositories/workspace-run-changes-store')
+    const readChanges = vi.spyOn(changes, 'listWorkspaceRunChangesForAssistantMessages').mockReturnValue([])
+    const sid = 'person-main-filter'
+    const session = { id: sid, profile: 'default', source: 'builtin_agent', studio_user_id: '1', preview: 'PRIVATE truncated preview' }
+    const messages = [{ id: 1, session_id: sid, role: 'assistant', content: '<think>PRIVATE</think>Visible', timestamp: 1, reasoning: 'PRIVATE', tool_calls: [{ arguments: 'PRIVATE' }] },
+      { id: 2, session_id: sid, role: 'tool', content: 'PRIVATE', timestamp: 2, tool_call_id: 'PRIVATE', run_marker: 'old-run' }]
+    localGetSessionDetailPaginatedMock.mockReturnValue({ session, messages, total: 301, offset: 150, limit: 150, hasMore: true })
+    localGetSessionDetailMock.mockReturnValue({ ...session, messages })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: sid }, query: { offset: '150' }, state: { user: { id: 1 } } }
+    await mod.getConversationMessagesPaginated(ctx)
+    expect(ctx.body).toMatchObject({ projection: 'person-display-v1', total: 301, offset: 150, consumedCount: 2, nextOffset: 152, hasMore: true })
+    expect(ctx.body.messages.map((m: any) => m.content)).toEqual(['Visible', ''])
+    expect(JSON.stringify(ctx.body)).not.toContain('PRIVATE')
+    await mod.getHermesSession(ctx)
+    expect(ctx.body.session.messages).toHaveLength(2)
+    expect(JSON.stringify(ctx.body)).not.toContain('PRIVATE')
+    await mod.get(ctx)
+    expect(JSON.stringify(ctx.body)).not.toContain('PRIVATE')
+    await mod.getContext(ctx)
+    expect(JSON.stringify(ctx.body)).not.toContain('PRIVATE')
+    await mod.getConversationMessages(ctx)
+    expect(JSON.stringify(ctx.body)).not.toContain('PRIVATE')
+    ctx.set = vi.fn()
+    ctx.query = { ext: 'json' }
+    await mod.exportSession(ctx)
+    expect(ctx.body).not.toContain('PRIVATE')
+    expect(messages[0].reasoning).toBe('PRIVATE')
+    readChanges.mockRestore()
+  })
+
+  it('preserves full task-detail history for the existing authorized task reader', async () => {
+    const sid = 'person-task-filter'
+    const messages = [{ id: 1, role: 'tool', content: 'Full result', tool_call_id: 'c', reasoning: 'Full reasoning' }]
+    localGetSessionDetailPaginatedMock.mockReturnValue({ session: { id: sid, profile: 'default' }, messages, total: 1, offset: 0, limit: 150, hasMore: false })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { method: 'GET', params: { id: sid }, query: {}, state: { personTaskRead: sid } }
+    await mod.getConversationMessagesPaginated(ctx)
+    expect(ctx.body.messages).toEqual(messages)
+    expect(ctx.body).not.toHaveProperty('projection')
+  })
+
   it('lists conversations from the local session store', async () => {
     localListSessionsMock.mockReturnValue([{
       id: 'local-conversation',

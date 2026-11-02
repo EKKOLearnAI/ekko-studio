@@ -188,6 +188,34 @@ function continuationContext(subagentId = 'child-background') {
 }
 
 describe('ekko-agent context usage events', () => {
+  it('filters Person socket traffic after raw callbacks and persistence, including fragmented thinking', async () => {
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap, events } = makeHarness()
+    ;(socket as any).data = { user: { id: 7 } }
+    getSessionMock.mockReturnValue({ id: 'person-main-7', studio_user_id: '7', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', workspace: personWorkspaceFixture })
+    createPersonChatAgentMock.mockResolvedValue({ run: agentRunMock, estimateContext: agentEstimateContextMock, sessionWorkspaceDirectory: () => personWorkspaceFixture })
+    agentRunMock.mockImplementationOnce(async (input: any) => {
+      input.onEvent({ type: 'run.started', runId: 'private-run', maxSteps: 4 })
+      input.onEvent({ type: 'model.reasoning', runId: 'private-run', text: 'PRIVATE reasoning' })
+      input.onEvent({ type: 'tool.started', runId: 'private-run', toolCallId: 'c', toolName: 'exec', arguments: { command: 'PRIVATE command' } })
+      input.onEvent({ type: 'tool.completed', runId: 'private-run', toolCallId: 'c', toolName: 'exec', result: { ok: true, content: 'PRIVATE result' }, durationMs: 1 })
+      input.onEvent({ type: 'model.context', runId: 'private-run', context: { raw: 'PRIVATE context' } })
+      for (const text of ['<thi', 'nk>PRIVATE thought</th', 'ink>Visible']) input.onEvent({ type: 'model.delta', runId: 'private-run', text })
+      return { runId: 'private-run', output: { role: 'assistant', content: '<think>PRIVATE thought</think>Visible', reasoning: 'PRIVATE reasoning' },
+        context: { raw: 'PRIVATE context' }, steps: [{ type: 'tool', toolCallId: 'unstreamed', toolName: 'exec', result: { ok: true, content: 'PRIVATE result' } }], messages: [], events: [] }
+    })
+    await handleEkkoAgentRun(nsp as any, socket as any, { session_id: 'person-main-7', input: 'Do work', coding_agent_id: 'ekko-agent',
+      onEvent: (event, payload) => events.push({ event, payload }) }, 'default', sessionMap, vi.fn(() => false))
+    const emitted = nsp.to('session:person-main-7').emit.mock.calls
+    expect(JSON.stringify(emitted)).not.toContain('PRIVATE')
+    expect(emitted).toContainEqual(['message.delta', expect.objectContaining({ delta: 'Visible' })])
+    expect(emitted).toContainEqual(['run.completed', expect.objectContaining({ output: 'Visible' })])
+    expect(events).toContainEqual({ event: 'tool.completed', payload: expect.objectContaining({ output: 'PRIVATE result' }) })
+    expect(JSON.stringify(sessionMap.get('person-main-7').messages)).toContain('PRIVATE')
+    expect(addMessageMock).toHaveBeenCalledWith(expect.objectContaining({ role: 'assistant', content: '<think>PRIVATE thought</think>Visible' }))
+    expect(addMessagesMock.mock.calls.flatMap(call => call[0])).toContainEqual(expect.objectContaining({ role: 'tool', content: 'PRIVATE result' }))
+  })
+
   it('approves parallel delegated tools without prompts and still coordinates real questions', async () => {
     const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
     const { nsp, socket, sessionMap, events } = makeHarness()

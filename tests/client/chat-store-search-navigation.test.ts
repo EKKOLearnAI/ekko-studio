@@ -74,6 +74,25 @@ describe('search message navigation', () => {
     await expect(store.loadOlderMessages()).resolves.toBe(false)
   })
 
+  it('advances Person raw offsets through hidden slots and retains a receipt without body text', async () => {
+    const sid = 'person-main-display'
+    const rawPage = (offset: number) => ({ ...page(offset, 150, 451), messages: page(offset, 150, 451).messages.map(m => ({
+      ...m, role: 'assistant', content: m.id === 1 ? 'Oldest visible reply' : '',
+      ...(m.id === 2 ? { person_task_return: { taskId: 't', executionId: 'e', assistantMessageId: '2', title: 'Receipt', state: 'finished', agent: 'ekko' } } : {}),
+    })) })
+    api.resumeSession.mockImplementation((id, callback) => callback({ session_id: id, messages: rawPage(0).messages,
+      messageTotal: 451, messageLoadedCount: 150, hasMoreBefore: true, isWorking: false, events: [] }))
+    api.fetchSessionMessagesPage.mockImplementation(async (_id, offset) => rawPage(offset))
+    const store = useChatStore()
+    store.sessions = [session(sid)]
+    await expect(store.switchSession(sid, '1')).resolves.toBe(true)
+    expect(api.fetchSessionMessagesPage.mock.calls.map(call => call[1])).toEqual([150, 300, 450])
+    expect(store.activeSession?.loadedMessageCount).toBe(451)
+    expect(store.messages.some(m => m.id === '1' && m.content === 'Oldest visible reply')).toBe(true)
+    expect(store.messages.find(m => m.id === '2')?.personTaskReturn?.assistantMessageId).toBe('2')
+    expect(store.messages.filter(m => m.role === 'assistant')).toHaveLength(2)
+  })
+
   it('does not request older pages for a hit in the resume page', async () => {
     const store = useChatStore()
     store.sessions = [session()]

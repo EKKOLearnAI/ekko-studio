@@ -2,6 +2,7 @@ import { pendingChatEkkoInteractions } from '../../public/chat-agent-runtime'
 import { ownsPersonSession } from '../../contracts/person-session'
 import { getSession } from '../../repositories/session-store'
 import { buildResumeEvents } from '../chat-run/resume-payload'
+import { personDisplayEvents } from '../chat-run/person-display'
 import type { SessionState } from '../chat-run/types'
 import type { BusinessEvent } from '../webhooks/business-events'
 import { stateEvent } from '../webhooks/app-event-state'
@@ -17,7 +18,7 @@ export function personNotificationSnapshot(userId: number, states: Iterable<[str
     const runId = state.activeRunMarker || state.responseRun?.runMarker || state.runId
     result.push({ ...stateEvent('person.run.updated', profile, { session_id: sessionId, run_id: runId },
       { state: { session_id: sessionId, status: 'running', timestamp: Date.now(), started_at: state.runStartedAt } }), source: 'person' })
-    for (const { event, data } of buildResumeEvents(pendingChatEkkoInteractions(sessionId))) {
+    for (const { event, data } of personDisplayEvents(sessionId, buildResumeEvents(pendingChatEkkoInteractions(sessionId)))) {
       if (event !== 'approval.requested' && event !== 'clarify.requested') continue
       const approval = event.startsWith('approval.')
       const id = approval ? data?.approval_id : data?.clarify_id

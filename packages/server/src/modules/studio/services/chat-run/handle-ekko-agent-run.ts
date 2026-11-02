@@ -1,3 +1,4 @@
+import { createPersonDisplayStream } from './person-display'
 import { studioModelReasoningEffort } from '../../public/model-reasoning-effort'
 import { personBackgroundPendingCount } from '../../repositories/person-store'
 import { isPersonSession, isPrivatePersonSession } from '../../contracts/person-session'
@@ -544,6 +545,7 @@ export async function handleEkkoAgentRun(
       : data.session_source === 'workflow' || data.source === 'workflow'
         ? 'workflow'
         : 'builtin_agent'
+  const projectDisplayEvent = createPersonDisplayStream(sessionId)
   const emit = (event: string, payload: any) => {
     const tagged = { ...payload, session_id: sessionId }
     if (personStageContext && (event === 'run.completed' || event === 'run.failed')) {
@@ -552,7 +554,9 @@ export async function handleEkkoAgentRun(
     if (!isPrivatePersonSession(sessionId)) observeRunChatPetEvent(profile, event, tagged)
     data.onEvent?.(event, tagged)
     appendStateEvent(state, event, tagged)
-    const outbound = buildOutboundRunEvent(event, tagged)
+    const display = projectDisplayEvent(event, tagged)
+    if (display === null) return
+    const outbound = buildOutboundRunEvent(event, display)
     nsp.to(`session:${sessionId}`).emit(event, outbound)
     if (!data.onEvent && !nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
       socket.emit(event, outbound)
