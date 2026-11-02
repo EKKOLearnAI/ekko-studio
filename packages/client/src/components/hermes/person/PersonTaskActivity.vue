@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { PersonFlow, PersonTask } from '@/api/person'
 import { usePageLoadingState } from '@/composables/usePageLoading'
 import { useReducedMotion } from '@/composables/useReducedMotion'
-import { PERSON_ANIMATIONS, PERSON_AVATAR, personAvatarAnimation, type ChatAgentAvatar } from '@/utils/chat-agent-avatar'
+import { PERSON_ANIMATIONS, PERSON_AVATAR, personTaskAgentAvatar, personAvatarAnimation, type ChatAgentAvatar } from '@/utils/chat-agent-avatar'
 import { personFlowAnimation, personFlowState, personFlowVisibleInActivity } from '@/utils/person-flow'
 import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
 import PersonFlowGraph from './PersonFlowGraph.vue'
@@ -54,10 +54,6 @@ function escape(event: KeyboardEvent) {
   if (event.key === 'Escape' && expanded.value) { event.stopPropagation(); close(true) }
 }
 function flowAnimation(flow: PersonFlow) { return personAvatarAnimation(avatar.value, personFlowAnimation(personFlowState(flow))) || animation.value }
-function taskAnimation(task: PersonTask) {
-  const state = ['starting','running','stopping'].includes(task.execution_state) ? 'searching' : 'sleeping'
-  return personAvatarAnimation(avatar.value, state) || animation.value
-}
 watch(visible, value => { if (!value) close() })
 watch(name, () => { void nextTick(measure) })
 watch(activeFlows, (flows, previous) => {
@@ -114,8 +110,8 @@ onBeforeUnmount(() => {
             <p v-if="truncatedName" class="activity-full-name">{{ name }}</p>
             <ul class="activity-list">
               <li v-for="task in activeTasks" :key="`task-${task.id}`">
-                <button type="button" class="activity-row" :title="task.title" @click="close(); emit('openTask', task)">
-                  <img class="row-gif" :src="reducedMotion ? avatar.src : taskAnimation(task)" alt="" width="38" height="38" />
+                <button type="button" class="activity-row" :title="task.title" :aria-label="task.title" @click="close(); emit('openTask', task)">
+                  <img class="row-gif" :src="personTaskAgentAvatar(task).src" :alt="personTaskAgentAvatar(task).label" width="38" height="38" />
                   <span class="row-title">{{ task.title }}</span>
                 </button>
               </li>
