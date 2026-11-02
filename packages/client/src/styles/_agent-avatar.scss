@@ -1,0 +1,11 @@
+@use 'variables' as *;
+
+@mixin agent-avatar($size) {
+  width: $size;
+  height: $size;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border: var(--border-width, 1px) solid $border-light;
+  border-radius: 50%;
+  object-fit: cover;
+}

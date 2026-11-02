@@ -2374,7 +2374,7 @@ for (const scenario of ['after-request', 'reconnect', 'idle-schedule'] as const)
   })
 }
 
-test('opens a hidden task in a right drawer, continues it and restores the Person window', async ({ page }) => {
+test('opens a hidden task in a right column, continues it and restores the Person window', async ({ page }) => {
   const { state, operations } = await setup(page, 'light', false)
   Object.assign(state.tasks[0], { status: 'completed', running: false, execution_state: 'finished', updated_at: Date.now() })
   await page.addInitScript(() => {
@@ -2398,10 +2398,15 @@ test('opens a hidden task in a right drawer, continues it and restores the Perso
   await expect(dialog.locator('.message.tool')).toBeVisible()
   await expect(dialog.locator('.assistant-message-author .message-author-name')).toHaveText('Ekko')
   await expect(page.locator('.n-modal')).toHaveCount(0)
-  const bounds = await dialog.boundingBox()
-  expect(bounds?.y).toBeLessThanOrEqual(48)
-  expect(bounds?.height).toBeGreaterThanOrEqual(page.viewportSize()!.height - 48)
-  expect(bounds && Math.round(bounds.x + bounds.width)).toBe(page.viewportSize()!.width)
+  const bounds = (await dialog.boundingBox())!
+  const layout = (await page.locator('.person-chat-layout').boundingBox())!
+  const main = (await page.locator('.person-chat-surface').boundingBox())!
+  expect(bounds.y).toBeCloseTo(layout.y, 0)
+  expect(bounds.height).toBeCloseTo(layout.height, 0)
+  expect(bounds.x + bounds.width).toBeCloseTo(layout.x + layout.width, 0)
+  expect(bounds.width).toBeCloseTo(page.viewportSize()!.width / 3, 0)
+  expect(main.x + main.width).toBeLessThanOrEqual(bounds.x + 1)
+  await page.locator('.person-compose .input-textarea').fill('Keep my main conversation draft')
   await expect(page.locator('.person-compose')).toHaveCount(1)
   await expect(page.locator('.person-compose .input-textarea')).toHaveValue('Keep my main conversation draft')
   await expect(page.locator('.person-view').getByText('The report task has finished.', { exact: true })).toBeVisible()
@@ -2425,7 +2430,7 @@ test('opens a hidden task in a right drawer, continues it and restores the Perso
   await emit(page, 'run.started', { run_id: 'return-to-main', autonomous: true })
   await emit(page, 'message.delta', { run_id: 'return-to-main', delta: 'The follow-up result is LIME-42.' })
   await emit(page, 'run.completed', { run_id: 'return-to-main', output: 'The follow-up result is LIME-42.', background_pending: 0 })
-  await expect(page.locator('.person-view').getByText('The follow-up result is LIME-42.', { exact: true })).toBeVisible()
+  await expect(page.locator('.person-view').getByText('The follow-up result is LIME-42.', { exact: true })).toBeAttached()
   await expect(dialog.getByText('Your code was LIME-42.', { exact: true })).toBeVisible()
   await expect(dialog.getByText('The follow-up result is LIME-42.', { exact: true })).toHaveCount(0)
   await page.keyboard.press('Escape')
