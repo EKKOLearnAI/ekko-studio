@@ -61,18 +61,21 @@ npm run build
 
 ## Testing Rules
 
-- The legacy tests and fixtures have been removed. Add small, focused tests for
-  newly introduced features; do not rebuild a full regression suite by default.
-- Keep tests scoped to the new behavior. Use Vitest for local logic and add
-  Playwright only when the new browser journey needs it.
+- The legacy tests and fixtures have been removed. Every new feature must include
+  small, focused tests; do not rebuild a full regression suite by default.
+- Keep tests scoped to the new behavior. Use Vitest for local logic and include
+  Playwright coverage for new browser journeys.
 - Use local fixtures and mocked external APIs/sockets. Avoid global setup,
   source-string assertions and repeated platform/theme/viewport matrices.
 - Run `npm run harness:check` and `npm run build` before opening a PR, plus the
   specific tests added for new functionality.
 - `npm test`, `npm run test:coverage` and `npm run test:e2e` allow an empty suite
-  while continuing to fail on assertions in any tests that are present.
-- CI keeps harness, build and lockfile checks. The previous coverage step and
-  browser/platform test workflows have been removed. See `tests/README.md`.
+  during the reset while continuing to fail on assertions in any tests that are
+  present. An empty suite does not exempt new features from adding tests.
+- Build CI runs `npm test` and `npm run test:e2e` automatically on pushes to
+  `main` and pull requests targeting `main` or `base`, alongside harness and build
+  checks. Lockfile checks remain separate. Coverage, browser shards and platform
+  test matrices remain removed. See `tests/README.md`.
 
 ## npm Publishing
 
@@ -147,5 +150,5 @@ Closes #123
 ## Validation
 - `npm run harness:check`
 - `npm run build`
-- Focused tests for new features, if applicable
+- Focused tests for each new feature, including E2E for new browser journeys
 ```

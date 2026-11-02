@@ -13,7 +13,7 @@ Ekko Agent, Hermes Agent, and coding agents for chat, coding, and workflows.
 | Ekko Agent | `packages/ekko-agent` | Canonical Ekko runtime, profile facade, providers, tools, memory, skills, conversations, and package API. |
 | Desktop | `packages/desktop` | Electron shell, local Web UI server bootstrap, updater, bundled Python/Hermes runtime. |
 | MCU | `packages/mcu` | ESP32-C3 source projects and release firmware; board-specific ESP32-S3 firmware. |
-| Tests | `tests` | Optional focused tests added with new features; the legacy suite has been removed. |
+| Tests | `tests` | Required focused tests for new features; the legacy suite has been removed. |
 | CI | `.github/workflows` | Build, e2e, lockfile, Docker, and desktop release automation. |
 
 ## Request Flow
@@ -149,9 +149,11 @@ allows users to run the upstream `hermes update` command directly.
 The minimum mechanical harness is:
 
 - `npm run harness:check` for repository docs, workflow, and package-script invariants.
-- Focused `npm run test -- <file>` for new feature logic, when added.
-- Focused `npm run test:e2e -- <file>` for new browser journeys, when added.
-- Empty suites are allowed; CI does not run blanket coverage or browser shards.
+- Focused `npm run test -- <file>` for each new feature's logic.
+- Focused `npm run test:e2e -- <file>` for new browser journeys.
+- Build CI runs all current Vitest and Playwright tests. Empty suites are allowed
+  during the reset, without waiving the requirement to test new features.
+- CI does not require blanket coverage or browser shards.
 - `npm run build` for type checking and production bundles.
 
 See `docs/harness/validation.md` for change-specific commands.
