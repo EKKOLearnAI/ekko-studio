@@ -1,4 +1,4 @@
-import type { ModelClient, ModelProviderConfig } from '../../../../../../ekko-agent/src/model/types'
+import type { ModelClient, ModelProviderConfig, ModelUsage } from '../../../../../../ekko-agent/src/model/types'
 import { getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
 import { resolveProviderCatalogApiMode } from '../../contracts/providers'
 import {
@@ -10,6 +10,8 @@ import { recordSessionUsage, type RecordedUsage } from '../usage/usage-recorder'
 import { ModelApiError, modelApiErrorBody } from './errors'
 import { responsesModelRequest, validateResponsesBody } from './input'
 import { ResponsesOutput, type ResponsesEvent } from './output'
+import { chatModelRequest, validateChatBody } from './chat'
+import { ChatCompletionOutput, type ChatCompletionChunk } from './chat-output'
 import { reasoningCodec } from './reasoning'
 import { findModelApiKey } from './keys'
 import { checkModelApiBudget, startModelApiKeyRequest } from './budget'
@@ -52,6 +54,12 @@ function isSelfModelApi(group: ModelGroup): boolean {
   return findModelApiKey(group.api_key.trim()) !== null
 }
 
+/** Keep the upstream cause in the server log; the API caller only sees its classification. */
+function logUpstreamFailure(error: unknown, context: { requestId: string; provider: string; timeoutMs?: number }): void {
+  if (error instanceof ModelApiError) return
+  logger.warn({ err: error, ...context }, 'Model API provider request failed')
+}
+
 async function unifiedCatalog(profiles: string[]): Promise<Map<string, CatalogEntry>> {
   const names = [...new Set(profiles)]
   const groupsByProfile = await Promise.all(names.map(profile => getSessionAvailableModelGroups(profile) as Promise<ModelGroup[]>))
@@ -83,23 +91,37 @@ export async function listApiModels(profiles: string[], allowedModels?: readonly
   })) }
 }
 
-export async function prepareModelResponse(input: {
+/** Shared request context for every inference endpoint the Model API exposes. */
+export interface ModelApiCall {
   profiles: string[]
   onUsage?: (usage: RecordedUsage) => void
   accountId?: string
   apiKeyId?: string
   allowedModels?: readonly string[]
-  body: unknown
   signal: AbortSignal
-}) {
-  validateResponsesBody(input.body)
-  const checkBudget = () => { if (input.apiKeyId && input.accountId) checkModelApiBudget(Number(input.accountId), input.apiKeyId) }
-  const startAccounting = (id: string) => input.apiKeyId && input.accountId ? startModelApiKeyRequest(Number(input.accountId), input.apiKeyId, id) : () => {}
-  checkBudget()
-  const body = input.body
-  if (input.allowedModels && !input.allowedModels.includes(body.model)) throw new ModelApiError('Model is not available.', 404, 'model')
+}
+
+function budgetGuards(input: ModelApiCall) {
+  const check = () => { if (input.apiKeyId && input.accountId) checkModelApiBudget(Number(input.accountId), input.apiKeyId) }
+  const start = (id: string) => input.apiKeyId && input.accountId ? startModelApiKeyRequest(Number(input.accountId), input.apiKeyId, id) : () => {}
+  return { check, start }
+}
+
+interface ResolvedTarget {
+  profile: string
+  group: ModelGroup
+  model: string
+  runtime: Awaited<ReturnType<typeof resolveChatEkkoProviderRuntimeConfig>>
+  providerConfig: ModelProviderConfig
+  client: ModelClient
+}
+
+/** One catalog lookup and one credential resolution, shared by every protocol. */
+async function resolveTarget(input: ModelApiCall, modelId: unknown): Promise<ResolvedTarget> {
+  if (typeof modelId !== 'string' || !modelId.trim()) throw new ModelApiError('Model must be provider/model.', 400, 'model')
+  if (input.allowedModels && !input.allowedModels.includes(modelId)) throw new ModelApiError('Model is not available.', 404, 'model')
   const catalog = await unifiedCatalog(input.profiles)
-  const selected = catalog.get(body.model)
+  const selected = catalog.get(modelId)
   if (!selected || selected.group.model_meta?.[selected.model]?.disabled) throw new ModelApiError('Model is not available.', 404, 'model')
   const { profile, group, model } = selected
   if (!supported(group, model)) throw new ModelApiError('This provider requires a runtime that does not support direct model requests.', 501, 'model')
@@ -107,39 +129,56 @@ export async function prepareModelResponse(input: {
   const resolved: { providerConfig: ModelProviderConfig } = resolveChatEkkoModelProviderConfigs({
     ...runtime, provider: group.provider, model,
   })
-  const codec = await reasoningCodec(JSON.stringify([profile, group.provider, model, resolved.providerConfig.baseUrl, resolved.providerConfig.requestStyle]))
-  const request = responsesModelRequest(body, model, codec, input.signal)
   const client: ModelClient = createChatEkkoModelClient(resolved.providerConfig, { fetch: createChatEkkoAuthorizedProviderFetch({
     profile, provider: group.provider, model, accessToken: runtime.apiKey,
   }) })
-  if (request.messages.some(message => message.contentParts?.some(part => part.type === 'image')) && !client.capabilities.vision) {
-    throw new ModelApiError('This model does not support images.', 400, 'input')
-  }
-  const output = new ResponsesOutput(body.model, codec, body, resolved.providerConfig.requestStyle !== 'openai-responses')
+  return { profile, group, model, runtime, providerConfig: resolved.providerConfig, client }
+}
+
+function usageRecorder(input: ModelApiCall, target: ResolvedTarget, runId: string, readUsage: () => ModelUsage | undefined) {
   let recorded = false
-  const record = (startedAt: number) => {
+  return (startedAt: number) => {
     if (recorded) return
     recorded = true
     recordSessionUsage({
       onRecorded: input.onUsage,
-      sessionId: '', runId: output.id, origin: 'external', accountId: input.accountId, modelApiKeyId: input.apiKeyId,
+      sessionId: '', runId, origin: 'external', accountId: input.accountId, modelApiKeyId: input.apiKeyId,
       source: 'model_api', agent: 'model_api', usageScope: 'model_call', apiCalls: 1,
-      profile, provider: group.provider, model, baseUrl: runtime.baseUrl,
-      usage: output.usage, apiDuration: (performance.now() - startedAt) / 1000,
+      profile: target.profile, provider: target.group.provider, model: target.model, baseUrl: target.runtime.baseUrl,
+      usage: readUsage(), apiDuration: (performance.now() - startedAt) / 1000,
     })
   }
-  checkBudget()
+}
+
+export async function prepareModelResponse(input: ModelApiCall & { body: unknown }) {
+  validateResponsesBody(input.body)
+  const guards = budgetGuards(input)
+  guards.check()
+  const body = input.body
+  const target = await resolveTarget(input, body.model)
+  const { profile, group, model, providerConfig, client } = target
+  const codec = await reasoningCodec(JSON.stringify([profile, group.provider, model, providerConfig.baseUrl, providerConfig.requestStyle]))
+  const request = responsesModelRequest(body, model, codec, input.signal)
+  if (request.messages.some(message => message.contentParts?.some(part => part.type === 'image')) && !client.capabilities.vision) {
+    throw new ModelApiError('This model does not support images.', 400, 'input')
+  }
+  const output = new ResponsesOutput(body.model, codec, body, providerConfig.requestStyle !== 'openai-responses')
+  const record = usageRecorder(input, target, output.id, () => output.usage)
+  guards.check()
   return {
     id: output.id,
     stream: body.stream === true,
     async create() {
-      checkBudget()
-      const release = startAccounting(output.id)
+      guards.check()
+      const release = guards.start(output.id)
       const startedAt = performance.now()
       try {
         const result = await client.create(request)
         const events = output.finish(result)
         return events[events.length - 1].response
+      } catch (error) {
+        logUpstreamFailure(error, { requestId: output.id, provider: group.provider, timeoutMs: providerConfig.timeoutMs })
+        throw error
       } finally { try { record(startedAt) } finally { release() } }
     },
     async *events(): AsyncGenerator<ResponsesEvent> {
@@ -147,8 +186,8 @@ export async function prepareModelResponse(input: {
       let admitted = false
       let release = () => {}
       try {
-        checkBudget()
-        release = startAccounting(output.id)
+        guards.check()
+        release = guards.start(output.id)
         admitted = true
         yield output.event('response.created', { response: output.response() })
         yield output.event('response.in_progress', { response: output.response() })
@@ -164,9 +203,83 @@ export async function prepareModelResponse(input: {
         throw new Error('Provider stream ended before completion')
       } catch (error) {
         if (!input.signal.aborted) {
-          logger.warn({ requestId: output.id, provider: group.provider }, 'Model API stream failed')
-          yield output.event('response.failed', { response: output.response('failed', modelApiErrorBody(error).body.error) })
+          logUpstreamFailure(error, { requestId: output.id, provider: group.provider, timeoutMs: providerConfig.timeoutMs })
+          yield output.event('response.failed', {
+            response: output.response('failed', modelApiErrorBody(error, { timeoutMs: providerConfig.timeoutMs }).body.error),
+          })
         }
+      } finally { try { if (admitted) record(startedAt) } finally { release() } }
+    },
+  }
+}
+
+/**
+ * OpenAI Chat Completions for the same catalog. Clients that only speak
+ * `/chat/completions` (Cline, Continue, the OpenAI SDKs) reach every configured
+ * provider through this endpoint instead of failing on a missing route.
+ */
+export async function prepareChatCompletion(input: ModelApiCall & { body: unknown }) {
+  validateChatBody(input.body)
+  const guards = budgetGuards(input)
+  guards.check()
+  const body = input.body
+  const target = await resolveTarget(input, body.model)
+  const { group, model, providerConfig, client } = target
+  const request = chatModelRequest(body, model, input.signal)
+  if (request.messages.some(message => message.contentParts?.some(part => part.type === 'image')) && !client.capabilities.vision) {
+    throw new ModelApiError('This model does not support images.', 400, 'messages')
+  }
+  const output = new ChatCompletionOutput(body.model)
+  const record = usageRecorder(input, target, output.id, () => output.usage)
+  const includeUsage = body.stream_options?.include_usage === true
+  guards.check()
+  return {
+    id: output.id,
+    stream: body.stream === true,
+    includeUsage,
+    async create() {
+      guards.check()
+      const release = guards.start(output.id)
+      const startedAt = performance.now()
+      try {
+        return output.finish(await client.create(request)).body
+      } catch (error) {
+        logUpstreamFailure(error, { requestId: output.id, provider: group.provider, timeoutMs: providerConfig.timeoutMs })
+        throw error
+      } finally { try { record(startedAt) } finally { release() } }
+    },
+    /**
+     * Yields deltas; the caller owns the SSE envelope. A provider failure after the
+     * stream is open throws, so the caller can emit an error frame instead of a fake stop.
+     */
+    async *chunks(): AsyncGenerator<ChatCompletionChunk> {
+      const startedAt = performance.now()
+      let admitted = false
+      let release = () => {}
+      try {
+        guards.check()
+        release = guards.start(output.id)
+        admitted = true
+        yield output.open()
+        for await (const event of client.stream(request)) {
+          if (event.type === 'error') throw new Error(event.error)
+          for (const chunk of output.consume(event)) yield chunk
+          if (event.type === 'done') {
+            yield output.finish(event.response).chunk
+            if (includeUsage) {
+              const usage = output.usageChunk()
+              if (usage) yield usage
+            }
+            return
+          }
+        }
+        // An EOF without a terminal event is never a successful response.
+        throw new Error('Provider stream ended before completion')
+      } catch (error) {
+        if (!input.signal.aborted) {
+          logUpstreamFailure(error, { requestId: output.id, provider: group.provider, timeoutMs: providerConfig.timeoutMs })
+        }
+        throw error
       } finally { try { if (admitted) record(startedAt) } finally { release() } }
     },
   }

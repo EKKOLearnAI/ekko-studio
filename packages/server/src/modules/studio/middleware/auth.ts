@@ -329,6 +329,7 @@ function isAccountModelApiPath(path: string | undefined): boolean {
     || path === '/api/studio/models/cloud-link' || !!path?.startsWith('/api/studio/models/cloud-link/')
     || path === '/api/studio/models/api-keys' || !!path?.startsWith('/api/studio/models/api-keys/')
     || path === '/api/ekko-studio/models/v1/models' || path === '/api/ekko-studio/models/v1/responses'
+    || path === '/api/ekko-studio/models/v1/chat/completions'
 }
 
 /** Only session identifiers carry ownership; search text and file paths do not. */
@@ -381,7 +382,8 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
     try {
       // Keys never authenticate UI, management, proxy or WebSocket endpoints.
       if (!(ctx.method === 'GET' && ctx.path === '/api/ekko-studio/models/v1/models')
-        && !(ctx.method === 'POST' && ctx.path === '/api/ekko-studio/models/v1/responses')) {
+        && !(ctx.method === 'POST' && ctx.path === '/api/ekko-studio/models/v1/responses')
+        && !(ctx.method === 'POST' && ctx.path === '/api/ekko-studio/models/v1/chat/completions')) {
         throw new ModelApiError('This key only permits Model API requests.', 403)
       }
       if (ctx.get('authorization') !== `Bearer ${token}`) throw new ModelApiError('Send the API key in the Authorization header.', 401)
