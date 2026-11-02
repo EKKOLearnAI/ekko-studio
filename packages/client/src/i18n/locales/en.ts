@@ -2905,7 +2905,7 @@ export default {
       protectFirstN: 'Protect First Messages',
       protectFirstNHint: 'Keep this many earliest messages uncompressed',
       microCompactDefault: 'Micro-compaction default (global)',
-      microCompactDefaultHint: 'When on, newly created profiles automatically enable rolling micro-compaction (micro_compact); existing profiles need the sync button below. Applies to hermes profiles only.',
+      microCompactDefaultHint: 'When on, newly created profiles automatically enable rolling micro-compaction (micro_compact); existing profiles need a one-time sync to apply. Applies to hermes profiles only.',
       microCompactSync: 'Sync to all existing profiles',
       microCompactSyncSuccess: 'Synced {count} profile(s)',
       microCompactSyncSkipped: 'Skipped {count} (no config): {list}',

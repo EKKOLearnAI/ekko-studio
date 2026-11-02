@@ -2943,7 +2943,7 @@ export default {
       protectFirstN: '保护开头消息',
       protectFirstNHint: '最早多少条消息不参与压缩',
       microCompactDefault: '微压缩默认（全局）',
-      microCompactDefaultHint: '开启后，新建的 Profile 会自动启用滚动微压缩（micro_compact）；已有 Profile 需点下方按钮同步。仅作用于 hermes profile。',
+      microCompactDefaultHint: '开启后，新建的 Profile 会自动启用滚动微压缩（micro_compact）；已有 Profile 需同步一次才生效。仅作用于 hermes profile。',
       microCompactSync: '同步到所有现有 Profile',
       microCompactSyncSuccess: '已同步 {count} 个 Profile',
       microCompactSyncSkipped: '跳过 {count} 个（无 config）：{list}',
