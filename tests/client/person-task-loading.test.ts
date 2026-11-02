@@ -37,8 +37,11 @@ const response = { task: { id: 'task', title: 'Loaded task', status: 'open', rev
 const row = (title: string) => ({ id: title, title, summary: 'Summary', status: 'open', updated_at: 1, session_id: 'main', selection_json: '{}' })
 const emitUpdate = () => { for (const fn of mocks.subscribers) fn({ session_id: 'main' }) }
 let wrapper: VueWrapper | undefined
-beforeEach(() => { mocks.request.mockReset(); mocks.remove.mockReset(); mocks.switchSession.mockReset().mockResolvedValue(true); mocks.subscribers.clear(); mocks.route = reactive({ query: {} }) })
-afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers() })
+beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  mocks.request.mockReset(); mocks.remove.mockReset(); mocks.switchSession.mockReset().mockResolvedValue(true); mocks.subscribers.clear(); mocks.route = reactive({ query: {} })
+})
+afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Person task loading and recovery', () => {
   it('replaces a failed initial detail spinner with retry and recovers without reopening', async () => {
