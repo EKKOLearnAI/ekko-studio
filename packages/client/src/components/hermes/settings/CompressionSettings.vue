@@ -99,7 +99,6 @@ function debouncedSave(key: string, value: any) {
         />
       </div>
     </div>
-    <div class="section-divider"></div>
     <SettingRow :label="t('settings.compression.enabled')" :hint="t('settings.compression.enabledHint')">
       <NSwitch
         :value="settingsStore.compression.enabled ?? defaults.enabled"
@@ -165,7 +164,7 @@ function debouncedSave(key: string, value: any) {
   margin-bottom: 16px;
   padding: 12px;
   border-radius: 8px;
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--theme-card-bg);
 }
 
 .gd-row {
@@ -185,11 +184,5 @@ function debouncedSave(key: string, value: any) {
   opacity: 0.65;
   margin-top: 2px;
   line-height: 1.5;
-}
-
-.section-divider {
-  height: 1px;
-  background: rgba(127, 127, 127, 0.2);
-  margin: 4px 0 12px;
 }
 </style>
