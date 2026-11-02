@@ -236,8 +236,8 @@ export class OpenAICompatibleModelClient implements ModelClient {
           for (const toolCallDelta of choice.delta?.tool_calls ?? []) {
             const index = toolCallDelta.index ?? 0
             const current = toolCalls.get(index) ?? { id: '', name: '', argumentsText: '' }
-            current.id = toolCallDelta.id ?? current.id
-            current.name = toolCallDelta.function?.name ?? current.name
+            current.id = toolCallDelta.id || current.id
+            current.name = toolCallDelta.function?.name || current.name
             current.argumentsText += toolCallDelta.function?.arguments ?? ''
             toolCalls.set(index, current)
           }
