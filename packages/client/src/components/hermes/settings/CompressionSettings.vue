@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { NButton, NInputNumber, NPopconfirm, NSwitch, useMessage } from 'naive-ui'
+import { NInputNumber, NSwitch, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { fetchConfig, updateConfigSection } from '@/api/hermes/config'
@@ -12,7 +12,6 @@ const message = useMessage()
 const { t } = useI18n()
 
 const microCompactDefault = ref(false)
-const syncing = ref(false)
 
 async function loadMicroCompactDefault() {
   try {
@@ -23,32 +22,28 @@ async function loadMicroCompactDefault() {
   }
 }
 
+// 开关切换：设全局默认 + 立即应用到所有现有 profile（消化已有的；未来新建自动遵循该值）
 async function setMicroCompactDefault(v: boolean) {
   try {
     await updateConfigSection('microCompactDefault', { microCompactDefault: v })
     microCompactDefault.value = v
   } catch {
-    message.error(t('settings.compression.microCompactSyncFailed'))
+    message.error(t('settings.compression.microCompactFailed'))
+    return
   }
-}
-
-async function syncToAll() {
-  syncing.value = true
   try {
     const r = await syncProfileCompression()
     if (r.skipped && r.skipped.length) {
       message.warning(
-        t('settings.compression.microCompactSyncSuccess', { count: r.count }) +
+        t('settings.compression.microCompactApplied', { count: r.count }) +
         ' · ' +
-        t('settings.compression.microCompactSyncSkipped', { count: r.skipped.length, list: r.skipped.join(', ') }),
+        t('settings.compression.microCompactSkipped', { count: r.skipped.length, list: r.skipped.join(', ') }),
       )
     } else {
-      message.success(t('settings.compression.microCompactSyncSuccess', { count: r.count }))
+      message.success(t('settings.compression.microCompactApplied', { count: r.count }))
     }
   } catch {
-    message.error(t('settings.compression.microCompactSyncFailed'))
-  } finally {
-    syncing.value = false
+    message.error(t('settings.compression.microCompactFailed'))
   }
 }
 
@@ -92,24 +87,16 @@ function debouncedSave(key: string, value: any) {
 <template>
   <section class="settings-section">
     <div class="global-default-block">
-      <div class="gd-title">{{ t('settings.compression.microCompactDefault') }}</div>
-      <div class="gd-hint">{{ t('settings.compression.microCompactDefaultHint') }}</div>
-      <div class="gd-controls">
+      <div class="gd-row">
+        <div class="gd-text">
+          <div class="gd-title">{{ t('settings.compression.microCompactDefault') }}</div>
+          <div class="gd-hint">{{ t('settings.compression.microCompactDefaultHint') }}</div>
+        </div>
         <NSwitch
           :value="microCompactDefault"
           size="small"
           @update:value="(v: boolean) => setMicroCompactDefault(v)"
         />
-        <NPopconfirm
-          :content="t('settings.compression.microCompactSyncConfirm', { value: microCompactDefault ? 'true' : 'false' })"
-          :positive-text="t('settings.compression.microCompactSyncYes')"
-          :negative-text="t('settings.compression.microCompactSyncNo')"
-          @positive-click="syncToAll"
-        >
-          <NButton size="small" :loading="syncing">
-            {{ t('settings.compression.microCompactSync') }}
-          </NButton>
-        </NPopconfirm>
       </div>
     </div>
     <div class="section-divider"></div>
@@ -181,6 +168,13 @@ function debouncedSave(key: string, value: any) {
   background: rgba(127, 127, 127, 0.08);
 }
 
+.gd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .gd-title {
   font-size: 14px;
   font-weight: 600;
@@ -189,15 +183,8 @@ function debouncedSave(key: string, value: any) {
 .gd-hint {
   font-size: 12px;
   opacity: 0.65;
-  margin-top: 4px;
+  margin-top: 2px;
   line-height: 1.5;
-}
-
-.gd-controls {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 10px;
 }
 
 .section-divider {
