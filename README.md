@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="./docs/screenshots/overview/new-chat.png" alt="Ekko Studio new-chat page with Agent cards and a shared composer" width="960"/>
+  <img src="./docs/screenshots/overview/new-chat.png" alt="Ekko Studio new-chat page with the Agent carousel and shared composer" width="960"/>
 </p>
 
 <p align="center">
@@ -35,25 +35,12 @@ package and command remain supported and receive the same releases.
 
 ## Screenshots
 
-Captured from the **v0.7.33** client on 2026-10-10. Chat, workflows, and Skills use demo data; Agent versions reflect a local installation. See [capture notes](./docs/screenshots/overview/README.md).
+Captured from **v0.8.13** source on 2026-11-03, running locally with isolated data. The workflow is an example created in the UI and has not been run; Agent statuses reflect this machine. See [capture notes](./docs/screenshots/overview/README.md).
 
 | Visual workflows | Agent Manager |
 | --- | --- |
-| [![Visual workflow connecting research, coding, and review](./docs/screenshots/overview/workflow.png)](./docs/screenshots/overview/workflow.png) | [![Agent Manager with built-in and coding-agent integrations](./docs/screenshots/overview/agent-manager.png)](./docs/screenshots/overview/agent-manager.png) |
-| Connect agent steps and add a human approval gate. | Manage agent installations, settings, and updates in one place. |
-
-<details>
-<summary>Explore chat progress and Skills</summary>
-
-Follow a task in the conversation, including its plan and per-turn usage.
-
-![Ekko Studio conversation with a completed task plan and usage summary](./docs/screenshots/overview/workspace.png)
-
-Browse installed skills, read their instructions, and enable them as needed.
-
-![Ekko Agent Skills browser showing the GitHub skill](./docs/screenshots/overview/skills.png)
-
-</details>
+| [![Idle example workflow connecting Claude, Codex, and a review node with an approval gate](./docs/screenshots/overview/workflow.png)](./docs/screenshots/overview/workflow.png) | [![Agent Manager with all 16 built-in and coding-agent cards](./docs/screenshots/overview/agent-manager.png)](./docs/screenshots/overview/agent-manager.png) |
+| Connect agent steps and add a human approval gate; this example is not running. | Manage Agent installations, settings, and updates in one place. |
 
 ## Core Capabilities
 
