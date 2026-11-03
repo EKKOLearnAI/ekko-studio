@@ -150,7 +150,7 @@ const chatStore = useChatStore()
 const profilesStore = useProfilesStore()
 const message = useMessage()
 const {
-  screenToFlowCoordinate, getViewport, setViewport, setNodes, setEdges, updateNodeInternals,
+  nodes: canvasNodes, screenToFlowCoordinate, getViewport, setViewport, setNodes, setEdges, updateNodeInternals,
   findNode, addSelectedNodes, removeSelectedElements,
 } = useVueFlow('hermes-workflow')
 const defaultViewport: WorkflowViewport = { x: 80, y: 80, zoom: 0.75 }
@@ -685,7 +685,23 @@ function makeInitialNodes(): WorkflowNode[] {
   return []
 }
 
-const nodes = ref<WorkflowNode[]>(makeInitialNodes())
+// Keep an authored-only input for Vue Flow's initial mount and workflow switches.
+// Read live nodes from its store so edits never replay stale measurements or geometry.
+const nodeDefinitions = ref<WorkflowNode[]>(makeInitialNodes())
+const nodes = computed<WorkflowNode[]>({
+  get: () => canvasNodes.value as WorkflowNode[],
+  set: (value) => {
+    nodeDefinitions.value = value.map(node => ({
+      id: node.id,
+      type: node.type,
+      position: node.position,
+      dragHandle: node.dragHandle,
+      style: node.style,
+      data: node.data,
+    }))
+    setNodes(nodeDefinitions.value)
+  },
+})
 const edges = ref<WorkflowEdge[]>([])
 
 function unavailableWorkflowAgent() {
@@ -2929,13 +2945,12 @@ async function handleConnectEnd(event?: MouseEvent | TouchEvent) {
   transaction.after.edges[transaction.after.edges.length - 1] = {
     ...transaction.after.edges[transaction.after.edges.length - 1], animated: false, markerEnd: MarkerType.ArrowClosed,
   }
-  setNodes(transaction.after.nodes)
+  nodes.value = transaction.after.nodes
   await nextTick()
   updateNodeInternals([nodeId])
   setEdges(transaction.after.edges)
   await nextTick()
-  // Selection lives in Vue Flow's internal store, not in our definition
-  // array. Apply it after the release gesture has committed Node + Edge.
+  // Apply selection after the release gesture has committed Node + Edge.
   window.setTimeout(() => {
     removeSelectedElements()
     const createdNode = findNode(nodeId)
@@ -2949,7 +2964,7 @@ async function handleConnectEnd(event?: MouseEvent | TouchEvent) {
 function undoLastCanvasTransaction() {
   const transaction = lastCanvasTransaction.value
   if (!transaction || selectedWorkflowRunId.value) return
-  setNodes(transaction.before.nodes)
+  nodes.value = transaction.before.nodes
   setEdges(transaction.before.edges)
   nextNodeIndex.value = Math.max(1, nextNodeIndex.value - 1)
   lastCanvasTransaction.value = null
@@ -3790,7 +3805,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
         <VueFlow
           :key="workflowFlowKey"
           id="hermes-workflow"
-          v-model:nodes="nodes"
+          :nodes="nodeDefinitions"
           v-model:edges="renderedEdges"
           :fit-view-on-init="false"
           :default-viewport="defaultViewport"
