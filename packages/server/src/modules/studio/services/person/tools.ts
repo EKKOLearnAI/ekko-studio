@@ -101,7 +101,7 @@ export function personTools(userId: number, role: PersonRole, taskId?: string, s
       }
       return context.search(personText(args.query, 'query', 200), personRevision(args.offset ?? 0))
     }),
-    personTool('bot_schedules_query', 'List saved schedules without copying task histories.', {}, [], async () => listPersonSchedules(userId)),
+    personTool('bot_schedules_query', 'List all saved schedules across this account’s BOTs, including owner names, BOT types and full goals. Does not include task histories.', {}, [], async () => listPersonSchedules(userId)),
     personTool('bot_schedule_apply', 'Create: assistant uses title/goal (optional workers); worker uses task_id. Once: ISO+offset; cron: five fields+timezone. Pause/resume/cancel/delete future triggers.', {
       mode: { type: 'string', enum: ['assistant','worker'] }, session_id: string, title: string, goal: string,
       action: { type: 'string', enum: ['create','update','pause','resume','cancel','delete'] }, task_id: string, schedule_id: string, kind: { type: 'string', enum: ['once','cron'] }, expression: string,
