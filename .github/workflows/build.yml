@@ -39,15 +39,5 @@ jobs:
       - name: Check repository harness
         run: npm run harness:check
 
-      - name: Run unit and integration tests
-        run: npm test
-
       - name: Build
         run: npm run build
-
-      - name: Run browser tests
-        run: |
-          if find tests/e2e -type f \( -name '*.spec.*' -o -name '*.test.*' \) -print -quit | grep -q .; then
-            npx playwright install --with-deps chromium
-          fi
-          npm run test:e2e

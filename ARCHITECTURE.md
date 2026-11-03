@@ -14,7 +14,7 @@ Ekko Agent, Hermes Agent, and coding agents for chat, coding, and workflows.
 | Desktop | `packages/desktop` | Electron shell, local Web UI server bootstrap, updater, bundled Python/Hermes runtime. |
 | MCU | `packages/mcu` | ESP32-C3 source projects and release firmware; board-specific ESP32-S3 firmware. |
 | Tests | `tests` | Required focused tests for new features; the legacy suite has been removed. |
-| CI | `.github/workflows` | Build, e2e, lockfile, Docker, and desktop release automation. |
+| CI | `.github/workflows` | Independent Build, Test and E2E checks, lockfile, Docker, and desktop release automation. |
 
 ## Request Flow
 
@@ -151,8 +151,11 @@ The minimum mechanical harness is:
 - `npm run harness:check` for repository docs, workflow, and package-script invariants.
 - Focused `npm run test -- <file>` for each new feature's logic.
 - Focused `npm run test:e2e -- <file>` for new browser journeys.
-- Build CI runs all current Vitest and Playwright tests. Empty suites are allowed
-  during the reset, without waiving the requirement to test new features.
+- Independent Test (`test.yml`) and E2E (`playwright.yml`) workflows run all
+  current Vitest and Playwright tests. Build (`build.yml`) runs the harness and
+  production build. Each workflow reports its own status and can fail independently.
+- Empty suites are allowed during the reset, without waiving the requirement to
+  test new features.
 - CI does not require blanket coverage or browser shards.
 - `npm run build` for type checking and production bundles.
 

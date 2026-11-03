@@ -72,10 +72,11 @@ npm run build
 - `npm test`, `npm run test:coverage` and `npm run test:e2e` allow an empty suite
   during the reset while continuing to fail on assertions in any tests that are
   present. An empty suite does not exempt new features from adding tests.
-- Build CI runs `npm test` and `npm run test:e2e` automatically on pushes to
-  `main` and pull requests targeting `main` or `base`, alongside harness and build
-  checks. Lockfile checks remain separate. Coverage, browser shards and platform
-  test matrices remain removed. See `tests/README.md`.
+- Independent Test and E2E workflows run `npm test` and `npm run test:e2e`
+  automatically on pushes to `main` and pull requests targeting `main` or `base`;
+  both also support manual dispatch. Build reports harness and production-build
+  results separately. Lockfile checks remain separate. Coverage, browser shards
+  and platform test matrices remain removed. See `tests/README.md`.
 
 ## npm Publishing
 

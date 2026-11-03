@@ -19,9 +19,13 @@ Run the tests added for each new feature before opening a PR. `npm test`,
 during the reset; this does not exempt new features from adding tests. Once
 matching tests are added, assertion failures still fail the command.
 
-Build CI automatically runs `npm test` and `npm run test:e2e` on pushes to `main`
-and pull requests targeting `main` or `base`, alongside the repository harness
-and production build. It installs Chromium only when browser test files exist.
-New tests are picked up without editing the workflow, and any assertion failure
-fails the job. Lockfile checks remain separate. Blanket coverage, browser shards
-and cross-platform regression matrices are not required.
+Independent Test (`.github/workflows/test.yml`) and E2E
+(`.github/workflows/playwright.yml`) workflows automatically run `npm test` and
+`npm run test:e2e` on pushes to `main` and pull requests targeting `main` or `base`.
+Both can also be run manually. Build reports the repository harness and production
+build separately. E2E installs Chromium only when browser test files exist, and
+uploads available HTML reports, screenshots and traces even when tests fail.
+New tests are picked up without editing the workflows, and any assertion failure
+fails the corresponding Test or E2E check. Lockfile checks remain separate.
+Blanket coverage, browser shards and cross-platform regression matrices are not
+required.
