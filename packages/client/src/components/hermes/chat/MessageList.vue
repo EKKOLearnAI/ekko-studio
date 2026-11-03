@@ -27,6 +27,8 @@ import { LIVE_CHAT_MAX_LOADED_MESSAGES, parseMessageReference, useChatStore, typ
 import { useProfilesStore } from "@/stores/hermes/profiles";
 import { useToolTraceVisibility } from "@/composables/useToolTraceVisibility";
 import { openSubagentStream, subagentIdFromToolCall } from "@/utils/hermes/subagent-stream";
+import SubagentCard from './SubagentCard.vue';
+import SubagentProgressSummary from './SubagentProgressSummary.vue';
 import { messageScrollPositionKey, rememberMessageScrollPosition } from "./message-scroll-position";
 import { chatSessionAgentAvatar, personAvatarAnimation, personAvatarStyle } from "@/utils/chat-agent-avatar";
 import { parseThinking } from "@/utils/thinking-parser";
@@ -793,6 +795,7 @@ defineExpose({
       :positive-button-props="{ loading: deletingMessages, disabled: selectionUnavailable }"
       :negative-button-props="{ disabled: deletingMessages }" :mask-closable="!deletingMessages" :closable="!deletingMessages"
       @positive-click="deleteSelectedMessages" />
+    <SubagentProgressSummary />
     <VirtualMessageList
       v-if="!isSearchFetching"
       :key="activeSessionScrollKey || 'chat-empty'"
@@ -978,12 +981,13 @@ defineExpose({
               ></span>
             </div>
             <!-- Tool calls -->
-            <div
-              v-for="tc in visibleToolCalls"
-              :key="tc.id"
-              class="tool-call-item"
-              :class="{ 'subagent-entry': isSubagentToolCall(tc) }"
-              :role="isSubagentToolCall(tc) ? 'button' : undefined"
+            <template v-for="tc in visibleToolCalls" :key="tc.id">
+              <SubagentCard v-if="isSubagentToolCall(tc)" :tool-call-id="tc.toolCallId" />
+              <div
+                v-else
+                class="tool-call-item"
+                :class="{ 'subagent-entry': isSubagentToolCall(tc) }"
+                :role="isSubagentToolCall(tc) ? 'button' : undefined"
               :tabindex="isSubagentToolCall(tc) ? 0 : undefined"
               :title="isSubagentToolCall(tc) ? t('subagent.open') : undefined"
               @click="handleToolCallClick(tc)"
@@ -1056,6 +1060,7 @@ defineExpose({
                 />
               </svg>
             </div>
+            </template>
           </div>
         </div>
         </Transition>

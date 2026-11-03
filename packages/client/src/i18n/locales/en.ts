@@ -1091,7 +1091,8 @@ export default {
   subagent: {
     title: 'Background task', noGoal: 'Untitled background task', open: 'Open live background task output', close: 'Close background task output',
     waiting: 'Waiting for live output...', tool: 'Tool', tools: '{count} tools', tokens: '{input} in · {output} out',
-    started: 'Started', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted',
+    started: 'Started', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full log', collapseOutput: 'Collapse log',
+
   },
 
   realtimeVoice: {
