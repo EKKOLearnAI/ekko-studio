@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="./docs/screenshots/overview/new-chat.png" alt="Ekko Studio 新建聊天页面：Agent 卡片与统一输入框" width="960"/>
+  <img src="./docs/screenshots/overview/new-chat.png" alt="Ekko Studio 新建聊天页面：Agent 轮播卡片与统一输入框" width="960"/>
 </p>
 
 <p align="center">
@@ -34,25 +34,12 @@ Ekko Studio 原名 Hermes Studio / Hermes Web UI。GitHub 仓库为
 
 ## 界面预览
 
-以下截图来自 **v0.7.33** 客户端（2026-10-10）。聊天、工作流和技能使用演示数据，Agent 版本信息来自本机安装。详见[截图说明](./docs/screenshots/overview/README.md)。
+以下截图于 2026-11-03 从本地运行的 **v0.8.13** 源码版本截取，使用隔离数据目录。工作流示例通过界面创建，尚未执行；Agent 状态来自本机实际检测。详见[截图说明](./docs/screenshots/overview/README.md)。
 
 | 可视化工作流 | Agent 管理 |
 | --- | --- |
-| [![可视化工作流：研究、编码与审核](./docs/screenshots/overview/workflow.png)](./docs/screenshots/overview/workflow.png) | [![Agent 管理器：内置 Agent 与 Coding Agent 集成](./docs/screenshots/overview/agent-manager.png)](./docs/screenshots/overview/agent-manager.png) |
-| 连接多个 Agent 节点，并设置人工审批。 | 在同一界面管理 Agent 安装、设置和更新。 |
-
-<details>
-<summary>查看聊天进度和技能管理界面</summary>
-
-在对话中跟踪任务计划、步骤进度和每轮用量。
-
-![Ekko Studio 对话：已完成的任务计划与用量摘要](./docs/screenshots/overview/workspace.png)
-
-浏览已安装的技能、阅读使用说明，并按需启用。
-
-![Ekko Agent 技能管理与 GitHub 技能说明](./docs/screenshots/overview/skills.png)
-
-</details>
+| [![未执行的工作流示例：Claude、Codex 与开启人工审批的审核节点](./docs/screenshots/overview/workflow.png)](./docs/screenshots/overview/workflow.png) | [![Agent 管理器：完整展示 16 张内置 Agent 与 Coding Agent 卡片](./docs/screenshots/overview/agent-manager.png)](./docs/screenshots/overview/agent-manager.png) |
+| 连接多个 Agent 节点，并设置人工审批；此示例尚未执行。 | 在同一界面管理 Agent 安装、设置和更新。 |
 
 ## 核心能力
 
