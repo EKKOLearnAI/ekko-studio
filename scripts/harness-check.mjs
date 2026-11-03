@@ -8,9 +8,11 @@ import { checkDshModuleBoundaries } from './dsh-module-harness.mjs'
 import { checkCodingAgentModuleBoundaries } from './coding-agent-module-harness.mjs'
 import { checkJevIntegrations } from './jev-harness.mjs'
 import { checkUiTheme } from './ui-theme-harness.mjs'
+import { checkTaskArtifacts } from './task-artifacts.mjs'
 
 const root = process.cwd()
 const failures = []
+failures.push(...await checkTaskArtifacts(root))
 failures.push(...await checkDshModuleBoundaries(root))
 failures.push(...await checkCodingAgentModuleBoundaries(root))
 failures.push(...await checkJevIntegrations(root))
@@ -49,6 +51,9 @@ for (const file of [
   'scripts/jev-integrations.json',
   'docs/harness/frontend-ui.md',
   'scripts/ui-theme-baseline.json',
+  'docs/harness/task-artifacts.md',
+  'scripts/task-artifacts.mjs',
+  'scripts/task-artifacts-cli.mjs',
 ]) {
   requireFile(file)
 }

@@ -47,9 +47,10 @@ Use per-worktree state and ports to avoid colliding with a running local app:
 
 ```bash
 export PORT=18648
-export HERMES_WEB_UI_HOME="$PWD/.tmp/hermes-web-ui"
+export STUDIO_TASK_DIR="$(npm run --silent artifacts:new -- local-verification)"
+export HERMES_WEB_UI_HOME="$STUDIO_TASK_DIR/hermes-web-ui"
 export HERMES_WEBUI_STATE_DIR="$HERMES_WEB_UI_HOME"
-export UPLOAD_DIR="$PWD/.tmp/uploads"
+export UPLOAD_DIR="$STUDIO_TASK_DIR/uploads"
 npm run dev
 ```
 
@@ -79,6 +80,10 @@ git worktree remove ../worktrees/hermes-web-ui-<short-topic>
 ```
 
 Only remove the worktree you created.
+Keep reports and scratch files outside it using `docs/harness/task-artifacts.md`.
+After stopping verification processes and preserving requested evidence, remove
+only the marked external task directory you created. Keep runtime/user data when
+ownership, active use or recovery needs are uncertain.
 
 Vite development and Playwright servers use separate dependency caches. The client
 cache defaults to `node_modules/.vite/client`; Playwright sets

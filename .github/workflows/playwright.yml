@@ -46,6 +46,8 @@ jobs:
           fi
 
       - name: Run Playwright tests
+        env:
+          STUDIO_TASK_ARTIFACTS_DIR: ${{ runner.temp }}/studio-artifacts
         run: npm run test:e2e -- --reporter=list,html
 
       - name: Upload browser test results
@@ -54,7 +56,11 @@ jobs:
         with:
           name: e2e-results
           path: |
-            playwright-report/
-            test-results/
+            ${{ runner.temp }}/studio-artifacts/playwright-html/
+            ${{ runner.temp }}/studio-artifacts/playwright-results/
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Check task artifact locations
+        if: ${{ !cancelled() }}
+        run: npm run artifacts:check
