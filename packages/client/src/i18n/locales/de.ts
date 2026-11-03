@@ -3568,6 +3568,10 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_8_14_1: "Bot-Aufgabenkorrekturen öffnen keine separate Unterhaltung mehr: Ein geändertes Ziel oder Vorgehen lässt sich natürlich formulieren; der zuständige Bot setzt die ursprüngliche Aufgabe mit demselben Agent, Arbeitsbereich und Ausführungsdialog fort und bewahrt Verlauf und geltende Vorgaben (#3656)",
+    new_0_8_14_2: "Korrekturen warten auf das Ende früherer Arbeit, verknüpfter Prüfung und alter Ergebnisverarbeitung. Danach gilt die vollständige neueste Anfrage. Bei fehlgeschlagenem Stopp bleibt sie für Wiederholung und Neustart erhalten; aufeinanderfolgende Korrekturen nutzen die neueste Vorgabe, veraltete Eingaben und Ergebnisse greifen nicht ein (#3656)",
+    new_0_8_14_3: "Kompatible Ergänzungen bleiben im selben Dialog der Reihe nach vorgemerkt; ein ausdrücklicher Stopp verwirft eine ausstehende Korrektur. Aufgaben mit Abnahme behalten Kriterien und Voreinstellungen und werden für die geänderten Anforderungen erneut geprüft (#3656)",
+    new_0_8_14_4: "Bei Korrekturen bleiben Verlauf und Eingabefeld erhalten; Stopp- und Fehlerzustände werden angezeigt. Bei abgewiesenen veralteten Anfragen bleibt der Entwurf bestehen, und gespeicherte Korrekturen sind vor gewöhnlichem Entfernen aus der Warteschlange geschützt (#3656)",
     new_0_8_13_1: "Agent-Karten zeigen die gespeicherte Denkintensität; Aufgabenaktivität nutzt verbindliche Serverzählungen und behält die Laufzeitidentität der gewählten Ausführung bei, mit neutralen Symbolen für unbekannte Laufzeiten (#3641, #3634)",
     new_0_8_13_2: "Agent-Aufgabengespräche erscheinen am Desktop in einer verstellbaren rechten Spalte mit Tastatursteuerung, gespeicherter Breite und RTL. Arbeitsbereich, Terminal und Browser teilen ein Werkzeugpanel für die aktuelle Aufgabensitzung; schmale Ansichten nutzen Overlays (#3641)",
     new_0_8_13_3: "Große abgerundete Agent-Symbole auf Ergebniskarten wiederhergestellt; kleine runde Avatare in Aktivität und Aufgabenlisten bleiben erhalten (#3640)",

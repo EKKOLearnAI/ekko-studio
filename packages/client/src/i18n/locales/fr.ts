@@ -3568,6 +3568,10 @@ jobTriggered: 'Job declenche',
   },
 
   changelog: {
+    new_0_8_14_1: "Correction des tâches Bot ouvrant une autre conversation : décrivez naturellement un nouvel objectif ou une autre approche ; le Bot responsable poursuit dans la tâche, l’Agent, l’espace de travail et la conversation d’origine en conservant l’historique et les contraintes applicables (#3656)",
+    new_0_8_14_2: "Les corrections attendent l’arrêt du travail précédent, de la vérification liée et du traitement des anciens résultats avant de reprendre la demande complète la plus récente. Un échec conserve la demande pour réessai et reprise après redémarrage ; seule la dernière correction prévaut, sans interférence des entrées ou résultats périmés (#3656)",
+    new_0_8_14_3: "Les ajouts compatibles restent en file dans la même conversation ; un arrêt explicite annule une correction en attente. Les tâches avec validation conservent leurs critères et préréglages et font l’objet d’une nouvelle vérification des exigences révisées (#3656)",
+    new_0_8_14_4: "Les corrections conservent l’historique et la zone de saisie, affichent l’arrêt en cours et les erreurs, préservent les brouillons si une demande périmée est rejetée et protègent les corrections enregistrées contre une suppression ordinaire dans la file (#3656)",
     new_0_8_13_1: "Les cartes Agent affichent l’effort de raisonnement enregistré ; l’activité utilise les comptes de référence du serveur et conserve l’identité du runtime de l’exécution choisie, avec une icône neutre pour les runtimes inconnus (#3641, #3634)",
     new_0_8_13_2: "Les conversations de tâche Agent occupent une colonne droite redimensionnable sur ordinateur, avec clavier, largeur mémorisée et RTL. Espace de travail, terminal et navigateur partagent un panneau lié à la session de tâche courante ; les petits écrans utilisent une superposition (#3641)",
     new_0_8_13_3: "Rétablissement des grandes icônes Agent arrondies sur les cartes de résultat, tout en conservant les petits avatars ronds dans l’activité et les listes (#3640)",

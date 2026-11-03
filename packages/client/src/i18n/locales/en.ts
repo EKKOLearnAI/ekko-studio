@@ -3985,6 +3985,10 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_14_1: "Fixed Bot task corrections opening a separate conversation: describe a revised goal or approach naturally and the owning Bot continues in the original task, Agent, workspace and execution conversation, preserving history and applicable constraints (#3656)",
+    new_0_8_14_2: "Task corrections stop previous work, linked verification and old result handling before continuing with the complete latest request; failed stops retain the request for retry and restart recovery, successive corrections keep the latest intent, and obsolete queued inputs and results cannot interfere (#3656)",
+    new_0_8_14_3: "Compatible additions remain queued in order in the same conversation; explicit Stop cancels a pending correction, while tasks with acceptance enabled retain their criteria and presets and undergo fresh verification for the revised requirements (#3656)",
+    new_0_8_14_4: "Task corrections keep chat history and the composer mounted, show stopping and error states, preserve drafts when stale requests are rejected, and protect saved corrections from ordinary queue removal (#3656)",
     new_0_8_13_1: "Assistant Agent cards show saved reasoning effort; task activity uses authoritative server counts and preserves the selected execution's runtime identity, with neutral icons for unknown runtimes (#3641, #3634)",
     new_0_8_13_2: "Agent task conversations use a resizable desktop side column with keyboard resizing, remembered width and RTL support; workspace, terminal and browser share a tools panel bound to the current task session, with overlays on narrow screens (#3641)",
     new_0_8_13_3: "Restore large rounded Agent icons on task result cards while retaining small circular avatars in activity capsules and task lists (#3640)",
