@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Message, SubagentStream, SubagentStreamEntry, SubagentStreamStatus } from '@/stores/hermes/chat'
+import { useChatStore } from '@/stores/hermes/chat'
+import { subagentBatchNumber } from '@/utils/hermes/subagent-stream'
 import LiveReasoningStatus from './LiveReasoningStatus.vue'
 import type { ChatAgentAvatar } from '@/utils/chat-agent-avatar'
 import MessageItem from './MessageItem.vue'
@@ -31,6 +33,12 @@ const taskPosition = computed(() => {
   const stream = props.stream
   if (!stream) return ''
   return `${stream.taskIndex + 1}/${Math.max(1, stream.taskCount)}`
+})
+const chatStore = useChatStore()
+const batchNo = computed(() => {
+  const stream = props.stream
+  if (!stream?.runId) return null
+  return subagentBatchNumber([...chatStore.subagentStreams.values()], stream.sessionId, stream.runId)
 })
 
 const isRunning = computed(() => props.stream?.status === 'running')
@@ -198,6 +206,7 @@ onBeforeUnmount(stopElapsedTimer)
         <div class="subagent-stream-kicker">
           <span class="subagent-live-dot" :class="{ active: stream?.status === 'running' }" aria-hidden="true"></span>
           <span>{{ t('subagent.title') }}</span>
+          <span v-if="batchNo" class="subagent-task-position">{{ t('subagent.batch', { n: batchNo }) }}</span>
           <span v-if="taskPosition" class="subagent-task-position">{{ taskPosition }}</span>
           <div class="subagent-header-actions">
             <span v-if="stream" class="subagent-status" :class="`status-${statusKey(stream.status)}`">
@@ -332,7 +341,7 @@ onBeforeUnmount(stopElapsedTimer)
   margin-top: 6px;
   color: $text-primary;
   font-size: calc(var(--font-size-base, 14px) * 14 / 14);
-  font-weight: 600;
+  font-weight: 400;
   line-height: var(--line-height, 1.45);
   overflow-wrap: anywhere;
 }
@@ -425,6 +434,10 @@ onBeforeUnmount(stopElapsedTimer)
   display: flex;
   flex-direction: column;
   background: var(--theme-content-bg, $bg-main-surface);
+
+  :deep(.message) { max-width: 100%; }
+  :deep(.message.assistant) { max-width: 100%; }
+  :deep(.message.user) { max-width: 100%; }
 }
 
 .subagent-empty {

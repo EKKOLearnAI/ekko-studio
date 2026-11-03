@@ -152,6 +152,7 @@ export interface SubagentStreamEntry {
 export interface SubagentStream {
   sessionId: string
   subagentId: string
+  runId?: string
   taskIndex: number
   taskCount: number
   goal?: string
@@ -369,6 +370,7 @@ export function reduceSubagentStream(
   return {
     sessionId,
     subagentId,
+    runId: (evt as any).run_id || current?.runId,
     taskIndex: Number.isFinite(incomingTaskIndex) ? incomingTaskIndex : current?.taskIndex || 0,
     taskCount: Number.isFinite(incomingTaskCount) && incomingTaskCount > 0 ? incomingTaskCount : current?.taskCount || 1,
     goal: goal || current?.goal,
