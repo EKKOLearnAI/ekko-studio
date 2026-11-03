@@ -50,7 +50,7 @@ import { personRequest, type PersonSnapshot, type PersonModel, type PersonModelG
 import { clientUuid } from '@/utils/secure-uuid'
 import { DEFAULT_PERSON_BOT_TYPE, personBot } from '../../../../shared/person-bots'
 import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
-import { PERSON_AVATAR, chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
+import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 import { personBotLabel } from '@/utils/person-bot-label'
 import { deploymentUrl } from '@/utils/deployment-url'
 import { prepareAgentDeployment, type AgentDeploymentController } from '@/components/hermes/chat/agentDeployment.mjs'
@@ -738,8 +738,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       <ModelProtocolModal v-model:show="showModelProtocol" v-model:value="selectedModelApiMode"
         @confirm="modelProtocol.confirm" @cancel="modelProtocol.cancel" />
       <NDrawer v-model:show="showPanel" :width="drawerWidth" placement="right" :close-on-esc="true" class="person-workspace-drawer" @after-enter="flowsPanelRef?.revealFocus()">
-        <NDrawerContent closable :native-scrollbar="false" :body-content-style="{ padding: '0' }">
-          <template #header><div class="workspace-heading"><span class="workspace-brand">{{ PERSON_AVATAR.label }}</span><span class="workspace-divider">/</span><span>{{ t('person.title') }}</span></div></template>
+        <NDrawerContent :title="t('person.settings')" closable :native-scrollbar="false" :body-content-style="{ padding: '0' }">
           <div class="person-workspace">
             <NAlert v-if="error && !['general', 'agents'].includes(tab)" class="workspace-error" type="error" closable @close="error = ''">{{ error }}</NAlert>
             <NTabs v-model:value="tab" type="line" size="large" animated>
@@ -805,9 +804,6 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
 .person-chat-messages { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .person-model-hint { display: block; margin: 0 auto; border: 0; background: transparent; color: $accent-primary; cursor: pointer; font: inherit; font-size: 12px; padding: 8px; }
 .person-workspace { padding: 0 24px 28px; min-width: 0; }
-.workspace-heading { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 400; color: $text-secondary; }
-.workspace-brand { font-size: 17px; font-weight: 600; letter-spacing: -.4px; color: $text-primary; }
-.workspace-divider { color: $text-muted; }
 .workspace-tab { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; }
 .workspace-tab-count { color: $text-muted; font-size: 11px; font-variant-numeric: tabular-nums; margin-inline-start: 4px; }
 .workspace-error { margin-top: 20px; }
