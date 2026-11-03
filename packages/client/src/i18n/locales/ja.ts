@@ -1095,7 +1095,8 @@ export default {
   subagent: {
     title: 'バックグラウンドタスク', noGoal: '無題のバックグラウンドタスク', open: 'バックグラウンドタスクのライブ出力を開く', close: 'バックグラウンドタスクの出力を閉じる',
     waiting: 'ライブ出力を待機中…', tool: 'ツール', tools: 'ツール呼び出し {count} 回', tokens: '入力 {input} · 出力 {output}',
-    started: '開始済み', running: '実行中', completed: '完了', failed: '失敗', cancelled: 'キャンセル済み', interrupted: '中断済み',
+    started: '開始済み', running: '実行中', completed: '完了', failed: '失敗', cancelled: 'キャンセル済み', interrupted: '中断済み',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full output', collapseOutput: 'Collapse full output',
+
   },
 
   realtimeVoice: {
