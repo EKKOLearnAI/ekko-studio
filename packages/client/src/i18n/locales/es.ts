@@ -3568,6 +3568,10 @@ jobTriggered: 'Job ejecutado',
   },
 
   changelog: {
+    new_0_8_14_1: "Corregido que las rectificaciones de tareas Bot abrieran otra conversación: describe con lenguaje natural el nuevo objetivo o enfoque y el Bot responsable continuará en la tarea, Agent, espacio de trabajo y conversación originales, conservando el historial y las restricciones aplicables (#3656)",
+    new_0_8_14_2: "Las rectificaciones esperan a que terminen el trabajo anterior, la verificación vinculada y el procesamiento de resultados antiguos antes de seguir la última solicitud completa. Si falla la detención, la solicitud se conserva para reintentar y recuperarse tras reiniciar; prevalece la última corrección y se evitan interferencias de entradas y resultados obsoletos (#3656)",
+    new_0_8_14_3: "Los añadidos compatibles siguen en cola por orden en la misma conversación; una detención explícita cancela una corrección pendiente. Las tareas con aceptación conservan criterios y preajustes y se verifican de nuevo con los requisitos revisados (#3656)",
+    new_0_8_14_4: "Las rectificaciones conservan el historial y el editor, muestran los estados de detención y error, mantienen los borradores al rechazar solicitudes obsoletas y protegen las correcciones guardadas frente a eliminaciones normales de la cola (#3656)",
     new_0_8_13_1: "Las tarjetas de Agent muestran el esfuerzo de razonamiento guardado; la actividad usa recuentos oficiales del servidor y conserva la identidad del entorno de la ejecución elegida, con iconos neutros para entornos desconocidos (#3641, #3634)",
     new_0_8_13_2: "Las conversaciones de tareas de Agent usan una columna derecha ajustable en escritorio, con teclado, ancho recordado y RTL. Espacio de trabajo, terminal y navegador comparten un panel vinculado a la sesión de tarea actual; en pantallas estrechas se superpone (#3641)",
     new_0_8_13_3: "Se restauran los iconos grandes y redondeados de Agent en las tarjetas de resultados, conservando los avatares circulares pequeños de actividad y listas (#3640)",

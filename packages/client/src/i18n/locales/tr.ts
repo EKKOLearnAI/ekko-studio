@@ -168,6 +168,10 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_14_1: "Bot görevi düzeltilince ayrı konuşma açılması giderildi: Yeni hedefi veya yaklaşımı doğal dille anlatın; sorumlu Bot aynı görev, Agent, çalışma alanı ve yürütme konuşmasında geçmişi ve geçerli kısıtları koruyarak devam eder (#3656)",
+    new_0_8_14_2: "Görev düzeltmeleri, en son tam isteğe geçmeden önce önceki işin, bağlı doğrulamanın ve eski sonuç işlemenin durmasını bekler. Durdurma başarısız olursa istek yeniden deneme ve yeniden başlatma sonrası kurtarma için saklanır; ardışık düzeltmelerde son istek geçerlidir, eski kuyruk girdileri ve sonuçlar müdahale etmez (#3656)",
+    new_0_8_14_3: "Uyumlu ek istekler aynı konuşmada sırayla bekler; açık Durdur isteği bekleyen düzeltmeyi iptal eder. Kabul denetimi etkin görevler ölçütlerini ve ön ayarlarını korur, değişen gereksinimler için yeniden doğrulanır (#3656)",
+    new_0_8_14_4: "Görev düzeltmeleri sohbet geçmişini ve yazma alanını korur, durdurma ve hata durumlarını gösterir, eski istek reddedildiğinde taslakları saklar ve kayıtlı düzeltmeleri normal kuyruk silme işlemlerinden korur (#3656)",
     new_0_8_13_1: "Agent ayar kartları kaydedilmiş akıl yürütme düzeyini gösterir; görev etkinliği sunucunun kesin sayaçlarını kullanır ve seçilen çalıştırmanın ortam kimliğini korur, bilinmeyen ortamlar nötr simge alır (#3641, #3634)",
     new_0_8_13_2: "Agent görev konuşmaları masaüstünde klavyeyle ayarlanabilen, genişliği hatırlayan ve RTL destekleyen sağ sütuna taşındı. Çalışma alanı, terminal ve tarayıcı geçerli görev oturumuna bağlı ortak panel kullanır; dar ekranlarda üst katman açılır (#3641)",
     new_0_8_13_3: "Görev sonuç kartlarındaki büyük yuvarlatılmış Agent simgeleri geri getirildi; etkinlik ve görev listelerindeki küçük yuvarlak avatarlar korundu (#3640)",

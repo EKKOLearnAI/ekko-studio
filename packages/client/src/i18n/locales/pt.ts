@@ -3568,6 +3568,10 @@ jobTriggered: 'Job acionado',
   },
 
   changelog: {
+    new_0_8_14_1: "Corrigido o problema de correções de tarefas Bot abrirem outra conversa: descreva naturalmente um novo objetivo ou abordagem e o Bot responsável continuará na tarefa, Agent, espaço de trabalho e conversa originais, preservando o histórico e as restrições aplicáveis (#3656)",
+    new_0_8_14_2: "As correções aguardam a parada do trabalho anterior, da verificação vinculada e do tratamento de resultados antigos antes de seguir o pedido completo mais recente. Falhas de parada preservam o pedido para nova tentativa e recuperação após reiniciar; vale a última correção, sem interferência de entradas ou resultados obsoletos (#3656)",
+    new_0_8_14_3: "Complementos compatíveis continuam na fila em ordem na mesma conversa; uma parada explícita cancela uma correção pendente. Tarefas com aceitação mantêm critérios e predefinições e passam por nova verificação dos requisitos revisados (#3656)",
+    new_0_8_14_4: "As correções mantêm o histórico e o campo de mensagem, mostram estados de parada e erro, preservam rascunhos quando pedidos obsoletos são rejeitados e protegem correções salvas contra a remoção comum da fila (#3656)",
     new_0_8_13_1: "Os cartões de Agent mostram o esforço de raciocínio salvo; a atividade usa contagens oficiais do servidor e preserva a identidade do runtime da execução selecionada, com ícones neutros para runtimes desconhecidos (#3641, #3634)",
     new_0_8_13_2: "Conversas de tarefas de Agent usam uma coluna direita redimensionável no desktop, com teclado, largura memorizada e RTL. Espaço de trabalho, terminal e navegador compartilham um painel ligado à sessão da tarefa atual; telas estreitas usam sobreposição (#3641)",
     new_0_8_13_3: "Restaurados os ícones grandes e arredondados de Agent nos cartões de resultado, mantendo os avatares pequenos e circulares na atividade e nas listas (#3640)",
