@@ -24,6 +24,7 @@ import { deliverPersonStages, recoverPersonStages } from './stage-flows'
 import { personTaskPrompt } from './task-prompt'
 import { dispatchPersonInsertion } from './task-queue'
 import { advanceAutomaticAcceptances } from './automatic-acceptance'
+import { advancePersonRedirects, assertPersonRedirectConversation } from './task-redirection'
 
 const active = new Map<string, { run: PersonExecution; abort: AbortController }>()
 const busyTasks = new Set<string>()
@@ -80,7 +81,7 @@ async function coordinate(run: PersonExecution, nativeId: string, questionText: 
     return { recorded: true }
   }))
   const task = getPersonTask(run.owner_user_id, run.task_id)
-  const decisions = personDb().prepare("SELECT substr(question,1,300) AS question,substr(answer,1,600) AS answer,answered_by FROM person_interactions WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND session_id=?) AND state='answered' ORDER BY created_at DESC LIMIT 6").all(task.id,run.session_id)
+  const decisions = personDb().prepare("SELECT substr(question,1,300) AS question,substr(answer,1,600) AS answer,answered_by FROM person_interactions WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND session_id=? AND requirements_revision=?) AND state='answered' ORDER BY created_at DESC LIMIT 6").all(task.id,run.session_id,run.requirements_revision)
   await runPersonModel(run.owner_user_id, 'coordinator', [{ role: 'user', content: JSON.stringify({ task: { title: task.title, requirements: JSON.parse(task.requirements_json) }, question: question.question, current_input: run.input_json ? JSON.parse(run.input_json) : undefined, choices, decisions }) }], tools, signal,
     'You answer a delegated agent on behalf of Person within the existing task scope. Use bot_interaction_reply once. Read relevant evidence when needed. Do not ask the human about routine implementation choices.',
     event => personEvent(run, 'coordinator.event', event), () => { current(run); requirePersonWorkspace(run.workspace) }, task.session_id, run.workspace)
@@ -122,17 +123,21 @@ async function execute(run: PersonExecution, abort: AbortController) {
       run.workspace = workspace
     }
     personDb().prepare('UPDATE sessions SET workspace=? WHERE id=? AND CAST(studio_user_id AS TEXT)=?').run(workspace, run.session_id, String(userId))
-    const decisions = personDb().prepare("SELECT question,answer,answered_by FROM person_interactions WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND session_id=?) AND state='answered' ORDER BY created_at DESC LIMIT 10").all(task.id,run.session_id) as unknown as Pick<PersonInteraction, 'question' | 'answer' | 'answered_by'>[]
+    const decisions = personDb().prepare("SELECT question,answer,answered_by FROM person_interactions WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND session_id=? AND requirements_revision=?) AND state='answered' ORDER BY created_at DESC LIMIT 10").all(task.id,run.session_id,run.requirements_revision) as unknown as Pick<PersonInteraction, 'question' | 'answer' | 'answered_by'>[]
     const requirements = personRequirements(task)
     const description = personTaskPrompt(task, decisions)
     const input = run.input_json ? JSON.parse(run.input_json) as ContentBlock[] : undefined
+    const corrected = !!personDb().prepare("SELECT 1 FROM person_task_redirects WHERE task_id=? AND execution_id=? AND requirements_revision=? AND state='completed'")
+      .get(task.id,run.id,run.requirements_revision)
+    if (corrected) assertPersonRedirectConversation(run)
     // A new conversation needs its task brief; an existing one already has that context.
     const prompt = input
-      ? run.session_id === personExecutionSessionId(run.id) ? [{ type: 'text' as const, text: description }, ...input] : input
+      ? corrected ? [{ type:'text' as const,text:`The user has replaced the previous requirements for this same task. Continue in this conversation using the complete current brief below. Earlier conflicting goals and decisions are superseded; preserve applicable context and artifacts.\n\n${personTaskPrompt(task,[])}` },...input]
+        : run.session_id === personExecutionSessionId(run.id) ? [{ type: 'text' as const, text: description }, ...input] : input
       : description
     current(run)
     const executeTask = requirements.verification_for ? executeBotVerification : executePersonAcceptance
-    const result = await executeTask(run, { user: personUser(userId), selection, sessionId: run.session_id, workspace, prompt, displayInput: input ? undefined : description, signal: abort.signal,
+    const result = await executeTask(run, { user: personUser(userId), selection, sessionId: run.session_id, workspace, prompt, displayInput: corrected ? input : input ? undefined : description, signal: abort.signal,
       taskTimeoutMinutes: personSettings(userId).settings.taskTimeoutMinutes,
       onEvent: (kind, payload) => {
         try { requirePersonWorkspace(workspace) }
@@ -207,6 +212,7 @@ export async function tickPersonWork() {
   if (ticking) return
   ticking = true
   try {
+    advancePersonRedirects()
     expireBotAcceptances()
     await advanceAutomaticAcceptances()
     await deliverPersonResults()
@@ -230,7 +236,9 @@ export async function tickPersonWork() {
       if (!fenced.changes) continue
       db.prepare("UPDATE person_interactions SET state='expired',revision=revision+1 WHERE execution_id=? AND state='pending'").run(run.id)
     }
-    const queued = db.prepare("SELECT * FROM person_executions WHERE state='queued' ORDER BY created_at").all() as unknown as PersonExecution[]
+    const queued = db.prepare(`SELECT e.* FROM person_executions e JOIN session_tasks t ON t.id=e.task_id
+      WHERE e.state='queued' AND e.requirements_revision=t.requirements_revision
+      AND NOT EXISTS(SELECT 1 FROM person_task_redirects r WHERE r.task_id=t.id AND r.state IN ('waiting','cancelling')) ORDER BY e.created_at`).all() as unknown as PersonExecution[]
     for (const next of queued) {
       if (active.size >= 12) break
       if (busyTasks.has(next.task_id)) continue

@@ -20592,7 +20592,7 @@
           "Person"
         ],
         "summary": "Get chat",
-        "description": "Open the selected account-owned execution conversation. Each fresh task start and scheduled occurrence has an independent session. Returns recent executions, task and session metadata for standard socket resume. It stays excluded from ordinary session lists. Read-only history is permitted to its owner; direct run, abort and other session mutations remain forbidden. Enabled tasks also return acceptance with immutable snapshot, state/reason/deadline and ordered attempts containing actual verifier session/run IDs, ordinary report text, Bot decision/actor receipt, errors and host-computed evidence path/size/SHA-256. Statuses include pending, developing, awaiting_dispatch, verification_pending, awaiting_review, repair_required, passed, failed, blocked and interrupted. No independent verification is claimed when the native run identity or evidence is missing.",
+        "description": "Open the selected account-owned execution conversation. Each fresh task start and scheduled occurrence has an independent session. Returns recent conversation entries, task and session metadata for standard socket resume. Corrections reuse the original conversation, preserving its messages and native session identity. It stays excluded from ordinary session lists. Read-only history is permitted to its owner; direct run, abort and other session mutations remain forbidden. Enabled tasks also return acceptance with immutable snapshot, state/reason/deadline and ordered attempts containing actual verifier session/run IDs, ordinary report text, Bot decision/actor receipt, errors and host-computed evidence path/size/SHA-256. Statuses include pending, developing, awaiting_dispatch, verification_pending, awaiting_review, repair_required, passed, failed, blocked and interrupted. No independent verification is claimed when the native run identity or evidence is missing.",
         "operationId": "taskChat",
         "security": [
           {
@@ -20633,8 +20633,8 @@
         "tags": [
           "Person"
         ],
-        "summary": "Create chat",
-        "description": "Continue a non-closed task in the conversation selected by execution_id, or the current execution when omitted. Background schedules start fresh conversations; follow-ups retain the selected conversation. Running work queues follow-ups durably in FIFO order; completed tasks reopen. Stopping, stale revisions and a full queue return 409. Results return to the task-owning Person conversation, including cross-conversation instructions.",
+        "summary": "Send a natural-language task follow-up",
+        "description": "The server compares this user input with the saved goal and conversation. Compatible additions queue normally; a replacement instruction updates the goal and title, invalidates obsolete pending work/results, and waits for confirmed termination before continuing. No intent/mode parameter is needed. Rejected or unclear classification never silently starts replacement work; retry with the same idempotency key. Observed revision and execution checks remain authoritative. Corrections stop the current execution, then send the latest complete requirements in the SAME task conversation after native termination. Earlier execution links retain historical receipts in this same conversation; fresh task controls target the current execution. A separate obsolete conversation remains readable but cannot receive new work. An explicit stop-only instruction uses the existing stop operation without creating a replacement.",
         "operationId": "taskContinue",
         "security": [
           {

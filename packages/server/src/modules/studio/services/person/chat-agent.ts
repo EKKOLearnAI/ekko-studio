@@ -17,6 +17,7 @@ import { personSessionDirectory, personSessionIds, requirePersonSession } from '
 import { recordSessionUsage } from '../usage/usage-recorder'
 import { capturePersonMemoryRequest, personReturnMemoryInput } from './return-memory'
 import type { PersonResultIdentity } from '../../contracts/person-session'
+import { registerPersonReturnTurn } from './delivery'
 
 export function personChatBusy(userId: number, sessionId?: string): boolean {
   const server = getChatRunServer()
@@ -107,11 +108,13 @@ The current:true role is YOU: requests naming it are your work. Names are labels
       if (user.role !== 'super_admin' && !user.profiles.includes(selection.profile)) throw personError('Resource permission revoked', 403)
     },
   })
-  if (!stageContext) return agent
-  return { ...agent,personStageContext:stageContext,async run(input: Parameters<typeof agent.run>[0]) {
-    assertPersonStage(userId,stageContext,sessionId)
-    const turn = registerPersonStageTurn(stageContext)
-    try { return await agent.run({ ...input,signal:input.signal ? AbortSignal.any([input.signal,turn.signal]) : turn.signal }) }
-    finally { turn.release() }
+  if (!stageContext && !returnExecutionId) return agent
+  return { ...agent,...(stageContext ? {personStageContext:stageContext} : {}),async run(input: Parameters<typeof agent.run>[0]) {
+    if (stageContext) assertPersonStage(userId,stageContext,sessionId)
+    const returned = returnExecutionId ? registerPersonReturnTurn(userId,returnExecutionId) : undefined
+    const turn = stageContext ? registerPersonStageTurn(stageContext) : undefined
+    const signals = [input.signal,returned?.signal,turn?.signal].filter((signal): signal is AbortSignal => !!signal)
+    try { return await agent.run({ ...input,signal:AbortSignal.any(signals) }) }
+    finally { turn?.release();returned?.release() }
   } }
 }

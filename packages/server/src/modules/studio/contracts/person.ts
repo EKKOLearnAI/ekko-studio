@@ -70,6 +70,8 @@ export interface PersonTask {
   execution_selection_json?: string | null
   execution_state?: PersonRunState | 'idle'
   pending_count?: number
+  redirect_state?: 'waiting' | 'cancelling' | 'completed' | 'cancelled' | null
+  redirect_error?: string | null
 }
 export interface PersonExecution {
   /** Fixed at admission; Bot settings and role transfers never rewrite this path. */

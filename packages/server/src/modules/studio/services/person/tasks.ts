@@ -11,7 +11,7 @@ import { logger } from '../../public/logging'
 import { personTurnWorkspace } from './workspace'
 import { validatePersonSelection } from './catalog'
 import { selectPersonExecutionAgent } from './agents'
-import { savePersonTaskOrigin } from './delivery'
+import { savePersonTaskOrigin, assertPersonDeliveryOrigin, stopPersonTaskReturns } from './delivery'
 import { requirePersonSession } from '../../repositories/person-session-store'
 import { personRequirements } from '../../contracts/person-flow'
 import { advancePersonFlow, assertPersonTaskActor, plannedPersonFlow, stopPersonFlow } from './task-flow'
@@ -31,6 +31,7 @@ function requestStop(userId: number, taskId: string, executionId: string) {
   if (run.state !== 'stopping') {
     const now = Date.now()
     const db = personDb()
+    db.prepare("UPDATE person_task_redirects SET state='cancelling',updated_at=? WHERE task_id=? AND state='waiting'").run(now,taskId)
     db.prepare('UPDATE person_executions SET state=?,generation=generation+1,updated_at=? WHERE id=?')
       .run(['pending','queued'].includes(run.state) ? 'interrupted' : 'stopping', now, run.id)
     db.prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND state='pending')").run(now, taskId)
@@ -100,6 +101,7 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
   if(action==='record_acceptance' && boundTask) throw personError('Only the user-facing Bot can record acceptance',403)
   const decision=action==='record_acceptance' ? await prepareBotAcceptanceDecision(userId,getPersonTask(userId,String(input.task_id)),input,origin) : undefined
   const result = personOperation(userId, `task:${key}`, operationInput, () => {
+    assertPersonDeliveryOrigin(userId,origin)
     if (origin?.stage) {
       const { stage } = assertPersonStage(userId,origin.stage,origin.sessionId)
       if (targetSession !== stage.session_id || ['adopt','advance'].includes(action)) throw personError('Stage workers must belong to the receiving role',403)
@@ -200,6 +202,7 @@ export function personOperationKey() { return randomUUID() }
 /** Deletion cancels every occurrence and follow-up, and waits for native exit before removing records. */
 export async function stopPersonSessionTasks(userId: number, sessionId: string) {
   const runs = personTransaction(() => {
+    personDb().prepare("UPDATE person_task_redirects SET state='cancelling' WHERE task_id IN (SELECT id FROM session_tasks WHERE owner_user_id=? AND session_id=?) AND state='waiting'").run(userId,sessionId)
     personDb().prepare("UPDATE person_schedules SET state='cancelled',revision=revision+1 WHERE task_id IN (SELECT id FROM session_tasks WHERE owner_user_id=? AND session_id=?)").run(userId, sessionId)
     personDb().prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id IN (SELECT e.id FROM person_executions e JOIN session_tasks t ON t.id=e.task_id WHERE t.owner_user_id=? AND t.session_id=?)").run(userId, sessionId)
     const tasks = personDb().prepare('SELECT id FROM session_tasks WHERE owner_user_id=? AND session_id=?').all(userId, sessionId)
@@ -211,7 +214,16 @@ export async function stopPersonSessionTasks(userId: number, sessionId: string) 
         if (result.execution.state === 'stopping') stopping.push(result.execution)
       }
     }
+    // A pending correction can hide an older stopping worker from execution selection.
+    for (const run of personDb().prepare(`SELECT e.* FROM person_executions e WHERE e.owner_user_id=? AND e.state='stopping'
+      AND (e.task_id IN (SELECT id FROM session_tasks WHERE owner_user_id=? AND session_id=?) OR
+        e.task_id IN (SELECT l.verification_task_id FROM person_acceptance_tasks l JOIN session_tasks t ON t.id=l.development_task_id WHERE t.owner_user_id=? AND t.session_id=?))`)
+      .all(userId,userId,sessionId,userId,sessionId) as unknown as PersonExecution[]) {
+      if (!stopping.some(item => item.id === run.id)) stopping.push(run)
+    }
     return stopping
   })
   await Promise.all(runs.map(acknowledgePersonStop))
+  for (const task of personDb().prepare('SELECT id FROM session_tasks WHERE owner_user_id=? AND session_id=?').all(userId,sessionId)) await Promise.all(stopPersonTaskReturns(userId,String(task.id)))
+  personDb().prepare("UPDATE person_task_redirects SET state='cancelled' WHERE state='cancelling' AND task_id IN (SELECT id FROM session_tasks WHERE owner_user_id=? AND session_id=?)").run(userId,sessionId)
 }

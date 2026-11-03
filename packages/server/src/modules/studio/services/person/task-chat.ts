@@ -8,7 +8,7 @@ import { getPersonTask, getPersonExecution, taskPersonConversations, personDb, p
 import { getSession } from '../../repositories/session-store'
 import { personUpdated } from '../../repositories/person-updates'
 import { personUser, validatePersonSelection } from './catalog'
-import { savePersonTaskOrigin } from './delivery'
+import { savePersonTaskOrigin, assertPersonDeliveryOrigin } from './delivery'
 import { requirePersonSession } from '../../repositories/person-session-store'
 import { personRequirements } from '../../contracts/person-flow'
 import { assertPersonTaskActor } from './task-flow'
@@ -39,17 +39,16 @@ export async function personTaskChat(userId: number, taskId: string, executionId
     .get(userId,taskId,id) as unknown as Pick<PersonExecution,'id'|'session_id'|'state'|'created_at'|'occurrence_id'> | undefined
   const execution = selectedId ? read(selectedId) : null
   if (selectedId && !execution) throw personError('Execution not found', 404)
+  const current = task.execution_id ? read(task.execution_id) : undefined
   const session = execution ? ownedPersonTaskSession(userId, execution.session_id).session : null
   const executions = taskPersonConversations(userId, taskId)
-  // Queued follow-ups can be newer than the active turn in the same conversation.
-  const current = task.execution_id ? read(task.execution_id) : undefined
   if (current && !executions.some(run => run.id === current.id)) executions.unshift(current)
   // Include a selected older conversation even when it falls outside the recent page.
   if (execution && !executions.some(run => run.session_id === execution.session_id)) executions.push(execution)
   return { task: { ...task, running: !!task.running }, session, execution: execution || null, executions, acceptance: personAcceptanceDetail(userId,taskId,execution?.id), pending: pendingPersonInputs(userId, taskId, session?.id), ...personTaskQueue(userId, taskId, session?.id || '') }
 }
 
-function chatInput(value: unknown): ContentBlock[] {
+export function personTaskInput(value: unknown): ContentBlock[] {
   if (!Array.isArray(value) || !value.length || value.length > 50 || JSON.stringify(value).length > 100_000) throw personError('Invalid input')
   return value.map(block => {
     if (!block || typeof block !== 'object') throw personError('Invalid input block')
@@ -75,8 +74,9 @@ export async function continuePersonTask(userId: number, taskId: string, body: R
     const current = getPersonTask(userId, taskId)
     return { task: { ...current, running: !!current.running }, execution, pending: pendingPersonInputs(userId, taskId, execution.session_id) }
   }
-  const input = chatInput(body.input)
+  const input = personTaskInput(body.input)
   const result = personOperation(userId, key, request, () => {
+    assertPersonDeliveryOrigin(userId,origin)
     const stage = assertPersonStageTask(userId,taskId)
     if (origin?.stage) {
       assertPersonStage(userId,origin.stage,origin.sessionId)
@@ -104,7 +104,7 @@ export async function continuePersonTask(userId: number, taskId: string, body: R
     }
     requirePersonSession(userId, current.session_id)
     if (current.revision !== personRevision(body.expected_revision)) throw personError('Task changed; query it again', 409)
-    if (current.execution_state === 'stopping') throw personError('Task is stopping; wait for acknowledgement', 409)
+    if (current.execution_state === 'stopping' || current.redirect_state === 'cancelling') throw personError('Task is stopping; wait for acknowledgement', 409)
     if (Object.hasOwn(body, 'expected_execution_id') && body.expected_execution_id !== (current.execution_id || null)) throw personError('Execution changed; query the task again', 409)
     if (current.status === 'closed') throw personError('Reopen the task before continuing', 409)
     if (requirements.flow) personDb().prepare('UPDATE session_tasks SET requirements_json=? WHERE id=?').run(JSON.stringify(requirements), taskId)
@@ -114,6 +114,7 @@ export async function continuePersonTask(userId: number, taskId: string, body: R
     const next = getPersonTask(userId, taskId)
     const target = body.execution_id ? getPersonExecution(userId, personText(body.execution_id, 'execution_id', 100)) : undefined
     if (target && target.task_id !== taskId) throw personError('Execution not found', 404)
+    if (target && target.requirements_revision !== current.requirements_revision && target.session_id !== (current.execution_id ? getPersonExecution(userId,current.execution_id).session_id : undefined)) throw personError('This conversation was superseded; open the current task', 409)
     const automaticRepair=automaticAcceptance(acceptance) && acceptance?.state==='repair_required'
     const execution = enqueuePersonExecution(next, automaticRepair ? getPersonExecution(userId,acceptance.execution_id).occurrence_id : null, input, true, target?.session_id)
     if (automaticRepair) {

@@ -1,5 +1,6 @@
 export const personMessages = {
   "en": {
+    "redirectTaskWaiting": "Stopping the previous work, then continuing with your latest request.",
     "deleteScheduleConfirm": "Delete this schedule? Future triggers stop. Existing tasks, execution history and running work are kept.",
     "executionHistory": "Execution history",
     "noExecution": "Start the task to open its execution conversation.",
@@ -171,6 +172,7 @@ export const personMessages = {
     "compressionDisabled": "Automatic compression is disabled in global settings. Model context limits still apply.",
   },
   "zh": {
+    "redirectTaskWaiting": "正在停止之前的工作，随后按最新要求继续。",
     "deleteScheduleConfirm": "删除这个定时计划？将不再触发后续执行，已有任务、执行记录及正在运行的工作会保留。",
     "executionHistory": "执行记录",
     "noExecution": "启动任务后即可查看执行对话。",
@@ -342,6 +344,7 @@ export const personMessages = {
     "compressionDisabled": "全局设置已关闭自动压缩，仍受模型上下文上限约束。",
   },
   "zh-TW": {
+    "redirectTaskWaiting": "正在停止先前的工作，隨後按最新要求繼續。",
     "deleteScheduleConfirm": "刪除此排程？將不再觸發後續執行，現有任務、執行記錄及正在執行的工作會保留。",
     "executionHistory": "執行記錄",
     "noExecution": "啟動任務後即可查看執行對話。",
@@ -513,6 +516,7 @@ export const personMessages = {
     "compressionDisabled": "全域設定已關閉自動壓縮，仍受模型上下文上限限制。",
   },
   "ja": {
+    "redirectTaskWaiting": "前の作業を停止してから、最新のご依頼に沿って続行します。",
     "deleteScheduleConfirm": "このスケジュールを削除しますか？今後の実行は停止します。既存のタスク、実行履歴、実行中の作業は保持されます。",
     "executionHistory": "実行履歴",
     "noExecution": "タスクを開始すると実行の会話を表示できます。",
@@ -684,6 +688,7 @@ export const personMessages = {
     "compressionDisabled": "全体設定で自動圧縮が無効です。モデルのコンテキスト上限は適用されます。",
   },
   "ko": {
+    "redirectTaskWaiting": "이전 작업을 중지한 뒤 최신 요청에 따라 계속합니다.",
     "deleteScheduleConfirm": "이 일정을 삭제할까요? 이후 예약 실행은 중지됩니다. 기존 작업, 실행 기록 및 실행 중인 작업은 유지됩니다.",
     "executionHistory": "실행 기록",
     "noExecution": "작업을 시작하면 실행 대화를 볼 수 있습니다.",
@@ -855,6 +860,7 @@ export const personMessages = {
     "compressionDisabled": "전역 설정에서 자동 압축이 꺼져 있습니다. 모델 컨텍스트 한도는 계속 적용됩니다.",
   },
   "fr": {
+    "redirectTaskWaiting": "Arrêt du travail précédent, puis poursuite selon votre dernière demande.",
     "deleteScheduleConfirm": "Supprimer ce programme ? Les déclenchements futurs cessent. Les tâches, l’historique et les travaux en cours sont conservés.",
     "executionHistory": "Historique des exécutions",
     "noExecution": "Démarrez la tâche pour ouvrir sa conversation.",
@@ -1026,6 +1032,7 @@ export const personMessages = {
     "compressionDisabled": "La compression automatique est désactivée dans les paramètres globaux. Les limites du modèle restent applicables.",
   },
   "es": {
+    "redirectTaskWaiting": "Deteniendo el trabajo anterior para continuar con tu última petición.",
     "deleteScheduleConfirm": "¿Eliminar esta programación? Se detendrán las activaciones futuras. Se conservarán las tareas, el historial y el trabajo en curso.",
     "executionHistory": "Historial de ejecuciones",
     "noExecution": "Inicia la tarea para abrir su conversación.",
@@ -1197,6 +1204,7 @@ export const personMessages = {
     "compressionDisabled": "La compresión automática está desactivada en los ajustes globales. Se mantienen los límites del modelo.",
   },
   "de": {
+    "redirectTaskWaiting": "Die bisherige Arbeit wird gestoppt; danach geht es mit Ihrer neuesten Anfrage weiter.",
     "deleteScheduleConfirm": "Diesen Zeitplan löschen? Künftige Auslösungen enden. Aufgaben, Ausführungsverlauf und laufende Arbeiten bleiben erhalten.",
     "executionHistory": "Ausführungsverlauf",
     "noExecution": "Starten Sie die Aufgabe, um ihre Unterhaltung zu öffnen.",
@@ -1368,6 +1376,7 @@ export const personMessages = {
     "compressionDisabled": "Automatische Komprimierung ist global deaktiviert. Die Kontextgrenzen des Modells gelten weiterhin.",
   },
   "pt": {
+    "redirectTaskWaiting": "Parando o trabalho anterior para continuar com seu pedido mais recente.",
     "deleteScheduleConfirm": "Excluir este agendamento? As próximas execuções deixam de ser acionadas. Tarefas, histórico e trabalhos em andamento são mantidos.",
     "executionHistory": "Histórico de execuções",
     "noExecution": "Inicie a tarefa para abrir a conversa.",
@@ -1539,6 +1548,7 @@ export const personMessages = {
     "compressionDisabled": "A compressão automática está desativada nos ajustes globais. Os limites do modelo continuam valendo.",
   },
   "ru": {
+    "redirectTaskWaiting": "Останавливаем прежнюю работу, затем продолжим по вашему последнему запросу.",
     "deleteScheduleConfirm": "Удалить расписание? Новые запуски прекратятся. Задачи, история запусков и текущая работа сохранятся.",
     "executionHistory": "История запусков",
     "noExecution": "Запустите задачу, чтобы открыть её диалог.",
@@ -1710,6 +1720,7 @@ export const personMessages = {
     "compressionDisabled": "Автоматическое сжатие отключено в общих настройках. Ограничения контекста модели сохраняются.",
   },
   "ar": {
+    "redirectTaskWaiting": "جارٍ إيقاف العمل السابق، ثم المتابعة وفقًا لطلبك الأخير.",
     "deleteScheduleConfirm": "هل تريد حذف هذا الجدول؟ ستتوقف عمليات التشغيل المستقبلية. ستبقى المهام وسجل التنفيذ والعمل الجاري محفوظة.",
     "executionHistory": "سجل التنفيذ",
     "noExecution": "ابدأ المهمة لفتح محادثة تنفيذها.",
@@ -1881,6 +1892,7 @@ export const personMessages = {
     "compressionDisabled": "الضغط التلقائي معطل في الإعدادات العامة. تظل حدود سياق النموذج سارية.",
   },
   "tr": {
+    "redirectTaskWaiting": "Önceki çalışma durduruluyor, ardından son isteğinize göre devam edilecek.",
     "deleteScheduleConfirm": "Bu zamanlama silinsin mi? Gelecekteki tetiklemeler durur. Görevler, çalıştırma geçmişi ve devam eden işler korunur.",
     "executionHistory": "Çalıştırma geçmişi",
     "noExecution": "Yürütme konuşmasını açmak için görevi başlatın.",
