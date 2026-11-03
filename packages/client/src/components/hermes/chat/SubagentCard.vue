@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/hermes/chat'
 import type { SubagentStream, SubagentStreamEntry } from '@/stores/hermes/chat'
-import { openSubagentStream, subagentIdFromToolCall } from '@/utils/hermes/subagent-stream'
+import { openSubagentStream, subagentIdFromToolCall, subagentBatchNumber } from '@/utils/hermes/subagent-stream'
 
 const props = defineProps<{ toolCallId?: string; sessionId?: string }>()
 
@@ -26,6 +26,11 @@ const pos = computed(() => {
   const s = stream.value
   if (!s) return ''
   return `${s.taskIndex + 1}/${Math.max(1, s.taskCount)}`
+})
+const batchNo = computed(() => {
+  const s = stream.value
+  if (!s?.runId) return null
+  return subagentBatchNumber([...chatStore.subagentStreams.values()], s.sessionId, s.runId)
 })
 
 // running 时每秒 tick，显示实时耗时
@@ -109,7 +114,7 @@ function openDetail(ev?: Event) { ev?.stopPropagation(); if (sid.value) openSuba
         <svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </span>
       <div class="sc-titles">
-        <div class="sc-kicker">{{ t('subagent.title') }}<span v-if="pos"> · {{ pos }}</span></div>
+        <div class="sc-kicker">{{ t('subagent.title') }}<span v-if="batchNo"> · {{ t('subagent.batch', { n: batchNo }) }}</span><span v-if="pos"> · {{ pos }}</span></div>
         <div class="sc-goal" dir="auto">{{ goal }}</div>
       </div>
       <span class="badge" :class="status">{{ statusLabel }}</span>
