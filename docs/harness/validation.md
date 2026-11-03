@@ -24,8 +24,8 @@ assertions still fail. This does not exempt new features from adding tests.
 - Keep setup local to the feature; avoid loading complete business runtimes for
   simple cases and duplicating source-level architecture checks.
 - Avoid exact source-string/CSS assertions and exhaustive OS/theme/viewport products.
-- Build CI automatically runs all current Vitest and Playwright tests; no separate
-  workflow is needed when adding new feature tests.
+- Test and E2E CI automatically run all current Vitest and Playwright tests;
+  adding new feature tests does not require editing either workflow.
 - For workflow changes, run `actionlint` when available. For dependency changes,
   run `npm ci --ignore-scripts` and keep the lockfile synchronized.
 
@@ -57,12 +57,16 @@ state and does not require a running Gateway.
 
 ## CI Mapping
 
-- Build installs dependencies, runs `npm run harness:check`, `npm test`, the
-  production build and `npm run test:e2e` on pushes to `main` and pull requests
-  targeting `main` or `base`. Chromium is installed only when browser test files
-  are present. Any test failure fails the job. Coverage is not required.
+- Build (`build.yml`) runs `npm run harness:check` and the production build.
+- Test (`test.yml`) runs `npm test` and reports its own Test check.
+- E2E (`playwright.yml`) runs `npm run test:e2e` and reports its own E2E check.
+  Chromium is installed only when browser test files are present. HTML reports,
+  screenshots and traces are uploaded as available, including on test failure.
+- All three workflows run independently on pushes to `main` and pull requests
+  targeting `main` or `base`. Test and E2E also support manual dispatch. Any test
+  failure fails its own check. Coverage is not required.
 - The old Playwright shards and coding-agent, P2P and desktop-isolation test
-  workflows have been removed.
+  matrices remain removed.
 - The NPM lockfile workflow still verifies dependency lockfile synchronization.
 - Desktop/runtime/release workflows retain packaging, signing, artifact and
   isolated update-feed verification, without calls into the removed test suites.
