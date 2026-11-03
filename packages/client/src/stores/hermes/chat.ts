@@ -2812,9 +2812,25 @@ function createChatState(scopedSessionId?: string) {
       return
     }
 
-    const subagentId = String((evt as any).subagent_id || `${(evt as any).task_index ?? 0}`)
-    const streamKey = `${sessionId}:${subagentId}`
-    const currentStream = subagentStreams.value.get(streamKey)
+    let subagentId = String((evt as any).subagent_id || `${(evt as any).task_index ?? 0}`)
+    let streamKey = `${sessionId}:${subagentId}`
+    let currentStream = subagentStreams.value.get(streamKey)
+    // 卡死兜底：complete 事件的 subagent_id 与 start 不一致（Hermes 事件偶发缺失）时，
+    // 按 subagent_id 查不到 running stream，完成态刷不上 → 卡死。这里按 run_id + task_index
+    // 找同批次同序号的 running stream，复用它的 key，让 complete 落到正确的卡上。
+    if (eventName === 'subagent.complete' && !currentStream) {
+      const runId = String((evt as any).run_id || '')
+      const taskIndex = Number((evt as any).task_index ?? -1)
+      const fallback = [...subagentStreams.value.values()].find(s =>
+        s.sessionId === sessionId && s.status === 'running'
+        && s.taskIndex === taskIndex && (!runId || s.runId === runId),
+      )
+      if (fallback) {
+        subagentId = fallback.subagentId
+        streamKey = `${sessionId}:${subagentId}`
+        currentStream = fallback
+      }
+    }
     const nextStream = reduceSubagentStream(currentStream, sessionId, evt)
     if (nextStream === currentStream) return
     subagentStreams.value.set(streamKey, nextStream)
