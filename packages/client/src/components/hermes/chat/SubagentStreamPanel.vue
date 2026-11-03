@@ -199,27 +199,27 @@ onBeforeUnmount(stopElapsedTimer)
           <span class="subagent-live-dot" :class="{ active: stream?.status === 'running' }" aria-hidden="true"></span>
           <span>{{ t('subagent.title') }}</span>
           <span v-if="taskPosition" class="subagent-task-position">{{ taskPosition }}</span>
+          <div class="subagent-header-actions">
+            <span v-if="stream" class="subagent-status" :class="`status-${statusKey(stream.status)}`">
+              {{ statusText() }}
+            </span>
+            <button
+              type="button"
+              class="subagent-close"
+              :aria-label="t('subagent.close')"
+              :title="t('subagent.close')"
+              @click="emit('close')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="subagent-stream-title" dir="auto">{{ stream?.goal || t('subagent.noGoal') }}</div>
         <div v-if="metrics.length" class="subagent-stream-metrics">
           <span v-for="metric in metrics" :key="metric.key">{{ metric.value }}</span>
         </div>
-      </div>
-      <div class="subagent-header-actions">
-        <span v-if="stream" class="subagent-status" :class="`status-${statusKey(stream.status)}`">
-          {{ statusText() }}
-        </span>
-        <button
-          type="button"
-          class="subagent-close"
-          :aria-label="t('subagent.close')"
-          :title="t('subagent.close')"
-          @click="emit('close')"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
-        </button>
       </div>
     </header>
 
@@ -359,6 +359,7 @@ onBeforeUnmount(stopElapsedTimer)
   gap: calc(8px * var(--spacing-scale, 1));
   flex: 0 0 auto;
   min-width: 0;
+  margin-left: auto;
 }
 
 .subagent-status {
