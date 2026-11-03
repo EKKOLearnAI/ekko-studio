@@ -86,6 +86,7 @@ export function tickPersonSchedules(now = Date.now()) {
       let state = 'skipped'; let execution: string | null = null; let flow: string | null = null
       requirePersonSession(schedule.owner_user_id, schedule.session_id)
       const active = db.prepare("SELECT id FROM person_executions WHERE task_id=? AND state IN ('pending','queued','starting','stopping','running','waiting_person','waiting_user','waiting_approval')").get(schedule.task_id)
+        || db.prepare("SELECT 1 FROM person_task_redirects WHERE task_id=? AND state IN ('waiting','cancelling')").get(schedule.task_id)
         || db.prepare("SELECT 1 FROM person_acceptance a JOIN person_executions e ON e.id=a.execution_id WHERE a.task_id=? AND a.orchestration='bot_tasks' AND a.state NOT IN ('passed','failed','blocked','interrupted') AND e.rowid=(SELECT MAX(rowid) FROM person_executions WHERE task_id=a.task_id)").get(schedule.task_id)
       const task = schedule.task_id ? getPersonTask(schedule.owner_user_id, schedule.task_id) : undefined
       const activeFlow = db.prepare(`SELECT 1 FROM person_occurrences o JOIN person_flows f ON f.id=o.flow_id WHERE o.schedule_id=?

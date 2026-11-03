@@ -80,12 +80,15 @@ export function savePersonSettingsInTransaction(userId: number, settings: Person
   return personSettings(userId, sessionId)
 }
 const executionOrder = "CASE WHEN state IN ('finished','failed','interrupted') THEN 2 WHEN state='pending' THEN 1 ELSE 0 END,created_at DESC,rowid DESC"
-export const taskExecutionJoin = `LEFT JOIN person_executions selected_execution ON selected_execution.id=(
-  SELECT id FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1)`
+export const taskExecutionJoin = `LEFT JOIN person_executions selected_execution ON selected_execution.id=COALESCE((
+  SELECT id FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.requirements_revision=t.requirements_revision ORDER BY ${executionOrder} LIMIT 1),(
+  SELECT id FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id ORDER BY ${executionOrder} LIMIT 1))`
 const taskExecutionColumns = `
   json_extract(t.requirements_json, '$.creator_session_id') AS creator_session_id,
   (SELECT title FROM sessions s WHERE s.id=t.session_id) AS session_title,
   selected_execution.id AS execution_id,
+  (SELECT r.state FROM person_task_redirects r WHERE r.task_id=t.id) AS redirect_state,
+  (SELECT r.error FROM person_task_redirects r WHERE r.task_id=t.id) AS redirect_error,
   (SELECT a.state FROM person_acceptance a WHERE a.execution_id=selected_execution.id) AS acceptance_state,
   (SELECT a.reason FROM person_acceptance a WHERE a.execution_id=selected_execution.id) AS acceptance_reason,
   selected_execution.selection_json AS execution_selection_json,
@@ -122,10 +125,13 @@ export function updatePersonTask(userId: number, id: string, revision: number, r
   if (!changed.changes) throw personError('Task changed or is closed', 409)
   return getPersonTask(userId, id)
 }
-export function enqueuePersonExecution(task: PersonTask, occurrence: string | null = null, input?: import('../contracts/runs/session').ContentBlock[], followup = false, resumeSessionId?: string): PersonExecution {
+export function enqueuePersonExecution(task: PersonTask, occurrence: string | null = null, input?: import('../contracts/runs/session').ContentBlock[], followup = false, resumeSessionId?: string, deferredRedirect = false): PersonExecution {
   if (JSON.parse(task.requirements_json).flow?.stopped) throw personError('Flow is stopped', 409)
   requirePersonSession(task.owner_user_id, task.session_id)
   if (task.status !== 'open') throw personError('Task must be open', 409)
+  const redirect = personDb().prepare("SELECT state FROM person_task_redirects WHERE task_id=? AND state IN ('waiting','cancelling')").get(task.id)
+  if (redirect && (redirect.state === 'cancelling' || (!followup && !deferredRedirect))) throw personError('Task direction is changing; wait for confirmed stop',409)
+  if (deferredRedirect && redirect?.state !== 'waiting') throw personError('No pending task redirection',409)
   const previousAcceptance = task.execution_id ? personDb().prepare('SELECT * FROM person_acceptance WHERE execution_id=?').get(task.execution_id) : undefined
   if (previousAcceptance?.orchestration === 'bot_tasks' && !['passed','failed','blocked','interrupted'].includes(String(previousAcceptance.state))
     && !(followup && previousAcceptance.state === 'repair_required')) throw personError('Finish or stop the current acceptance before starting more development; use verify for pending acceptance',409)
@@ -133,13 +139,13 @@ export function enqueuePersonExecution(task: PersonTask, occurrence: string | nu
   if (JSON.stringify(priorInputs).length > 200_000) throw personError('Acceptance follow-up history is too large; consolidate requirements with an explicit task update',409)
   const id = randomUUID(); const now = Date.now()
   const active = personDb().prepare("SELECT id FROM person_executions WHERE task_id=? AND state IN ('pending','queued','starting','stopping','running','waiting_person','waiting_user','waiting_approval')").get(task.id)
-  if (active && !followup) throw personError('Task already has an active execution', 409)
+  if (active && !followup && !deferredRedirect) throw personError('Task already has an active execution', 409)
   if (Number(task.pending_count) >= 20) throw personError('Task follow-up queue is full', 409)
-  const previous = followup && task.execution_id ? getPersonExecution(task.owner_user_id, task.execution_id) : undefined
-  const sessionId = followup ? resumeSessionId || previous?.session_id || personExecutionSessionId(id) : personExecutionSessionId(id)
+  const previous = (followup || deferredRedirect) && task.execution_id ? getPersonExecution(task.owner_user_id, task.execution_id) : undefined
+  const sessionId = followup || deferredRedirect ? resumeSessionId || previous?.session_id || personExecutionSessionId(id) : personExecutionSessionId(id)
   const resumed = sessionId === personExecutionSessionId(id) ? undefined : personDb().prepare(
-    'SELECT workspace FROM person_executions WHERE task_id=? AND owner_user_id=? AND session_id=? AND requirements_revision=? ORDER BY created_at DESC,rowid DESC LIMIT 1')
-    .get(task.id, task.owner_user_id, sessionId, task.requirements_revision)
+    'SELECT workspace FROM person_executions WHERE task_id=? AND owner_user_id=? AND session_id=? AND (requirements_revision=? OR ?=1) ORDER BY created_at DESC,rowid DESC LIMIT 1')
+    .get(task.id, task.owner_user_id, sessionId, task.requirements_revision, deferredRedirect ? 1 : 0)
   const workspace = resumed ? String(resumed.workspace) : task.workspace
   if (sessionId === personExecutionSessionId(id)) {
     const selection = JSON.parse(task.selection_json) as PersonSelection
@@ -150,7 +156,7 @@ export function enqueuePersonExecution(task: PersonTask, occurrence: string | nu
       reasoning_effort: selection.reasoningEffort, workspace: task.workspace, push_enabled: false })
   } else if (!resumed) throw personError('Execution conversation is unavailable or its requirements changed', 409)
   personDb().prepare(`INSERT INTO person_executions(id,task_id,owner_user_id,requirements_revision,state,session_id,selection_json,created_at,updated_at,occurrence_id,input_json,workspace)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, task.id, task.owner_user_id, task.requirements_revision, active ? 'pending' : 'queued', sessionId, task.selection_json, now, now, occurrence, input ? JSON.stringify(input) : '', workspace)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(id, task.id, task.owner_user_id, task.requirements_revision, active || deferredRedirect ? 'pending' : 'queued', sessionId, task.selection_json, now, now, occurrence, input ? JSON.stringify(input) : '', workspace)
   const requirements = JSON.parse(task.requirements_json)
   if (requirements.acceptance?.enabled) {
     const carry = followup && previousAcceptance?.orchestration === 'bot_tasks' && previousAcceptance.state === 'repair_required'
@@ -168,6 +174,7 @@ export function promotePersonFollowups() {
   personDb().prepare(`UPDATE person_executions SET state='queued',updated_at=? WHERE id IN (
     SELECT e.id FROM person_executions e JOIN session_tasks t ON t.id=e.task_id
     WHERE e.state='pending' AND t.status='open' AND e.requirements_revision=t.requirements_revision
+    AND NOT EXISTS(SELECT 1 FROM person_task_redirects r WHERE r.task_id=t.id AND r.state IN ('waiting','cancelling'))
     AND e.rowid=(SELECT p.rowid FROM person_executions p WHERE p.task_id=e.task_id AND p.state='pending' ORDER BY queue_priority DESC,created_at,rowid LIMIT 1)
     AND NOT EXISTS(SELECT 1 FROM person_executions a WHERE a.task_id=e.task_id AND a.state IN ('queued','starting','stopping','running','waiting_person','waiting_user','waiting_approval'))
   )`).run(Date.now())
@@ -264,6 +271,7 @@ export function personBackgroundPendingCount(sessionId: string, reportingExecuti
     .get(sessionId, reportingExecutionId) as { n: number }).n)
 }
 export function personTaskRunning(taskId: string): boolean {
+  if (personDb().prepare("SELECT 1 FROM person_task_redirects WHERE task_id=? AND state IN ('waiting','cancelling')").get(taskId)) return true
   return !!personDb().prepare(`SELECT 1 FROM session_tasks t JOIN person_executions e
     ON e.task_id=t.id AND e.owner_user_id=t.owner_user_id WHERE t.id=? AND
     (e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')

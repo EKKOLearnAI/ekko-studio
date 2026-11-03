@@ -4,7 +4,8 @@ import type { Context } from 'koa'
 import { personError, personRevision, personText } from '../contracts/person'
 import { personSnapshot, configurePerson } from '../services/person/service'
 import { personUser, personCapabilities, personModelCatalog } from '../services/person/catalog'
-import { personTaskChat, continuePersonTask } from '../services/person/task-chat'
+import { personTaskChat } from '../services/person/task-chat'
+import { submitPersonTaskInput } from '../services/person/task-input'
 import { insertPersonTaskMessage, removePersonTaskMessage } from '../services/person/task-queue'
 import { applyPersonTask } from '../services/person/tasks'
 import { applyPersonSchedule } from '../services/person/schedules'
@@ -41,7 +42,7 @@ export const taskApply = (ctx: Context) => handle(ctx, (id, body) => applyPerson
 export const flows = (ctx: Context) => handle(ctx,(id,body)=>({ flows:body.flow_id ? [getPersonFlow(id,personText(body.flow_id,'flow_id',100))] : listPersonFlows(id,String(body.session_id || ''),Math.max(0,Number(body.offset)||0)) }))
 export const flowApply = (ctx: Context) => handle(ctx,(id,body)=>body.action === 'create' ? createPersonFlow(id,body) : controlPersonFlow(id,body))
 export const taskChat = (ctx: Context) => handle(ctx, id => personTaskChat(id, ctx.params.id, String(ctx.query.execution_id || '')))
-export const taskContinue = (ctx: Context) => handle(ctx, (id, body) => continuePersonTask(id, ctx.params.id, body))
+export const taskContinue = (ctx: Context) => handle(ctx, (id, body) => submitPersonTaskInput(id, ctx.params.id, body))
 export const taskInsert = (ctx: Context) => handle(ctx, (id, body) => insertPersonTaskMessage(id, ctx.params.id, body))
 export const taskRemove = (ctx: Context) => handle(ctx, (id, body) => removePersonTaskMessage(id, ctx.params.id, body))
 export const executions = (ctx: Context) => handle(ctx, id => ({ executions: taskPersonExecutions(id, ctx.params.id) }))

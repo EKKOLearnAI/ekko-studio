@@ -44,7 +44,7 @@ const sending = ref(false)
 const stopping = ref(false)
 const error = ref('')
 const lifetime = new AbortController()
-const disabled = computed(() => !ready.value || closing.value || sending.value || stopping.value || !!requestingInsertion.value || !!requestingRemoval.value || task.value?.execution_state === 'stopping' || task.value?.status === 'closed')
+const disabled = computed(() => !ready.value || closing.value || sending.value || stopping.value || !!requestingInsertion.value || !!requestingRemoval.value || task.value?.execution_state === 'stopping' || task.value?.redirect_state === 'cancelling' || task.value?.status === 'closed')
 const queueDisabled = computed(() => disabled.value || refreshing.value)
 const canRemove = computed(() => selectedIsCurrent.value && task.value?.status === 'open' && queueState.value.canRemove === true)
 const stopControl = computed(() => ({ active: selectedIsCurrent.value && personTaskCanStop(task.value), allowSend: true, pending: stopping.value || task.value?.execution_state === 'stopping', request: stopTask }))
@@ -76,11 +76,11 @@ async function send(text: string, attachments?: Attachment[]) {
   reads.cancel()
   try {
     const input = await buildContentBlocks(text, attachments, await uploadFiles(attachments || []))
-    const result = await personRequest<{ task: PersonTask; pending?: typeof pending.value }>(`/tasks/${encodeURIComponent(props.taskId)}/chat`, {
+    const result = await personRequest<{ task: PersonTask; execution?: PersonExecutionSummary; pending?: typeof pending.value }>(`/tasks/${encodeURIComponent(props.taskId)}/chat`, {
       input, execution_id: selectedExecutionId.value || undefined, expected_execution_id: task.value.execution_id || null, expected_revision: task.value.revision, idempotency_key: clientUuid(),
     }, 'POST', lifetime.signal)
     task.value = result.task; pending.value = result.pending || []
-    await refresh()
+    await refresh(result.execution?.id || '')
     return true
   } catch (e) { if (!lifetime.signal.aborted) { error.value = String(e); await refresh() }; return false }
   finally { sending.value = false }
@@ -161,7 +161,8 @@ defineExpose({ session, send, panelWidth: width, addFiles: (files: File[]) => co
       </header>
       <div class="task-chat-layout">
       <div class="task-chat-main">
-      <NAlert v-if="removalError || error || queueState.insertionError" type="error" class="task-chat-alert">{{ removalError || error || queueState.insertionError }}</NAlert>
+      <NAlert v-if="removalError || error || queueState.insertionError || task?.redirect_error" type="error" class="task-chat-alert">{{ removalError || error || queueState.insertionError || task?.redirect_error }}</NAlert>
+      <p v-if="task?.redirect_state === 'waiting'" role="status" class="task-chat-alert">{{ t('person.redirectTaskWaiting') }}</p>
       <NAlert v-if="loadError" type="error" class="task-chat-alert">
         {{ t('sessionTasks.loadFailed') }} <NButton size="small" :disabled="sending || stopping || !!requestingInsertion || !!requestingRemoval || refreshing" @click="refresh()">{{ t('sessionTasks.retry') }}</NButton>
       </NAlert>
@@ -170,7 +171,7 @@ defineExpose({ session, send, panelWidth: width, addFiles: (files: File[]) => co
         <NSelect v-if="executionOptions.length > 1" class="task-executions" :value="session?.id" :options="executionOptions"
           :disabled="sending || stopping || !!requestingInsertion || !!requestingRemoval || refreshing" :aria-label="t('person.executionHistory')" @update:value="value => refresh(executions.find(run => run.session_id === value)?.id)" />
         <PersonTaskConversation v-if="session" ref="conversationRef" :key="session.id" :session="session" :pending="pending" :send="send"
-          :can-insert="selectedIsCurrent && !!queueState.canInsert && !queueDisabled" :can-remove="canRemove" :queue-disabled="queueDisabled" :requesting-removal="requestingRemoval" :remove="remove" :insertion="queueState.insertion" :requesting-insertion="requestingInsertion" :insert="insert"
+          :can-insert="selectedIsCurrent && !!queueState.canInsert && !queueDisabled" :can-remove="canRemove" :protected-queue-id="queueState.protectedQueueId" :queue-disabled="queueDisabled" :requesting-removal="requestingRemoval" :remove="remove" :insertion="queueState.insertion" :requesting-insertion="requestingInsertion" :insert="insert"
           :disabled="disabled" :stop-control="stopControl" />
         <p v-else class="task-chat-alert">{{ t('person.noExecution') }}</p>
       </template>

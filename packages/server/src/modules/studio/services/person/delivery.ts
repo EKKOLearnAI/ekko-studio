@@ -11,6 +11,31 @@ import { assertPersonStage, personTaskStage } from '../../repositories/person-st
 import { failPersonStage } from './stage-flows'
 import { botAcceptanceContext, claimAutomaticReview, finishAutomaticReview } from './bot-acceptance'
 
+type ReturnTurn = { userId: number; executionId: string; controller: AbortController; finished: Promise<void> }
+const activeReturns = new Set<ReturnTurn>()
+
+/** A cancelled callback must unwind; a cancelled row or sent abort alone is not termination. */
+export function registerPersonReturnTurn(userId: number, executionId: string) {
+  if (!personDeliveryCurrent(userId,executionId)) throw personError('Result callback is no longer current',409)
+  let finish!: () => void
+  const turn: ReturnTurn = {userId,executionId,controller:new AbortController(),finished:new Promise(resolve=>{finish=resolve})}
+  activeReturns.add(turn)
+  return {signal:turn.controller.signal,release(){activeReturns.delete(turn);finish()}}
+}
+export function stopPersonTaskReturns(userId: number, taskId: string, currentRevision?: number): Promise<void>[] {
+  const stopped: Promise<void>[] = []
+  for (const turn of activeReturns) {
+    if (turn.userId !== userId) continue
+    const run = getPersonExecution(userId,turn.executionId)
+    const affected = run.task_id === taskId ? currentRevision === undefined || run.requirements_revision !== currentRevision
+      : !!personDb().prepare('SELECT 1 FROM person_acceptance_tasks WHERE development_task_id=? AND verification_task_id=?').get(taskId,run.task_id)
+    if (!affected) continue
+    turn.controller.abort(new Error('Task result superseded'))
+    stopped.push(turn.finished)
+  }
+  return stopped
+}
+
 export function savePersonTaskOrigin(userId: number, taskId: string, supplied?: PersonTaskOrigin) {
   const sessionId = getPersonTask(userId, taskId).session_id
   if (!ownsPersonSession(userId, getSession(sessionId))) throw personError('Task conversation not found', 404)
@@ -65,6 +90,10 @@ export function personDeliveryCurrent(userId: number, executionId: string, expec
   }
   if (flow && !personDb().prepare("SELECT 1 FROM person_deliveries WHERE execution_id=? AND state IN ('pending','queued')").get(executionId)) return false
   return !flow?.stopped && !flow?.completed && ownsPersonSession(userId, getSession(task.session_id)) && ['finished','failed'].includes(run.state) && task.status !== 'closed' && task.requirements_revision === run.requirements_revision
+}
+/** Recheck under the mutation transaction, after any model/resource validation awaits. */
+export function assertPersonDeliveryOrigin(userId: number, origin?: PersonTaskOrigin) {
+  if (origin?.returnExecutionId && !personDeliveryCurrent(userId,origin.returnExecutionId,origin.acceptanceReturnId || '')) throw personError('Result callback is no longer current',409)
 }
 export async function deliverPersonResults() {
   const db = personDb()

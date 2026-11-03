@@ -47,6 +47,7 @@ export function personHasExecutingTask(userId: number): boolean {
 
 /** Shared by activity rows and counts, including completed tasks still reporting. Alias: t. */
 export const PERSON_TASK_RUNNING_SQL = `EXISTS(SELECT 1 FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
+  OR EXISTS(SELECT 1 FROM person_task_redirects r WHERE r.task_id=t.id AND r.state IN ('waiting','cancelling'))
   OR EXISTS(SELECT 1 FROM person_deliveries d JOIN person_executions e ON e.id=d.execution_id WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND d.owner_user_id=t.owner_user_id AND d.state IN ('pending','queued'))
   OR EXISTS(SELECT 1 FROM person_acceptance_tasks l JOIN person_executions v ON v.task_id=l.verification_task_id
     WHERE l.development_task_id=t.id AND v.owner_user_id=t.owner_user_id AND v.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
