@@ -20,7 +20,7 @@ export async function personSnapshot(userId: number, sessionId = '') {
     active_agent_task_count: sessionId ? personBackgroundTaskCount(userId, sessionId) : 0, memories: await personMemories(userId),
     flows:sessionId ? listPersonFlows(userId,sessionId) : [],
     ...(sessionId ? personFlowActivity(userId,sessionId) : { active_flow_count:0,active_flows:[] }),
-    schedules: sessionId ? listPersonSchedules(userId, sessionId) : [], interactions: personInteractions(userId), busy,
+    schedules: listPersonSchedules(userId), interactions: personInteractions(userId), busy,
     history_revision: session.session?.history_revision ?? 0, can_clear: !!session.session && !busy && !personHasPendingWork(userId, sessionId) }
 }
 export async function configurePerson(userId: number, input: Record<string, unknown>) {

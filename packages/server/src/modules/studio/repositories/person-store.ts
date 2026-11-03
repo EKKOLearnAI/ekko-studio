@@ -238,7 +238,12 @@ export function answerPersonInteraction(userId: number, id: string, revision: nu
   return { ...question, answer, answered_by: actor, revision: revision + 1, state: 'answered' }
 }
 export function listPersonSchedules(userId: number, sessionId = ''): PersonSchedule[] {
-  return personDb().prepare("SELECT * FROM person_schedules WHERE owner_user_id=? AND (?='' OR session_id=?) ORDER BY created_at DESC LIMIT 50").all(userId, sessionId, sessionId) as unknown as PersonSchedule[]
+  return personDb().prepare(`SELECT p.*, s.title AS session_title, s.bot_type,
+    t.title AS task_title, COALESCE(CASE WHEN json_valid(t.requirements_json) THEN json_extract(t.requirements_json, '$.goal') END, t.summary) AS task_goal
+    FROM person_schedules p
+    LEFT JOIN sessions s ON s.id=p.session_id AND CAST(s.studio_user_id AS TEXT)=CAST(p.owner_user_id AS TEXT)
+    LEFT JOIN session_tasks t ON t.id=p.task_id AND t.owner_user_id=p.owner_user_id AND t.session_id=p.session_id
+    WHERE p.owner_user_id=? AND (?='' OR p.session_id=?) ORDER BY p.created_at DESC, p.id DESC`).all(userId, sessionId, sessionId) as unknown as PersonSchedule[]
 }
 
 /** Existing goals with recorded account ownership can be assigned to Person without making a duplicate. */

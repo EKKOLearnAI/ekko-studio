@@ -10,7 +10,7 @@ export interface PersonTask { redirect_state?: string | null; redirect_error?: s
 export interface PersonExecutionSummary { id: string; session_id: string; state: string; created_at: number; occurrence_id?: string | null }
 export interface PersonTaskQueueState { protectedQueueId?: string; canInsert?: boolean; canRemove?: boolean; insertion?: { queueId: string; phase: string } | null; insertionError?: string }
 export interface PersonTaskQueueSnapshot extends PersonTaskQueueState { task: PersonTask; pending: { id: string; input: { type: string; text?: string; name?: string }[] }[] }
-export interface PersonSchedule { id: string; mode: 'assistant' | 'worker'; task_id: string | null; session_id: string; title: string; goal: string; expression: string; timezone: string; next_at: number; state: string; revision: number }
+export interface PersonSchedule { id: string; mode: 'assistant' | 'worker'; task_id: string | null; session_id: string; session_title?: string | null; bot_type?: string | null; task_title?: string | null; task_goal?: string | null; title: string; goal: string; expression: string; timezone: string; next_at: number; state: string; revision: number }
 export interface PersonMemory { id: string; content: string; revision: number }
 export interface PersonQuestion { id: string; task_id: string | null; question: string; kind: string; choices_json: string; revision: number }
 export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed' }
