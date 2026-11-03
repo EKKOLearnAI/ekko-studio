@@ -18,6 +18,7 @@ import { useI18n } from "vue-i18n";
 import VirtualMessageList from "./VirtualMessageList.vue";
 import MessageItem from "./MessageItem.vue";
 import { positionTaskPlansAtTurnEnd } from "@/utils/task-plan";
+import { parseContentBlocks, blocksQueuePreview } from "@/utils/content-blocks";
 import LiveReasoningStatus from "./LiveReasoningStatus.vue";
 import ToolRunCard from "./ToolRunCard.vue";
 import MessageQueueFloatPanel from "./MessageQueueFloatPanel.vue";
@@ -407,7 +408,7 @@ const queuedMessages = computed(() => {
 });
 const queuedFloatItems = computed(() => queuedMessages.value.map(message => ({
   id: message.id,
-  text: queuedPreview(message.content),
+  text: queuedPreview(message),
 })));
 const activeQueueInsertion = computed(() => {
   const sid = chatStore.activeSessionId;
@@ -520,11 +521,16 @@ function queueInsertionTitle(messageId: string): string {
   return t("chat.queueInsertionStopping");
 }
 
-function queuedPreview(content: string): string {
-  const reference = parseMessageReference(content);
-  const visibleContent = reference?.reply || reference?.content || content;
-  const normalized = visibleContent.replace(/\s+/g, " ").trim();
+function queuedPreview(message: Message): string {
+  const blocks = parseContentBlocks(message.content);
+  if (blocks) return blocksQueuePreview(blocks);
+  const normalized = plainQueueText(message.content).replace(/\s+/g, " ").trim();
   return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized;
+}
+
+function plainQueueText(content: string): string {
+  const reference = parseMessageReference(content);
+  return reference?.reply || reference?.content || content;
 }
 
 function shouldAutoFollowBottom(threshold = 100): boolean {
