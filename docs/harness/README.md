@@ -17,6 +17,7 @@ agent can discover without chat history.
 - `DEVELOPMENT.md` remains the contributor rules and command reference.
 - `docs/harness/validation.md` maps change types to checks.
 - `docs/harness/worktree-runbook.md` explains isolated worktree development.
+- `docs/harness/task-artifacts.md` defines external task/report storage and safe cleanup; `scripts/task-artifacts.mjs` checks known leftovers without deleting anything.
 - `docs/harness/pr-review.md` provides a PR self-review checklist.
 - `docs/harness/person-task-acceptance.md` documents opt-in background-task acceptance, durable completion gates, supported surfaces and validation.
 - `docs/harness/person-task-redirection.md` documents direction corrections, queue/callback invalidation, confirmed-stop barriers and focused verification.

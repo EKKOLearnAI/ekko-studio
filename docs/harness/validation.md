@@ -1,5 +1,11 @@
 # Validation Guide
 
+Task reports and temporary verification files belong outside all checkouts.
+`npm run harness:check` includes the read-only artifact guard; use
+`npm run artifacts:check` for a standalone check and
+`npm test -- tests/harness/task-artifacts.test.ts` when changing the policy.
+See [task artifacts](task-artifacts.md) for report defaults, exemptions and limits.
+
 The legacy automated tests and fixtures have been removed. Every new feature
 must include small, focused tests; run the relevant files locally. See
 `tests/README.md`.

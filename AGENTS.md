@@ -10,6 +10,7 @@ and keep this file small enough to fit into every task context.
 - `docs/harness/README.md` - how this repository is prepared for agent work.
 - `docs/harness/validation.md` - which checks to run for each change type.
 - `docs/harness/worktree-runbook.md` - isolated local dev and test setup.
+- `docs/harness/task-artifacts.md` - external task/report directories, checks and safe cleanup.
 - `docs/harness/pr-review.md` - self-review checklist before pushing.
 - `docs/harness/server-module-boundaries.md` - target backend modules, ownership, and dependency rules.
 - `docs/harness/jev-integrations.md` - required switches, frontend configuration and registration for JEV consumers.
@@ -55,6 +56,7 @@ Empty suites are allowed during the reset; this does not waive new-feature tests
 - Add user-facing strings to every locale file.
 - Register every JEV business integration with its own switch and frontend configuration entry; explicitly register any enabled Studio default, keep standalone defaults off, and run `npm run harness:check`.
 - Do not mix unrelated refactors into a bug fix.
+- Keep one-off reports, temporary probes and test evidence outside all checkouts; use `npm run artifacts:new -- <task>` and `npm run artifacts:check`.
 - New UI must follow the theme surface contract in `docs/harness/frontend-ui.md`; do not expand the legacy style baseline to bypass checks.
 
 ## When The Agent Gets Stuck

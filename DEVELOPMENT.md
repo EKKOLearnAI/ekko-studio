@@ -153,3 +153,11 @@ Closes #123
 - `npm run build`
 - Focused tests for each new feature, including E2E for new browser journeys
 ```
+
+## Task Outputs
+
+Keep one-off reports, temporary scripts and test evidence outside every checkout.
+Use `npm run --silent artifacts:new -- <task>` for an owned external directory.
+`npm run artifacts:check` and the existing harness reject known report/scratch
+paths, including ignored files. See `docs/harness/task-artifacts.md` for supported
+test output locations, protected runtime/dependency areas, cleanup and limits.

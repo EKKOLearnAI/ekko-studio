@@ -41,3 +41,7 @@ jobs:
 
       - name: Run unit and integration tests
         run: npm test
+
+      - name: Check task artifact locations
+        if: ${{ !cancelled() }}
+        run: npm run artifacts:check

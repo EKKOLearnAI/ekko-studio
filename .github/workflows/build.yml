@@ -41,3 +41,7 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Check task artifact locations after build
+        if: ${{ !cancelled() }}
+        run: npm run artifacts:check
