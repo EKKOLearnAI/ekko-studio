@@ -1095,7 +1095,7 @@ export default {
   subagent: {
     title: 'Hintergrundaufgabe', noGoal: 'Unbenannte Hintergrundaufgabe', open: 'Live-Ausgabe der Hintergrundaufgabe öffnen', close: 'Ausgabe der Hintergrundaufgabe schließen',
     waiting: 'Warte auf Live-Ausgabe…', tool: 'Werkzeug', tools: '{count} Werkzeuge', tokens: '{input} ein · {output} aus',
-    started: 'Gestartet', running: 'Wird ausgeführt', completed: 'Abgeschlossen', failed: 'Fehlgeschlagen', cancelled: 'Abgebrochen', interrupted: 'Unterbrochen',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full output', collapseOutput: 'Collapse full output',
+    started: 'Gestartet', running: 'Wird ausgeführt', completed: 'Abgeschlossen', failed: 'Fehlgeschlagen', cancelled: 'Abgebrochen', interrupted: 'Unterbrochen',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full output', collapseOutput: 'Collapse full output', batch: 'Batch {n}',
 
   },
 

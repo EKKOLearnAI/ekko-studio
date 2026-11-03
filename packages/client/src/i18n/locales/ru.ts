@@ -1022,7 +1022,7 @@ export default {
   subagent: {
     title: 'Фоновая задача', noGoal: 'Фоновая задача без названия', open: 'Открыть поток фоновой задачи', close: 'Закрыть поток фоновой задачи',
     waiting: 'Ожидание потока данных…', tool: 'Инструмент', tools: 'Инструментов: {count}', tokens: 'Ввод {input} · вывод {output}',
-    started: 'Запущена', running: 'Выполняется', completed: 'Завершена', failed: 'Ошибка', cancelled: 'Отменена', interrupted: 'Прервана',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full output', collapseOutput: 'Collapse full output',
+    started: 'Запущена', running: 'Выполняется', completed: 'Завершена', failed: 'Ошибка', cancelled: 'Отменена', interrupted: 'Прервана',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full output', collapseOutput: 'Collapse full output', batch: 'Batch {n}',
 
   },
 
