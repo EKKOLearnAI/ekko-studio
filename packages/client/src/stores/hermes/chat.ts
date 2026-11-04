@@ -5562,6 +5562,15 @@ function createChatState(scopedSessionId?: string) {
     }
   }
 
+  // 无条件中止指定 session 的 run（含后台 delegation/子任务）。
+  // 与 stopStreaming 不同：不依赖 streamStates/serverWorking 条件，
+  // 子任务 running 但主 run 状态不对时（stopStreaming 不 emit）也能中止。
+  function abortSession(sid: string | null) {
+    if (!sid) return
+    setAbortState(sid, { aborting: true, synced: null })
+    getChatRunSocket(runtimeTransport())?.emit('abort', { session_id: sid })
+  }
+
   // Tab visibility: re-sync when returning to foreground
   if (typeof document !== 'undefined') {
     const onVisibilityChange = () => {
@@ -5833,6 +5842,7 @@ function createChatState(scopedSessionId?: string) {
     archiveSession,
     sendMessage,
     stopStreaming,
+    abortSession,
     respondApproval,
     respondApprovalFor,
     respondToClarify,
