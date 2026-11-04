@@ -149,7 +149,7 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
         const active = personDb().prepare("SELECT id FROM person_executions WHERE task_id=? AND id=? AND state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')").get(task.id, task.execution_id || '')
         return active ? requestStop(userId, task.id, String(active.id)) : { task: getPersonTask(userId, task.id) }
       }
-      if (requirements.flow.stopped && action !== 'reopen') throw personError('Flow is stopped; its creator must reopen it', 409)
+      if (requirements.flow.stopped && action !== 'reopen') throw personError('Flow is stopped; reopen it before continuing', 409)
     }
     if (action === 'advance') return advancePersonFlow(task, input.message, origin)
     if (action === 'stop') {
@@ -162,9 +162,7 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
     if (personTaskRunning(task.id) && !closingReturnedStageChild) throw personError('Task is running; wait for it to finish', 409)
     const db = personDb()
     if (action === 'reopen') {
-      if (requirements.flow?.stopped) {
-        if (origin && origin.sessionId !== requirements.creator_session_id) throw personError('Only the creator can resume a stopped flow', 403)
-      } else if (task.status === 'open') throw personError('Task is already open',409)
+      if (!requirements.flow?.stopped && task.status === 'open') throw personError('Task is already open',409)
       if (requirements.flow) {
         requirements.flow.stopped = false
         requirements.flow.completed = false

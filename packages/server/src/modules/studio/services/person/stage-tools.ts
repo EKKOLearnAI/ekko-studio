@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { PersonTaskOrigin } from '../../contracts/person'
 import type { PersonConversationFlow } from '../../contracts/person-stage'
+import { canControlPersonFlow } from '../../contracts/person-stage'
 import type { PersonTool } from './model'
 import { personError } from '../../contracts/person'
 import { getPersonFlow, listPersonFlows } from '../../repositories/person-stage-store'
@@ -16,9 +17,17 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
     if (references.size > 100) references.delete(references.keys().next().value!)
     const current = flow.stages.filter(stage => stage.group_position === flow.current_position)
     const stage = current.find(item => item.id === origin?.stage?.stageId)
-      || current.find(item => item.session_id === sessionId && item.state === 'active')
+      || current.find(item => item.session_id === sessionId && ['active','failed'].includes(item.state))
       || current.find(item => item.state === 'active') || current[0]
+    const allowed: string[] = []
+    if (flow.state !== 'completed' && canControlPersonFlow(flow,sessionId)) {
+      if (flow.state !== 'stopped') allowed.push('stop')
+      if (['stopped','failed'].includes(flow.state)) allowed.push('resume')
+      if (origin?.stage?.flowId === flow.id && origin.stage.generation === flow.generation && origin.runId
+        && stage.id === origin.stage.stageId && stage.session_id === sessionId && stage.state === 'active') allowed.push('complete')
+    }
     return { id:flow.id,flow_ref:ref,title:flow.title,state:flow.state,current_stage:stage.id,session_id:stage.session_id,
+      allowed_actions:allowed,
       creator_session_id:flow.creator_session_id,position:flow.current_position,total:flow.stages.length,error:flow.error,
       round_number:flow.round_number,round_limit:flow.round_limit,
       group_count:Math.max(...flow.stages.map(item => item.group_position)) + 1,
@@ -67,7 +76,7 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
       title:string,goal:string,stages:{ type:'array',minItems:1,maxItems:13,items:{ type:'object',additionalProperties:false,
         properties:{ session_id:string,goal:string,return_expectation:string,group:{ type:'integer',minimum:0 } },required:['session_id','goal','return_expectation'] } },
     },['title','goal','stages'],(args,origin)=>mutate(args,origin!,true)),
-    define('bot_flow_control','complete branch then reply; stop all; creator resumes unfinished.',{
+    define('bot_flow_control','complete your assigned live branch then reply; stop all. On a user request to continue, the creator or an unfinished current role may resume a stopped/failed flow. Query allowed_actions first, wait for peers/workers to settle, then query and continue the SAME original task. Do not create a replacement.',{
       action:{ type:'string',enum:['complete','stop','resume'] },flow_ref:string,
     },['action','flow_ref'],(args,origin)=>{
       const reference = references.get(String(args.flow_ref))

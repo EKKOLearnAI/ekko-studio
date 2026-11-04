@@ -12,7 +12,7 @@ import { requirePersonSession } from '../../repositories/person-session-store'
 import type { PersonTool } from './model'
 import { personFlowSummary, personRequirements } from '../../contracts/person-flow'
 import { personDeliveryCurrent } from './delivery'
-import { assertPersonStage, assertPersonStageTask, personTaskStage } from '../../repositories/person-stage-store'
+import { assertPersonStage, assertPersonStageTask, getPersonFlow, personTaskStage } from '../../repositories/person-stage-store'
 import { resolve } from 'node:path'
 
 type Field = { type: string | readonly string[]; maxLength?: number; minLength?: number; minimum?: number; maximum?: number; enum?: string[]; description?: string; minItems?: number; maxItems?: number; items?: Field; properties?: Record<string, Field>; required?: readonly string[]; additionalProperties?: boolean }
@@ -66,7 +66,7 @@ function baseActions(task: Snapshot, assignable = false, sessionId = '', staged 
   if (requirements?.flow) {
     const own = sessionId === task.session_id, creator = sessionId === requirements.creator_session_id
     if (!own && !creator) return []
-    if (requirements.flow.stopped) return creator ? ['reopen'] : []
+    if (requirements.flow.stopped) return ['reopen']
     if (!own) return requirements.flow.completed || task.status === 'closed' ? [] : ['stop']
     if (!requirements.flow.completed && task.status !== 'closed' && task.execution_state === 'finished' && !task.pending_count) return ['advance', 'continue', 'stop', 'close']
     if (!requirements.flow.completed && task.status !== 'closed' && task.execution_state === 'failed' && !task.pending_count) return ['continue', 'stop', 'close']
@@ -105,12 +105,16 @@ export function personTaskTools(userId: number, currentSessionId: string): Perso
     const { revision: _revision, running: _running, requirements_json: _requirements, ...visible } = snapshot
     const context = _requirements ? personFlowSummary({ requirements_json: _requirements }) : undefined
     const stage = assignable ? undefined : personTaskStage(userId,task.id)
+    const flow = stage ? getPersonFlow(userId,stage.flowId) : undefined
     let allowedActions = actions(snapshot,assignable,currentSessionId,!!stage)
     if (stage) {
       try { assertPersonStageTask(userId,task.id) }
-      catch { allowedActions = allowedActions.filter(action => action !== 'redirect') }
+      catch { allowedActions = allowedActions.filter(action => action === 'stop') }
     }
-    return { ...visible, ...context, verification_task_for: _requirements ? personRequirements({requirements_json:_requirements}).verification_for?.task_id : undefined, ...(stage ? { stage } : {}), ...(context ? { return_expectation: context.return_expectation.slice(0,400) } : {}), acceptance_enabled: Boolean(_requirements && personRequirements({ requirements_json: _requirements }).acceptance?.enabled), task_ref: ref, allowed_actions: allowedActions }
+    return { ...visible, ...context, verification_task_for: _requirements ? personRequirements({requirements_json:_requirements}).verification_for?.task_id : undefined,
+      ...(stage && flow ? { stage, collaboration: { flow_id:flow.id,state:flow.state,current_position:flow.current_position,
+        stage_state:flow.stages.find(item => item.id === stage.stageId)?.state, resume_required:['stopped','failed'].includes(flow.state) } } : {}),
+      ...(context ? { return_expectation: context.return_expectation.slice(0,400) } : {}), acceptance_enabled: Boolean(_requirements && personRequirements({ requirements_json: _requirements }).acceptance?.enabled), task_ref: ref, allowed_actions: allowedActions }
   }
   const execute = async (input: Record<string, unknown>, origin?: PersonTaskOrigin) => {
     origin ||= { sessionId: currentSessionId, runId: '', messages: [] }
@@ -172,7 +176,7 @@ export function personTaskTools(userId: number, currentSessionId: string): Perso
       }
     },
   })
-  const query = define('bot_tasks_query', 'List/search tasks, including completed ones; exact task_id for details. Query existing work before routing follow-ups. Use fresh task_ref/allowed_actions. assignable=true lists adoptable goals.', {
+  const query = define('bot_tasks_query', 'List/search tasks, including completed ones; exact task_id for details. Query existing work before routing follow-ups. Use fresh task_ref/allowed_actions. For blocked collaboration tasks, query collaboration.flow_id with bot_flows_query and resume if permitted, then requery and continue this SAME task. A blocked state is not an ownership denial. assignable=true lists adoptable goals.', {
     session_id: { ...text(100), description: 'Conversation filter.' },
     task_id: { ...text(100), type: ['string', 'null'], minLength: 0 }, search: { ...text(200), minLength: 0 }, offset: { type: 'integer', minimum: 0 }, assignable: { type: 'boolean' },
     report_offset: { type: 'integer', minimum: 0, maximum: 2_000_000, description: 'Task details only: read the next page of the current verification report using next_offset. Do not decide from a truncated callback.' },
