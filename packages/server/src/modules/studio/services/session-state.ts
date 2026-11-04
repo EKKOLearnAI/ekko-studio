@@ -25,7 +25,11 @@ export class SessionStateSync {
     return listSessionStateRecords(user.id, sessionId).filter(session => this.allowed(user, session)).map(session => {
       const runtime = this.runtime(session.id)
       const backgroundPending = this.pending.get(session.id) ?? runtime.backgroundPending
-      const working = (this.foreground.get(session.id) ?? runtime.working) || backgroundPending > 0 || (runtime.collaborationPending || 0) > 0
+      // Person main turns are owned by the chat host. A missed terminal event
+      // must not keep a settled host alive in subsequent list snapshots.
+      const foreground = session.id.startsWith('person-main-') && !runtime.working
+        ? false : this.foreground.get(session.id) ?? runtime.working
+      const working = foreground || backgroundPending > 0 || (runtime.collaborationPending || 0) > 0
       return { sessionId: session.id, profile: session.profile || 'default', working,
         backgroundPending, lastMessageId: session.lastMessageId, readMessageId: session.readMessageId,
         lastAttentionId: session.lastAttentionId, readAttentionId: session.readAttentionId,
