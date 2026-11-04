@@ -86,6 +86,62 @@ it('delivers an explicitly planned return stage to its creator, with the upstrea
   expect(stages.personStageSources(1,context(one.flow))).toMatchObject([{id:one.id,session_id:b}])
   const two = await finish(one.flow,'已收到并汇总')
   expect(two.flow.state).toBe('completed')
+  flows.finishPersonStageTurn(1,two.ctx,two.runId,two.id,true)
+  flows.recoverPersonStages()
+  await flows.deliverPersonStages()
+  expect(f.runtime.deliverStage).toHaveBeenCalledTimes(1)
+  expect(f.db.prepare('SELECT count(*) n FROM messages WHERE session_id=?').get(creator)!.n).toBe(1)
+  expect(f.db.prepare('SELECT count(*) n FROM session_attention_events WHERE session_id=?').get(creator)!.n).toBe(0)
+})
+
+it('finishes every requested parallel round without an extra creator turn or replaying a legacy report queue', async () => {
+  const flow = flows.createPersonFlow(1,{title:'按原路由协作',goal:'两位 Bot 独立完成两轮',session_id:creator,rounds:2,idempotency_key:randomUUID(),
+    stages:[b,c].map(session_id=>({session_id,group:0,goal:'完成本轮工作',return_expectation:'给出结果，按需汇报'}))})
+  const ids:number[]=[]
+  for(let round=1;round<=2;round++) {
+    await flows.deliverPersonStages()
+    const current=stages.getPersonFlow(1,flow.id)
+    ids.push((await finish(current,`B 第 ${round} 轮`,0)).id)
+    ids.push((await finish(current,`C 第 ${round} 轮`,1)).id)
+  }
+  expect(stages.getPersonFlow(1,flow.id)).toMatchObject({state:'completed',round_number:2,error:''})
+  expect(vi.mocked(f.runtime.deliverStage!).mock.calls.map(([input])=>input.sessionId)).toEqual([b,c,b,c])
+  expect(f.db.prepare('SELECT result_message_id FROM person_stage_results ORDER BY result_message_id').all().map(row=>row.result_message_id)).toEqual(ids)
+  // Retain old integration data as inert history; it must not become a new wake on restart.
+  f.db.exec('CREATE TABLE person_flow_reports(id TEXT PRIMARY KEY,flow_id TEXT NOT NULL,state TEXT NOT NULL)')
+  f.db.prepare("INSERT INTO person_flow_reports VALUES('legacy-report',?,'pending')").run(flow.id)
+  await f.reopen()
+  flows.recoverPersonStages();flows.recoverPersonStages()
+  await f.runner.tickPersonWork();await f.runner.tickPersonWork()
+  expect(f.runtime.deliverStage).toHaveBeenCalledTimes(4)
+  expect(f.runtime.deliver).not.toHaveBeenCalled()
+  expect(f.runtime.execute).not.toHaveBeenCalled()
+  expect(f.runtime.model).not.toHaveBeenCalled()
+  expect(f.db.prepare('SELECT count(*) n FROM messages WHERE session_id=?').get(creator)!.n).toBe(0)
+  expect(f.db.prepare('SELECT count(*) n FROM session_attention_events WHERE session_id=?').get(creator)!.n).toBe(0)
+  expect(f.db.prepare('SELECT state FROM person_flow_reports').get()!.state).toBe('pending')
+  expect(stages.getPersonFlow(1,flow.id).state).toBe('completed')
+})
+
+it('keeps flow lookups read-only and rejects the removed pagination and reporting arguments', async () => {
+  const ended=await finish(create(undefined,[b]),'已保存的结果')
+  const before=stages.getPersonFlow(1,ended.flow.id)
+  const {personFlowTools}=await import('../../packages/server/src/modules/studio/services/person/stage-tools')
+  const tools=personFlowTools(1,creator),query=tools.find(tool=>tool.name==='bot_flows_query')!
+  const origin={sessionId:creator,runId:'status-only',messages:[]}
+  const response:any=await query.execute({flow_id:before.id},origin)
+  expect(response.flows[0]).toMatchObject({state:'completed',results:[{message_id:ended.id}]})
+  expect(response.flows[0]).not.toHaveProperty('report_instruction')
+  expect(await query.execute({flow_id:before.id,result_offset:0},origin)).toMatchObject({ok:false})
+  expect(await query.execute({flow_id:before.id,claim_report:true},origin)).toMatchObject({ok:false})
+  expect(await tools.find(tool=>tool.name==='bot_flow_create')!.execute({title:'额外汇报',goal:'不创建额外汇报',report_to_creator:true,
+    stages:[{session_id:c,goal:'工作',return_expectation:'结果'}]},origin)).toMatchObject({ok:false})
+  // Existing flow-list offsets are part of the user's original API and remain supported.
+  expect(await query.execute({offset:0},origin)).toMatchObject({flows:[{id:before.id}]})
+  expect(stages.getPersonFlow(1,before.id)).toEqual(before)
+  expect(f.db.prepare('SELECT count(*) n FROM person_flows').get()!.n).toBe(1)
+  expect(f.db.prepare('SELECT count(*) n FROM messages WHERE session_id=?').get(creator)!.n).toBe(0)
+  expect(f.runtime.deliverStage).not.toHaveBeenCalled()
 })
 
 it('finishes worker-backed rounds without reusing or exposing prior-round workers as current work', async () => {
