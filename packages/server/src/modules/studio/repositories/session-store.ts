@@ -1067,6 +1067,20 @@ export function getSessionContextMessage(sessionId: string, messageId: number): 
   return row ? mapMessageRow(row) : null
 }
 
+/** Find the newest delegate_task dispatch record for a delegation id (newest first). */
+export function findBackgroundDispatchMessages(sessionId: string, delegationId: string, limit = 10): HermesMessageRow[] {
+  if (!isSqliteAvailable() || !delegationId.trim()) return []
+  const pattern = `%"delegation_id":"${delegationId.trim()}%"`
+  const rows = getDb()!.prepare(
+    `SELECT * FROM ${MESSAGES_TABLE}
+     WHERE session_id = ? AND tool_name = 'delegate_task'
+       AND (content LIKE ? OR display_content LIKE ?)
+     ORDER BY id DESC
+     LIMIT ?`,
+  ).all(sessionId, pattern, pattern, limit) as Record<string, unknown>[]
+  return rows.map(mapMessageRow)
+}
+
 export function getSessionContextMessageCount(sessionId: string, throughId?: number): number {
   if (!isSqliteAvailable()) return 0
   const hasBoundary = Number.isSafeInteger(throughId)
