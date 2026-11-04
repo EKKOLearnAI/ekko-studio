@@ -1495,6 +1495,7 @@ export default {
         error: 'Fehler',
       },
       browserSpeechUnsupported: 'Browser-Spracherkennung wird in diesem Browser nicht unterstuetzt.',
+      backendSttRequired: 'Die Spracheingabe in der Desktop-App benötigt Backend-STT. Aktiviere unter Modelle → STT die lokale Spracherkennung oder konfiguriere und aktiviere einen Cloud-Anbieter.',
       browserSpeechFailed: 'Browser-Spracherkennung fehlgeschlagen.',
       browserSpeechFailedWithReason: 'Browser-Spracherkennung fehlgeschlagen: {error}.',
       microphoneUnsupported: 'Mikrofonaufnahme wird in diesem Browser nicht unterstuetzt.',

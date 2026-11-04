@@ -1495,6 +1495,7 @@ export default {
         error: 'Erreur',
       },
       browserSpeechUnsupported: 'La reconnaissance vocale du navigateur n est pas prise en charge par ce navigateur.',
+      backendSttRequired: 'La saisie vocale dans l’application de bureau nécessite un STT côté serveur. Activez la reconnaissance locale ou configurez et activez un fournisseur cloud dans Modèles → STT.',
       browserSpeechFailed: 'La reconnaissance vocale du navigateur a echoue.',
       browserSpeechFailedWithReason: 'La reconnaissance vocale du navigateur a echoue : {error}.',
       microphoneUnsupported: 'La capture micro n est pas prise en charge par ce navigateur.',

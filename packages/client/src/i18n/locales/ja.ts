@@ -1495,6 +1495,7 @@ export default {
         error: 'エラー',
       },
       browserSpeechUnsupported: 'このブラウザは内蔵音声認識に対応していません。',
+      backendSttRequired: 'デスクトップ版の音声入力にはバックエンド STT が必要です。「モデル → STT」でローカル音声認識を有効にするか、クラウドサービスを設定して有効にしてください。',
       browserSpeechFailed: 'ブラウザ音声認識に失敗しました。',
       browserSpeechFailedWithReason: 'ブラウザ音声認識に失敗しました: {error}。',
       microphoneUnsupported: 'このブラウザはマイク録音に対応していません。',
