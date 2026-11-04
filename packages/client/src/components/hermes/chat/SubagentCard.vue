@@ -91,6 +91,7 @@ const transcript = computed(() => {
 const expanded = ref(false)
 function toggleExpanded(ev?: Event) { ev?.stopPropagation(); expanded.value = !expanded.value }
 function openDetail(ev?: Event) { ev?.stopPropagation(); if (sid.value) openSubagentStream(sid.value, props.toolCallId) }
+function abortSubagent(ev?: Event) { ev?.stopPropagation(); chatStore.stopStreaming() }
 </script>
 
 <template>
@@ -118,6 +119,7 @@ function openDetail(ev?: Event) { ev?.stopPropagation(); if (sid.value) openSuba
         <div class="sc-goal" dir="auto">{{ goal }}</div>
       </div>
       <span class="badge" :class="status">{{ statusLabel }}</span>
+      <button v-if="isRunning" class="sc-abort" type="button" data-theme-surface="card" @click.stop="abortSubagent">{{ t('subagent.abort') }}</button>
       <span class="sc-dur">{{ durationText }}</span>
     </header>
 
@@ -258,4 +260,7 @@ function openDetail(ev?: Event) { ev?.stopPropagation(); if (sid.value) openSuba
 .sc-failed-icon { width: 16px; height: 16px; border-radius: 50%; background: $error; display: grid; place-items: center; flex-shrink: 0; }
 .sc-failed-icon svg { width: 11px; height: 11px; stroke: var(--text-on-accent, #fff); stroke-width: 3; fill: none; }
 .sc-failed-concl { margin-top: 8px; font-size: 13px; line-height: 1.6; color: $text-primary; }
+
+.sc-abort { margin-left: 8px; padding: 2px 8px; font-size: 12px; line-height: 1.5; color: $text-secondary; background: $bg-secondary; border: var(--border-width, 1px) solid $border-color; border-radius: 8px; cursor: pointer; flex-shrink: 0; transition: color .15s ease, border-color .15s ease; }
+.sc-abort:hover { color: $error; border-color: $error; }
 </style>
