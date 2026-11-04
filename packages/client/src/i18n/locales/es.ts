@@ -1095,7 +1095,7 @@ export default {
   subagent: {
     title: 'Tarea en segundo plano', noGoal: 'Tarea en segundo plano sin título', open: 'Abrir salida en directo de la tarea', close: 'Cerrar salida de la tarea',
     waiting: 'Esperando salida en directo…', tool: 'Herramienta', tools: '{count} herramientas', tokens: '{input} entrada · {output} salida',
-    started: 'Iniciada', running: 'En ejecución', completed: 'Completada', failed: 'Fallida', cancelled: 'Cancelada', interrupted: 'Interrumpida',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full output', collapseOutput: 'Collapse full output', batch: 'Batch {n}',
+    started: 'Iniciada', running: 'En ejecución', completed: 'Completada', failed: 'Fallida', cancelled: 'Cancelada', interrupted: 'Interrumpida',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full output', collapseOutput: 'Collapse full output', batch: 'Batch {n}', abort: 'Abort',
 
   },
 
