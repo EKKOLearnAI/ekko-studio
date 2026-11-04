@@ -21,7 +21,8 @@ const props = withDefaults(defineProps<{
   reservedWidth?: number
   submit: (text: string, attachments?: Attachment[]) => Promise<boolean>
 }>(), { active: true, reservedWidth: 0 })
-const emit = defineEmits<{ attach: [file: File]; 'update:show': [show: boolean] }>()
+const emit = defineEmits<{ attach: [file: File] }>()
+const show = defineModel<boolean>('show', { default: false })
 const { t } = useI18n()
 const message = useMessage()
 const filesStore = useFilesStore()
@@ -41,7 +42,8 @@ let resizeStart: { x: number; width: number } | undefined
 let observer: ResizeObserver | undefined
 function measure() {
   const target = document.querySelector(props.panelTarget)
-  layoutWidth.value = target?.clientWidth || window.innerWidth
+  const layout = target?.closest('.person-chat-layout') || target
+  layoutWidth.value = layout?.clientWidth || window.innerWidth
 }
 function resize(event: PointerEvent) {
   if (!resizeStart) return
@@ -66,7 +68,6 @@ function startResize(event: PointerEvent) {
   window.addEventListener('pointercancel', stopResize)
 }
 const panelId = `person-files-panel-${useId()}`
-const show = ref(false)
 const panelReady = ref(false)
 const activePanel = ref<'files' | 'terminal' | 'browser'>('files')
 const browserAvailable = hasDesktopBrowserBridge()
@@ -173,17 +174,20 @@ function handlePreview(event: Event) {
 }
 
 watch(() => [props.sessionId, props.workspace, props.active] as const, (_, previous) => {
-  reset()
-  activePanel.value = 'files'
-  if (filesStore.previewFile?.workspaceSessionId === previous[0]) filesStore.closePreview()
+  stopResize()
+  requestSequence++
+  if (loading.value || filesStore.previewFile?.workspaceSessionId === previous[0]) filesStore.closePreview()
+  loading.value = false
+  previewOnly.value = false
+  if (!filesStore.hasUnsavedChanges) filesStore.closeEditor()
 })
 watch(show, async value => {
-  emit('update:show', value)
   observer?.disconnect()
   if (!value) return
   await nextTick()
   measure()
-  const target = document.querySelector(props.panelTarget)
+  const host = document.querySelector(props.panelTarget)
+  const target = host?.closest('.person-chat-layout') || host
   if (target) observer?.observe(target)
 })
 onMounted(() => {
@@ -218,6 +222,7 @@ onBeforeUnmount(() => {
           <FilePreview v-else-if="filesStore.previewFile" :custom-close="close" />
         </template>
         <ChatToolsPanel v-else v-model:active-panel="activePanel" :workspace-session-id="sessionId" :workspace="workspace"
+          :context-ready="active && !!sessionId"
           :visible="show" :browser-visible="panelReady" :browser-available="browserAvailable"
           :submit="submitBrowserAnnotations" @attach="file => emit('attach', file)" />
       </template>

@@ -3,6 +3,8 @@ import type { AgentMessage } from '../../../../../ekko-agent/src/model/types'
 export type PersonRole = 'main' | 'coordinator'
 export type PersonRunState = 'pending' | 'queued' | 'starting' | 'stopping' | 'running' | 'waiting_person' | 'waiting_user' | 'waiting_approval' | 'finished' | 'failed' | 'interrupted'
 export interface PersonSelection {
+  agentId?: string
+  agentName?: string
   runtime: string
   mode: 'scoped' | 'global'
   profile: string

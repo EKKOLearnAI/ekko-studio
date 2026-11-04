@@ -47,7 +47,7 @@ export async function selectPersonExecutionAgent(userId: number, id?: unknown) {
   const preset = id ? agents.find(agent => agent.id === id) : agents.length === 1 ? agents[0] : undefined
   if (!preset) throw personError('Choose one of the configured execution agents')
   await validatePersonSelection(userId, preset.selection)
-  return preset.selection
+  return { ...preset.selection, agentId: preset.id, agentName: preset.name }
 }
 
 /** Full model data is returned only to the settings UI, never to the Person prompt. */

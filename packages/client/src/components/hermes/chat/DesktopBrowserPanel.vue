@@ -13,12 +13,15 @@ import type { BrowserAnnotationSubmission } from '@/utils/browser-annotation-sub
 
 const props = withDefaults(defineProps<{
   visible?: boolean
+  submissionContext?: string | null
   submit: (submission: BrowserAnnotationSubmission) => boolean | void | Promise<boolean | void>
 }>(), {
   visible: true,
 })
 
 const { t } = useI18n()
+let submissionContextRevision = 0
+watch(() => props.submissionContext, () => { submissionContextRevision++ }, { flush: 'sync' })
 const historyOpen = ref(false)
 const downloadsOpen = ref(false)
 async function downloadsVisibility(value: boolean) {
@@ -105,6 +108,8 @@ let annotatingTabId: string | null = null
 let unmounting = false
 let annotationNoteUpdate: Promise<unknown> = Promise.resolve()
 let overlayCheckFrame = 0
+let viewportFrame = 0
+let lastViewportSent = ''
 const overlayCheckTimers = new Map<number, number>()
 
 const activeTab = computed(() => state.value?.tabs.find(tab => tab.id === state.value?.activeTabId))
@@ -145,7 +150,7 @@ const annotationAnchorStyle = computed(() => {
 watch(() => activeTab.value?.url, value => { address.value = value || '' }, { immediate: true })
 watch(historyOpen, () => { void nextTick(syncViewport) })
 watch(externalOverlayOpen, () => { void nextTick(syncViewport) })
-watch(() => props.visible, () => { void nextTick(syncViewport) })
+watch(() => props.visible, () => { void nextTick(trackViewport) })
 
 function applyState(next: DesktopBrowserState): void {
   state.value = next
@@ -156,7 +161,28 @@ async function syncViewport(): Promise<void> {
   const rect = viewport.value.getBoundingClientRect()
   const visible = props.visible && !externalOverlayOpen.value && !historyOpen.value && !pendingAnnotation.value
     && rect.width > 0 && rect.height > 0 && document.visibilityState === 'visible'
-  await bridge.setViewport({ x: rect.left, y: rect.top, width: rect.width, height: rect.height }, visible).catch(() => undefined)
+    && getComputedStyle(viewport.value).visibility === 'visible'
+  // Match Electron's DIP rounding. Native views paint above renderer content,
+  // so stale coordinates can cover a sibling Agent even when DOM order is right.
+  const bounds = { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) }
+  const key = JSON.stringify({ ...bounds, visible })
+  if (key === lastViewportSent) return
+  lastViewportSent = key
+  await bridge.setViewport(bounds, visible).catch(() => {
+    if (lastViewportSent === key) lastViewportSent = ''
+  })
+}
+
+function trackViewport(): void {
+  if (viewportFrame) window.cancelAnimationFrame(viewportFrame)
+  viewportFrame = 0
+  if (unmounting) return
+  void syncViewport()
+  // ResizeObserver only reports size changes. Teleports, flex siblings and CSS
+  // transitions can move this viewport without changing its size.
+  if (props.visible && document.visibilityState === 'visible') {
+    viewportFrame = window.requestAnimationFrame(trackViewport)
+  }
 }
 
 async function run(action: () => Promise<unknown>): Promise<void> {
@@ -331,6 +357,7 @@ function undoAnnotation(): void {
 
 async function sendAnnotations(): Promise<void> {
   if (annotationLocked.value) return
+  const context = submissionContextRevision
   annotationSubmitting.value = true
   try {
     await commitPendingAnnotation(false)
@@ -356,6 +383,7 @@ async function sendAnnotations(): Promise<void> {
         },
       }, null, 2),
     }
+    if (context !== submissionContextRevision) return
     const submitted = await props.submit(submission)
     if (submitted === false) return
     resetAnnotationSession()
@@ -385,7 +413,7 @@ function handleAnnotationKeydown(event: KeyboardEvent): void {
 
 function handleVisibility(): void {
   scheduleExternalOverlayCheck()
-  void syncViewport()
+  trackViewport()
 }
 
 function detectExternalOverlay(): void {
@@ -446,7 +474,7 @@ onMounted(async () => {
     detectExternalOverlay()
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('resize', handleVisibility)
-    await nextTick(syncViewport)
+    await nextTick(trackViewport)
   } catch (error) {
     loadError.value = `${t('browser.loadFailed')}: ${error instanceof Error ? error.message : String(error)}`
     message.error(loadError.value)
@@ -454,6 +482,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  submissionContextRevision++
   unmounting = true
   if (bridge && annotatingTabId) void bridge.cancelAnnotation(annotatingTabId)
   if (bridge && annotationTabId.value) void bridge.clearAnnotations(annotationTabId.value)
@@ -462,6 +491,7 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   modalObserver?.disconnect()
   if (overlayCheckFrame) window.cancelAnimationFrame(overlayCheckFrame)
+  if (viewportFrame) window.cancelAnimationFrame(viewportFrame)
   for (const timer of overlayCheckTimers.values()) window.clearTimeout(timer)
   overlayCheckTimers.clear()
   document.removeEventListener('visibilitychange', handleVisibility)

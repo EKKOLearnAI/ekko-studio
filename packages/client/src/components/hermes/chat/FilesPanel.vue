@@ -46,6 +46,7 @@ const mobileMediaQuery = window.matchMedia(`(max-width: 768px)`)
 const isMobileLayout = ref(mobileMediaQuery.matches)
 const mobileFileOpen = ref(false)
 let stopSidebarResize: (() => void) | null = null
+let disposed = false
 const hasOpenFile = computed(() => Boolean(
   selectedDiffEntry.value || filesStore.editingFile || filesStore.previewFile,
 ))
@@ -128,13 +129,15 @@ function handleRename(entry: FileEntry) {
 
 async function handleAttach(entry: FileEntry) {
   if (entry.isDir) return
+  const sessionId = props.workspaceSessionId
+  const roomId = props.workspaceRoomId
   try {
     const blob = props.workspaceSessionId
       ? await fetchSessionWorkspaceAttachmentBlob(props.workspaceSessionId, entry.path)
       : props.workspaceRoomId
         ? await fetchGroupWorkspaceAttachmentBlob(props.workspaceRoomId, entry.path)
         : null
-    if (!blob) return
+    if (!blob || disposed || sessionId !== props.workspaceSessionId || roomId !== props.workspaceRoomId) return
     emit('attach', new File([blob], entry.name, {
       type: blob.type || 'application/octet-stream',
       lastModified: Date.parse(entry.modTime) || Date.now(),
@@ -226,6 +229,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   stopSidebarResize?.()
   mobileMediaQuery.removeEventListener('change', handleMobileLayoutChange)
 })

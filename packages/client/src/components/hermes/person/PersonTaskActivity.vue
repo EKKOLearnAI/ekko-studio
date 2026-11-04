@@ -4,13 +4,14 @@ import { useI18n } from 'vue-i18n'
 import type { PersonFlow, PersonTask } from '@/api/person'
 import { usePageLoadingState } from '@/composables/usePageLoading'
 import { useReducedMotion } from '@/composables/useReducedMotion'
-import { PERSON_ANIMATIONS, PERSON_AVATAR, chatSessionAgentAvatar, personAvatarAnimation, type ChatAgentAvatar } from '@/utils/chat-agent-avatar'
+import { PERSON_ANIMATIONS, PERSON_AVATAR, personAvatarAnimation, type ChatAgentAvatar } from '@/utils/chat-agent-avatar'
 import { personFlowAnimation, personFlowState, personFlowVisibleInActivity } from '@/utils/person-flow'
 import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
 import PersonFlowGraph from './PersonFlowGraph.vue'
-import PersonPanelIcon from './PersonPanelIcon.vue'
+import PersonTaskIdentity from './PersonTaskIdentity.vue'
+import type { PersonAgentPreset } from '@/api/person'
 
-const props = defineProps<{ sessionId: string; count: number; agentCount?: number; tasks: PersonTask[]; flows: PersonFlow[]; flowCount?: number; avatar?: ChatAgentAvatar; name?: string }>()
+const props = defineProps<{ sessionId: string; count: number; agentCount?: number; tasks: PersonTask[]; flows: PersonFlow[]; flowCount?: number; avatar?: ChatAgentAvatar; name?: string; agents?: PersonAgentPreset[] }>()
 const emit = defineEmits<{ openTask: [task: PersonTask]; openFlow: [flow: PersonFlow]; refresh: [] }>()
 const { t, locale } = useI18n()
 const pageLoading = usePageLoadingState()
@@ -57,14 +58,6 @@ function escape(event: KeyboardEvent) {
   if (event.key === 'Escape' && expanded.value) { event.stopPropagation(); close(true) }
 }
 function flowAnimation(flow: PersonFlow) { return personAvatarAnimation(avatar.value, personFlowAnimation(personFlowState(flow))) || animation.value }
-function taskAvatar(task: PersonTask): ChatAgentAvatar | null {
-  try {
-    const selection = JSON.parse(task.execution_selection_json || task.selection_json || '{}')
-    const runtime = typeof selection.runtime === 'string' ? selection.runtime.trim().toLowerCase() : ''
-    const known = ['hermes', 'ekko', 'ekko-agent', 'claude', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode', 'antigravity']
-    return known.includes(runtime) ? chatSessionAgentAvatar({ agent: runtime }) : null
-  } catch { return null }
-}
 watch(visible, value => { if (!value) close() })
 watch(name, () => { void nextTick(measure) })
 watch(activeFlows, (flows, previous) => {
@@ -123,9 +116,7 @@ onBeforeUnmount(() => {
             <ul class="activity-list">
               <li v-for="task in activeTasks" :key="`task-${task.id}`">
                 <button type="button" class="activity-row" :title="task.title" :aria-label="task.title" @click="openTask(task)">
-                  <img v-if="taskAvatar(task)" class="row-agent-avatar" :src="taskAvatar(task)!.src" :alt="taskAvatar(task)!.label" width="24" height="24" />
-                  <PersonPanelIcon v-else class="row-agent-avatar" name="agents" :size="24" />
-                  <span class="row-title">{{ task.title }}</span>
+                  <PersonTaskIdentity :task="task" :agents="agents" />
                 </button>
               </li>
               <li v-for="flow in activeFlows" :key="`flow-${flow.id}`">
@@ -152,7 +143,6 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-@use '@/styles/agent-avatar' as *;
 .person-task-activity { position: absolute; z-index: 5; top: 12px; left: 50%; width: min(440px, calc(100% - 32px)); transform: translateX(-50%); pointer-events: none; }
 .activity-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .person-task-island { width: min(280px, 100%); margin-inline: auto; padding: 0; border: 0; border-radius: 30px; background: $bg-card; color: $text-primary; overflow: hidden; pointer-events: auto; box-shadow: 0 6px 22px rgba(var(--text-primary-rgb), .05); transition: width 440ms cubic-bezier(.22, 1, .36, 1), height 440ms cubic-bezier(.22, 1, .36, 1), border-radius 440ms cubic-bezier(.22, 1, .36, 1), box-shadow 440ms ease; }
@@ -179,7 +169,7 @@ onBeforeUnmount(() => {
 .activity-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 5px 7px; border: 0; border-radius: 9px; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .activity-row:hover { background: rgba(var(--text-primary-rgb), .035); }
 .row-gif { width: 38px; height: 38px; flex-shrink: 0; object-fit: contain; }
-.row-agent-avatar { @include agent-avatar(24px); }
+.activity-row > .person-task-identity { flex: 1; }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .row-chevron { flex-shrink: 0; color: $text-muted; transition: transform 220ms ease; }
 .flow-preview-toggle[aria-expanded='true'] .row-chevron { transform: rotate(180deg); }
