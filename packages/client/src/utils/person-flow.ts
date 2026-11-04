@@ -51,13 +51,7 @@ export function personFlowDependencies(flow: PersonFlow, stage: PersonFlowStage)
 }
 
 export function personFlowState(flow: PersonFlow): PersonFlowStatus {
-  if (flow.state === 'completed') {
-    const report = flow.completion_report?.state
-    if (report === 'failed') return 'blocked'
-    if (report === 'paused') return 'waiting_user'
-    if (report && ['pending','queued','starting','running'].includes(report)) return 'waiting_reply'
-    return 'completed'
-  }
+  if (flow.state === 'completed') return 'completed'
   if (flow.state === 'stopped') return 'interrupted'
   if (flow.state === 'failed') return 'blocked'
   const current = personFlowGroups(flow).find(group => group.position === flow.current_position)

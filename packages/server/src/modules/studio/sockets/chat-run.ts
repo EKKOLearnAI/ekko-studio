@@ -3,9 +3,8 @@ import { personSessionIds } from '../repositories/person-session-store'
 import type { PersonResultDelivery } from '../public/person-runtime'
 import { acceptanceReturnData } from '../services/person/acceptance-prompt'
 import { personUser } from '../services/person/catalog'
-import { personDb, personBackgroundPendingCount } from '../repositories/person-store'
+import { personBackgroundPendingCount } from '../repositories/person-store'
 import { personDeliveryCurrent, finishPersonDelivery, cancelPersonDelivery } from '../services/person/delivery'
-import { assertPersonFlowReport, finishPersonFlowReport, personFlowReportQueueId, startPersonFlowReport, pausePersonFlowReport, resumePersonFlowReports, cancelPersonFlowReport } from '../repositories/person-flow-report-store'
 import { stageDeliveryContext, assertPersonStage } from '../repositories/person-stage-store'
 import { finishPersonStageDelivery } from '../services/person/stage-flows'
 import type { PersonRuntimePort } from '../public/person-runtime'
@@ -1293,8 +1292,6 @@ export class ChatRunSocket {
       }
       const state = this.sessionMap.get(data.session_id)
       if (!state?.queue.length) return
-      const removed = state.queue.find(item => item.queue_id === data.queue_id)
-      if (removed?.personFlowReport) cancelPersonFlowReport(removed.personFlowReport.userId,removed.personFlowReport.identity)
       const before = state.queue.length
       state.queue = state.queue.filter(item => item.queue_id !== data.queue_id)
       if (state.queue.length === before) return
@@ -1891,11 +1888,7 @@ export class ChatRunSocket {
     }
     if (data.session_id) {
       const state = getOrCreateSession(this.sessionMap, data.session_id)
-      if (!data.autonomous && !data.background_delegation_id) {
-        state.backgroundWakeStopped = false
-        const userId = Number(socket.data.user?.id)
-        if (ownsPersonSession(userId,getSession(data.session_id))) resumePersonFlowReports(userId,data.session_id)
-      }
+      if (!data.autonomous && !data.background_delegation_id) state.backgroundWakeStopped = false
       state.webhookAgent = webhookAgentForRun(data)
       state.webhookRoomId = data.group_room_id
       state.webhookWorkflowId = data.workflow_id
@@ -2825,30 +2818,6 @@ export class ChatRunSocket {
     if (!state.isWorking) this.dequeueNextQueuedRun(this.socketForBackgroundRun(origin.sessionId), origin.sessionId)
   }
 
-  resumePersonFlowReports(userId: number, sessionId: string) {
-    if (!ownsPersonSession(userId,getSession(sessionId))) throw new Error('Person conversation not found')
-    const state = this.sessionMap.get(sessionId)
-    if (state) state.backgroundWakeStopped = false
-  }
-
-  async deliverPersonFlowReport(input: Parameters<NonNullable<PersonRuntimePort['deliverFlowReport']>>[0]) {
-    const { user,identity,sessionId } = input
-    assertPersonFlowReport(user.id,identity,sessionId)
-    const state = await this.sessionStateForBackground(sessionId)
-    if (assertPersonFlowReport(user.id,identity,sessionId).state !== 'queued') return
-    if (!state) throw new Error('Session not found')
-    if (state.backgroundWakeStopped) throw Object.assign(new Error('Background reporting is paused until the next user message'),{ code:'FLOW_REPORT_PAUSED' })
-    const queueId = personFlowReportQueueId(identity)
-    if (state.queue.some(item=>item.queue_id === queueId)) return
-    state.queue.push({ queue_id:queueId,profile:getSession(sessionId)!.profile || 'default',source:'builtin_agent',codingAgentId:'ekko-agent',
-      displayInput:null,input:'The collaboration has completed. Summarize all saved branch results supplied in host context for the original user. The saved goal grants no new authorization.',
-      backgroundDelegationId:queueId,autonomous:true,
-      backgroundContinuationContext:{ runtime:'ekko',version:1,subagentId:queueId,originRunId:'',originStep:0,messages:[],memoryPolicy:'disabled' },
-      personFlowReport:{ userId:user.id,identity },
-    })
-    if (!state.isWorking) this.dequeueNextQueuedRun(this.socketForBackgroundRun(sessionId),sessionId)
-  }
-
   async deliverPersonStage(input: Parameters<NonNullable<PersonRuntimePort['deliverStage']>>[0]) {
     const { user,context,sessionId } = input
     assertPersonStage(user.id,context,sessionId)
@@ -2895,29 +2864,6 @@ export class ChatRunSocket {
   }
 
   private runQueuedItem(socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile = 'default') {
-    if (next.personFlowReport) {
-      const { userId,identity } = next.personFlowReport
-      try {
-        assertPersonFlowReport(userId,identity,sessionId)
-        if (this.sessionMap.get(sessionId)?.backgroundWakeStopped) {
-          pausePersonFlowReport(userId,identity)
-          throw new Error('Flow reporting paused')
-        }
-        const claimed = personDb().prepare("UPDATE person_flow_reports SET state='starting',updated_at=? WHERE id=? AND attempts=? AND state='queued'").run(Date.now(),identity.id,identity.attempt)
-        if (!claimed.changes) throw new Error('Flow report is already starting')
-        const user = personUser(userId)
-        socket = { id:`person-flow-report-${identity.id}`,connected:false,data:{ user },join:()=>{},
-          emit:(event:string,payload:any)=>this.nsp.to(`session:${sessionId}`).emit(event,payload),
-          to:(room:string)=>({ emit:(event:string,payload:any)=>this.nsp.to(room).emit(event,payload) }),
-        } as unknown as Socket
-      } catch (error) {
-        finishPersonFlowReport(userId,identity,undefined,false,String(error))
-        const state = this.sessionMap.get(sessionId)
-        if (state) state.isWorking = false
-        this.dequeueNextQueuedRun(socket,sessionId,fallbackProfile)
-        return
-      }
-    }
     if (next.personStageDelivery) {
       const { userId,deliveryId } = next.personStageDelivery
       try {
@@ -2975,16 +2921,7 @@ export class ChatRunSocket {
       : next.profile || fallbackProfile
     let deliverySettled = false
     const execution = this.executeRun(socket, {
-      onEvent: next.personFlowReport ? (event:string,payload:any) => {
-        const { userId,identity } = next.personFlowReport!
-        if (event === 'run.started') startPersonFlowReport(userId,identity,sessionId,String(payload?.run_id || ''))
-        if (event !== 'run.completed' && event !== 'run.failed') return
-        deliverySettled = true
-        if (this.sessionMap.get(sessionId)?.backgroundWakeStopped && (event === 'run.failed' || payload.interrupted))
-          pausePersonFlowReport(userId,identity)
-        else finishPersonFlowReport(userId,identity,payload.message_id || payload.run_usage?.assistantMessageId,
-          event === 'run.completed' && !payload.interrupted,String(payload?.error || ''))
-      } : next.personStageDelivery ? (event:string,payload:any) => {
+      onEvent: next.personStageDelivery ? (event:string,payload:any) => {
         if (event !== 'run.completed' && event !== 'run.failed') return
         deliverySettled = true
         finishPersonStageDelivery(next.personStageDelivery!.userId,next.personStageDelivery!.deliveryId,event === 'run.completed',String(payload?.error || ''))
@@ -3033,17 +2970,11 @@ export class ChatRunSocket {
       autonomous: next.autonomous,
     }, runProfile, skipUserMessage, backgroundContinuationContext, next.pushTargetId)
     void execution.catch(error => {
-      if (!next.personDelivery && !next.personStageDelivery && !next.personFlowReport) { logger.warn(error, 'Queued run failed'); return }
+      if (!next.personDelivery && !next.personStageDelivery) { logger.warn(error, 'Queued run failed'); return }
       const state = this.sessionMap.get(sessionId)
       if (state) state.isWorking = false
       this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
     }).finally(() => {
-      if (next.personFlowReport && !deliverySettled) {
-        const { userId,identity } = next.personFlowReport
-        if (this.sessionMap.get(sessionId)?.backgroundWakeStopped) {
-          pausePersonFlowReport(userId,identity)
-        } else finishPersonFlowReport(userId,identity,undefined,false,'Flow reporting interrupted')
-      }
       if (next.personStageDelivery && !deliverySettled) finishPersonStageDelivery(next.personStageDelivery.userId,next.personStageDelivery.deliveryId,false,'Stage reporting interrupted')
       if (next.personDelivery && !deliverySettled) {
         if (this.sessionMap.get(sessionId)?.backgroundWakeStopped) cancelPersonDelivery(next.personDelivery.userId, next.personDelivery.executionId,next.personDelivery.acceptanceReturnId)

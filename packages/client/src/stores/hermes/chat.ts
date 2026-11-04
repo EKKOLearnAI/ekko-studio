@@ -4621,7 +4621,7 @@ function createChatState(scopedSessionId?: string) {
                   content: 'Error: Agent returned no output. The model call may have failed (e.g. invalid API key, model not supported by provider, or context exceeded). Check the hermes-agent logs for details.',
                   timestamp: Date.now(),
                 })
-              } else if (evt.notification_suppressed !== true) {
+              } else {
                 playCompletionBellIfEnabled()
                 showCompletionNotificationIfEnabled(sid, completedAssistantMessageId)
               }
@@ -5275,7 +5275,7 @@ function createChatState(scopedSessionId?: string) {
               content: 'Error: Agent returned no output. The model call may have failed (e.g. invalid API key, model not supported by provider, or context exceeded). Check the hermes-agent logs for details.',
               timestamp: Date.now(),
             })
-          } else if (evt.notification_suppressed !== true) {
+          } else {
             playCompletionBellIfEnabled()
             showCompletionNotificationIfEnabled(sid, completedAssistantMessageId)
           }

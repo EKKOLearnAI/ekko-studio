@@ -433,9 +433,8 @@ async function refresh() {
     }
   }
 }
-function flowAction(flow: PersonFlow, action: 'stop' | 'resume' | 'retry_report') {
-  return act(() => personRequest('/flows/apply', { action, flow_id: flow.id, expected_revision: flow.revision, idempotency_key: clientUuid(),
-    ...(action === 'retry_report' ? {report_id:flow.completion_report?.id,expected_attempt:flow.completion_report?.attempts} : {}) }))
+function flowAction(flow: PersonFlow, action: 'stop' | 'resume') {
+  return act(() => personRequest('/flows/apply', { action, flow_id: flow.id, expected_revision: flow.revision, idempotency_key: clientUuid() }))
 }
 function openFlowResult(sessionId: string, messageId: number) {
   showPanel.value = false

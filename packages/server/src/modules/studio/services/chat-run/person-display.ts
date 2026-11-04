@@ -147,7 +147,7 @@ export function personDisplayBackgroundTasks(sessionId: string, tasks: any[]): a
 const common = 'event session_id run_id run_marker message_id queue_id timestamp replayed restored background_snapshot'
 const controls: Record<string, string> = {
   'run.started': 'model provider queue_length autonomous delegation_id',
-  'run.completed': 'interrupted boundary_interrupt queue_remaining background_pending autonomous delegation_id stop_reason notification_suppressed',
+  'run.completed': 'interrupted boundary_interrupt queue_remaining background_pending autonomous delegation_id stop_reason',
   'run.failed': 'error code queue_remaining background_pending stop_reason interrupted',
   'run.reattach_failed': 'error code retryable',
   'abort.started': 'queue_length', 'abort.completed': 'queue_length background_pending',

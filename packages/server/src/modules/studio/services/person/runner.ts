@@ -1,5 +1,3 @@
-import { deliverPersonFlowReports } from './flow-reports'
-import { recoverPersonFlowReports } from '../../repositories/person-flow-report-store'
 import { executePersonAcceptance } from './acceptance'
 import { executeBotVerification, keepsAcceptanceOpen, finishBotVerification, expireBotAcceptances, failBotVerification, interruptBotVerification, recoverBotVerifications } from './bot-acceptance'
 import { getPersonAcceptance, setPersonAcceptance, interruptPersonAcceptance, personAcceptanceSessions, recoverPersonAcceptances } from '../../repositories/person-acceptance-store'
@@ -221,7 +219,6 @@ export async function tickPersonWork() {
     await deliverPersonResults()
     await deliverPersonStages()
     tickStageConfirmations()
-    await deliverPersonFlowReports()
     promotePersonFollowups()
     tickPersonSchedules()
     const db = personDb()
@@ -264,7 +261,6 @@ export function startPersonWork() {
   recoverBotVerifications()
   recoverPersonStages()
   recoverStageConfirmations()
-  recoverPersonFlowReports()
   // Queue entries are process-local; recover delivery receipts after restart.
   personDb().prepare("UPDATE person_deliveries SET state='pending',error='' WHERE state='queued'").run()
   personDb().prepare("UPDATE person_deliveries SET state='pending' WHERE state='waiting' AND execution_id IN (SELECT id FROM person_executions WHERE state IN ('finished','failed'))").run()

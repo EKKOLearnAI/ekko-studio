@@ -16,11 +16,8 @@ export interface PersonStage {
   state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; completion_run_id: string
 }
 export interface PersonConversationFlow {
-  /** Optional creator summary requested from task intent; completion alone never opts in. */
-  report_to_creator: boolean
   /** Zero means repeat until explicitly stopped; existing flows run once. */
   round_limit: number; round_number: number; round_generation: number
-  completion_report?: Pick<PersonFlowReport, 'id' | 'state' | 'attempts' | 'attempt_limit' | 'run_id' | 'result_message_id' | 'error' | 'next_attempt_at'> | null
   workspace: string
   id: string; owner_user_id: number; creator_session_id: string; title: string; goal: string
   /** current_position indexes execution groups; each stage retains its unique route position. */
@@ -30,12 +27,4 @@ export interface PersonConversationFlow {
 export interface PersonStageDelivery {
   id: string; owner_user_id: number; flow_id: string; stage_id: string; generation: number
   state: 'pending' | 'queued' | 'failed' | 'delivered' | 'cancelled'; updated_at: number; error: string
-}
-
-export interface PersonFlowReportIdentity { id: string; attempt: number }
-export interface PersonFlowReport {
-  id: string; owner_user_id: number; flow_id: string; generation: number; session_id: string
-  snapshot_json: string; state: 'pending' | 'queued' | 'starting' | 'running' | 'paused' | 'delivered' | 'failed' | 'cancelled'
-  attempts: number; attempt_limit: number; run_id: string; result_message_id: number | null; error: string
-  next_attempt_at: number; created_at: number; updated_at: number
 }

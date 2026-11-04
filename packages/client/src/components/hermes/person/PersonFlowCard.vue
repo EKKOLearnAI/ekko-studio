@@ -8,7 +8,7 @@ import { chatSessionAgentAvatar, personAvatarStyle } from '@/utils/chat-agent-av
 import { personFlowDependencies, personFlowGroups, personFlowStageStatus, personFlowState, personFlowStatusKey, type PersonFlowStage, type PersonFlowStatus } from '@/utils/person-flow'
 
 const props = defineProps<{ flow: PersonFlow; saving: boolean; embedded?: boolean }>()
-const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume' | 'retry_report']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
+const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
 const { t, locale } = useI18n()
 const groups = computed(() => personFlowGroups(props.flow))
 const completed = computed(() => props.flow.stages.filter(stage => stage.state === 'completed').length)
@@ -19,11 +19,6 @@ const status = (stage: PersonFlowStage) => personFlowStageStatus(props.flow,stag
 const avatar = (stage: PersonFlowStage) => chatSessionAgentAvatar({ id:stage.session_id,bot_type:stage.bot_type || undefined })
 const label = (value: PersonFlowStatus) => t(personFlowStatusKey(value))
 const flowState = computed(() => personFlowState(props.flow))
-const report = computed(() => props.flow.completion_report)
-const reportLabel = computed(() => {
-  const state = report.value?.state
-  return t(`person.${({failed:'flowReportFailed',paused:'flowReportPaused',delivered:'flowReportDelivered',cancelled:'flowReportCancelled'} as Record<string,string>)[state || ''] || 'flowReportPending'}`)
-})
 const summary = computed(() => {
   if (props.flow.state === 'stopped') return t('person.flowStoppedHint')
   if (props.flow.state === 'completed') return t('person.states.completed')
@@ -61,12 +56,6 @@ function dependencyLabel(stage: PersonFlowStage) {
     </div>
     <NProgress type="line" :percentage="Math.round(completed / Math.max(1,flow.stages.length) * 100)" :show-indicator="false" :height="3" color="var(--success)" />
     <NAlert v-if="flow.error" type="warning" class="flow-error">{{ flow.error }}</NAlert>
-    <NAlert v-if="report" :type="['failed','paused'].includes(report.state) ? 'warning' : report.state === 'delivered' ? 'success' : 'info'" class="flow-error" :title="reportLabel">
-      <p role="status">{{ t('person.flowReportAttempts',{count:report.attempts,total:report.attempt_limit}) }}</p>
-      <p v-if="report.error && ['failed','paused'].includes(report.state)">{{ report.error }}</p>
-      <NButton v-if="['failed','paused'].includes(report.state)" :disabled="saving" size="small" secondary @click="emit('action',flow,'retry_report')">{{ t('person.flowReportRetry') }}</NButton>
-      <NButton v-if="report.state === 'delivered' && report.result_message_id && flow.creator_session_id" size="small" text @click="emit('openResult',flow.creator_session_id,report.result_message_id)">{{ t('person.viewResult') }}</NButton>
-    </NAlert>
     <ol class="flow-graph">
       <li v-for="(group,index) in groups" :key="group.position" class="flow-group" :class="{ 'flow-group--parallel':group.stages.length > 1, 'flow-group--last':index === groups.length - 1, 'flow-group--wrapped':group.stages.length > 3 }" :style="{ '--flow-columns':Math.min(3,group.stages.length) }">
         <div class="flow-group-heading">

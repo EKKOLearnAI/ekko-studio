@@ -27,5 +27,8 @@ test('shows bounded and continuous rounds, preserving Stop/Resume controls',asyn
   }
   await page.evaluate(()=>(window as any).flowRoundsFixture.completed())
   await expect(stop).toHaveCount(0)
+  await expect(page.getByText('已完成',{exact:true}).first()).toBeVisible()
+  await expect(page.getByRole('button',{name:'重试汇总',exact:true})).toHaveCount(0)
+  await expect(page.getByText(/阶段已完成，汇总/)).toHaveCount(0)
   expect(errors).toEqual([])
 })

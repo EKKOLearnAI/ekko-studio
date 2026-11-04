@@ -1,12 +1,10 @@
 import { cancelPersonDelivery } from '../person/delivery'
-import { pausePersonFlowReportsForSession } from '../../repositories/person-flow-report-store'
 /**
  * Abort handler — cancels in-progress runs (both API server and CLI bridge).
  */
 
 import type { Server, Socket } from 'socket.io'
-import { getSession, updateSession, updateSessionStats } from '../../repositories/session-store'
-import { isPersonSession } from '../../contracts/person-session'
+import { updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
 import { chatCodingAgentRunManager as codingAgentRunManager } from '../../public/chat-agent-runtime'
 import {
@@ -68,10 +66,6 @@ export async function handleAbort(
     sessionMap.set(sessionId, state)
   }
   const isCodingAgentRun = state?.source === 'coding_agent' || state?.source === 'builtin_agent' || state?.webhookAgent === 'ekko' || hasCodingAgentRun || hasEkkoBackgroundTasks
-  if (isPersonSession(sessionId)) {
-    const userId = Number(getSession(sessionId)?.studio_user_id)
-    if (userId) pausePersonFlowReportsForSession(userId,sessionId)
-  }
   if (state) {
     state.backgroundWakeStopped = true
     const dropped = state.queue.filter(item => item.goalContinuation || item.autonomous || item.backgroundDelegationId)
