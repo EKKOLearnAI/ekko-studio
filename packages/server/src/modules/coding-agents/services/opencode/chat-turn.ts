@@ -50,11 +50,17 @@ export function startOpenCodeTurn(
       : []),
     ...images.flatMap(image => ['--file', image.path]),
   ]
+  const workingDirectory = codingAgentWorkingDirectory(run.launch)
+  const env = run.launch.mode === 'global'
+    ? { ...process.env, ...(run.launch.env || {}) }
+    : isolatedCodingAgentChildEnv(run.launch.env)
+  // OpenCode's bash tool resolves relative paths against PWD, so keep it in
+  // sync with the actual spawn cwd instead of inheriting the server's /app.
+  env.PWD = workingDirectory
+  delete env.OLDPWD
   const child = host.spawn(run.launch.command, args, {
-    cwd: codingAgentWorkingDirectory(run.launch),
-    env: run.launch.mode === 'global'
-      ? { ...process.env, ...(run.launch.env || {}) }
-      : isolatedCodingAgentChildEnv(run.launch.env),
+    cwd: workingDirectory,
+    env,
     pipeStdin: true,
   })
   run.currentChild = child
