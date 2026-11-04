@@ -1,6 +1,6 @@
 import { personUpdated } from './person-updates'
 import { requirePersonSession } from './person-session-store'
-import { recordPersonOutcome, PERSON_TASK_RUNNING_SQL } from './person-presence-store'
+import { recordPersonOutcome, PERSON_TASK_RUNNING_SQL, PERSON_TASK_ACTIVITY_SQL } from './person-presence-store'
 import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { getWebUiHome } from '../public/config'
@@ -94,7 +94,8 @@ const taskExecutionColumns = `
   selected_execution.selection_json AS execution_selection_json,
   COALESCE(selected_execution.state,'idle') AS execution_state,
   (SELECT COUNT(*) FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state='pending') AS pending_count,
-  (${PERSON_TASK_RUNNING_SQL}) AS running`
+  (${PERSON_TASK_RUNNING_SQL}) AS running,
+  (${PERSON_TASK_ACTIVITY_SQL}) AS activity_running`
 export function getPersonTask(userId: number, id: string): PersonTask {
   const task = personDb().prepare(`SELECT t.*, ${taskExecutionColumns} FROM session_tasks t ${taskExecutionJoin} WHERE t.id=? AND t.owner_user_id=? AND t.bot_id=?`).get(id, userId, `person:${userId}`) as unknown as PersonTask | undefined
   if (!task) throw personError('Task not found', 404)
@@ -106,7 +107,7 @@ export function listPersonTasks(userId: number, search = '', offset = 0, options
   if (search) { filters.push('(instr(lower(t.title),lower(?))>0 OR instr(lower(t.summary),lower(?))>0)'); params.push(search, search) }
   if (options.sessionId) { filters.push('t.session_id=?'); params.push(options.sessionId) }
   if (options.status) { filters.push('t.status=?'); params.push(options.status) }
-  if (options.activeOnly) filters.push(`(${PERSON_TASK_RUNNING_SQL})`)
+  if (options.activeOnly) filters.push(`(${PERSON_TASK_ACTIVITY_SQL})`)
   return personDb().prepare(`SELECT t.*, ${taskExecutionColumns}
     FROM session_tasks t ${taskExecutionJoin} WHERE ${filters.join(' AND ')}
     ORDER BY t.updated_at ${options.order === 'oldest' ? 'ASC' : 'DESC'},t.id LIMIT ? OFFSET ?`).all(...params, Math.max(1, Math.min(100, Number(options.limit) || 20)), offset) as unknown as PersonTask[]

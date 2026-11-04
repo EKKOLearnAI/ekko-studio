@@ -45,20 +45,27 @@ export function personHasExecutingTask(userId: number): boolean {
       AND e.state IN ('starting','running','stopping') LIMIT 1`).get(userId, userId, `person:${userId}`)
 }
 
-/** Shared by activity rows and counts, including completed tasks still reporting. Alias: t. */
-export const PERSON_TASK_RUNNING_SQL = `EXISTS(SELECT 1 FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
+/** Work belonging to this task, including completed workers still reporting. Alias: t. */
+export const PERSON_TASK_ACTIVITY_SQL = `EXISTS(SELECT 1 FROM person_executions e WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
   OR EXISTS(SELECT 1 FROM person_task_redirects r WHERE r.task_id=t.id AND r.state IN ('waiting','cancelling'))
   OR EXISTS(SELECT 1 FROM person_deliveries d JOIN person_executions e ON e.id=d.execution_id WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id AND d.owner_user_id=t.owner_user_id AND d.state IN ('pending','queued'))
+  OR (t.status='open' AND EXISTS(SELECT 1 FROM person_acceptance a JOIN person_executions e ON e.id=a.execution_id WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id
+    AND json_extract(a.snapshot_json,'$.requirements.acceptance.progression')='automatic'
+    AND a.state IN ('pending','developing','awaiting_dispatch','repair_required')
+    AND e.rowid=(SELECT MAX(rowid) FROM person_executions WHERE task_id=t.id)))`
+
+/** Dependency locks also protect a developer waiting for its separate verifier. */
+export const PERSON_TASK_RUNNING_SQL = `(${PERSON_TASK_ACTIVITY_SQL})
   OR EXISTS(SELECT 1 FROM person_acceptance_tasks l JOIN person_executions v ON v.task_id=l.verification_task_id
     WHERE l.development_task_id=t.id AND v.owner_user_id=t.owner_user_id AND v.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval'))
   OR (t.status='open' AND EXISTS(SELECT 1 FROM person_acceptance a JOIN person_executions e ON e.id=a.execution_id WHERE e.owner_user_id=t.owner_user_id AND e.task_id=t.id
     AND json_extract(a.snapshot_json,'$.requirements.acceptance.progression')='automatic'
-    AND a.state IN ('pending','developing','awaiting_dispatch','verification_pending','awaiting_review','repair_required')
+    AND a.state IN ('verification_pending','awaiting_review')
     AND e.rowid=(SELECT MAX(rowid) FROM person_executions WHERE task_id=t.id)))`
 
 /** Count tasks across the account, including queued/waiting work and pending reports. */
 export function personBackgroundTaskCount(userId: number, sessionId?: string): number {
   return Number(personDb().prepare(`SELECT COUNT(*) AS n FROM session_tasks t
-    WHERE t.owner_user_id=? AND t.bot_id=? AND (? IS NULL OR t.session_id=?) AND (${PERSON_TASK_RUNNING_SQL})`)
+    WHERE t.owner_user_id=? AND t.bot_id=? AND (? IS NULL OR t.session_id=?) AND (${PERSON_TASK_ACTIVITY_SQL})`)
     .get(userId, `person:${userId}`, sessionId ?? null, sessionId ?? null)!.n)
 }

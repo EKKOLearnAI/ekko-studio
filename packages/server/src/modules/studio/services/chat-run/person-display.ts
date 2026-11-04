@@ -15,6 +15,10 @@ function pick(value: any, keys: string): Data {
 
 const usageKeys = 'runId assistantMessageId inputTokens outputTokens cacheReadTokens cacheHitRate costUsd tokensPerSecond speedSource isEstimated'
 const receiptKeys = 'taskId executionId assistantMessageId title summary agent state'
+function taskReturn(value: any): Data {
+  return { ...pick(value, receiptKeys),
+    ...(Array.isArray(value?.relatedTasks) ? { relatedTasks: value.relatedTasks.slice(0, 1).map((item: any) => pick(item, receiptKeys)) } : {}) }
+}
 const tokenKeys = 'input_tokens output_tokens total_tokens cache_read_tokens cache_write_tokens reasoning_tokens cost_usd inputTokens outputTokens cacheReadTokens cacheWriteTokens contextTokens context_tokens systemPromptTokens toolTokens messageTokens toolCount'
 
 function plan(value: any): Data {
@@ -109,7 +113,7 @@ export function personDisplayMessages<T>(sessionId: string, messages: T[]): T[] 
     if (visible) {
       Object.assign(result, pick(input, 'finish_reason token_count'))
       if (input.run_usage) result.run_usage = pick(input.run_usage, usageKeys)
-      if (input.person_task_return) result.person_task_return = pick(input.person_task_return, receiptKeys)
+      if (input.person_task_return) result.person_task_return = taskReturn(input.person_task_return)
     }
     return result as T
   })
@@ -183,7 +187,7 @@ export function personDisplayEvent(sessionId: string, event: string, payload: an
   if (interaction && payload?.error && typeof payload.error === 'object') result.error = pick(payload.error, 'code')
   if (event === 'run.completed') result.output = displayContent(payload?.output, true)
   if (payload?.run_usage) result.run_usage = pick(payload.run_usage, usageKeys)
-  if (payload?.person_task_return) result.person_task_return = pick(payload.person_task_return, receiptKeys)
+  if (payload?.person_task_return) result.person_task_return = taskReturn(payload.person_task_return)
   if (payload?.usage) result.usage = pick(payload.usage, tokenKeys)
   if (payload?.contextEstimate) result.contextEstimate = pick(payload.contextEstimate, tokenKeys)
   if (payload?.workspace_run_change) result.workspace_run_change = workspaceChange(payload.workspace_run_change)

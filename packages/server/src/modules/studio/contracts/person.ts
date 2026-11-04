@@ -66,6 +66,7 @@ export interface PersonTask {
   created_at: number
   updated_at: number
   running?: boolean | number
+  activity_running?: boolean | number
   acceptance_state?: import('./person-acceptance').PersonAcceptanceState | null
   acceptance_reason?: string | null
   execution_id?: string | null

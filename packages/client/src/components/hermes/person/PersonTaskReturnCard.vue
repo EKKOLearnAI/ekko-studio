@@ -9,12 +9,15 @@ import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 const props = defineProps<{ result: PersonTaskReturn }>()
 const { t } = useI18n()
 const openTask = inject(personTaskNavigation, undefined)
-const avatar = computed(() => chatSessionAgentAvatar({ agent: props.result.agent }))
+const results = computed(() => [props.result, ...(props.result.relatedTasks || [])].map(result => ({
+  ...result, avatar: chatSessionAgentAvatar({ agent: result.agent }),
+})))
 </script>
 
 <template>
-  <section v-if="openTask" class="person-task-return-card" data-theme-surface="card" :aria-label="result.title">
-    <img class="task-return-logo" :src="avatar.src" :alt="avatar.label" :title="avatar.label" />
+  <template v-if="openTask">
+  <section v-for="result in results" :key="result.executionId" class="person-task-return-card" data-theme-surface="card" :aria-label="result.title">
+    <img class="task-return-logo" :src="result.avatar.src" :alt="result.avatar.label" :title="result.avatar.label" />
     <div class="task-return-content">
       <div class="task-return-header">
         <button type="button" class="task-return-title" :aria-label="t('sessionTasks.openTask', { title: result.title })" @click="openTask(result.taskId, result.executionId)">{{ result.title }}</button>
@@ -28,6 +31,7 @@ const avatar = computed(() => chatSessionAgentAvatar({ agent: props.result.agent
       </details>
     </div>
   </section>
+  </template>
 </template>
 
 <style scoped lang="scss">

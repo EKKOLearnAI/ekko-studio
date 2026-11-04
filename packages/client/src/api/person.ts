@@ -6,14 +6,14 @@ import { clientUuid } from '../utils/secure-uuid'
 export interface PersonModel { profile: string; provider: string; model: string; apiMode?: ProviderApiMode }
 export interface PersonModelGroup extends Pick<AvailableModelGroup, 'provider' | 'label' | 'models' | 'model_meta' | 'api_mode' | 'api_mode_by_model'> { profile: string }
 export interface PersonAgentPreset { id: string; name: string; description: string; selection: PersonModel & { runtime: string; mode: 'scoped' | 'global'; reasoningEffort: string } }
-export interface PersonTask { redirect_state?: string | null; redirect_error?: string | null; requirements_json?: string; acceptance_state?: string | null; acceptance_reason?: string | null; session_id: string; session_title?: string; updated_at: number; selection_json: string; execution_selection_json?: string | null; id: string; title: string; summary: string; status: string; revision: number; execution_id?: string | null; execution_state: string; running: boolean | number; completion_evidence: string }
+export interface PersonTask { activity_running?: boolean | number; redirect_state?: string | null; redirect_error?: string | null; requirements_json?: string; acceptance_state?: string | null; acceptance_reason?: string | null; session_id: string; session_title?: string; updated_at: number; selection_json: string; execution_selection_json?: string | null; id: string; title: string; summary: string; status: string; revision: number; execution_id?: string | null; execution_state: string; running: boolean | number; completion_evidence: string }
 export interface PersonExecutionSummary { id: string; session_id: string; state: string; created_at: number; occurrence_id?: string | null }
 export interface PersonTaskQueueState { protectedQueueId?: string; canInsert?: boolean; canRemove?: boolean; insertion?: { queueId: string; phase: string } | null; insertionError?: string }
 export interface PersonTaskQueueSnapshot extends PersonTaskQueueState { task: PersonTask; pending: { id: string; input: { type: string; text?: string; name?: string }[] }[] }
 export interface PersonSchedule { id: string; mode: 'assistant' | 'worker'; task_id: string | null; session_id: string; session_title?: string | null; bot_type?: string | null; task_title?: string | null; task_goal?: string | null; title: string; goal: string; expression: string; timezone: string; next_at: number; state: string; revision: number }
 export interface PersonMemory { id: string; content: string; revision: number }
 export interface PersonQuestion { id: string; task_id: string | null; question: string; kind: string; choices_json: string; revision: number }
-export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed' }
+export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed'; relatedTasks?: PersonTaskReturn[] }
 export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; taskTimeoutMinutes: number; timezone: string }
 export interface PersonFlow {
   round_number?: number; round_limit?: number

@@ -62,6 +62,93 @@ it('automatically verifies a first-pass result and finishes with no developer re
   expect(rootReceipt(task.id)).toMatchObject({state:'passed',attempt:1})
 })
 
+it('shows the verifier instead of its waiting developer while retaining dependency locks',async()=>{
+  const {advanceAutomaticAcceptances}=await import('../../packages/server/src/modules/studio/services/person/automatic-acceptance')
+  const {personBackgroundTaskCount}=await import('../../packages/server/src/modules/studio/repositories/person-presence-store')
+  const {personHasPendingWork,clearPersonHistory}=await import('../../packages/server/src/modules/studio/repositories/person-history-store')
+  const {task}=await f.create({acceptance});await f.run(task.id)
+  expect(f.get(task.id)).toMatchObject({status:'open',activity_running:1})
+  await advanceAutomaticAcceptances()
+  const verifier=f.store.listPersonTasks(1).find(row=>row.id!==task.id)!
+  const active=()=>f.store.listPersonTasks(1,'',0,{sessionId:task.session_id,activeOnly:true})
+  expect(active().map(row=>row.id)).toEqual([verifier.id])
+  expect(personBackgroundTaskCount(1,task.session_id)).toBe(1)
+  expect(f.get(task.id)).toMatchObject({status:'open',running:1,activity_running:0,execution_state:'finished'})
+  expect(personHasPendingWork(1,task.session_id)).toBe(true)
+  expect(()=>clearPersonHistory(1,task.session_id,0)).toThrow(/Wait for Person tasks/)
+  await f.run(verifier.id)
+  expect(rootReceipt(task.id).state).toBe('awaiting_review')
+  expect(active().map(row=>row.id)).toEqual([verifier.id])
+  expect(personBackgroundTaskCount(1,task.session_id)).toBe(1)
+})
+
+it.each([false,true])('persists both final cards with the accepted development execution; repair=%s',async repair=>{
+  const {savePersonTaskReturn,withPersonTaskReturns}=await import('../../packages/server/src/modules/studio/repositories/person-return-store')
+  const {addMessage}=await import('../../packages/server/src/modules/studio/repositories/session-store')
+  const {personDisplayMessages,personDisplayEvent}=await import('../../packages/server/src/modules/studio/services/chat-run/person-display')
+  const {advanceAutomaticAcceptances}=await import('../../packages/server/src/modules/studio/services/person/automatic-acceptance')
+  if(repair) f.worker('41','42')
+  const {task,execution}=await f.create({acceptance});await f.run(task.id)
+  await advanceAutomaticAcceptances()
+  const verifier=f.store.listPersonTasks(1).find(row=>row.id!==task.id)!
+  await f.run(verifier.id)
+  const intermediateId=addMessage({session_id:task.session_id,role:'assistant',content:'Reading the review'})
+  const intermediate=savePersonTaskReturn(1,f.get(verifier.id).execution_id!,task.session_id,intermediateId)!
+  expect(intermediate).toMatchObject({taskId:verifier.id})
+  expect(intermediate.relatedTasks).toBeUndefined()
+  await f.record(task.id)
+  if(repair) {
+    await advanceAutomaticAcceptances();await f.run(task.id)
+    await advanceAutomaticAcceptances();await f.run(verifier.id);await f.record(task.id)
+  }
+  const accepted=f.get(task.id).execution_id!,verification=f.get(verifier.id).execution_id!
+  expect(accepted===execution.id).toBe(!repair)
+  const messageId=addMessage({session_id:task.session_id,role:'assistant',content:'Development and acceptance finished'})
+  const result=savePersonTaskReturn(1,verification,task.session_id,messageId)!
+  expect(result).toMatchObject({taskId:task.id,executionId:accepted,assistantMessageId:String(messageId),relatedTasks:[{taskId:verifier.id,executionId:verification,assistantMessageId:String(messageId)}]})
+  const raw=[{id:intermediateId,role:'assistant'},{id:messageId,role:'assistant'}]
+  const restored=withPersonTaskReturns(task.session_id,raw) as Array<typeof raw[number]&{person_task_return:typeof result}>
+  expect(restored[0].person_task_return).toEqual(intermediate)
+  expect(restored[1].person_task_return).toEqual(result)
+  expect(personDisplayMessages(task.session_id,restored)[1].person_task_return).toEqual(result)
+  const payload={person_task_return:{...result,private:'hidden',relatedTasks:[{...result.relatedTasks![0],private:'hidden',relatedTasks:[result]}]}}
+  expect(personDisplayEvent(task.session_id,'run.completed',payload)?.person_task_return).toEqual(result)
+  expect(savePersonTaskReturn(2,verification,task.session_id,messageId)).toBeUndefined()
+  await f.reopen()
+  expect(withPersonTaskReturns(task.session_id,raw)).toEqual(restored)
+})
+
+it('keeps cross-Bot review and development cards in their own conversations',async()=>{
+  const {savePersonTaskReturn}=await import('../../packages/server/src/modules/studio/repositories/person-return-store')
+  const {addMessage}=await import('../../packages/server/src/modules/studio/repositories/session-store')
+  const {advanceAutomaticAcceptances}=await import('../../packages/server/src/modules/studio/services/person/automatic-acceptance')
+  const reviewer_session_id=await reviewer()
+  const {task,execution}=await f.create({acceptance:{...acceptance,reviewer_session_id}});await f.run(task.id)
+  await advanceAutomaticAcceptances()
+  const verifier=f.store.listPersonTasks(1).find(row=>row.id!==task.id)!
+  await f.run(verifier.id)
+  const verification=f.get(verifier.id).execution_id!
+  await f.record(task.id,undefined,{sessionId:reviewer_session_id,runId:'review-turn',messages:[],returnExecutionId:verification})
+  const reviewMessage=addMessage({session_id:reviewer_session_id,role:'assistant',content:'Review passed'})
+  expect(savePersonTaskReturn(1,verification,reviewer_session_id,reviewMessage)).toMatchObject({taskId:verifier.id})
+  expect(savePersonTaskReturn(1,verification,reviewer_session_id,reviewMessage)?.relatedTasks).toBeUndefined()
+  const developmentMessage=addMessage({session_id:task.session_id,role:'assistant',content:'Accepted result'})
+  expect(savePersonTaskReturn(1,verification,task.session_id,developmentMessage)).toBeUndefined()
+  expect(savePersonTaskReturn(1,execution.id,task.session_id,developmentMessage)).toMatchObject({taskId:task.id})
+})
+
+it('adds the callback link column without losing existing ordinary receipts',async()=>{
+  const {savePersonTaskReturn,withPersonTaskReturns}=await import('../../packages/server/src/modules/studio/repositories/person-return-store')
+  const {addMessage}=await import('../../packages/server/src/modules/studio/repositories/session-store')
+  const {task,execution}=await f.create();await f.run(task.id)
+  const messageId=addMessage({session_id:task.session_id,role:'assistant',content:'Delivered'})
+  const receipt=savePersonTaskReturn(1,execution.id,task.session_id,messageId)
+  f.db.exec('ALTER TABLE person_task_returns DROP COLUMN development_execution_id')
+  f.schema.initAllHermesTables()
+  const messages=[{id:messageId,role:'assistant'}]
+  expect(withPersonTaskReturns(task.session_id,messages)).toEqual([{...messages[0],person_task_return:receipt}])
+})
+
 it('retains original result-memory authority for developer repair without granting it to the reviewer',async()=>{
   await decideReports();f.worker('41','42')
   const memoryRequest={sessionId:'person-main-1',messageId:1,historyRevision:0,content:'Remember the verified result'}
@@ -161,14 +248,14 @@ it('does not let an automatic background callback cancel the workflow instead of
   expect(rootReceipt(task.id).state).toBe('awaiting_dispatch')
 })
 
-it('keeps cross-Bot acceptance visible and prevents clearing its owner while the linked verifier is pending or stopping',async()=>{
+it('retains cross-Bot dependency locks without duplicating the linked verifier in developer activity',async()=>{
   const {advanceAutomaticAcceptances}=await import('../../packages/server/src/modules/studio/services/person/automatic-acceptance')
   const {personHasPendingWork,clearPersonHistory}=await import('../../packages/server/src/modules/studio/repositories/person-history-store')
   const {personBackgroundTaskCount}=await import('../../packages/server/src/modules/studio/repositories/person-presence-store')
   const reviewer_session_id=await reviewer()
   const {task,execution}=await f.create({acceptance:{...acceptance,reviewer_session_id}});await f.run(task.id)
   await advanceAutomaticAcceptances()
-  expect(personBackgroundTaskCount(1,task.session_id)).toBe(1)
+  expect(personBackgroundTaskCount(1,task.session_id)).toBe(0)
   expect(personHasPendingWork(1,task.session_id)).toBe(true)
   expect(()=>clearPersonHistory(1,task.session_id,0)).toThrow(/Wait for Person tasks/)
   await f.tasks.applyPersonTask(1,{action:'stop',task_id:task.id,execution_id:execution.id,expected_revision:f.get(task.id).revision,idempotency_key:randomUUID()})

@@ -93,6 +93,9 @@ export function initPersonTables(db: DatabaseSync): void {
       PRIMARY KEY(session_id, assistant_message_id)
     );
   `)
+  if (!db.prepare('PRAGMA table_info(person_task_returns)').all().some(column => column.name === 'development_execution_id')) {
+    db.exec('ALTER TABLE person_task_returns ADD COLUMN development_execution_id TEXT')
+  }
   const executionColumns = db.prepare('PRAGMA table_info(person_executions)').all()
   for (const [name, definition] of Object.entries({
     queue_priority: 'INTEGER NOT NULL DEFAULT 0',
