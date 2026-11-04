@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 
 const selection = { runtime: 'codex', mode: 'scoped', profile: 'default', provider: 'fixture', model: 'test-model', reasoningEffort: '' }
-async function setup(page: Page) {
+async function setup(page: Page, fullShell = false) {
   const errors: string[] = [], posts: { path: string; body: any }[] = [], files: string[] = []
   const delayed = new Map<string, { promise: Promise<void>; release: () => void }>()
   function hold(path: string) {
@@ -15,6 +15,7 @@ async function setup(page: Page) {
   page.on('pageerror', e => errors.push(e.message))
   await page.addInitScript(() => {
     localStorage.setItem('hermes_locale', 'zh')
+    localStorage.setItem('hermes_api_key', 'fixture.' + btoa(JSON.stringify({ sub: 1, role: 'user', username: 'fixture' })) + '.fixture')
     localStorage.setItem('hermes.person.agentPanelWidth', '480')
     localStorage.setItem('hermes.person.toolDrawerWidth', '600')
     const state = { available: true, activeProfileId: 'default', activeTabId: 'shared-tab', tabs: [{ id: 'shared-tab', profileId: 'default', title: '共享浏览器页', url: 'https://example.test/shared', loading: false, canGoBack: false, canGoForward: false, agentControl: 'idle' }], profiles: [{ id: 'default', name: 'Default' }], downloads: [], permissions: [], visible: true, maxTabs: 20 }
@@ -49,6 +50,7 @@ async function setup(page: Page) {
     let json: any = {}
     if (u.pathname === '/api/auth/me') json = { user: { id: 1, username: 'fixture', role: 'super_admin' } }
     else if (u.pathname === '/api/auth/avatar') json = { avatar: '' }
+    else if (u.pathname === '/api/hermes/available-models') json = { groups: [{ provider: 'fixture', models: ['test-model'], label: 'Fixture' }], allProviders: [], default: 'test-model', default_provider: 'fixture' }
     else if (u.pathname.includes('/profiles')) json = { profiles: [{ name: 'default', active: true }] }
     else if (u.pathname === '/api/studio/person/conversations') json = { sessions, next_offset: null }
     else if (u.pathname === '/api/studio/person') {
@@ -69,9 +71,9 @@ async function setup(page: Page) {
     } else if (u.pathname === '/api/studio/workspace/directories') json = { directories: [] }
     await route.fulfill({ json }).catch(() => {})
   })
-  const entry = '/@fs/' + resolve('tests/e2e/fixtures/person-conversation-layout.ts').replace(/^\//, '')
+  const entry = '/@fs/' + resolve(fullShell ? 'packages/client/src/main.ts' : 'tests/e2e/fixtures/person-conversation-layout.ts').replace(/^\//, '')
   await page.route('**/__conversation_layout__', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="zh"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div><script type="module" src="${entry}"></script></body></html>` }))
-  await page.goto('/__conversation_layout__')
+  await page.goto('/__conversation_layout__' + (fullShell ? '#/person' : ''))
   await expect(page.locator('.person-title')).toHaveText('日常助手')
   return { errors, posts, files, tasks, hold }
 }
@@ -154,6 +156,7 @@ test('rejects late Agent reads, refreshes files and sends only to the current Ag
   expect(state.posts[0].path).toContain('/tasks/a2/chat')
   await chooseTask(page, state.tasks[0].title)
   await expect(page.locator('.person-tools-panel')).toContainText('a1-only.txt')
+  await expect(page.locator('.person-task-chat')).toHaveCSS('width', '480px')
   await expect(page.locator('.person-tools-panel')).not.toContainText('a2-only.txt')
   expect(state.errors).toEqual([])
   await evidence(page, '04-current-files', { posts: state.posts, files: state.files, errors: state.errors })
@@ -278,4 +281,93 @@ test('does not submit a browser annotation capture to an Agent selected while ca
   expect(state.posts).toEqual([])
   expect(state.errors).toEqual([])
   await evidence(page, '07-annotation-context', { posts: state.posts, errors: state.errors })
+})
+
+test('opens only the Agent from a closed workspace and preserves explicit closed state through switches', async ({ page }) => {
+  await page.setViewportSize({ width: 2048, height: 1152 })
+  const state = await setup(page)
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await chooseTask(page, state.tasks[0].title)
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('前端工程师')
+  await expect(page.locator('.person-task-chat textarea')).toBeVisible()
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await chooseTask(page, state.tasks[1].title)
+  await expect(page.locator('.task-chat-heading .task-identity-title')).toHaveText(state.tasks[1].title)
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await bot(page, '研发 Bot')
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('研发执行器')
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await evidence(page, '08-agent-only', { fileRequests: state.files, errors: state.errors })
+  expect(state.files).toEqual([])
+  expect(state.errors).toEqual([])
+})
+
+test('keeps the workspace to the right of Agent when the workspace was opened first; manual close survives switches', async ({ page }) => {
+  await page.setViewportSize({ width: 2048, height: 1152 })
+  const state = await setup(page)
+  await tools(page)
+  await expect(page.locator('.person-tools-panel')).toContainText('bot-only.txt')
+  await expect(page.locator('.person-task-chat')).toHaveCount(0)
+  await chooseTask(page, state.tasks[0].title)
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('前端工程师')
+  await expect(page.locator('.person-tools-panel')).toContainText('a1-only.txt')
+  await expect(page.locator('.person-task-chat')).toHaveCSS('width', '480px')
+  const bounds = async () => ({ agent: await page.locator('.person-task-chat').boundingBox(), tools: await page.locator('.person-tools-panel').boundingBox() })
+  await expect.poll(async () => { const r = await bounds(); return r.agent!.x + r.agent!.width <= r.tools!.x }).toBe(true)
+  const opened = await bounds()
+  await evidence(page, '09-workspace-opened-first', opened)
+  await chooseTask(page, state.tasks[1].title)
+  await expect(page.locator('.person-tools-panel')).toContainText('a2-only.txt')
+  expect(await bounds()).toEqual(opened)
+  await bot(page, '研发 Bot')
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('研发执行器')
+  await expect(page.locator('.person-tools-panel')).toContainText('bot-only.txt')
+  expect(await bounds()).toEqual(opened)
+  await page.locator('.person-tools-close').click()
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await bot(page, '日常助手')
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('后端工程师')
+  await chooseTask(page, state.tasks[0].title)
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('前端工程师')
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await tools(page)
+  await expect(page.locator('.person-tools-panel')).toContainText('a1-only.txt')
+  const reopened = await bounds()
+  expect(reopened.agent!.x + reopened.agent!.width).toBeLessThanOrEqual(reopened.tools!.x)
+  // The header toggle is also an explicit user close, not an Agent action.
+  await page.locator('.person-header-actions button[aria-controls^="person-files-panel"]').click()
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await chooseTask(page, state.tasks[1].title)
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('后端工程师')
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  expect(state.errors).toEqual([])
+})
+
+test('uses the application shell and real chat resume for Agent-only, explicit workspace open and both switch states', async ({ page }) => {
+  await page.setViewportSize({ width: 2048, height: 1152 })
+  const state = await setup(page, true)
+  await chooseTask(page, state.tasks[0].title)
+  await expect(page.locator('.person-task-chat textarea')).toBeVisible()
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await chooseTask(page, state.tasks[1].title)
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('后端工程师')
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await tools(page)
+  await expect(page.locator('.person-tools-panel')).toContainText('a2-only.txt')
+  await chooseTask(page, state.tasks[0].title)
+  await expect(page.locator('.person-tools-panel')).toContainText('a1-only.txt')
+  await bot(page, '研发 Bot')
+  await expect(page.locator('.person-task-chat textarea')).toBeVisible()
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('研发执行器')
+  await expect(page.locator('.person-tools-panel')).toContainText('bot-only.txt')
+  await page.locator('.person-tools-close').click()
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await bot(page, '日常助手')
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('前端工程师')
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await chooseTask(page, state.tasks[1].title)
+  await expect(page.locator('.person-task-chat textarea')).toBeVisible()
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await evidence(page, '10-full-application-agent-only', { errors: state.errors, files: state.files })
+  expect(state.errors).toEqual([])
 })

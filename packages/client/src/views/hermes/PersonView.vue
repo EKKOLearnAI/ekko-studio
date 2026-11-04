@@ -681,9 +681,9 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
             <template #trigger><NButton quaternary circle size="small" :disabled="busy || pending || settingsWrites > 0" :aria-label="t('chat.workspace')" :aria-expanded="showWorkspace" @click="openWorkspace"><FolderIcon /></NButton></template>
             {{ data?.settings.workspace || t('chat.workspace') }}
           </NTooltip>
-          <PersonWorkspaceFiles panel-target="#person-tools-target" :reserved-width="taskPanelOpen ? taskChatRef?.panelWidth || 0 : 0"
+          <PersonWorkspaceFiles v-model:show="toolsOpen" panel-target="#person-tools-target" :reserved-width="taskPanelOpen ? taskChatRef?.panelWidth || 0 : 0"
             :session-id="toolsSession?.id" :workspace="toolsSession?.workspace" :submit="submitTools"
-            :active="data?.session?.id === selectedSessionId" @attach="attachToolFile" @update:show="toolsOpen = $event" />
+            :active="data?.session?.id === selectedSessionId" @attach="attachToolFile" />
           <NPopconfirm v-model:show="showClearConfirm" :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" :positive-button-props="{ loading: pending }" :disabled="!data?.can_clear || busy || pending || settingsWrites > 0" @positive-click="clearHistory">
             <template #trigger>
               <NTooltip trigger="hover">
@@ -736,7 +736,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           <NButton v-for="entry in recentWorkspaces" :key="entry.path" size="tiny" :title="entry.path" @click="workspaceValue = entry.path">{{ folderName(entry.path) }}</NButton>
         </div>
       </NModal>
-      <div v-if="!isNewConversation" id="person-tools-target" class="person-chat-layout">
+      <div v-if="!isNewConversation" class="person-chat-layout">
       <div ref="chatSurface" class="person-chat-surface" :inert="isMobile && (taskPanelOpen || toolsOpen) || undefined">
       <div v-if="data.session" class="person-chat-messages">
       <PersonTaskActivity :key="selectedSessionId" :session-id="data.session.id" :count="sessionStates.backgroundCount(selectedSessionId)" :agent-count="data.active_agent_task_count" :tasks="data.active_tasks || data.tasks" :flows="data.active_flows || data.flows || []" :flow-count="data.active_flow_count"
@@ -755,6 +755,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       </div>
       <PersonTaskChat v-if="taskPanelOpen" ref="taskChatRef" :inert="isMobile && toolsOpen || undefined"
         :loading="switchingConversation" :can-close="canChangeContext" :agents="data.settings.agents" :execution-id="chatExecutionId" :task-id="chatTaskId" :main-session-id="selectedSessionId" @close="closeTaskChat" />
+      <div id="person-tools-target" class="person-tools-host" />
       </div>
       <NModal v-model:show="showAgentSetup" preset="dialog" :title="t('person.agentSetupTitle')" :aria-label="t('person.agentSetupTitle')"
         :positive-text="t('person.configureAgents')" :negative-text="t('common.cancel')"
@@ -833,6 +834,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
 .person-alert { margin: 12px; width: auto; }
 .person-compose { flex-shrink: 0; min-width: 0; }
 .person-chat-layout { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.person-tools-host { display: contents; }
 .person-chat-surface { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .person-chat-messages { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .person-model-hint { display: block; margin: 0 auto; border: 0; background: transparent; color: $accent-primary; cursor: pointer; font: inherit; font-size: 12px; padding: 8px; }
