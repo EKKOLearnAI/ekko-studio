@@ -28,7 +28,8 @@ export function getPersonFlow(userId: number, id: string): PersonConversationFlo
     })
   }
   const error = db.prepare("SELECT error FROM person_stage_deliveries WHERE flow_id=? AND generation=? AND state IN ('pending','failed') AND error!='' ORDER BY updated_at DESC LIMIT 1").get(id,row.generation)?.error || ''
-  return { ...row, stages, error } as unknown as PersonConversationFlow
+  const completion_report = db.prepare('SELECT id,state,attempts,run_id,result_message_id,error,next_attempt_at FROM person_flow_reports WHERE flow_id=? AND generation=? AND session_id=?').get(id,row.generation,row.creator_session_id)
+  return { ...row, stages, error, completion_report: completion_report || null } as unknown as PersonConversationFlow
 }
 export function listPersonFlows(userId: number, sessionId = '', offset = 0) {
   return personDb().prepare(`SELECT f.id FROM person_flows f WHERE owner_user_id=? AND

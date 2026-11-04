@@ -25,6 +25,21 @@ export function initPersonStageTables(db: DatabaseSync) {
     CREATE INDEX IF NOT EXISTS idx_person_stage_session ON person_stages(session_id,flow_id);
     CREATE INDEX IF NOT EXISTS idx_person_stage_tasks_stage ON person_stage_tasks(stage_id);
     CREATE INDEX IF NOT EXISTS idx_person_stage_delivery_pending ON person_stage_deliveries(state,updated_at);
+    CREATE TABLE IF NOT EXISTS person_flow_reports (
+      id TEXT PRIMARY KEY, owner_user_id INTEGER NOT NULL, flow_id TEXT NOT NULL,
+      generation INTEGER NOT NULL, session_id TEXT NOT NULL, snapshot_json TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+      run_id TEXT NOT NULL DEFAULT '', result_message_id INTEGER,
+      error TEXT NOT NULL DEFAULT '', next_attempt_at INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      UNIQUE(flow_id,generation,session_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_person_flow_report_pending ON person_flow_reports(state,next_attempt_at);
+    CREATE TABLE IF NOT EXISTS person_flow_report_events (
+      id INTEGER PRIMARY KEY, report_id TEXT NOT NULL, event TEXT NOT NULL,
+      attempt INTEGER NOT NULL, run_id TEXT NOT NULL, message_id INTEGER,
+      error TEXT NOT NULL, created_at INTEGER NOT NULL
+    );
   `)
   if (!db.prepare('PRAGMA table_info(person_stages)').all().some(column => column.name === 'group_position')) {
     db.exec('ALTER TABLE person_stages ADD COLUMN group_position INTEGER NOT NULL DEFAULT 0; UPDATE person_stages SET group_position=position;')

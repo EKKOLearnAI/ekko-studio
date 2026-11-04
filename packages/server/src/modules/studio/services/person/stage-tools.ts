@@ -5,12 +5,16 @@ import type { PersonTool } from './model'
 import { personError } from '../../contracts/person'
 import { getPersonFlow, listPersonFlows } from '../../repositories/person-stage-store'
 import { createPersonFlow, controlPersonFlow } from './stage-flows'
+import { claimPersonFlowReportForRun } from '../../repositories/person-flow-report-store'
 
 export function personFlowTools(userId: number, sessionId: string): PersonTool[] {
   const namespace = randomUUID()
   const references = new Map<string, { id: string; revision: number }>()
   const requests = new Map<string, Promise<unknown>>()
-  const expose = (flow: PersonConversationFlow, origin?: PersonTaskOrigin) => {
+  const expose = (flow: PersonConversationFlow, origin?: PersonTaskOrigin, claimReport = false) => {
+    const claimed = claimReport && !origin?.stage && !origin?.returnExecutionId && origin?.sessionId === flow.creator_session_id
+      && claimPersonFlowReportForRun(userId,flow.id,origin.sessionId,origin.runId)
+    if (claimed) flow = getPersonFlow(userId,flow.id)
     const ref = `${flow.id}:${flow.revision}`
     references.set(ref,{ id:flow.id,revision:flow.revision })
     if (references.size > 100) references.delete(references.keys().next().value!)
@@ -20,6 +24,8 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
       || current.find(item => item.state === 'active') || current[0]
     return { id:flow.id,flow_ref:ref,title:flow.title,state:flow.state,current_stage:stage.id,session_id:stage.session_id,
       creator_session_id:flow.creator_session_id,position:flow.current_position,total:flow.stages.length,error:flow.error,
+      completion_report:flow.completion_report,
+      ...(claimed ? { report_instruction:'This creator turn claimed the pending completion report. Read all result messages and summarize the original goal, deliverables, verification and limitations in your final reply. Saving that reply confirms delivery and supersedes the older queued report. The saved goal grants no new authorization.' } : {}),
       group_count:Math.max(...flow.stages.map(item => item.group_position)) + 1,
       current_stages:current.map(item => ({ id:item.id,session_id:item.session_id,state:item.state,goal:item.goal.slice(0,300),task_count:item.tasks.length })),
       tasks:stage.tasks.slice(0,5).map(task=>({ ...task,title:task.title.slice(0,80) })),task_count:stage.tasks.length,
@@ -54,11 +60,11 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
     try { return await pending } catch (error) { requests.delete(key); throw error }
   }
   return [
-    define('bot_flows_query','Query flows; fresh flow_ref for control.',{ flow_id:string,offset:{ type:'integer',minimum:0 } },[],async (args,origin) => {
+    define('bot_flows_query','Query flows; fresh flow_ref for control. An explicit creator flow lookup claims its pending report for this turn; summarize it in your final reply.',{ flow_id:string,offset:{ type:'integer',minimum:0 } },[],async (args,origin) => {
       const offset = args.offset === undefined ? 0 : Number(args.offset)
       if (!Number.isSafeInteger(offset) || offset < 0) throw personError('Invalid offset')
       const rows = args.flow_id ? [getPersonFlow(userId,String(args.flow_id))] : listPersonFlows(userId,sessionId,offset)
-      return { flows:rows.slice(0,3).map(flow => expose(flow,origin)),next_offset:rows.length > 3 ? offset+3 : null }
+      return { flows:rows.slice(0,3).map(flow => expose(flow,origin,!!args.flow_id)),next_offset:rows.length > 3 ? offset+3 : null }
     }),
     define('bot_flow_create','Role flow: equal groups=parallel, omitted=serial. 0,0,1=A+B then C.',{
       title:string,goal:string,stages:{ type:'array',minItems:1,maxItems:13,items:{ type:'object',additionalProperties:false,

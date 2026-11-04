@@ -6,6 +6,7 @@ import { personDb, personTransaction } from './person-store'
 import { getSession } from './session-store'
 import { PERSON_STAGE_PENDING_WORK_SQL } from './person-stage-store'
 import { PERSON_TASK_RUNNING_SQL } from './person-presence-store'
+import { cancelPersonFlowReportsForSession } from './person-flow-report-store'
 
 export function personHasPendingWork(userId: number, sessionId = ''): boolean {
   if (personDb().prepare(`SELECT 1 FROM person_flows f JOIN person_stages member ON member.flow_id=f.id
@@ -32,6 +33,7 @@ export function clearPersonHistory(userId: number, mainId: string, historyRevisi
     if (!ownsPersonSession(userId, main)) throw personError('Session not found', 404)
     if (main!.history_revision !== historyRevision) throw personError('Conversation changed; reload and retry', 409)
     if (personHasPendingWork(userId, mainId)) throw personError('Wait for Person tasks and result delivery to finish', 409)
+    cancelPersonFlowReportsForSession(userId,mainId)
     const rows = personHistorySessions(userId, mainId)
     db.prepare('DELETE FROM person_occurrences WHERE schedule_id IN (SELECT id FROM person_schedules WHERE owner_user_id=? AND session_id=?)').run(userId, mainId)
     db.prepare('DELETE FROM person_schedules WHERE owner_user_id=? AND session_id=?').run(userId, mainId)
