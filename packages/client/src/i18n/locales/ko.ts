@@ -1495,6 +1495,7 @@ export default {
         error: '오류',
       },
       browserSpeechUnsupported: '이 브라우저는 내장 음성 인식을 지원하지 않습니다.',
+      backendSttRequired: '데스크톱 앱의 음성 입력에는 백엔드 STT가 필요합니다. 모델 → STT에서 로컬 음성 인식을 활성화하거나 클라우드 서비스를 설정하고 활성화하세요.',
       browserSpeechFailed: '브라우저 음성 인식에 실패했습니다.',
       browserSpeechFailedWithReason: '브라우저 음성 인식에 실패했습니다: {error}.',
       microphoneUnsupported: '이 브라우저는 마이크 녹음을 지원하지 않습니다.',

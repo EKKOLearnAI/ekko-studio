@@ -1317,6 +1317,7 @@ export default {
         error: '錯誤',
       },
       browserSpeechUnsupported: '目前瀏覽器不支援內建語音辨識。',
+      backendSttRequired: '桌面端語音輸入需要後端 STT。請在「模型 → STT」中啟用本機語音辨識，或設定並啟用雲端服務。',
       browserSpeechFailed: '瀏覽器語音辨識失敗。',
       browserSpeechFailedWithReason: '瀏覽器語音辨識失敗：{error}。',
       microphoneUnsupported: '目前瀏覽器不支援麥克風錄音。',

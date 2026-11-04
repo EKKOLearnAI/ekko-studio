@@ -86,7 +86,7 @@ const recentEventTypes = computed(() => props.events.slice(-5).map(event => even
   z-index: 1200;
   width: min(20rem, calc(100vw - 2rem));
   max-width: 20rem;
-  pointer-events: none;
+  pointer-events: auto;
   box-sizing: border-box;
 }
 

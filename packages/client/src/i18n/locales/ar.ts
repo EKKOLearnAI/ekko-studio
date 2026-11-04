@@ -1319,6 +1319,7 @@ export default {
         error: 'خطأ',
       },
       browserSpeechUnsupported: 'التعرّف على الكلام غير مدعوم في هذا المتصفح.',
+      backendSttRequired: 'يتطلب الإدخال الصوتي في تطبيق سطح المكتب خدمة STT في الخادم. فعّل التعرّف المحلي على الكلام أو اضبط مزوّدًا سحابيًا وفعّله ضمن النماذج → STT.',
       browserSpeechFailed: 'فشل التعرّف على الكلام في المتصفح.',
       browserSpeechFailedWithReason: 'فشل التعرّف على الكلام في المتصفح: {error}.',
       microphoneUnsupported: 'التقاط الميكروفون غير مدعوم في هذا المتصفح.',

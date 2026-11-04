@@ -1326,6 +1326,7 @@ export default {
         error: '错误',
       },
       browserSpeechUnsupported: '当前浏览器不支持内置语音识别。',
+      backendSttRequired: '桌面端语音输入需要后端 STT。请在「模型 → STT」中启用本地语音识别，或配置并启用云端服务。',
       browserSpeechFailed: '浏览器语音识别失败。',
       browserSpeechFailedWithReason: '浏览器语音识别失败：{error}。',
       microphoneUnsupported: '当前浏览器不支持麦克风录音。',

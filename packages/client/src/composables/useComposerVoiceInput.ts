@@ -1,4 +1,4 @@
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMicRecorder } from '@/composables/useMicRecorder'
 import { usePcmStreamRecorder } from '@/composables/usePcmStreamRecorder'
@@ -13,7 +13,7 @@ import {
   startLocalSttStream,
   transcribeSpeech,
 } from '@/api/studio/stt'
-import type { StoredSttProvider } from '@/api/studio/stt-settings'
+import { fetchSttSettings, type StoredSttProvider } from '@/api/studio/stt-settings'
 import { isDesktopShell } from '@/utils/desktop-bridge'
 import { isMobileDevice } from '@/utils/device'
 
@@ -57,6 +57,7 @@ export function useComposerVoiceInput(options: {
     },
   })
   const activeCaptureMode = ref<'browser' | 'backend' | 'pcm' | 'local' | null>(null)
+  const captureStartError = ref<Error | null>(null)
   const localStreamTranscript = ref('')
   const localStreamError = ref<Error | null>(null)
   let localStreamSessionId: string | null = null
@@ -69,6 +70,9 @@ export function useComposerVoiceInput(options: {
     language?: string
     prompt?: string
   } {
+    if (isDesktopShell() && sttSettings.provider.value === 'browser') {
+      throw new Error(t('chat.voiceInput.backendSttRequired'))
+    }
     if (sttSettings.provider.value === 'custom') {
       return {
         provider: 'custom',
@@ -110,6 +114,7 @@ export function useComposerVoiceInput(options: {
 
   const error = computed(() =>
     dialogue.error.value?.message
+    ?? captureStartError.value?.message
     ?? localStreamError.value?.message
     ?? ((sttSettings.provider.value === 'browser' || activeCaptureMode.value === 'browser')
       ? browserRecognition.error.value?.message
@@ -161,15 +166,28 @@ export function useComposerVoiceInput(options: {
 
   async function start() {
     browserRecognition.clearError()
+    captureStartError.value = null
     localStreamError.value = null
     const { captureId } = await dialogue.beginCapture()
-    const useBrowserProvider = sttSettings.provider.value === 'browser'
-    const useLocalProvider = sttSettings.provider.value === 'local'
-    const usePcmCapture = !useBrowserProvider && !useLocalProvider && (isDesktopShell() || isMobileDevice())
-    activeCaptureMode.value = useBrowserProvider
-      ? 'browser'
-      : useLocalProvider ? 'local' : usePcmCapture ? 'pcm' : 'backend'
     try {
+      if (isDesktopShell()) {
+        const settings = await fetchSttSettings()
+        if (dialogue.activeCaptureId.value !== captureId) return
+        const provider = settings.activeProvider
+        if (
+          !provider || provider === 'browser'
+          || (provider !== 'local' && !settings.providers.find(row => row.provider === provider)?.secrets.apiKey)
+        ) {
+          throw new Error(t('chat.voiceInput.backendSttRequired'))
+        }
+        sttSettings.applyServerSttSettings(settings, true)
+      }
+      const useBrowserProvider = sttSettings.provider.value === 'browser'
+      const useLocalProvider = sttSettings.provider.value === 'local'
+      const usePcmCapture = !useBrowserProvider && !useLocalProvider && (isDesktopShell() || isMobileDevice())
+      activeCaptureMode.value = useBrowserProvider
+        ? 'browser'
+        : useLocalProvider ? 'local' : usePcmCapture ? 'pcm' : 'backend'
       if (useBrowserProvider) {
         await browserRecognition.start({ language: browserCaptureLanguage() })
         return
@@ -193,7 +211,9 @@ export function useComposerVoiceInput(options: {
       if (usePcmCapture) await pcmRecorder.start()
       else await micRecorder.start()
     } catch (cause) {
-      if (useLocalProvider) {
+      if (dialogue.activeCaptureId.value !== captureId) return
+      captureStartError.value = cause instanceof Error ? cause : new Error(String(cause))
+      if (activeCaptureMode.value === 'local') {
         localStreamError.value = cause instanceof Error ? cause : new Error(String(cause))
         localStreamGeneration += 1
         localPcmRecorder.cancel()
@@ -207,14 +227,23 @@ export function useComposerVoiceInput(options: {
   async function stop() {
     const captureId = dialogue.activeCaptureId.value
     if (!captureId) return
+    if (!activeCaptureMode.value) {
+      dialogue.cancelCapture(captureId)
+      return
+    }
     if (activeCaptureMode.value === 'browser') {
+      let text: string
       try {
-        const text = await browserRecognition.stop()
-        activeCaptureMode.value = null
+        text = await browserRecognition.stop()
+      } catch {
+        text = browserRecognition.transcript.value
+      }
+      if (dialogue.activeCaptureId.value !== captureId || activeCaptureMode.value !== 'browser') return
+      activeCaptureMode.value = null
+      try {
         await dialogue.commitTranscript(captureId, text)
       } catch {
-        activeCaptureMode.value = null
-        dialogue.cancelCapture(captureId)
+        // useVoiceDialogue owns the visible error state.
       }
       return
     }
@@ -281,6 +310,12 @@ export function useComposerVoiceInput(options: {
       // useVoiceDialogue owns the visible error state.
     }
   }
+
+  watch(browserRecognition.error, cause => {
+    if (cause && activeCaptureMode.value === 'browser' && dialogue.status.value === 'capturing') {
+      void stop()
+    }
+  })
 
   function cancel() {
     if (activeCaptureMode.value === 'browser') browserRecognition.cancel()

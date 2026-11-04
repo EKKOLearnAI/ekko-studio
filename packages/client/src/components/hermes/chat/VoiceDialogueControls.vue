@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VoiceDialogueEvent } from '@/utils/voiceDialogueEvents'
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import VoiceTranscriptOverlay, { type VoiceDialogueStatus } from './VoiceTranscriptOverlay.vue'
 
@@ -21,12 +21,28 @@ const props = withDefaults(defineProps<{
 
 const activeStatuses = new Set<VoiceDialogueStatus>(['capturing', 'transcribing', 'sending'])
 const { t } = useI18n()
+const controlsRef = ref<HTMLElement | null>(null)
+const overlayDismissed = ref(false)
 
 const isActive = computed(() => activeStatuses.has(props.status))
-const shouldShowOverlay = computed(() => isActive.value || Boolean(props.transcript) || Boolean(props.error))
+const shouldShowOverlay = computed(() => isActive.value || (!overlayDismissed.value && (Boolean(props.transcript) || Boolean(props.error))))
 const toggleLabel = computed(() => (isActive.value ? t('chat.voiceInput.stopCaptureAndInsert') : t('chat.voiceInput.startCapture')))
 
+watch(() => [props.status, props.transcript, props.error], () => {
+  overlayDismissed.value = false
+})
+
+function dismissOverlay(event: PointerEvent) {
+  if (!isActive.value && event.target instanceof Node && !controlsRef.value?.contains(event.target)) {
+    overlayDismissed.value = true
+  }
+}
+
+onMounted(() => document.addEventListener('pointerdown', dismissOverlay, true))
+onUnmounted(() => document.removeEventListener('pointerdown', dismissOverlay, true))
+
 async function toggle() {
+  overlayDismissed.value = false
   if (isActive.value) {
     await props.onStop()
     return
@@ -41,7 +57,7 @@ function cancel() {
 </script>
 
 <template>
-  <div class="voice-dialogue-controls voice-dialogue-controls--floating-overlay" :class="{ active: isActive }">
+  <div ref="controlsRef" class="voice-dialogue-controls voice-dialogue-controls--floating-overlay" :class="{ active: isActive }">
     <VoiceTranscriptOverlay
       v-if="shouldShowOverlay"
       floating

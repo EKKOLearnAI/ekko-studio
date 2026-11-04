@@ -1326,6 +1326,7 @@ export default {
         error: 'Error',
       },
       browserSpeechUnsupported: 'Browser speech recognition is not supported in this browser.',
+      backendSttRequired: 'Desktop voice input requires backend STT. Enable local speech recognition or configure and activate a cloud provider in Models → STT.',
       browserSpeechFailed: 'Browser speech recognition failed.',
       browserSpeechFailedWithReason: 'Browser speech recognition failed: {error}.',
       microphoneUnsupported: 'Microphone capture is not supported in this browser.',

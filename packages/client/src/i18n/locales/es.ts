@@ -1495,6 +1495,7 @@ export default {
         error: 'Error',
       },
       browserSpeechUnsupported: 'El reconocimiento de voz del navegador no es compatible con este navegador.',
+      backendSttRequired: 'La entrada de voz en la aplicación de escritorio requiere STT del servidor. Activa el reconocimiento local o configura y activa un proveedor en la nube en Modelos → STT.',
       browserSpeechFailed: 'Fallo el reconocimiento de voz del navegador.',
       browserSpeechFailedWithReason: 'Fallo el reconocimiento de voz del navegador: {error}.',
       microphoneUnsupported: 'La captura de microfono no es compatible con este navegador.',

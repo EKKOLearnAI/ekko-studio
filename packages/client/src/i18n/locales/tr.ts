@@ -544,6 +544,9 @@ export default {
   },
 
   chat: {
+    voiceInput: {
+      backendSttRequired: 'Masaüstü uygulamasında sesli giriş için sunucu taraflı STT gerekir. Modeller → STT bölümünde yerel konuşma tanımayı etkinleştirin veya bir bulut sağlayıcısını yapılandırıp etkinleştirin.',
+    },
     selectMessages: "Mesajları seç",
     messagesSelected: "{count} seçildi",
     deleteSelectedMessages: "Seçilenleri sil",
