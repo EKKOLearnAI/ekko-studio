@@ -5,13 +5,13 @@ import {
   formatReferencedContentForDisplay,
   parseMessageReference,
   type Message,
-  type ContentBlock,
 } from "@/stores/hermes/chat";
 import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMessage } from "naive-ui";
 import { downloadFile, getDownloadUrl } from "@/api/studio/download";
 import { copyToClipboard } from "@/utils/clipboard";
+import { parseContentBlocks } from "@/utils/content-blocks";
 import { parseThinking, countThinkingChars } from "@/utils/thinking-parser";
 import { useChatStore } from "@/stores/hermes/chat";
 import { useFilesStore } from "@/stores/hermes/files";
@@ -125,38 +125,6 @@ function imageNameFromDataUrl(url: string, index: number): string {
   const match = url.match(/^data:image\/([^;,]+)/i)
   const ext = match?.[1] === 'jpeg' ? 'jpg' : match?.[1] || 'png'
   return `image-${index + 1}.${ext}`
-}
-
-function parseContentBlocks(content: string): Array<ContentBlock | Record<string, unknown>> | null {
-  const trimmed = content.trim()
-  if (!trimmed) return null
-
-  const parse = (value: string) => {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) && parsed.length > 0 && 'type' in parsed[0]
-      ? parsed as Array<ContentBlock | Record<string, unknown>>
-      : null
-  }
-
-  try {
-    return parse(trimmed)
-  } catch {
-    // Hermes Agent stored some multimodal user messages via Python str(list),
-    // e.g. [{'type': 'text'}, {'type': 'image_url', ...}]. Convert that
-    // legacy repr into JSON for display only.
-    if (!trimmed.startsWith("[{'") && !trimmed.startsWith('[{"')) return null
-    try {
-      return parse(
-        trimmed
-          .replace(/\bNone\b/g, 'null')
-          .replace(/\bTrue\b/g, 'true')
-          .replace(/\bFalse\b/g, 'false')
-          .replace(/'/g, '"'),
-      )
-    } catch {
-      return null
-    }
-  }
 }
 
 // Parse ContentBlock[] from JSON string
@@ -1163,9 +1131,12 @@ onBeforeUnmount(() => {
 
             <!-- Render user message content -->
             <template v-if="message.role === 'user'">
-              <!-- ContentBlock[] format -->
+              <!-- ContentBlock[] format. Native attachments (with display URLs)
+                   win when both are present, e.g. queued messages promoted into
+                   the transcript keep attachments while content stays serialized
+                   blocks. -->
               <template v-if="isContentBlockArray">
-                <div v-if="contentFiles && contentFiles.length > 0" class="msg-attachments">
+                <div v-if="!hasAttachments && contentFiles && contentFiles.length > 0" class="msg-attachments">
                   <div
                     v-for="(file, idx) in contentFiles"
                     :key="idx"

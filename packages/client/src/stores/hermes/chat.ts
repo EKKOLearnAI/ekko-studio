@@ -394,24 +394,7 @@ export interface MessageReference {
   senderId?: string
 }
 
-export interface ParsedMessageReference {
-  content: string
-  reply: string
-}
-
-export function parseMessageReference(content: string): ParsedMessageReference | null {
-  if (!content.startsWith('<quoted_message')) return null
-  const openEnd = content.indexOf('>\n')
-  if (openEnd === -1) return null
-  const closeMarker = '\n</quoted_message>'
-  const closeStart = content.indexOf(closeMarker, openEnd + 2)
-  if (closeStart === -1) return null
-
-  return {
-    content: content.slice(openEnd + 2, closeStart).trim(),
-    reply: content.slice(closeStart + closeMarker.length).trim(),
-  }
-}
+export { parseMessageReference } from '@/utils/content-blocks'
 
 export function formatReferencedContentForDisplay(content: string): string {
   return content
