@@ -7,7 +7,7 @@ import type { PersonFlow } from '../../../packages/client/src/api/person'
 import '../../../packages/client/src/styles/global.scss'
 
 const flow = ref<PersonFlow>({
-  id:'idiom-chain',creator_session_id:'person-main-creator',title:'成语接龙',goal:'各 Bot 依次接龙三轮',state:'active',revision:1,current_position:0,error:'',round_number:2,round_limit:3,
+  id:'idiom-chain',creator_session_id:'person-main-creator',report_to_creator:false,title:'成语接龙',goal:'各 Bot 依次接龙三轮',state:'active',revision:1,current_position:0,error:'',round_number:2,round_limit:3,
   stages:['甲','乙'].map((name,index)=>({id:`stage-${index}`,position:index,group_position:index,session_id:`person-main-${index}`,session_title:name,
     goal:'接上一个成语',state:index ? 'pending' : 'active',result_message_id:null,tasks:[]})),
 })
@@ -17,6 +17,7 @@ const result = ref('')
 const saving = ref(false)
 ;(window as any).flowRoundsFixture = {
   report(state:NonNullable<PersonFlow['completion_report']>['state']) {
+    flow.value.report_to_creator=true
     flow.value.state='completed';flow.value.round_number=3;flow.value.stages.forEach(stage=>{stage.state='completed'})
     flow.value.completion_report={id:'report-1',state,attempts:5,attempt_limit:5,run_id:'report-run',result_message_id:state==='delivered'?777:null,error:state==='failed'?'Fixture summary delivery failure':'',next_attempt_at:0}
   },

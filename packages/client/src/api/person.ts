@@ -16,6 +16,7 @@ export interface PersonQuestion { id: string; task_id: string | null; question: 
 export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed' }
 export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; taskTimeoutMinutes: number; timezone: string }
 export interface PersonFlow {
+  report_to_creator?: boolean
   completion_report?: {id:string;state:'pending'|'queued'|'starting'|'running'|'paused'|'delivered'|'failed'|'cancelled';attempts:number;attempt_limit:number;run_id:string;result_message_id:number|null;error:string;next_attempt_at:number} | null
   round_number?: number; round_limit?: number
   creator_session_id?: string

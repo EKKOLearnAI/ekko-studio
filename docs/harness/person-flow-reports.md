@@ -1,11 +1,24 @@
 # Collaboration completion reports
 
+Reporting is optional and follows task and user intent. Creating a flow omits
+`report_to_creator` by default (false). Completion alone saves stage results and
+never requires or queues a creator summary. `return_expectation` is output text,
+not an opt-in inferred from keywords. A recipient stage may provide requested
+reporting, work or review through the existing route.
+
+When a creator summary is needed, `report_to_creator: true` requests durable
+delivery after all rounds. A later live creator turn can instead request and
+fulfill a summary using `bot_flows_query` with `flow_id` and `claim_report: true`.
+Ordinary status and evidence queries do not claim a report or impose a summary
+reply. Existing flows migrate with reporting off; pending legacy reports without
+a saved request cannot dispatch, resume or be retried implicitly.
+
 `person_flows.state=completed` means every stage saved its result. It does not
 mean the creator has saved a summary. `completion_report`, returned by flow
 queries, exposes that separate delivery state, attempt, run, saved message and
 last error.
 
-The last stage transaction inserts `person_flow_reports` with a unique
+For a requested summary, the last stage transaction inserts `person_flow_reports` with a unique
 `(flow_id,generation,session_id)` key. Its snapshot retains the original goal,
 workspace, return expectations and message references. Result text is read from
 the originals under current session ownership, both at dispatch and before model
@@ -19,7 +32,8 @@ ID before messages can be saved. Only a nonempty final assistant message in
 that creator session, with the bound run marker and no tool calls, confirms
 delivery. A runtime success event alone cannot confirm it.
 
-A live creator turn that queries a completed flow can claim its outstanding report.
+A live creator turn that explicitly sets `claim_report: true` on a completed flow
+can request a summary or claim its outstanding report.
 The claim binds that turn’s run ID and fences any older queue item. Its saved final
 reply uses the same confirmation gate; an unrelated turn or a participant cannot
 claim delivery. A creator query can also retry an exhausted report explicitly.

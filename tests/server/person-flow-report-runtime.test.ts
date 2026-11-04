@@ -50,7 +50,7 @@ beforeEach(async()=>{
   sessions.createSession({id:peer,studio_user_id:1,user_id:1,source:'builtin_agent',agent:'ekko-agent',workspace:f.workspace})
   flows=await import('../../packages/server/src/modules/studio/services/person/stage-flows')
   reports=await import('../../packages/server/src/modules/studio/repositories/person-flow-report-store')
-  const flow=flows.createPersonFlow(1,{session_id:creator,title:'Summary',goal:'Return saved evidence',stages:[{session_id:peer,goal:'Work',return_expectation:'Evidence'}],idempotency_key:randomUUID()})
+  const flow=flows.createPersonFlow(1,{session_id:creator,title:'Summary',goal:'Return saved evidence',report_to_creator:true,stages:[{session_id:peer,goal:'Work',return_expectation:'Evidence'}],idempotency_key:randomUUID()})
   flowId=flow.id
   const context={flowId,stageId:flow.stages[0].id,generation:0}
   await flows.controlPersonFlow(1,{action:'complete',flow_id:flow.id,expected_revision:0,idempotency_key:'complete'},{sessionId:peer,runId:'peer',stage:context,messages:[]})

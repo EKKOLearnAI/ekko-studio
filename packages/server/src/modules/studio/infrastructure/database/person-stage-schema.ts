@@ -62,6 +62,7 @@ export function initPersonStageTables(db: DatabaseSync) {
   if (!db.prepare('PRAGMA table_info(person_stage_confirmations)').all().some(column => column.name === 'source_hash'))
     db.exec("ALTER TABLE person_stage_confirmations ADD COLUMN source_hash TEXT NOT NULL DEFAULT ''")
   const columns = new Set(db.prepare('PRAGMA table_info(person_flows)').all().map(column => column.name))
+  if (!columns.has('report_to_creator')) db.exec('ALTER TABLE person_flows ADD COLUMN report_to_creator INTEGER NOT NULL DEFAULT 0')
   for (const [name, value] of [['round_limit',1],['round_number',1],['round_generation',0]] as const) {
     if (!columns.has(name)) db.exec(`ALTER TABLE person_flows ADD COLUMN ${name} INTEGER NOT NULL DEFAULT ${value}`)
   }

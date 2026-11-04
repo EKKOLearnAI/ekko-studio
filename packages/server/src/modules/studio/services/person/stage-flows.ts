@@ -23,7 +23,8 @@ export function registerPersonStageTurn(context: PersonStageContext) {
 
 export function createPersonFlow(userId: number, input: Record<string, unknown>, origin?: PersonTaskOrigin) {
   if (Object.hasOwn(input,'acceptance') || (Array.isArray(input.stages) && input.stages.some(stage => stage && Object.hasOwn(stage,'acceptance')))) throw personError('Direct stage acceptance is unavailable; enable acceptance on background subtasks')
-  if (Object.keys(input).some(key => !['action','session_id','title','goal','stages','rounds','idempotency_key'].includes(key))) throw personError('Unknown flow field')
+  if (Object.keys(input).some(key => !['action','session_id','title','goal','stages','rounds','report_to_creator','idempotency_key'].includes(key))) throw personError('Unknown flow field')
+  if (input.report_to_creator !== undefined && typeof input.report_to_creator !== 'boolean') throw personError('report_to_creator must be a boolean')
   if (origin && input.session_id && input.session_id !== origin.sessionId) throw personError('Creator is assigned by the host',403)
   const creator = requirePersonSession(userId, origin?.sessionId || personText(input.session_id, 'session_id',100)).id
   if (origin?.stage) throw personError('Continue this flow instead of creating a replacement',403)
@@ -64,7 +65,7 @@ export function createPersonFlow(userId: number, input: Record<string, unknown>,
       throw Object.assign(personError('Wait for this turn\'s worker result before handing off its work.',409),{code:'WORK_PENDING'})
     }
     requirePersonWorkspace(workspace)
-    db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at,workspace,round_limit) VALUES(?,?,?,?,?,?,?,?,?)').run(id,userId,creator,title,goal,now,now,workspace,Number(rounds))
+    db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at,workspace,round_limit,report_to_creator) VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,userId,creator,title,goal,now,now,workspace,Number(rounds),input.report_to_creator === true ? 1 : 0)
     steps.forEach((step, position) => {
       requirePersonSession(userId,step.session_id)
       db.prepare('INSERT INTO person_stages(id,flow_id,position,group_position,session_id,goal,return_expectation,state) VALUES(?,?,?,?,?,?,?,?)')
@@ -250,7 +251,7 @@ export function finishPersonStageTurn(userId: number, context: PersonStageContex
       for (const item of flow.stages.filter(item => item.group_position === 0)) enqueuePersonStage(userId,item,flow.generation+1)
     } else {
       db.prepare("UPDATE person_flows SET state='completed',revision=revision+1,updated_at=? WHERE id=?").run(Date.now(),flow.id)
-      enqueuePersonFlowReport(flow,stage.session_id,Number(message.id),runId)
+      if (flow.report_to_creator) enqueuePersonFlowReport(flow,stage.session_id,Number(message.id),runId)
       db.prepare("UPDATE person_occurrences SET state='finished' WHERE flow_id=?").run(flow.id)
     }
   }) } catch (failure) {

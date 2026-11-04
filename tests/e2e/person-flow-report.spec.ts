@@ -2,6 +2,19 @@ import {test,expect} from '@playwright/test'
 import {resolve} from 'node:path'
 import {mkdir} from 'node:fs/promises'
 
+test('shows ordinary completion without requiring a summary or exposing a summary retry',async({page})=>{
+  const entry='/@fs/'+resolve('tests/e2e/fixtures/person-flow-rounds.ts').replaceAll('\\','/').replace(/^\//,'')
+  await page.route('**/__optional_report__',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html lang="zh"><head><meta charset="utf-8"></head><body><div id="app"></div><script type="module" src="${entry}"></script></body></html>`}))
+  await page.goto('/__optional_report__')
+  await page.evaluate(()=>(window as any).flowRoundsFixture.completed())
+  await expect(page.getByText('已完成',{exact:true}).first()).toBeVisible()
+  await expect(page.getByRole('button',{name:'重试汇总',exact:true})).toHaveCount(0)
+  await expect(page.getByText(/阶段已完成，汇总/)).toHaveCount(0)
+  await expect(page.getByText('汇总已送达',{exact:true})).toHaveCount(0)
+  await expect(page.getByRole('button',{name:'停止流程',exact:true})).toHaveCount(0)
+  await expect(page.getByLabel('流程操作')).toBeEmpty()
+})
+
 test('separates stage completion from summary delivery and retries the summary without rerunning stages',async({page})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message))
   const capture=async(name:string)=>{

@@ -48,13 +48,13 @@ export function personFlowReportSources(userId: number, flowId: string, offset: 
 
 export async function deliverPersonFlowReports() {
   const db = personDb()
-  const rows = db.prepare("SELECT * FROM person_flow_reports WHERE state='pending' AND next_attempt_at<=? ORDER BY created_at LIMIT 20")
+  const rows = db.prepare("SELECT * FROM person_flow_reports WHERE state='pending' AND next_attempt_at<=? AND EXISTS(SELECT 1 FROM person_flows f WHERE f.id=flow_id AND f.report_to_creator=1) ORDER BY created_at LIMIT 20")
     .all(Date.now()) as unknown as PersonFlowReport[]
   for (const candidate of rows) {
     const row = personTransaction(() => {
       // Paused admissions do not consume retry budget.
       const claim = db.prepare(`UPDATE person_flow_reports SET state='queued',attempts=attempts+1,run_id='',error='',updated_at=?
-        WHERE id=? AND state='pending' AND next_attempt_at<=?`).run(Date.now(),candidate.id,Date.now())
+        WHERE id=? AND state='pending' AND next_attempt_at<=? AND EXISTS(SELECT 1 FROM person_flows f WHERE f.id=flow_id AND f.report_to_creator=1)`).run(Date.now(),candidate.id,Date.now())
       if (!claim.changes) return undefined
       const row = getPersonFlowReport(candidate.owner_user_id,candidate.id)
       recordFlowReportEvent(row,'creator_report_queued')

@@ -36,8 +36,8 @@ beforeEach(async () => {
 })
 afterEach(()=>{ db.close();rmSync(root,{recursive:true,force:true});vi.restoreAllMocks() })
 
-function create(route = [{session_id:peer,group:0}], rounds=1) {
-  return flows.createPersonFlow(1,{ session_id:creator,title:'Original collaboration',goal:'Answer the original request',rounds,idempotency_key:crypto.randomUUID(),stages:route.map(s=>({...s,goal:'Do assigned work',return_expectation:'Report evidence'})) })
+function create(route = [{session_id:peer,group:0}], rounds=1, reporting:Record<string,unknown>={report_to_creator:true}) {
+  return flows.createPersonFlow(1,{ session_id:creator,title:'Original collaboration',goal:'Answer the original request',rounds,...reporting,idempotency_key:crypto.randomUUID(),stages:route.map(s=>({...s,goal:'Do assigned work',return_expectation:'Report evidence'})) })
 }
 async function complete(flowId:string, index=0) {
   const flow = stages.getPersonFlow(1,flowId), stage=flow.stages[index]
@@ -58,6 +58,97 @@ function begin(runId='summary-run') {
 function summary(runId='summary-run', overrides:Record<string,unknown>={}) {
   return sessions.addMessage({ session_id:creator,run_marker:runId,role:'assistant',content:'Verified summary',finish_reason:'completed',...overrides })!
 }
+
+it.each([{}, {report_to_creator:false}])('completes all rounds without a creator report when not requested: %j',async reporting=>{
+  const flow=create([{session_id:peer,group:0},{session_id:other,group:1}],2,reporting)
+  expect(flow.report_to_creator).toBe(false)
+  // An unavailable reporting subsystem must not block work that does not request reporting.
+  db.exec("CREATE TRIGGER reject_unrequested_report BEFORE INSERT ON person_flow_reports BEGIN SELECT RAISE(ABORT,'no report requested'); END")
+  const messages:number[]=[]
+  for(let round=0;round<2;round++) {
+    messages.push((await complete(flow.id,0)).message,(await complete(flow.id,1)).message)
+  }
+  flows.recoverPersonStages();reports.recoverPersonFlowReports()
+  await delivery.deliverPersonFlowReports()
+  expect(stages.getPersonFlow(1,flow.id)).toMatchObject({state:'completed',round_number:2,error:'',report_to_creator:false,completion_report:null})
+  expect(db.prepare('SELECT result_message_id FROM person_stage_results ORDER BY round_number,stage_id').all().map(row=>row.result_message_id).sort()).toEqual(messages.sort())
+  expect(receipt()).toBeUndefined()
+  expect(runtime.deliverFlowReport).not.toHaveBeenCalled()
+  expect(runtime.deliverStage).not.toHaveBeenCalled()
+})
+
+it('keeps a requested recipient stage without adding a compulsory creator summary',async()=>{
+  const flow=create([{session_id:peer,group:0},{session_id:creator,group:1}],1,{})
+  await complete(flow.id,0)
+  expect(stages.getPersonFlow(1,flow.id).stages[1].state).toBe('active')
+  const result=await complete(flow.id,1)
+  await delivery.deliverPersonFlowReports()
+  expect(stages.getPersonFlow(1,flow.id)).toMatchObject({state:'completed',completion_report:null})
+  expect(db.prepare('SELECT content FROM messages WHERE id=? AND session_id=?').get(result.message,creator)).toBeTruthy()
+  expect(receipt()).toBeUndefined()
+  expect(runtime.deliverFlowReport).not.toHaveBeenCalled()
+})
+
+it('keeps ordinary creator status queries read-only and allows a later explicit summary request',async()=>{
+  const flow=create([{session_id:peer,group:0},{session_id:other,group:1}],2,{})
+  const ids:number[]=[]
+  for(let round=0;round<2;round++)ids.push((await complete(flow.id,0)).message,(await complete(flow.id,1)).message)
+  const before=stages.getPersonFlow(1,flow.id)
+  const {personFlowTools}=await import('../../packages/server/src/modules/studio/services/person/stage-tools')
+  const query=personFlowTools(1,creator).find(tool=>tool.name==='bot_flows_query')!
+  const origin={sessionId:creator,runId:'requested-summary',messages:[]}
+  const status:any=await query.execute({flow_id:flow.id},origin)
+  expect(status.flows[0]).not.toHaveProperty('report_instruction')
+  expect(stages.getPersonFlow(1,flow.id)).toEqual(before)
+  expect(receipt()).toBeUndefined()
+  await query.execute({flow_id:flow.id,claim_report:true},{sessionId:peer,runId:'peer-query',messages:[]})
+  expect(receipt()).toBeUndefined()
+  const requested:any=await query.execute({flow_id:flow.id,claim_report:true},origin)
+  expect(requested.flows[0]).toMatchObject({report_to_creator:true,completion_report:{state:'running',run_id:'requested-summary'},report_instruction:expect.any(String)})
+  expect(JSON.parse(receipt().snapshot_json).sources.map((source:any)=>source.result_message_id)).toEqual(ids)
+  const attempts=receipt().attempts
+  await query.execute({flow_id:flow.id,claim_report:true},origin)
+  expect(receipt().attempts).toBe(attempts)
+  const message=summary('requested-summary')
+  expect(reports.finishPersonFlowReport(1,{id:receipt().id,attempt:attempts},message,true)).toBe(true)
+  reports.recoverPersonFlowReports();await delivery.deliverPersonFlowReports()
+  expect(receipt()).toMatchObject({state:'delivered',result_message_id:message})
+  expect(runtime.deliverFlowReport).not.toHaveBeenCalled()
+  expect(db.prepare('SELECT count(*) n FROM person_stage_results').get()!.n).toBe(4)
+})
+
+it('does not let a normal status lookup claim an already requested pending summary',async()=>{
+  const flow=create();await complete(flow.id)
+  const {personFlowTools}=await import('../../packages/server/src/modules/studio/services/person/stage-tools')
+  const result:any=await personFlowTools(1,creator).find(tool=>tool.name==='bot_flows_query')!.execute({flow_id:flow.id},{sessionId:creator,runId:'status-only',messages:[]})
+  expect(result.flows[0]).not.toHaveProperty('report_instruction')
+  expect(receipt()).toMatchObject({state:'pending',attempts:0,run_id:''})
+})
+
+it.each(['pending','paused','running'])('migrates old flows with reporting off and keeps legacy %s reports dormant until requested',async state=>{
+  const flow=create();const saved=await complete(flow.id)
+  db.prepare('UPDATE person_flow_reports SET state=?').run(state)
+  db.exec('ALTER TABLE person_flows DROP COLUMN report_to_creator')
+  const {initPersonStageTables}=await import('../../packages/server/src/modules/studio/infrastructure/database/person-stage-schema')
+  initPersonStageTables(db);initPersonStageTables(db)
+  expect(stages.getPersonFlow(1,flow.id)).toMatchObject({state:'completed',report_to_creator:false,completion_report:null})
+  reports.recoverPersonFlowReports();reports.resumePersonFlowReports(1,creator)
+  await delivery.deliverPersonFlowReports()
+  expect(runtime.deliverFlowReport).not.toHaveBeenCalled()
+  expect(receipt().state).toBe(state==='running'?'pending':state)
+  expect(db.prepare('SELECT id FROM messages WHERE id=?').get(saved.message)).toBeTruthy()
+  expect(()=>reports.retryCompletedPersonFlowReport(1,stages.getPersonFlow(1,flow.id),receipt().id,receipt().attempts)).toThrow()
+  expect(reports.claimPersonFlowReportForRun(1,flow.id,creator,'requested-after-upgrade')).toBe(true)
+  expect(receipt()).toMatchObject({state:'running',run_id:'requested-after-upgrade'})
+  const id=summary('requested-after-upgrade')
+  expect(reports.finishPersonFlowReport(1,{id:receipt().id,attempt:receipt().attempts},id,true)).toBe(true)
+  expect(runtime.deliverFlowReport).not.toHaveBeenCalled()
+})
+
+it.each(['false',1,null])('rejects a non-boolean reporting request: %j',value=>{
+  expect(()=>create(undefined,1,{report_to_creator:value})).toThrow('boolean')
+  expect(db.prepare('SELECT count(*) n FROM person_flows').get()!.n).toBe(0)
+})
 
 it('atomically creates one outbox item and acknowledges only the creator saved final reply',async()=>{
   const flow=create(), finished=await complete(flow.id)
@@ -413,10 +504,10 @@ it.each([false,true])('lets a creator follow-up claim and fulfill the same repor
   const {personFlowTools}=await import('../../packages/server/src/modules/studio/services/person/stage-tools')
   const query=personFlowTools(1,creator).find(tool=>tool.name==='bot_flows_query')!
   const origin={sessionId:creator,runId:'follow-up-run',messages:[]}
-  const response:any=await query.execute({flow_id:flow.id},origin)
+  const response:any=await query.execute({flow_id:flow.id,claim_report:true},origin)
   expect(response.flows[0]).toMatchObject({completion_report:{state:'running',run_id:'follow-up-run'},report_instruction:expect.any(String)})
   const attempts=receipt().attempts
-  await query.execute({flow_id:flow.id},origin)
+  await query.execute({flow_id:flow.id,claim_report:true},origin)
   expect(receipt().attempts).toBe(attempts)
   const message=summary('follow-up-run')
   for(const row of reports.personFlowReportsForRun(1,creator,'follow-up-run'))
@@ -431,7 +522,7 @@ it('does not let a participant query claim the creator report',async()=>{
   const flow=create();await complete(flow.id)
   const {personFlowTools}=await import('../../packages/server/src/modules/studio/services/person/stage-tools')
   const query=personFlowTools(1,peer).find(tool=>tool.name==='bot_flows_query')!
-  await query.execute({flow_id:flow.id},{sessionId:peer,runId:'participant-run',messages:[]})
+  await query.execute({flow_id:flow.id,claim_report:true},{sessionId:peer,runId:'participant-run',messages:[]})
   expect(receipt()).toMatchObject({state:'pending',attempts:0})
 })
 

@@ -16,6 +16,8 @@ export interface PersonStage {
   state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; completion_run_id: string
 }
 export interface PersonConversationFlow {
+  /** Optional creator summary requested from task intent; completion alone never opts in. */
+  report_to_creator: boolean
   /** Zero means repeat until explicitly stopped; existing flows run once. */
   round_limit: number; round_number: number; round_generation: number
   completion_report?: Pick<PersonFlowReport, 'id' | 'state' | 'attempts' | 'attempt_limit' | 'run_id' | 'result_message_id' | 'error' | 'next_attempt_at'> | null

@@ -22,7 +22,7 @@ beforeEach(async()=>{
   vi.mocked(f.runtime.model).mockResolvedValue(JSON.stringify({status:'complete',reason:'The original result fulfills the stage'}))
 })
 afterEach(async()=>{await f.close('flow-report-integration')})
-function create(rounds=1){return flows.createPersonFlow(1,{session_id:creator,title:'Two roles',goal:'Retain evidence',rounds,idempotency_key:randomUUID(),stages:[peer,other].map(session_id=>({session_id,goal:'Produce evidence',return_expectation:'Return evidence'}))})}
+function create(rounds=1){return flows.createPersonFlow(1,{session_id:creator,title:'Two roles',goal:'Retain evidence',rounds,report_to_creator:true,idempotency_key:randomUUID(),stages:[peer,other].map(session_id=>({session_id,goal:'Produce evidence',return_expectation:'Return evidence'}))})}
 async function saved(flowId:string,prepare=true,settle=true){
   const flow=stages.getPersonFlow(1,flowId),stage=flow.stages[flow.current_position],runId=randomUUID()
   const context={flowId,stageId:stage.id,generation:flow.generation}

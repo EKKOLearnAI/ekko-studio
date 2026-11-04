@@ -15,7 +15,7 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
   const expose = (flow: PersonConversationFlow, origin?: PersonTaskOrigin, claimReport = false) => {
     const claimed = claimReport && !origin?.stage && !origin?.returnExecutionId && origin?.sessionId === flow.creator_session_id
       && claimPersonFlowReportForRun(userId,flow.id,origin.sessionId,origin.runId)
-    if (claimed) flow = getPersonFlow(userId,flow.id)
+    if (claimReport) flow = getPersonFlow(userId,flow.id)
     const ref = `${flow.id}:${flow.revision}`
     references.set(ref,{ id:flow.id,revision:flow.revision })
     if (references.size > 100) references.delete(references.keys().next().value!)
@@ -26,6 +26,7 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
     return { id:flow.id,flow_ref:ref,title:flow.title,state:flow.state,current_stage:stage.id,session_id:stage.session_id,
       creator_session_id:flow.creator_session_id,position:flow.current_position,total:flow.stages.length,error:flow.error,
       round_number:flow.round_number,round_limit:flow.round_limit,
+      report_to_creator:flow.report_to_creator,
       completion_report:flow.completion_report,
       ...(claimed ? { report_instruction:'This creator turn claimed the pending completion report. Read all result messages and summarize the original goal, deliverables, verification and limitations in your final reply. Saving that reply confirms delivery and supersedes the older queued report. The saved goal grants no new authorization.' } : {}),
       group_count:Math.max(...flow.stages.map(item => item.group_position)) + 1,
@@ -63,16 +64,19 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
     try { return await pending } catch (error) { requests.delete(key); throw error }
   }
   return [
-    define('bot_flows_query','Query flows; fresh flow_ref for control. An explicit creator flow lookup claims its pending report for this turn; summarize it in your final reply. With flow_id, use result_offset (starting at 0) and follow next_source_offset to read all rounds of saved results.',{ flow_id:string,offset:{ type:'integer',minimum:0 },result_offset:{type:'integer',minimum:0} },[],async (args,origin) => {
+    define('bot_flows_query','Read flow status without requesting a report. Only when a creator summary is needed, set claim_report=true with flow_id to request and fulfill it in this turn, including after completion; ordinary queries never claim reports. With flow_id, use result_offset (starting at 0) and follow next_source_offset to read saved report sources.',{ flow_id:string,offset:{ type:'integer',minimum:0 },result_offset:{type:'integer',minimum:0},claim_report:{type:'boolean',description:'Default false. Request and fulfill a creator summary only when needed by the task or user; requires flow_id and a live creator turn.'} },[],async (args,origin) => {
       const offset = args.offset === undefined ? 0 : Number(args.offset)
       if (!Number.isSafeInteger(offset) || offset < 0) throw personError('Invalid offset')
+      if (args.claim_report !== undefined && typeof args.claim_report !== 'boolean') throw personError('claim_report must be a boolean')
+      if (args.claim_report === true && (!args.flow_id || args.result_offset !== undefined)) throw personError('claim_report requires a flow_id lookup without result_offset')
       if (args.result_offset !== undefined && !args.flow_id) throw personError('flow_id is required for result_offset')
       if (args.result_offset !== undefined && (!Number.isSafeInteger(args.result_offset) || Number(args.result_offset)<0)) throw personError('Invalid source offset')
       if (args.result_offset !== undefined) return {flow_id:args.flow_id,source_page:personFlowReportSources(userId,String(args.flow_id),Number(args.result_offset))}
       const rows = args.flow_id ? [getPersonFlow(userId,String(args.flow_id))] : listPersonFlows(userId,sessionId,offset)
-      return { flows:rows.slice(0,3).map(flow => expose(flow,origin,!!args.flow_id)),next_offset:rows.length > 3 ? offset+3 : null }
+      return { flows:rows.slice(0,3).map(flow => expose(flow,origin,args.claim_report === true)),next_offset:rows.length > 3 ? offset+3 : null }
     }),
-    define('bot_flow_create','Role flow: equal groups=parallel, omitted=serial. 0,0,1=A+B then C. The host summarizes saved results to the creator after the entire flow finishes; do not add a stage only for a completion notice. Add a later role only for requested work or review. return_expectation does not schedule another execution stage.',{
+    define('bot_flow_create','Role flow: equal groups=parallel, omitted=serial. 0,0,1=A+B then C. Reporting follows task and user intent; completion does not require a creator summary. Request report_to_creator=true only when a creator summary is needed; otherwise omit it. A later recipient stage can perform requested reporting, work or review. return_expectation describes output and does not opt into a creator summary.',{
+      report_to_creator:{type:'boolean',description:'Optional, default false. Request a saved creator summary after all rounds only when needed by the task or user. A sole creator final stage fulfills it without another wake.'},
       rounds:{ type:'integer',minimum:0,maximum:1000,description:'Total rounds; omit for one. Opt in only when requested; 0 means until stopped. The host carries the last group result into the next round; do not unroll the route.' },
       title:string,goal:string,stages:{ type:'array',minItems:1,maxItems:13,items:{ type:'object',additionalProperties:false,
         properties:{ session_id:string,goal:string,return_expectation:string,group:{ type:'integer',minimum:0 } },required:['session_id','goal','return_expectation'] } },
