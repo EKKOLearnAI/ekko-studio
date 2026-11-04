@@ -58,7 +58,7 @@ import type { Server, Socket } from 'socket.io'
 import { randomUUID } from 'crypto'
 import { logger } from '../public/logging'
 import { getSystemPrompt } from '../public/runs/prompt'
-import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
+import { clearSessionMessages, deleteSession, findBackgroundDispatchMessages, getSession, getSessionContextMessage, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
 import { deleteSessionMessageGroups } from '../repositories/session-message-deletion'
 import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
 import { getSessionCategory } from '../repositories/session-category-store'
@@ -85,7 +85,7 @@ import { handleEkkoAgentRun, type EkkoAgentRunSocketData } from '../services/cha
 import { handleEkkoSessionCommand, parseEkkoRunCommand } from '../services/chat-run/ekko-session-command'
 import { handleAbort } from '../services/chat-run/abort'
 import { getOrCreateSession } from '../services/chat-run/compression'
-import { loadSessionStateFromDb, resolveRunSource } from '../services/chat-run/load-state'
+import { backgroundDelegationTerminalStatus, loadSessionStateFromDb, resolveRunSource } from '../services/chat-run/load-state'
 import { getSessionContextOverhead, refreshContextUsageAfterDeletion } from '../services/chat-run/context-usage'
 import { handleSessionCommand, isSessionCommand, parseSessionCommand } from '../services/chat-run/session-command'
 import { contentBlocksToString } from '../services/chat-run/content-blocks'
@@ -104,6 +104,7 @@ import type {
   QueueInsertionRuntime,
   QueuedRun,
   SessionState,
+  BackgroundDelegationState,
 } from '../services/chat-run/types'
 import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
 import { userCanAccessProfile } from '../repositories/users-store'
@@ -2178,6 +2179,74 @@ export class ChatRunSocket {
       .length + personPending
   }
 
+  /**
+   * Reconcile stale in-memory background state against the persisted display_content.
+   * Session state is hydrated once (readSessionStateFromDb) and cached in sessionMap; a
+   * background delegation restored as 'running' before its completion was persisted stays
+   * 'running' in memory forever for sessions whose completion events do not flow through
+   * this server (CLI sessions, server restarts mid-delivery). The mirror DB is the
+   * authoritative record — persistHermesBackgroundResult writes the terminal status there.
+   */
+  private reconcileStaleBackgroundState(state: SessionState, sessionId: string): void {
+    const delegations = state.backgroundDelegations
+    const staleDelegations = Object.values(delegations || {}).filter(
+      item => (item.status === 'running' || item.status === 'delivering') && item.messageId != null,
+    )
+    const staleTasks = Object.values(state.backgroundTasks || {}).filter(
+      task => task.status === 'running' && String(task.delegation_id || '').trim(),
+    )
+    if (staleDelegations.length === 0 && staleTasks.length === 0) return
+
+    const finalStatus = new Map<string, BackgroundDelegationState['status']>()
+    for (const item of staleDelegations) {
+      const row = getSessionContextMessage(sessionId, Number(item.messageId))
+      const status = backgroundDelegationTerminalStatus(row?.display_content)
+      if (status) finalStatus.set(item.delegationId, status)
+    }
+    // Tasks may reference delegations the hydration window never restored; resolve those too.
+    for (const task of staleTasks) {
+      const delegationId = String(task.delegation_id).trim()
+      if (finalStatus.has(delegationId)) continue
+      const known = delegations?.[delegationId]
+      let status = known?.messageId != null
+        ? backgroundDelegationTerminalStatus(getSessionContextMessage(sessionId, Number(known.messageId))?.display_content)
+        : null
+      if (!status) {
+        // Fall back to a direct DB lookup when the delegation was never restored into memory.
+        for (const row of findBackgroundDispatchMessages(sessionId, delegationId)) {
+          status = backgroundDelegationTerminalStatus(row.display_content)
+          if (status) break
+        }
+      }
+      if (status) finalStatus.set(delegationId, status)
+    }
+
+    let changed = false
+    for (const [delegationId, status] of finalStatus) {
+      const item = delegations?.[delegationId]
+      if (item && (item.status === 'running' || item.status === 'delivering')) {
+        state.backgroundDelegations![delegationId] = { ...item, status, updatedAt: Date.now() }
+        changed = true
+      }
+    }
+    for (const [taskKey, task] of Object.entries(state.backgroundTasks || {})) {
+      if (task.status !== 'running') continue
+      const status = finalStatus.get(String(task.delegation_id || '').trim())
+      if (status) {
+        state.backgroundTasks![taskKey] = { ...task, status }
+        changed = true
+      }
+    }
+    if (!changed) return
+    logger.info('[chat-run-socket] reconciled stale background state for session %s (%d terminal)',
+      sessionId, finalStatus.size)
+    this.sessionStateSync.observe('delegation.updated', {
+      session_id: sessionId,
+      status: 'completed',
+      background_pending: this.backgroundPendingCount(state, sessionId),
+    })
+  }
+
   private async sessionStateForBackground(sessionId: string): Promise<SessionState | null> {
     const existing = this.sessionMap.get(sessionId)
     if (existing) return existing
@@ -2412,6 +2481,7 @@ export class ChatRunSocket {
       state = this.sessionMap.get(sid) || await loadSessionStateFromDb(sid, this.sessionMap)
       this.sessionMap.set(sid, state)
     }
+    if (!state.isWorking) this.reconcileStaleBackgroundState(state, sid)
     const resumeEvents = state.isWorking
       ? isPersonSession(sid)
         ? [...state.events.filter(entry => !['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(entry.event)), ...pendingChatEkkoInteractions(sid)]
