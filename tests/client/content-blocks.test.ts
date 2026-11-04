@@ -102,6 +102,10 @@ describe('parseMessageReference', () => {
     expect(parseMessageReference('<quoted_message>\n原文\n</quoted_message>\n\n回复')).toEqual({ content: '原文', reply: '回复' })
   })
 
+  it('parses a wrapper with a sender attribute', () => {
+    expect(parseMessageReference('<quoted_message sender="张三">\n原文\n</quoted_message>\n\n回复')).toEqual({ content: '原文', reply: '回复' })
+  })
+
   it('returns null for content without a quote wrapper', () => {
     expect(parseMessageReference('普通消息')).toBeNull()
   })
