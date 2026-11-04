@@ -6,7 +6,6 @@ import { personDb, personOperation, personTransaction, getPersonTask } from '../
 import { assertPersonStage, enqueuePersonStage, getPersonFlow, getPersonStageDelivery, personFlowHasPendingWork, personStageSources, recordPersonStageFailure, stageDeliveryContext } from '../../repositories/person-stage-store'
 import { requirePersonSession } from '../../repositories/person-session-store'
 import { personUpdated } from '../../repositories/person-updates'
-import { recordSessionAttention } from '../../repositories/session-state-store'
 import { personRuntime } from '../../public/person-runtime'
 import { personUser } from './catalog'
 import { logger } from '../../public/logging'
@@ -22,11 +21,13 @@ export function registerPersonStageTurn(context: PersonStageContext) {
 
 export function createPersonFlow(userId: number, input: Record<string, unknown>, origin?: PersonTaskOrigin) {
   if (Object.hasOwn(input,'acceptance') || (Array.isArray(input.stages) && input.stages.some(stage => stage && Object.hasOwn(stage,'acceptance')))) throw personError('Direct stage acceptance is unavailable; enable acceptance on background subtasks')
-  if (Object.keys(input).some(key => !['action','session_id','title','goal','stages','idempotency_key'].includes(key))) throw personError('Unknown flow field')
+  if (Object.keys(input).some(key => !['action','session_id','title','goal','stages','rounds','idempotency_key'].includes(key))) throw personError('Unknown flow field')
   if (origin && input.session_id && input.session_id !== origin.sessionId) throw personError('Creator is assigned by the host',403)
   const creator = requirePersonSession(userId, origin?.sessionId || personText(input.session_id, 'session_id',100)).id
   if (origin?.stage) throw personError('Continue this flow instead of creating a replacement',403)
   const title = personText(input.title,'title',200), goal = personText(input.goal,'goal',8000)
+  const rounds = input.rounds === undefined ? 1 : input.rounds
+  if (!Number.isSafeInteger(rounds) || Number(rounds) < 0 || Number(rounds) > 1000) throw personError('rounds must be an integer from 0 to 1000; 0 repeats until stopped')
   if (!Array.isArray(input.stages) || !input.stages.length || input.stages.length > 13 || JSON.stringify(input.stages).length > 32000) throw personError('Use 1 to 13 stages (at most 32000 characters)')
   const grouped = input.stages.some(raw => raw && typeof raw === 'object' && Object.hasOwn(raw,'group'))
   const steps = input.stages.map((raw, position) => {
@@ -48,6 +49,8 @@ export function createPersonFlow(userId: number, input: Record<string, unknown>,
     if (groups[index].length === 1 && previous.length === 1 && groups[index][0].session_id === previous[0].session_id)
       throw Object.assign(personError('A role cannot hand off to itself. Finish your own work here, then route only to another role.'),{code:'SELF_HANDOFF'})
   }
+  if (rounds !== 1 && groups[0].length === 1 && groups.at(-1)!.length === 1 && groups[0][0].session_id === groups.at(-1)![0].session_id)
+    throw personError('A repeating route must hand off to a different role across the round boundary')
   const key = personText(input.idempotency_key,'idempotency_key',200)
   const workspace = personTurnWorkspace(userId, creator, origin)
   const result = personOperation(userId, `flow:${key}`, { ...input, creator }, () => {
@@ -59,7 +62,7 @@ export function createPersonFlow(userId: number, input: Record<string, unknown>,
       throw Object.assign(personError('Wait for this turn\'s worker result before handing off its work.',409),{code:'WORK_PENDING'})
     }
     requirePersonWorkspace(workspace)
-    db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at,workspace) VALUES(?,?,?,?,?,?,?,?)').run(id,userId,creator,title,goal,now,now,workspace)
+    db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at,workspace,round_limit) VALUES(?,?,?,?,?,?,?,?,?)').run(id,userId,creator,title,goal,now,now,workspace,Number(rounds))
     steps.forEach((step, position) => {
       requirePersonSession(userId,step.session_id)
       db.prepare('INSERT INTO person_stages(id,flow_id,position,group_position,session_id,goal,return_expectation,state) VALUES(?,?,?,?,?,?,?,?)')
@@ -74,7 +77,8 @@ export function createPersonFlow(userId: number, input: Record<string, unknown>,
 }
 
 function stageHasWork(stageId: string) {
-  return !!personDb().prepare(`SELECT 1 FROM person_stage_tasks l JOIN session_tasks t ON t.id=l.task_id WHERE l.stage_id=? AND
+  return !!personDb().prepare(`SELECT 1 FROM person_stage_tasks l JOIN session_tasks t ON t.id=l.task_id
+    JOIN person_stages s ON s.id=l.stage_id JOIN person_flows f ON f.id=s.flow_id WHERE l.stage_id=? AND l.generation>=f.round_generation AND
     (t.status NOT IN ('completed','closed') OR (json_extract(t.requirements_json,'$.acceptance.enabled')=1 AND NOT EXISTS(SELECT 1 FROM person_executions ae JOIN person_acceptance_passes a ON a.execution_id=ae.id WHERE ae.task_id=t.id AND ae.requirements_revision=t.requirements_revision AND ae.rowid=(SELECT MAX(last.rowid) FROM person_executions last WHERE last.task_id=t.id) AND ae.state='finished')) OR EXISTS(SELECT 1 FROM person_executions e WHERE e.task_id=t.id
       AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')))`).get(stageId)
 }
@@ -123,7 +127,7 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
         const updated = getPersonFlow(userId,id)
         for (const stage of active) {
           db.prepare("UPDATE person_stages SET state='active' WHERE id=?").run(stage.id)
-          db.prepare('UPDATE person_stage_tasks SET generation=? WHERE stage_id=?').run(updated.generation,stage.id)
+          db.prepare('UPDATE person_stage_tasks SET generation=? WHERE stage_id=? AND generation>=?').run(updated.generation,stage.id,updated.round_generation)
           enqueuePersonStage(userId,stage,updated.generation)
         }
       }
@@ -145,7 +149,8 @@ async function stopFlowWorkers(userId: number, flowId: string, stageId = '', gen
   const { applyPersonTask } = await import('./tasks')
   const current = () => generation === undefined || getPersonFlow(userId,flowId).generation === generation
   if (!current()) return
-  const rows = personDb().prepare(`SELECT l.task_id FROM person_stage_tasks l JOIN person_stages s ON s.id=l.stage_id JOIN session_tasks t ON t.id=l.task_id WHERE s.flow_id=? AND (?='' OR s.id=?)`).all(flowId,stageId,stageId)
+  const rows = personDb().prepare(`SELECT l.task_id FROM person_stage_tasks l JOIN person_stages s ON s.id=l.stage_id JOIN person_flows f ON f.id=s.flow_id
+    JOIN session_tasks t ON t.id=l.task_id WHERE s.flow_id=? AND l.generation>=f.round_generation AND (?='' OR s.id=?)`).all(flowId,stageId,stageId)
   for (const row of rows) {
     if (!current()) return
     const task = getPersonTask(userId,String(row.task_id))
@@ -180,6 +185,7 @@ export function finishPersonStageTurn(userId: number, context: PersonStageContex
     if (stageHasWork(stage.id)) throw personError('Stage still has unfinished work',409)
     // Save the result even if the destination was removed. Delivery reports that blocker.
     db.prepare("UPDATE person_stages SET state='completed',result_message_id=?,completion_run_id='' WHERE id=?").run(message.id,stage.id)
+    db.prepare('INSERT INTO person_stage_results(stage_id,round_number,result_message_id) VALUES(?,?,?)').run(stage.id,flow.round_number,message.id)
     db.prepare("UPDATE person_stage_deliveries SET state='delivered',error='',updated_at=? WHERE stage_id=? AND state IN ('pending','queued')").run(Date.now(),stage.id)
     if (flow.stages.some(item => item.group_position === stage.group_position && item.id !== stage.id && item.state !== 'completed')) {
       db.prepare('UPDATE person_flows SET revision=revision+1,updated_at=? WHERE id=?').run(Date.now(),flow.id)
@@ -192,9 +198,14 @@ export function finishPersonStageTurn(userId: number, context: PersonStageContex
         db.prepare("UPDATE person_stages SET state='active' WHERE id=? AND state='pending'").run(item.id)
         enqueuePersonStage(userId,item,flow.generation)
       }
+    } else if (flow.round_limit === 0 || flow.round_number < flow.round_limit) {
+      // The saved result and next round's durable dispatch commit together. A new
+      // generation fences every late completion/worker callback from the old round.
+      db.prepare('UPDATE person_flows SET round_number=round_number+1,generation=generation+1,round_generation=generation+1,current_position=0,revision=revision+1,updated_at=? WHERE id=?').run(Date.now(),flow.id)
+      db.prepare("UPDATE person_stages SET state=CASE WHEN group_position=0 THEN 'active' ELSE 'pending' END,result_message_id=NULL,completion_run_id='' WHERE flow_id=?").run(flow.id)
+      for (const item of flow.stages.filter(item => item.group_position === 0)) enqueuePersonStage(userId,item,flow.generation+1)
     } else {
       db.prepare("UPDATE person_flows SET state='completed',revision=revision+1,updated_at=? WHERE id=?").run(Date.now(),flow.id)
-      recordSessionAttention(flow.creator_session_id, `person-flow-completed:${flow.id}:${flow.generation}`)
       db.prepare("UPDATE person_occurrences SET state='finished' WHERE flow_id=?").run(flow.id)
     }
   })

@@ -20,6 +20,7 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
       || current.find(item => item.state === 'active') || current[0]
     return { id:flow.id,flow_ref:ref,title:flow.title,state:flow.state,current_stage:stage.id,session_id:stage.session_id,
       creator_session_id:flow.creator_session_id,position:flow.current_position,total:flow.stages.length,error:flow.error,
+      round_number:flow.round_number,round_limit:flow.round_limit,
       group_count:Math.max(...flow.stages.map(item => item.group_position)) + 1,
       current_stages:current.map(item => ({ id:item.id,session_id:item.session_id,state:item.state,goal:item.goal.slice(0,300),task_count:item.tasks.length })),
       tasks:stage.tasks.slice(0,5).map(task=>({ ...task,title:task.title.slice(0,80) })),task_count:stage.tasks.length,
@@ -60,7 +61,8 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
       const rows = args.flow_id ? [getPersonFlow(userId,String(args.flow_id))] : listPersonFlows(userId,sessionId,offset)
       return { flows:rows.slice(0,3).map(flow => expose(flow,origin)),next_offset:rows.length > 3 ? offset+3 : null }
     }),
-    define('bot_flow_create','Role flow: equal groups=parallel, omitted=serial. 0,0,1=A+B then C.',{
+    define('bot_flow_create','Role flow: equal groups=parallel, omitted=serial. 0,0,1=A+B then C. Follow user intent: add a later result-recipient stage only when a return is needed. return_expectation and completion notices do not schedule returns.',{
+      rounds:{ type:'integer',minimum:0,maximum:1000,description:'Total rounds; omit for one. Opt in only when requested; 0 means until stopped. The host carries the last group result into the next round; do not unroll the route.' },
       title:string,goal:string,stages:{ type:'array',minItems:1,maxItems:13,items:{ type:'object',additionalProperties:false,
         properties:{ session_id:string,goal:string,return_expectation:string,group:{ type:'integer',minimum:0 } },required:['session_id','goal','return_expectation'] } },
     },['title','goal','stages'],(args,origin)=>mutate(args,origin!,true)),

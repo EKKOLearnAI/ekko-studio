@@ -43,6 +43,9 @@ function dependencyLabel(stage: PersonFlowStage) {
         </span>
         <h3 v-if="!embedded">{{ flow.title }}</h3>
         <p class="flow-description">{{ flow.goal }}</p>
+        <p v-if="flow.round_limit != null && flow.round_limit !== 1" class="flow-description" role="status">
+          {{ t(flow.round_limit === 0 ? 'person.flowRoundContinuous' : 'person.flowRound', { number:flow.round_number, total:flow.round_limit }) }}
+        </p>
       </div>
       <NButton v-if="flow.state !== 'completed'" :disabled="saving" size="small" secondary @click="emit('action',flow,['stopped','failed'].includes(flow.state) ? 'resume' : 'stop')">
         {{ t(['stopped','failed'].includes(flow.state) ? 'person.resume' : 'person.stopFlow') }}

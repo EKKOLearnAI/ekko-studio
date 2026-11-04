@@ -15,6 +15,8 @@ export interface PersonStage {
   state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; completion_run_id: string
 }
 export interface PersonConversationFlow {
+  /** Zero means repeat until explicitly stopped; existing flows run once. */
+  round_limit: number; round_number: number; round_generation: number
   workspace: string
   id: string; owner_user_id: number; creator_session_id: string; title: string; goal: string
   /** current_position indexes execution groups; each stage retains its unique route position. */
