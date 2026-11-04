@@ -22,13 +22,16 @@ export function getPersonFlow(userId: number, id: string): PersonConversationFlo
     const delivery = db.prepare('SELECT state,error FROM person_stage_deliveries WHERE stage_id=? AND generation=?').get(stage.id,row.generation)
     stage.delivery_state = delivery ? String(delivery.state) : undefined
     stage.delivery_error = delivery ? String(delivery.error) : undefined
-    stage.tasks = db.prepare('SELECT t.id FROM person_stage_tasks l JOIN session_tasks t ON t.id=l.task_id WHERE l.stage_id=? ORDER BY t.created_at,t.id').all(stage.id).map(({ id }) => {
+    const confirmation = db.prepare('SELECT state,attempts,reason,message_id,decision_pending FROM person_stage_confirmations WHERE stage_id=? AND generation=?').get(stage.id,row.generation)
+    if (confirmation) stage.confirmation = {decision_pending:Boolean(confirmation.decision_pending),state:String(confirmation.state),attempts:Number(confirmation.attempts),reason:String(confirmation.reason),message_id:confirmation.message_id == null ? null : Number(confirmation.message_id)}
+    stage.tasks = db.prepare('SELECT t.id FROM person_stage_tasks l JOIN session_tasks t ON t.id=l.task_id WHERE l.stage_id=? AND l.generation>=? ORDER BY t.created_at,t.id').all(stage.id,Number(row.round_generation)).map(({ id }) => {
       const task = getPersonTask(userId,String(id))
       return { id:task.id,title:task.title,status:task.status,execution_state:task.execution_state || 'idle',agent:JSON.parse(task.selection_json).runtime }
     })
   }
   const error = db.prepare("SELECT error FROM person_stage_deliveries WHERE flow_id=? AND generation=? AND state IN ('pending','failed') AND error!='' ORDER BY updated_at DESC LIMIT 1").get(id,row.generation)?.error || ''
-  return { ...row, stages, error } as unknown as PersonConversationFlow
+  const confirmationError = db.prepare("SELECT c.reason FROM person_stage_confirmations c JOIN person_stages s ON s.id=c.stage_id WHERE s.flow_id=? AND c.generation=? AND c.state='blocked' AND c.reason!='' ORDER BY c.updated_at DESC LIMIT 1").get(id,row.generation)?.reason || ''
+  return { ...row, stages, error:error || confirmationError } as unknown as PersonConversationFlow
 }
 export function listPersonFlows(userId: number, sessionId = '', offset = 0) {
   return personDb().prepare(`SELECT f.id FROM person_flows f WHERE owner_user_id=? AND
@@ -43,7 +46,7 @@ export function personFlowActivity(userId: number, sessionId: string) {
     AND NOT EXISTS(SELECT 1 FROM person_stage_deliveries d WHERE d.flow_id=f.id AND d.generation=f.generation AND d.error!='')
     AND NOT EXISTS(SELECT 1 FROM person_stage_tasks l JOIN person_stages s ON s.id=l.stage_id
       JOIN session_tasks t ON t.id=l.task_id ${taskExecutionJoin}
-      WHERE s.flow_id=f.id AND s.state!='completed' AND t.status='open' AND selected_execution.state IN ('failed','interrupted'))`
+      WHERE s.flow_id=f.id AND l.generation>=f.round_generation AND s.state!='completed' AND t.status='open' AND selected_execution.state IN ('failed','interrupted'))`
   const params = [userId, sessionId]
   const count = Number(db.prepare(`SELECT COUNT(*) AS n FROM person_flows f WHERE ${where}`).get(...params)!.n)
   const ids = db.prepare(`SELECT f.id FROM person_flows f WHERE ${where} ORDER BY updated_at DESC,id LIMIT 50`).all(...params)
@@ -69,10 +72,11 @@ export function recordPersonStageFailure(userId: number, context: PersonStageCon
     const { flow,stage } = current, db = personDb(), now = Date.now()
     const detail = (error || 'Collaboration stage failed').slice(0,1000)
     db.prepare("UPDATE person_stages SET state='failed',completion_run_id='' WHERE id=?").run(stage.id)
+    db.prepare("UPDATE person_stage_confirmations SET state='blocked',claim='',reason=?,updated_at=? WHERE stage_id=? AND generation=? AND state!='completed'").run(detail,now,stage.id,flow.generation)
     db.prepare("UPDATE person_stage_deliveries SET state='failed',error=?,updated_at=? WHERE stage_id=? AND generation=? AND state IN ('pending','queued','delivered')")
       .run(detail,now,stage.id,flow.generation)
     db.prepare(`UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE state IN ('waiting','pending','queued')
-      AND execution_id IN (SELECT e.id FROM person_executions e JOIN person_stage_tasks l ON l.task_id=e.task_id WHERE l.stage_id=?)`).run(now,stage.id)
+      AND execution_id IN (SELECT e.id FROM person_executions e JOIN person_stage_tasks l ON l.task_id=e.task_id WHERE l.stage_id=? AND l.generation>=?)`).run(now,stage.id,flow.round_generation)
     db.prepare("UPDATE person_flows SET state='failed',revision=revision+1,updated_at=? WHERE id=?").run(now,flow.id)
     db.prepare("UPDATE person_occurrences SET state='failed' WHERE flow_id=?").run(flow.id)
     return true
@@ -81,8 +85,9 @@ export function recordPersonStageFailure(userId: number, context: PersonStageCon
 
 /** SQL predicate for stage alias s; failed work itself never holds a lock. */
 export const PERSON_STAGE_PENDING_WORK_SQL = `(s.completion_run_id!='' OR EXISTS(
+  SELECT 1 FROM person_stage_confirmations c WHERE c.stage_id=s.id AND c.generation=f.generation AND c.state IN ('running','pending','confirming','waiting')) OR EXISTS(
   SELECT 1 FROM person_stage_deliveries d WHERE d.stage_id=s.id AND d.generation=f.generation AND d.state IN ('pending','queued') AND d.error='') OR EXISTS(
-  SELECT 1 FROM person_stage_tasks l JOIN person_executions e ON e.task_id=l.task_id WHERE l.stage_id=s.id AND
+  SELECT 1 FROM person_stage_tasks l JOIN person_executions e ON e.task_id=l.task_id WHERE l.stage_id=s.id AND l.generation>=f.round_generation AND
     (e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval') OR EXISTS(
       SELECT 1 FROM person_deliveries d WHERE d.execution_id=e.id AND d.state IN ('pending','queued')))))`
 
@@ -140,12 +145,15 @@ export function stageDeliveryContext(userId: number, id: string): PersonStageCon
 /** Required inputs are read from originals, never copied into recipient history. */
 export function personStageSources(userId: number, context: PersonStageContext) {
   const { flow, stage } = assertPersonStage(userId, context)
-  const previous = flow.stages.filter(item => item.group_position === stage.group_position - 1)
+  const wrapped = stage.group_position === 0 && flow.round_number > 1
+  const previousGroup = wrapped ? Math.max(...flow.stages.map(item => item.group_position)) : stage.group_position - 1
+  const previous = flow.stages.filter(item => item.group_position === previousGroup)
   // Share the context budget across every upstream branch, retaining all original references.
   const limit = Math.floor(6000 / Math.max(1, previous.length))
   return previous.map(source => {
     requirePersonSession(userId, source.session_id)
-    const row = source.state === 'completed' && personDb().prepare("SELECT id,session_id,content FROM messages WHERE id=? AND session_id=? AND role='assistant' AND COALESCE(finish_reason,'')!='streaming'").get(source.result_message_id, source.session_id)
+    const messageId = wrapped ? personDb().prepare('SELECT result_message_id FROM person_stage_results WHERE stage_id=? AND round_number=?').get(source.id,flow.round_number-1)?.result_message_id : source.result_message_id
+    const row = (wrapped || source.state === 'completed') && personDb().prepare("SELECT id,session_id,content FROM messages WHERE id=? AND session_id=? AND role='assistant' AND COALESCE(finish_reason,'')!='streaming'").get(messageId ?? null, source.session_id)
     if (!row) throw personError('Previous stage result is unavailable', 409)
     return { id: Number(row.id), session_id: String(row.session_id), content: String(row.content).slice(0,limit), truncated: String(row.content).length > limit }
   })

@@ -1,8 +1,10 @@
 import { createPersonDisplayStream } from './person-display'
+import { emitEkkoAbortCompletion } from './ekko-abort-completion'
 import { studioModelReasoningEffort } from '../../public/model-reasoning-effort'
 import { personBackgroundPendingCount } from '../../repositories/person-store'
 import { isPersonSession, isPrivatePersonSession, parsePersonResultQueueId } from '../../contracts/person-session'
 import { finishPersonStageTurn } from '../person/stage-flows'
+import { startPersonStageRun, stageDecisionEvent } from '../../repositories/person-stage-confirmations'
 import type { PersonStageContext } from '../../contracts/person-stage'
 import { createPersonChatAgent } from '../person/chat-agent'
 import { requirePersonWorkspace } from '../person/workspace'
@@ -547,6 +549,9 @@ export async function handleEkkoAgentRun(
   const projectDisplayEvent = createPersonDisplayStream(sessionId)
   const emit = (event: string, payload: any) => {
     const tagged = { ...payload, session_id: sessionId }
+    if (personStageContext && event === 'run.started') startPersonStageRun(Number(authenticatedUserId),personStageContext,String(payload.run_id))
+    if (personStageContext && ['clarify.requested','approval.requested','clarify.resolved','approval.resolved'].includes(event))
+      stageDecisionEvent(personStageContext,String(payload.run_id),event.endsWith('.requested'))
     if (personStageContext && (event === 'run.completed' || event === 'run.failed')) {
       finishPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''),payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed',String(payload.error || ''))
     }
@@ -1726,9 +1731,16 @@ export async function handleEkkoAgentRun(
   } catch (err) {
     if (abortController.signal.aborted || isAbortError(err)) {
       logger.info('[chat-run-socket] ekko-agent run aborted for session %s', sessionId)
-      try { finalizeInterruptedUsage() }
+      let interruptedUsage: ReturnType<typeof finalizeInterruptedUsage>
+      try { interruptedUsage = finalizeInterruptedUsage() }
       catch (usageError) { logger.warn({ err: usageError, sessionId }, '[run-usage] interrupted Ekko usage failed') }
-      completeWorkspaceRunDiff()
+      const workspaceRunChange = completeWorkspaceRunDiff()
+      if (personStageContext) emitEkkoAbortCompletion(state,abortController,emit,{
+        run_id:runId,queue_id:data.queue_id,autonomous:data.autonomous === true,
+        delegation_id:data.background_delegation_id,
+        background_pending:ekkoBackgroundPendingCount(state,sessionId,data.background_delegation_id),
+        workspace_run_change:workspaceRunChange,run_usage:interruptedUsage,
+      })
       return
     }
     const error = err instanceof Error ? err.message : String(err)
@@ -1758,7 +1770,7 @@ export async function handleEkkoAgentRun(
   } finally {
     foregroundEnded = true
     releaseIdleMcp()
-    if (!abortController.signal.aborted || state.abortController === abortController) {
+    if (state.abortController === abortController) {
       state.ekkoBoundaryInterrupt = undefined
       state.isWorking = false
       state.isAborting = false

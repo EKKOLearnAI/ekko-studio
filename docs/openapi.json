@@ -19616,7 +19616,7 @@
           "Person"
         ],
         "summary": "Create apply",
-        "description": "Create a flow with session_id (creator), title, goal and stages (session_id, goal, return_expectation). Omit group on all stages for serial execution, or set ordered contiguous group numbers from zero on every stage: 0,0,1 runs A and B in parallel then C. Each role appears once per group; the creator may join a first parallel group. The next group receives every previous-group result only after all are saved. No execution preset is required. Stop/resume require flow_id and current expected_revision. Stop cancels all stage turns, deliveries and workers; resume requeues only unfinished branches with a new generation, preserving completed results. Only an assigned live model turn may prepare its branch completion; its stage and generation fence the operation, so peer revision changes do not require retries. The host commits it after saving its final result. Route and creator are immutable.",
+        "description": "Create a flow with session_id (creator), title, goal and stages (session_id, goal, return_expectation). Omit group on all stages for serial execution, or set ordered contiguous group numbers from zero on every stage: 0,0,1 runs A and B in parallel then C. Each role appears once per group; the creator may join a first parallel group. The next group receives every previous-group result only after all are saved. No execution preset is required. Stop/resume require flow_id and current expected_revision. Stop cancels all stage turns, deliveries and workers; resume requeues only unfinished branches with a new generation, preserving completed results. Only an assigned live model turn may prepare its branch completion; its stage and generation fence the operation, so peer revision changes do not require retries. The host commits it after saving its final result. Route and creator are immutable. Optional rounds defaults to 1; 2–1000 repeats that many rounds, while 0 repeats until explicitly stopped. Each round preserves result message references and passes its last group to the next round’s first group. Stop/resume retain the current round. Completion alone does not create an unread notification or wake the creator; save a later recipient stage when a return is requested. If a saved reply omits completion with no outstanding work or decision, the host makes at most two persisted status-only confirmation attempts with the same Bot, without task tools or a second result. Exhaustion, missing input and execution failures block downstream progression and retain original results; explicit resume confirms saved candidates rather than rerunning them. Claims are fenced by stage, generation, original run/message and a durable lease.",
         "operationId": "flowApply",
         "security": [
           {
@@ -19672,6 +19672,13 @@
                     "type": "string",
                     "maxLength": 8000
                   },
+                  "rounds": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000,
+                    "default": 1,
+                    "description": "Total rounds; 0 repeats until explicitly stopped. Opt in only when requested."
+                  },
                   "stages": {
                     "type": "array",
                     "minItems": 1,
@@ -19685,6 +19692,11 @@
                         "return_expectation"
                       ],
                       "properties": {
+                        "group": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 12
+                        },
                         "session_id": {
                           "type": "string",
                           "description": "Owning Person conversation ID. Required for new work; continuations preserve the existing task conversation."

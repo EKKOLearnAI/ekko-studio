@@ -16,9 +16,10 @@ export interface PersonQuestion { id: string; task_id: string | null; question: 
 export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed' }
 export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; taskTimeoutMinutes: number; timezone: string }
 export interface PersonFlow {
+  round_number?: number; round_limit?: number
   creator_session_id?: string
   id: string; title: string; goal: string; revision: number; state: 'active' | 'failed' | 'stopped' | 'completed'; current_position: number; error: string
-  stages: Array<{ id: string; position: number; group_position: number; session_id: string; session_title?: string; bot_type?: string | null; delivery_state?: string; delivery_error?: string; goal: string; state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; tasks: Array<{ id: string; title: string; status: string; execution_state?: string; agent?: string }> }>
+  stages: Array<{ confirmation?: {decision_pending?: boolean; state: string; attempts: number; reason: string; message_id: number | null}; id: string; position: number; group_position: number; session_id: string; session_title?: string; bot_type?: string | null; delivery_state?: string; delivery_error?: string; goal: string; state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; tasks: Array<{ id: string; title: string; status: string; execution_state?: string; agent?: string }> }>
 }
 export interface PersonSnapshot {
   active_tasks?: PersonTask[]

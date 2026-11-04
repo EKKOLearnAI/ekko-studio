@@ -43,6 +43,9 @@ function dependencyLabel(stage: PersonFlowStage) {
         </span>
         <h3 v-if="!embedded">{{ flow.title }}</h3>
         <p class="flow-description">{{ flow.goal }}</p>
+        <p v-if="flow.round_limit != null && flow.round_limit !== 1" class="flow-description" role="status">
+          {{ t(flow.round_limit === 0 ? 'person.flowRoundContinuous' : 'person.flowRound', { number:flow.round_number, total:flow.round_limit }) }}
+        </p>
       </div>
       <NButton v-if="flow.state !== 'completed'" :disabled="saving" size="small" secondary @click="emit('action',flow,['stopped','failed'].includes(flow.state) ? 'resume' : 'stop')">
         {{ t(['stopped','failed'].includes(flow.state) ? 'person.resume' : 'person.stopFlow') }}
@@ -79,6 +82,11 @@ function dependencyLabel(stage: PersonFlowStage) {
               <p class="flow-role-goal">{{ stage.goal }}</p>
               <p v-if="stage.state === 'pending'" class="flow-dependency"><SessionTaskIcon :size="13" name="circle" />{{ dependencyLabel(stage) }}</p>
               <p v-else-if="stage.delivery_error" class="flow-dependency flow-dependency--error">{{ stage.delivery_error }}</p>
+              <p v-if="stage.confirmation && ['pending','confirming','waiting','blocked'].includes(stage.confirmation.state)" class="flow-dependency">
+                {{ t('person.flowConfirmationProgress',{ count:stage.confirmation.attempts,total:2 }) }}
+              </p>
+              <p v-if="stage.confirmation?.reason && !stage.delivery_error" class="flow-dependency">{{ stage.confirmation.reason }}</p>
+              <p v-if="stage.confirmation?.state === 'blocked'" class="flow-dependency">{{ t('person.flowConfirmationResume') }}</p>
               <details v-if="stage.tasks.length" class="flow-worker-details">
                 <summary><SessionTaskIcon :size="14" /><span>{{ t('person.flowWorkerTasks',{ count:stage.tasks.length }) }}</span><SessionTaskIcon name="chevron-down" :size="12" /></summary>
                 <ul><li v-for="task in stage.tasks" :key="task.id">
