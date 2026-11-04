@@ -445,8 +445,16 @@ async function refresh() {
   try {
     const next = await personRequest<PersonSnapshot>(sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '', undefined, 'GET', request.controller.signal)
     if (!isCurrent()) return
-    if (taskPanelOpen.value && next.session && !taskSelections.value[next.session.id]) {
-      taskSelections.value[next.session.id] = { taskId: (next.active_tasks?.length ? next.active_tasks : next.tasks)[0]?.id || null }
+    if (taskPanelOpen.value && next.session?.id === sessionId) {
+      // A pending/failed/stale read is not evidence that this Bot has no tasks.
+      // Only a successful snapshot for the selected Bot can close the UI panel.
+      if (Array.isArray(next.tasks) && !next.tasks.length
+        && !next.active_tasks?.length && !next.active_agent_task_count) {
+        taskPanelOpen.value = false
+      } else if (!taskSelections.value[sessionId]?.taskId) {
+        const task = (next.active_tasks?.length ? next.active_tasks : next.tasks)?.[0]
+        if (task) taskSelections.value[sessionId] = { taskId: task.id }
+      }
     }
     data.value = next
     syncSession(next)

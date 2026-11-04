@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 
 const selection = { runtime: 'codex', mode: 'scoped', profile: 'default', provider: 'fixture', model: 'test-model', reasoningEffort: '' }
 async function setup(page: Page, fullShell = false, widths = { agent: 480, tools: 600 }) {
-  const errors: string[] = [], posts: { path: string; body: any }[] = [], files: string[] = []
+  const errors: string[] = [], posts: { path: string; body: any }[] = [], files: string[] = [], taskMutations: string[] = []
   const delayed = new Map<string, { promise: Promise<void>; release: () => void }>()
   function hold(path: string) {
     let release!: () => void
@@ -48,6 +48,7 @@ async function setup(page: Page, fullShell = false, widths = { agent: 480, tools
   })
   await page.route(url => url.pathname.startsWith('/api/'), async (route: Route) => {
     const request = route.request(), u = new URL(request.url())
+    if (u.pathname.includes('/person/tasks') && request.method() !== 'GET') taskMutations.push(request.method() + ' ' + u.pathname)
     const gate = delayed.get(u.pathname + u.search) || delayed.get(u.pathname)
     if (gate) await gate.promise
     let json: any = {}
@@ -78,7 +79,7 @@ async function setup(page: Page, fullShell = false, widths = { agent: 480, tools
   await page.route('**/__conversation_layout__', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="zh"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div><script type="module" src="${entry}"></script></body></html>` }))
   await page.goto('/__conversation_layout__' + (fullShell ? '#/person' : ''))
   await expect(page.locator('.person-title')).toHaveText('日常助手')
-  return { errors, posts, files, tasks, hold }
+  return { errors, posts, files, tasks, hold, taskMutations }
 }
 async function chooseTask(page: Page, title: string) {
   await page.getByRole('button', { name: /日常助手.*Agent/ }).click()
@@ -135,10 +136,74 @@ test('retains panel elements, geometry and browser tab across Agent and Bot swit
   expect(await page.evaluate(() => (window as any).savedPanels.every((el: Element, i: number) => el === document.querySelectorAll('.person-task-chat, .person-tools-panel, .browser-panel')[i]))).toBe(true)
   await evidence(page, '02-restored', { geometry: await rects(page), errors: state.errors })
   await bot(page, '空 Bot')
-  await expect(page.locator('.person-task-chat')).toContainText('启动任务后即可查看执行对话。')
-  expect(await rects(page)).toEqual(before)
+  await expect(page.locator('.person-task-chat')).toHaveCount(0)
+  expect(await rects(page)).toEqual([before[1]])
   await expect(page.getByRole('tab', { name: '浏览器', exact: true })).toHaveAttribute('aria-selected', 'true')
   await evidence(page, '03-empty-bot')
+  expect(state.errors).toEqual([])
+})
+
+for (const workspaceOpen of [false, true]) {
+  test(`closes the Agent only after the current Bot confirms no tasks; workspace ${workspaceOpen ? 'open' : 'closed'} is preserved`, async ({ page }) => {
+    await page.setViewportSize({ width: 2048, height: 1152 })
+    const state = await setup(page, true)
+    await chooseTask(page, state.tasks[0].title)
+    await expect(page.locator('.person-task-chat')).toHaveCSS('width', '480px')
+    if (workspaceOpen) await tools(page)
+    const workspaceBefore = workspaceOpen ? await page.locator('.person-tools-panel').boundingBox() : null
+    const release = state.hold('/api/studio/person?session_id=person-main-empty')
+    await bot(page, '空 Bot')
+    await expect(page.locator('.person-title')).toHaveText('空 Bot')
+    await expect(page.locator('.person-task-chat .task-chat-loading')).toBeVisible()
+    await expect(page.locator('.person-task-chat')).not.toContainText(state.tasks[0].title)
+    await expect(page.locator('.person-tools-panel')).toHaveCount(workspaceOpen ? 1 : 0)
+    await evidence(page, `empty-loading-${workspaceOpen}`)
+    release()
+    await expect(page.locator('.person-task-chat')).toHaveCount(0)
+    await expect(page.locator('.person-tools-panel')).toHaveCount(workspaceOpen ? 1 : 0)
+    if (workspaceOpen) {
+      expect(await page.locator('.person-tools-panel').boundingBox()).toEqual(workspaceBefore)
+      await expect.poll(() => state.files.some(path => path.includes('/person-main-empty/'))).toBe(true)
+    }
+    await evidence(page, `empty-confirmed-${workspaceOpen}`, { taskMutations: state.taskMutations, errors: state.errors })
+    // Closing an empty panel does not implicitly open it again on another Bot.
+    await bot(page, '日常助手')
+    await expect(page.locator('.person-task-chat')).toHaveCount(0)
+    await chooseTask(page, state.tasks[1].title)
+    await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('后端工程师')
+    await expect(page.locator('.person-tools-panel')).toHaveCount(workspaceOpen ? 1 : 0)
+    expect(state.taskMutations).toEqual([])
+    expect(state.errors).toEqual([])
+  })
+}
+
+test('does not treat a failed or stale Bot snapshot as confirmation of no tasks', async ({ page }) => {
+  await page.setViewportSize({ width: 2048, height: 1152 })
+  const state = await setup(page, true)
+  await chooseTask(page, state.tasks[0].title)
+  await tools(page)
+  const emptyUrl = '**/api/studio/person?session_id=person-main-empty'
+  await page.route(emptyUrl, route => route.fulfill({ status: 503, json: { error: 'fixture unavailable' } }))
+  await bot(page, '空 Bot')
+  await expect(page.locator('.person-alert')).toContainText('fixture unavailable')
+  await expect(page.locator('.person-task-chat .task-chat-loading')).toBeVisible()
+  await expect(page.locator('.person-tools-panel')).toBeVisible()
+  await evidence(page, 'empty-request-failed', { taskMutations: state.taskMutations })
+  await page.unroute(emptyUrl)
+  await bot(page, '日常助手')
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('前端工程师')
+  const release = state.hold('/api/studio/person?session_id=person-main-empty')
+  await bot(page, '空 Bot')
+  await expect(page.locator('.person-task-chat .task-chat-loading')).toBeVisible()
+  await bot(page, '研发 Bot')
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('研发执行器')
+  release()
+  // Force a new successful response so the canceled old read has been overtaken.
+  await bot(page, '日常助手')
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('前端工程师')
+  await expect(page.locator('.person-tools-panel')).toContainText('a1-only.txt')
+  await evidence(page, 'empty-stale-ignored', { taskMutations: state.taskMutations, errors: state.errors })
+  expect(state.taskMutations).toEqual([])
   expect(state.errors).toEqual([])
 })
 
