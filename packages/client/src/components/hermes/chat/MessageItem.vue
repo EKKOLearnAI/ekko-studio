@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import RunUsageCard from "./RunUsageCard.vue";
+import PersonTaskReturnCard from '../person/PersonTaskReturnCard.vue';
 import {
   formatReferencedContentForDisplay,
   parseMessageReference,
@@ -16,7 +17,7 @@ import { useChatStore } from "@/stores/hermes/chat";
 import { useFilesStore } from "@/stores/hermes/files";
 import { useToolPanelStore } from "@/stores/hermes/tool-panel";
 import { useSettingsStore } from "@/stores/hermes/settings";
-import { chatSessionAgentAvatar, type ChatAgentAvatar } from "@/utils/chat-agent-avatar";
+import { chatSessionAgentAvatar, personAvatarAnimation, personAvatarStyle, type ChatAgentAvatar } from "@/utils/chat-agent-avatar";
 import TaskPlanCard from './TaskPlanCard.vue';
 import ToolChangeCard from "./ToolChangeCard.vue";
 import {
@@ -48,6 +49,8 @@ const JSON_TRUNCATED_KEY = "__truncated__";
 
 const props = withDefaults(defineProps<{
   message: Message
+  hideRunUsage?: boolean
+  hideReasoning?: boolean
   highlight?: boolean
   headingIdPrefix?: string
   showForkAction?: boolean
@@ -1002,7 +1005,7 @@ onBeforeUnmount(() => {
           class="tool-details-expand"
         >
           <div class="tool-details" @click="handleToolDetailClick">
-            <div v-if="message.reasoning?.trim()" class="tool-detail-section">
+            <div v-if="!hideReasoning && message.reasoning?.trim()" class="tool-detail-section">
               <div class="tool-detail-label">{{ t("chat.thinkingLabel") }}</div>
               <div class="tool-detail-reasoning">
                 <MarkdownRenderer :content="message.reasoning" />
@@ -1035,6 +1038,8 @@ onBeforeUnmount(() => {
           <div v-if="message.role === 'assistant'" class="message-author assistant-message-author">
             <img
               class="msg-avatar"
+              :class="{ 'msg-avatar--person': !!personAvatarAnimation(assistantAgent, 'idle') }"
+              :style="personAvatarStyle(assistantAgent)"
               :src="assistantAgent.src"
               :alt="assistantAgent.label"
               draggable="false"
@@ -1114,7 +1119,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div
-              v-if="hasThinking"
+              v-if="!hideReasoning && hasThinking"
               class="thinking-block"
               :class="{ expanded: thinkingExpanded }"
             >
@@ -1221,12 +1226,13 @@ onBeforeUnmount(() => {
 
             <!-- Render assistant message content -->
             <MarkdownRenderer
-              v-if="message.role === 'assistant' && message.content && !parsedThinking.body"
+              v-if="message.role === 'assistant' && message.content && !parsedThinking.body && !(hideReasoning && hasThinking)"
               :content="message.content"
               :heading-id-prefix="effectiveHeadingIdPrefix"
             />
 
-            <RunUsageCard v-if="message.runUsage && !message.isStreaming" :usage="message.runUsage" />
+            <PersonTaskReturnCard v-if="message.personTaskReturn && !message.isStreaming" :result="message.personTaskReturn" />
+            <RunUsageCard v-if="!hideRunUsage && message.runUsage && !message.isStreaming" :usage="message.runUsage" />
 
             <ToolChangeCard
               v-for="change in workspaceChanges"
@@ -1338,6 +1344,7 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
+@use "@/styles/person-avatar" as *;
 
 .message {
   display: flex;
@@ -1384,6 +1391,7 @@ onBeforeUnmount(() => {
       border: var(--border-width, 1px) solid #fff;
       border-radius: 50%;
       object-fit: cover;
+      &--person { @include person-avatar(22px); }
     }
 
     .message-bubble {

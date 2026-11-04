@@ -13,6 +13,8 @@ export type ChatWebhookEventType =
   | 'chat.clarification.resolved'
   | 'chat.run.completed'
   | 'chat.run.failed'
+  | 'chat.task.created'
+  | 'chat.task.completed'
   | 'group.message.created'
   | 'group.run.failed'
   | 'group.approval.requested'

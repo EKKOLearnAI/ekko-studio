@@ -59,6 +59,13 @@ jobs:
             runner: windows-latest
             target_os: win32
             target_arch: x64
+          # Chrome for Testing has no Windows ARM64 archive. The Electron
+          # browser remains available; omit the optional Hermes browser bundle.
+          - label: Windows arm64
+            runner: windows-11-arm
+            target_os: win32
+            target_arch: arm64
+            skip_browser_runtime: true
           - label: Linux x64
             runner: ubuntu-22.04
             target_os: linux
@@ -115,7 +122,7 @@ jobs:
         if: steps.check.outputs.missing == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: packages/desktop/package-lock.json
 
@@ -126,6 +133,11 @@ jobs:
       - name: Install desktop dependencies
         if: steps.check.outputs.missing == 'true'
         run: npm ci --prefix packages/desktop --no-audit --no-fund
+
+      - name: Prepare native ARM64 OpenSSL
+        if: steps.check.outputs.missing == 'true' && matrix.target_os == 'win32' && matrix.target_arch == 'arm64'
+        shell: pwsh
+        run: ./packages/desktop/scripts/setup-windows-arm64-openssl.ps1
 
       - name: Prepare runtime resources
         if: steps.check.outputs.missing == 'true'

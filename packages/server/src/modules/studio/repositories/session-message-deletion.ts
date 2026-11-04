@@ -1,7 +1,7 @@
 import { getDb, isSqliteAvailable } from '../infrastructure/database'
 import { getCompressionSnapshot } from './compression-snapshot'
 import {
-  COMPRESSION_SNAPSHOT_TABLE, MESSAGES_TABLE, SESSIONS_TABLE, TASK_PLANS_TABLE,
+  COMPRESSION_SNAPSHOT_TABLE, MESSAGES_TABLE, SESSIONS_TABLE, TASK_PLANS_TABLE, SESSION_TASKS_TABLE,
   WORKSPACE_RUN_CHANGES_TABLE, WORKSPACE_RUN_CHANGE_FILES_TABLE,
 } from '../infrastructure/database/schemas'
 
@@ -98,6 +98,9 @@ export function deleteSessionMessageGroups(sessionId: string, messageIds: number
     const removeFiles = db.prepare(`DELETE FROM ${WORKSPACE_RUN_CHANGE_FILES_TABLE} WHERE session_id = ? AND change_id IN
       (SELECT change_id FROM ${WORKSPACE_RUN_CHANGES_TABLE} WHERE session_id = ? AND assistant_message_id = ?)`)
     for (const id of deletedIds) {
+      db.prepare(`DELETE FROM ${SESSION_TASKS_TABLE} WHERE session_id = ? AND source_message_id = ?`).run(sessionId, id)
+      db.prepare(`UPDATE ${SESSION_TASKS_TABLE} SET status = 'open', completion_evidence = '', evidence_message_id = NULL,
+        completed_at = NULL, updated_at = ? WHERE session_id = ? AND evidence_message_id = ?`).run(Date.now(), sessionId, id)
       removeFiles.run(sessionId, sessionId, String(id))
       removeChanges.run(sessionId, String(id))
       remove.run(sessionId, id)
@@ -115,6 +118,7 @@ export function deleteSessionMessageGroups(sessionId: string, messageIds: number
       .run(expectedRevision + 1, sessionId)
     db.prepare(`UPDATE ${SESSIONS_TABLE} SET
       history_revision = history_revision + 1, history_cleared_at = ?,
+      task_summary_revision = task_summary_revision + 1, task_summary_updated_at = 0,
       message_count = (SELECT COUNT(*) FROM ${MESSAGES_TABLE} WHERE session_id = ?),
       tool_call_count = (SELECT COALESCE(SUM(CASE WHEN json_valid(tool_calls) THEN json_array_length(tool_calls) ELSE 0 END), 0) FROM ${MESSAGES_TABLE} WHERE session_id = ?),
       preview = COALESCE((SELECT SUBSTR(REPLACE(REPLACE(content, CHAR(10), ' '), CHAR(13), ' '), 1, 100) FROM ${MESSAGES_TABLE} WHERE session_id = ? AND role = 'user' ORDER BY id LIMIT 1), ''),

@@ -4,6 +4,7 @@ import PageHeader from '@/components/layout/PageHeader.vue'
 import { NButton, NSelect } from 'naive-ui'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { useUsageStore } from '@/stores/hermes/usage'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import StatCards from '@/components/hermes/usage/StatCards.vue'
@@ -11,6 +12,7 @@ import UsageOverviewInsights from '@/components/hermes/usage/UsageOverviewInsigh
 import type { UsageStatsFilters } from '@/api/studio/sessions'
 import DailyTrend from '@/components/hermes/usage/DailyTrend.vue'
 import UsagePricing from '@/components/hermes/usage/UsagePricing.vue'
+import AgentBreakdown from '@/components/hermes/usage/AgentBreakdown.vue'
 
 const { t } = useI18n()
 const usageStore = useUsageStore()
@@ -25,7 +27,10 @@ const periodOptions = [
 ] as const
 
 const selectedPeriod = ref(30)
-const filters = ref<UsageStatsFilters>({})
+const route = useRoute()
+const filters = ref<UsageStatsFilters>({
+  ...(route.query.origin === 'external' ? { origin: 'external' } : {}),
+})
 const profileScope = computed(() => filters.value.profile || t('usage.dashboard.allProfiles'))
 const profileOptions = computed(() => [
   { label: t('usage.dashboard.allProfiles'), value: '' },
@@ -84,6 +89,14 @@ onMounted(() => {
     </PageHeader>
 
     <div class="usage-content" :aria-busy="usageStore.isLoading">
+      <div class="usage-origins period-selector" role="group" :aria-label="t('usage.origin.label')">
+        <NButton v-for="origin in (['internal', 'external'] as const)" :key="origin" size="small"
+          :data-usage-origin="origin" :aria-pressed="(filters.origin || 'internal') === origin"
+          :type="(filters.origin || 'internal') === origin ? 'primary' : 'default'"
+          :secondary="(filters.origin || 'internal') === origin" :quaternary="(filters.origin || 'internal') !== origin"
+          @click="applyFilters({ ...filters, origin })">{{ t(`usage.origin.${origin}`) }}</NButton>
+      </div>
+      <p class="account-note">{{ t('usage.origin.description') }}</p>
       <div class="overview-heading"><p>{{ t('usage.dashboard.overviewSubtitle') }}</p><span>{{ selectedPeriod === 1 ? t('usage.dashboard.todaySummary') : t('usage.dashboard.periodSummary', { days: selectedPeriod }) }} · {{ profileScope }}</span></div>
       <div class="overview-controls" :aria-label="t('usage.dashboard.filters')">
         <div class="period-selector" role="group" :aria-label="t('usage.dashboard.period')">
@@ -101,12 +114,13 @@ onMounted(() => {
           @update:value="applyFilters({ ...filters, profile: $event || undefined })" />
         <UsagePricing :profile="filters.profile" />
       </div>
-      <p class="account-note">{{ t('usage.dashboard.accountScope') }}</p>
+      <p class="account-note">{{ filters.origin === 'external' ? t('usage.origin.accountScope') : t('usage.dashboard.accountScope') }}</p>
       <div v-if="usageStore.isLoading" class="usage-loading" role="status">{{ t('common.loading') }}</div>
       <div v-else-if="usageStore.loadError" class="usage-empty" role="alert">{{ t('usage.dashboard.loadFailed') }}</div>
       <div v-if="usageStore.hasData && !usageStore.loadError" v-show="!usageStore.isLoading" class="overview-results">
         <StatCards />
         <DailyTrend />
+        <AgentBreakdown v-if="filters.origin !== 'external'" />
         <UsageOverviewInsights />
       </div>
 

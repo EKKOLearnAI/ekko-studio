@@ -3,7 +3,7 @@
   "info": {
     "title": "Ekko Studio API",
     "description": "Ekko Studio API — chat sessions, scheduled jobs, platform channels, model management, skills, memory, logs, file browser, group chat, and terminal.",
-    "version": "0.7.36"
+    "version": "0.8.15"
   },
   "servers": [
     {
@@ -12,6 +12,14 @@
     }
   ],
   "tags": [
+    {
+      "name": "Person",
+      "description": "Account-owned assistant, independent memory, task execution, decisions and durable schedules"
+    },
+    {
+      "name": "Desktop Browser",
+      "description": "Authenticated remote Desktop browser relay with explicit Desktop consent"
+    },
     {
       "name": "Profiles",
       "description": "Hermes profile management"
@@ -129,6 +137,10 @@
       "description": "Cross-agent chat session management"
     },
     {
+      "name": "Model API",
+      "description": "OpenAI Responses-compatible inference across configured providers; external usage accounting"
+    },
+    {
       "name": "Session Shares",
       "description": "App-bound single-session share tokens, first claim, permissions and revocation"
     },
@@ -162,7 +174,7 @@
     },
     {
       "name": "JEV",
-      "description": "Profile-scoped TypeSafe JEV configuration and shared Choice, Score, Noul evaluations"
+      "description": "Global TypeSafe JEV configuration and shared Choice, Score, Noul evaluations"
     },
     {
       "name": "Media",
@@ -199,10 +211,6 @@
     {
       "name": "App Relay",
       "description": "Mobile App cloud relay route and connection management"
-    },
-    {
-      "name": "Devices",
-      "description": "Device pairing and LAN peer operations"
     },
     {
       "name": "MCU Devices",
@@ -4091,40 +4099,14 @@
         ]
       }
     },
-    "/api/devices": {
-      "get": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Get devices",
-        "description": "GET /api/devices",
-        "operationId": "listDevices",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "description": "Not found"
-          }
-        }
-      }
-    },
     "/api/devices/link-info": {
       "get": {
         "tags": [
-          "Devices"
+          "MCU Devices"
         ],
         "summary": "Get link-info",
         "description": "GET /api/devices/link-info",
-        "operationId": "deviceLinkInfoController",
+        "operationId": "mcuBackendInfoController",
         "security": [
           {
             "BearerAuth": []
@@ -4143,149 +4125,14 @@
         }
       }
     },
-    "/api/devices/link-request": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create link-request",
-        "description": "POST /api/devices/link-request",
-        "operationId": "requestDeviceLinkController",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "nonce": {
-                    "type": "string"
-                  },
-                  "signature": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/devices/link-status": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create link-status",
-        "description": "POST /api/devices/link-status",
-        "operationId": "requestDeviceLinkStatusController",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "device_id": {
-                    "type": "string"
-                  },
-                  "device_public_key": {
-                    "type": "string"
-                  },
-                  "nonce": {
-                    "type": "string"
-                  },
-                  "signature": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/devices/manual-request": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create manual-request",
-        "description": "POST /api/devices/manual-request",
-        "operationId": "requestManualDevicePairing",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "url": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/devices/pairing-link": {
+    "/api/ekko-studio/models/v1/models": {
       "get": {
         "tags": [
-          "Devices"
+          "Model API"
         ],
-        "summary": "Get pairing-link",
-        "description": "GET /api/devices/pairing-link",
-        "operationId": "getDevicePairingLink",
+        "summary": "List configured models with provider-qualified IDs",
+        "description": "Model API keys see only their explicitly allowed model IDs; Studio user JWTs see the full account catalog. Aggregates all accessible Profiles as provider/model and deduplicates IDs, preserving slashes inside native model IDs. Callable configurations win over disabled/unsupported duplicates, then default Profile, then Profile names in lexical order. Caller Profile selectors are ignored. Never returns credentials. MoA presets and self-referencing Model API providers using a locally issued Model API key are excluded from this catalog. responses_supported=false marks disabled models and providers requiring Bedrock or Codex app-server runtimes.",
+        "operationId": "modelApiModels",
         "security": [
           {
             "BearerAuth": []
@@ -4293,135 +4140,87 @@
         ],
         "responses": {
           "200": {
-            "description": "Success"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "description": "Not found"
-          }
-        }
-      }
-    },
-    "/api/devices/peer-connections": {
-      "get": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Get peer-connections",
-        "description": "GET /api/devices/peer-connections",
-        "operationId": "listPeerConnections",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "description": "Not found"
-          }
-        }
-      }
-    },
-    "/api/devices/peer-connections/{connectionId}/disconnect": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create disconnect",
-        "description": "POST /api/devices/peer-connections/:connectionId/disconnect",
-        "operationId": "disconnectPeerDevice",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/devices/peer-connections/{connectionId}/download": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create download",
-        "description": "POST /api/devices/peer-connections/:connectionId/download",
-        "operationId": "downloadPeerFile",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": true
+            "description": "OpenAI-compatible model list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "list"
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "example": "glm/glm-5.3"
+                          },
+                          "object": {
+                            "type": "string",
+                            "enum": [
+                              "model"
+                            ]
+                          },
+                          "created": {
+                            "type": "integer"
+                          },
+                          "owned_by": {
+                            "type": "string"
+                          },
+                          "api_mode": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "responses_supported": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
+          },
+          "400": {
+            "description": "Invalid input or unsupported Responses feature"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed"
           }
-        }
+        },
+        "parameters": []
       }
     },
-    "/api/devices/peer-connections/{connectionId}/exec": {
+    "/api/ekko-studio/models/v1/responses": {
       "post": {
         "tags": [
-          "Devices"
+          "Model API"
         ],
-        "summary": "Create exec",
-        "description": "POST /api/devices/peer-connections/:connectionId/exec",
-        "operationId": "execPeerCommand",
+        "summary": "Request a configured model using OpenAI Responses format",
+        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. Every attempted upstream request records external usage under the authenticated user. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations.",
+        "operationId": "modelApiResponses",
         "security": [
           {
             "BearerAuth": []
@@ -4429,668 +4228,217 @@
         ],
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Response object, or named Responses SSE events ending in response.completed, response.incomplete or response.failed. Usage may be null if the upstream did not report it.",
+            "headers": {
+              "x-request-id": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "object": {
+                      "type": "string",
+                      "enum": [
+                        "response"
+                      ]
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "completed",
+                        "incomplete",
+                        "failed"
+                      ]
+                    },
+                    "output": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "usage": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "error": {
+                      "type": "object",
+                      "nullable": true
+                    }
+                  }
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
-            "$ref": "#/components/responses/BadRequest"
+            "description": "Invalid input or unsupported Responses feature"
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed"
           }
         },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
+                "required": [
+                  "model",
+                  "input"
+                ],
                 "properties": {
-                  "args": {
+                  "model": {
+                    "type": "string",
+                    "example": "glm/glm-5.3"
+                  },
+                  "input": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "description": "Responses message, reasoning, function_call or function_call_output item."
+                        }
+                      }
+                    ]
+                  },
+                  "instructions": {
                     "type": "string"
                   },
-                  "cwd": {
-                    "type": "string"
+                  "stream": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "store": {
+                    "type": "boolean",
+                    "enum": [
+                      false
+                    ],
+                    "default": false
+                  },
+                  "max_output_tokens": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 2
+                  },
+                  "reasoning": {
+                    "type": "object",
+                    "properties": {
+                      "effort": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ]
+                      },
+                      "summary": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "concise",
+                          "detailed"
+                        ]
+                      }
+                    }
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "name"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "function"
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "parameters": {
+                          "type": "object"
+                        },
+                        "strict": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "tool_choice": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "none",
+                      "required"
+                    ]
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "maxProperties": 16,
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 512
+                    }
                   }
                 }
               }
             }
           }
-        }
-      }
-    },
-    "/api/devices/peer-connections/{connectionId}/terminal": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create terminal",
-        "description": "POST /api/devices/peer-connections/:connectionId/terminal",
-        "operationId": "createPeerTerminal",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
         },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "shell": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/devices/peer-connections/{connectionId}/terminal/{terminalId}/close": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create close",
-        "description": "POST /api/devices/peer-connections/:connectionId/terminal/:terminalId/close",
-        "operationId": "closePeerTerminal",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "terminalId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/devices/peer-connections/{connectionId}/terminal/{terminalId}/input": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create input",
-        "description": "POST /api/devices/peer-connections/:connectionId/terminal/:terminalId/input",
-        "operationId": "writePeerTerminal",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "terminalId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/devices/peer-connections/{connectionId}/terminal/{terminalId}/read": {
-      "get": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Get read",
-        "description": "GET /api/devices/peer-connections/:connectionId/terminal/:terminalId/read",
-        "operationId": "readPeerTerminal",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "description": "Not found"
-          }
-        },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "terminalId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/devices/peer-connections/{connectionId}/terminal/{terminalId}/resize": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create resize",
-        "description": "POST /api/devices/peer-connections/:connectionId/terminal/:terminalId/resize",
-        "operationId": "resizePeerTerminal",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "terminalId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/devices/peer-connections/{connectionId}/terminals": {
-      "get": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Get terminals",
-        "description": "GET /api/devices/peer-connections/:connectionId/terminals",
-        "operationId": "listPeerTerminals",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "description": "Not found"
-          }
-        },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/devices/peer-connections/{connectionId}/upload": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create upload",
-        "description": "POST /api/devices/peer-connections/:connectionId/upload",
-        "operationId": "uploadPeerFile",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "connectionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": true
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/devices/scan": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create scan",
-        "description": "POST /api/devices/scan",
-        "operationId": "scanDevices",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
-    "/api/devices/{id}/approve": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create approve",
-        "description": "POST /api/devices/:id/approve",
-        "operationId": "approveDevice",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/devices/{id}/block": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create block",
-        "description": "POST /api/devices/:id/block",
-        "operationId": "blockDevice",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/devices/{id}/connect": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create connect",
-        "description": "POST /api/devices/:id/connect",
-        "operationId": "connectPeerDevice",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/devices/{id}/reject": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create reject",
-        "description": "POST /api/devices/:id/reject",
-        "operationId": "rejectDevice",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/devices/{id}/request": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create request",
-        "description": "POST /api/devices/:id/request",
-        "operationId": "requestDevicePairing",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "pairing_code": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/devices/{id}/request-history": {
-      "delete": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Delete request-history",
-        "description": "DELETE /api/devices/:id/request-history",
-        "operationId": "deleteDeviceRequestHistory",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/devices/{id}/unblock": {
-      "post": {
-        "tags": [
-          "Devices"
-        ],
-        "summary": "Create unblock",
-        "description": "POST /api/devices/:id/unblock",
-        "operationId": "unblockDevice",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success"
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        },
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
+        "parameters": []
       }
     },
     "/api/ekko/config": {
@@ -7184,13 +6532,26 @@
                     "type": "string"
                   },
                   "api_mode": {
-                    "type": "string"
+                    "nullable": true,
+                    "type": "string",
+                    "enum": [
+                      "chat_completions",
+                      "codex_responses",
+                      "anthropic_messages",
+                      "bedrock_converse",
+                      "codex_app_server",
+                      null
+                    ],
+                    "description": "Null clears the custom connection protocol override for automatic matching; no api_mode is written to configuration."
                   },
                   "base_url": {
                     "type": "string"
                   },
                   "context_length": {
                     "type": "number"
+                  },
+                  "create_only": {
+                    "type": "boolean"
                   },
                   "model": {
                     "type": "string"
@@ -7260,7 +6621,17 @@
                     "type": "string"
                   },
                   "api_mode": {
-                    "type": "string"
+                    "nullable": true,
+                    "type": "string",
+                    "enum": [
+                      "chat_completions",
+                      "codex_responses",
+                      "anthropic_messages",
+                      "bedrock_converse",
+                      "codex_app_server",
+                      null
+                    ],
+                    "description": "Null clears the custom connection protocol override for automatic matching; no api_mode is written to configuration."
                   },
                   "base_url": {
                     "type": "string"
@@ -13423,6 +12794,85 @@
         "x-session-share-permission": "input"
       }
     },
+    "/api/studio/desktop-browser/request": {
+      "post": {
+        "tags": [
+          "Desktop Browser"
+        ],
+        "summary": "Operate the explicitly authorized remote Desktop browser",
+        "description": "Requires an identified Studio user and matching Profile with an explicitly authorized active Desktop. Ownership transfers only on real user input after 10 minutes of owner inactivity and no in-flight operation. No browser credentials or debug ports are exposed. Run bindings never silently switch desktops; disconnected or replaced targets fail closed.",
+        "operationId": "requestDesktopBrowser",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Identified Studio account required"
+          },
+          "409": {
+            "description": "Unavailable, ambiguous, disconnected, revoked or invalid browser operation"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "method",
+                  "client_id"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "client_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Stable browser MCP process identity bound with authenticated token/context to the original Desktop."
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "state",
+                      "tabs.list",
+                      "tabs.create",
+                      "tabs.activate",
+                      "tabs.close",
+                      "lease.release",
+                      "navigate",
+                      "navigation.action",
+                      "snapshot",
+                      "text.read",
+                      "interact",
+                      "interact.batch",
+                      "screenshot",
+                      "console.read",
+                      "console.clear"
+                    ]
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/files/copy": {
       "post": {
         "tags": [
@@ -16827,7 +16277,7 @@
           "JEV"
         ],
         "summary": "Create match",
-        "description": "POST /api/studio/jev/browser/match",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "matchBrowser",
         "security": [
           {
@@ -16836,7 +16286,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Advisory, Profile-gated assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
+            "description": "Advisory, globally configured assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16955,17 +16405,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ],
+        "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -17050,7 +16490,7 @@
           "JEV"
         ],
         "summary": "Create verify",
-        "description": "POST /api/studio/jev/browser/verify",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "verifyBrowser",
         "security": [
           {
@@ -17059,7 +16499,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Advisory, Profile-gated assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
+            "description": "Advisory, globally configured assessment of supplied snapshot evidence. Never executes actions or changes their completion status.",
             "content": {
               "application/json": {
                 "schema": {
@@ -17179,17 +16619,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ],
+        "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -17274,7 +16704,7 @@
           "JEV"
         ],
         "summary": "Create evaluate",
-        "description": "POST /api/studio/jev/evaluate",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "evaluate",
         "security": [
           {
@@ -17417,17 +16847,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       }
     },
     "/api/studio/jev/settings": {
@@ -17436,7 +16856,7 @@
           "JEV"
         ],
         "summary": "Get settings",
-        "description": "GET /api/studio/jev/settings",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "getSettings",
         "security": [
           {
@@ -17451,6 +16871,94 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "personMemoryEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "personMemoryKindRoutingEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRelevanceFilterEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRerankEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryWriteReviewEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "personMemoryRecallMinConfidence": {
+                      "type": "number",
+                      "default": 0.5,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryFilterMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
+                    "ekkoComputerUseMatchEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ekkoComputerUseMatchCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "ekkoComputerUseMatchMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "ekkoComputerUseMatchTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
+                    "ekkoComputerUseVerifyEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ekkoComputerUseVerifyMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "ekkoComputerUseVerifyTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
                     "browserMatchEnabled": {
                       "type": "boolean",
                       "default": false
@@ -17596,24 +17104,14 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       },
       "put": {
         "tags": [
           "JEV"
         ],
         "summary": "Update settings",
-        "description": "PUT /api/studio/jev/settings",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "saveSettings",
         "security": [
           {
@@ -17628,6 +17126,94 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "personMemoryEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "personMemoryKindRoutingEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRelevanceFilterEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRerankEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryWriteReviewEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "personMemoryRecallMinConfidence": {
+                      "type": "number",
+                      "default": 0.5,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryFilterMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
+                    "ekkoComputerUseMatchEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ekkoComputerUseMatchCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "ekkoComputerUseMatchMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "ekkoComputerUseMatchTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
+                    "ekkoComputerUseVerifyEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ekkoComputerUseVerifyMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "ekkoComputerUseVerifyTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
                     "browserMatchEnabled": {
                       "type": "boolean",
                       "default": false
@@ -17778,6 +17364,94 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "personMemoryEnabled": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "personMemoryKindRoutingEnabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "personMemoryRelevanceFilterEnabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "personMemoryRerankEnabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "personMemoryWriteReviewEnabled": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "personMemoryCandidateLimit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  "personMemoryRecallMinConfidence": {
+                    "type": "number",
+                    "default": 0.5,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "personMemoryFilterMinConfidence": {
+                    "type": "number",
+                    "default": 0.8,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "personMemoryMinConfidence": {
+                    "type": "number",
+                    "default": 0.8,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "personMemoryTimeoutMs": {
+                    "type": "integer",
+                    "default": 3000,
+                    "minimum": 100,
+                    "maximum": 30000
+                  },
+                  "ekkoComputerUseMatchEnabled": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "ekkoComputerUseMatchCandidateLimit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  "ekkoComputerUseMatchMinConfidence": {
+                    "type": "number",
+                    "default": 0.8,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "ekkoComputerUseMatchTimeoutMs": {
+                    "type": "integer",
+                    "default": 3000,
+                    "minimum": 100,
+                    "maximum": 30000
+                  },
+                  "ekkoComputerUseVerifyEnabled": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "ekkoComputerUseVerifyMinConfidence": {
+                    "type": "number",
+                    "default": 0.8,
+                    "minimum": 0.5,
+                    "maximum": 1
+                  },
+                  "ekkoComputerUseVerifyTimeoutMs": {
+                    "type": "integer",
+                    "default": 3000,
+                    "minimum": 100,
+                    "maximum": 30000
+                  },
                   "browserMatchEnabled": {
                     "type": "boolean",
                     "default": false
@@ -17842,24 +17516,14 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       },
       "delete": {
         "tags": [
           "JEV"
         ],
         "summary": "Delete settings",
-        "description": "DELETE /api/studio/jev/settings",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "deleteSettings",
         "security": [
           {
@@ -17874,6 +17538,94 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "personMemoryEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "personMemoryKindRoutingEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRelevanceFilterEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryRerankEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryWriteReviewEnabled": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "personMemoryCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "personMemoryRecallMinConfidence": {
+                      "type": "number",
+                      "default": 0.5,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryFilterMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "personMemoryTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
+                    "ekkoComputerUseMatchEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ekkoComputerUseMatchCandidateLimit": {
+                      "type": "integer",
+                      "default": 20,
+                      "minimum": 1,
+                      "maximum": 50
+                    },
+                    "ekkoComputerUseMatchMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "ekkoComputerUseMatchTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
+                    "ekkoComputerUseVerifyEnabled": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "ekkoComputerUseVerifyMinConfidence": {
+                      "type": "number",
+                      "default": 0.8,
+                      "minimum": 0.5,
+                      "maximum": 1
+                    },
+                    "ekkoComputerUseVerifyTimeoutMs": {
+                      "type": "integer",
+                      "default": 3000,
+                      "minimum": 100,
+                      "maximum": 30000
+                    },
                     "browserMatchEnabled": {
                       "type": "boolean",
                       "default": false
@@ -18016,17 +17768,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       }
     },
     "/api/studio/jev/test": {
@@ -18035,7 +17777,7 @@
           "JEV"
         ],
         "summary": "Create test",
-        "description": "POST /api/studio/jev/test",
+        "description": "Uses the shared global JEV configuration, independent of model Profile. Configuration writes and connection tests require super administrator privileges.",
         "operationId": "testConnection",
         "security": [
           {
@@ -18120,17 +17862,7 @@
             }
           }
         },
-        "parameters": [
-          {
-            "name": "X-Hermes-Profile",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Authorized Profile; never changes the global active Profile."
-          }
-        ]
+        "parameters": []
       }
     },
     "/api/studio/live-activities/registration": {
@@ -18858,6 +18590,643 @@
         }
       }
     },
+    "/api/studio/models/api-keys": {
+      "get": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "List my account-wide Model API keys",
+        "description": "Requires Studio user authentication. Lists only the caller’s keys, independent of Profile selection. Never returns plaintext keys or hashes.",
+        "operationId": "modelApiKeys",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "budgetUsd": {
+                            "type": "number",
+                            "nullable": true,
+                            "minimum": 0,
+                            "maximum": 1000000,
+                            "description": "Lifetime USD budget. Null or omitted means unlimited; 0 blocks inference. Editing never resets spending."
+                          },
+                          "spentUsd": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "Settled lifetime USD costs for this key"
+                          },
+                          "unpricedRequests": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Unpriced or pending requests. Limited keys pause when costs remain unresolved after completion or interruption; known in-flight calls can continue."
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "preview": {
+                            "type": "string"
+                          },
+                          "models": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Explicit provider-qualified model IDs allowed by this key"
+                          },
+                          "createdAt": {
+                            "type": "integer",
+                            "description": "Unix milliseconds"
+                          },
+                          "lastUsedAt": {
+                            "type": "integer",
+                            "nullable": true,
+                            "description": "Unix milliseconds"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "403": {
+            "description": "Profile access denied"
+          }
+        },
+        "parameters": []
+      },
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Create an account-wide Model API key",
+        "description": "Requires Studio user authentication. Key allows model listing and Responses inference only for the explicitly selected models; valid until revoked. Only the hash is persisted. Limit: 50 keys per account. Cache-Control: no-store.",
+        "operationId": "modelApiCreateKey",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Save the plaintext API key now; it is returned only once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "object",
+                      "properties": {
+                        "budgetUsd": {
+                          "type": "number",
+                          "nullable": true,
+                          "minimum": 0,
+                          "maximum": 1000000,
+                          "description": "Lifetime USD budget. Null or omitted means unlimited; 0 blocks inference. Editing never resets spending."
+                        },
+                        "spentUsd": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Settled lifetime USD costs for this key"
+                        },
+                        "unpricedRequests": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Unpriced or pending requests. Limited keys pause when costs remain unresolved after completion or interruption; known in-flight calls can continue."
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "preview": {
+                          "type": "string"
+                        },
+                        "models": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Explicit provider-qualified model IDs allowed by this key"
+                        },
+                        "createdAt": {
+                          "type": "integer",
+                          "description": "Unix milliseconds"
+                        },
+                        "lastUsedAt": {
+                          "type": "integer",
+                          "nullable": true,
+                          "description": "Unix milliseconds"
+                        }
+                      }
+                    },
+                    "apiKey": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid key name or key limit reached"
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "403": {
+            "description": "Profile access denied"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "models"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "budgetUsd": {
+                    "type": "number",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 1000000,
+                    "description": "Lifetime USD budget. Null or omitted means unlimited; 0 blocks inference. Editing never resets spending."
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "models": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Currently accessible, callable provider-qualified model IDs. New models are not granted automatically."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": []
+      }
+    },
+    "/api/studio/models/api-keys/{id}": {
+      "patch": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Edit my Model API key name, allowed models and USD budget",
+        "description": "Requires Studio user authentication. Updates only the caller’s key. The secret, token hash and lifetime spending remain unchanged. budgetUsd sets a cumulative USD cap, null removes it and 0 pauses inference. Subsequent model listing and inference requests immediately use the saved model scope. Already-running requests are not cancelled.",
+        "operationId": "modelApiEditKey",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated key metadata without plaintext or hash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "object",
+                      "properties": {
+                        "budgetUsd": {
+                          "type": "number",
+                          "nullable": true,
+                          "minimum": 0,
+                          "maximum": 1000000,
+                          "description": "Lifetime USD budget. Null or omitted means unlimited; 0 blocks inference. Editing never resets spending."
+                        },
+                        "spentUsd": {
+                          "type": "number",
+                          "minimum": 0,
+                          "description": "Settled lifetime USD costs for this key"
+                        },
+                        "unpricedRequests": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Unpriced or pending requests. Limited keys pause when costs remain unresolved after completion or interruption; known in-flight calls can continue."
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "preview": {
+                          "type": "string"
+                        },
+                        "models": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Explicit provider-qualified model IDs allowed by this key"
+                        },
+                        "createdAt": {
+                          "type": "integer",
+                          "description": "Unix milliseconds"
+                        },
+                        "lastUsedAt": {
+                          "type": "integer",
+                          "nullable": true,
+                          "description": "Unix milliseconds"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name or model selection"
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "404": {
+            "description": "No matching key owned by caller"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "models"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "budgetUsd": {
+                    "type": "number",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 1000000,
+                    "description": "Lifetime USD budget. Null or omitted means unlimited; 0 blocks inference. Editing never resets spending."
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "models": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Currently accessible, callable provider-qualified model IDs. New models are not granted automatically."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Revoke my Model API key",
+        "description": "Requires Studio user authentication. Revokes only the caller’s key. Profile selection does not affect key ownership. New requests are rejected; already-running requests are not cancelled.",
+        "operationId": "modelApiRevokeKey",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key revoked"
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "403": {
+            "description": "Profile access denied"
+          },
+          "404": {
+            "description": "No matching key owned by caller"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/models/cloud-link": {
+      "get": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Get my dual-route cloud Model API link",
+        "description": "Requires Studio user authentication and a valid formal cloud connection for this machine/account. Independent of Profile. Returns available:false when cloud access, enabled server feature or relay v3 support is unavailable. The optional cloud feature is disabled by default; Agent run credentials cannot manage links. Addresses are routing IDs; model API keys are still required. Authorized cloud response calls record account/machine/model/token/USD metadata without request or response content. Reset/revoke invalidates both routes.",
+        "operationId": "modelApiCloudLinkGet",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cloud link status and independent limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "urls": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "official": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "cloudflare": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "uploadMaxMegabytes": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "downloadMaxMegabytes": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "uploadMegabytesPerSecond": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "downloadMegabytesPerSecond": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "requestsPerMinute": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "503": {
+            "description": "Cloud relay unavailable"
+          }
+        },
+        "parameters": []
+      },
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Create my dual-route cloud Model API link",
+        "description": "Requires Studio user authentication and a valid formal cloud connection for this machine/account. Independent of Profile. Returns available:false when cloud access, enabled server feature or relay v3 support is unavailable. The optional cloud feature is disabled by default; Agent run credentials cannot manage links. Addresses are routing IDs; model API keys are still required. Authorized cloud response calls record account/machine/model/token/USD metadata without request or response content. Reset/revoke invalidates both routes.",
+        "operationId": "modelApiCloudLinkCreate",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cloud link status and independent limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "urls": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "official": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "cloudflare": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "uploadMaxMegabytes": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "downloadMaxMegabytes": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "uploadMegabytesPerSecond": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "downloadMegabytesPerSecond": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "requestsPerMinute": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "503": {
+            "description": "Cloud relay unavailable"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rotate": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "True replaces both URLs; otherwise creates a link if absent."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": []
+      },
+      "delete": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Revoke my dual-route cloud Model API link",
+        "description": "Requires Studio user authentication and a valid formal cloud connection for this machine/account. Independent of Profile. Returns available:false when cloud access, enabled server feature or relay v3 support is unavailable. The optional cloud feature is disabled by default; Agent run credentials cannot manage links. Addresses are routing IDs; model API keys are still required. Authorized cloud response calls record account/machine/model/token/USD metadata without request or response content. Reset/revoke invalidates both routes.",
+        "operationId": "modelApiCloudLinkRevoke",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cloud link status and independent limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "urls": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "official": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "cloudflare": {
+                          "type": "string",
+                          "format": "uri"
+                        }
+                      }
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "uploadMaxMegabytes": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "downloadMaxMegabytes": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "uploadMegabytesPerSecond": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "downloadMegabytesPerSecond": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "requestsPerMinute": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "503": {
+            "description": "Cloud relay unavailable"
+          }
+        },
+        "parameters": []
+      }
+    },
     "/api/studio/performance/runtime": {
       "get": {
         "tags": [
@@ -18880,6 +19249,1704 @@
           },
           "404": {
             "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/studio/person": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get person",
+        "description": "GET /api/studio/person",
+        "operationId": "snapshot",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Selected owned conversation; omitted returns shared settings with session=null and creates no conversation."
+          }
+        ]
+      }
+    },
+    "/api/studio/person/agent-models": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get agent-models",
+        "description": "GET /api/studio/person/agent-models",
+        "operationId": "executionModelCatalog",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/studio/person/capabilities": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get capabilities",
+        "description": "GET /api/studio/person/capabilities",
+        "operationId": "capabilities",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/studio/person/clear": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Clear Person chat history and tasks",
+        "description": "Clear only the specified owned Person conversation, its tasks, hidden worker conversations, execution records and schedules atomically. Running replies/tasks and pending deliveries return 409; expected_history_revision must match the Person snapshot. Preserves memories, settings, usage ledger and workspace files. Broadcasts cleared conversation state to connected views.",
+        "operationId": "clear",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Person is busy, has pending results, or the history revision changed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "description": "Owning Person conversation ID. Required for new work; continuations preserve the existing task conversation."
+                  },
+                  "expected_history_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "expected_history_revision"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/conversations": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get conversations",
+        "description": "GET /api/studio/person/conversations",
+        "operationId": "conversations",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Search owned Person conversation names and message contents only."
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Create conversations",
+        "description": "Create an account-owned, user-named conversation with a generated session ID and a persisted bot_type (defaults to zhezhe). Duplicate BOT names return HTTP 409 with code PERSON_BOT_NAME_EXISTS; concurrent creates are checked in the insertion transaction. Optional model and reasoning_effort apply only to the new conversation. Omitted, null or blank workspace creates an independent default directory using the Ekko single-chat directory manager. A nonblank workspace must be an existing accessible absolute directory. Its real path is persisted only for this Bot; old bindings and account settings are unchanged. Directory provisioning or access failures return HTTP 409 with code WORKSPACE_UNAVAILABLE. Workspace files survive conversation deletion; running an existing Bot never silently changes or recreates its bound directory. Optional expected_revision is checked before creation. Unknown bot types are rejected. Memory and Agent presets remain shared across the account.",
+        "operationId": "conversationCreate",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "description": "BOT name, unique among this account’s Person conversations after trimming, Unicode NFKC normalization and lowercasing."
+                  },
+                  "bot_type": {
+                    "type": "string",
+                    "default": "zhezhe",
+                    "description": "Registered bot appearance, independent of conversation title and Agent runtime."
+                  },
+                  "model": {
+                    "type": "object",
+                    "required": [
+                      "profile",
+                      "provider",
+                      "model"
+                    ],
+                    "properties": {
+                      "profile": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "reasoning_effort": {
+                    "type": "string"
+                  },
+                  "workspace": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 4000,
+                    "description": "Optional existing absolute directory for this Bot. Omitted, null or blank creates an independent per-session workspace using the Ekko single-chat directory manager. The effective real path is persisted; invalid manual paths and default provisioning failures return WORKSPACE_UNAVAILABLE without creating a Bot. Other Bot bindings and account settings are unchanged."
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Optional current account settings revision; when supplied, stale values return HTTP 409 before creation."
+                  }
+                },
+                "required": [
+                  "title"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/conversations/{id}": {
+      "delete": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Delete :id",
+        "description": "Delete the owned conversation and its task graph after stopping main and worker executions. Cancels schedules and callbacks; waits for native stop acknowledgement. Keeps account memory, settings, workspace files and other conversations. No data migration or task reassignment.",
+        "operationId": "conversationDelete",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expected_history_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "expected_history_revision"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/executions/{id}/events": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get events",
+        "description": "GET /api/studio/person/executions/:id/events",
+        "operationId": "events",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/person/flows/apply": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Create apply",
+        "description": "Create a flow with session_id (creator), title, goal and stages (session_id, goal, return_expectation). Omit group on all stages for serial execution, or set ordered contiguous group numbers from zero on every stage: 0,0,1 runs A and B in parallel then C. Each role appears once per group; the creator may join a first parallel group. The next group receives every previous-group result only after all are saved. No execution preset is required. Stop/resume require flow_id and current expected_revision. Stop cancels all stage turns, deliveries and workers; resume requeues only unfinished branches with a new generation, preserving completed results. Only an assigned live model turn may prepare its branch completion; its stage and generation fence the operation, so peer revision changes do not require retries. The host commits it after saving its final result. Route and creator are immutable.",
+        "operationId": "flowApply",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "create",
+                      "stop",
+                      "resume"
+                    ]
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "flow_id": {
+                    "type": "string"
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "description": "Owning Person conversation ID. Required for new work; continuations preserve the existing task conversation."
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "goal": {
+                    "type": "string",
+                    "maxLength": 8000
+                  },
+                  "stages": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 13,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "session_id",
+                        "goal",
+                        "return_expectation"
+                      ],
+                      "properties": {
+                        "session_id": {
+                          "type": "string",
+                          "description": "Owning Person conversation ID. Required for new work; continuations preserve the existing task conversation."
+                        },
+                        "goal": {
+                          "type": "string",
+                          "maxLength": 8000
+                        },
+                        "return_expectation": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        }
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "action",
+                  "idempotency_key"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/flows/query": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Create query",
+        "description": "List up to 50 owned flows per page, most recently updated first, optionally filtered by involved conversation. Use offset for older flows, or read one flow_id. Includes ordered role stages with group_position, Bot appearance, current-generation delivery state/error, original result references and child tasks with actual execution state and Agent runtime. current_position identifies the current execution group; every role in that group can be active.",
+        "operationId": "flows",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "flow_id": {
+                    "type": "string"
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "description": "Owning Person conversation ID. Required for new work; continuations preserve the existing task conversation."
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/interactions/{id}/answer": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Create answer",
+        "description": "Studio user login required. Account isolation is enforced by the server. Mutations use current revisions; task and schedule operations require an idempotency key. Worker question answers are delivered through their original interactive runtime.",
+        "operationId": "answer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "answer": {
+                    "type": "string",
+                    "maxLength": 4000
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "answer",
+                  "expected_revision"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/memory": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Delete Person memory",
+        "description": "Studio user login required. Permanently delete one account-owned memory card at its current revision. New memories and corrections are made through the Person conversation.",
+        "operationId": "memory",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "forget": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "forget",
+                  "expected_revision"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/models": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get models",
+        "description": "GET /api/studio/person/models",
+        "operationId": "modelCatalog",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/studio/person/schedules/apply": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Create apply",
+        "description": "Studio user login required. Account isolation is enforced by the server. Mutations use current revisions; task and schedule operations require an idempotency key. Worker question answers are delivered through their original interactive runtime. Delete requires schedule_id and current expected_revision. It removes the schedule and occurrence metadata, stops future triggers and preserves tasks, execution history, running work and result delivery. Exact retries with the same idempotency key return the deletion receipt.",
+        "operationId": "schedules",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "assistant",
+                      "worker"
+                    ],
+                    "description": "Required on create. Assistant uses session_id/title/goal and optional workers; worker uses task_id."
+                  },
+                  "session_id": {
+                    "type": "string",
+                    "description": "Owning Person conversation ID. Required for new work; continuations preserve the existing task conversation."
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "goal": {
+                    "type": "string",
+                    "maxLength": 8000
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "create",
+                      "update",
+                      "pause",
+                      "resume",
+                      "cancel",
+                      "delete"
+                    ]
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "task_id": {
+                    "type": "string"
+                  },
+                  "schedule_id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "once",
+                      "cron"
+                    ]
+                  },
+                  "expression": {
+                    "type": "string",
+                    "description": "ISO date with offset or five-field cron"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "misfire": {
+                    "type": "string",
+                    "enum": [
+                      "skip",
+                      "run_latest"
+                    ]
+                  }
+                },
+                "required": [
+                  "action",
+                  "idempotency_key"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/settings": {
+      "put": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Update settings",
+        "description": "Studio user login required. Account isolation is enforced by the server. Mutations use current revisions; task and schedule operations require an idempotency key. Worker question answers are delivered through their original interactive runtime.",
+        "operationId": "settings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "description": "Owned Person conversation ID. Required for model, reasoning_effort or use_global_default changes; these settings are stored only for this session."
+                  },
+                  "workspace": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "description": "Shared absolute working directory for all Person background tasks; empty restores the account private workspace. Requires all tasks and deliveries to be idle. Existing tasks use it on their next execution."
+                  },
+                  "agents": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "description": "Account-shared execution presets; required only for background tasks. Direct chat and dialogue stages need no worker preset.",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "name",
+                        "description",
+                        "selection"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "selection": {
+                          "type": "object",
+                          "required": [
+                            "runtime",
+                            "mode",
+                            "profile",
+                            "model"
+                          ],
+                          "properties": {
+                            "runtime": {
+                              "type": "string"
+                            },
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "scoped",
+                                "global"
+                              ]
+                            },
+                            "profile": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "type": "string"
+                            },
+                            "model": {
+                              "type": "string"
+                            },
+                            "reasoningEffort": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "use_global_default": {
+                    "type": "boolean"
+                  },
+                  "model": {
+                    "type": "object",
+                    "properties": {
+                      "profile": {
+                        "type": "string"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "profile",
+                      "provider",
+                      "model"
+                    ]
+                  },
+                  "reasoning_effort": {
+                    "type": "string",
+                    "enum": [
+                      "",
+                      "none",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "maxSteps": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 30
+                  },
+                  "compressionThreshold": {
+                    "type": "number",
+                    "nullable": true,
+                    "minimum": 0.05,
+                    "maximum": 0.95,
+                    "description": "Fraction of the current interaction model context window that triggers compression; null inherits the global threshold. Model capacity is resolved automatically."
+                  },
+                  "maxConcurrentTasks": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12,
+                    "default": 6,
+                    "description": "Account-shared concurrency across all Person BOTs; additional tasks queue."
+                  },
+                  "taskTimeoutMinutes": {
+                    "type": "integer",
+                    "default": 60,
+                    "oneOf": [
+                      {
+                        "type": "integer",
+                        "enum": [
+                          -1
+                        ]
+                      },
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 35791
+                      }
+                    ],
+                    "description": "Account-shared wall-clock limit in minutes for each subsequent Person background task run. Defaults to 60 for existing and new accounts; -1 disables the wall-clock timer. Current runs retain their starting limit."
+                  }
+                },
+                "required": [
+                  "expected_revision"
+                ],
+                "allOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "not": {
+                          "required": [
+                            "model"
+                          ]
+                        }
+                      },
+                      {
+                        "required": [
+                          "session_id"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "not": {
+                          "required": [
+                            "reasoning_effort"
+                          ]
+                        }
+                      },
+                      {
+                        "required": [
+                          "session_id"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "not": {
+                          "required": [
+                            "use_global_default"
+                          ]
+                        }
+                      },
+                      {
+                        "required": [
+                          "session_id"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/tasks/apply": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Create apply",
+        "description": "Studio user login required. Account isolation is enforced by the server. Mutations use current revisions; task and schedule operations require an idempotency key. Worker question answers are delivered through their original interactive runtime. Optional acceptance is off by default. Configure on create/adopt or configure_acceptance before the first execution. Development finishes while the goal stays open. Newly configured acceptance uses host-owned automatic progression: the host dispatches a linked acceptance task, continues the original developer after a recorded product failure, and reuses the SAME acceptance task and Agent with a fresh execution for re-verification. Existing Bot-driven cycles retain explicit verify and continue: verify uses task_id, expected_revision and idempotency_key. Invalid review evidence can be corrected in the decision or rechecked through the existing acceptance task without rerunning development. Attempt and total-time budgets survive repair rounds. The host blocks unaccepted goal completion in SQLite. Existing legacy executions retain their old receipts. Direct stages, assistant schedules and legacy next_steps do not support direct acceptance. During a Bot acceptance cycle, development follow-up queuing and queue insertion are rejected explicitly. Due worker occurrences treat unsettled acceptance as busy and use the existing skip policy. Verification tasks cannot be independently scheduled or reconfigured. Independent Agents receive readable requirement/checklist briefs and return ordinary written reports without a fixed format. A successful verification execution enters awaiting_review, keeping both goals open. Bot reads the report and records its evidence-backed per-criterion decision with action=record_acceptance on the development task, task_id, expected_revision, expected_execution_id, verification_execution_id, report and idempotency_key. The host checks current identities, deadline and actual evidence before allowing completion. Missing evidence can be corrected in the decision arguments or rechecked using verify; newly configured acceptance automatically dispatches verification, continues the same developer for recorded product defects and re-verifies the repaired result using the same linked task. Missing Bot decisions are retried at most three decision turns per verification attempt, then blocked; overall round and deadline budgets are preserved. Environment blockers, stop and interruption do not retry development. Persisted earlier cycles retain their prior callback contract. Runtime success and report keywords never complete acceptance. reviewer_session_id binds an explicitly named reviewing Bot, independently of verifier_agent_id. Its decision is returned durably to the original developer Bot without a duplicate role flow. Every decision check reconciles issues: unresolved in-scope issues normalize passed into failed and trigger repair; non-blocking labels do not waive defects. Resolved/out_of_scope requires a reason. Versioned decision receipts preserve historical validated results and fence stale return callbacks.",
+        "operationId": "taskApply",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "description": "Owning Person conversation ID. Required for new work; continuations preserve the existing task conversation."
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "create",
+                      "adopt",
+                      "update",
+                      "start",
+                      "stop",
+                      "close",
+                      "reopen",
+                      "configure_acceptance",
+                      "verify",
+                      "record_acceptance"
+                    ]
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "task_id": {
+                    "type": "string"
+                  },
+                  "execution_id": {
+                    "type": "string",
+                    "description": "Required with task_id and expected_revision for stop; query the current execution first. Stops only this occurrence, keeping the goal and future schedules."
+                  },
+                  "schedule_id": {
+                    "type": "string"
+                  },
+                  "agent_id": {
+                    "type": "string",
+                    "description": "Configured execution agent ID; omitted selects the sole saved preset. At least one preset is required."
+                  },
+                  "title": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "goal": {
+                    "type": "string",
+                    "maxLength": 8000
+                  },
+                  "start": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "acceptance": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "enabled"
+                    ],
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "criteria": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 20,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        }
+                      },
+                      "verifier_agent_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "reviewer_session_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100,
+                        "description": "Optional named reviewing Bot conversation. Its linked review task and decision callback belong to this Bot; decisions return to the original developer Bot for repair/reporting. Worker preset identity does not replace Bot identity."
+                      },
+                      "max_attempts": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "default": 3
+                      },
+                      "timeout_minutes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 120,
+                        "default": 30
+                      }
+                    }
+                  },
+                  "verification_execution_id": {
+                    "type": "string",
+                    "description": "record_acceptance: exact current finished verification execution."
+                  },
+                  "report": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "verdict",
+                      "summary",
+                      "checks"
+                    ],
+                    "description": "Bot decision tool arguments after reading an ordinary verifier report; never a required Agent response format.",
+                    "properties": {
+                      "verdict": {
+                        "type": "string",
+                        "enum": [
+                          "passed",
+                          "failed",
+                          "blocked"
+                        ]
+                      },
+                      "summary": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000
+                      },
+                      "checks": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 20,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "criterion_id",
+                            "status",
+                            "findings",
+                            "evidence",
+                            "issues"
+                          ],
+                          "properties": {
+                            "criterion_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "passed",
+                                "failed",
+                                "blocked"
+                              ]
+                            },
+                            "findings": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4000
+                            },
+                            "evidence": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "path",
+                                  "description"
+                                ],
+                                "properties": {
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4000
+                                  },
+                                  "description": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2000
+                                  }
+                                }
+                              }
+                            },
+                            "issues": {
+                              "type": "array",
+                              "maxItems": 20,
+                              "description": "Explicit product issue reconciliation. Unresolved in-scope defects require repair even when non-blocking. Resolved/out_of_scope needs a concrete reason.",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "description",
+                                  "disposition",
+                                  "reason"
+                                ],
+                                "properties": {
+                                  "description": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2000
+                                  },
+                                  "disposition": {
+                                    "type": "string",
+                                    "enum": [
+                                      "repair",
+                                      "resolved",
+                                      "out_of_scope"
+                                    ]
+                                  },
+                                  "reason": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2000
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "action",
+                  "idempotency_key"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/tasks/query": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Create query",
+        "description": "Studio user login required. Account isolation is enforced by the server. Mutations use current revisions; task and schedule operations require an idempotency key. Worker question answers are delivered through their original interactive runtime.",
+        "operationId": "tasks",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "description": "Owning Person conversation ID. Required for new work; continuations preserve the existing task conversation."
+                  },
+                  "search": {
+                    "type": "string"
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "",
+                      "open",
+                      "completed",
+                      "closed"
+                    ]
+                  },
+                  "order": {
+                    "type": "string",
+                    "enum": [
+                      "newest",
+                      "oldest"
+                    ]
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/tasks/{id}/chat": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get chat",
+        "description": "Open the selected account-owned execution conversation. Each fresh task start and scheduled occurrence has an independent session. Returns recent conversation entries, task and session metadata for standard socket resume. Corrections reuse the original conversation, preserving its messages and native session identity. It stays excluded from ordinary session lists. Read-only history is permitted to its owner; direct run, abort and other session mutations remain forbidden. Enabled tasks also return acceptance with immutable snapshot, state/reason/deadline and ordered attempts containing actual verifier session/run IDs, ordinary report text, Bot decision/actor receipt, errors and host-computed evidence path/size/SHA-256. Statuses include pending, developing, awaiting_dispatch, verification_pending, awaiting_review, repair_required, passed, failed, blocked and interrupted. No independent verification is claimed when the native run identity or evidence is missing.",
+        "operationId": "taskChat",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Select an owned execution conversation; omitted selects the current execution. Returns null session before the first run."
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Send a natural-language task follow-up",
+        "description": "The server compares this user input with the saved goal and conversation. Compatible additions queue normally; a replacement instruction updates the goal and title, invalidates obsolete pending work/results, and waits for confirmed termination before continuing. No intent/mode parameter is needed. Rejected or unclear classification never silently starts replacement work; retry with the same idempotency key. Observed revision and execution checks remain authoritative. Corrections stop the current execution, then send the latest complete requirements in the SAME task conversation after native termination. Earlier execution links retain historical receipts in this same conversation; fresh task controls target the current execution. A separate obsolete conversation remains readable but cannot receive new work. An explicit stop-only instruction uses the existing stop operation without creating a replacement.",
+        "operationId": "taskContinue",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "execution_id": {
+                    "type": "string",
+                    "description": "Execution whose conversation receives this follow-up; defaults to current."
+                  },
+                  "expected_execution_id": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Current task execution ID for concurrency checks."
+                  },
+                  "input": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "text"
+                          ],
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "text"
+                              ]
+                            },
+                            "text": {
+                              "type": "string",
+                              "maxLength": 32000
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "type",
+                            "name",
+                            "path"
+                          ],
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "file",
+                                "image"
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": "string"
+                            },
+                            "media_type": {
+                              "type": "string"
+                            },
+                            "context": {
+                              "type": "string"
+                            },
+                            "video_frame": {
+                              "type": "boolean"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "input",
+                  "expected_revision",
+                  "idempotency_key"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/tasks/{id}/executions": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get executions",
+        "description": "GET /api/studio/person/tasks/:id/executions",
+        "operationId": "executions",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/person/tasks/{id}/queue/insert": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Prioritize a queued task message and interrupt the current turn",
+        "description": "Account-owned task operation. Preserves other queued inputs. Returns the durable insertion phase; accepted does not mean the next turn has started. The native runtime must acknowledge interruption before the task scheduler starts the selected input.",
+        "operationId": "taskInsert",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Resource access revoked"
+          },
+          "409": {
+            "description": "Stale task, unavailable queue item or unsupported runtime"
+          },
+          "503": {
+            "description": "Runtime temporarily unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "queue_id",
+                  "expected_execution_id",
+                  "expected_revision",
+                  "idempotency_key"
+                ],
+                "properties": {
+                  "queue_id": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Pending execution ID from the task chat snapshot."
+                  },
+                  "expected_execution_id": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/person/tasks/{id}/queue/remove": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Remove one queued task message without stopping the active turn",
+        "description": "Account-owned, revision-checked and idempotent cancellation of one pending or queued input and its result delivery. Preserves the active worker and all other inputs. Rejects an input that has started or is the target of an active queue insertion.",
+        "operationId": "taskRemove",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Resource access revoked"
+          },
+          "409": {
+            "description": "Stale task, started or unavailable queue item, or insertion in progress"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "queue_id",
+                  "expected_execution_id",
+                  "expected_revision",
+                  "idempotency_key"
+                ],
+                "properties": {
+                  "queue_id": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Pending execution ID from the task chat snapshot."
+                  },
+                  "expected_execution_id": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -19526,6 +21593,346 @@
                     "enum": [
                       true
                     ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/session-tasks": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "List conversation tasks across accessible profiles",
+        "description": "Lists persisted single-chat tasks, including archived sessions, with stable pagination. Profile access and pending deletions are applied before counting. Group, workflow and global-agent tasks are excluded. Open tasks precede completed then closed tasks; update time and id determine stable order within each status. Does not invoke a model or modify task status.",
+        "operationId": "listSessionTaskItems",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized task page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "tasks",
+                    "total",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SessionTaskListItem"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filters or pagination."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Profile access denied."
+          }
+        },
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional exact profile filter. Empty selects all accessible, existing profiles; run credentials remain bound to their profile."
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Literal substring in task title, summary or session name, including its first-message fallback."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "completed",
+                "closed"
+              ]
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "newest",
+                "oldest"
+              ],
+              "default": "newest"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/session-tasks/list": {
+      "post": {
+        "tags": [
+          "Chat Run"
+        ],
+        "summary": "Read the active turn session goals",
+        "description": "The current turn context binds the session and profile. Expired contexts, other profiles, group chats, workflows and background/delegated runs are rejected. No per-turn task plan is created or modified. Writes upsert only changed/new goals and preserve omitted goals; revision conflicts require rereading. New completions require completion_evidence. Closed goals remain readable but model writes cannot change them; only a user can reopen them from the task list.",
+        "operationId": "listSessionTasks",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current goal ledger; tasks is empty before the first goal is recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "session_id",
+                    "revision",
+                    "updated_at",
+                    "tasks"
+                  ],
+                  "properties": {
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "updated_at": {
+                      "type": "integer"
+                    },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SessionTask"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input, foreign task id, duplicate goal or missing completion evidence."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The authenticated user cannot access this session profile."
+          },
+          "409": {
+            "description": "Context expired, session scope unavailable, or revision changed; reread before retrying."
+          },
+          "503": {
+            "description": "Chat run service unavailable."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "context_id"
+                ],
+                "properties": {
+                  "context_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/session-tasks/update": {
+      "post": {
+        "tags": [
+          "Chat Run"
+        ],
+        "summary": "Update the active turn session goals",
+        "description": "The current turn context binds the session and profile. Expired contexts, other profiles, group chats, workflows and background/delegated runs are rejected. No per-turn task plan is created or modified. Writes upsert only changed/new goals and preserve omitted goals; revision conflicts require rereading. New completions require completion_evidence. Closed goals remain readable but model writes cannot change them; only a user can reopen them from the task list.",
+        "operationId": "updateSessionTasks",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current goal ledger; tasks is empty before the first goal is recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "session_id",
+                    "revision",
+                    "updated_at",
+                    "tasks"
+                  ],
+                  "properties": {
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "updated_at": {
+                      "type": "integer"
+                    },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SessionTask"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input, foreign task id, duplicate goal or missing completion evidence."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The authenticated user cannot access this session profile."
+          },
+          "409": {
+            "description": "Context expired, session scope unavailable, or revision changed; reread before retrying."
+          },
+          "503": {
+            "description": "Chat run service unavailable."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "context_id",
+                  "revision",
+                  "changes"
+                ],
+                "properties": {
+                  "context_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "changes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 30,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "title",
+                        "summary",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "description": "Concise user outcome; reuse the existing goal for refinements and corrections."
+                        },
+                        "summary": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000,
+                          "description": "One or two short sentences about results and remaining blockers. Keep implementation and test logs in the conversation."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "completed"
+                          ]
+                        },
+                        "completion_evidence": {
+                          "type": "string",
+                          "maxLength": 1000,
+                          "description": "Required for newly completed goals: evidence of verified delivery."
+                        }
+                      }
+                    }
                   }
                 }
               }
@@ -21446,6 +23853,207 @@
           }
         ],
         "x-session-share-permission": "switchWorkspace"
+      }
+    },
+    "/api/studio/sessions/{id}/tasks": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Read durable session goals",
+        "description": "Returns persisted goals for an accessible Studio session. The current conversation agent reviews them at turn start and records only independent deliverables, ongoing follow-up or explicitly requested tracking. Simple questions, one-off lookups and trivial edits without lasting tracking value are skipped; refinements and corrections reuse the same goal. Eligible goals are created before execution; changed results are saved before the final response. Summaries contain one or two short sentences about results and remaining blockers. Goals span turns and are separate from run plans. Reading goals does not require a write or create a per-turn task-plan card.",
+        "operationId": "getSessionTasks",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current goal ledger; tasks is empty before the first goal is recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "session_id",
+                    "revision",
+                    "updated_at",
+                    "tasks"
+                  ],
+                  "properties": {
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "updated_at": {
+                      "type": "integer"
+                    },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SessionTask"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The authenticated user cannot access this session profile."
+          },
+          "404": {
+            "description": "Session not found, or the explicit profile filter does not match."
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional exact session profile filter."
+          }
+        ]
+      }
+    },
+    "/api/studio/sessions/{id}/tasks/{taskId}/status": {
+      "patch": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Manually change a task status",
+        "description": "User action from the task list. Changes one existing task to open, completed or closed, with account/profile access checks. Requires its latest updated_at as expected_updated_at; stale rows return 409. Closed tasks remain readable and only this manual endpoint can reopen them. Manual completion records the user action as evidence and links to the original request. Does not invoke a model or create a run plan. Run credentials cannot use this endpoint.",
+        "operationId": "setSessionTaskStatus",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current goal ledger; tasks is empty before the first goal is recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "session_id",
+                    "revision",
+                    "updated_at",
+                    "tasks"
+                  ],
+                  "properties": {
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "updated_at": {
+                      "type": "integer"
+                    },
+                    "tasks": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SessionTask"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid status or expected_updated_at."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The authenticated user cannot access this session profile."
+          },
+          "404": {
+            "description": "Session not found, or the explicit profile filter does not match."
+          },
+          "409": {
+            "description": "Task changed or session is unavailable. Refresh the task list."
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional exact session profile filter."
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "status",
+                  "expected_updated_at"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "completed",
+                      "closed"
+                    ]
+                  },
+                  "expected_updated_at": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/studio/sessions/{id}/unarchive": {
@@ -23951,7 +26559,7 @@
           "Sessions"
         ],
         "summary": "Get stats",
-        "description": "Aggregates all recorded usage across accessible Profiles by default. Account means the Studio user who owns the session, not a provider account. Account options include newly created sessions before their first usage event. Legacy rows use confirmed Studio ownership; unknown ownership remains unassigned.",
+        "description": "Aggregates one usage origin across accessible Profiles. Defaults to internal (existing sessions, workflows and coding agents). External includes every Model API request, even when Studio calls its own endpoint. The categories can represent the same physical upstream call and must not be summed as a deduplicated total. Account means the session owner for internal usage and the authenticated API caller for external usage; unknown historical ownership remains unassigned.",
         "operationId": "usageStats",
         "security": [
           {
@@ -23963,7 +26571,7 @@
             "description": "Success"
           },
           "400": {
-            "description": "Invalid account ID or timezone"
+            "description": "Invalid origin, account ID or timezone"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -24035,6 +26643,19 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "internal",
+                "external"
+              ],
+              "default": "internal"
             }
           }
         ]
@@ -26926,6 +29547,103 @@
             "description": "Stable JEV error code used for client-side translation; middleware errors may omit it."
           }
         }
+      },
+      "SessionTask": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "summary",
+          "status",
+          "source_message_id",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "completed",
+              "closed"
+            ]
+          },
+          "source_message_id": {
+            "type": "integer"
+          },
+          "evidence_message_id": {
+            "type": "integer",
+            "nullable": true
+          },
+          "completion_evidence": {
+            "type": "string",
+            "description": "Concise verification from the conversation agent, or an explicit manual-completion marker for a user action."
+          },
+          "created_at": {
+            "type": "integer",
+            "description": "Unix time in milliseconds."
+          },
+          "updated_at": {
+            "type": "integer"
+          },
+          "completed_at": {
+            "type": "integer",
+            "nullable": true
+          }
+        }
+      },
+      "SessionTaskListItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SessionTask"
+          },
+          {
+            "type": "object",
+            "required": [
+              "session_id",
+              "session_title",
+              "profile",
+              "source",
+              "agent",
+              "message_id"
+            ],
+            "properties": {
+              "session_id": {
+                "type": "string"
+              },
+              "session_title": {
+                "type": "string",
+                "nullable": true,
+                "description": "Conversation display name, using the same first-user-message fallback as the session list when no title is set."
+              },
+              "profile": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "message_id": {
+                "type": "integer",
+                "nullable": true,
+                "description": "Visible user message beginning the request turn for open tasks or the completion turn for completed tasks. Use with the session/profile to navigate chat."
+              }
+            }
+          }
+        ]
       }
     },
     "responses": {

@@ -10,9 +10,11 @@ export async function getAggregatedUsageStats(profiles: string[], days: number, 
   for (const profile of profiles) {
     const profileSelection = selection.account ? { ...selection, sessionAccounts: getSessionUsageAccounts(profile) } : selection
     const local = getLocalUsageStats(profile, days, profileSelection)
+    ledgers.push(local)
+    // Native Hermes history belongs only to internal usage; never mix it into API usage.
+    if (selection.origin === 'external') continue
     const localSessionIds = getRecordedUsageSessionIds(profile)
     const unpriced = getUnpricedHermesUsageSessions(profile, days, profileSelection)
-    ledgers.push(local)
     try {
       // Each Profile owns a separate history DB; exclusions and bills stay within that Profile.
       const hermes = await getHermesUsageStats(days, undefined, profile, localSessionIds, unpriced.map(row => row.sessionId), profileSelection)
@@ -88,6 +90,7 @@ export async function getAggregatedUsageStats(profiles: string[], days: number, 
   const costCoverage = emptyCostCoverage()
   for (const ledger of ledgers) addCostCoverage(costCoverage, ledger.cost_coverage)
   return {
+    origin: selection.origin || 'internal',
     total_input_tokens: sum('input_tokens'),
     total_output_tokens: sum('output_tokens'),
     total_cache_read_tokens: sum('cache_read_tokens'),

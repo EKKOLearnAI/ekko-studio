@@ -97,6 +97,8 @@ export interface AgentRuntimeRunInput {
   messages: AgentMessageInput[]
   signal?: AbortSignal
   systemPrompt?: string
+  /** Default true. Scoped hosts without execution tools may omit generic shell/code guidance. Does not grant or remove tools. */
+  toolExecutionGuidelinesEnabled?: boolean
   skills?: AgentSkill[]
   maxSteps?: number
   maxModelRetries?: number

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { agentReasoningEffortOptions, agentReasoningEffortValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
 import { isGlobalOnlyCodingAgent } from "@/utils/agent-catalog"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
@@ -14,7 +14,7 @@ import type { WorkflowAgentNodeData, WorkflowAgentNodeEditableData } from './typ
 import type { ChatCodingAgentId, CodingAgentApiMode, CodingAgentId } from '@/api/coding-agents'
 import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
 import { getFileDownloadUrl } from '@/api/studio/files'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 
 import '@vue-flow/node-resizer/dist/style.css'
 
@@ -48,22 +48,31 @@ const selectableModelGroups = computed(() => (
       ))
     : props.data.modelGroups
 ))
+const configuredApiMode = computed(() => configuredProviderApiMode(
+  props.data.modelGroups.find(group => group.provider === props.data.provider), props.data.model,
+))
+watch([configuredApiMode, () => props.data.apiMode], ([mode]) => {
+  if (mode && !props.data.readonly && usesScopedModel.value && props.data.apiMode !== mode) updateField('apiMode', mode)
+}, { immediate: true })
 const apiModeOptions = computed(() => [
   { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
   { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
   { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
-const reasoningEffortOptions = computed(() => [
-  { label: t('chat.reasoningEffort.options.default'), value: 'default' },
+const reasoningEffortOptions = computed(() => agentReasoningEffortOptions([
+  { label: t('chat.reasoningEffort.options.none'), value: 'default' },
   ...modelReasoningEfforts(
     props.data.modelGroups,
     props.data.provider,
     props.data.model,
   ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
-])
+], 'default'))
+const reasoningEffortValue = computed(() => agentReasoningEffortValue(props.data.reasoningEffort, reasoningEffortOptions.value, 'default'))
 watch([reasoningEffortOptions, () => props.data.reasoningEffort], ([options, effort]) => {
-  if (!props.data.readonly && usesScopedModel.value && effort && !options.some(option => option.value === effort)) {
-    updateField('reasoningEffort', 'default')
+  if (props.data.readonly || !usesScopedModel.value || !props.data.model) return
+  const fallback = agentReasoningEffortValue('default', options, 'default')
+  if (((!effort || effort === 'default') && fallback !== 'default') || (effort && effort !== 'default' && !options.some(option => option.value === effort))) {
+    updateField('reasoningEffort', fallback)
   }
 }, { immediate: true })
 const imageAttachments = computed(() => props.data.images.filter(isImagePath))
@@ -217,7 +226,7 @@ async function uploadImages(files: File[]) {
         :model="data.model" :reasoning-effort="data.reasoningEffort === 'default' ? '' : data.reasoningEffort"
         :disabled="data.readonly" @change="selection => data.onUpdate(id, { ...selection, reasoningEffort: selection.reasoningEffort || 'default' })" />
       <NSelect
-        v-if="isCodingAgent && usesScopedModel"
+        v-if="isCodingAgent && usesScopedModel && !configuredApiMode"
         :value="data.apiMode"
         :options="apiModeOptions"
         size="small"
@@ -229,7 +238,7 @@ async function uploadImages(files: File[]) {
         <span class="node-field-label-row">{{ t('chat.reasoningEffort.tooltip') }}</span>
         <NSelect
           v-if="usesScopedModel"
-          :value="data.reasoningEffort"
+          :value="reasoningEffortValue"
           :options="reasoningEffortOptions"
           size="small"
           :disabled="data.readonly"

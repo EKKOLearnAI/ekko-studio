@@ -5,9 +5,9 @@ import { webUiHome } from './paths'
 export const REMOTE_SERVER_URL_ENV = 'EKKO_STUDIO_DESKTOP_SERVER_URL'
 export const REMOTE_SERVER_SETTINGS_NAME = 'desktop-remote-server.json'
 
-const DEFAULT_REMOTE_READY_TIMEOUT_MS = 30_000
+const DEFAULT_REMOTE_READY_TIMEOUT_MS = 300_000
 const REMOTE_READY_POLL_INTERVAL_MS = 500
-const REMOTE_READY_REQUEST_TIMEOUT_MS = 2_000
+const REMOTE_READY_REQUEST_TIMEOUT_MS = 300_000
 
 export function desktopPreloadArguments(kind: 'main' | 'pet' | 'chat', remoteMode: boolean): string[] {
   return [
@@ -62,6 +62,7 @@ export function resolveRemoteServerUrl(
   env: NodeJS.ProcessEnv = process.env,
   home: string = webUiHome(),
 ): string | null {
+  if (env.EKKO_STUDIO_DEVICE_INSTANCE && Object.hasOwn(env, REMOTE_SERVER_URL_ENV)) return remoteServerUrlFromEnv(env)
   return remoteServerUrlFromEnv(env) ?? remoteServerUrlFromSettings(home)
 }
 
@@ -70,19 +71,35 @@ export function remoteReadyTimeoutMs(env: NodeJS.ProcessEnv = process.env): numb
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_REMOTE_READY_TIMEOUT_MS
 }
 
+export function requireRemoteServerRootUrl(serverUrl: string): void {
+  // Client API, Socket.IO and asset URLs are rooted at /. Reject a deployment
+  // prefix instead of silently sending its requests to another root service.
+  if (new URL(serverUrl).pathname !== '/') {
+    throw new Error('REMOTE_DEVICE_UNSUPPORTED_PATH: Use a Studio server at the root of a domain or port (for example https://studio.example.com). Subpath deployments are not supported.')
+  }
+}
+
 export async function waitForRemoteServerReady(serverUrl: string, timeoutMs: number): Promise<void> {
+  requireRemoteServerRootUrl(serverUrl)
   const deadline = Date.now() + timeoutMs
   const healthUrl = `${serverUrl}/health/ready`
   let lastFailure = 'no response'
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(healthUrl, { signal: AbortSignal.timeout(REMOTE_READY_REQUEST_TIMEOUT_MS) })
-      if (res.ok) return
-      lastFailure = `HTTP ${res.status}`
+      const requestTimeout = Math.min(REMOTE_READY_REQUEST_TIMEOUT_MS, Math.max(1, deadline - Date.now()))
+      const res = await fetch(healthUrl, { signal: AbortSignal.timeout(requestTimeout), redirect: 'error', cache: 'no-store' })
+      if (res.ok) {
+        const data = await res.json().catch(() => null) as { status?: unknown } | null
+        if (data?.status === 'ready') return
+        lastFailure = 'Expected a ready Studio server at /health/ready'
+      } else {
+        lastFailure = `HTTP ${res.status}`
+      }
     } catch (err) {
       lastFailure = err instanceof Error ? err.message : String(err)
     }
-    await new Promise(resolveDelay => setTimeout(resolveDelay, REMOTE_READY_POLL_INTERVAL_MS))
+    const remaining = deadline - Date.now()
+    if (remaining > 0) await new Promise(resolveDelay => setTimeout(resolveDelay, Math.min(REMOTE_READY_POLL_INTERVAL_MS, remaining)))
   }
   throw new Error(`Remote server ${serverUrl} did not become ready within ${timeoutMs}ms (${lastFailure})`)
 }

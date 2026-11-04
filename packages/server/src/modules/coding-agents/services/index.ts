@@ -1,3 +1,5 @@
+import { lowestReasoningEffort } from '../../../../../shared/reasoning-effort'
+import { studioModelReasoningEffort } from '../../studio/public/model-reasoning-effort'
 import type { CodingAgentDefinition, CodingAgentConfigFileDefinition } from '../contracts/definition'
 import { TOOL_DEFINITIONS, CONFIG_FILE_DEFINITIONS } from './registry/definitions'
 import { createOpenCodeConfig, mergeOpenCodeSettingsConfig, openCodeSettingsConfig, opencodeMcpServerConfig, openCodeRuntimeEnv, OPENCODE_CONFIG_FILE, OPENCODE_DATABASE_FILE, OPENCODE_API_KEY_ENV, OPENCODE_PROVIDER_ID } from './opencode/config'
@@ -27,7 +29,7 @@ import { getCompatibleCustomProviders } from '../../studio/contracts/provider-co
 import { registerClaudeCodeProxyTarget } from './claude-code/proxy'
 import { registerCodexProxyTarget, restoreCodexProxyTarget } from './codex/proxy'
 import { compactCodexThread } from './codex/compact'
-import { hermesPromptDocument, writeManagedPromptFile } from './prompt-file'
+import { writeManagedPromptFile } from './prompt-file'
 import type { ApiMode, CodingAgentImageInput } from '../protocol/types'
 import { PROVIDER_PRESETS, assertProviderAvailable, isRetiredProvider } from '../../studio/contracts/providers'
 import { getModelContextLength, getModelRuntimeCapabilities } from '../../studio/public/provider-runtime'
@@ -55,7 +57,7 @@ import { updateAgentStatus } from '../../studio/public/agent-status-registry'
 import { logger } from '../../studio/public/logging'
 import { assertScopedCodingAgentProviderAllowed } from '../protocol/provider-policy'
 import type { CodingAgentRuntime } from '../../studio/contracts/agents/runtime'
-import { defaultCodingAgentWorkspace } from '../../studio/public/workspace-manager'
+import { defaultCodingAgentWorkspace, requireExistingWorkspaceDirectory } from '../../studio/public/workspace-manager'
 import { isolateUnhealthyRuntimeMcpServers } from './mcp-runtime-isolation'
 import { getCodingAgentGlobalHome } from '../../studio/public/coding-agent-global-home'
 import { codingAgentContextPolicy, compactionPercent, claudeCompactionPercent, piCompactionSettings, type CodingAgentContextPolicy } from './context-policy'
@@ -86,7 +88,6 @@ const CODEX_VERSION_CACHE_TTL_MS = 5 * 60 * 1000
 const HERMES_MCP_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-api', toolset: 'api' },
   { name: 'ekko-studio-browser', toolset: 'browser' },
-  { name: 'ekko-studio-devices', toolset: 'devices' },
   { name: 'ekko-studio-use', toolset: 'use' },
   { name: 'ekko-studio-interaction', toolset: 'plan' },
 ]
@@ -96,6 +97,7 @@ const LEGACY_HERMES_MCP_SERVER_NAMES = new Set([
   'hermes-studio-api',
   'hermes-studio-browser',
   'hermes-studio-devices',
+  'ekko-studio-devices',
   'hermes-studio-use',
   'hermes-studio', 'hermes-studio-mcp', 'ekko-studio-mcp', 'hermes-web-ui-mcp',
 ])
@@ -1593,12 +1595,18 @@ function piMcpConfig(profile: string, runTokenFile: string | undefined, ...exter
     .map((item) => {
     const server = managedHermesMcpServerConfig('pi', profile, item.name, item.toolset, runTokenFile)
     const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
-    const interaction = item.toolset === 'plan'
+    // plan and use are always-on direct tools. The use toolset collapses all
+    // Studio operations (including session_get / session_messages) into a
+    // single toolset meta-tool, so registering it directly costs one tool, not
+    // dozens. Pi previously demoted `use` to lazy/non-direct, which left
+    // session-readability dependent on the model remembering to lazy-load it -
+    // the source of "can sometimes, sometimes cannot read a session id".
+    const directToolset = item.toolset === 'plan' || item.toolset === 'use'
     return [item.name, {
       ...server,
-      lifecycle: interaction ? 'eager' : 'lazy',
-      directTools: interaction,
-      toolPrefix: interaction ? 'server' : 'none',
+      lifecycle: directToolset ? 'eager' : 'lazy',
+      directTools: directToolset,
+      toolPrefix: directToolset ? 'server' : 'none',
       requestTimeoutMs,
     }]
   }))
@@ -1626,11 +1634,15 @@ export function getCodingAgentManagedMcpServerConfigs(
     const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset, runTokenFile)
     if (id === 'pi') {
       const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
+      // plan and use are always-on direct tools (use collapses all Studio
+      // operations into one toolset meta-tool, so direct registration costs a
+      // single tool). See piMcpConfig for the session-readability rationale.
+      const directToolset = item.toolset === 'plan' || item.toolset === 'use'
       return [item.name, {
         ...server,
-        lifecycle: item.toolset === 'plan' ? 'eager' : 'lazy',
-        directTools: item.toolset === 'plan',
-        toolPrefix: item.toolset === 'plan' ? 'server' : 'none',
+        lifecycle: directToolset ? 'eager' : 'lazy',
+        directTools: directToolset,
+        toolPrefix: directToolset ? 'server' : 'none',
         requestTimeoutMs,
         ...(disabledManaged.has(item.name) ? { enabled: false } : {}),
       }]
@@ -1653,6 +1665,26 @@ export function getCodingAgentManagedMcpServerConfigs(
   }))
 }
 
+function piManagedServerToolset(name: string, server: Record<string, unknown>): string {
+  // Authoritative source is the injected env; fall back to the managed server
+  // name suffix (ekko-studio-use -> use, ekko-studio-interaction -> plan).
+  const env = (server.env && typeof server.env === 'object' ? server.env : {}) as Record<string, unknown>
+  if (typeof env.HERMES_MCP_TOOLSET === 'string' && env.HERMES_MCP_TOOLSET) return env.HERMES_MCP_TOOLSET
+  const bare = String(name).replace(/^mcp__/, '')
+  const suffix = /-(api|browser|devices|use|interaction|plan)$/.exec(bare)?.[1]
+  if (suffix) return suffix === 'interaction' ? 'plan' : suffix
+  return ''
+}
+
+function piManagedServerIsDirectTool(name: string, server: Record<string, unknown>): boolean {
+  // The use and plan toolsets collapse their operations into a single toolset
+  // meta-tool, so they register as direct always-on tools. api/browser/devices
+  // stay lazy to keep the tool surface small. Decided from the toolset, never
+  // from the persisted lifecycle/directTools (those are what we are fixing).
+  const toolset = piManagedServerToolset(name, server)
+  return toolset === 'use' || toolset === 'plan'
+}
+
 function migratePiRuntimeMcpContent(content: string): string | null {
   try {
     const parsed = JSON.parse(content)
@@ -1672,11 +1704,18 @@ function migratePiRuntimeMcpContent(content: string): string | null {
     }
     delete parsed.settings.freezeDirectTools
 
-    for (const [, server] of managedServers) {
+    for (const [name, server] of managedServers) {
       if (!server || typeof server !== 'object' || Array.isArray(server)) continue
       const managedServer = server as Record<string, unknown>
-      managedServer.lifecycle = 'lazy'
-      managedServer.directTools = false
+      if (piManagedServerIsDirectTool(name, managedServer)) {
+        managedServer.lifecycle = 'eager'
+        managedServer.directTools = true
+        managedServer.toolPrefix = 'server'
+      } else {
+        managedServer.lifecycle = 'lazy'
+        managedServer.directTools = false
+        managedServer.toolPrefix = 'none'
+      }
     }
 
     const migrated = `${JSON.stringify(parsed, null, 2)}\n`
@@ -3019,15 +3058,30 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const mcpCapabilities = studioMcpCapabilities(getCodingAgentManagedMcpServerConfigs(tool.id, input.profile || 'default'))
   const mode = resolvedCodingAgentLaunchMode(tool.id, input.mode)
   if (mode === 'global') {
-    const model = String(input.model || '').trim()
-    const reasoningEffort = String(input.reasoningEffort || '').trim()
+    let model = String(input.model || '').trim()
+    let reasoningEffort = String(input.reasoningEffort || '').trim()
     const variant = ['cursor', 'antigravity'].includes(tool.id) ? nativeModelVariant(model) : undefined
     if (variant && reasoningEffort && variant.effort !== reasoningEffort) {
       throw Object.assign(new Error('Native model ID and reasoning effort must select the same variant'), { status: 400 })
     }
+    if (!reasoningEffort && !variant) {
+      const catalog = (await getCodingAgentModels({ agent: tool.id })).agents[0]
+      const selected = catalog?.models.find(entry => !entry.hidden && (model ? entry.id === model : entry.isDefault))
+      // Native CLIs have their own capabilities; never guess unsupported CLI flags.
+      reasoningEffort = lowestReasoningEffort(selected?.reasoningEfforts || []) || ''
+      if (selected?.modelFamily && reasoningEffort) {
+        const target = catalog.models.find(entry => !entry.hidden && entry.provider === selected.provider
+          && entry.modelFamily === selected.modelFamily && entry.reasoningEffort === reasoningEffort)
+        if (target) model = target.id
+        else reasoningEffort = ''
+      }
+    }
+    input = { ...input, model, reasoningEffort }
     const scope = normalizeConfigScope({ profile: input.profile, provider: 'global' })
-    const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
-    await mkdir(workspaceDir, { recursive: true })
+    const workspaceDir = input.sessionId?.startsWith('person-task-')
+      ? requireExistingWorkspaceDirectory(input.workspace || '')
+      : resolveLaunchWorkspaceRoot(scope, input.workspace)
+    if (!input.sessionId?.startsWith('person-task-')) await mkdir(workspaceDir, { recursive: true })
     if (tool.id === 'pi' && input.piOutputMode === 'rpc') {
       const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, input)
       const dynamicPromptPath = join(rootDir, PI_DYNAMIC_PROMPT_FILE)
@@ -3254,7 +3308,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const baseUrl = String(input.baseUrl || '').trim()
   const preset = PROVIDER_PRESETS.find(item => item.value === provider)
   const apiMode = normalizeLaunchApiMode(input.apiMode, preset?.api_mode || 'chat_completions')
-  const reasoningEffort = String(input.reasoningEffort || '').trim()
+  const reasoningEffort = studioModelReasoningEffort({ provider, model, baseUrl, reasoningEffort: input.reasoningEffort }) || ''
   const contextPolicy = await codingAgentContextPolicy({ profile: scope.profile, provider, model })
   const groupSystemPrompt = String(input.groupSystemPrompt || '').trim()
   const scopedSystemPrompt = tool.id === 'pi' && groupSystemPrompt
@@ -3270,9 +3324,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       }
     : input
   const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, isolatedInput)
-  const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
+  const workspaceDir = input.sessionId?.startsWith('person-task-')
+    ? requireExistingWorkspaceDirectory(input.workspace || '')
+    : resolveLaunchWorkspaceRoot(scope, input.workspace)
   await mkdir(rootDir, { recursive: true })
-  await mkdir(workspaceDir, { recursive: true })
+  if (!input.sessionId?.startsWith('person-task-')) await mkdir(workspaceDir, { recursive: true })
 
   const files: Array<{ key: string; path: string; absolutePath: string }> = []
   const writeScopedFile = async (key: string, content: string) => {
@@ -3374,7 +3430,14 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const globalMcpConfig = globalMcpPath ? await safeReadFile(globalMcpPath) : ''
     const existingMcpConfig = existingMcpPath ? await safeReadFile(existingMcpPath) : ''
     await writeScopedFile('mcp', claudeMcpConfigJson(scope.profile, input.studioMcpTokenFile, globalMcpConfig, existingMcpConfig))
-    await writeScopedFile('prompt', hermesPromptDocument(scopedSystemPrompt))
+    // User instructions must stay outside the block replaced before every Claude turn.
+    const claudeInstructions = [
+      (await safeReadFile(getLiveConfigFileDefinition(tool.id, 'memory')?.absolutePath || ''))?.trim() || '',
+      (await safeReadFile(getScopedConfigFileDefinition(tool.id, 'memory', scope)?.absolutePath || ''))?.trim() || '',
+    ].filter((value, index, values) => value && values.indexOf(value) === index)
+    const promptDefinition = getScopedConfigFileDefinition(tool.id, 'prompt', scope, rootDir)!
+    await writeManagedPromptFile(promptDefinition.absolutePath, scopedSystemPrompt, claudeInstructions.join('\n\n'))
+    files.push({ key: 'prompt', path: promptDefinition.path, absolutePath: promptDefinition.absolutePath })
 
     const settingsPath = join(rootDir, 'settings.json')
     const mcpPath = join(rootDir, 'mcp.json')

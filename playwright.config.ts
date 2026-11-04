@@ -1,5 +1,16 @@
 /// <reference types="node" />
 import { defineConfig, devices } from '@playwright/test'
+import { taskArtifactPath, assertExternalArtifactPath } from './scripts/task-artifacts.mjs'
+
+// Reporter environment variables also cover CLI --reporter=list,html/blob,
+// which replaces the reporter options in this configuration.
+for (const [variable, category] of [
+  ['PLAYWRIGHT_HTML_OUTPUT_DIR', 'playwright-html'],
+  ['PLAYWRIGHT_BLOB_OUTPUT_DIR', 'playwright-blob'],
+]) {
+  process.env[variable] = assertExternalArtifactPath(__dirname,
+    process.env[variable] || taskArtifactPath(__dirname, category))
+}
 
 const PORT = Number(process.env.PLAYWRIGHT_PORT || 4173)
 const BASE_URL = `http://127.0.0.1:${PORT}`
@@ -9,11 +20,12 @@ const BROWSER_CHANNEL = process.env.PLAYWRIGHT_CHANNEL as 'chrome' | 'msedge' | 
 
 export default defineConfig({
   testDir: './tests/e2e',
+  outputDir: taskArtifactPath(__dirname, 'playwright-results'),
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['dot'], ['blob']] : [['list']],
+  reporter: [['list']],
   use: {
     baseURL: BASE_URL,
     locale: 'en-US',

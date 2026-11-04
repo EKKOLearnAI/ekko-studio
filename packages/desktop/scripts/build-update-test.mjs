@@ -10,13 +10,14 @@ import { fileURLToPath } from 'node:url'
 import { inflateRawSync } from 'node:zlib'
 
 const require = createRequire(import.meta.url)
-const { validateTestUpdateUrl, resolveDesktopUpdateSource } = require('../dist/main/updater-source.js')
+const { validateTestUpdateUrl, resolveDesktopUpdateSource, desktopUpdateChannel } = require('../dist/main/updater-source.js')
 const { load: loadYaml } = require('js-yaml')
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const targets = {
   'darwin-arm64': { platform: 'darwin', args: ['--mac', 'dmg', 'zip', '--arm64'], resources: 'mac-arm64/Ekko Studio.app/Contents/Resources', manifest: 'latest-mac.yml' },
   'darwin-x64': { platform: 'darwin', args: ['--mac', 'dmg', 'zip', '--x64'], resources: 'mac/Ekko Studio.app/Contents/Resources', manifest: 'latest-mac.yml' },
   'win32-x64': { platform: 'win32', args: ['--win', 'nsis', '--x64'], resources: 'win-unpacked/resources', manifest: 'latest.yml' },
+  'win32-arm64': { platform: 'win32', args: ['--win', 'nsis', '--arm64'], resources: 'win-arm64-unpacked/resources', manifest: 'latest-arm64.yml' },
   'linux-x64': { platform: 'linux', args: ['--linux', 'AppImage', '--x64'], resources: 'linux-unpacked/resources', manifest: 'latest-linux.yml' },
   'linux-arm64': { platform: 'linux', args: ['--linux', 'AppImage', '--arm64'], resources: 'linux-arm64-unpacked/resources', manifest: 'latest-linux-arm64.yml' },
 }
@@ -37,7 +38,7 @@ export function createTestBuildConfig(env) {
     config: {
       extends: join(desktopRoot, 'electron-builder.yml'),
       extraMetadata: { version, desktopUpdate: { channel: 'test', url } },
-      publish: [{ provider: 'generic', url, channel: 'latest' }],
+      publish: [{ provider: 'generic', url, channel: desktopUpdateChannel(targets[target].platform, target.split('-')[1]) }],
       detectUpdateChannel: false,
       generateUpdatesFilesForAllChannels: false,
       directories: { output: join(desktopRoot, 'release-update-test', target, version) },
@@ -96,7 +97,8 @@ export async function verifyTestArtifacts(output, target, metadata) {
     throw new Error('Packaged version or update source differs from the requested test build')
   }
   const nativeFeed = loadYaml(await readFile(join(resources, 'app-update.yml'), 'utf8'))
-  if (nativeFeed?.provider !== 'generic' || nativeFeed.url !== expectedSource.url || nativeFeed.channel !== 'latest') {
+  if (nativeFeed?.provider !== 'generic' || nativeFeed.url !== expectedSource.url
+    || nativeFeed.channel !== desktopUpdateChannel(info.platform, target.split('-')[1])) {
     throw new Error('Packaged app-update.yml must also point exclusively at the test feed')
   }
   return verifyTestFeed(output, target, metadata)

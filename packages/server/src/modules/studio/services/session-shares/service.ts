@@ -1,3 +1,4 @@
+import { isPrivatePersonSession } from '../../contracts/person-session'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { realpathSync, statSync } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
@@ -49,7 +50,7 @@ export class SessionShareService {
   private assertOwnerSession(ownerId: number, sessionId: string) {
     const session = this.deps.session(sessionId)
     const owner = this.deps.owner(ownerId)
-    if (!session || ['workflow', 'group_chat'].includes(session.source || '') || !owner || owner.status !== 'active'
+    if (!session || isPrivatePersonSession(session.id) || ['workflow', 'group_chat'].includes(session.source || '') || !owner || owner.status !== 'active'
       || (owner.role !== 'super_admin' && !this.deps.canAccessProfile(ownerId, session.profile || 'default'))) {
       throw new SessionShareError('share_session_unavailable', 403)
     }

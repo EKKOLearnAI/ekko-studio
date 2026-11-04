@@ -11,6 +11,9 @@ account ID, last viewer or phone that submitted a run.
   additionally require permission to handle that request.
 - Workflow: persisted `workflow_runs.user_id` (including the schedule owner),
   with current Profile access.
+- Personal assistant: the account owning the exact `person-main-<user-id>`
+  session, independent of the Profile currently being viewed. Worker sessions
+  never notify directly.
 
 Missing owners/subjects and disabled users receive nothing. Sharing a Profile,
 being a group member or being a super-admin does not make someone the recipient.
@@ -52,6 +55,22 @@ logout alone cannot revoke remote state until a server learns of it. APNs
 failed registration; a late response cannot delete a newer registration.
 
 ## Events and routing
+
+Personal assistant main-window events use the existing notification bus with
+`source: 'person'`: `person.run.completed`, `person.run.failed`,
+`person.approval.requested/resolved`, and
+`person.clarification.requested/resolved`. Background and scheduled worker results
+notify when the assistant reports them in the main conversation. Private worker,
+tool, history and plan events are excluded, and Person events are not exported to
+HTTP webhooks.
+
+Studio routes these events to the owning account on its existing chat transports
+and reuses the existing completion and pending-action notifications. Notification
+clicks open `/person`. App event subscriptions can explicitly request the same
+`person.*` event types. The APNs consumer maps them to the existing four trigger
+types and retains the compatible `run_kind: 'chat'` / main `session_id` click route.
+App client event handling is deferred; this change does not modify the App,
+the gateway protocol, or enable Person Live Activities.
 
 Each App connection in Device Connections has a **Push notifications** switch,
 enabled by default for new and existing devices. The connection owner and

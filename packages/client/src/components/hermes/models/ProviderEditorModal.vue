@@ -36,7 +36,7 @@ const testing = ref(false)
 const clearingCredential = ref(false)
 const label = ref('')
 const baseUrl = ref('')
-const apiMode = ref<ProviderApiMode>('chat_completions')
+const apiMode = ref<ProviderApiMode | 'auto'>('auto')
 const preferredModel = ref('')
 const newApiKey = ref('')
 const contextDraft = ref<Record<string, number | null>>({})
@@ -74,13 +74,14 @@ const providerCredentialInputProps = {
   'data-lpignore': 'true',
 }
 
-const API_MODE_OPTIONS = [
+const API_MODE_OPTIONS = computed(() => [
   { label: 'Chat Completions', value: 'chat_completions' },
   { label: 'Codex Responses', value: 'codex_responses' },
   { label: 'Anthropic Messages', value: 'anthropic_messages' },
   { label: 'Bedrock Converse', value: 'bedrock_converse' },
   { label: 'Codex App Server', value: 'codex_app_server' },
-]
+  { label: t('models.apiModeAuto'), value: 'auto' },
+])
 
 const knownModelIds = computed(() => new Set(
   catalogModels.value,
@@ -101,7 +102,7 @@ function resetDraft(next: ProviderEditorDetail) {
   detail.value = next
   label.value = next.label
   baseUrl.value = next.base_url
-  apiMode.value = next.api_mode || 'chat_completions'
+  apiMode.value = next.api_mode || 'auto'
   preferredModel.value = next.preferred_model || props.provider.models[0] || ''
   newApiKey.value = ''
   discoverModels.value = next.discover_models ?? false
@@ -154,7 +155,7 @@ function buildPatch(): ProviderEditorPatch {
   const patch: ProviderEditorPatch = {}
   if (can('label')) patch.label = label.value.trim()
   if (can('base_url')) patch.base_url = baseUrl.value.trim()
-  if (can('api_mode')) patch.api_mode = apiMode.value
+  if (can('api_mode')) patch.api_mode = apiMode.value === 'auto' ? null : apiMode.value
   if (can('preferred_model')) patch.preferred_model = preferredModel.value.trim()
   if (can('api_key')) {
     patch.credential_action = newApiKey.value.trim() ? 'replace' : 'keep'

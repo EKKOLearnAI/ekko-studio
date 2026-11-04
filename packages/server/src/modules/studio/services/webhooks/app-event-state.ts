@@ -20,6 +20,7 @@ export function stateEvent(type: string, profile: string, subject: BusinessEvent
 /** State updates share the notification event stream, without completion alerts. */
 export function publishAppState(event: BusinessEvent): void {
   ensureBusinessConsumers()
+  if (event.source === 'person') { businessEvents.publish(event); return }
   businessEvents.publish({ ...event, chat: {
     id: event.id, type: event.type as 'chat.run.updated' | 'group.run.updated' | 'workflow.run.updated',
     occurred_at: event.occurred_at, profile: event.profile, source: event.source as 'chat' | 'group_chat' | 'workflow',

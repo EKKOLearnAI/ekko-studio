@@ -69,6 +69,9 @@ card appearance changes do not change the alignment of nested tool messages.
   translucent selection tint instead of an opaque nested button.
 - `styles/_theme-surfaces.scss` maps region properties to native and teleported
   surfaces. Property classes exist only while the corresponding override is set.
+  Drawers use the page surface color by default and keep square outer corners.
+  Overlay background, opacity and blur apply to the drawer itself, leaving its
+  content transparent so the configured surface is painted once.
   Wallpaper defaults cover the same overlay list, including the account popover,
   Profile dialog and select menus. Select labels/tags stay transparent over their
   themed wrapper so they cannot hide or double the configured background alpha.

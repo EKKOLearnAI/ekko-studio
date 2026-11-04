@@ -27,7 +27,9 @@ export async function leaseEkkoMcpServers(servers: Record<string, unknown> | und
     const configured = { ...servers }
     for (const [name, value] of managed) {
       const server = value as { env: Record<string, string> }
-      configured[name] = { ...server, env: { ...server.env, HERMES_WEB_UI_PROFILE: run.profile,
+      configured[name] = { ...server,
+        ...(name === 'ekko-studio-browser' ? { requestTimeoutMs: 300_000 } : {}),
+        env: { ...server.env, HERMES_WEB_UI_PROFILE: run.profile,
         HERMES_WEB_UI_RUN_TOKEN_FILE: tokenFile, HERMES_WEB_UI_TOKEN: '', AUTH_TOKEN: '' } }
     }
     return { servers: configured, signal: lifecycle.signal, dispose }

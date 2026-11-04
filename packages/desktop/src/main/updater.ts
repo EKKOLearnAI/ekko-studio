@@ -8,8 +8,9 @@ import { t } from './desktop-i18n'
 import { isWindowsUpdaterLockError, pendingUpdateDirectories } from './updater-helpers'
 import type { DesktopUpdateState } from './updater-types'
 import { bindUpdateRequestCancellation } from './updater-cancellation'
-import { readDesktopUpdateSource } from './updater-source'
+import { desktopUpdateChannel, readDesktopUpdateSource } from './updater-source'
 
+let cancelInstallGate: (() => void) | undefined
 let initialized = false
 let checking = false
 let downloadedUpdate: UpdateDownloadedEvent | null = null
@@ -35,6 +36,7 @@ let updateState: DesktopUpdateState = {
 const execFileAsync = promisify(execFile)
 
 interface AutoUpdaterOptions {
+  acquireInstall?: (targetVersion: string) => (() => void) | Promise<() => void>
   beforeQuitAndInstall?: () => void | Promise<void>
   onInstallFailure?: () => void | Promise<void>
   onStateChange?: (state: DesktopUpdateState) => void
@@ -61,6 +63,7 @@ function reportDownloadFailure(err: unknown): void {
   console.error('[updater] update download failed:', err)
   const wasInstalling = updateState.status === 'installing'
   autoUpdater.autoInstallOnAppQuit = false
+  cancelInstallGate?.(); cancelInstallGate = undefined
   downloadedUpdate = null
   publishUpdateState({ status: 'error', bytesPerSecond: 0 })
   const notice = dialog.showMessageBox({
@@ -109,7 +112,14 @@ export function downloadDesktopUpdate(): DesktopUpdateState {
       // On macOS, electron-updater's event only means the ZIP is ready for
       // Squirrel. Wait for Electron's native event (including signature checks)
       // before offering a restart or shutting down Studio's local services.
-      if (process.platform === 'darwin') await task.nativeReady
+      if (process.platform === 'darwin') {
+        // autoInstallOnAppQuit remains false. Explicitly stage/verify with
+        // Squirrel without enabling any implicit quit-time installation.
+        const nativeError = (error: Error) => { task.error = error; task.finishNative() }
+        nativeAutoUpdater.once('error', nativeError)
+        try { nativeAutoUpdater.checkForUpdates(); await task.nativeReady }
+        finally { nativeAutoUpdater.removeListener('error', nativeError) }
+      }
       if (task.error) throw task.error
       downloadedUpdate = task.info
     } catch (err) {
@@ -148,6 +158,7 @@ function configureUpdateFeed(url: string): void {
   autoUpdater.setFeedURL({
     provider: 'generic',
     url,
+    channel: desktopUpdateChannel(),
   })
 }
 
@@ -258,19 +269,14 @@ Get-HermesStudioProcess | ForEach-Object {
   }
 }
 
-async function prepareQuitAndInstall(): Promise<void> {
+async function quitAndInstallDownloadedUpdate(release?: () => void): Promise<void> {
+  if (!downloadedUpdate || updateState.status !== 'installing') return
   try {
     await options.beforeQuitAndInstall?.()
-  } catch (err) {
-    console.warn(`[updater] beforeQuitAndInstall hook failed: ${err instanceof Error ? err.message : String(err)}`)
-  }
-  await stopOtherWindowsAppInstances()
-}
-
-async function quitAndInstallDownloadedUpdate(): Promise<void> {
-  await prepareQuitAndInstall()
-  if (!downloadedUpdate || updateState.status !== 'installing') return
-  autoUpdater.quitAndInstall()
+    if (!downloadedUpdate || updateState.status !== 'installing') { release?.(); return }
+    cancelInstallGate = release
+    autoUpdater.quitAndInstall()
+  } catch (error) { cancelInstallGate = undefined; release?.(); throw error }
 }
 
 export async function installDesktopUpdate(): Promise<DesktopUpdateState> {
@@ -300,8 +306,12 @@ async function promptInstallDownloadedUpdate(info: UpdateInfo): Promise<void> {
   })
   // Native preparation can fail while the confirmation dialog is still open.
   if (response === 0 && downloadedUpdate === info && updateState.status === 'downloaded') {
+    // Acquire before changing state or stopping services. A busy installation
+    // leaves the downloaded update and this running window intact.
+    const release = await options.acquireInstall?.(info.version)
+    if (downloadedUpdate !== info || updateState.status !== 'downloaded') { release?.(); return }
     publishUpdateState({ status: 'installing', bytesPerSecond: 0 })
-    await quitAndInstallDownloadedUpdate()
+    await quitAndInstallDownloadedUpdate(release)
   }
 }
 
@@ -332,7 +342,7 @@ export function initAutoUpdater(nextOptions: AutoUpdaterOptions = {}) {
   if (!app.isPackaged) return // dev mode: skip
 
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.autoInstallOnAppQuit = false
 
   if (process.platform === 'darwin') {
     nativeAutoUpdater.on('update-downloaded', () => {
@@ -387,7 +397,7 @@ export function initAutoUpdater(nextOptions: AutoUpdaterOptions = {}) {
   autoUpdater.on('update-downloaded', (info: UpdateDownloadedEvent) => {
     if (!activeDownload || activeDownload.token.cancelled || activeDownload.error || info.version !== activeDownload.version) return
     activeDownload.info = info
-    autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.autoInstallOnAppQuit = false
     publishUpdateState({ status: 'preparing', percent: 100, bytesPerSecond: 0 })
   })
 

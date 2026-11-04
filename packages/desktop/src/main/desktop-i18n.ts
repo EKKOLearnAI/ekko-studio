@@ -11,6 +11,14 @@ type TranslationKey =
   | 'tray.openAtLoginFailedTitle'
   | 'tray.openAtLoginFailedMessage'
   | 'tray.quit'
+  | 'update.interrupted'
+  | 'update.recoverInterrupted'
+  | 'browser.profileOutsideStorage'
+  | 'browser.profileInUse'
+  | 'browser.trashDownloadTitle'
+  | 'browser.trashDownloadMessage'
+  | 'browser.trashDownloadConfirm'
+  | 'update.otherDevicesOpen'
   | 'update.upToDateTitle'
   | 'update.upToDateMessage'
   | 'update.checkingTitle'
@@ -36,6 +44,8 @@ type TranslationKey =
   | 'desktop.startingLocalServices'
   | 'desktop.connectingRemoteServices'
   | 'desktop.failedConnectRemote'
+  | 'desktop.returnLocal'
+  | 'desktop.switchDeviceFailed'
   | 'desktop.selectRuntimeSource'
   | 'desktop.downloadFailed'
   | 'desktop.downloadCloudflareTitle'
@@ -54,6 +64,9 @@ type TranslationKey =
   | 'runtime.ready'
   | 'common.ok'
   | 'common.cancel'
+  | 'browser.remoteControl'
+  | 'browser.remoteControlAllow'
+  | 'browser.remoteControlWarning'
   | 'browser.selectElement'
   | 'browser.selectRegion'
   | 'loginReset.confirmTitle'
@@ -69,6 +82,15 @@ const supportedLocales: DesktopLocale[] = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr'
 
 const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
   en: {
+    'browser.trashDownloadTitle': "Move downloaded file to Trash / Recycle Bin?",
+    'browser.trashDownloadMessage': "Move “{name}” to the Trash / Recycle Bin? This also removes its download record.",
+    'browser.trashDownloadConfirm': "Move to Trash / Recycle Bin",
+
+    "update.interrupted": "A previous Desktop update may still be running. Only recover after confirming no installer is active.",
+    "update.recoverInterrupted": "Recover interrupted update",
+    "browser.profileOutsideStorage": "On macOS, select a browser directory inside this device storage folder: {root}",
+    'browser.profileInUse': "This browser profile is open in another Desktop instance. Close that instance first.",
+    'update.otherDevicesOpen': "Close other device windows before installing the Desktop update.",
     'tray.show': 'Show Ekko Studio',
     'tray.hide': 'Hide Ekko Studio',
     'tray.checkForUpdates': 'Check for Updates',
@@ -102,6 +124,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'desktop.startingLocalServices': 'Starting local services...',
     'desktop.connectingRemoteServices': 'Connecting to the remote server...',
     'desktop.failedConnectRemote': 'Could not connect to the remote server',
+    'desktop.returnLocal': "Switch to this computer (restart)",
+    'desktop.switchDeviceFailed': "Could not switch devices. Please try again.",
     'desktop.selectRuntimeSource': 'Select a runtime download source to start local services.',
     'desktop.downloadFailed': 'Download failed',
     'desktop.downloadCloudflareTitle': 'Download from Cloudflare',
@@ -120,6 +144,9 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'runtime.ready': 'Hermes runtime ready.',
     'common.ok': 'OK',
     'common.cancel': 'Cancel',
+    'browser.remoteControl': 'Allow remote browser control',
+    'browser.remoteControlAllow': 'Allow for this connection',
+    'browser.remoteControlWarning': 'Agents on this remote Studio account and profile can read pages, take screenshots and operate this Desktop browser, including logged-in sites. Disconnect or stop sharing to revoke access.',
     'browser.selectElement': 'Select DOM element',
     'browser.selectRegion': 'Select region',
     'loginReset.confirmTitle': 'Reset login',
@@ -132,6 +159,15 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'loginReset.failedMessage': 'Could not reset the desktop login.',
   },
   zh: {
+    'browser.trashDownloadTitle': "移除下载文件",
+    'browser.trashDownloadMessage': "将“{name}”移到废纸篓 / 回收站？同时移除此下载记录。",
+    'browser.trashDownloadConfirm': "移到废纸篓 / 回收站",
+
+    "update.interrupted": "上次 Desktop 更新可能仍在运行。仅在确认安装程序已结束后恢复。",
+    "update.recoverInterrupted": "恢复中断的更新",
+    "browser.profileOutsideStorage": "macOS 浏览器目录必须位于此设备的数据目录内：{root}",
+    'browser.profileInUse': "此浏览器配置正被其他 Desktop 实例使用，请先退出该实例。",
+    'update.otherDevicesOpen': "请先退出其他设备窗口，再安装 Desktop 更新。",
     'tray.show': '显示 Ekko Studio',
     'tray.hide': '隐藏 Ekko Studio',
     'tray.checkForUpdates': '检查更新',
@@ -165,6 +201,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'desktop.startingLocalServices': '正在启动本地服务...',
     'desktop.connectingRemoteServices': '正在连接远程服务器...',
     'desktop.failedConnectRemote': '无法连接远程服务器',
+    'desktop.returnLocal': "切换回本机（重启）",
+    'desktop.switchDeviceFailed': "切换设备失败，请重试。",
     'desktop.selectRuntimeSource': '请选择运行时下载源以启动本地服务。',
     'desktop.downloadFailed': '下载失败',
     'desktop.downloadCloudflareTitle': '从 Cloudflare 下载',
@@ -183,6 +221,9 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'runtime.ready': 'Hermes 运行时已就绪。',
     'common.ok': '确定',
     'common.cancel': '取消',
+    'browser.remoteControl': 'Allow remote browser control',
+    'browser.remoteControlAllow': 'Allow for this connection',
+    'browser.remoteControlWarning': 'Agents on this remote Studio account and profile can read pages, take screenshots and operate this Desktop browser, including logged-in sites. Disconnect or stop sharing to revoke access.',
     'browser.selectElement': '选择 DOM 元素',
     'browser.selectRegion': '框选区域',
     'loginReset.confirmTitle': '重置登录',
@@ -195,6 +236,15 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'loginReset.failedMessage': '无法重置桌面端登录。',
   },
   'zh-TW': {
+    'browser.trashDownloadTitle': "移除下載檔案",
+    'browser.trashDownloadMessage': "要將「{name}」移至垃圾桶 / 資源回收筒嗎？同時移除此下載記錄。",
+    'browser.trashDownloadConfirm': "移至垃圾桶 / 資源回收筒",
+
+    "update.interrupted": "上次 Desktop 更新可能仍在執行。僅在確認安裝程式已結束後恢復。",
+    "update.recoverInterrupted": "恢復中斷的更新",
+    "browser.profileOutsideStorage": "macOS 瀏覽器目錄必須位於此裝置的資料目錄內：{root}",
+    'browser.profileInUse': "此瀏覽器設定正由其他 Desktop 實例使用，請先結束該實例。",
+    'update.otherDevicesOpen': "請先結束其他裝置視窗，再安裝 Desktop 更新。",
     'tray.show': '顯示 Ekko Studio',
     'tray.hide': '隱藏 Ekko Studio',
     'tray.checkForUpdates': '檢查更新',
@@ -228,6 +278,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'desktop.startingLocalServices': '正在啟動本地服務...',
     'desktop.connectingRemoteServices': '正在連線遠端伺服器...',
     'desktop.failedConnectRemote': '無法連線遠端伺服器',
+    'desktop.returnLocal': "切換回本機（重新啟動）",
+    'desktop.switchDeviceFailed': "切換裝置失敗，請重試。",
     'desktop.selectRuntimeSource': '請選擇運行時下載來源以啟動本地服務。',
     'desktop.downloadFailed': '下載失敗',
     'desktop.downloadCloudflareTitle': '從 Cloudflare 下載',
@@ -246,6 +298,9 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'runtime.ready': 'Hermes 運行時已就緒。',
     'common.ok': '確定',
     'common.cancel': '取消',
+    'browser.remoteControl': 'Allow remote browser control',
+    'browser.remoteControlAllow': 'Allow for this connection',
+    'browser.remoteControlWarning': 'Agents on this remote Studio account and profile can read pages, take screenshots and operate this Desktop browser, including logged-in sites. Disconnect or stop sharing to revoke access.',
     'browser.selectElement': '選擇 DOM 元素',
     'browser.selectRegion': '框選區域',
     'loginReset.confirmTitle': '重置登入',
@@ -258,6 +313,15 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'loginReset.failedMessage': '無法重置桌面端登入。',
   },
   ja: {
+    'browser.trashDownloadTitle': "ダウンロードファイルを削除",
+    'browser.trashDownloadMessage': "「{name}」をゴミ箱へ移動しますか？ダウンロード履歴からも削除されます。",
+    'browser.trashDownloadConfirm': "ゴミ箱へ移動",
+
+    "update.interrupted": "前回の更新が実行中の可能性があります。インストーラーの終了を確認してから復旧してください。",
+    "update.recoverInterrupted": "中断された更新を復旧",
+    "browser.profileOutsideStorage": "macOS のブラウザーディレクトリはこのデバイス保存先内で選択してください: {root}",
+    'browser.profileInUse': "このブラウザープロファイルは別の Desktop インスタンスで使用中です。先に終了してください。",
+    'update.otherDevicesOpen': "Desktop を更新する前に、他のデバイスウィンドウを終了してください。",
     'tray.show': 'Ekko Studio を表示',
     'tray.hide': 'Ekko Studio を隠す',
     'tray.checkForUpdates': 'アップデートを確認',
@@ -291,6 +355,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'desktop.startingLocalServices': 'ローカルサービスを起動しています...',
     'desktop.connectingRemoteServices': 'リモートサーバーに接続しています...',
     'desktop.failedConnectRemote': 'リモートサーバーに接続できません',
+    'desktop.returnLocal': "このコンピューターに切り替え（再起動）",
+    'desktop.switchDeviceFailed': "デバイスを切り替えられませんでした。もう一度お試しください。",
     'desktop.selectRuntimeSource': 'ローカルサービスを開始するためのランタイムダウンロード元を選択してください。',
     'desktop.downloadFailed': 'ダウンロードに失敗しました',
     'desktop.downloadCloudflareTitle': 'Cloudflare からダウンロード',
@@ -309,6 +375,9 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'runtime.ready': 'Hermes ランタイムの準備ができました。',
     'common.ok': 'OK',
     'common.cancel': 'Cancel',
+    'browser.remoteControl': 'Allow remote browser control',
+    'browser.remoteControlAllow': 'Allow for this connection',
+    'browser.remoteControlWarning': 'Agents on this remote Studio account and profile can read pages, take screenshots and operate this Desktop browser, including logged-in sites. Disconnect or stop sharing to revoke access.',
     'browser.selectElement': 'DOM 要素を選択',
     'browser.selectRegion': '領域を選択',
     'loginReset.confirmTitle': 'Reset login',
@@ -321,6 +390,15 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'loginReset.failedMessage': 'Could not reset the desktop login.',
   },
   ko: {
+    'browser.trashDownloadTitle': "다운로드 파일 제거",
+    'browser.trashDownloadMessage': "“{name}”을(를) 휴지통으로 이동할까요? 다운로드 기록도 제거됩니다.",
+    'browser.trashDownloadConfirm': "휴지통으로 이동",
+
+    "update.interrupted": "이전 업데이트가 진행 중일 수 있습니다. 설치 프로그램 종료를 확인한 후 복구하세요.",
+    "update.recoverInterrupted": "중단된 업데이트 복구",
+    "browser.profileOutsideStorage": "macOS 브라우저 디렉터리는 이 기기 저장 폴더 안에 있어야 합니다: {root}",
+    'browser.profileInUse': "다른 Desktop 인스턴스가 이 브라우저 프로필을 사용 중입니다. 먼저 종료하세요.",
+    'update.otherDevicesOpen': "Desktop 업데이트를 설치하기 전에 다른 기기 창을 종료하세요.",
     'tray.show': 'Ekko Studio 표시',
     'tray.hide': 'Ekko Studio 숨기기',
     'tray.checkForUpdates': '업데이트 확인',
@@ -354,6 +432,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'desktop.startingLocalServices': '로컬 서비스를 시작하는 중...',
     'desktop.connectingRemoteServices': '원격 서버에 연결하는 중...',
     'desktop.failedConnectRemote': '원격 서버에 연결할 수 없습니다',
+    'desktop.returnLocal': "이 컴퓨터로 전환 (다시 시작)",
+    'desktop.switchDeviceFailed': "기기를 전환하지 못했습니다. 다시 시도하세요.",
     'desktop.selectRuntimeSource': '로컬 서비스를 시작할 런타임 다운로드 소스를 선택하세요.',
     'desktop.downloadFailed': '다운로드 실패',
     'desktop.downloadCloudflareTitle': 'Cloudflare에서 다운로드',
@@ -372,6 +452,9 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'runtime.ready': 'Hermes 런타임이 준비되었습니다.',
     'common.ok': '확인',
     'common.cancel': 'Cancel',
+    'browser.remoteControl': 'Allow remote browser control',
+    'browser.remoteControlAllow': 'Allow for this connection',
+    'browser.remoteControlWarning': 'Agents on this remote Studio account and profile can read pages, take screenshots and operate this Desktop browser, including logged-in sites. Disconnect or stop sharing to revoke access.',
     'browser.selectElement': 'DOM 요소 선택',
     'browser.selectRegion': '영역 선택',
     'loginReset.confirmTitle': 'Reset login',
@@ -384,6 +467,15 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'loginReset.failedMessage': 'Could not reset the desktop login.',
   },
   fr: {
+    'browser.trashDownloadTitle': "Supprimer le fichier téléchargé",
+    'browser.trashDownloadMessage': "Mettre « {name} » à la corbeille ? Son entrée sera aussi retirée de l’historique.",
+    'browser.trashDownloadConfirm': "Mettre à la corbeille",
+
+    "update.interrupted": "Une mise à jour peut encore être en cours. Vérifiez que l’installateur est arrêté avant de récupérer.",
+    "update.recoverInterrupted": "Récupérer la mise à jour interrompue",
+    "browser.profileOutsideStorage": "Sur macOS, choisissez un dossier de navigateur dans le stockage de cet appareil : {root}",
+    'browser.profileInUse': "Ce profil de navigateur est utilisé par une autre instance Desktop. Fermez-la d’abord.",
+    'update.otherDevicesOpen': "Fermez les autres fenêtres d’appareils avant d’installer la mise à jour Desktop.",
     'tray.show': 'Afficher Ekko Studio',
     'tray.hide': 'Masquer Ekko Studio',
     'tray.checkForUpdates': 'Rechercher les mises a jour',
@@ -417,6 +509,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'desktop.startingLocalServices': 'Demarrage des services locaux...',
     'desktop.connectingRemoteServices': 'Connexion au serveur distant...',
     'desktop.failedConnectRemote': 'Impossible de se connecter au serveur distant',
+    'desktop.returnLocal': "Passer à cet ordinateur (redémarrer)",
+    'desktop.switchDeviceFailed': "Impossible de changer d’appareil. Réessayez.",
     'desktop.selectRuntimeSource': 'Selectionnez une source de telechargement du runtime pour demarrer les services locaux.',
     'desktop.downloadFailed': 'Echec du telechargement',
     'desktop.downloadCloudflareTitle': 'Telecharger depuis Cloudflare',
@@ -435,6 +529,9 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'runtime.ready': 'Runtime Hermes pret.',
     'common.ok': 'OK',
     'common.cancel': 'Cancel',
+    'browser.remoteControl': 'Allow remote browser control',
+    'browser.remoteControlAllow': 'Allow for this connection',
+    'browser.remoteControlWarning': 'Agents on this remote Studio account and profile can read pages, take screenshots and operate this Desktop browser, including logged-in sites. Disconnect or stop sharing to revoke access.',
     'browser.selectElement': 'Sélectionner un élément DOM',
     'browser.selectRegion': 'Sélectionner une zone',
     'loginReset.confirmTitle': 'Reset login',
@@ -447,6 +544,15 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'loginReset.failedMessage': 'Could not reset the desktop login.',
   },
   es: {
+    'browser.trashDownloadTitle': "Eliminar archivo descargado",
+    'browser.trashDownloadMessage': "¿Mover «{name}» a la papelera? También se quitará su registro del historial.",
+    'browser.trashDownloadConfirm': "Mover a la papelera",
+
+    "update.interrupted": "Una actualización puede seguir en curso. Confirme que el instalador terminó antes de recuperarla.",
+    "update.recoverInterrupted": "Recuperar actualización interrumpida",
+    "browser.profileOutsideStorage": "En macOS, el directorio del navegador debe estar dentro del almacenamiento de este dispositivo: {root}",
+    'browser.profileInUse': "Otra instancia de Desktop está usando este perfil del navegador. Ciérrela primero.",
+    'update.otherDevicesOpen': "Cierre las otras ventanas de dispositivos antes de instalar la actualización de Desktop.",
     'tray.show': 'Mostrar Ekko Studio',
     'tray.hide': 'Ocultar Ekko Studio',
     'tray.checkForUpdates': 'Buscar actualizaciones',
@@ -480,6 +586,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'desktop.startingLocalServices': 'Iniciando servicios locales...',
     'desktop.connectingRemoteServices': 'Conectando al servidor remoto...',
     'desktop.failedConnectRemote': 'No se pudo conectar al servidor remoto',
+    'desktop.returnLocal': "Cambiar a este equipo (reiniciar)",
+    'desktop.switchDeviceFailed': "No se pudo cambiar de dispositivo. Inténtalo de nuevo.",
     'desktop.selectRuntimeSource': 'Selecciona una fuente de descarga del runtime para iniciar los servicios locales.',
     'desktop.downloadFailed': 'Error de descarga',
     'desktop.downloadCloudflareTitle': 'Descargar desde Cloudflare',
@@ -498,6 +606,9 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'runtime.ready': 'Runtime de Hermes listo.',
     'common.ok': 'Aceptar',
     'common.cancel': 'Cancel',
+    'browser.remoteControl': 'Allow remote browser control',
+    'browser.remoteControlAllow': 'Allow for this connection',
+    'browser.remoteControlWarning': 'Agents on this remote Studio account and profile can read pages, take screenshots and operate this Desktop browser, including logged-in sites. Disconnect or stop sharing to revoke access.',
     'browser.selectElement': 'Seleccionar elemento DOM',
     'browser.selectRegion': 'Seleccionar región',
     'loginReset.confirmTitle': 'Reset login',
@@ -510,6 +621,15 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'loginReset.failedMessage': 'Could not reset the desktop login.',
   },
   de: {
+    'browser.trashDownloadTitle': "Heruntergeladene Datei entfernen",
+    'browser.trashDownloadMessage': "„{name}“ in den Papierkorb verschieben? Der Verlaufseintrag wird ebenfalls entfernt.",
+    'browser.trashDownloadConfirm': "In den Papierkorb",
+
+    "update.interrupted": "Ein Update läuft möglicherweise noch. Stellen Sie vor der Wiederherstellung sicher, dass der Installer beendet ist.",
+    "update.recoverInterrupted": "Unterbrochenes Update wiederherstellen",
+    "browser.profileOutsideStorage": "Wählen Sie unter macOS ein Browser-Verzeichnis im Speicher dieses Geräts: {root}",
+    'browser.profileInUse': "Dieses Browserprofil wird von einer anderen Desktop-Instanz verwendet. Beenden Sie diese zuerst.",
+    'update.otherDevicesOpen': "Beenden Sie andere Gerätefenster, bevor Sie das Desktop-Update installieren.",
     'tray.show': 'Ekko Studio anzeigen',
     'tray.hide': 'Ekko Studio ausblenden',
     'tray.checkForUpdates': 'Nach Updates suchen',
@@ -543,6 +663,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'desktop.startingLocalServices': 'Lokale Dienste werden gestartet...',
     'desktop.connectingRemoteServices': 'Verbindung zum Remote-Server wird hergestellt...',
     'desktop.failedConnectRemote': 'Verbindung zum Remote-Server fehlgeschlagen',
+    'desktop.returnLocal': "Zu diesem Computer wechseln (Neustart)",
+    'desktop.switchDeviceFailed': "Gerätewechsel fehlgeschlagen. Bitte erneut versuchen.",
     'desktop.selectRuntimeSource': 'Wahlen Sie eine Runtime-Downloadquelle aus, um lokale Dienste zu starten.',
     'desktop.downloadFailed': 'Download fehlgeschlagen',
     'desktop.downloadCloudflareTitle': 'Von Cloudflare herunterladen',
@@ -561,6 +683,9 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'runtime.ready': 'Hermes Runtime ist bereit.',
     'common.ok': 'OK',
     'common.cancel': 'Cancel',
+    'browser.remoteControl': 'Allow remote browser control',
+    'browser.remoteControlAllow': 'Allow for this connection',
+    'browser.remoteControlWarning': 'Agents on this remote Studio account and profile can read pages, take screenshots and operate this Desktop browser, including logged-in sites. Disconnect or stop sharing to revoke access.',
     'browser.selectElement': 'DOM-Element auswählen',
     'browser.selectRegion': 'Bereich auswählen',
     'loginReset.confirmTitle': 'Reset login',
@@ -573,6 +698,15 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'loginReset.failedMessage': 'Could not reset the desktop login.',
   },
   pt: {
+    'browser.trashDownloadTitle': "Remover arquivo baixado",
+    'browser.trashDownloadMessage': "Mover “{name}” para a lixeira? O registro também será removido do histórico.",
+    'browser.trashDownloadConfirm': "Mover para a lixeira",
+
+    "update.interrupted": "Uma atualização pode estar em andamento. Confirme que o instalador terminou antes de recuperar.",
+    "update.recoverInterrupted": "Recuperar atualização interrompida",
+    "browser.profileOutsideStorage": "No macOS, escolha um diretório de navegador no armazenamento deste dispositivo: {root}",
+    'browser.profileInUse': "Este perfil de navegador está em uso por outra instância do Desktop. Encerre-a primeiro.",
+    'update.otherDevicesOpen': "Encerre as outras janelas de dispositivos antes de instalar a atualização do Desktop.",
     'tray.show': 'Mostrar Ekko Studio',
     'tray.hide': 'Ocultar Ekko Studio',
     'tray.checkForUpdates': 'Verificar atualizacoes',
@@ -606,6 +740,8 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'desktop.startingLocalServices': 'Iniciando servicos locais...',
     'desktop.connectingRemoteServices': 'Conectando ao servidor remoto...',
     'desktop.failedConnectRemote': 'Não foi possível conectar ao servidor remoto',
+    'desktop.returnLocal': "Mudar para este computador (reiniciar)",
+    'desktop.switchDeviceFailed': "Não foi possível mudar de dispositivo. Tente novamente.",
     'desktop.selectRuntimeSource': 'Selecione uma fonte de download do runtime para iniciar os servicos locais.',
     'desktop.downloadFailed': 'Falha no download',
     'desktop.downloadCloudflareTitle': 'Baixar pelo Cloudflare',
@@ -624,6 +760,9 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
     'runtime.ready': 'Runtime Hermes pronto.',
     'common.ok': 'OK',
     'common.cancel': 'Cancel',
+    'browser.remoteControl': 'Allow remote browser control',
+    'browser.remoteControlAllow': 'Allow for this connection',
+    'browser.remoteControlWarning': 'Agents on this remote Studio account and profile can read pages, take screenshots and operate this Desktop browser, including logged-in sites. Disconnect or stop sharing to revoke access.',
     'browser.selectElement': 'Selecionar elemento DOM',
     'browser.selectRegion': 'Selecionar região',
     'loginReset.confirmTitle': 'Reset login',
@@ -637,7 +776,7 @@ const translations: Record<DesktopLocale, Record<TranslationKey, string>> = {
   },
 }
 
-function resolveLocale(): DesktopLocale {
+export function desktopLocale(): DesktopLocale {
   const tag = app.getLocale()
   const lower = tag.toLowerCase()
   if (lower.startsWith('zh')) {
@@ -651,7 +790,7 @@ function resolveLocale(): DesktopLocale {
 }
 
 export function t(key: TranslationKey, params: Record<string, string> = {}): string {
-  const message = translations[resolveLocale()][key] || translations.en[key]
+  const message = translations[desktopLocale()][key] || translations.en[key]
   return Object.entries(params).reduce(
     (value, [name, replacement]) => value.replaceAll(`{${name}}`, replacement),
     message,

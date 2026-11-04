@@ -44,7 +44,7 @@ export async function sanitizeAgentToolResult(
       ? undefined
       : await boundToolResultText(error, tempRoot, options.maxTextBytes, options.maxTextArtifactBytes),
     contentParts: result.contentParts?.reduce<AgentToolContentPart[]>((parts, part) => {
-      if (part.type === 'text') parts.push({ type: 'text', text: part.text.slice(0, 100_000) })
+      if (part.type === 'text') parts.push({ type: 'text', text: truncateTextHead(part.text, 100_000) })
       else if (/^image\/(?:png|jpeg|webp|gif)$/i.test(part.mimeType)
         && looksLikeBase64(part.data)
         && Buffer.byteLength(part.data, 'base64') <= (options.maxBytes ?? DEFAULT_MAX_BYTES)) {
@@ -102,7 +102,33 @@ async function boundToolResultText(
     '',
     '',
   ].join('\n')
-  return `${buffer.subarray(0, headBytes).toString('utf8')}${marker}${buffer.subarray(-tailBytes).toString('utf8')}`
+  return `${decodeUtf8Head(buffer, headBytes).toString('utf8')}${marker}${decodeUtf8Tail(buffer, buffer.length - tailBytes).toString('utf8')}`
+}
+
+/**
+ * Cut at `maxCodeUnits` without ending on the high half of a surrogate pair:
+ * slicing inside an emoji leaves an unpaired surrogate that strict JSON parsers
+ * reject, which fails the whole provider request (see #3456).
+ */
+function truncateTextHead(text: string, maxCodeUnits: number): string {
+  if (text.length <= maxCodeUnits) return text
+  const head = text.slice(0, maxCodeUnits)
+  const code = head.charCodeAt(head.length - 1)
+  return code >= 0xd800 && code <= 0xdbff ? head.slice(0, -1) : head
+}
+
+/** Keep bytes up to `end`, backing off to a UTF-8 character boundary. */
+function decodeUtf8Head(buffer: Buffer, end: number): Buffer {
+  let cut = Math.min(end, buffer.length)
+  while (cut > 0 && cut < buffer.length && (buffer[cut] & 0xc0) === 0x80) cut -= 1
+  return buffer.subarray(0, cut)
+}
+
+/** Keep bytes from `start`, skipping the continuation bytes of a split character. */
+function decodeUtf8Tail(buffer: Buffer, start: number): Buffer {
+  let from = Math.max(0, start)
+  while (from < buffer.length && (buffer[from] & 0xc0) === 0x80) from += 1
+  return buffer.subarray(from)
 }
 
 function positiveInteger(value: number | undefined, fallback: number): number {

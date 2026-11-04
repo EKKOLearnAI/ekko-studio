@@ -92,7 +92,6 @@
       "literal-color | .download-trigger > b | background: #ef4444": 1,
       "unowned-background | .download-trigger > b | background: #ef4444": 1,
       "literal-color | .download-trigger > b | color: #fff": 1,
-      "unowned-background | .download-popover > header | background: var(--n-color, var(--bg-card))": 1,
       "literal-color | .agent-banner | background: rgba(59,130,246,.12)": 1,
       "unowned-background | .agent-banner | background: rgba(59,130,246,.12)": 1,
       "literal-color | .agent-banner | color: #3b82f6": 1,
@@ -105,9 +104,6 @@
       "literal-color | .annotation-item | background: rgba(59,130,246,.1)": 1,
       "unowned-background | .annotation-item | background: rgba(59,130,246,.1)": 1,
       "literal-color | .annotation-item > button:hover | background: rgba(59,130,246,.15)": 1,
-      "literal-color | .native-viewport | background: #fff": 1,
-      "unowned-background | .native-viewport | background: #fff": 1,
-      "literal-color | .native-viewport | color: #777": 1,
       "unowned-background | .annotation-editor | background: var(--card-color, #fff)": 1,
       "literal-color | .annotation-preview > img | background: #fff": 1,
       "unowned-background | .annotation-preview > img | background: #fff": 1,
@@ -1111,12 +1107,6 @@
       "literal-color | .agent-logo | background: rgba(255, 255, 255, 0.92)": 1,
       "unowned-background | .agent-logo | background: rgba(255, 255, 255, 0.92)": 1,
       "literal-color | .agent-update-error | color: #c44": 1
-    },
-    "packages/client/src/views/hermes/ApiRelayView.vue": {
-      "unowned-background | .api-relay-features span | background: $bg-secondary": 1
-    },
-    "packages/client/src/views/hermes/DevicesView.vue": {
-      "literal-color | .pairing-code-dialog | box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24)": 1
     },
     "packages/client/src/views/hermes/GroupChatLinkView.vue": {
       "unowned-background | .group-chat-link-view | background: $bg-primary": 1,

@@ -43,6 +43,10 @@ export type AgentToolAuthorizer = (
 ) => Promise<AgentToolAuthorizationDecision>
 
 export interface AgentToolContext {
+  /** Host-bound reader for durable session goals; distinct from this run's updatePlan callback. */
+  listSessionTasks?: () => import('./session-tasks').AgentSessionTasksSnapshot | Promise<import('./session-tasks').AgentSessionTasksSnapshot>
+  /** Host-bound writer for the current session's goals, separate from run execution plans. */
+  updateSessionTasks?: (update: import('./session-tasks').AgentSessionTasksUpdate) => import('./session-tasks').AgentSessionTasksSnapshot | Promise<import('./session-tasks').AgentSessionTasksSnapshot>
   updatePlan?: (update: import('./plan').AgentPlanUpdate) => import('./plan').AgentTaskPlan
   runId?: string
   cwd?: string

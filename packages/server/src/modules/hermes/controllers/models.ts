@@ -31,7 +31,7 @@ const PROVIDER_MODEL_CATALOG = buildProviderModelMap()
 
 type ModelMeta = { preview?: boolean; disabled?: boolean; alias?: string; reasoning?: boolean; reasoning_efforts?: string[] }
 type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
-type AvailableGroup = { provider: string; label: string; base_url: string; models: string[]; api_key: string; api_mode?: ProviderApiMode; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean }
+type AvailableGroup = { provider: string; label: string; base_url: string; models: string[]; api_key: string; api_mode?: ProviderApiMode; api_mode_by_model?: Record<string, ProviderApiMode | null>; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean }
 type ModelVisibility = Record<string, ModelVisibilityRule>
 type CustomModels = Record<string, string[]>
 
@@ -242,10 +242,10 @@ function normalizeProviderApiMode(mode: unknown): AvailableGroup['api_mode'] {
 
 function providerApiMode(providerKey: string, configuredMode?: unknown): AvailableGroup['api_mode'] {
   const explicitMode = normalizeProviderApiMode(configuredMode)
-  if (explicitMode) return explicitMode
+  if (explicitMode || providerKey.startsWith('custom:')) return explicitMode
   const normalized = providerKeyWithoutCustomPrefix(providerKey)
   const preset = PROVIDER_PRESETS.find((item: any) => item.value === normalized)
-  return normalizeProviderApiMode(preset?.api_mode)
+  return normalizeProviderApiMode(preset?.catalog_api_mode ?? preset?.api_mode)
 }
 
 function providerShouldFetchLiveModels(providerKey: string): boolean {
@@ -335,6 +335,8 @@ function mergeAvailableGroups(groups: AvailableGroup[]): AvailableGroup[] {
     existing.base_url = existing.base_url || group.base_url
     existing.api_mode = existing.api_mode || group.api_mode
     existing.builtin = existing.builtin || group.builtin
+    existing.api_mode_by_model = { ...(existing.api_mode_by_model || {}), ...(group.api_mode_by_model || {}) }
+    if (Object.keys(existing.api_mode_by_model).length === 0) delete existing.api_mode_by_model
     existing.model_meta = { ...(existing.model_meta || {}), ...(group.model_meta || {}) }
     if (existing.model_meta && Object.keys(existing.model_meta).length === 0) delete existing.model_meta
   }
@@ -583,7 +585,7 @@ async function buildAvailableForProfile(
   return { profile, default: currentDefault, default_provider: currentDefaultProvider, groups: applyCatalogModelMetadata(groupsWithCustomModels) }
 }
 
-export async function getAvailableModelGroupsForProfile(profile: string): Promise<AvailableGroup[]> {
+export async function getAvailableModelConfigForProfile(profile: string) {
   const appConfig = await readAppConfig()
   const modelVisibility = normalizeModelVisibility(appConfig.modelVisibility)
   const applyCatalogModelMetadata = createCatalogModelMetadataEnricher(
@@ -591,16 +593,21 @@ export async function getAvailableModelGroupsForProfile(profile: string): Promis
   )
   const modelCatalogCache = await readProviderModelCatalogCache()
   const result = await buildAvailableForProfile(profile || 'default', modelCatalogCache, appConfig, applyCatalogModelMetadata)
-  return applyModelVisibility(result.groups, modelVisibility)
+  return { ...result, groups: applyModelVisibility(applyModelAliases(result.groups, normalizeAliases(appConfig.modelAliases)), modelVisibility) }
+}
+
+export async function getAvailableModelGroupsForProfile(profile: string): Promise<AvailableGroup[]> {
+  return (await getAvailableModelConfigForProfile(profile)).groups
 }
 
 // Full directories are loaded by the settings editor, never by routine pickers.
 function compactModelGroups(groups: AvailableGroup[]) {
-  return groups.map(({ available_models, model_meta, ...group }) => {
+  return groups.map(({ available_models, model_meta, api_mode_by_model, ...group }) => {
     const visible = new Set(group.models)
     return {
       ...group,
       model_count: (available_models || group.models).length,
+      ...(api_mode_by_model ? { api_mode_by_model: Object.fromEntries(Object.entries(api_mode_by_model).filter(([id]) => visible.has(id))) } : {}),
       ...(model_meta ? { model_meta: Object.fromEntries(Object.entries(model_meta).filter(([id]) => visible.has(id))) } : {}),
     }
   })

@@ -15,6 +15,12 @@ interface Host {
   commandExecution(command: string, args: string[]): { command: string; args: string[]; windowsVerbatimArguments?: boolean }
 }
 export interface DshUiTarget { endpoint: string; cookie: string; generation: string }
+const DEFAULT_READY_TIMEOUT_MS = 180_000
+function readinessTimeoutMs(): number {
+  const value = Number(process.env.HERMES_DSH_READY_TIMEOUT_MS)
+  // Node timers overflow above this limit and would fail almost immediately.
+  return Number.isInteger(value) && value > 0 && value <= 2_147_483_647 ? value : DEFAULT_READY_TIMEOUT_MS
+}
 const instances = new Set<DshManagement>()
 export async function shutdownDshManagement() { await Promise.all([...instances].map(instance => instance.close())) }
 
@@ -78,7 +84,8 @@ export class DshManagement {
     try {
       const target = await new Promise<DshUiTarget>((resolve, reject) => {
         let output = ''; let settled = false; let probing = false
-        const timeout = setTimeout(() => fail('readiness timed out after 30 seconds'), 30_000)
+        const timeoutMs = readinessTimeoutMs()
+        const timeout = setTimeout(() => fail(`readiness timed out after ${timeoutMs / 1000} seconds`), timeoutMs)
         function fail(reason: string) { if (!settled) { settled = true; clearTimeout(timeout); reject(new DshPluginError(503, 'DSH_UI_UNAVAILABLE', `Unable to start the DSH configuration runtime (${reason})`)) } }
         child.once('error', (error: NodeJS.ErrnoException) => {
           // Only expose OS error identifiers, never command paths or plugin logs.

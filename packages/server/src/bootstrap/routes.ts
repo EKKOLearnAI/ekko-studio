@@ -1,3 +1,4 @@
+import { desktopBrowserRoutes } from '../modules/studio/routes/desktop-browser'
 import type { Context, Next } from 'koa'
 import './hermes-ops-adapter'
 import './agent-log-adapter'
@@ -6,13 +7,14 @@ import './workflow-runtime-adapter'
 import './chat-agent-runtime-adapter'
 import './group-chat-agent-runtime-adapter'
 import './session-agent-runtime-adapter'
+import './person-runtime-adapter'
+import { personRoutes } from '../modules/studio/routes/person'
 import { apiDocsRoutes } from '../modules/studio'
 import { healthRoutes } from './health'
 import { updateRoutes } from './update'
 import { themeRoutes } from '../modules/studio/routes/theme'
 import { announcementRoutes } from '../modules/studio/routes/announcements'
 import { appConnectionRoutes, appRelayRoutes } from './app-relay'
-import { devicePublicRoutes, deviceRoutes } from './devices'
 import { socialMessageRoutes } from '../modules/studio/routes/social-messages'
 import {
   claudeCodeProxyRoutes,
@@ -24,9 +26,10 @@ import {
 import { uploadRoutes } from '../modules/studio/routes/upload'
 import { appUploadRoutes } from '../modules/studio/routes/app-upload'
 import { authPublicRoutes, authProtectedRoutes } from '../modules/studio/routes/auth'
-import { mcuDeviceRoutes } from '../modules/studio/routes/mcu-devices'
+import { mcuDevicePublicRoutes, mcuDeviceRoutes } from '../modules/studio/routes/mcu-devices'
 
 import { sessionRoutes } from '../modules/studio/routes/sessions'
+import { modelApiRoutes } from '../modules/studio/routes/model-api'
 import { sessionSharePublicRoutes, sessionShareRoutes } from '../modules/studio/routes/session-shares'
 import { profileRoutes } from '../modules/hermes/routes/profiles'
 import { skillRoutes } from '../modules/hermes/routes/skills'
@@ -84,7 +87,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   // --- Public routes (no auth required) ---
   app.use(healthRoutes.routes())
   app.use(authPublicRoutes.routes())
-  app.use(devicePublicRoutes.routes())
+  app.use(mcuDevicePublicRoutes.routes())
   app.use(claudeCodeProxyRoutes.routes())
   app.use(codexProxyRoutes.routes())
   app.use(ttsRoutes.routes())
@@ -99,7 +102,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
 
   // --- Protected routes (auth required) ---
   app.use(authProtectedRoutes.routes())
-  app.use(deviceRoutes.routes())
+  app.use(desktopBrowserRoutes.routes())
   app.use(mcuDeviceRoutes.routes())
   app.use(appConnectionRoutes.routes())
   app.use(uploadRoutes.routes())
@@ -112,6 +115,8 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(appRelayRoutes.routes())
   app.use(socialMessageRoutes.routes())
   app.use(sessionRoutes.routes())
+  app.use(modelApiRoutes.routes())
+  app.use(personRoutes.routes())
   app.use(sessionShareRoutes.routes())
   app.use(profileRoutes.routes())
   app.use(ekkoMemoryRoutes.routes())

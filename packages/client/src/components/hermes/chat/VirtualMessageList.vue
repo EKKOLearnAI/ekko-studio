@@ -31,6 +31,7 @@ type BottomScrollOptions = number | {
 const props = withDefaults(defineProps<{
   messages: VirtualItem[];
   virtualized?: boolean;
+  showEmpty?: boolean;
   estimatedItemHeight?: number;
   overscan?: number;
   rowGap?: number;
@@ -38,6 +39,7 @@ const props = withDefaults(defineProps<{
   topThreshold?: number;
 }>(), {
   virtualized: true,
+  showEmpty: true,
   estimatedItemHeight: 180,
   overscan: 8,
   rowGap: 16,
@@ -618,7 +620,7 @@ defineExpose({
         </DynamicScrollerItem>
       </template>
       <template #after>
-        <slot v-if="messages.length > 0" name="after" />
+        <slot v-if="messages.length > 0 || !showEmpty" name="after" />
       </template>
     </DynamicScroller>
     <div
@@ -640,10 +642,10 @@ defineExpose({
         >
           <slot name="item" :message="item" />
         </div>
-        <slot v-if="messages.length > 0" name="after" />
+        <slot v-if="messages.length > 0 || !showEmpty" name="after" />
       </div>
     </div>
-    <div v-if="messages.length === 0 && $slots.empty" class="virtual-message-list-empty">
+    <div v-if="showEmpty && messages.length === 0 && $slots.empty" class="virtual-message-list-empty">
       <slot name="empty" />
     </div>
   </div>

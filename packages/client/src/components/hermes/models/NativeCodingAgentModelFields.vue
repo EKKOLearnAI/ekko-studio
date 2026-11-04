@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { NButton, NSelect } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import type { CodingAgentId } from '@/api/coding-agents'
+import { agentReasoningEffortOptions, agentReasoningEffortValue } from '@/utils/model-reasoning-effort'
 import { useCodingAgentModels } from '@/composables/useCodingAgentModels'
 import { nativeCatalogModel, nativeModelLabel, nativeModelEffortChoices, nativeModelFamilies, nativeModelPickerId, selectNativeModelEffort } from '@/utils/native-model-families'
 import ModelCascader from './ModelCascader.vue'
@@ -15,18 +16,23 @@ const models = computed(() => catalog.value?.models || [])
 const selected = computed(() => nativeCatalogModel(models.value, props.model))
 const choices = computed(() => nativeModelEffortChoices(models.value, props.model))
 const effort = computed(() => props.reasoningEffort || selected.value?.reasoningEffort || '')
-const effortLabel = (value: string) => !value ? t('chat.reasoningEffort.defaultLabel')
+const effortLabel = (value: string) => !value ? t('chat.reasoningEffort.options.none')
   : te(`chat.reasoningEffort.options.${value}`) ? t(`chat.reasoningEffort.options.${value}`) : value
 const effortOptions = computed(() => {
   const options = choices.value?.map(choice => ({ label: effortLabel(choice.effort), value: choice.effort }))
     || ['', ...(selected.value?.reasoningEfforts || [])].map(value => ({ label: effortLabel(value), value }))
   if (effort.value && !options.some(option => option.value === effort.value)) options.push({ label: effortLabel(effort.value), value: effort.value })
-  return options
+  return agentReasoningEffortOptions(options)
 })
 const canSelectEffort = computed(() => Boolean(selected.value?.reasoningEfforts?.length)
   && effortOptions.value.length > 1 && (!effort.value || (choices.value
     ? choices.value.some(choice => choice.effort === effort.value)
     : selected.value?.reasoningEfforts?.includes(effort.value))))
+watch([selected, effortOptions, () => props.reasoningEffort, () => props.disabled], () => {
+  if (props.disabled || !canSelectEffort.value || effort.value) return
+  const value = agentReasoningEffortValue('', effortOptions.value)
+  if (value) emit('change', selectNativeModelEffort(models.value, props.model, value))
+}, { immediate: true })
 const groups = computed(() => [{ provider: `native:${props.agent}`, label: catalog.value?.name || props.agent,
   base_url: '', api_key: '', models: ['', ...new Set(nativeModelFamilies(models.value).map(model => model.id))] }])
 function displayName(id: string) {
@@ -63,7 +69,7 @@ function selectEffort(value: string) {
         </div>
       </template>
     </ModelCascader>
-    <NSelect v-else class="native-reasoning-effort" :value="effort"
+    <NSelect v-else class="native-reasoning-effort" :value="agentReasoningEffortValue(effort, effortOptions)"
       :options="effortOptions" size="small" :disabled="disabled || !canSelectEffort"
       :aria-label="t('chat.reasoningEffort.tooltip')"
       :placeholder="t('chat.reasoningEffort.tooltip')" @update:value="selectEffort" />

@@ -2,6 +2,7 @@ import { createI18n } from 'vue-i18n'
 import { loadLocaleMessages, mergeMessagesWithFallback, supportedLocales } from './messages'
 import type { SupportedLocale } from './messages'
 import { applyDocumentDirection } from './direction'
+import { uiLocale } from './locale-state'
 
 const saved = localStorage.getItem('hermes_locale')
 
@@ -35,6 +36,7 @@ function resolveLocale(saved: string | null): SupportedLocale {
 }
 
 function setHtmlLang(locale: SupportedLocale) {
+  uiLocale.value = locale
   document.documentElement.lang = locale
   applyDocumentDirection(locale)
 }

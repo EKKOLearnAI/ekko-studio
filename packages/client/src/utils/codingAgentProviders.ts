@@ -1,4 +1,16 @@
-import type { ChatCodingAgentId } from '@/api/coding-agents'
+import type { ChatCodingAgentId, CodingAgentApiMode } from '@/api/coding-agents'
+import type { AvailableModelGroup } from '@/api/hermes/system'
+import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
+
+export function providerModelApiMode(group?: AvailableModelGroup, model = ''): ProviderApiMode | undefined {
+  return (group?.api_mode_by_model ? group.api_mode_by_model[model] : group?.api_mode) ?? undefined
+}
+
+/** An absent/unsupported mode keeps the existing manual protocol selection available. */
+export function configuredProviderApiMode(group?: AvailableModelGroup, model = ''): CodingAgentApiMode | undefined {
+  const value = providerModelApiMode(group, model)
+  return value === 'chat_completions' || value === 'codex_responses' || value === 'anthropic_messages' ? value : undefined
+}
 
 const SCOPED_EXTERNAL_AGENT_AUTH_PROVIDERS = new Set([
   'openai-codex',

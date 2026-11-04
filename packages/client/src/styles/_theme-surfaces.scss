@@ -1,6 +1,6 @@
 // Native and teleported surfaces share the same regional tokens. Classes are
 // enabled only for explicitly configured properties, preserving preset defaults.
-$overlay-surfaces: '.n-modal, .n-dialog, .n-drawer-content, .n-popover:not(.n-tooltip), .n-dropdown-menu, .n-base-select-menu, .n-cascader-menu, .n-notification, .slash-command-dropdown, .mention-dropdown, .annotation-popover, .workflow-runs-panel--overlay';
+$overlay-surfaces: '.n-modal, .n-dialog, .n-drawer, .n-popover:not(.n-tooltip), .n-dropdown-menu, .n-base-select-menu, .n-cascader-menu, .n-notification, .slash-command-dropdown, .mention-dropdown, .annotation-popover, .workflow-runs-panel--overlay';
 // Native tables share their containing card; Naive tables own one wrapper fill.
 // Message tables share the bubble's background, filter and border tokens.
 $markdown-card-tables: '.markdown-body table:not(:where(.message-bubble, .msg-content, .group-run-bubble) table)';
@@ -8,7 +8,7 @@ $table-surfaces: '.n-data-table-wrapper, .n-table, .plugins-table-wrap, .relay-u
 $regions: (
   chrome: '.studio-frame-surface, .desktop-titlebar:not(.desktop-titlebar--flush)',
   sidebar: '.sidebar, .hermes-config-sidebar, .ekko-config-sidebar, .coding-agent-config-sidebar, .session-list, .room-sidebar, .agent-avatar-rail, .workflow-sidebar',
-  content: '.app-main--card, .chat-main-content, .group-chat-surface, .workflow-main, .connections-panel, .agent-manager-panel, .models-view, .voice-stage',
+  content: '.app-main--card, .chat-main-content, .group-chat-surface, .workflow-main, .person-view, .connections-panel, .agent-manager-panel, .models-view, .voice-stage',
   card: '#{$table-surfaces}, [data-theme-surface="card"], .theme-card, .settings-card, .provider-card, .profile-card, .model-card, .run-card:not(.group-run-bubble), .run-usage-card, .job-card, .mcp-card, .kanban-task-card, .platform-card, .stat-card, .task-plan-card, .workflow-agent-node, .n-card:not(.n-modal), .n-descriptions-table-wrapper, .theme-appearance-editor',
   input: '[data-theme-surface="input"], .input-wrapper, .context-usage-row, .n-input, .n-base-selection, .search-input, .profile-display, .model-trigger',
   overlay: $overlay-surfaces,
@@ -67,7 +67,8 @@ html:is(.theme-overlay-bg, .theme-has-custom-background) .n-popover:not(.n-toolt
     -webkit-backdrop-filter: var(--theme-#{$region}-filter);
     backdrop-filter: var(--theme-#{$region}-filter);
   }
-  html.theme-customized.theme-#{$region}-radius :is(#{$selectors}) {
+  // Drawers keep square outer corners even when other overlays use a radius.
+  html.theme-customized.theme-#{$region}-radius :is(#{$selectors}):where(:not(.n-drawer)) {
     --radius-component: var(--theme-#{$region}-radius);
     border-radius: var(--theme-#{$region}-radius);
   }
@@ -83,7 +84,7 @@ html:is(.theme-overlay-bg, .theme-has-custom-background) .n-popover:not(.n-toolt
 // A filter on the content container creates a backdrop root: nested card filters
 // can no longer sample the wallpaper, even with blur(0). Paint that outer effect
 // on a sibling layer, keeping the content tint and blur behind the cards.
-html.theme-customized.theme-card-filter :is(.app-main--card, .workflow-main, .connections-panel, .agent-manager-panel, .models-view) {
+html.theme-customized.theme-card-filter :is(.app-main--card, .workflow-main, .person-view, .connections-panel, .agent-manager-panel, .models-view) {
   position: relative;
   isolation: isolate;
   background: transparent;
@@ -109,7 +110,7 @@ html.theme-has-custom-background {
   --theme-card-wallpaper-bg: rgba(var(--bg-card-rgb), 0.72);
 }
 
-html:is(.theme-card-bg, .theme-has-custom-background) :is(.app-download-meta span, .app-platform-icon, .api-relay-features span) {
+html:is(.theme-card-bg, .theme-has-custom-background) :is(.app-download-meta span, .app-platform-icon) {
   background: rgba(var(--text-primary-rgb), 0.04);
 }
 

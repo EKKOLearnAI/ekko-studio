@@ -13,13 +13,3 @@ export type PublicSystemInfo = {
 }
 
 export type LanEndpointKind = 'web' | 'desktop' | 'custom'
-
-export type LanDeviceInfo = PublicSystemInfo & {
-  id: string
-  ip: string
-  http_port: number
-  endpoint_kind: LanEndpointKind
-  url: string
-  response_ms: number
-  last_seen_at: string
-}

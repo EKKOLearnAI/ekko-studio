@@ -9,8 +9,9 @@ must still be enabled before its configured child features can use JEV.
 
 - Register the feature in `scripts/jev-integrations.json`: a stable id, purpose,
   concrete source files, independent boolean `enabledKey`, additional `options`,
-  implementation status, and regression test files.
-- Each feature switch is scoped to the selected Profile and has a labeled
+  implementation status, and any new feature test files. Legacy test lists are
+  empty after the suite reset; listed tests must still exist.
+- Each feature switch is global to the Studio installation and has a labeled
   frontend `NSwitch`. Studio defaults to `false` unless its registration explicitly
   declares `studioDefaultEnabled: true`. The checker requires the persisted default
   to match this declaration; standalone switches still default to `false`.
@@ -30,7 +31,7 @@ must still be enabled before its configured child features can use JEV.
   it off must stop that feature's JEV requests and preserve its original flow.
   Missing credentials and optional provider failures must preserve that flow as
   well; cancellation must still propagate. Other JEV features remain independent.
-- Apply saved settings at the documented run boundary, respect Profile isolation,
+- Apply saved settings at the documented run boundary, preserve resource/identity isolation,
   and preserve explicit `false` overrides. For standalone agents, provide the
   corresponding local config/constructor option and document the Studio mapping.
 - Use Studio's public facade or the agent-owned evaluator. Business modules must
@@ -47,6 +48,25 @@ must still be enabled before its configured child features can use JEV.
 | `ekko-memory-write-review` | Active: `memory/jev-write-review.ts` | `ekkoMemoryWriteReviewEnabled` | `jev.memoryWriteReviewEnabled` | Memory options → Review memory writes |
 | `ekko-skills` | Active: `skills/jev.ts`, routing and learning preflight | `ekkoSkillsEnabled` | `jev.skillsEnabled` | Models → JEV → Use JEV for Ekko skills |
 
+Personal assistant memory registers `person-memory` and four child integrations
+(`person-memory-kind-routing`, `person-memory-relevance-filter`,
+`person-memory-rerank`, `person-memory-write-review`). Its `personMemory*` settings
+are independent of `ekkoMemory*`, with the same numeric defaults/ranges and child
+defaults. `getPersonJevRuntimeConfig` maps these values to the existing Ekko memory
+evaluator before each assistant run in `bootstrap/person-chat-agent.ts`. The master
+defaults to false; all four children explicitly default to true. The JEV page
+exposes all controls. Global settings supply configuration and credentials;
+the account continues to own the memory store.
+
+Computer Use integrations `ekko-computer-use-match` and `ekko-computer-use-verify`
+are independently default-off at Models → JEV → Ekko Computer Use.
+Studio `ekkoComputerUseMatch*` / `ekkoComputerUseVerify*` map to standalone
+`jev.computerUseMatch*` / `jev.computerUseVerify*` at each normal/isolated run.
+The agent-owned evaluator assesses only fresh native window labels and control
+states. It returns advisory token suggestions or outcome judgments and never
+dispatches input. See [Computer Use JEV](../../packages/ekko-agent/docs/computer-use.md#optional-jev-assessments)
+for fields, limits, cancellation and fallback behavior.
+
 Browser integrations `browser-match` and `browser-verify` are registered independently
 with default-off switches `browserMatchEnabled` and `browserVerifyEnabled` at
 Models → JEV → Built-in browser automation. They share the provider connection,
@@ -59,9 +79,9 @@ See [browser JEV behavior](../jev.md#built-in-browser-automation).
 Agent source paths above are relative to `packages/ekko-agent/src`. Studio's memory
 master defaults to false; its four child switches default to true. Existing saved
 values, including explicit false, take precedence. Standalone Ekko retains false
-defaults for every switch. Studio reads the selected Profile before each normal/isolated run;
+defaults for every switch. Studio reads the global configuration before each normal/isolated run;
 the runtime snapshots the values for all subsequent memory operations. Shared memory
-services never store a mutable JEV client or Profile configuration. No runtime
+services never store a mutable JEV client or per-run configuration. No runtime
 setting is written back to Ekko's local file.
 
 Skill enhancement is one integration with two stages under one switch, as requested
@@ -95,7 +115,8 @@ It reads TypeScript and Vue syntax, including real template bindings, and checks
 1. JEV imports/calls, runtime evaluator access and known HTTP entry points in
    server, client, standalone agent, Desktop and MCP `bin/` source have a registered owner.
 2. Each integration declares its own boolean switch, matching Studio default and
-   concrete source/test paths; a configuration-only integration cannot directly evaluate.
+   concrete source paths; any listed test files must exist. A configuration-only
+   integration cannot directly evaluate.
 3. Settings declared by defaults and server/client interfaces are registered,
    accepted by the save API, returned by the read API, bound to editable controls,
    included in the frontend save request, and labeled in every locale. The form
@@ -121,18 +142,15 @@ positive/negative fixtures together instead of exempting the business module.
    the switch check at the evaluation boundary and preserve the existing fallback.
 4. Test disabled/no-credential behavior with zero upstream requests; enabled
    behavior; optional provider failure; explicit disabling after enabling; saved
-   setting refresh; Profile isolation; and overrides without write-back where
-   applicable. Verify frontend save/reload and Profile switching in Playwright.
-5. Run `npm run harness:check`, `npm run test -- tests/server/jev-harness.test.ts`,
-   feature tests, and the relevant browser tests/build. The PR must describe the
+   setting refresh; global configuration sharing and resource isolation; and overrides without write-back where
+   applicable. Verify frontend save/reload and persistence across model Profile changes in Playwright.
+5. Run `npm run harness:check`, `npm run build` and the focused tests added for
+   the new integration. The PR must describe the
    configuration entry point, defaults, effective timing, and fallback behavior.
 
-The harness test suite deliberately removes switches, save fields, controls,
-locale labels and runtime mappings, and introduces unregistered/aliased callers,
-to verify that these regressions fail the check. Filesystem discovery is tested
-against a small isolated repository. The full repository scan runs in the separate
-`npm run harness:check` CI step, keeping coverage tests independent of repository
-size and avoiding a duplicate full scan under their per-test timeout.
+The legacy harness tests have been removed. Add focused positive/negative fixtures
+when introducing new checker behavior. The full structural repository scan still
+runs once through `npm run harness:check` in CI.
 
 Memory routing and reranking share the registered candidate limit and recall
 threshold (default 0.5). Relevance filtering shares the candidate limit and the
@@ -148,10 +166,10 @@ round-trip tests.
 Studio business features that evaluate JEV after their baseline operation may use
 `createJevSidecar` from the public facade. The sidecar is infrastructure, not an
 integration switch: PRs that call the factory must still register their concrete
-business source, independent Profile switch, options, frontend controls and tests.
+business source, independent global switch, options, frontend controls and tests.
 
 The sidecar accepts only statically registered adapters. An adapter parses its
-non-secret policy from the same private Profile settings read that creates the
+non-secret policy from the same private global settings read that creates the
 provider snapshot, supplies a bounded admission ceiling and call counts, and
 rechecks an explicit source/authorization expectation before every real provider
 dispatch and before application. A snapshot freezes calculation parameters; it

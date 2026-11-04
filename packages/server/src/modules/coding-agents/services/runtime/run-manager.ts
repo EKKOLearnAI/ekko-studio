@@ -1,3 +1,4 @@
+import { codingAgentWorkingDirectory } from './workspace'
 import { startOpenCodeTurn as startOpenCodeTurnProcess } from '../opencode/chat-turn'
 import { applyOpenCodeLine } from '../opencode/event-adapter'
 import type { OpenCodeTurnHost } from '../opencode/turn-host'
@@ -9,7 +10,6 @@ import { startDshChatTurn } from '../dsh/chat-turn'
 import { agentUpdateLocked, noteAgentActivity } from '../update-lock'
 import { dirname, join } from 'path'
 import { existsSync, accessSync, chmodSync, constants as fsConstants, readFileSync, writeFileSync } from 'fs'
-import { homedir } from 'os'
 import { spawn, type ChildProcess } from 'child_process'
 import { createSession, addMessage, getSession, updateSession, updateSessionStats } from '../../../studio/public/sessions'
 import type { ApiMode, CodingAgentImageInput } from '../../protocol/types'
@@ -433,7 +433,7 @@ function hasManagedHermesMcpConfig(run: ManagedCodingAgentRun): boolean {
   if (!codexHome) return false
   try {
     const config = readFileSync(join(codexHome, 'config.toml'), 'utf-8')
-    return ['api', 'browser', 'devices', 'use', 'interaction'].every(toolset => config.includes(`[mcp_servers.ekko-studio-${toolset}]`))
+    return ['api', 'browser', 'use', 'interaction'].every(toolset => config.includes(`[mcp_servers.ekko-studio-${toolset}]`))
   } catch {
     return false
   }
@@ -684,6 +684,7 @@ export function sanitizeCodingAgentTerminalOutput(value: string): string {
 export class CodingAgentRunManager {
   private runs = new Map<string, ManagedCodingAgentRun>()
   private sessionIndex = new Map<string, string>()
+  private sessionExits = new Map<string, { run: ManagedCodingAgentRun; promise: Promise<void> }>()
   private memoryExportChildren = new Set<ChildProcess>()
 
   constructor(private readonly idleMs = DEFAULT_IDLE_MS) {}
@@ -832,7 +833,7 @@ export class CodingAgentRunManager {
       name: 'xterm-color',
       cols: 120,
       rows: 30,
-      cwd: existsSync(launch.workspaceDir) ? launch.workspaceDir : homedir(),
+      cwd: codingAgentWorkingDirectory(launch),
       env: {
         ...process.env,
         ...(launch.env || {}),
@@ -1038,6 +1039,25 @@ export class CodingAgentRunManager {
     return this.requestPiRpc<PiNativeSessionState>(run, { type: 'get_state' })
   }
 
+  /** Observe before stopping: cleanup removes the run before its process exits. */
+  waitForSessionExit(sessionId: string): Promise<void> {
+    const pending = this.sessionExits.get(sessionId)
+    const run = this.getBySession(sessionId)
+    if (!run || pending?.run === run) return pending?.promise || Promise.resolve()
+    const exits: Promise<unknown>[] = pending ? [pending.promise] : []
+    const child = run.currentChild
+    if (child && child.exitCode == null && child.signalCode == null) {
+      exits.push(new Promise<void>(resolve => child.once('close', () => resolve())))
+    }
+    if (run.pty) exits.push(new Promise<void>(resolve => run.pty!.onExit(() => resolve())))
+    // There is deliberately no timeout that treats an unconfirmed stop as success.
+    const promise = Promise.all(exits).then(async () => { await run.nativeUsageCompletion }).finally(() => {
+      if (this.sessionExits.get(sessionId)?.promise === promise) this.sessionExits.delete(sessionId)
+    })
+    this.sessionExits.set(sessionId, { run, promise })
+    return promise
+  }
+
   stop(sessionId: string, options: { reportClosed?: boolean } = {}): boolean {
     const run = this.getBySession(sessionId)
     if (!run) return false
@@ -1049,10 +1069,15 @@ export class CodingAgentRunManager {
   async interruptForQueueInsertion(
     sessionId: string,
     expectedRunId?: string,
+    expectedTurn?: { responseId: string; runMarker?: string },
   ): Promise<CodingAgentQueueInsertionInterruptResult> {
     const run = this.getBySession(sessionId)
     if (!run || run.exited) return { status: 'not_found' }
     if (expectedRunId && run.id !== expectedRunId) return { status: 'run_mismatch' }
+    // printResponseId can change on Claude message_start within a single turn.
+    // Fence the response identity published by run.started, plus the turn marker.
+    if (expectedTurn && (run.state.responseRun?.responseId !== expectedTurn.responseId
+      || (expectedTurn.runMarker && run.runMarker !== expectedTurn.runMarker))) return { status: 'run_mismatch' }
     const isRunning = run.launch.agentId === 'pi'
       ? run.turnActive === true
       : childIsRunning(run.currentChild)
@@ -1502,14 +1527,15 @@ export class CodingAgentRunManager {
 
   private addUserMessage(run: ManagedCodingAgentRun, content: string) {
     const timestamp = nowSeconds()
-    run.state.messages.push({
+    const message = {
       id: run.state.messages.length + 1,
       session_id: run.launch.sessionId,
       runMarker: run.runMarker,
       role: 'user',
       content,
       timestamp,
-    })
+    }
+    run.state.messages.push(message)
     const id = addMessage({
       session_id: run.launch.sessionId,
       role: 'user',
@@ -1517,6 +1543,8 @@ export class CodingAgentRunManager {
       run_marker: run.runMarker ?? null,
       timestamp,
     })
+    // Task/search links use database IDs, including while this run stays live.
+    if (id != null) message.id = id
     logger.debug({ runId: run.id, sessionId: run.launch.sessionId, messageId: id }, '[coding-agent-run] recorded user message')
     return id
   }
@@ -1612,7 +1640,7 @@ export class CodingAgentRunManager {
 
   private startPiRpcProcess(run: ManagedCodingAgentRun) {
     const child = spawnCodingAgentChild(run.launch.command, run.launch.args, {
-      cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
+      cwd: codingAgentWorkingDirectory(run.launch),
       env: run.launch.mode === 'global'
         ? { ...process.env, ...(run.launch.env || {}) }
         : isolatedCodingAgentChildEnv(run.launch.env),
@@ -2108,7 +2136,7 @@ export class CodingAgentRunManager {
       '--verbose',
     ]
     const child = spawnCodingAgentChild(run.launch.command, args, {
-      cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
+      cwd: codingAgentWorkingDirectory(run.launch),
       env: run.launch.mode === 'global'
         ? { ...process.env, ...(run.launch.env || {}) }
         : isolatedCodingAgentChildEnv(run.launch.env),
@@ -2727,7 +2755,7 @@ export class CodingAgentRunManager {
 
     const rootDir = String(run.launch.env?.GROK_HOME || '').trim()
     if (!rootDir) throw new Error('Grok runtime home is missing')
-    const workspaceDir = existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir()
+    const workspaceDir = codingAgentWorkingDirectory(run.launch)
     const nativeSessionId = String(run.launch.agentNativeSessionId || '')
     if (!run.nativeResumeReady && grokSessionExists(rootDir, workspaceDir, nativeSessionId)) {
       run.nativeResumeReady = true
@@ -2855,7 +2883,7 @@ export class CodingAgentRunManager {
     })
     if (run.launch.promptFile) updateManagedPromptFileSync(run.launch.promptFile, systemPrompt)
 
-    const workspaceDir = existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir()
+    const workspaceDir = codingAgentWorkingDirectory(run.launch)
     const nativeSessionId = String(run.launch.agentNativeSessionId || '')
     const turnInput = systemPrompt.trim()
       ? `${systemPrompt.trim()}\n\n${input}`
@@ -2973,7 +3001,7 @@ export class CodingAgentRunManager {
     })
     if (run.launch.promptFile) updateManagedPromptFileSync(run.launch.promptFile, systemPrompt)
 
-    const workspaceDir = existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir()
+    const workspaceDir = codingAgentWorkingDirectory(run.launch)
     const nativeSessionId = String(run.launch.agentNativeSessionId || '')
     const turnInput = systemPrompt.trim()
       ? `${systemPrompt.trim()}\n\n${input}`
@@ -3147,7 +3175,7 @@ export class CodingAgentRunManager {
       : ['exec', ...commonArgs, '--cd', run.launch.workspaceDir, '-']
 
     const child = spawnCodingAgentChild(run.launch.command, args, {
-      cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
+      cwd: codingAgentWorkingDirectory(run.launch),
       env: run.launch.mode === 'global'
         ? { ...process.env, ...(run.launch.env || {}) }
         : isolatedCodingAgentChildEnv(run.launch.env),
@@ -3767,7 +3795,7 @@ export class CodingAgentRunManager {
     let child: ChildProcess
     try {
       child = spawnCodingAgentChild('nmem', args, {
-        cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
+        cwd: codingAgentWorkingDirectory(run.launch),
         env,
       })
     } catch (err) {

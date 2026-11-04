@@ -41,6 +41,10 @@ Filters only narrow this authorization. Internal payloads are never sent verbati
 
 ## Compatibility and channels
 
+MCU connections have a separate opt-in adapter for the complete HTTP Webhook
+catalog. See [MCU Webhook subscriptions](mcu-webhook-events.md) for the wire
+protocol, content controls and permissions. The existing MCU firmware is unchanged.
+
 New App sends `auth.appEventVersion=1`, subscribes on this single namespace and does
 not open legacy group/workflow notification listeners. Old clients retain the three
 legacy event names through a hub consumer. Version-1 clients never get both channels.
@@ -74,8 +78,8 @@ uses the HTTP dispatcher's retry queue. See [run push snapshots](run-push-regist
 
 ## Task-card progress webhooks
 
-There are 26 HTTP webhook event types, including three task-card progress types and
-three `*.run.updated` state types.
+There are 28 HTTP webhook event types, including two session-task lifecycle types,
+three task-card progress types and three `*.run.updated` state types.
 Chat and workflow `plan.updated` runtime events publish `chat.plan.updated` and
 `workflow.plan.updated`; workflow subjects also retain workflow/node identifiers.
 Group cards publish `group.plan.updated` only after the versioned tool message is
@@ -99,6 +103,32 @@ As with other webhooks there is no event history/backfill; HTTP delivery still u
 the endpoint's existing retry policy. Consumers can use the event ID and revision
 for idempotence. Progress events do not trigger APNs alerts or social-message push;
 the App's existing task-card transport continues to display its live updates.
+
+## Session-task lifecycle webhooks
+
+Subscribe to `chat.task.created` and `chat.task.completed` to receive one event per
+session goal when it is created or transitions into `completed`. Native Ekko tools
+and the session-task MCP share this producer. Events are published only after the
+task batch commits successfully. Reading tasks, editing titles/summaries/evidence,
+reopening a task and repeating an already completed status do not emit events.
+A task first saved as completed emits both created and completed events; a reopened
+task emits another completed event when it is completed again.
+
+Each event has `subject.session_id`, `subject.task_id`, `summary.status` (`created`
+or `completed`) and a `session_task` object. The object contains the task ID, ledger
+revision, status, request/evidence message IDs and creation/update/completion
+timestamps. Enabling the endpoint's `include_content` switch also includes the
+task's `title`, `summary` and `completion_evidence`; `include_user_content` alone
+does not expose this text. Only saved task fields are projected, never MCP arguments
+or turn capabilities. Each event represents the saved task at that revision, rather
+than the entire session ledger.
+
+Event identity includes the type, profile, session, task and ledger revision.
+HTTP retries retain that identity so receivers can deduplicate delivery. Profile
+and event filters, signatures, retry ordering and the in-memory queue are shared
+with other HTTP webhooks. Delivery is best effort with no durable event history or
+backfill. History cleanup/deletion is not a task-tool lifecycle event. These events
+do not expand the App subscription or mobile/social push event sets.
 
 ## Android background notifications
 

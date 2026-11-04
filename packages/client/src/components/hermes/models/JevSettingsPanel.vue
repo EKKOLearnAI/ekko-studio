@@ -6,11 +6,12 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import { useI18n } from 'vue-i18n'
 import { deleteJevSettings, getJevSettings, saveJevSettings, testJevConnection, type JevSettings } from '@/api/studio/jev'
+import { isStoredSuperAdmin } from '@/api/client'
 import SettingRow from '@/components/hermes/settings/SettingRow.vue'
 
-const props = defineProps<{ profile: string }>()
 const { t, te, n } = useI18n()
 const message = useMessage()
+const canConfigure = isStoredSuperAdmin()
 const settings = ref<JevSettings | null>(null)
 const apiKey = ref('')
 const loading = ref(true)
@@ -27,6 +28,10 @@ const memoryStatus = computed(() => !settings.value?.ekkoMemoryEnabled ? 'jev.me
   : !settings.value.hasApiKey ? 'common.notConfigured'
     : !settings.value.ekkoMemoryKindRoutingEnabled && !settings.value.ekkoMemoryRelevanceFilterEnabled && !settings.value.ekkoMemoryRerankEnabled && !settings.value.ekkoMemoryWriteReviewEnabled
       ? 'jev.memoryNoFeatures' : 'jev.memoryReady')
+const personMemoryStatus = computed(() => !settings.value?.personMemoryEnabled ? 'jev.memoryDisabled'
+  : !settings.value.hasApiKey ? 'common.notConfigured'
+    : !settings.value.personMemoryKindRoutingEnabled && !settings.value.personMemoryRelevanceFilterEnabled && !settings.value.personMemoryRerankEnabled && !settings.value.personMemoryWriteReviewEnabled
+      ? 'jev.memoryNoFeatures' : 'jev.memoryReady')
 let disposed = false
 onUnmounted(() => { disposed = true })
 
@@ -42,30 +47,28 @@ function errorKey(err: unknown): string {
 async function load() {
   loading.value = true
   error.value = ''
-  try { settings.value = await getJevSettings(props.profile) }
+  try { settings.value = await getJevSettings() }
   catch (err) { if (!disposed) error.value = errorKey(err) }
   finally { loading.value = false }
 }
 onMounted(load)
 
 async function perform(action: 'save' | 'delete' | 'test') {
-  if (!settings.value || busy.value) return
+  if (!settings.value || busy.value || !canConfigure) return
   busy.value = true
   error.value = ''
   testResult.value = null
-  // Capture the profile for the whole operation, including a late response after switching tabs.
-  const profile = props.profile
   try {
     if (action === 'test') {
-      const result = await testJevConnection(profile)
+      const result = await testJevConnection()
       if (!disposed) testResult.value = { model: result.model, durationMs: result.durationMs }
     } else {
-      const { groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryRevisionEnabled, groupSummaryReviewTimeoutMs, workflowQualityEnabled, workflowQualityMinConfidence, workflowQualityTimeoutMs, groupMessageRoutingEnabled, groupHandoffReviewEnabled, groupLoopDetectionEnabled, groupMessageRoutingMinConfidence, groupMessageRoutingMode, groupMessageRoutingTimeoutMs, browserMatchEnabled, browserMatchCandidateLimit, browserMatchMinConfidence, browserMatchTimeoutMs, browserVerifyEnabled, browserVerifyMinConfidence, browserVerifyTimeoutMs, baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
-        ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs } = settings.value
-      const result = action === 'delete' ? await deleteJevSettings(profile)
-        : await saveJevSettings(profile, { groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryRevisionEnabled, groupSummaryReviewTimeoutMs, workflowQualityEnabled, workflowQualityMinConfidence, workflowQualityTimeoutMs, groupMessageRoutingEnabled, groupHandoffReviewEnabled, groupLoopDetectionEnabled, groupMessageRoutingMinConfidence, groupMessageRoutingMode, groupMessageRoutingTimeoutMs, browserMatchEnabled, browserMatchCandidateLimit, browserMatchMinConfidence, browserMatchTimeoutMs, browserVerifyEnabled, browserVerifyMinConfidence, browserVerifyTimeoutMs, baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+      const { ekkoComputerUseMatchEnabled, ekkoComputerUseMatchCandidateLimit, ekkoComputerUseMatchMinConfidence, ekkoComputerUseMatchTimeoutMs, ekkoComputerUseVerifyEnabled, ekkoComputerUseVerifyMinConfidence, ekkoComputerUseVerifyTimeoutMs, groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryRevisionEnabled, groupSummaryReviewTimeoutMs, workflowQualityEnabled, workflowQualityMinConfidence, workflowQualityTimeoutMs, groupMessageRoutingEnabled, groupHandoffReviewEnabled, groupLoopDetectionEnabled, groupMessageRoutingMinConfidence, groupMessageRoutingMode, groupMessageRoutingTimeoutMs, browserMatchEnabled, browserMatchCandidateLimit, browserMatchMinConfidence, browserMatchTimeoutMs, browserVerifyEnabled, browserVerifyMinConfidence, browserVerifyTimeoutMs, baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
+        ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs, personMemoryEnabled, personMemoryKindRoutingEnabled, personMemoryRelevanceFilterEnabled, personMemoryRerankEnabled, personMemoryWriteReviewEnabled, personMemoryCandidateLimit, personMemoryRecallMinConfidence, personMemoryFilterMinConfidence, personMemoryMinConfidence, personMemoryTimeoutMs } = settings.value
+      const result = action === 'delete' ? await deleteJevSettings()
+        : await saveJevSettings({ ekkoComputerUseMatchEnabled, ekkoComputerUseMatchCandidateLimit, ekkoComputerUseMatchMinConfidence, ekkoComputerUseMatchTimeoutMs, ekkoComputerUseVerifyEnabled, ekkoComputerUseVerifyMinConfidence, ekkoComputerUseVerifyTimeoutMs, groupSummaryReviewEnabled, groupSummaryReviewMinConfidence, groupSummaryRevisionEnabled, groupSummaryReviewTimeoutMs, workflowQualityEnabled, workflowQualityMinConfidence, workflowQualityTimeoutMs, groupMessageRoutingEnabled, groupHandoffReviewEnabled, groupLoopDetectionEnabled, groupMessageRoutingMinConfidence, groupMessageRoutingMode, groupMessageRoutingTimeoutMs, browserMatchEnabled, browserMatchCandidateLimit, browserMatchMinConfidence, browserMatchTimeoutMs, browserVerifyEnabled, browserVerifyMinConfidence, browserVerifyTimeoutMs, baseUrl, model, timeoutMs, ekkoSkillsEnabled, ekkoSkillsCandidateLimit, ekkoSkillsMinConfidence, ekkoSkillsTimeoutMs, ekkoMemoryEnabled, ekkoMemoryKindRoutingEnabled, ekkoMemoryRelevanceFilterEnabled, ekkoMemoryRerankEnabled,
           ekkoMemoryWriteReviewEnabled, ekkoMemoryCandidateLimit, ekkoMemoryRecallMinConfidence, ekkoMemoryFilterMinConfidence, ekkoMemoryMinConfidence, ekkoMemoryTimeoutMs,
-          ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
+          personMemoryEnabled, personMemoryKindRoutingEnabled, personMemoryRelevanceFilterEnabled, personMemoryRerankEnabled, personMemoryWriteReviewEnabled, personMemoryCandidateLimit, personMemoryRecallMinConfidence, personMemoryFilterMinConfidence, personMemoryMinConfidence, personMemoryTimeoutMs, ...(apiKey.value.trim() ? { apiKey: apiKey.value.trim() } : {}) })
       if (!disposed) { settings.value = result; apiKey.value = ''; message.success(t(action === 'delete' ? 'jev.deleted' : 'common.saved')); catalogChanged() }
     }
   } catch (err) { if (!disposed) error.value = errorKey(err) }
@@ -84,23 +87,24 @@ usePageLoadingTask(() => loading.value)
         <NAlert type="error">{{ t(error) }}</NAlert>
         <NButton v-if="!settings" @click="load">{{ t('common.retry') }}</NButton>
       </NSpace>
-      <NForm v-if="settings" class="jev-form" :disabled="busy" @submit.prevent="perform('save')">
+      <NAlert v-if="settings && !canConfigure" type="info">{{ t('jev.globalReadonlyHint') }}</NAlert>
+      <NForm v-if="settings" class="jev-form" :disabled="busy || !canConfigure" @submit.prevent="perform('save')">
         <section class="config-card connection-card" :aria-label="t('jev.connectionSettings')">
           <header class="card-header">
             <h4 class="card-title">{{ t('jev.connectionSettings') }}</h4>
           </header>
           <div class="settings-rows connection-fields">
             <SettingRow :label="t('jev.baseUrl')" class="text-setting">
-              <NInput v-model:value="settings.baseUrl" size="small" :input-props="{ 'aria-label': `JEV ${t('jev.baseUrl')}` }" placeholder="https://api.typesafe.ai" />
+              <NInput :disabled="busy || !canConfigure" v-model:value="settings.baseUrl" size="small" :input-props="{ 'aria-label': `JEV ${t('jev.baseUrl')}` }" placeholder="https://api.typesafe.ai" />
             </SettingRow>
             <SettingRow :label="t('profiles.model')" class="text-setting">
-              <NInput v-model:value="settings.model" size="small" :input-props="{ 'aria-label': `JEV ${t('profiles.model')}` }" placeholder="jev-latest" />
+              <NInput :disabled="busy || !canConfigure" v-model:value="settings.model" size="small" :input-props="{ 'aria-label': `JEV ${t('profiles.model')}` }" placeholder="jev-latest" />
             </SettingRow>
             <SettingRow :label="t('jev.apiKey')" :hint="t(settings.hasApiKey ? 'common.configured' : 'common.notConfigured')" class="text-setting">
-              <NInput v-model:value="apiKey" size="small" :input-props="{ 'aria-label': `JEV ${t('jev.apiKey')}`, autocomplete: 'new-password' }" type="password" show-password-on="click" :placeholder="t(settings.hasApiKey ? 'jev.keyHint' : 'jev.keyPlaceholder')" />
+              <NInput :disabled="busy || !canConfigure" v-model:value="apiKey" size="small" :input-props="{ 'aria-label': `JEV ${t('jev.apiKey')}`, autocomplete: 'new-password' }" type="password" show-password-on="click" :placeholder="t(settings.hasApiKey ? 'jev.keyHint' : 'jev.keyPlaceholder')" />
             </SettingRow>
             <SettingRow :label="t('jev.timeout')">
-              <NInputNumber :value="settings.timeoutMs" size="small" class="input-md" :min="1000" :max="120000" :step="1000" :placeholder="t('jev.timeout')" :input-props="{ 'aria-label': `JEV ${t('jev.timeout')}` }" @update:value="value => { if (value !== null) settings!.timeoutMs = value }" />
+              <NInputNumber :disabled="busy || !canConfigure" :value="settings.timeoutMs" size="small" class="input-md" :min="1000" :max="120000" :step="1000" :placeholder="t('jev.timeout')" :input-props="{ 'aria-label': `JEV ${t('jev.timeout')}` }" @update:value="value => { if (value !== null) settings!.timeoutMs = value }" />
             </SettingRow>
           </div>
         </section>
@@ -110,7 +114,7 @@ usePageLoadingTask(() => loading.value)
             <section class="config-card" :aria-label="t('jev.ekkoMemoryEnabled')">
               <header class="card-header">
                 <h5 class="card-title">{{ t('jev.ekkoMemoryEnabled') }}</h5>
-                <NSwitch v-model:value="settings.ekkoMemoryEnabled" :aria-label="t('jev.ekkoMemoryEnabled')" />
+                <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.ekkoMemoryEnabled" :aria-label="t('jev.ekkoMemoryEnabled')" />
               </header>
               <p class="card-hint">{{ t(memoryStatus) }}</p>
               <details class="memory-options" :open="settings.ekkoMemoryEnabled">
@@ -118,35 +122,81 @@ usePageLoadingTask(() => loading.value)
                 <p class="section-hint">{{ t('jev.memoryOptionsHint') }}</p>
                 <div class="settings-rows">
                   <SettingRow :label="t('jev.memoryKindRouting')" :hint="t('jev.memoryKindRoutingHint')">
-                    <NSwitch v-model:value="settings.ekkoMemoryKindRoutingEnabled" :aria-label="t('jev.memoryKindRouting')" />
+                    <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.ekkoMemoryKindRoutingEnabled" :aria-label="t('jev.memoryKindRouting')" />
                   </SettingRow>
                   <SettingRow :label="t('jev.memoryRelevanceFilter')" :hint="t('jev.memoryRelevanceFilterHint')">
-                    <NSwitch v-model:value="settings.ekkoMemoryRelevanceFilterEnabled" :aria-label="t('jev.memoryRelevanceFilter')" />
+                    <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.ekkoMemoryRelevanceFilterEnabled" :aria-label="t('jev.memoryRelevanceFilter')" />
                   </SettingRow>
                   <SettingRow :label="t('jev.memoryRerank')" :hint="t('jev.memoryRerankHint')">
-                    <NSwitch v-model:value="settings.ekkoMemoryRerankEnabled" :aria-label="t('jev.memoryRerank')" />
+                    <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.ekkoMemoryRerankEnabled" :aria-label="t('jev.memoryRerank')" />
                   </SettingRow>
                   <SettingRow :label="t('jev.memoryWriteReview')" :hint="t('jev.memoryWriteReviewHint')">
-                    <NSwitch v-model:value="settings.ekkoMemoryWriteReviewEnabled" :aria-label="t('jev.memoryWriteReview')" />
+                    <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.ekkoMemoryWriteReviewEnabled" :aria-label="t('jev.memoryWriteReview')" />
                   </SettingRow>
                 </div>
                 <details class="memory-advanced">
                   <summary>{{ t('jev.memoryAdvanced') }}</summary>
                   <div class="settings-rows">
                     <SettingRow :label="t('jev.memoryCandidateLimit')" :hint="t('jev.memoryCandidateLimitHint')">
-                      <NInputNumber :value="settings.ekkoMemoryCandidateLimit" @update:value="value => { if (value !== null) settings!.ekkoMemoryCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.memoryCandidateLimit') }" />
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoMemoryCandidateLimit" @update:value="value => { if (value !== null) settings!.ekkoMemoryCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.memoryCandidateLimit') }" />
                     </SettingRow>
                     <SettingRow :label="t('jev.memoryRecallMinConfidence')" :hint="t('jev.memoryRecallMinConfidenceHint')">
-                      <NInputNumber :value="settings.ekkoMemoryRecallMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryRecallMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryRecallMinConfidence') }" />
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoMemoryRecallMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryRecallMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryRecallMinConfidence') }" />
                     </SettingRow>
                     <SettingRow :label="t('jev.memoryFilterMinConfidence')" :hint="t('jev.memoryFilterMinConfidenceHint')">
-                      <NInputNumber :value="settings.ekkoMemoryFilterMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryFilterMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryFilterMinConfidence') }" />
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoMemoryFilterMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryFilterMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryFilterMinConfidence') }" />
                     </SettingRow>
                     <SettingRow :label="t('jev.memoryMinConfidence')" :hint="t('jev.memoryMinConfidenceHint')">
-                      <NInputNumber :value="settings.ekkoMemoryMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryMinConfidence') }" />
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoMemoryMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoMemoryMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.memoryMinConfidence') }" />
                     </SettingRow>
                     <SettingRow :label="t('jev.memoryTimeout')" :hint="t('jev.memoryTimeoutHint')">
-                      <NInputNumber :value="settings.ekkoMemoryTimeoutMs" @update:value="value => { if (value !== null) settings!.ekkoMemoryTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.memoryTimeout') }" />
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoMemoryTimeoutMs" @update:value="value => { if (value !== null) settings!.ekkoMemoryTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.memoryTimeout') }" />
+                    </SettingRow>
+                  </div>
+                </details>
+              </details>
+            </section>
+            <section class="config-card" data-theme-surface="card" :aria-label="t('jev.personMemoryEnabled')">
+              <header class="card-header">
+                <h5 class="card-title">{{ t('jev.personMemoryEnabled') }}</h5>
+                <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.personMemoryEnabled" :aria-label="t('jev.personMemoryEnabled')" />
+              </header>
+              <p class="card-hint">{{ t('jev.personMemoryHint') }}</p>
+              <p class="card-hint">{{ t(personMemoryStatus) }}</p>
+              <details class="memory-options" :open="settings.personMemoryEnabled">
+                <summary>{{ t('jev.memoryOptions') }}</summary>
+                <p class="section-hint">{{ t('jev.memoryOptionsHint') }}</p>
+                <div class="settings-rows">
+                  <SettingRow :label="t('jev.memoryKindRouting')" :hint="t('jev.memoryKindRoutingHint')">
+                    <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.personMemoryKindRoutingEnabled" :aria-label="`${t('person.title')} · ${t('jev.memoryKindRouting')}`" />
+                  </SettingRow>
+                  <SettingRow :label="t('jev.memoryRelevanceFilter')" :hint="t('jev.memoryRelevanceFilterHint')">
+                    <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.personMemoryRelevanceFilterEnabled" :aria-label="`${t('person.title')} · ${t('jev.memoryRelevanceFilter')}`" />
+                  </SettingRow>
+                  <SettingRow :label="t('jev.memoryRerank')" :hint="t('jev.memoryRerankHint')">
+                    <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.personMemoryRerankEnabled" :aria-label="`${t('person.title')} · ${t('jev.memoryRerank')}`" />
+                  </SettingRow>
+                  <SettingRow :label="t('jev.memoryWriteReview')" :hint="t('jev.memoryWriteReviewHint')">
+                    <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.personMemoryWriteReviewEnabled" :aria-label="`${t('person.title')} · ${t('jev.memoryWriteReview')}`" />
+                  </SettingRow>
+                </div>
+                <details class="memory-advanced">
+                  <summary>{{ t('jev.memoryAdvanced') }}</summary>
+                  <div class="settings-rows">
+                    <SettingRow :label="t('jev.memoryCandidateLimit')" :hint="t('jev.memoryCandidateLimitHint')">
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.personMemoryCandidateLimit" @update:value="value => { if (value !== null) settings!.personMemoryCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': `${t('person.title')} · ${t('jev.memoryCandidateLimit')}` }" />
+                    </SettingRow>
+                    <SettingRow :label="t('jev.memoryRecallMinConfidence')" :hint="t('jev.memoryRecallMinConfidenceHint')">
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.personMemoryRecallMinConfidence" @update:value="value => { if (value !== null) settings!.personMemoryRecallMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': `${t('person.title')} · ${t('jev.memoryRecallMinConfidence')}` }" />
+                    </SettingRow>
+                    <SettingRow :label="t('jev.memoryFilterMinConfidence')" :hint="t('jev.memoryFilterMinConfidenceHint')">
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.personMemoryFilterMinConfidence" @update:value="value => { if (value !== null) settings!.personMemoryFilterMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': `${t('person.title')} · ${t('jev.memoryFilterMinConfidence')}` }" />
+                    </SettingRow>
+                    <SettingRow :label="t('jev.memoryMinConfidence')" :hint="t('jev.memoryMinConfidenceHint')">
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.personMemoryMinConfidence" @update:value="value => { if (value !== null) settings!.personMemoryMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': `${t('person.title')} · ${t('jev.memoryMinConfidence')}` }" />
+                    </SettingRow>
+                    <SettingRow :label="t('jev.memoryTimeout')" :hint="t('jev.memoryTimeoutHint')">
+                      <NInputNumber :disabled="busy || !canConfigure" :value="settings.personMemoryTimeoutMs" @update:value="value => { if (value !== null) settings!.personMemoryTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': `${t('person.title')} · ${t('jev.memoryTimeout')}` }" />
                     </SettingRow>
                   </div>
                 </details>
@@ -155,7 +205,7 @@ usePageLoadingTask(() => loading.value)
             <section class="config-card" :aria-label="t('jev.ekkoSkillsEnabled')">
               <header class="card-header">
                 <h5 class="card-title">{{ t('jev.ekkoSkillsEnabled') }}</h5>
-                <NSwitch v-model:value="settings.ekkoSkillsEnabled" :aria-label="t('jev.ekkoSkillsEnabled')" />
+                <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.ekkoSkillsEnabled" :aria-label="t('jev.ekkoSkillsEnabled')" />
               </header>
               <p class="card-hint">{{ t(skillsStatus) }}</p>
               <details class="skills-options" :open="settings.ekkoSkillsEnabled">
@@ -163,13 +213,13 @@ usePageLoadingTask(() => loading.value)
                 <p class="section-hint">{{ t('jev.skillsOptionsHint') }}</p>
                 <div class="settings-rows">
                   <SettingRow :label="t('jev.skillsCandidateLimit')" :hint="t('jev.skillsCandidateLimitHint')">
-                    <NInputNumber :value="settings.ekkoSkillsCandidateLimit" @update:value="value => { if (value !== null) settings!.ekkoSkillsCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.skillsCandidateLimit') }" />
+                    <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoSkillsCandidateLimit" @update:value="value => { if (value !== null) settings!.ekkoSkillsCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.skillsCandidateLimit') }" />
                   </SettingRow>
                   <SettingRow :label="t('jev.skillsMinConfidence')" :hint="t('jev.skillsMinConfidenceHint')">
-                    <NInputNumber :value="settings.ekkoSkillsMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoSkillsMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.skillsMinConfidence') }" />
+                    <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoSkillsMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoSkillsMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.skillsMinConfidence') }" />
                   </SettingRow>
                   <SettingRow :label="t('jev.skillsTimeout')" :hint="t('jev.skillsTimeoutHint')">
-                    <NInputNumber :value="settings.ekkoSkillsTimeoutMs" @update:value="value => { if (value !== null) settings!.ekkoSkillsTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.skillsTimeout') }" />
+                    <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoSkillsTimeoutMs" @update:value="value => { if (value !== null) settings!.ekkoSkillsTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.skillsTimeout') }" />
                   </SettingRow>
                 </div>
               </details>
@@ -179,11 +229,51 @@ usePageLoadingTask(() => loading.value)
         <section class="config-group" :aria-label="t('jev.groupSchedulingTitle')">
           <h4 class="group-title">{{ t('jev.groupSchedulingTitle') }}</h4>
           <div class="config-grid">
-            <section class="config-card"><header class="card-header"><h5 class="card-title">{{ t('jev.groupMessageRoutingEnabled') }}</h5><NSwitch v-model:value="settings.groupMessageRoutingEnabled" :aria-label="t('jev.groupMessageRoutingEnabled')" /></header><p class="card-hint">{{ t(routingStatus) }}</p><div class="settings-rows"><SettingRow :label="t('jev.groupHandoffReviewEnabled')" :hint="t('jev.groupHandoffReviewHint')"><NSwitch v-model:value="settings.groupHandoffReviewEnabled" :aria-label="t('jev.groupHandoffReviewEnabled')" /></SettingRow><SettingRow :label="t('jev.groupLoopDetectionEnabled')" :hint="t('jev.groupLoopDetectionHint')"><NSwitch v-model:value="settings.groupLoopDetectionEnabled" :aria-label="t('jev.groupLoopDetectionEnabled')" /></SettingRow><SettingRow :label="t('jev.groupMessageRoutingMode')"><NSelect data-testid="jev-routing-mode" :aria-label="t('jev.groupMessageRoutingMode')" v-model:value="settings.groupMessageRoutingMode" :options="[{ label: t('jev.groupRoutingSuggest'), value: 'suggest' }, { label: t('jev.groupRoutingAuto'), value: 'auto' }]" size="small" /></SettingRow><SettingRow :label="t('jev.groupMessageRoutingMinConfidence')" :hint="t('jev.groupMessageRoutingMinConfidenceHint')"><NInputNumber :value="settings.groupMessageRoutingMinConfidence" @update:value="value => { if (value !== null) settings!.groupMessageRoutingMinConfidence = value }" :input-props="{ 'aria-label': t('jev.groupMessageRoutingMinConfidence') }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" /></SettingRow><SettingRow :label="t('jev.groupMessageRoutingTimeout')" :hint="t('jev.groupMessageRoutingTimeoutHint')"><NInputNumber :value="settings.groupMessageRoutingTimeoutMs" @update:value="value => { if (value !== null) settings!.groupMessageRoutingTimeoutMs = value }" :input-props="{ 'aria-label': t('jev.groupMessageRoutingTimeout') }" size="small" class="input-md" :min="100" :max="30000" :step="100" /></SettingRow></div></section>
-            <section class="config-card"><header class="card-header"><h5 class="card-title">{{ t('jev.workflowExpectationTitle') }}</h5><NSwitch v-model:value="settings.workflowQualityEnabled" :aria-label="t('jev.workflowQualityEnabled')" /></header><p class="card-hint">{{ t(workflowStatus) }}</p><div class="settings-rows"><SettingRow :label="t('jev.workflowQualityMinConfidence')" :hint="t('jev.workflowQualityMinConfidenceHint')"><NInputNumber :value="settings.workflowQualityMinConfidence" @update:value="value => { if (value !== null) settings!.workflowQualityMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.workflowQualityMinConfidence') }" /></SettingRow><SettingRow :label="t('jev.workflowQualityTimeout')" :hint="t('jev.workflowQualityTimeoutHint')"><NInputNumber :value="settings.workflowQualityTimeoutMs" @update:value="value => { if (value !== null) settings!.workflowQualityTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :input-props="{ 'aria-label': t('jev.workflowQualityTimeout') }" /></SettingRow></div></section>
-            <section class="config-card"><header class="card-header"><h5 class="card-title">{{ t('jev.groupSummaryTitle') }}</h5><NSwitch v-model:value="settings.groupSummaryReviewEnabled" :aria-label="t('jev.groupSummaryReviewEnabled')" /></header><p class="card-hint">{{ t(summaryStatus) }}</p><div class="settings-rows"><SettingRow :label="t('jev.groupSummaryRevisionEnabled')" :hint="t('jev.groupSummaryRevisionHint')"><NSwitch v-model:value="settings.groupSummaryRevisionEnabled" :aria-label="t('jev.groupSummaryRevisionEnabled')" /></SettingRow><SettingRow :label="t('jev.groupSummaryReviewMinConfidence')" :hint="t('jev.groupSummaryReviewMinConfidenceHint')"><NInputNumber :value="settings.groupSummaryReviewMinConfidence" @update:value="value => { if (value !== null) settings!.groupSummaryReviewMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.groupSummaryReviewMinConfidence') }" /></SettingRow><SettingRow :label="t('jev.groupSummaryReviewTimeout')" :hint="t('jev.groupSummaryReviewTimeoutHint')"><NInputNumber :value="settings.groupSummaryReviewTimeoutMs" @update:value="value => { if (value !== null) settings!.groupSummaryReviewTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.groupSummaryReviewTimeout') }" /></SettingRow></div></section>
+            <section class="config-card"><header class="card-header"><h5 class="card-title">{{ t('jev.groupMessageRoutingEnabled') }}</h5><NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.groupMessageRoutingEnabled" :aria-label="t('jev.groupMessageRoutingEnabled')" /></header><p class="card-hint">{{ t(routingStatus) }}</p><div class="settings-rows"><SettingRow :label="t('jev.groupHandoffReviewEnabled')" :hint="t('jev.groupHandoffReviewHint')"><NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.groupHandoffReviewEnabled" :aria-label="t('jev.groupHandoffReviewEnabled')" /></SettingRow><SettingRow :label="t('jev.groupLoopDetectionEnabled')" :hint="t('jev.groupLoopDetectionHint')"><NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.groupLoopDetectionEnabled" :aria-label="t('jev.groupLoopDetectionEnabled')" /></SettingRow><SettingRow :label="t('jev.groupMessageRoutingMode')"><NSelect :disabled="busy || !canConfigure" data-testid="jev-routing-mode" :aria-label="t('jev.groupMessageRoutingMode')" v-model:value="settings.groupMessageRoutingMode" :options="[{ label: t('jev.groupRoutingSuggest'), value: 'suggest' }, { label: t('jev.groupRoutingAuto'), value: 'auto' }]" size="small" /></SettingRow><SettingRow :label="t('jev.groupMessageRoutingMinConfidence')" :hint="t('jev.groupMessageRoutingMinConfidenceHint')"><NInputNumber :disabled="busy || !canConfigure" :value="settings.groupMessageRoutingMinConfidence" @update:value="value => { if (value !== null) settings!.groupMessageRoutingMinConfidence = value }" :input-props="{ 'aria-label': t('jev.groupMessageRoutingMinConfidence') }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" /></SettingRow><SettingRow :label="t('jev.groupMessageRoutingTimeout')" :hint="t('jev.groupMessageRoutingTimeoutHint')"><NInputNumber :disabled="busy || !canConfigure" :value="settings.groupMessageRoutingTimeoutMs" @update:value="value => { if (value !== null) settings!.groupMessageRoutingTimeoutMs = value }" :input-props="{ 'aria-label': t('jev.groupMessageRoutingTimeout') }" size="small" class="input-md" :min="100" :max="30000" :step="100" /></SettingRow></div></section>
+            <section class="config-card"><header class="card-header"><h5 class="card-title">{{ t('jev.workflowExpectationTitle') }}</h5><NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.workflowQualityEnabled" :aria-label="t('jev.workflowQualityEnabled')" /></header><p class="card-hint">{{ t(workflowStatus) }}</p><div class="settings-rows"><SettingRow :label="t('jev.workflowQualityMinConfidence')" :hint="t('jev.workflowQualityMinConfidenceHint')"><NInputNumber :disabled="busy || !canConfigure" :value="settings.workflowQualityMinConfidence" @update:value="value => { if (value !== null) settings!.workflowQualityMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.workflowQualityMinConfidence') }" /></SettingRow><SettingRow :label="t('jev.workflowQualityTimeout')" :hint="t('jev.workflowQualityTimeoutHint')"><NInputNumber :disabled="busy || !canConfigure" :value="settings.workflowQualityTimeoutMs" @update:value="value => { if (value !== null) settings!.workflowQualityTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :input-props="{ 'aria-label': t('jev.workflowQualityTimeout') }" /></SettingRow></div></section>
+            <section class="config-card"><header class="card-header"><h5 class="card-title">{{ t('jev.groupSummaryTitle') }}</h5><NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.groupSummaryReviewEnabled" :aria-label="t('jev.groupSummaryReviewEnabled')" /></header><p class="card-hint">{{ t(summaryStatus) }}</p><div class="settings-rows"><SettingRow :label="t('jev.groupSummaryRevisionEnabled')" :hint="t('jev.groupSummaryRevisionHint')"><NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.groupSummaryRevisionEnabled" :aria-label="t('jev.groupSummaryRevisionEnabled')" /></SettingRow><SettingRow :label="t('jev.groupSummaryReviewMinConfidence')" :hint="t('jev.groupSummaryReviewMinConfidenceHint')"><NInputNumber :disabled="busy || !canConfigure" :value="settings.groupSummaryReviewMinConfidence" @update:value="value => { if (value !== null) settings!.groupSummaryReviewMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.groupSummaryReviewMinConfidence') }" /></SettingRow><SettingRow :label="t('jev.groupSummaryReviewTimeout')" :hint="t('jev.groupSummaryReviewTimeoutHint')"><NInputNumber :disabled="busy || !canConfigure" :value="settings.groupSummaryReviewTimeoutMs" @update:value="value => { if (value !== null) settings!.groupSummaryReviewTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.groupSummaryReviewTimeout') }" /></SettingRow></div></section>
           </div>
         </section>
+        <section class="config-group" :aria-label="t('jev.computerUseAutomation')">
+          <h4 class="group-title">{{ t('jev.computerUseAutomation') }}</h4>
+          <p class="section-hint">{{ t('jev.computerUseAutomationHint') }}</p>
+          <div class="config-grid">
+            <section class="config-card" data-theme-surface="card" :aria-label="t('jev.computerUseMatchEnabled')">
+              <header class="card-header">
+                <h5 class="card-title">{{ t('jev.computerUseMatchEnabled') }}</h5>
+                <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.ekkoComputerUseMatchEnabled" :aria-label="t('jev.computerUseMatchEnabled')" />
+              </header>
+              <p class="card-hint">{{ t('jev.computerUseMatchHint') }}</p>
+              <div class="settings-rows">
+                <SettingRow :label="t('jev.computerUseMatchCandidateLimit')">
+                  <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoComputerUseMatchCandidateLimit" @update:value="value => { if (value !== null) settings!.ekkoComputerUseMatchCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.computerUseMatchCandidateLimit') }" />
+                </SettingRow>
+                <SettingRow :label="t('jev.computerUseMatchMinConfidence')">
+                  <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoComputerUseMatchMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoComputerUseMatchMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.computerUseMatchMinConfidence') }" />
+                </SettingRow>
+                <SettingRow :label="t('jev.computerUseMatchTimeoutMs')">
+                  <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoComputerUseMatchTimeoutMs" @update:value="value => { if (value !== null) settings!.ekkoComputerUseMatchTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.computerUseMatchTimeoutMs') }" />
+                </SettingRow>
+              </div>
+            </section>
+            <section class="config-card" data-theme-surface="card" :aria-label="t('jev.computerUseVerifyEnabled')">
+              <header class="card-header">
+                <h5 class="card-title">{{ t('jev.computerUseVerifyEnabled') }}</h5>
+                <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.ekkoComputerUseVerifyEnabled" :aria-label="t('jev.computerUseVerifyEnabled')" />
+              </header>
+              <p class="card-hint">{{ t('jev.computerUseVerifyHint') }}</p>
+              <div class="settings-rows">
+                <SettingRow :label="t('jev.computerUseVerifyMinConfidence')">
+                  <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoComputerUseVerifyMinConfidence" @update:value="value => { if (value !== null) settings!.ekkoComputerUseVerifyMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.computerUseVerifyMinConfidence') }" />
+                </SettingRow>
+                <SettingRow :label="t('jev.computerUseVerifyTimeoutMs')">
+                  <NInputNumber :disabled="busy || !canConfigure" :value="settings.ekkoComputerUseVerifyTimeoutMs" @update:value="value => { if (value !== null) settings!.ekkoComputerUseVerifyTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.computerUseVerifyTimeoutMs') }" />
+                </SettingRow>
+              </div>
+            </section>
+          </div>
+        </section>
+
         <section class="config-group" :aria-label="t('jev.browserAutomation')">
           <h4 class="group-title">{{ t('jev.browserAutomation') }}</h4>
           <p class="section-hint">{{ t('jev.browserAutomationHint') }}</p>
@@ -191,20 +281,20 @@ usePageLoadingTask(() => loading.value)
             <section class="config-card" :aria-label="t('jev.browserMatchEnabled')">
               <header class="card-header">
                 <h5 class="card-title">{{ t('jev.browserMatchEnabled') }}</h5>
-                <NSwitch v-model:value="settings.browserMatchEnabled" :aria-label="t('jev.browserMatchEnabled')" />
+                <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.browserMatchEnabled" :aria-label="t('jev.browserMatchEnabled')" />
               </header>
               <p class="card-hint">{{ t('jev.browserMatchHint') }}</p>
               <details class="browser-options" :open="settings.browserMatchEnabled">
                 <summary>{{ t('jev.browserMatchOptions') }}</summary>
                 <div class="settings-rows">
                   <SettingRow :label="t('jev.browserMatchCandidateLimit')">
-                    <NInputNumber :value="settings.browserMatchCandidateLimit" @update:value="value => { if (value !== null) settings!.browserMatchCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.browserMatchCandidateLimit') }" />
+                    <NInputNumber :disabled="busy || !canConfigure" :value="settings.browserMatchCandidateLimit" @update:value="value => { if (value !== null) settings!.browserMatchCandidateLimit = value }" size="small" class="input-md" :min="1" :max="50" :precision="0" :input-props="{ 'aria-label': t('jev.browserMatchCandidateLimit') }" />
                   </SettingRow>
                   <SettingRow :label="t('jev.browserMatchMinConfidence')">
-                    <NInputNumber :value="settings.browserMatchMinConfidence" @update:value="value => { if (value !== null) settings!.browserMatchMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.browserMatchMinConfidence') }" />
+                    <NInputNumber :disabled="busy || !canConfigure" :value="settings.browserMatchMinConfidence" @update:value="value => { if (value !== null) settings!.browserMatchMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.browserMatchMinConfidence') }" />
                   </SettingRow>
                   <SettingRow :label="t('jev.browserMatchTimeoutMs')">
-                    <NInputNumber :value="settings.browserMatchTimeoutMs" @update:value="value => { if (value !== null) settings!.browserMatchTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.browserMatchTimeoutMs') }" />
+                    <NInputNumber :disabled="busy || !canConfigure" :value="settings.browserMatchTimeoutMs" @update:value="value => { if (value !== null) settings!.browserMatchTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.browserMatchTimeoutMs') }" />
                   </SettingRow>
                 </div>
               </details>
@@ -212,17 +302,17 @@ usePageLoadingTask(() => loading.value)
             <section class="config-card" :aria-label="t('jev.browserVerifyEnabled')">
               <header class="card-header">
                 <h5 class="card-title">{{ t('jev.browserVerifyEnabled') }}</h5>
-                <NSwitch v-model:value="settings.browserVerifyEnabled" :aria-label="t('jev.browserVerifyEnabled')" />
+                <NSwitch :disabled="busy || !canConfigure" :aria-disabled="busy || !canConfigure" v-model:value="settings.browserVerifyEnabled" :aria-label="t('jev.browserVerifyEnabled')" />
               </header>
               <p class="card-hint">{{ t('jev.browserVerifyHint') }}</p>
               <details class="browser-options" :open="settings.browserVerifyEnabled">
                 <summary>{{ t('jev.browserVerifyOptions') }}</summary>
                 <div class="settings-rows">
                   <SettingRow :label="t('jev.browserVerifyMinConfidence')">
-                    <NInputNumber :value="settings.browserVerifyMinConfidence" @update:value="value => { if (value !== null) settings!.browserVerifyMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.browserVerifyMinConfidence') }" />
+                    <NInputNumber :disabled="busy || !canConfigure" :value="settings.browserVerifyMinConfidence" @update:value="value => { if (value !== null) settings!.browserVerifyMinConfidence = value }" size="small" class="input-md" :min="0.5" :max="1" :step="0.05" :input-props="{ 'aria-label': t('jev.browserVerifyMinConfidence') }" />
                   </SettingRow>
                   <SettingRow :label="t('jev.browserVerifyTimeoutMs')">
-                    <NInputNumber :value="settings.browserVerifyTimeoutMs" @update:value="value => { if (value !== null) settings!.browserVerifyTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.browserVerifyTimeoutMs') }" />
+                    <NInputNumber :disabled="busy || !canConfigure" :value="settings.browserVerifyTimeoutMs" @update:value="value => { if (value !== null) settings!.browserVerifyTimeoutMs = value }" size="small" class="input-md" :min="100" :max="30000" :step="100" :precision="0" :input-props="{ 'aria-label': t('jev.browserVerifyTimeoutMs') }" />
                   </SettingRow>
                 </div>
               </details>
@@ -230,10 +320,10 @@ usePageLoadingTask(() => loading.value)
           </div>
         </section>
         <div class="settings-actions">
-          <NButton type="primary" :loading="busy" :disabled="busy" @click="perform('save')">{{ t('common.save') }}</NButton>
-          <NButton :disabled="busy || !settings.hasApiKey" @click="perform('test')">{{ t('jev.testSaved') }}</NButton>
+          <NButton type="primary" :loading="busy" :disabled="busy || !canConfigure" @click="perform('save')">{{ t('common.save') }}</NButton>
+          <NButton :disabled="busy || !canConfigure || !settings.hasApiKey" @click="perform('test')">{{ t('jev.testSaved') }}</NButton>
           <NPopconfirm :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" @positive-click="perform('delete')">
-            <template #trigger><NButton type="error" secondary :disabled="busy">{{ t('common.delete') }}</NButton></template>
+            <template #trigger><NButton type="error" secondary :disabled="busy || !canConfigure">{{ t('common.delete') }}</NButton></template>
             {{ t('jev.deleteConfirm') }}
           </NPopconfirm>
         </div>

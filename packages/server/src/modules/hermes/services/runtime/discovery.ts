@@ -9,7 +9,18 @@ import { isPathWithin } from './path'
 import { resolveHermesBin } from './process'
 
 const execFileAsync = promisify(execFile)
-const HERMES_VERSION_PROBE = "import importlib.util, hermes_cli; assert importlib.util.find_spec('hermes_cli.main'); print(hermes_cli.__version__)"
+const HERMES_VERSION_PROBE = [
+  'import importlib.util, hermes_cli',
+  "assert importlib.util.find_spec('hermes_cli.main')",
+  'try:',
+  '    from hermes_cli.version_info import get_version_info',
+  'except ModuleNotFoundError as exc:',
+  "    if exc.name != 'hermes_cli.version_info': raise",
+  '    version = hermes_cli.__version__',
+  'else:',
+  '    version = get_version_info().display_version',
+  'print(version)',
+].join('\n')
 
 export interface HermesManagedRuntimeLocation {
   version: string
@@ -67,10 +78,12 @@ async function findHermesCommandPaths(env: NodeJS.ProcessEnv): Promise<string[]>
 }
 
 function normalizeVersion(raw: string): string {
-  return raw
+  const version = raw
     .split(/\r?\n/)[0]
     ?.replace(/^Hermes(?: Agent)?\s+/i, '')
     .trim() || ''
+  // An unstamped Hermes compatibility version is not a release identity.
+  return /^(?:v?0\.0\.0|unknown)$/i.test(version) ? '' : version
 }
 
 function versionProbeError(error: unknown): string {

@@ -2,6 +2,11 @@ appId: com.hermeswebui.studio
 productName: Ekko Studio
 copyright: Copyright © 2026
 
+protocols:
+  - name: Ekko Studio provider import
+    schemes:
+      - ekko-studio
+
 directories:
   output: release
   buildResources: build
@@ -96,7 +101,7 @@ win:
   icon: build/icon.ico
   target:
     - target: nsis
-      arch: [x64]
+      arch: [x64, arm64]
   artifactName: "Ekko.Studio-${version}-${arch}.${ext}"
 
 linux:

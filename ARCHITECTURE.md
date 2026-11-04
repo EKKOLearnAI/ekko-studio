@@ -12,8 +12,9 @@ Ekko Agent, Hermes Agent, and coding agents for chat, coding, and workflows.
 | Server | `packages/server/src` | HTTP API, auth, Socket.IO, SQLite stores, file access, Hermes runtime integration. |
 | Ekko Agent | `packages/ekko-agent` | Canonical Ekko runtime, profile facade, providers, tools, memory, skills, conversations, and package API. |
 | Desktop | `packages/desktop` | Electron shell, local Web UI server bootstrap, updater, bundled Python/Hermes runtime. |
-| Tests | `tests` | Vitest unit/integration tests and Playwright browser tests. |
-| CI | `.github/workflows` | Build, e2e, lockfile, Docker, and desktop release automation. |
+| MCU | `packages/mcu` | ESP32-C3 source projects and release firmware; board-specific ESP32-S3 firmware. |
+| Tests | `tests` | Required focused tests for new features; the legacy suite has been removed. |
+| CI | `.github/workflows` | Independent Build, Test and E2E checks, lockfile, Docker, and desktop release automation. |
 
 ## Request Flow
 
@@ -77,16 +78,14 @@ Frontend rules:
 
 Desktop packaging is intentionally split:
 
-- Pull requests run the web UI build and tests in `.github/workflows/build.yml`.
+- Pull requests run the repository harness and web UI build in `.github/workflows/build.yml`.
 - Published GitHub Releases run Web UI artifact packaging and Docker image publishing without
   marking the release as GitHub latest.
-- The independent `tos-package-test.yml` workflow, triggered manually or by
-  TOS-related pull requests, builds a
-  TOS 7 x86_64 Deb service with a private Node.js runtime. It keeps beta packages,
-  checksums and static verification reports in Actions artifacts only, pending
-  TNAS lifecycle acceptance; it is separate from the main release workflows.
 - Manual dispatches run full desktop artifact packaging in `.github/workflows/desktop-release.yml`.
 - `.github/workflows/desktop-manual-build.yml` builds one desktop target for targeted repairs or re-runs.
+- Windows x64 and ARM64 use native runners and separate updater manifests
+  (`latest.yml` and `latest-arm64.yml`). See `packages/desktop/WINDOWS-ARM64.md`
+  for native speech staging and runtime acceptance.
 - Each release matrix target uploads only the artifact globs for its own platform.
 - A successful full desktop release marks the target GitHub Release as latest after all desktop artifacts
   and the merged macOS updater manifest have been uploaded.
@@ -150,8 +149,14 @@ allows users to run the upstream `hermes update` command directly.
 The minimum mechanical harness is:
 
 - `npm run harness:check` for repository docs, workflow, and package-script invariants.
-- `npm run test` or focused Vitest tests for local logic.
-- `npm run test:e2e` for browser-visible routing/auth/chat regressions.
+- Focused `npm run test -- <file>` for each new feature's logic.
+- Focused `npm run test:e2e -- <file>` for new browser journeys.
+- Independent Test (`test.yml`) and E2E (`playwright.yml`) workflows run all
+  current Vitest and Playwright tests. Build (`build.yml`) runs the harness and
+  production build. Each workflow reports its own status and can fail independently.
+- Empty suites are allowed during the reset, without waiving the requirement to
+  test new features.
+- CI does not require blanket coverage or browser shards.
 - `npm run build` for type checking and production bundles.
 
 See `docs/harness/validation.md` for change-specific commands.

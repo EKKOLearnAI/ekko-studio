@@ -1,24 +1,24 @@
 <script setup lang="ts">
 import PageHeader from '@/components/layout/PageHeader.vue'
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { NTabPane, NTabs } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppConnectionsPanel from '@/components/hermes/connections/AppConnectionsPanel.vue'
 import McuDevicesPanel from '@/components/hermes/connections/McuDevicesPanel.vue'
-import DevicesView from '@/views/hermes/DevicesView.vue'
-import { isStoredSuperAdmin } from '@/api/client'
+import RemoteDevicesPanel from '@/components/hermes/connections/RemoteDevicesPanel.vue'
+import { desktopBridge } from '@/utils/desktop-bridge'
 
-type ConnectionTab = 'app' | 'mcu' | 'devices'
+type ConnectionTab = 'app' | 'mcu' | 'remote'
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
-const isSuperAdmin = computed(() => isStoredSuperAdmin())
+const hasRemoteDevices = desktopBridge()?.isDesktop === true && !!desktopBridge()?.remoteDevices
 
 function normalizeTab(value: unknown): ConnectionTab {
+  if (value === 'remote' && hasRemoteDevices) return value
   if (value === 'mcu') return value
-  if (value === 'devices' && isSuperAdmin.value) return value
   return 'app'
 }
 
@@ -67,8 +67,8 @@ function updateTab(value: string | number) {
       <NTabPane name="mcu" :tab="t('connections.tabs.mcu')" display-directive="if">
         <McuDevicesPanel />
       </NTabPane>
-      <NTabPane v-if="isSuperAdmin" name="devices" :tab="t('connections.tabs.devices')" display-directive="if">
-        <DevicesView embedded />
+      <NTabPane v-if="hasRemoteDevices" name="remote" :tab="t('remoteDevices.title')" display-directive="if">
+        <RemoteDevicesPanel />
       </NTabPane>
     </NTabs>
   </div>

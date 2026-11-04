@@ -15,13 +15,38 @@ export function assertProviderAvailable(provider: string): void {
   }
 }
 
+/** Curate discovered built-in catalogs only; configured/custom IDs are added by callers. */
+export function currentMiniMaxCatalogModels(provider: string, baseUrl: string, models: string[]): string[] {
+  provider = provider.replace(/^custom:/, '')
+  const preset = PROVIDER_PRESETS.find(candidate => candidate.value === provider)
+  const normalizeUrl = (url: string) => url.replace(/\/+$/, '').replace(/\/v1$/, '')
+  const directMiniMax = ['minimax', 'minimax-cn', 'minimax-oauth'].includes(provider) &&
+    /^https:\/\/api\.(?:minimax\.io|minimaxi\.com)\/(?:anthropic(?:\/v1)?|v1)\/?$/.test(baseUrl)
+  if (!preset || (!directMiniMax && normalizeUrl(preset.base_url) !== normalizeUrl(baseUrl))) return [...models]
+  const current = models.filter(model =>
+    !/^(?:(?:minimax|minimaxai)\/)?minimax-m\d/i.test(model) ||
+    /^(?:(?:minimax|minimaxai)\/)?minimax-(?:m3|m3\.1-flash(?::free|-free)?)$/i.test(model))
+  if (provider === 'minimax' || provider === 'minimax-cn') {
+    return [...new Set([...preset.models, ...current])]
+  }
+  // Keep unrelated model positions stable while recommending Flash before M3.
+  const isMiniMax = (model: string) => /^(?:(?:minimax|minimaxai)\/)?minimax-m\d/i.test(model)
+  const miniMaxModels = current.filter(isMiniMax)
+    .sort((left, right) => Number(/m3\.1-flash/i.test(right)) - Number(/m3\.1-flash/i.test(left)))
+  return current.map(model => isMiniMax(model) ? miniMaxModels.shift()! : model)
+}
+
+export type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
+
 export interface ProviderPreset {
   label: string
   value: string
   base_url: string
   models: string[]
   builtin: boolean
-  api_mode?: 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
+  api_mode?: ProviderApiMode
+  // Catalog metadata only; existing Hermes configuration writers use api_mode.
+  catalog_api_mode: ProviderApiMode | 'per_model'
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -31,6 +56,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://api.apikey.fan/v1',
     api_mode: 'codex_responses',
+    catalog_api_mode: 'codex_responses',
     models: [
       'gpt-5.5',
       'gpt-5.4',
@@ -45,6 +71,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://api.apikey.fan',
     api_mode: "anthropic_messages",
+    catalog_api_mode: "anthropic_messages",
     models: [
       'claude-opus-4-8',
       'claude-opus-4-7',
@@ -59,6 +86,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'http://127.0.0.1:1234/v1',
     api_mode: 'chat_completions',
+    catalog_api_mode: 'chat_completions',
     models: [],
   },
   {
@@ -67,6 +95,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://api.anthropic.com',
     api_mode: 'anthropic_messages',
+    catalog_api_mode: 'anthropic_messages',
     models: [
       'claude-fable-5',
       'claude-opus-4-8',
@@ -86,6 +115,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://api.anthropic.com',
     api_mode: 'anthropic_messages',
+    catalog_api_mode: 'anthropic_messages',
     models: [
       'claude-fable-5',
       'claude-opus-4-8',
@@ -100,6 +130,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'gemini',
     builtin: true,
     base_url: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    catalog_api_mode: 'chat_completions',
     models: [
       'gemini-3.1-pro-preview',
       'gemini-3-pro-preview',
@@ -112,6 +143,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'deepseek',
     builtin: true,
     base_url: 'https://api.deepseek.com',
+    catalog_api_mode: 'chat_completions',
     models: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'],
   },
   {
@@ -119,6 +151,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'zai',
     builtin: true,
     base_url: 'https://api.z.ai/api/paas/v4',
+    catalog_api_mode: 'chat_completions',
     models: [
       'glm-5.2',
       'glm-5.1',
@@ -135,6 +168,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'glm',
     builtin: true,
     base_url: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    catalog_api_mode: 'chat_completions',
     models: [
       'glm-5.2',
       'glm-5.1',
@@ -147,6 +181,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'kimi-coding',
     builtin: true,
     base_url: 'https://api.kimi.com/coding/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'kimi-k2.7-code',
       'kimi-k2.6',
@@ -163,6 +198,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'kimi-coding-cn',
     builtin: true,
     base_url: 'https://api.kimi.cn/coding/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'kimi-k2.6',
       'kimi-k2.5',
@@ -176,6 +212,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'xai',
     builtin: true,
     base_url: 'https://api.x.ai/v1',
+    catalog_api_mode: 'codex_responses',
     models: [
       'grok-build-0.1',
       'grok-composer-2.5-fast',
@@ -191,6 +228,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'xai-oauth',
     builtin: true,
     base_url: 'https://api.x.ai/v1',
+    catalog_api_mode: 'codex_responses',
     models: [
       'grok-build-0.1',
       'grok-composer-2.5-fast',
@@ -207,6 +245,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://portal.qwen.ai/v1',
     api_mode: 'chat_completions',
+    catalog_api_mode: 'chat_completions',
     models: [
       'qwen3.5-plus',
       'qwen3-coder-plus',
@@ -219,7 +258,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://api.minimax.io/anthropic/v1',
     api_mode: 'anthropic_messages',
-    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
+    catalog_api_mode: 'anthropic_messages',
+    models: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
   },
   {
     label: 'MiniMax Coding Plan (OAuth)',
@@ -227,7 +267,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://api.minimax.io/anthropic',
     api_mode: 'anthropic_messages',
-    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed'],
+    catalog_api_mode: 'anthropic_messages',
+    models: ['MiniMax-M3'],
   },
   {
     label: 'MiniMax (China)',
@@ -235,13 +276,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://api.minimaxi.com/anthropic/v1',
     api_mode: 'anthropic_messages',
-    models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2'],
+    catalog_api_mode: 'anthropic_messages',
+    models: ['MiniMax-M3.1-Flash', 'MiniMax-M3'],
   },
   {
     label: 'Alibaba Cloud',
     value: 'alibaba',
     builtin: true,
     base_url: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'qwen3.7-max',
       'qwen3.6-plus',
@@ -251,7 +294,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'qwen3-coder-next',
       'glm-5',
       'glm-4.7',
-      'MiniMax-M2.5',
     ],
   },
   {
@@ -264,6 +306,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     // https://coding.dashscope.aliyuncs.com/v1 (no -intl), since the -intl endpoint
     // returns HTTP 401 for those keys.
     base_url: 'https://coding-intl.dashscope.aliyuncs.com/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'qwen3.7-max',
       'qwen3.7-plus',
@@ -274,7 +317,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'kimi-k2.5',
       'glm-5',
       'glm-4.7',
-      'MiniMax-M2.5',
     ],
   },
   {
@@ -282,12 +324,12 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'huggingface',
     builtin: true,
     base_url: 'https://router.huggingface.co/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'moonshotai/Kimi-K2.5',
       'Qwen/Qwen3.5-397B-A17B',
       'Qwen/Qwen3.5-35B-A3B',
       'deepseek-ai/DeepSeek-V3.2',
-      'MiniMaxAI/MiniMax-M2.5',
       'zai-org/GLM-5',
       'XiaomiMiMo/MiMo-V2-Flash',
       'moonshotai/Kimi-K2-Thinking',
@@ -299,6 +341,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'nvidia',
     builtin: true,
     base_url: 'https://integrate.api.nvidia.com/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'nvidia/nemotron-3-ultra-550b-a55b',
       'nvidia/nemotron-3-super-120b-a12b',
@@ -313,9 +356,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'novita',
     builtin: true,
     base_url: 'https://api.novita.ai/openai',
+    catalog_api_mode: 'chat_completions',
     models: [
       'moonshotai/kimi-k2.5',
-      'minimax/minimax-m2.7',
       'zai-org/glm-5',
       'deepseek/deepseek-v3-0324',
       'deepseek/deepseek-r1-0528',
@@ -327,6 +370,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'gmi',
     builtin: true,
     base_url: 'https://api.gmi-serving.com/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'zai-org/GLM-5.1-FP8',
       'deepseek-ai/DeepSeek-V3.2',
@@ -341,6 +385,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'xiaomi-token-plan',
     builtin: true,
     base_url: 'https://token-plan-sgp.xiaomimimo.com/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'mimo-v2-omni',
       'mimo-v2-pro',
@@ -357,6 +402,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'xiaomi',
     builtin: true,
     base_url: 'https://api.xiaomimimo.com/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'mimo-v2.5-pro',
       'mimo-v2.5',
@@ -370,6 +416,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'kilocode',
     builtin: true,
     base_url: 'https://api.kilo.ai/api/gateway',
+    catalog_api_mode: 'chat_completions',
     models: [
       'anthropic/claude-opus-4.6',
       'anthropic/claude-sonnet-4.6',
@@ -383,6 +430,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'tencent-tokenhub',
     builtin: true,
     base_url: 'https://tokenhub.tencentmaas.com/v1',
+    catalog_api_mode: 'chat_completions',
     models: ['hy3-preview'],
   },
   {
@@ -390,11 +438,11 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'ai-gateway',
     builtin: true,
     base_url: 'https://ai-gateway.vercel.sh/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'moonshotai/kimi-k2.6',
       'alibaba/qwen3.6-plus',
       'zai/glm-5.1',
-      'minimax/minimax-m2.7',
       'anthropic/claude-sonnet-4.6',
       'anthropic/claude-opus-4.7',
       'anthropic/claude-opus-4.6',
@@ -413,6 +461,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'cliproxyapi',
     builtin: true,
     base_url: 'http://127.0.0.1:8317/v1',
+    catalog_api_mode: 'chat_completions',
     models: [
       'gpt-5.5',
       'gpt-5-codex',
@@ -427,6 +476,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'opencode-zen',
     builtin: true,
     base_url: 'https://opencode.ai/zen/v1',
+    catalog_api_mode: 'per_model',
     models: [
       'kimi-k2.5',
       'kimi-k2.6',
@@ -460,9 +510,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'gemini-3.5-flash',
       'gemini-3.1-pro',
       'gemini-3-flash',
+      'minimax-m3.1-flash-free',
       'minimax-m3',
-      'minimax-m2.7',
-      'minimax-m2.5',
       'glm-5.2',
       'glm-5.1',
       'glm-5',
@@ -485,6 +534,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'opencode-go',
     builtin: true,
     base_url: 'https://opencode.ai/zen/go/v1',
+    catalog_api_mode: 'per_model',
     models: [
       'kimi-k2.7-code',
       'kimi-k2.6',
@@ -497,8 +547,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'mimo-v2-pro',
       'mimo-v2-omni',
       'minimax-m3',
-      'minimax-m2.7',
-      'minimax-m2.5',
       'deepseek-v4-pro',
       'deepseek-v4-flash',
       'qwen3.7-max',
@@ -513,6 +561,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://api.longcat.chat/openai',
     api_mode: 'codex_responses',
+    catalog_api_mode: 'codex_responses',
     models: ['LongCat-Flash-Lite', 'LongCat-2.0-Preview'],
   },
   {
@@ -520,6 +569,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'openai-codex',
     builtin: true,
     base_url: 'https://chatgpt.com/backend-api/codex',
+    catalog_api_mode: 'codex_responses',
     models: [
       'gpt-5.6-sol',
       'gpt-5.6-sol-pro',
@@ -540,6 +590,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     builtin: true,
     base_url: 'https://api.openai.com/v1',
     api_mode: 'codex_responses',
+    catalog_api_mode: 'codex_responses',
     models: [
       'gpt-5.6-sol',
       'gpt-5.6-sol-pro',
@@ -564,6 +615,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'arcee',
     builtin: true,
     base_url: 'https://api.arcee.ai/api/v1',
+    catalog_api_mode: 'chat_completions',
     models: ['trinity-large-thinking', 'trinity-large-preview', 'trinity-mini'],
   },
   {
@@ -571,6 +623,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'nous',
     builtin: true,
     base_url: 'https://inference-api.nousresearch.com/v1',
+    catalog_api_mode: 'chat_completions',
     // Ordered fallback catalog pinned from hermes_cli/models.py at
     // 4281151ae859241351ba14d8c7682dc67ff4c126 and mirrored by the docs
     // model catalog (SHA256 bab0d42038f84f44e0673e347f18f1c347daab599ce78128ed237763638b038e).
@@ -615,6 +668,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'stepfun',
     builtin: true,
     base_url: 'https://api.stepfun.ai/step_plan/v1',
+    catalog_api_mode: 'chat_completions',
     models: ['step-3.7-flash', 'step-3.5-flash', 'step-3.5-flash-2603'],
   },
   {
@@ -622,6 +676,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'ollama-cloud',
     builtin: true,
     base_url: 'https://ollama.com/v1',
+    catalog_api_mode: 'chat_completions',
     models: [],
   },
   {
@@ -629,6 +684,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'openrouter',
     builtin: true,
     base_url: 'https://openrouter.ai/api/v1',
+    catalog_api_mode: 'chat_completions',
     models: [],
   },
   {
@@ -636,6 +692,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     value: 'copilot',
     builtin: true,
     base_url: 'https://api.githubcopilot.com',
+    catalog_api_mode: 'per_model',
     models: [
       'gpt-5.5',
       'gpt-5.4',
@@ -669,4 +726,74 @@ export function buildProviderModelMap(): Record<string, string[]> {
     }
   }
   return map
+}
+
+/** Provider-specific protocol rules; callers retain the original model ID for requests. */
+export function resolveProviderCatalogApiMode(provider: string, model = ''): ProviderApiMode | undefined {
+  const preset = PROVIDER_PRESETS.find(item => item.value === provider)
+  if (!preset) return undefined
+  const mode = preset.catalog_api_mode
+  if (mode !== 'per_model') return mode
+  // Relays may prepend one or more namespaces, e.g. channel/openai/gpt-6.1-sol.
+  const id = model.slice(model.lastIndexOf('/') + 1).trim().toLowerCase()
+  if (!id) return undefined
+  if (provider === 'copilot') {
+    const major = /^gpt-(\d+)/.exec(id)?.[1]
+    return major && Number(major) >= 5 && !id.startsWith('gpt-5-mini') ? 'codex_responses' : 'chat_completions'
+  }
+  if (provider === 'opencode-zen' || provider === 'opencode-go') {
+    if (['gpt-', 'grok-', 'muse-spark'].some(prefix => id.startsWith(prefix))) return 'codex_responses'
+    if (['claude-', 'qwen', 'union-alpha'].some(prefix => id.startsWith(prefix))
+      || (provider === 'opencode-go' && id.startsWith('minimax-'))) return 'anthropic_messages'
+    return 'chat_completions'
+  }
+  return undefined
+}
+
+function normalizedProviderEndpoint(baseUrl: string): string | undefined {
+  try {
+    const url = new URL(baseUrl)
+    if (!['http:', 'https:'].includes(url.protocol) || url.search) return undefined
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+  } catch {
+    return undefined
+  }
+}
+
+const PROVIDER_ENDPOINTS = PROVIDER_PRESETS.map(preset => ({
+  provider: preset.value,
+  endpoint: normalizedProviderEndpoint(preset.base_url),
+})).filter(candidate => candidate.endpoint)
+
+/** Conservative defaults for automatic custom relays, never a claim of endpoint support. */
+function resolveConversationModelApiMode(model: string, outputModalities?: string[]): ProviderApiMode | undefined {
+  const id = model.slice(model.lastIndexOf('/') + 1).trim().toLowerCase()
+  if (outputModalities?.length && !outputModalities.includes('text')) return undefined
+  // Numeric GPT families include conversation aliases, but also dedicated media APIs.
+  if (/(?:^|[-_.])(image|audio|realtime|transcribe|transcription|tts|embedding|search)(?:[-_.]|$)/.test(id)) return undefined
+  if (/^gpt-(?:[4-9]|\d{2,})(?:\.\d+)*o?(?:-|$)/.test(id)) return 'codex_responses'
+  if (/^claude-(?:(?:\d+-)*)(?:opus|sonnet|haiku)(?:-|$)/.test(id)) return 'anthropic_messages'
+  return undefined
+}
+
+/** Known connection rules take priority over automatic custom-relay model defaults. */
+export function resolveProviderConnectionApiMode(
+  provider: string,
+  baseUrl: string,
+  model = '',
+  outputModalities?: string[],
+): ProviderApiMode | undefined {
+  if (PROVIDER_PRESETS.some(preset => preset.value === provider)) {
+    return resolveProviderCatalogApiMode(provider, model)
+  }
+  const endpoint = normalizedProviderEndpoint(baseUrl)
+  if (!endpoint) return undefined
+  const exact = PROVIDER_ENDPOINTS.filter(candidate => candidate.endpoint === endpoint)
+  // Prefer the exact path: some relays expose different protocols at / and /v1.
+  const matches = exact.length ? exact : PROVIDER_ENDPOINTS.filter(candidate => (
+    candidate.endpoint!.replace(/\/v1$/, '') === endpoint.replace(/\/v1$/, '')
+  ))
+  const modes = new Set(matches.map(candidate => resolveProviderCatalogApiMode(candidate.provider, model)))
+  if (matches.length) return modes.size === 1 ? modes.values().next().value : undefined
+  return provider.startsWith('custom:') ? resolveConversationModelApiMode(model, outputModalities) : undefined
 }

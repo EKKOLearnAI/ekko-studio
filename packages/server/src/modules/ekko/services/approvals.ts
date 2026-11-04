@@ -4,6 +4,9 @@ import type {
 } from '../../../../../ekko-agent/src'
 
 interface PendingEkkoToolApproval {
+  request: AgentToolApprovalRequest
+  requestedAt: number
+  runId?: string
   sessionId: string
   resolve: (choice: AgentToolApprovalChoice) => void
   timer: NodeJS.Timeout
@@ -14,6 +17,7 @@ interface PendingEkkoToolApproval {
 
 export interface WaitForEkkoToolApprovalOptions {
   sessionId: string
+  runId?: string
   signal?: AbortSignal
   onRequested: (request: AgentToolApprovalRequest) => void
   onResolved?: (choice: AgentToolApprovalChoice) => void
@@ -56,6 +60,9 @@ export function waitForEkkoToolApproval(
     const onAbort = () => finish('deny')
     pendingApprovals.set(request.approvalId, {
       sessionId: options.sessionId,
+      runId: options.runId,
+      request: { ...request, choices: [...request.choices] },
+      requestedAt: Date.now(),
       resolve,
       timer,
       signal: options.signal,
@@ -69,6 +76,20 @@ export function waitForEkkoToolApproval(
       finish('deny')
     }
   })
+}
+
+/** Read the live broker slots independently of the bounded chat event history. */
+export function pendingEkkoToolApprovalEvents(sessionId: string) {
+  return [...pendingApprovals.values()].filter(pending => pending.sessionId === sessionId).map(pending => ({
+    event: 'approval.requested',
+    data: {
+      event: 'approval.requested', session_id: sessionId, run_id: pending.runId,
+      approval_id: pending.request.approvalId, command: pending.request.command,
+      description: pending.request.description, choices: [...pending.request.choices],
+      allow_permanent: pending.request.allowPermanent, timeout_ms: pending.request.timeoutMs,
+      requested_at: pending.requestedAt, tool: pending.request.toolName, permission_key: pending.request.key,
+    },
+  }))
 }
 
 export function respondToEkkoToolApproval(

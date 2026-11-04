@@ -20,6 +20,7 @@ server/dist
 packages/server/dist
 *.local
 ROADMAP.md
+!/packages/mcu/m5stack-stackchan/docs/ROADMAP.md
 pnpm-lock.yaml
 pnpm-workspace.yaml
 # Server data
@@ -34,6 +35,7 @@ packages/desktop/resources/python/
 packages/desktop/node_modules/
 packages/*/.pio/
 packages/*/*/.pio/
+packages/mcu/*/*/.pio/
 
 # Hermes config files (should be in user data directory, not project root)
 config.yaml

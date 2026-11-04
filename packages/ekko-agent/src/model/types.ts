@@ -23,6 +23,8 @@ export type AgentReasoningFormat =
   | 'gemini-content-parts'
 
 export interface AgentReasoningNative {
+  /** Opaque origin identity; Responses history without it cannot be replayed safely. */
+  replayScope?: string
   format: AgentReasoningFormat
   data: unknown
 }

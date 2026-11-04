@@ -12,6 +12,7 @@ import {
 } from './browser-types'
 import { publicBrowserUrl, redactBrowserText } from './browser-url'
 import { snapshotOptions } from './browser-snapshot'
+import { parseBrowserUploadFiles, parseBrowserUploadMethod } from './browser-files'
 
 interface BrokerRequest {
   method?: unknown
@@ -32,9 +33,13 @@ interface BrokerClient {
   pid?: number
 }
 
-const BODY_LIMIT = 1024 * 1024
+// Uploads carry up to 10 MB of base64 file content; every other request stays small.
+const BODY_LIMIT = 16 * 1024 * 1024
+const MAX_WAIT_MS = 30_000
 const LEASE_TTL_MS = 60_000
 const STOP_TIMEOUT_MS = 2_000
+
+const MAX_NETWORK_READ = 200
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -150,6 +155,13 @@ export class BrowserBroker {
     if (this.manager.state().tabs.some(tab => tab.id === tabId)) this.manager.cancelAgentOperation(tabId)
   }
 
+  revokeClient(clientId: string): void {
+    for (const [tabId, lease] of this.leases) {
+      if (lease.clientId === clientId) this.revokeTab(tabId)
+    }
+    this.clients.delete(clientId)
+  }
+
   revokeAll(): void {
     const tabIds = new Set([...this.leases.keys(), ...this.queues.keys()])
     for (const tabId of tabIds) this.revokeTab(tabId)
@@ -202,11 +214,12 @@ export class BrowserBroker {
 
   private async execute(clientId: string, method: string, params: Record<string, unknown>, operationId: string, tabGeneration: number): Promise<unknown> {
     this.cleanupExpiredLeases()
+    if (!this.clients.has(clientId)) throw new Error('Browser client permission was revoked')
     const tabId = typeof params.tab_id === 'string' ? params.tab_id.trim() : ''
     if (tabId && (this.tabGenerations.get(tabId) || 0) !== tabGeneration) {
       throw new Error('Browser operation was cancelled by user takeover')
     }
-    const mutating = !['state', 'tabs.list', 'console.read'].includes(method)
+    const mutating = !['state', 'tabs.list', 'console.read', 'network.read', 'download.read'].includes(method)
     if (tabId && mutating) this.claimLease(tabId, clientId, method)
     if (tabId && mutating && method !== 'lease.release') {
       this.manager.setAgentControl(tabId, 'active', clientId.slice(0, 24), method)
@@ -270,6 +283,37 @@ export class BrowserBroker {
               throw new Error('Browser batch was cancelled or its tab control was revoked')
             }
           })
+        case 'upload': {
+          const uploadTabId = requiredString(params.tab_id, 'tab_id')
+          // Without a ref the files go to the file picker the page just tried to open.
+          const ref = params.ref === undefined ? undefined : requiredString(params.ref, 'ref')
+          const tab = await this.manager.upload(uploadTabId, ref ? requiredString(params.snapshot_id, 'snapshot_id') : undefined, ref,
+            parseBrowserUploadFiles(params.files), parseBrowserUploadMethod(params.method), () => {
+              if (!this.server || this.leases.get(uploadTabId)?.clientId !== clientId || (this.tabGenerations.get(uploadTabId) || 0) !== tabGeneration) {
+                throw new Error('Browser upload was cancelled or its tab control was revoked')
+              }
+            })
+          return { ...this.publicTab(tab), upload: tab.upload, snapshot: tab.snapshot, snapshotError: tab.snapshotError, observation: tab.observation }
+        }
+        case 'wait': {
+          const waitTabId = requiredString(params.tab_id, 'tab_id')
+          const text = params.text === undefined ? undefined : requiredString(params.text, 'text')
+          const textGone = params.text_gone === undefined ? undefined : requiredString(params.text_gone, 'text_gone')
+          const timeoutMs = boundedInteger(params.timeout_ms, 'timeout_ms', 10_000, 0, MAX_WAIT_MS)
+          if (text === undefined && textGone === undefined && params.timeout_ms === undefined) throw new Error('text, text_gone or timeout_ms is required')
+          return await this.manager.wait(waitTabId, { text, textGone, timeoutMs }, () => {
+            if (!this.server || (this.tabGenerations.get(waitTabId) || 0) !== tabGeneration) throw new Error('Browser wait was cancelled by user takeover')
+          })
+        }
+        case 'download.start':
+          return await this.manager.downloadStart(requiredString(params.tab_id, 'tab_id'), {
+            url: params.url === undefined ? undefined : requiredString(params.url, 'url'),
+            snapshotId: params.snapshot_id === undefined ? undefined : requiredString(params.snapshot_id, 'snapshot_id'),
+            ref: params.ref === undefined ? undefined : requiredString(params.ref, 'ref'),
+          })
+        case 'download.read':
+          return this.manager.downloadRead(requiredString(params.download_id, 'download_id'),
+            boundedInteger(params.offset, 'offset', 0, 0, Number.MAX_SAFE_INTEGER))
         case 'screenshot':
           return await this.manager.screenshot(requiredString(params.tab_id, 'tab_id'), params.full_page === true)
         case 'console.read':
@@ -280,6 +324,27 @@ export class BrowserBroker {
           }))
         case 'console.clear':
           this.manager.clearConsole(requiredString(params.tab_id, 'tab_id'))
+          return { ok: true }
+        case 'dialog': {
+          const dialogTabId = requiredString(params.tab_id, 'tab_id')
+          const action = params.action === undefined ? 'status' : params.action
+          if (action === 'status') return { dialog: this.manager.pageDialog(dialogTabId) || null }
+          if (action !== 'accept' && action !== 'dismiss') throw new Error('action must be status, accept or dismiss')
+          if (params.prompt_text !== undefined && (typeof params.prompt_text !== 'string' || params.prompt_text.length > 10_000)) {
+            throw new Error('prompt_text must be a string of at most 10000 characters')
+          }
+          const tab = await this.manager.handleDialog(dialogTabId, action === 'accept', params.prompt_text as string | undefined)
+          return { ...this.publicTab(tab), dialog: tab.dialog, snapshot: tab.snapshot, snapshotError: tab.snapshotError, observation: tab.observation }
+        }
+        case 'network.read': {
+          const filter = params.filter === undefined ? '' : requiredString(params.filter, 'filter').toLowerCase()
+          const limit = boundedInteger(params.limit, 'limit', 50, 1, MAX_NETWORK_READ)
+          const entries = this.manager.networkEntries(requiredString(params.tab_id, 'tab_id'))
+            .filter(entry => (!filter || entry.url.toLowerCase().includes(filter)) && (params.only_failed !== true || entry.failed || (entry.status ?? 0) >= 400))
+          return { total: entries.length, entries: entries.slice(-limit) }
+        }
+        case 'network.clear':
+          this.manager.clearNetwork(requiredString(params.tab_id, 'tab_id'))
           return { ok: true }
         case 'lease.release':
           this.releaseLease(requiredString(params.tab_id, 'tab_id'), clientId)
@@ -420,7 +485,7 @@ export class BrowserBroker {
     for await (const chunk of request) {
       const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
       length += data.length
-      if (length > BODY_LIMIT) throw new Error('Request body exceeds 1 MB')
+      if (length > BODY_LIMIT) throw new Error('Request body exceeds 16 MB')
       chunks.push(data)
     }
     const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as BrokerRequest

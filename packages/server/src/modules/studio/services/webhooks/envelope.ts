@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import type { ChatWebhookEventType } from '../../public/chat-webhooks'
 import { taskPlanWebhookContent, type WebhookTaskPlan } from './task-plan'
+import { sessionTaskWebhookContent, type WebhookSessionTask } from './session-task'
 
 export const CHAT_WEBHOOK_SCHEMA_VERSION = 1
 export const MAX_WEBHOOK_CONTENT_BYTES = 64 * 1024
@@ -29,6 +30,7 @@ export interface ChatRunWebhookEvent {
     workflow_id?: string
     workflow_node_id?: string
     plan_id?: string
+    task_id?: string
   }
   summary: {
     status: ChatWebhookLifecycleStatus
@@ -47,6 +49,7 @@ export interface ChatRunWebhookEvent {
   content_truncated?: boolean
   content_role?: ChatWebhookMessageRole
   task_plan?: WebhookTaskPlan
+  session_task?: WebhookSessionTask
   state?: Record<string, unknown>
 }
 
@@ -85,6 +88,7 @@ export function buildChatWebhookEnvelope(
     schema_version: CHAT_WEBHOOK_SCHEMA_VERSION,
     ...metadata,
     ...(metadata.task_plan ? { task_plan: taskPlanWebhookContent(metadata.task_plan, includeAssistantContent) } : {}),
+    ...(metadata.session_task ? { session_task: sessionTaskWebhookContent(metadata.session_task, includeAssistantContent) } : {}),
   }
   const shouldIncludeContent = (
     (includeAssistantContent && (event.type === 'chat.run.completed' || (event.type === 'group.message.created' && contentRole === 'assistant')))

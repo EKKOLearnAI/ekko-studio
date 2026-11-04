@@ -8,7 +8,7 @@ import { DshPluginError } from './errors'
 
 // New releases can use the adapter when the required integration seams remain
 // compatible. Record the source hash for diagnostics, never as an allowlist.
-export const DSH_ACP_ADAPTER_REVISION = 3
+export const DSH_ACP_ADAPTER_REVISION = 4
 
 export async function writeDshAcpAdapter(installation: string, destination: string, acpAppDirectory: string) {
   // ACP belongs to the selected bundle and may be nested beneath it. Resolve
@@ -18,12 +18,13 @@ export async function writeDshAcpAdapter(installation: string, destination: stri
   const manifest = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
   let source = await readFile(filename, 'utf8')
   const sourceHash = createHash('sha256').update(source).digest('hex')
-  const replace = (capability: string, before: string, after: string, count = 1) => {
-    const found = source.split(before).length - 1
+  const replaceVariants = (capability: string, variants: [string, string][], count = 1) => {
+    const found = variants.reduce((total, [before]) => total + source.split(before).length - 1, 0)
     if (found !== count) throw new DshPluginError(422, 'DSH_CAPABILITY_UNSUPPORTED',
       `DSH ACP ${manifest.version || 'unknown version'} is incompatible with Studio's ${capability} adapter: expected ${count} integration point(s), found ${found}. The installed DSH files were not changed.`)
-    source = source.split(before).join(after)
+    for (const [before, after] of variants) source = source.split(before).join(after)
   }
+  const replace = (capability: string, before: string, after: string, count = 1) => replaceVariants(capability, [[before, after]], count)
   replace('new-session preset selection', 'agentOptions: agentOptions(config),\n\t\t\t\t\tfallbackSelection:', 'agentOptions: agentOptions(config),\n\t\t\t\t\tagentPreset: params._meta?.agentPreset,\n\t\t\t\t\tfallbackSelection:')
   replace('preset persistence', 'meta: { cwd: options.cwd },', 'meta: { cwd: options.cwd, agentPreset: options.agentPreset },')
   replace('preset mounting', 'await mountAcpMcpServers(agentCtx, options.mcpServers, options.cwd);',
@@ -35,7 +36,13 @@ export async function writeDshAcpAdapter(installation: string, destination: stri
   replace('preset restoration', 'if (persisted === void 0 || persisted.origin === "subagent" || persisted.parentSession !== void 0) throw invalidParams(`session is not resumable: ${sessionId}`);',
     'if (persisted === void 0 || persisted.origin === "subagent" || persisted.parentSession !== void 0) throw invalidParams(`session is not resumable: ${sessionId}`);\n\t\t\t\tconst agentPreset = persisted.agentPreset ?? ctx.agentPresets.defaultId;')
   replace('resume-session preset selection', 'agentOptions: agentOptions(config),\n\t\t\t\t\t\tfallbackSelection:', 'agentOptions: agentOptions(config),\n\t\t\t\t\t\tagentPreset,\n\t\t\t\t\t\tfallbackSelection:')
-  replace('turn persistence', 'if (inflight.messageQueued) {\n\t\t\t\tawait this.agent.whenIdle();\n\t\t\t\tawait this.outputTail;', 'if (inflight.messageQueued) {\n\t\t\t\tawait this.agent.whenIdle();\n\t\t\t\tawait this.outputTail;\n\t\t\t\tawait this.ctx.sessions.flush(this.agent.session);')
+  // Newer ACP waits for descendants and cancellation as well as root/output
+  // quiescence. Flush after that whole drain, before releasing the prompt slot.
+  const turnPersistencePoints = [
+    'if (inflight.messageQueued) {\n\t\t\t\tawait this.agent.whenIdle();\n\t\t\t\tawait this.outputTail;',
+    'if (isCancelled() || idleAt(idleSeq)) break;\n\t\t\t\t}\n\t\t\t\tif (isCancelled()) await cancelled;',
+  ]
+  replaceVariants('turn persistence', turnPersistencePoints.map(before => [before, before + '\n\t\t\t\tawait this.ctx.sessions.flush(this.agent.session);']))
   // Apply after native restoration/preset initialization, before any prompt.
   // This also replaces persisted workspace-write/ask values on old sessions.
   replace('session permission policy', 'this.modelControl = modelControl;', 'this.modelControl = modelControl;\n\t\tsetSandboxMode(this.agent.session, "danger-full-access");\n\t\tsetApprovalPolicy(this.agent.session, "never");')

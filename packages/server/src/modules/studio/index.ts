@@ -17,6 +17,6 @@ export type { AgentRuntime, CodingAgentRuntime } from './contracts/agents/runtim
 export { RUN_MODES, RUN_SURFACES, isRunMode, isRunSurface } from './contracts/runs/surface'
 export type { RunMode, RunSurface } from './contracts/runs/surface'
 export * from './contracts/runs/model-execution-identity'
-export type { LanDeviceInfo, LanEndpointKind, PublicSystemInfo } from './contracts/devices'
+export type { LanEndpointKind, PublicSystemInfo } from './contracts/devices'
 export * from './contracts/providers'
 export * from './public/config'

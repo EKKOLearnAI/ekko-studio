@@ -1,7 +1,7 @@
 import { execFileSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'fs'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { logger } from '../../public/logging'
 import { saveWorkspaceRunChange, type SaveWorkspaceRunChangeInput, type WorkspaceRunChangeSummary } from '../../repositories/workspace-run-changes-store'
@@ -219,6 +219,13 @@ function nowSeconds(): number {
 function isPathInside(parent: string, candidate: string): boolean {
   const rel = relative(parent, candidate)
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
+function isBroadWorkspaceRoot(root: string): boolean {
+  // Home is a valid execution directory, but never a project snapshot boundary.
+  // System/private/cloud directories can block a synchronous filesystem call;
+  // MAX_SCAN_MS cannot interrupt that call once it has started.
+  return isPathInside(root, resolve(homedir())) || root === resolve(root, '..')
 }
 
 function runGit(cwd: string, args: string[], maxBuffer = 1024 * 1024): string {
@@ -586,11 +593,13 @@ export function startWorkspaceRunCheckpoint(args: {
   const workspace = args.workspace ? resolve(args.workspace) : ''
   const runId = args.runId || ''
   if (!workspace || !runId) return
+  if (isBroadWorkspaceRoot(workspace)) return
   const key = checkpointKey(args.sessionId, runId)
   if (checkpoints.has(key)) return
   const changeId = createRunChangeId(runId)
   const gitRoot = resolveGitRoot(workspace)
   if (gitRoot) {
+    if (isBroadWorkspaceRoot(gitRoot)) return
     const status = getGitStatusPaths(gitRoot)
     const files = new Map<string, SnapshotFile>()
     for (const relPath of status.paths) {
@@ -611,7 +620,7 @@ export function startWorkspaceRunCheckpoint(args: {
   }
 
   const filesystemRoot = resolveFilesystemRoot(workspace)
-  if (!filesystemRoot) return
+  if (!filesystemRoot || isBroadWorkspaceRoot(filesystemRoot)) return
   const scan = scanFilesystemPaths(filesystemRoot)
   const snapshot = snapshotPaths(filesystemRoot, scan.paths, MAX_TOTAL_SNAPSHOT_BYTES)
   registerCheckpoint(key, {

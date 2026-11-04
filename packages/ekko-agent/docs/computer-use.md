@@ -34,6 +34,24 @@ applicable; the SDK's Linux builds target glibc, not musl. macOS and Windows
 packages support x64/arm64, as do the published Linux native packages. Native
 acceptance for this integration has been performed on macOS only.
 
+In the local macOS desktop app, **Ekko Settings → Tools → Computer Use** shows
+Accessibility and Screen Recording status while Computer Use is enabled. Opening
+the page, returning to it, or selecting **Check again** only reads permissions.
+**Authorize** explicitly requests the selected permission and opens its System
+Settings pane; the screen request registers the app without collecting thumbnails.
+Enable Ekko Studio in that pane and return to recheck. If macOS requires a restart,
+save your work and reopen the app. These OS grants are separate from tool approvals.
+The guide is hidden in browsers, older desktop bridges, remote-server mode, Windows,
+and Linux; it never reports those environments as authorized based on local Mac grants.
+
+An active Ekko chat also checks silently when a live `computer_use` call or status
+operation starts. Known missing grants show an in-app reminder with **Go to
+permissions** and **Not now**. The desktop main process allows one reminder per
+app launch across windows and page reloads. History replay, tool discovery, other
+agents, background sessions and unknown permission status do not trigger it.
+The reminder opens the settings guide; it does not grant access, pause the run or
+automatically retry desktop actions. Authorize from the guide and retry as needed.
+
 ```json
 {
   "tools": {
@@ -113,10 +131,74 @@ runtime; it must rediscover schemas and capture fresh state before resuming.
 Direct tool callers must supply their own `computerUseSessionSignal` and abort
 it when done. A standalone `status` probe manages its own connection.
 
+## Optional JEV assessments
+
+In Studio, **Models → JEV → Ekko Computer Use** provides independent default-off
+switches for desktop element matching and outcome verification. Both use the
+shared global JEV provider. Settings take effect at the next normal or
+isolated Ekko run; a running agent keeps its configuration snapshot. These
+switches are independent of browser, memory and skill JEV settings and do not
+enable Computer Use itself.
+
+After describing `get_window_state`, supply optional **top-level** `target` and/or
+`expectation` fields alongside the native operation arguments:
+
+```json
+{
+  "action": "call",
+  "tool": "get_window_state",
+  "arguments": { "pid": 123, "window_id": 456 },
+  "target": "Save button",
+  "expectation": "A saved confirmation is visible"
+}
+```
+
+The tool captures a fresh window state once. Enabled assessments request both
+structured elements and the native tree, ignoring `since` so a diff is never
+mistaken for a full observation. Matching ranks enabled interactive elements
+before applying the candidate budget. It returns only a token already present in
+that exact window snapshot. Verification reports `met`, `not_met` or `unknown`.
+Results appear in `data.jev.match` / `data.jev.verify` and in model-visible text,
+alongside the unchanged native result, capture geometry and screenshot images.
+Each completed assessment includes the process, window and snapshot identities.
+Native token expiry and all normal input approvals still apply.
+
+Only bounded accessibility roles, labels and enabled/selected flags are sent to
+JEV. Values, value descriptions, screenshots, raw trees, window titles and native
+tokens are excluded. Expectations requiring field values, image interpretation,
+external effects or absent evidence should remain `unknown`. This is advisory;
+it never dispatches input, retries an action or changes native success status.
+Use native `verify_state` for precise value predicates. JEV reads the structured
+`elements` projection: static text shown only in `tree_markdown` is not assessment
+evidence. An expectation about that text can remain uncertain even when the
+agent can read it in the native tool result.
+
+Disabled/unconfigured assessments make zero provider requests. Provider errors,
+malformed responses, low confidence, oversized or invalid snapshots, and timeouts
+return a skipped/unavailable assessment while retaining the native observation.
+Caller or run cancellation aborts evaluation. Each assessment has its own deadline
+including a hard bound for a provider that ignores cancellation. No automatic
+retries occur. At most 500 native rows and 64,000 UTF-8 request bytes are assessed;
+partial snapshots are marked as such and cannot establish absence.
+
+Standalone config/constructor overrides use `jev.computerUseMatchEnabled` and
+`jev.computerUseVerifyEnabled`, both defaulting to false. Set `jev.enabled` and a
+provider key as well. Studio maps these fields without writing the local config:
+
+| Studio setting | Standalone `jev` field | Default |
+| --- | --- | --- |
+| `ekkoComputerUseMatchEnabled` | `computerUseMatchEnabled` | false |
+| `ekkoComputerUseMatchCandidateLimit` | `computerUseMatchCandidateLimit` | 20 (1–50) |
+| `ekkoComputerUseMatchMinConfidence` | `computerUseMatchMinConfidence` | 0.8 (0.5–1) |
+| `ekkoComputerUseMatchTimeoutMs` | `computerUseMatchTimeoutMs` | 3000 (100–30000 ms) |
+| `ekkoComputerUseVerifyEnabled` | `computerUseVerifyEnabled` | false |
+| `ekkoComputerUseVerifyMinConfidence` | `computerUseVerifyMinConfidence` | 0.8 (0.5–1) |
+| `ekkoComputerUseVerifyTimeoutMs` | `computerUseVerifyTimeoutMs` | 3000 (100–30000 ms) |
+
 ## Validation
 
 ```sh
-npx vitest run tests/ekko-agent/computer-use.test.ts tests/ekko-agent/runtime.test.ts
+npx vitest run tests/ekko-agent/computer-use.test.ts tests/ekko-agent/computer-use-jev.test.ts tests/ekko-agent/runtime.test.ts
 npx playwright test tests/e2e/ekko-computer-use-settings.spec.ts
 ```
 

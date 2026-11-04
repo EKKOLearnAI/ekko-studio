@@ -25,10 +25,27 @@ export interface JevSettings {
   browserVerifyMinConfidence: number
   browserVerifyTimeoutMs: number
 
+  ekkoComputerUseMatchEnabled: boolean
+  ekkoComputerUseMatchCandidateLimit: number
+  ekkoComputerUseMatchMinConfidence: number
+  ekkoComputerUseMatchTimeoutMs: number
+  ekkoComputerUseVerifyEnabled: boolean
+  ekkoComputerUseVerifyMinConfidence: number
+  ekkoComputerUseVerifyTimeoutMs: number
   ekkoSkillsEnabled: boolean
   ekkoSkillsCandidateLimit: number
   ekkoSkillsMinConfidence: number
   ekkoSkillsTimeoutMs: number
+  personMemoryEnabled: boolean
+  personMemoryKindRoutingEnabled: boolean
+  personMemoryRelevanceFilterEnabled: boolean
+  personMemoryRerankEnabled: boolean
+  personMemoryWriteReviewEnabled: boolean
+  personMemoryCandidateLimit: number
+  personMemoryRecallMinConfidence: number
+  personMemoryFilterMinConfidence: number
+  personMemoryMinConfidence: number
+  personMemoryTimeoutMs: number
   ekkoMemoryEnabled: boolean
   ekkoMemoryKindRoutingEnabled: boolean
   ekkoMemoryRelevanceFilterEnabled: boolean
@@ -46,23 +63,18 @@ export interface JevSettings {
 }
 export type JevSettingsUpdate = Omit<JevSettings, 'hasApiKey'> & { apiKey?: string }
 
-function profileHeaders(profile: string): Record<string, string> {
-  if (!profile.trim()) throw new Error('Profile is required')
-  return { 'X-Hermes-Profile': profile }
+export function getJevSettings() {
+  return request<JevSettings>('/api/studio/jev/settings')
 }
-
-export function getJevSettings(profile: string) {
-  return request<JevSettings>('/api/studio/jev/settings', { headers: profileHeaders(profile) })
+export function saveJevSettings(settings: JevSettingsUpdate) {
+  return request<JevSettings>('/api/studio/jev/settings', { method: 'PUT', body: JSON.stringify(settings) })
 }
-export function saveJevSettings(profile: string, settings: JevSettingsUpdate) {
-  return request<JevSettings>('/api/studio/jev/settings', { method: 'PUT', headers: profileHeaders(profile), body: JSON.stringify(settings) })
+export function deleteJevSettings() {
+  return request<JevSettings>('/api/studio/jev/settings', { method: 'DELETE' })
 }
-export function deleteJevSettings(profile: string) {
-  return request<JevSettings>('/api/studio/jev/settings', { method: 'DELETE', headers: profileHeaders(profile) })
+export function testJevConnection() {
+  return request<SystemOneResult<Questions> & { durationMs: number }>('/api/studio/jev/test', { method: 'POST' })
 }
-export function testJevConnection(profile: string) {
-  return request<SystemOneResult<Questions> & { durationMs: number }>('/api/studio/jev/test', { method: 'POST', headers: profileHeaders(profile) })
-}
-export function evaluateJev<Q extends Questions>(profile: string, input: SystemOneRequest<Q>, signal?: AbortSignal) {
-  return request<SystemOneResult<Q>>('/api/studio/jev/evaluate', { method: 'POST', headers: profileHeaders(profile), body: JSON.stringify(input), signal })
+export function evaluateJev<Q extends Questions>(input: SystemOneRequest<Q>, signal?: AbortSignal) {
+  return request<SystemOneResult<Q>>('/api/studio/jev/evaluate', { method: 'POST', body: JSON.stringify(input), signal })
 }

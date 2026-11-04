@@ -148,6 +148,16 @@ body {
   outline-offset: 2px;
 }
 
+// Body-level drawer portals share the shell header's height so both the panel
+// and its mask start below the header, including when the viewport is resized.
+body:has(.app-shell--navigation-rail) {
+  --studio-header-height: 40px;
+
+  > .n-drawer-container {
+    top: var(--studio-header-height);
+  }
+}
+
 .hermes-desktop-pet-window,
 .hermes-desktop-pet-window body,
 .hermes-desktop-pet-window #app {

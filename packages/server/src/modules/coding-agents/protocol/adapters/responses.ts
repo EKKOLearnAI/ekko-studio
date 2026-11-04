@@ -1,129 +1,21 @@
 // Shared Responses payload translation for Coding Agent provider proxies.
+import { createHash } from 'node:crypto'
 import { imageUrlToAnthropicSource, openAiImageUrl } from './multimodal'
 import { shouldPreserveReasoningContent } from './anthropic'
 
 export interface ResponsesAdapterTarget {
   model: string
+  mcpToolRoutes?: McpToolRoutes
   provider?: string
   baseUrl?: string
   /** Default for providers such as Anthropic Messages that require max_tokens. */
   outputLimit?: number
 }
 
-const HERMES_STUDIO_NAMESPACE = 'mcp__ekko_studio'
 const TOOL_SEARCH_NAME = 'tool_search'
 const RESPONSES_TOOL_OUTPUT_FORWARD_LIMIT = 32 * 1024
 const RESPONSES_TOOL_OUTPUT_HEAD_BYTES = 24 * 1024
 const RESPONSES_TOOL_OUTPUT_TAIL_BYTES = 7 * 1024
-
-const HERMES_STUDIO_MCP_TOOLS = [
-  {
-    name: 'ekko_studio_lan_devices_list',
-    description: 'List known LAN and remote devices from Hermes Web UI, including pairing and online status.',
-    inputSchema: inputSchema(),
-  },
-  {
-    name: 'ekko_studio_lan_devices_scan',
-    description: 'Refresh LAN device discovery cache and return known devices with pairing and online status.',
-    inputSchema: inputSchema(),
-  },
-  {
-    name: 'ekko_studio_lan_peer_connect',
-    description: 'Connect to a paired LAN device by device id.',
-    inputSchema: inputSchema({ device_id: { type: 'string' } }, ['device_id']),
-  },
-  {
-    name: 'ekko_studio_lan_peer_connections',
-    description: 'List active LAN peer socket connections.',
-    inputSchema: inputSchema(),
-  },
-  {
-    name: 'ekko_studio_lan_peer_disconnect',
-    description: 'Disconnect an active LAN peer socket connection.',
-    inputSchema: inputSchema({ connection_id: { type: 'string' } }, ['connection_id']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_create',
-    description: 'Create an interactive terminal on a connected LAN peer.',
-    inputSchema: inputSchema({
-      connection_id: { type: 'string' },
-      shell: { type: 'string' },
-      cols: { type: 'number' },
-      rows: { type: 'number' },
-    }, ['connection_id']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_list',
-    description: 'List interactive terminals tracked for a connected LAN peer, including IDs that can be read or closed.',
-    inputSchema: inputSchema({ connection_id: { type: 'string' } }, ['connection_id']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_input',
-    description: 'Write input to an interactive terminal on a connected LAN peer.',
-    inputSchema: inputSchema({
-      connection_id: { type: 'string' },
-      terminal_id: { type: 'string' },
-      data: { type: 'string' },
-    }, ['connection_id', 'terminal_id', 'data']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_read',
-    description: 'Read buffered terminal output from an interactive terminal.',
-    inputSchema: inputSchema({
-      connection_id: { type: 'string' },
-      terminal_id: { type: 'string' },
-    }, ['connection_id', 'terminal_id']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_resize',
-    description: 'Resize an interactive terminal on a connected LAN peer.',
-    inputSchema: inputSchema({
-      connection_id: { type: 'string' },
-      terminal_id: { type: 'string' },
-      cols: { type: 'number' },
-      rows: { type: 'number' },
-    }, ['connection_id', 'terminal_id', 'cols', 'rows']),
-  },
-  {
-    name: 'ekko_studio_lan_terminal_close',
-    description: 'Close an interactive terminal on a connected LAN peer.',
-    inputSchema: inputSchema({
-      connection_id: { type: 'string' },
-      terminal_id: { type: 'string' },
-    }, ['connection_id', 'terminal_id']),
-  },
-  {
-    name: 'ekko_studio_lan_command_exec',
-    description: 'Run a command on a connected LAN peer using command plus args, without shell string execution.',
-    inputSchema: inputSchema({
-      connection_id: { type: 'string' },
-      command: { type: 'string' },
-      args: { type: 'array', items: { type: 'string' } },
-      cwd: { type: 'string' },
-      timeout_ms: { type: 'number' },
-    }, ['connection_id', 'command']),
-  },
-  {
-    name: 'ekko_studio_lan_file_download',
-    description: 'Download a file from a connected LAN peer remote path to a local path on this machine.',
-    inputSchema: inputSchema({
-      connection_id: { type: 'string' },
-      remote_path: { type: 'string' },
-      local_path: { type: 'string' },
-      timeout_ms: { type: 'number' },
-    }, ['connection_id', 'remote_path', 'local_path']),
-  },
-  {
-    name: 'ekko_studio_lan_file_upload',
-    description: 'Upload a local file path from this machine to a connected LAN peer remote path.',
-    inputSchema: inputSchema({
-      connection_id: { type: 'string' },
-      local_path: { type: 'string' },
-      remote_path: { type: 'string' },
-      timeout_ms: { type: 'number' },
-    }, ['connection_id', 'local_path', 'remote_path']),
-  },
-]
 
 const HERMES_STUDIO_SPLIT_MCP_TOOLS = new Map<string, Array<{
   name: string
@@ -160,10 +52,6 @@ const HERMES_STUDIO_SPLIT_MCP_TOOLS = new Map<string, Array<{
     'ekko_studio_browser_toolset',
     'Discover and invoke Ekko Studio Desktop browser operations. Covers tabs and leases, navigation, accessibility snapshots, interaction, screenshots, and console logs.',
   )]],
-  ['mcp__ekko_studio_devices', [categoryToolset(
-    'ekko_studio_devices_toolset',
-    'Discover and invoke Ekko Studio LAN and remote-device operations. Covers discovery, peer connections, terminals, structured commands, and file transfer.',
-  )]],
   ['mcp__ekko_studio_use', [categoryToolset(
     'ekko_studio_use_toolset',
     'Discover and invoke high-level Ekko Studio operations for explicit user-requested runs, sessions, usage, profiles, models, providers, workers, and workflows.',
@@ -171,9 +59,6 @@ const HERMES_STUDIO_SPLIT_MCP_TOOLS = new Map<string, Array<{
 ])
 
 // Historical conversations may still refer to the previous MCP namespaces.
-HERMES_STUDIO_SPLIT_MCP_TOOLS.set('mcp__hermes_studio', HERMES_STUDIO_MCP_TOOLS.map(tool => ({
-  ...tool, name: tool.name.replace(/^ekko_studio_/, 'hermes_studio_'),
-})))
 for (const [namespace, tools] of [...HERMES_STUDIO_SPLIT_MCP_TOOLS]) {
   if (!namespace.startsWith('mcp__ekko_studio_')) continue
   HERMES_STUDIO_SPLIT_MCP_TOOLS.set(namespace.replace('mcp__ekko_', 'mcp__hermes_'), tools.map(tool => ({
@@ -181,9 +66,7 @@ for (const [namespace, tools] of [...HERMES_STUDIO_SPLIT_MCP_TOOLS]) {
   })))
 }
 
-const HERMES_STUDIO_MCP_TOOL_NAMESPACES = new Map<string, string>(
-  HERMES_STUDIO_MCP_TOOLS.map(tool => [tool.name, HERMES_STUDIO_NAMESPACE]),
-)
+const HERMES_STUDIO_MCP_TOOL_NAMESPACES = new Map<string, string>()
 for (const [namespace, tools] of HERMES_STUDIO_SPLIT_MCP_TOOLS) {
   for (const tool of tools) HERMES_STUDIO_MCP_TOOL_NAMESPACES.set(tool.name, namespace)
 }
@@ -246,14 +129,38 @@ function normalizedNamespaceName(value: unknown): string {
   return String(value || '').trim().replace(/-/g, '_')
 }
 
+export type McpToolRoutes = Record<string, { name: string; namespace: string }>
+
+// Stable provider-safe aliases retain namespace identity without a global registry.
+// The original name remains in the description for model-side tool selection.
+function mcpToolAlias(namespace: string, name: string): string {
+  return `mcp_${createHash('sha256').update(JSON.stringify([namespace, name])).digest('hex').slice(0, 40)}`
+}
+
+export function responseMcpToolRoutes(body: any): McpToolRoutes {
+  const routes: McpToolRoutes = Object.create(null)
+  for (const tool of expandedResponseTools(responsesAvailableTools(body))) {
+    if (tool.namespace?.startsWith('mcp__')) {
+      routes[mcpToolAlias(tool.namespace, tool.name)] = { name: tool.name, namespace: tool.namespace }
+    }
+  }
+  return routes
+}
+
+function providerToolName(tool: any): string {
+  return tool.namespace?.startsWith('mcp__') && tool.name !== tool.namespace
+    ? mcpToolAlias(tool.namespace, tool.name) : String(tool.name || 'tool')
+}
+
 function expandedResponseTools(tools: unknown): any[] {
   if (!Array.isArray(tools)) return []
   const mapped: any[] = []
   const seen = new Set<string>()
   const addFunctionTool = (tool: any) => {
     const name = String(tool?.name || '').trim()
-    if (!name || seen.has(name)) return
-    seen.add(name)
+    const key = JSON.stringify([tool?.namespace || '', name])
+    if (!name || seen.has(key)) return
+    seen.add(key)
     mapped.push({
       type: 'function',
       name,
@@ -285,9 +192,7 @@ function expandedResponseTools(tools: unknown): any[] {
         }
         continue
       }
-      const namespaceTools = namespace === HERMES_STUDIO_NAMESPACE
-        ? HERMES_STUDIO_MCP_TOOLS
-        : HERMES_STUDIO_SPLIT_MCP_TOOLS.get(namespace)
+      const namespaceTools = HERMES_STUDIO_SPLIT_MCP_TOOLS.get(namespace)
       if (namespaceTools) {
         for (const mcpTool of namespaceTools) {
           addFunctionTool({
@@ -509,7 +414,7 @@ function toolSearchArguments(value: unknown): Record<string, unknown> {
   return safeJsonParse(String(value || '{}'))
 }
 
-function responseToolCall(name: unknown, argumentsValue: unknown, id: unknown, index: number): any {
+function responseToolCall(name: unknown, argumentsValue: unknown, id: unknown, index: number, routes?: McpToolRoutes): any {
   const rawName = String(name || 'tool')
   const callId = String(id || `call_${index}`)
   if (rawName === TOOL_SEARCH_NAME) {
@@ -528,7 +433,7 @@ function responseToolCall(name: unknown, argumentsValue: unknown, id: unknown, i
     type: 'function_call',
     id: String(id || `fc_${index}`),
     call_id: callId,
-    ...normalizeResponseFunctionCall(rawName, rawArguments),
+    ...normalizeResponseFunctionCall(rawName, rawArguments, routes),
   }
 }
 
@@ -536,11 +441,13 @@ export function responseToolNamespaceForName(name: unknown): string | undefined 
   return HERMES_STUDIO_MCP_TOOL_NAMESPACES.get(String(name || ''))
 }
 
-export function normalizeResponseFunctionCall(name: unknown, argumentsValue: unknown): { name: string; arguments: string; namespace?: string } {
+export function normalizeResponseFunctionCall(name: unknown, argumentsValue: unknown, routes?: McpToolRoutes): { name: string; arguments: string; namespace?: string } {
   const rawName = String(name || 'tool')
   // An empty string starts streamed arguments; adding {} would corrupt the
   // JSON when the client appends subsequent argument deltas.
   const rawArguments = String(argumentsValue ?? '{}')
+  const route = routes?.[rawName]
+  if (route && route.name !== route.namespace) return { ...route, arguments: rawArguments }
   const namespace = normalizedNamespaceName(rawName)
   if (namespace.startsWith('mcp__')) {
     const parsed = safeJsonParse(rawArguments)
@@ -765,7 +672,7 @@ function responsesInputToChatMessages(body: any, target: ResponsesAdapterTarget)
         id: callId,
         type: 'function',
         function: {
-          name: item.type === 'tool_search_call' ? TOOL_SEARCH_NAME : String(item.name || 'tool'),
+          name: item.type === 'tool_search_call' ? TOOL_SEARCH_NAME : providerToolName(item),
           arguments: item.type === 'tool_search_call'
             ? JSON.stringify(toolSearchArguments(item.arguments))
             : String(item.arguments || '{}'),
@@ -840,8 +747,10 @@ function responsesToolsToChatTools(tools: unknown): any[] | undefined {
     return {
       type: 'function',
       function: {
-        name: String(tool.name || ''),
-        description: String(tool.description || ''),
+        name: providerToolName(tool),
+        description: tool.namespace?.startsWith('mcp__')
+          ? `${String(tool.description || '')} MCP tool: ${tool.namespace}.${tool.name}.`
+          : String(tool.description || ''),
         parameters: tool.parameters || { type: 'object', properties: {} },
       },
     }
@@ -910,7 +819,7 @@ function responsesInputToAnthropicMessages(body: any): any[] {
         content: [{
           type: 'tool_use',
           id: String(item.call_id || item.id || `toolu_${messages.length}`),
-          name: item.type === 'tool_search_call' ? TOOL_SEARCH_NAME : String(item.name || 'tool'),
+          name: item.type === 'tool_search_call' ? TOOL_SEARCH_NAME : providerToolName(item),
           input: item.type === 'tool_search_call'
             ? toolSearchArguments(item.arguments)
             : safeJsonParse(String(item.arguments || '{}')),
@@ -947,8 +856,10 @@ function responsesToolsToAnthropicTools(tools: unknown): any[] | undefined {
   const mapped = expandedResponseTools(tools).map((tool: any) => {
     if (tool?.type !== 'function') return null
     return {
-      name: String(tool.name || ''),
-      description: String(tool.description || ''),
+      name: providerToolName(tool),
+      description: tool.namespace?.startsWith('mcp__')
+          ? `${String(tool.description || '')} MCP tool: ${tool.namespace}.${tool.name}.`
+          : String(tool.description || ''),
       input_schema: tool.parameters || { type: 'object', properties: {} },
     }
   }).filter((tool: any) => tool?.name)
@@ -1041,6 +952,7 @@ export function openAiChatToResponses(data: any, target: ResponsesAdapterTarget)
       call.function?.arguments || '{}',
       call.id,
       output.length,
+      target.mcpToolRoutes,
     ))
   }
 
@@ -1069,6 +981,7 @@ export function anthropicMessageToResponses(data: any, target: ResponsesAdapterT
         block.input || {},
         block.id,
         output.length,
+        target.mcpToolRoutes,
       ))
     }
   }

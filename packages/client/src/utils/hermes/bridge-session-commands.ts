@@ -87,7 +87,9 @@ export function normalizeBridgeSessionCommandName(name: string): BridgeSessionCo
 export function readBridgeSessionCommandName(input: string): BridgeSessionCommandName | null {
   const trimmed = input.trim()
   if (!trimmed.startsWith('/')) return null
-  const match = trimmed.match(/^\/([a-zA-Z][\w-]*)(?:\s|$)/)
+  // Keep the boundary contract aligned with the server parser: explicit
+  // whitespace/punctuation, adjacent CJK letters, or the end of the command.
+  const match = trimmed.match(/^\/([a-zA-Z][\w-]*)(?=\s|[:：、,，]|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|$)/u)
   if (!match) return null
   return normalizeBridgeSessionCommandName(match[1])
 }

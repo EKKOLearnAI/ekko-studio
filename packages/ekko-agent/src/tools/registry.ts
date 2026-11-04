@@ -6,6 +6,7 @@ import type {
   AgentToolResult,
 } from './types'
 import { UpdatePlanTool } from './plan'
+import { createSessionTasksToolProvider } from './session-tasks'
 import { createBrowserTools } from './browser'
 import { ComputerUseTool, type ComputerUseToolOptions } from './computer-use'
 import { createClarificationToolProvider } from './clarify'
@@ -169,6 +170,7 @@ export function createDefaultToolRegistry(options: DefaultToolRegistryOptions = 
     }))
   }
   registry.registerProvider(createClarificationToolProvider())
+  registry.registerProvider(createSessionTasksToolProvider())
   registry.registerProvider(createMcpToolProvider())
   return registry
 }

@@ -8,8 +8,11 @@ import { useI18n } from 'vue-i18n'
 import AuxiliaryModelsPanel from '@/components/hermes/models/AuxiliaryModelsPanel.vue'
 import CombinationModelsPanel from '@/components/hermes/models/CombinationModelsPanel.vue'
 import JevSettingsPanel from '@/components/hermes/models/JevSettingsPanel.vue'
+import ModelApiPanel from '@/components/hermes/models/ModelApiPanel.vue'
 import ProvidersPanel from '@/components/hermes/models/ProvidersPanel.vue'
 import ProviderFormModal from '@/components/hermes/models/ProviderFormModal.vue'
+import ProviderImportModal from '@/components/hermes/models/ProviderImportModal.vue'
+import { pendingProviderImport, type ProviderImport } from '@/utils/provider-import'
 import ProviderVisibilityModal from '@/components/hermes/models/ProviderVisibilityModal.vue'
 import ModelCatalogNotice from '@/components/hermes/models/ModelCatalogNotice.vue'
 import VoiceSettings from '@/components/hermes/settings/VoiceSettings.vue'
@@ -28,6 +31,24 @@ const message = useMessage()
 const route = useRoute()
 const router = useRouter()
 const showModal = ref(false)
+const importDraft = ref<ProviderImport | null>(null)
+const importRevision = ref(0)
+watch(pendingProviderImport, pending => {
+  if (!pending) return
+  pendingProviderImport.value = null
+  if (pending.invalid) message.error(t('models.importInvalid'))
+  else if (pending.draft) {
+    importRevision.value++
+    importDraft.value = pending.draft
+  }
+}, { immediate: true })
+
+async function handleImportSaved(profile: string) {
+  importDraft.value = null
+  await router.replace({ query: { ...route.query, modelProfile: profile } })
+  await modelsStore.fetchProviders()
+  await appStore.reloadModels({ preserveSelection: true })
+}
 const showLargeCatalogNotice = ref(false)
 const visibilityProviderId = ref('')
 const largeCatalogProviders = computed(() => modelsStore.providers.filter(provider => provider.models.length > 100))
@@ -68,9 +89,9 @@ watch(() => route.query.modelProfile, profile => {
   showModal.value = false
   void loadProvidersForProfile()
 })
-type ModelsTab = 'general' | 'auxiliary' | 'combination' | 'stt' | 'tts' | 'jev'
+type ModelsTab = 'general' | 'auxiliary' | 'combination' | 'stt' | 'tts' | 'jev' | 'api'
 
-const MODELS_TABS = new Set<ModelsTab>(['general', 'auxiliary', 'combination', 'stt', 'tts', 'jev'])
+const MODELS_TABS = new Set<ModelsTab>(['general', 'auxiliary', 'combination', 'stt', 'tts', 'jev', 'api'])
 const activeTab = ref<ModelsTab>('general')
 
 function normalizeTab(value: unknown): ModelsTab {
@@ -181,7 +202,7 @@ async function handleRefreshModelCache() {
 </script>
 
 <template>
-  <PageLoading :show="profileLoading || modelsStore.refreshingModelCache || (modelsStore.loading && modelsStore.providers.length === 0)" class="models-view">
+  <PageLoading :show="activeTab !== 'jev' && (profileLoading || modelsStore.refreshingModelCache || (modelsStore.loading && modelsStore.providers.length === 0))" class="models-view">
     <PageHeader>
     <header class="page-header">
       <div class="models-header-left">
@@ -189,6 +210,7 @@ async function handleRefreshModelCache() {
       </div>
       <div class="header-actions">
         <NSelect
+          v-if="activeTab !== 'api' && activeTab !== 'jev'"
           class="models-profile-select"
           data-testid="models-profile-select"
           :value="selectedProfile"
@@ -233,14 +255,17 @@ async function handleRefreshModelCache() {
     </PageHeader>
 
     <div class="models-content">
-      <div v-if="profileLoading" class="models-profile-loading" role="status" aria-live="polite">
+      <div v-if="profileLoading && activeTab !== 'jev'" class="models-profile-loading" role="status" aria-live="polite">
 
       </div>
-      <NTabs v-else-if="selectedProfile" :key="selectedProfile" v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
+      <NTabs v-else-if="selectedProfile || activeTab === 'api' || activeTab === 'jev'" :key="activeTab === 'api' || activeTab === 'jev' ? activeTab : selectedProfile" v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
         <NTabPane name="general" :tab="t('models.generalTitle')">
           <div>
             <ProvidersPanel />
           </div>
+        </NTabPane>
+        <NTabPane name="api" :tab="t('modelApi.title')">
+          <ModelApiPanel />
         </NTabPane>
         <NTabPane name="auxiliary" :tab="t('models.auxiliaryTitle')">
           <AuxiliaryModelsPanel />
@@ -249,7 +274,7 @@ async function handleRefreshModelCache() {
           <CombinationModelsPanel />
         </NTabPane>
         <NTabPane name="jev" tab="JEV">
-          <JevSettingsPanel :profile="selectedProfile" />
+          <JevSettingsPanel />
         </NTabPane>
         <NTabPane name="stt" :tab="t('settings.voice.sttProvidersTitle')">
           <VoiceSettings :key="`stt-${selectedProfile}`" kind="stt" />
@@ -265,8 +290,12 @@ async function handleRefreshModelCache() {
       @close="handleModalClose"
       @saved="handleSaved"
     />
+    <ProviderImportModal v-if="importDraft && !profileLoading && selectedProfile"
+      :key="importRevision"
+      :draft="importDraft" :profile="selectedProfile" :profiles="profiles"
+      @close="importDraft = null" @saved="handleImportSaved" />
     <ModelCatalogNotice
-      v-if="largeCatalogProviders.length > 0 && !profileLoading && !modelsStore.loading && !modelsStore.refreshingModelCache && !showModal && !visibilityProvider && !catalogBusy"
+      v-if="activeTab !== 'api' && largeCatalogProviders.length > 0 && !profileLoading && !modelsStore.loading && !modelsStore.refreshingModelCache && !showModal && !visibilityProvider && !catalogBusy"
       v-model:show="showLargeCatalogNotice"
       :providers="largeCatalogProviders"
       @manage="manageLargeCatalog"

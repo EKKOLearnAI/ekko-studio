@@ -2565,6 +2565,20 @@ class ChatStorage {
 
             this.ensureCurrentRoomTokenAccounting(roomId)
             const previousIds = this.contextWindowMessageIdsForTokenDelta(roomId)
+            const summary = this.getRoomSummary(roomId)
+            let invalidatesSummary = false
+            if (summary?.summaryThroughMessageId || summary?.summarizedTurnCount) {
+                // Inspect the full cursor history, not the bounded context window;
+                // multipart replies and equal timestamps use canonical ordering.
+                const boundary = sliceGroupMessagesCanonical(
+                    db.prepare('SELECT id, timestamp FROM gc_messages WHERE roomId = ?').all(roomId) as Array<{ id: string; timestamp: number }>,
+                    { throughMessageId: summary.summaryThroughMessageId },
+                )
+                invalidatesSummary = !summary.summaryThroughMessageId
+                    || !boundary.throughMessageFound
+                    || boundary.messages.at(-1)?.timestamp !== summary.summaryThroughMessageTimestamp
+                    || boundary.messages.some(item => item.id === selected.messageId)
+            }
             const cancelledAt = Date.now()
             const queueIds = siblings.map(item => item.id)
             const placeholders = queueIds.map(() => '?').join(', ')
@@ -2599,8 +2613,14 @@ class ChatStorage {
                  SET totalTokens = ?, summaryGeneration = summaryGeneration + 1
                  WHERE id = ?`,
             ).run(totalTokens, roomId)
-            db.prepare('DELETE FROM gc_summary_reviews WHERE roomId = ?').run(roomId)
-            db.prepare('DELETE FROM gc_room_summaries WHERE roomId = ?').run(roomId)
+            if (invalidatesSummary) {
+                db.prepare('DELETE FROM gc_summary_reviews WHERE roomId = ?').run(roomId)
+                db.prepare('DELETE FROM gc_room_summaries WHERE roomId = ?').run(roomId)
+            } else {
+                this.invalidateRoomSummaryRun(roomId)
+                // A failed drain may still point at the retracted message.
+                db.prepare("UPDATE gc_room_summaries SET summaryDrainThroughMessageId = '' WHERE roomId = ? AND summaryDrainThroughMessageId != ''").run(roomId)
+            }
 
             return {
                 messageId: selected.messageId,
@@ -5349,6 +5369,7 @@ export class GroupChatServer {
             totalTokens: retracted.totalTokens,
             lastActiveAt: retracted.lastActiveAt,
         })
+        this.nsp.to(roomId).emit('room_summary_updated', this.roomSummaryService.getState(roomId))
         this.broadcastExecutionQueue(roomId)
         this.nsp.to(roomId).emit('room_updated', {
             roomId,

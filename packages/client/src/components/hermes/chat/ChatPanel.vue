@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { agentMetadata, isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
-import PageSidebar from "@/components/layout/PageSidebar.vue"
-import SidebarResizeHandle from "@/components/layout/SidebarResizeHandle.vue"
+import SessionListSidebar from "./SessionListSidebar.vue"
+import SessionSelectionToolbar from "./SessionSelectionToolbar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
-import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { useSessionReadState } from '@/composables/useSessionReadState'
+import { usePageLoadingState, usePageLoadingTask } from '@/composables/usePageLoading'
 import { useCodingAgentModels } from '@/composables/useCodingAgentModels'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
+import HeaderToolPanelToggle from '@/components/layout/HeaderToolPanelToggle.vue'
 import { AGENT_OPTIONS } from "@/utils/agent-options"
 import { setSessionPinned } from "@/api/studio/sessions";
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue";
@@ -23,6 +25,7 @@ import {
   type SessionCategory,
 } from "@/api/studio/sessions";
 import type { AvailableModelGroup } from "@/api/hermes/system";
+import ModelProtocolModal from '@/components/hermes/models/ModelProtocolModal.vue'
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
 import { nativeCatalogModel, nativeModelLabel, nativeModelFamilies, nativeModelPickerId, nativeModelEffortChoices, selectNativeModelEffort } from "@/utils/native-model-families";
 import { agentInstallationState, fetchAgentAvailabilitySnapshot, type AgentAvailabilitySnapshot } from "@/api/agent-status";
@@ -41,19 +44,20 @@ import {
   NModal,
   NSelect,
   NTooltip,
-  NPopconfirm,
   NPopover,
   useMessage,
   type DropdownOption,
 } from "naive-ui";
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { copyToClipboard } from "@/utils/clipboard";
 import FolderPicker from "./FolderPicker.vue";
 import StarIcon from "@/components/common/StarIcon.vue";
+import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue';
 import ChatInput from "./ChatInput.vue";
 import NewChatAgentCards from "./NewChatAgentCards.vue";
+import NewChatPage from "./NewChatPage.vue";
 import { prepareAgentDeployment, type AgentDeploymentController } from "./agentDeployment.mjs";
 import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
@@ -61,7 +65,7 @@ import MessageList from "./MessageList.vue";
 import SessionListItem from "./SessionListItem.vue";
 import ListActionsMenu from "@/components/layout/ListActionsMenu.vue";
 import OutlinePanel from "./OutlinePanel.vue";
-import TerminalPanel from "./TerminalPanel.vue";
+import ChatToolsPanel from "./ChatToolsPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
 import { chatSessionAgentAvatar } from "@/utils/chat-agent-avatar";
 import { isHermesSession } from "@/utils/hermes/session-agent";
@@ -69,12 +73,12 @@ import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./se
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import { buildActiveSessionMenuOptions, buildSessionContextMenuOptions } from "./session-menu-options";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
-import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { getStoredUserId, isStoredSuperAdmin } from "@/api/client";
 import { loadNewChatFormPreferences, saveNewChatFormPreferences } from "@/utils/new-chat-form-preferences";
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
+import { useChatSurfaceReveal } from "@/composables/useChatSurfaceReveal";
 import ModelCascader from "@/components/hermes/models/ModelCascader.vue";
-import { canScopedCodingAgentUseProvider, usesServerManagedProviderAuth } from "@/utils/codingAgentProviders";
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider, usesServerManagedProviderAuth } from "@/utils/codingAgentProviders";
 import { OPEN_SUBAGENT_STREAM_EVENT, type OpenSubagentStreamDetail } from "@/utils/hermes/subagent-stream";
 import { desktopBridge, hasDesktopBrowserBridge } from "@/utils/desktop-bridge";
 import { OPEN_DESKTOP_BROWSER_PANEL_EVENT } from "@/utils/desktop-browser";
@@ -97,21 +101,31 @@ const props = withDefaults(defineProps<{
 
 provide('hermesWorkspaceFilePreview', true);
 
-const FilesPanel = defineAsyncComponent(async () => (await import('./FilesPanel.vue')).default);
+const SessionTasksDrawer = defineAsyncComponent(async () => (await import('@/components/hermes/tasks/SessionTasksDrawer.vue')).default);
 const ConnectionsPanel = defineAsyncComponent(async () => (await import('@/components/hermes/connections/ConnectionsPanel.vue')).default);
 const AgentManagerPanel = defineAsyncComponent(async () => (await import('@/views/hermes/AgentManagerView.vue')).default);
 const ModelsPanel = defineAsyncComponent(async () => (await import('@/views/hermes/ModelsView.vue')).default);
 const WorkspaceDiffPreview = defineAsyncComponent(async () => (await import('@/components/hermes/files/WorkspaceDiffPreview.vue')).default);
 const FilePreview = defineAsyncComponent(async () => (await import('@/components/hermes/files/FilePreview.vue')).default);
-const DesktopBrowserPanel = defineAsyncComponent(async () => (await import('./DesktopBrowserPanel.vue')).default);
 
 const chatStore = useChatStore();
+const sessionStates = useSessionReadState(() => props.contentMode === 'chat' && !chatStore.isLoadingMessages ? chatStore.activeSessionId : null);
 const appStore = useAppStore();
 const profilesStore = useProfilesStore();
 const filesStore = useFilesStore();
 const toolPanelStore = useToolPanelStore();
 const sessionBrowserPrefsStore = useSessionBrowserPrefsStore();
 const router = useRouter();
+const route = useRoute();
+const sessionTasksMounted = ref(false);
+const showSessionTasks = computed(() => props.contentMode === 'chat' && chatStore.runtimeMode === 'default' && route.query.tasks === '1');
+watch(showSessionTasks, show => { if (show) sessionTasksMounted.value = true; }, { immediate: true });
+function openSessionTasks() {
+  void router.push({ query: { ...route.query, tasks: '1' } });
+}
+function updateSessionTasksVisibility(show: boolean) {
+  if (!show) void router.replace({ query: { ...route.query, tasks: undefined } });
+}
 const message = useMessage();
 const { t } = useI18n();
 const isSuperAdmin = computed(() => isStoredSuperAdmin());
@@ -134,7 +148,7 @@ const chatInputRef = ref<(InstanceType<typeof ChatInput> & {
 }) | null>(null);
 const chatContentWrapperRef = ref<HTMLElement | null>(null);
 const chatMainContentRef = ref<HTMLElement | null>(null);
-let sessionFadeAnimation: Animation | null = null;
+useChatSurfaceReveal(chatMainContentRef, () => chatStore.activeSessionId || 'new-chat', () => !chatStore.isLoadingMessages || chatStore.messages.length > 0);
 let workspacePreviewRequestSeq = 0;
 let workspacePreviewRequestPending = false;
 const chatDropCounter = ref(0);
@@ -530,21 +544,6 @@ watch(
     // composer keeps whatever focus the sidebar click left behind, so the first
     // keystroke goes nowhere.
     chatInputRef.value?.focusComposer?.();
-
-    const surface = chatMainContentRef.value;
-    if (!surface || typeof surface.animate !== "function") return;
-
-    sessionFadeAnimation?.cancel();
-    sessionFadeAnimation = surface.animate(
-      [
-        { opacity: 0 },
-        { opacity: 1 },
-      ],
-      {
-        duration: 1500,
-        easing: "ease",
-      },
-    );
   },
   { flush: "post" },
 );
@@ -560,13 +559,11 @@ onUnmounted(() => {
   window.removeEventListener("resize", updateNewChatCategoryAnchor);
   window.removeEventListener("scroll", updateNewChatCategoryAnchor, true);
   stopToolResize();
-  sessionFadeAnimation?.cancel();
   workspacePreviewRequestSeq += 1;
   if (workspacePreviewRequestPending || previewOnlyFileOpen.value || filesStore.previewFile?.workspaceSessionId) filesStore.closePreview();
   workspacePreviewRequestPending = false;
   previewOnlyFileOpen.value = false;
   toolPanelStore.closeWorkspaceDiff();
-  sessionFadeAnimation = null;
 });
 watch(showToolPanel, async (visible) => {
   if (!visible || isMobile.value) return;
@@ -686,7 +683,7 @@ function sortSessionsForSidebar(items: Session[]): Session[] {
 }
 
 const recentSessionPartition = computed(() => partitionRecentSessions(
-  chatStore.sessions.filter((session) => !session.isPinned),
+  chatStore.sessions.filter((session) => !/^person-(main|task)-/.test(session.id) && !session.isPinned),
   sessionBrowserPrefsStore.recentCount,
   t("chat.recent"),
 ));
@@ -712,7 +709,7 @@ function toggleRecentGroup() {
 
 const pinnedSessions = computed(() =>
   sortSessionsForSidebar(
-    chatStore.sessions.filter((session) =>
+    chatStore.sessions.filter((session) => !/^person-(main|task)-/.test(session.id) &&
       session.isPinned,
     ),
   ),
@@ -833,6 +830,13 @@ const headerTitle = computed(() =>
 );
 
 const showNewChatPage = ref(false);
+const pageLoading = usePageLoadingState();
+const isEmptySingleChat = computed(() =>
+  props.contentMode === "chat" && currentMode.value === "chat"
+  && chatStore.runtimeMode === "default" && route.name === "hermes.chat"
+  && !pageLoading.value && chatStore.sessionsLoaded && !chatStore.isLoadingSessions
+  && !chatStore.activeSessionId && chatStore.sessions.length === 0,
+);
 const showNewChatSettings = ref(false);
 const showNewChatCategory = ref(false);
 const newChatCategoryTriggerRef = ref<InstanceType<typeof NButton> | null>(null);
@@ -894,7 +898,7 @@ function closeNewChatPage() {
 }
 
 function cancelNewChatPage() {
-  if (newChatLoading.value) return;
+  if (newChatLoading.value || isEmptySingleChat.value) return;
   closeNewChatPage();
   showToolPanel.value = newChatPreviousToolPanel.value;
 }
@@ -933,6 +937,7 @@ const newChatNativeSelections = ref<Record<string, { model: string; reasoningEff
 const newChatBaseUrl = ref<string>("");
 const newChatApiKey = ref<string>("");
 const newChatApiMode = ref<CodingAgentApiMode>("codex_responses");
+const newChatApiModeManual = ref(false);
 const newChatWorkspace = ref("");
 const newChatAgentPreset = ref<string>();
 const newChatPresetReady = ref(false);
@@ -955,7 +960,7 @@ function persistNewChatForm() {
   saveNewChatFormPreferences(getStoredUserId(), {
     agent: preferredNewChatAgent, mode: newChatAgentMode.value, profile: newChatProfile.value,
     provider: newChatProvider.value, model: newChatModel.value, customModel: newChatCustomModel.value,
-    apiMode: newChatApiMode.value, reasoningEffort: newChatReasoningEffort.value,
+    apiMode: newChatApiMode.value, apiModeManual: newChatApiModeManual.value, reasoningEffort: newChatReasoningEffort.value,
     workspace: newChatWorkspace.value, categoryId: newChatCategoryId.value,
     agentPreset: newChatAgentPreset.value, baseUrl: newChatBaseUrl.value, apiKey: newChatApiKey.value,
     nativeModels: newChatNativeSelections.value,
@@ -963,7 +968,7 @@ function persistNewChatForm() {
 }
 
 watch([newChatAgent, newChatAgentMode, newChatProfile, newChatProvider, newChatModel, newChatCustomModel,
-  newChatApiMode, newChatReasoningEffort, newChatWorkspace, newChatCategoryId, newChatAgentPreset, newChatBaseUrl, newChatApiKey],
+  newChatApiMode, newChatApiModeManual, newChatReasoningEffort, newChatWorkspace, newChatCategoryId, newChatAgentPreset, newChatBaseUrl, newChatApiKey],
   () => { if (showNewChatPage.value) persistNewChatForm(); }, { flush: "post" });
 watch(newChatNativeSelections, () => { if (showNewChatPage.value) persistNewChatForm(); }, { deep: true });
 
@@ -1208,6 +1213,7 @@ watch(newChatNativeCatalog, catalog => {
   }
 });
 const newChatDraftConfig = computed(() => ({
+  agent: newChatAgent.value,
   profile: newChatProfile.value,
   provider: isNewChatGlobalCodingAgent.value ? "" : newChatProvider.value,
   model: isNewChatGlobalCodingAgent.value ? newChatNativeSelection.value.model : newChatModel.value,
@@ -1264,11 +1270,16 @@ const newChatMissingCredentials = computed(() =>
   || (newChatNeedsApiKey.value && !newChatApiKey.value.trim())),
 );
 
+const newChatConfiguredApiMode = computed(() => configuredProviderApiMode(selectedNewChatProviderGroup.value, newChatModel.value));
+watch(newChatConfiguredApiMode, (mode) => {
+  if (!restoringNewChatForm && !newChatApiModeManual.value && mode && newChatApiMode.value !== mode) newChatApiMode.value = mode;
+}, { flush: "sync" });
+
 function defaultNewChatApiMode(group?: AvailableModelGroup): CodingAgentApiMode {
   const providerKey = String(group?.provider || newChatProvider.value || "").toLowerCase();
   const baseUrl = String(group?.base_url || newChatBaseUrl.value || "").toLowerCase();
   return normalizeCodingAgentApiMode(
-    group?.api_mode,
+    configuredProviderApiMode(group, newChatModel.value),
     inferCodingAgentApiMode(providerKey, baseUrl),
   );
 }
@@ -1278,6 +1289,7 @@ function syncNewChatApiMode() {
 }
 
 function syncNewChatModelSelection() {
+  newChatApiModeManual.value = false;
   const defaults = getDefaultModelForProfile(newChatProfile.value);
   newChatProvider.value = defaults.provider;
   newChatModel.value = defaults.model;
@@ -1356,7 +1368,7 @@ async function loadNewChatModels(sequence: number) {
   }
 }
 
-async function openNewChatPage() {
+async function openNewChatPage(options: { preserveSidebar?: boolean } = {}) {
   if (newChatLoading.value) return;
   if (props.contentMode !== "chat") await router.push({ name: "hermes.chat" });
   const previousToolPanel = showNewChatPage.value ? newChatPreviousToolPanel.value : showToolPanel.value;
@@ -1373,6 +1385,7 @@ async function openNewChatPage() {
   showBatchDeleteConfirm.value = false;
   const saved = loadNewChatFormPreferences(getStoredUserId());
   restoringNewChatForm = true;
+  newChatApiModeManual.value = saved?.apiModeManual ?? !!saved?.apiMode;
   preferredNewChatAgent = saved?.agent || loadNewChatAgent();
   newChatAgent.value = preferredNewChatAgent;
   newChatAgentMode.value = saved?.mode || "scoped";
@@ -1393,7 +1406,7 @@ async function openNewChatPage() {
   newChatModelsLoading.value = !newChatModelCatalogKnown.value;
   if (!saved) syncNewChatModelSelection();
   restoringNewChatForm = false;
-  if (isMobile.value) showSessions.value = false;
+  if (isMobile.value && !options.preserveSidebar) showSessions.value = false;
   showNewChatPage.value = true;
   void initWorkspaceComposable().then(() => {
     if (isCurrentNewChatOptionsLoad(sequence) && !saved && !newChatWorkspace.value) {
@@ -1719,7 +1732,18 @@ async function handleDeleteSession(id: string) {
     message.error(t("common.deleteFailed"));
     return;
   }
+  await syncSessionRouteAfterDeletion();
   message.success(t("chat.sessionDeleted"));
+}
+
+async function syncSessionRouteAfterDeletion() {
+  if (isMobile.value && !chatStore.activeSessionId && chatStore.sessions.length === 0) showSessions.value = false;
+  const routeId = router.currentRoute.value.params.sessionId;
+  if (!routeId || chatStore.sessions.some(session => session.id === routeId)) return;
+  await router.replace(chatStore.activeSessionId ? {
+    name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgentSession" : "hermes.session",
+    params: { sessionId: chatStore.activeSessionId },
+  } : { name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgent" : "hermes.chat" });
 }
 
 function toggleBatchMode() {
@@ -1766,9 +1790,10 @@ async function handleBatchDelete() {
   try {
     const result = await batchDeleteSessions(targets);
     if (result.deleted > 0) {
-      // Remove deleted sessions from local store (without calling API again)
-      // Use loadSessions to refresh from server instead of manual filtering
+      const failedIds = new Set(result.errors.map(error => error.id));
+      for (const target of targets) if (!failedIds.has(target.id)) chatStore.forgetSession(target.id);
       await chatStore.loadSessions(chatStore.sessionProfileFilter);
+      await syncSessionRouteAfterDeletion();
 
       message.success(t("chat.batchDeleteSuccess", { count: result.deleted }));
       if (result.failed > 0) {
@@ -1787,25 +1812,18 @@ async function handleBatchDelete() {
   }
 }
 
-function handleBatchDeleteConfirm() {
-  void handleBatchDelete();
-  return false;
-}
-
 function selectAllSessions() {
   if (isBatchDeleting.value) return;
   selectedSessionKeys.value.clear();
   for (const session of chatStore.sessions) {
-    if (session.id !== chatStore.activeSessionId) {
-      selectedSessionKeys.value.add(sessionSelectionKey(session));
-    }
+    selectedSessionKeys.value.add(sessionSelectionKey(session));
   }
   selectedSessionKeys.value = new Set(selectedSessionKeys.value);
 }
 
 const selectedCount = computed(() => selectedSessionKeys.value.size);
 const canSelectAll = computed(() => {
-  return chatStore.sessions.some(s => s.id !== chatStore.activeSessionId);
+  return chatStore.sessions.length > 0;
 });
 
 const contextSessionId = ref<string | null>(null);
@@ -2384,7 +2402,7 @@ function defaultSessionModelApiMode(provider: string): CodingAgentApiMode {
   );
 }
 
-async function applySessionModelSwitch(model: string, provider: string, apiMode?: CodingAgentApiMode) {
+async function applySessionModelSwitch(model: string, provider: string, apiMode?: CodingAgentApiMode, manualApiMode = false) {
   if (sessionModelSwitching.value) return;
   if (sessionModelIsDraft.value) {
     if (!showNewChatPage.value || newChatLoading.value) return;
@@ -2397,6 +2415,7 @@ async function applySessionModelSwitch(model: string, provider: string, apiMode?
       showSessionModelPicker.value = false;
       return;
     }
+    newChatApiModeManual.value = manualApiMode;
     if (newChatProvider.value !== provider) {
       newChatBaseUrl.value = "";
       newChatApiKey.value = "";
@@ -2435,10 +2454,17 @@ async function selectSessionModel(model: string, provider: string) {
   const meta = sessionModelBaseGroups.value.find((group) => group.provider === provider)?.model_meta?.[model];
   if (meta?.disabled || (!sessionModelSessionId.value && !sessionModelIsDraft.value) || sessionModelSwitching.value) return;
   if (isSessionModelScopedCodingAgent.value) {
+    const group = sessionModelBaseGroups.value.find(group => group.provider === provider);
+    const mode = configuredProviderApiMode(group, model);
+    const sameModel = sessionModelProvider.value === provider && sessionModelValue.value === model;
+    if (mode && !(group?.api_mode_by_model && sameModel)) {
+      await applySessionModelSwitch(model, provider, mode);
+      return;
+    }
     pendingSessionModelSwitch.value = { model, provider };
-    sessionModelApiMode.value = sessionModelSession.value?.provider === provider && sessionModelSession.value.apiMode
-      ? normalizeCodingAgentApiMode(sessionModelSession.value.apiMode, defaultSessionModelApiMode(provider))
-      : defaultSessionModelApiMode(provider);
+    sessionModelApiMode.value = sameModel
+      ? normalizeCodingAgentApiMode(sessionModelIsDraft.value ? newChatApiMode.value : sessionModelSession.value?.apiMode, mode || defaultSessionModelApiMode(provider))
+      : mode || defaultSessionModelApiMode(provider);
     showSessionModelModeModal.value = true;
     return;
   }
@@ -2453,7 +2479,7 @@ async function selectSessionMoaPreset(preset: string) {
 async function confirmSessionModelMode() {
   const pending = pendingSessionModelSwitch.value;
   if (!pending) return;
-  await applySessionModelSwitch(pending.model, pending.provider, sessionModelApiMode.value);
+  await applySessionModelSwitch(pending.model, pending.provider, sessionModelApiMode.value, true);
 }
 
 function cancelSessionModelMode() {
@@ -2466,18 +2492,22 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
   if (selection.provider === 'moa') void selectSessionMoaPreset(selection.model);
   else void selectSessionModel(selection.model, selection.provider);
 }
+
+// Wait for route cleanup and session loading before opening the empty state;
+// explicit session links may still be resolving outside the sidebar list.
+watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
+  if (empty && !showNewChatPage.value) void openNewChatPage({ preserveSidebar: true });
+}, { immediate: true, flush: "post" });
 </script>
 
 <template>
   <div class="chat-panel" :class="{ 'chat-panel--standalone': standalone }">
-    <PageSidebar>
-    <aside
+    <SessionListSidebar
       v-if="hasPageSidebar"
-      class="session-list"
-      :class="{ collapsed: !showSessions, 'session-list--navigation': contentMode !== 'chat' }"
+      :expanded="showSessions"
+      :navigation="contentMode !== 'chat'"
     >
-      <SidebarResizeHandle />
-      <div v-if="showSessions" class="page-sidebar-top">
+      <template #header>
         <PageSidebarNav
           :active="contentMode === 'connections' ? 'connections' : contentMode === 'agents' ? 'agents' : contentMode === 'models' ? 'models' : chatStore.runtimeMode === 'global_agent' ? 'global' : 'chat'"
           :primary-label="t('chat.newChat')"
@@ -2507,77 +2537,18 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             </button>
           </template>
         </PageSidebarNav>
-        <div v-if="contentMode === 'chat' && isBatchMode" class="session-list-toolbar">
-          <span class="session-selection-count" role="status">{{ t('chat.selectedSessions', { count: selectedCount }) }}</span>
-          <div class="session-list-actions">
-            <NButton
-              v-if="isBatchMode"
-              quaternary
-              size="tiny"
-              @click="selectAllSessions"
-              :disabled="!canSelectAll || isBatchDeleting"
-              :title="t('chat.selectAll')"
-              :aria-label="t('chat.selectAll')"
-            >
-              <template #icon>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path d="M9 11l3 3L22 4" />
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                </svg>
-              </template>
-            </NButton>
-            <NPopconfirm
-              v-if="isBatchMode && selectedCount > 0"
-              v-model:show="showBatchDeleteConfirm"
-              :positive-button-props="{ loading: isBatchDeleting, disabled: isBatchDeleting }"
-              :negative-button-props="{ disabled: isBatchDeleting }"
-              @positive-click="handleBatchDeleteConfirm"
-            >
-              <template #trigger>
-                <NButton quaternary size="tiny" :title="t('common.delete')" :aria-label="t('common.delete')" :loading="isBatchDeleting" :disabled="isBatchDeleting">
-                  <template #icon>
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    </svg>
-                  </template>
-                </NButton>
-              </template>
-              {{ t('chat.confirmBatchDelete', { count: selectedCount }) }}
-            </NPopconfirm>
-            <NButton
-              v-if="isBatchMode"
-              quaternary
-              size="tiny"
-              @click="toggleBatchMode"
-              :disabled="isBatchDeleting"
-              :title="t('common.cancel')"
-              :aria-label="t('common.cancel')"
-            >
-              <template #icon>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path d="m18 6-12 12M6 6l12 12" />
-                </svg>
-              </template>
-            </NButton>
-          </div>
-        </div>
-      </div>
-      <div v-if="contentMode === 'chat' && showSessions" class="session-items">
+        <SessionSelectionToolbar
+          v-if="contentMode === 'chat' && isBatchMode"
+          v-model:show-confirm="showBatchDeleteConfirm"
+          :selected-count="selectedCount"
+          :can-select-all="canSelectAll"
+          :deleting="isBatchDeleting"
+          @select-all="selectAllSessions"
+          @delete="handleBatchDelete"
+          @cancel="toggleBatchMode"
+        />
+      </template>
+      <template #default>
         <div
           v-if="chatStore.isLoadingSessions && chatStore.sessions.length === 0"
           class="session-loading"
@@ -2599,12 +2570,9 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             :session="s"
             :active="s.id === chatStore.activeSessionId"
             :pinned="true"
-            :can-delete="
-              s.id !== chatStore.activeSessionId ||
-              chatStore.sessions.length > 1
-            "
-            :streaming="chatStore.isSessionWorking(s.id)"
-            :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
+            can-delete
+            :streaming="sessionStates.isWorking(s.id, chatStore.isSessionWorking(s.id))"
+            :completed-unread="sessionStates.isUnread(s.id, chatStore.isSessionCompletedUnread(s.id))"
             :selectable="isBatchMode"
             :selected="isSessionSelected(s)"
             :show-profile="true"
@@ -2656,9 +2624,9 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               :session="s"
               :active="s.id === chatStore.activeSessionId"
               :pinned="Boolean(s.isPinned)"
-              :can-delete="s.id !== chatStore.activeSessionId || chatStore.sessions.length > 1"
-              :streaming="chatStore.isSessionWorking(s.id)"
-              :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
+              can-delete
+              :streaming="sessionStates.isWorking(s.id, chatStore.isSessionWorking(s.id))"
+              :completed-unread="sessionStates.isUnread(s.id, chatStore.isSessionCompletedUnread(s.id))"
               :selectable="isBatchMode"
               :selected="isSessionSelected(s)"
               :show-profile="true"
@@ -2737,12 +2705,9 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               :session="s"
               :active="s.id === chatStore.activeSessionId"
               :pinned="false"
-              :can-delete="
-                s.id !== chatStore.activeSessionId ||
-                chatStore.sessions.length > 1
-              "
-              :streaming="chatStore.isSessionWorking(s.id)"
-              :completed-unread="chatStore.isSessionCompletedUnread(s.id)"
+              can-delete
+              :streaming="sessionStates.isWorking(s.id, chatStore.isSessionWorking(s.id))"
+              :completed-unread="sessionStates.isUnread(s.id, chatStore.isSessionCompletedUnread(s.id))"
               :selectable="isBatchMode"
               :selected="isSessionSelected(s)"
               :show-profile="true"
@@ -2756,10 +2721,8 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             />
           </template>
         </template>
-      </div>
-      <PageSidebarFooter v-if="showSessions" />
-    </aside>
-    </PageSidebar>
+      </template>
+    </SessionListSidebar>
 
     <NDropdown
       :key="contextMenuCategoriesKey"
@@ -2797,12 +2760,13 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
               />
             </label>
           </div>
-          <div v-if="(isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped') || newChatNeedsBaseUrl || newChatNeedsApiKey" class="new-chat-settings-group">
-            <label v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped'" class="new-chat-field">
+          <div v-if="(isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped' && !newChatConfiguredApiMode) || newChatNeedsBaseUrl || newChatNeedsApiKey" class="new-chat-settings-group">
+            <label v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped' && !newChatConfiguredApiMode" class="new-chat-field">
               <span class="new-chat-label">{{ t("codingAgents.protocolScope") }}</span>
               <NSelect
                 v-bind="newChatSettingsSelectProps"
                 v-model:value="newChatApiMode"
+                @update:value="newChatApiModeManual = true"
                 :options="newChatApiModeOptions"
                 :disabled="newChatLoading"
               />
@@ -2981,31 +2945,17 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
       </template>
     </ModelCascader>
 
-    <NModal
+    <ModelProtocolModal
       v-model:show="showSessionModelModeModal"
-      preset="dialog"
-      :title="t('codingAgents.protocolScope')"
-      :mask-closable="!sessionModelSwitching"
-      :close-on-esc="!sessionModelSwitching"
-      :closable="!sessionModelSwitching"
-      style="width: min(420px, calc(100vw - 32px))"
-    >
-      <NSelect
-        v-model:value="sessionModelApiMode"
-        :options="newChatApiModeOptions"
-        :disabled="sessionModelSwitching"
-      />
-      <template #action>
-        <NButton size="small" :disabled="sessionModelSwitching" @click="cancelSessionModelMode">
-          {{ t('common.cancel') }}
-        </NButton>
-        <NButton size="small" type="primary" :loading="sessionModelSwitching" @click="confirmSessionModelMode">
-          {{ sessionModelSwitching ? t('chat.modelSwitching') : t('common.confirm') }}
-        </NButton>
-      </template>
-    </NModal>
+      v-model:value="sessionModelApiMode"
+      :loading="sessionModelSwitching"
+      @cancel="cancelSessionModelMode"
+      @confirm="confirmSessionModelMode"
+    />
 
 
+
+    <SessionTasksDrawer v-if="sessionTasksMounted && !standalone && chatStore.runtimeMode === 'default'" :show="showSessionTasks" @update:show="updateSessionTasksVisibility" />
 
     <div
       class="chat-main"
@@ -3033,6 +2983,14 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
           <span class="header-session-title" dir="auto">{{ headerTitle }}</span>
         </div>
         <div class="header-actions">
+          <NTooltip v-if="chatStore.runtimeMode === 'default'" trigger="hover">
+            <template #trigger>
+              <NButton class="header-tasks-button" quaternary size="small" circle :aria-label="t('sessionTasks.title')" :aria-expanded="showSessionTasks" aria-haspopup="dialog" @click="openSessionTasks">
+                <template #icon><SessionTaskIcon :size="16" /></template>
+              </NButton>
+            </template>
+            {{ t('sessionTasks.title') }}
+          </NTooltip>
           <NButton
             v-if="!showNewChatPage && chatStore.activeSession?.workspace"
             class="header-workspace-button"
@@ -3051,39 +3009,9 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
           </NButton>
           <!-- chat/live mode toggle hidden -->
           <template v-if="currentMode === 'chat' && !showNewChatPage">
-            <NTooltip v-if="isSuperAdmin" trigger="hover">
-              <template #trigger>
-                <NButton
-                  class="header-tool-toggle"
-                  :class="{ active: showToolPanel }"
-                  quaternary
-                  size="small"
-                  :aria-label="t('chat.sidePanel')"
-                  :aria-expanded="showToolPanel"
-                  aria-controls="chat-tool-panel"
-                  @click="toggleToolPanel"
-                  circle
-                >
-                  <template #icon>
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      aria-hidden="true"
-                    >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <line x1="15" y1="3" x2="15" y2="21" />
-                    </svg>
-                  </template>
-                </NButton>
-              </template>
-              {{ desktopBrowserAvailable ? `${t("drawer.files")} / ${t("drawer.terminal")} / ${t("browser.title")}` : `${t("drawer.files")} / ${t("drawer.terminal")}` }}
-            </NTooltip>
+            <HeaderToolPanelToggle v-if="isSuperAdmin" :expanded="showToolPanel" controls="chat-tool-panel"
+              :tooltip="desktopBrowserAvailable ? `${t('drawer.files')} / ${t('drawer.terminal')} / ${t('browser.title')}` : `${t('drawer.files')} / ${t('drawer.terminal')}`"
+              @toggle="toggleToolPanel" />
             <NDropdown
               v-model:show="showActiveSessionMenu"
               trigger="click"
@@ -3143,22 +3071,19 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
             :data-agent-deployment-active="currentMode === 'chat' && !showNewChatPage"
             :data-agent-deployment-status-session="chatStore.activeSessionId || ''"
             :data-agent-deployment-status="chatStore.isLoadingMessages ? 'pending' : chatStore.isRunActive ? 'working' : 'settled'">
-            <section v-if="showNewChatPage" class="new-chat-page" :aria-label="t('chat.newChat')">
-              <div class="new-chat-intro">
-                <h1>{{ t('chat.newChatCardTitle') }}</h1>
-                <p>{{ t('chat.newChatCardSubtitle') }}</p>
-              </div>
-              <NewChatAgentCards :value="newChatAgent" :options="newChatAgentOptions"
-                :loading="newChatAgentLoading" :disabled="newChatLoading || newChatAgentLoading"
-                @update:value="handleNewChatAgentChange" />
-              <div class="new-chat-compose">
+            <NewChatPage v-if="showNewChatPage" :title="t('chat.newChatCardTitle')" :subtitle="t('chat.newChatCardSubtitle')">
+              <template #cards>
+                <NewChatAgentCards :value="newChatAgent" :options="newChatAgentOptions"
+                  :loading="newChatAgentLoading" :disabled="newChatLoading || newChatAgentLoading"
+                  @update:value="handleNewChatAgentChange" />
+              </template>
                 <div class="new-chat-config-bar">
                   <div class="new-chat-config-actions">
                     <NButton quaternary circle size="small" class="new-chat-config-icon" :disabled="newChatLoading" :title="newChatWorkspace || t('chat.workspace')"
                       :aria-label="t('chat.workspace')" :aria-expanded="showWorkspaceModal && workspaceIsDraft" @click="openNewChatWorkspace">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
                     </NButton>
-                    <DshSessionPresetSelect v-if="newChatAgent === 'dsh'" v-model="newChatAgentPreset" v-model:show="showNewChatPresetMode"
+                    <DshSessionPresetSelect v-if="newChatAgent === 'dsh'" :key="newChatComposerRevision" v-model="newChatAgentPreset" v-model:show="showNewChatPresetMode"
                       compact :disabled="newChatLoading" @valid="newChatPresetReady = $event" />
                     <NButton quaternary circle size="small" class="new-chat-config-icon" :disabled="newChatLoading" :title="t('chat.newChatSettings')"
                       :aria-label="t('chat.newChatSettings')" :aria-expanded="showNewChatSettings" @click="showNewChatSettings = true">
@@ -3224,8 +3149,7 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
                 <button v-else-if="newChatMissingCredentials" type="button" class="new-chat-config-hint" @click="showNewChatSettings = true">
                   {{ t('chat.newChatCredentialsHint') }}
                 </button>
-              </div>
-            </section>
+            </NewChatPage>
             <template v-else>
             <MessageList
               ref="messageListRef"
@@ -3296,72 +3220,10 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
                   </div>
                 </template>
                 <template v-else>
-                  <div class="chat-tool-tabs" role="tablist">
-                    <button
-                      class="chat-tool-tab"
-                      :class="{ active: activeToolPanel === 'files' }"
-                      type="button"
-                      role="tab"
-                      :title="t('drawer.files')"
-                      :aria-label="t('drawer.files')"
-                      :aria-selected="activeToolPanel === 'files'"
-                      @click="activeToolPanel = 'files'"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z" />
-                      </svg>
-                    </button>
-                    <button
-                      class="chat-tool-tab"
-                      :class="{ active: activeToolPanel === 'terminal' }"
-                      type="button"
-                      role="tab"
-                      :title="t('drawer.terminal')"
-                      :aria-label="t('drawer.terminal')"
-                      :aria-selected="activeToolPanel === 'terminal'"
-                      @click="activeToolPanel = 'terminal'"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <rect x="3" y="4" width="18" height="16" rx="2" />
-                        <path d="m7 9 3 3-3 3M13 15h4" />
-                      </svg>
-                    </button>
-                    <button
-                      v-if="desktopBrowserAvailable"
-                      class="chat-tool-tab"
-                      :class="{ active: activeToolPanel === 'browser' }"
-                      type="button"
-                      role="tab"
-                      :title="t('browser.title')"
-                      :aria-label="t('browser.title')"
-                      :aria-selected="activeToolPanel === 'browser'"
-                      @click="activeToolPanel = 'browser'"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <rect x="3" y="4" width="18" height="16" rx="2" />
-                        <path d="M3 9h18" />
-                        <circle cx="6.5" cy="6.5" r=".75" fill="currentColor" stroke="none" />
-                        <circle cx="9.5" cy="6.5" r=".75" fill="currentColor" stroke="none" />
-                      </svg>
-                    </button>
-                  </div>
-                  <div class="chat-tool-content">
-                    <FilesPanel
-                      v-show="activeToolPanel === 'files'"
-                      :workspace-session-id="activeWorkspaceSessionId"
-                      :workspace="activeWorkspacePath"
-                      @attach="handleWorkspaceFileAttach"
-                    />
-                    <TerminalPanel
-                      v-show="activeToolPanel === 'terminal'"
-                      :visible="showToolPanel && activeToolPanel === 'terminal'"
-                    />
-                    <DesktopBrowserPanel
-                      v-if="desktopBrowserAvailable && activeToolPanel === 'browser'"
-                      :visible="toolPanelTransitionReady"
-                      :submit="submitBrowserAnnotations"
-                    />
-                  </div>
+                  <ChatToolsPanel v-model:active-panel="activeToolPanel"
+                    :workspace-session-id="activeWorkspaceSessionId" :workspace="activeWorkspacePath"
+                    :visible="showToolPanel" :browser-visible="toolPanelTransitionReady" :browser-available="desktopBrowserAvailable"
+                    :submit="submitBrowserAnnotations" @attach="handleWorkspaceFileAttach" />
                 </template>
               </div>
             </aside>
@@ -3407,54 +3269,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
   background-color: var(--theme-card-bg, $bg-card);
 }
 
-.session-list {
-  position: relative;
-  width: $sidebar-width;
-  min-height: 0;
-  align-self: stretch;
-  margin: 0;
-  background: var(--theme-sidebar-bg, $bg-sidebar-surface);
-  border-inline-end: var(--border-width, 1px) solid $border-color;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  transition:
-    width $transition-normal,
-    opacity $transition-normal;
-  overflow: hidden;
-
-  &--navigation .page-sidebar-top {
-    flex: 1;
-    overflow-y: auto;
-  }
-
-  &.collapsed {
-    width: 0;
-    margin-inline-start: 0;
-    margin-inline-end: 0;
-    border: none;
-    box-shadow: none;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  @media (max-width: $breakpoint-mobile) {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    height: auto;
-    margin: 0;
-    z-index: 120;
-    width: $sidebar-width;
-
-    &.collapsed {
-      transform: translateX(-100%);
-      opacity: 0;
-    }
-  }
-}
-
 @media (max-width: $breakpoint-mobile) {
   .session-backdrop {
     position: absolute;
@@ -3470,11 +3284,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
       pointer-events: auto;
     }
   }
-}
-
-.page-sidebar-top {
-  flex-shrink: 0;
-  padding: calc(12px * var(--spacing-scale, 1));
 }
 
 .page-sidebar-tabs {
@@ -3518,53 +3327,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
   &:hover {
     background: rgba(var(--accent-primary-rgb), 0.06);
     color: $text-primary;
-  }
-}
-
-.session-list-toolbar {
-  display: flex;
-  align-items: center;
-  gap: calc(8px * var(--spacing-scale, 1));
-  margin-top: 8px;
-  justify-content: space-between;
-}
-
-.session-selection-count {
-  min-width: 0;
-  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
-  color: $text-secondary;
-}
-
-.session-list-actions {
-  display: flex;
-  align-items: center;
-  gap: calc(4px * var(--spacing-scale, 1));
-  height: 22px;
-
-  .n-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 22px;
-    min-height: 22px;
-  }
-}
-
-.session-close-btn {
-  display: inline-flex;
-  border: none;
-  background: none;
-  cursor: pointer;
-  color: $text-secondary;
-  padding: calc(4px * var(--spacing-scale, 1));
-  border-radius: $radius-sm;
-  height: 22px;
-  min-height: 22px;
-  align-items: center;
-  justify-content: center;
-
-  &:hover {
-    background: rgba($accent-primary, 0.06);
   }
 }
 
@@ -3650,19 +3412,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
   & + & { margin-top: 16px; padding-top: calc(16px * var(--spacing-scale, 1)); border-top: var(--border-width, 1px) solid $border-light; }
 }
 
-.new-chat-page {
-  flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
-  justify-content: center; padding: clamp(12px, 2vh, 24px) 0;
-}
-.new-chat-intro {
-  flex: none; text-align: center; padding: 0 calc(20px * var(--spacing-scale, 1));
-  h1 { margin: 0 0 8px; font-size: clamp(22px, 2.4vw, 30px); font-weight: 600; letter-spacing: -.6px; }
-  p { margin: 0; color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 13 / 14); }
-}
-.new-chat-page > :deep(.agent-cards) {
-  flex: 1; min-height: 0; max-height: calc(176px * 1.4 + 84px); max-width: 1040px; margin: 8px auto 0;
-}
-.new-chat-compose { flex: none; width: min(760px, calc(100% - 48px)); margin: 12px auto 0; }
 .new-chat-config-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); margin-bottom: 8px; }
 .new-chat-config-actions { display: flex; justify-content: flex-start; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); max-width: 100%; }
 .new-chat-config-icon { width: 28px; height: 28px; padding: 0; }
@@ -3681,25 +3430,12 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
     &:disabled { cursor: default; opacity: .45; }
   }
 }
-.new-chat-compose :deep(.chat-input-area) { padding: 0; border-top: 0; background: transparent; }
 .new-chat-config-hint { display: block; margin: 10px auto 0; padding: 0; border: 0; background: transparent; color: $text-secondary; font: inherit; font-size: calc(var(--font-size-base, 14px) * 12 / 14); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .workspace-picker-content { display: flex; flex-direction: column; gap: calc(12px * var(--spacing-scale, 1)); max-height: 65vh; overflow-y: auto; }
 .workspace-picker-content :deep(.n-button__content) { max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: $breakpoint-mobile) {
-  .new-chat-page { justify-content: flex-start; padding: calc(16px * var(--spacing-scale, 1)) 0; }
-  .new-chat-intro {
-    margin-top: auto;
-    padding: 0 calc(24px * var(--spacing-scale, 1));
-    h1 { margin-bottom: 6px; font-size: clamp(19px, 5.1vw, 24px); line-height: var(--line-height, 1.35); }
-    p { font-size: calc(var(--font-size-base, 14px) * 12 / 14); line-height: var(--line-height, 1.5); }
-  }
-  .new-chat-page > :deep(.agent-cards) { flex: none; max-height: none; }
-  .new-chat-compose { width: calc(100% - 32px); margin-top: 8px; margin-bottom: auto; }
   .new-chat-config-bar { flex-wrap: wrap; gap: calc(6px * var(--spacing-scale, 1)); }
   .new-chat-config-actions { width: 100%; }
-}
-@media (max-width: $breakpoint-mobile) and (max-height: 640px) {
-  .new-chat-page { padding: calc(8px * var(--spacing-scale, 1)) 0; }
 }
 
 .new-chat-field {
@@ -3833,12 +3569,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
   }
 }
 
-.session-items {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
-}
-
 .session-loading,
 .session-empty {
   padding: calc(16px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
@@ -3898,17 +3628,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
   flex-direction: column;
   min-width: 0;
   background-color: var(--theme-content-bg, $bg-main-surface);
-  animation: chat-surface-fade-in 1.5s ease both;
-}
-
-@keyframes chat-surface-fade-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
 }
 
 .chat-header {
@@ -3981,11 +3700,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
     font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   }
 
-}
-
-.header-tool-toggle.active {
-  color: var(--accent-primary);
-  background: rgba(var(--accent-primary-rgb), 0.1);
 }
 
 .chat-tool-panel {
@@ -4100,80 +3814,6 @@ function handleSessionModelSelect(selection: { model: string; provider: string }
   min-height: 0;
 }
 
-.chat-tool-tabs {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  flex-shrink: 0;
-  order: 2;
-  width: 48px;
-  height: 100%;
-  gap: calc(4px * var(--spacing-scale, 1));
-  padding: calc(8px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
-  border-inline-start: var(--border-width, 1px) solid $border-color;
-  background: var(--theme-sidebar-bg, $bg-sidebar-surface);
-  box-sizing: border-box;
-}
-
-.chat-tool-tab {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: none;
-  border-radius: $radius-sm;
-  background: transparent;
-  color: $text-secondary;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  transition: all $transition-fast;
-
-  svg {
-    width: 18px;
-    height: 18px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  &:hover {
-    color: $text-primary;
-    background: rgba(var(--accent-primary-rgb), 0.06);
-  }
-
-  &.active {
-    color: var(--accent-primary);
-    background: rgba(var(--accent-primary-rgb), 0.12);
-
-    &::after {
-      content: "";
-      position: absolute;
-      right: -6px;
-      top: 9px;
-      bottom: 9px;
-      width: 2px;
-      border-radius: 2px 0 0 2px;
-      background: var(--accent-primary);
-    }
-  }
-}
-
-.chat-tool-content {
-  order: 1;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--theme-content-bg, $bg-main-surface);
-}
-
-.chat-tool-content > * {
-  height: 100%;
-  min-height: 0;
-}
 
 @media (max-width: $breakpoint-mobile) {
   .chat-tool-panel {

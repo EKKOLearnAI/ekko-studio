@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { providerModelApiMode } from '@/utils/codingAgentProviders'
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import { NButton, NInput, NModal, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -86,7 +87,7 @@ function selectProvider(provider: string) {
 function selectModel(model: string) {
   const group = activeGroup.value
   if (!group || props.loading || group.model_meta?.[model]?.disabled) return
-  emit('select', { model, provider: group.provider, apiMode: group.api_mode })
+  emit('select', { model, provider: group.provider, apiMode: providerModelApiMode(group, model) })
   if (props.closeOnSelect) setShow(false)
 }
 function isCustom(model: string) {

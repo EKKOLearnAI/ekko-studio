@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { NSpin, NButton, NInput, NModal, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { fetchSessions, searchSessions, type SessionSearchResult, type SessionSummary } from '@/api/studio/sessions'
+import { personRequest } from '@/api/person'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useSessionSearch } from '@/composables/useSessionSearch'
 import { historySessionSource, sessionAgentFields } from '@/utils/hermes/session-agent'
@@ -12,6 +13,8 @@ import { getSourceLabel } from '@/shared/session-display'
 const { t } = useI18n()
 const message = useMessage()
 const router = useRouter()
+const route = useRoute()
+const personScope = computed(() => route.name === 'hermes.person')
 const chatStore = useChatStore()
 const { sessionSearchOpen } = useSessionSearch()
 
@@ -72,7 +75,9 @@ async function loadRecentSessions() {
   const seq = ++requestSeq
   loading.value = true
   try {
-    const sessions = profileFilter.value
+    const sessions = personScope.value
+      ? (await personRequest<{ sessions: SessionSummary[] }>('/conversations', undefined, 'GET')).sessions
+      : profileFilter.value
       ? await fetchSessions(runtimeSource.value, 8, profileFilter.value)
       : await fetchSessions(runtimeSource.value, 8)
     if (seq !== requestSeq) return
@@ -94,7 +99,9 @@ async function runSearch(text: string) {
   loading.value = true
   try {
     const results = text.trim()
-      ? profileFilter.value
+      ? personScope.value
+        ? (await personRequest<{ sessions: Array<SessionSummary & { matched_message_id?: number | null; snippet?: string }> }>(`/conversations?search=${encodeURIComponent(text.trim())}`, undefined, 'GET')).sessions.map(session => ({ ...session, matched_message_id: session.matched_message_id ?? null, snippet: session.snippet || session.preview || '', rank: 0 }))
+        : profileFilter.value
         ? await searchSessions(text.trim(), runtimeSource.value, 10, profileFilter.value)
         : await searchSessions(text.trim(), runtimeSource.value, 10)
       : []
@@ -121,6 +128,10 @@ async function openItem(item: SearchItem) {
   const messageId = item.matched_message_id != null ? String(item.matched_message_id) : null
   sessionSearchOpen.value = false
 
+  if (personScope.value) {
+    await router.push({ name: 'hermes.person', query: { session: item.id, ...(messageId ? { message: messageId } : {}) } })
+    return
+  }
   await ensureChatSessionsLoaded()
   if (!chatStore.sessions.some(session => session.id === item.id) && typeof chatStore.addOrUpdateSession === 'function') {
     chatStore.addOrUpdateSession({
@@ -251,7 +262,7 @@ onUnmounted(() => {
         <div class="search-title">{{ t('chat.searchSubtitle') }}</div>
         <div class="search-hint">{{ t('chat.searchHint') }}</div>
       </div>
-      <div class="search-scope">{{ t('chat.searchScope') }}</div>
+      <div class="search-scope">{{ t(personScope ? 'person.searchScope' : 'chat.searchScope') }}</div>
 
       <NInput
         ref="inputRef"

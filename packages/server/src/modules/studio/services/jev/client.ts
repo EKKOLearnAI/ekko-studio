@@ -55,7 +55,7 @@ export async function evaluateJevWithCredentials<Q extends Questions>(
   options: { signal?: AbortSignal; timeoutMs?: number; beforeFetch?: () => Promise<void> } = {},
 ): Promise<SystemOneResult<Q>> {
   const payload = parseJevRequest(request)
-  if (!settings.apiKey) throw new JevError('JEV API key is not configured for this Profile', 409, 'jev_not_configured')
+  if (!settings.apiKey) throw new JevError('JEV API key is not configured', 409, 'jev_not_configured')
   let fetchCount = 0
   const client = new TypeSafeClient({
     apiKey: settings.apiKey, baseURL: settings.baseUrl, defaultModel: settings.model,
@@ -78,25 +78,26 @@ export async function evaluateJevWithCredentials<Q extends Questions>(
     if (error instanceof APITimeoutError) throw new JevError('JEV request timed out', 504, 'jev_timeout')
     if (error instanceof APIUserAbortError || options.signal?.aborted) throw new JevError('JEV request cancelled', 499, 'jev_cancelled')
     if (error instanceof APIError) {
-      const code = [401, 403].includes(error.status) ? 'jev_auth_failed' : error.status === 429 ? 'jev_rate_limited' : 'jev_provider_error'
+      const code = [401, 403].includes(error.status) ? 'jev_auth_failed'
+        : error.status === 404 ? 'jev_endpoint_not_found'
+        : error.status === 429 ? 'jev_rate_limited' : 'jev_provider_error'
       throw new JevError(`JEV provider returned HTTP ${error.status}`, 502, code)
     }
     throw new JevError('JEV request failed', 502, 'jev_request_failed')
   }
 }
 
-/** Shared server entry point. Callers must pass their own authorized profile. */
+/** Shared server entry point. Operation context does not select configuration; all callers share global settings. */
 export async function evaluateJev<Q extends Questions>(
-  profile: string,
   request: SystemOneRequest<Q>,
   options: { signal?: AbortSignal } = {},
 ): Promise<SystemOneResult<Q>> {
-  return evaluateJevWithCredentials(await readJevCredentials(profile), request, options)
+  return evaluateJevWithCredentials(await readJevCredentials(), request, options)
 }
 
-export async function testJev(profile: string) {
+export async function testJev() {
   const started = Date.now()
-  const result = await evaluateJev(profile, {
+  const result = await evaluateJev({
     state: 'The service is working correctly.',
     questions: {
       sentiment: choice('What is the sentiment?', { positive: null, negative: null }),

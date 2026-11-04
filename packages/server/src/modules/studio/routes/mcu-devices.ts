@@ -1,6 +1,11 @@
 import Router from '@koa/router'
 import * as ctrl from '../controllers/mcu-devices'
 
+export const mcuDevicePublicRoutes = new Router()
+
+// Compatibility for shipped Small Box firmware's manual backend connection.
+mcuDevicePublicRoutes.get('/api/devices/link-info', ctrl.mcuBackendInfoController)
+
 export const mcuDeviceRoutes = new Router()
 
 mcuDeviceRoutes.get('/api/mcu-devices', ctrl.listMcuDevicesController)

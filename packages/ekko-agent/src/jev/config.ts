@@ -16,6 +16,14 @@ export interface EkkoJevConfig {
   memoryFilterMinConfidence: number
   /** Total budget per automatic recall or write batch, including all JEV stages. */
   memoryTimeoutMs: number
+  /** Independent advisory assessments of fresh native window observations. */
+  computerUseMatchEnabled: boolean
+  computerUseMatchCandidateLimit: number
+  computerUseMatchMinConfidence: number
+  computerUseMatchTimeoutMs: number
+  computerUseVerifyEnabled: boolean
+  computerUseVerifyMinConfidence: number
+  computerUseVerifyTimeoutMs: number
   /** One switch controls semantic skill matching and background learning preflight. */
   skillsEnabled: boolean
   skillsCandidateLimit: number
@@ -42,6 +50,13 @@ export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({
   memoryMinConfidence: 0.8,
   memoryFilterMinConfidence: 0.8,
   memoryTimeoutMs: 3000,
+  computerUseMatchEnabled: false,
+  computerUseMatchCandidateLimit: 20,
+  computerUseMatchMinConfidence: 0.8,
+  computerUseMatchTimeoutMs: 3000,
+  computerUseVerifyEnabled: false,
+  computerUseVerifyMinConfidence: 0.8,
+  computerUseVerifyTimeoutMs: 3000,
   skillsEnabled: false,
   skillsCandidateLimit: 20,
   skillsMinConfidence: 0.8,
@@ -67,6 +82,13 @@ export function resolveEkkoJevConfig(
       if (layer[key] !== undefined) Object.assign(next, { [key]: layer[key] })
     }
   }
+  if (typeof next.computerUseMatchEnabled !== 'boolean') throw new TypeError('Invalid JEV computerUseMatchEnabled')
+  if (!Number.isInteger(next.computerUseMatchCandidateLimit) || next.computerUseMatchCandidateLimit < 1 || next.computerUseMatchCandidateLimit > 50) throw new TypeError('Invalid JEV computerUseMatchCandidateLimit')
+  if (!Number.isFinite(next.computerUseMatchMinConfidence) || next.computerUseMatchMinConfidence < 0.5 || next.computerUseMatchMinConfidence > 1) throw new TypeError('Invalid JEV computerUseMatchMinConfidence')
+  if (!Number.isInteger(next.computerUseMatchTimeoutMs) || next.computerUseMatchTimeoutMs < 100 || next.computerUseMatchTimeoutMs > 30000) throw new TypeError('Invalid JEV computerUseMatchTimeoutMs')
+  if (typeof next.computerUseVerifyEnabled !== 'boolean') throw new TypeError('Invalid JEV computerUseVerifyEnabled')
+  if (!Number.isFinite(next.computerUseVerifyMinConfidence) || next.computerUseVerifyMinConfidence < 0.5 || next.computerUseVerifyMinConfidence > 1) throw new TypeError('Invalid JEV computerUseVerifyMinConfidence')
+  if (!Number.isInteger(next.computerUseVerifyTimeoutMs) || next.computerUseVerifyTimeoutMs < 100 || next.computerUseVerifyTimeoutMs > 30000) throw new TypeError('Invalid JEV computerUseVerifyTimeoutMs')
   if (typeof next.enabled !== 'boolean') throw new TypeError('JEV enabled must be a boolean.')
   if (typeof next.memoryEnabled !== 'boolean') throw new TypeError('JEV memoryEnabled must be a boolean.')
   if (typeof next.skillsEnabled !== 'boolean') throw new TypeError('JEV skillsEnabled must be a boolean.')
@@ -112,6 +134,8 @@ export function resolveEkkoJevConfig(
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
     throw new TypeError('JEV base URL must use HTTP(S) without credentials, query or fragment.')
   }
+  // The SDK appends /v1/systemone; accept versioned bases and complete endpoints too.
+  url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/v1(?:\/systemone)?$/, '') || '/'
   next.baseUrl = url.toString().replace(/\/+$/, '')
   return next
 }

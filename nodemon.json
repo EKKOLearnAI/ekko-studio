@@ -1,5 +1,5 @@
 {
-  "watch": ["packages/server/src", "packages/ekko-agent/src"],
+  "watch": ["packages/server/src", "packages/ekko-agent/src", "packages/shared"],
   "ext": "ts,tsx",
   "execMap": {
     "ts": "node -r ts-node/register"

@@ -1,3 +1,4 @@
+import { registerDesktopBrowserRelay } from '../modules/studio/sockets/desktop-browser'
 import { setupMobileTerminal } from '../modules/hermes/sockets/mobile-terminal'
 import { getSessionMetadata as getTerminalSessionMetadata } from '../modules/studio/public/sessions'
 import Koa from 'koa'
@@ -35,12 +36,10 @@ import { runRegisteredStartupTasks } from './startup-tasks'
 import { refreshConfiguredProviderModelCatalogsInBackground } from '../modules/hermes/services/providers/model-catalog-cache'
 import { refreshModelCatalog } from '../modules/studio/public/model-catalog'
 import {
-  scanLanDevices,
   selectLanIPv4Address,
   startLanDiscoveryResponder,
   stopLanDiscoveryResponder,
 } from './lan-discovery'
-import { getLanPeerSocketManager, getLanPeerSocketPath } from './lan-peer'
 import { startGlobalAgentServer } from '../modules/studio/public/global-agent'
 import { startLocalAppRelayServer } from '../modules/studio/services/app-relay/server'
 import {
@@ -52,6 +51,7 @@ import { setupGlobalEkkoAgent } from './ekko'
 import { injectManagedEkkoMcpServers } from '../modules/ekko/services/mcp'
 import { WorkflowSocketServer } from '../modules/studio/sockets/workflow'
 import { PetStateSocketServer } from '../modules/studio/sockets/pet-state'
+import { PersonPresenceSocketServer } from '../modules/studio/sockets/person-presence'
 import { logger } from '../modules/studio/public/logging'
 import { createStaticCompressionMiddleware } from '../modules/studio/middleware/static-compression'
 import { getStaticCacheControl, SPA_ENTRY_CACHE_CONTROL } from '../modules/studio/middleware/static-cache'
@@ -315,24 +315,6 @@ async function startRuntimeServicesAfterListen(hermesAvailable: boolean): Promis
   }
 }
 
-function startLanDiscovery(): void {
-  const discoverySocket = startLanDiscoveryResponder({ httpPort: config.port })
-  let initialScanStarted = false
-  const runInitialScan = () => {
-    if (initialScanStarted) return
-    initialScanStarted = true
-    void scanLanDevices().catch(err => logger.warn(err, '[lan-discovery] initial scan failed'))
-  }
-
-  if (discoverySocket) {
-    discoverySocket.once('listening', runInitialScan)
-    const fallbackTimer = setTimeout(runInitialScan, 500)
-    fallbackTimer.unref?.()
-  } else {
-    runInitialScan()
-  }
-}
-
 function recordLockedHermesSelection(selection: HermesRuntimeSelection): void {
   if (selection.source === 'none' || !selection.path) {
     const activationError = readActiveVersionManifest()?.runtimeActivationError || ''
@@ -546,6 +528,10 @@ export async function bootstrap() {
   // Start server using the configured bind host. Default is IPv4 for WSL stability.
   const listenResult = await listenWithFallback(app, config.port, config.host)
   server = listenResult.primary
+  if (isDesktopRuntime() && typeof process.send === 'function' && process.connected) {
+    const address = server.address()
+    if (address && typeof address === 'object') process.send({ type: 'hermes-desktop:listening', port: address.port })
+  }
   servers.splice(0, servers.length, ...listenResult.servers)
   console.log('[bootstrap] app.listen called')
   // The Desktop shell only needs registered HTTP routes and static assets before
@@ -570,14 +556,7 @@ export async function bootstrap() {
     close: () => kanbanEventsWebSocket.close(),
     forceClose: () => kanbanEventsWebSocket.forceClose(),
   })
-  const lanPeerSocketManager = getLanPeerSocketManager()
-  lanPeerSocketManager.setupServer(servers)
-  additionalShutdownSteps.push({
-    name: 'LAN peer WebSocket and child runtimes',
-    close: () => lanPeerSocketManager.shutdown(),
-    forceClose: () => lanPeerSocketManager.forceClose(),
-  })
-  console.log('[bootstrap] terminal + kanban + LAN peer websocket setup')
+  console.log('[bootstrap] terminal + kanban websocket setup')
 
   const loopbackBaseUrl = getLoopbackBaseUrl(server)
 
@@ -633,6 +612,9 @@ export async function bootstrap() {
   const { getWorkflowScheduleService } = await import('../modules/studio/services/workflow/schedule')
   const workflowScheduleService = getWorkflowScheduleService()
   workflowScheduleService.start()
+  const { startPersonWork, stopPersonWork } = await import('../modules/studio/services/person/runner')
+  startPersonWork()
+  additionalShutdownSteps.push({ name: 'Person task runtime', close: stopPersonWork })
   additionalShutdownSteps.push({
     name: 'Workflow scheduler',
     close: () => workflowScheduleService.stop(),
@@ -647,6 +629,10 @@ export async function bootstrap() {
 
   petStateSocketServer = new PetStateSocketServer(activeGroupChatServer.getIO())
   petStateSocketServer.init()
+  const personPresenceServer = new PersonPresenceSocketServer(activeGroupChatServer.getIO())
+  personPresenceServer.init()
+  additionalShutdownSteps.push({ name: 'Person presence', close: () => personPresenceServer.close() })
+  registerDesktopBrowserRelay(activeGroupChatServer.getIO())
 
   startGlobalAgentServer(activeGroupChatServer.getIO(), { localBaseUrl: loopbackBaseUrl })
   console.log('[bootstrap] global agent server ready')
@@ -673,7 +659,6 @@ export async function bootstrap() {
       if (!dshPluginUi.handlesUpgrade(req) &&
         url.pathname !== '/api/hermes/terminal' &&
         url.pathname !== '/api/hermes/kanban/events' &&
-        url.pathname !== getLanPeerSocketPath() &&
         !url.pathname.startsWith('/socket.io/')) {
         socket.destroy()
       }
@@ -685,7 +670,8 @@ export async function bootstrap() {
   console.log(`Server: http://localhost:${config.port} (LAN: http://${localIp}:${config.port})`)
   console.log(`Log: ${config.appHome}/logs/server.log`)
   logger.info('Server: http://localhost:%d (LAN: http://%s:%d)', config.port, localIp, config.port)
-  startLanDiscovery()
+  // Small Box firmware discovers its Studio backend through this shared responder.
+  startLanDiscoveryResponder({ httpPort: config.port })
   additionalShutdownSteps.push({
     name: 'LAN discovery responder',
     close: stopLanDiscoveryResponder,

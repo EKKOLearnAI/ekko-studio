@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { providerModelApiMode } from '@/utils/codingAgentProviders'
 import { computed, ref, watch } from 'vue'
 import { NInput, NModal } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
@@ -80,7 +81,7 @@ function modelAlias(model: string, provider: string): string {
 
 function handleSelect(group: AvailableModelGroup, model: string) {
   if (isDisabled(group, model)) return
-  emit('select', { provider: group.provider, model, apiMode: group.api_mode })
+  emit('select', { provider: group.provider, model, apiMode: providerModelApiMode(group, model) })
   if (props.closeOnSelect) emit('update:show', false)
 }
 

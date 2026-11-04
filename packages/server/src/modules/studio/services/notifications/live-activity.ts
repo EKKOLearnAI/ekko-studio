@@ -176,6 +176,7 @@ export function createLiveActivityConsumer(send: typeof fetch = (...args) => fet
     }
   }
   const consume = async (event: BusinessEvent, heartbeat = false, targetConnectionId?: number): Promise<void> => {
+    if (event.source === 'person') return // Person mobile progress cards are not enabled by this notification integration.
     const plan = event.type.endsWith('.plan.updated') ? event.chat?.task_plan : null
     if (!plan && !terminal(event) && !event.type.includes('approval.requested') && !event.type.includes('clarification.requested')) return
     if (!subjectId(event) || event.payload.replayed === true || event.payload.restored === true) return

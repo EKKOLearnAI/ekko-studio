@@ -14,8 +14,8 @@ import {
   getGlobalEkkoAgent,
   hasGlobalEkkoBackgroundTasks,
 } from '../modules/ekko/services/manager'
-import { respondToEkkoToolApproval, waitForEkkoToolApproval } from '../modules/ekko/services/approvals'
-import { respondToEkkoClarification, waitForEkkoClarification } from '../modules/ekko/services/clarifications'
+import { pendingEkkoToolApprovalEvents, respondToEkkoToolApproval, waitForEkkoToolApproval } from '../modules/ekko/services/approvals'
+import { pendingEkkoClarificationEvents, respondToEkkoClarification, waitForEkkoClarification } from '../modules/ekko/services/clarifications'
 import { resolveEkkoMcpServers } from '../modules/ekko/services/mcp'
 import {
   createEkkoAuthorizedProviderFetch,
@@ -51,6 +51,7 @@ configureChatAgentRuntime({
   ekkoAgentReasoningText: agentReasoningText,
   normalizeEkkoAgentReasoning: normalizeAgentReasoning,
   serializeEkkoAgentReasoningDetails: serializeAgentReasoningDetails,
+  pendingEkkoInteractions: sessionId => [...pendingEkkoToolApprovalEvents(sessionId), ...pendingEkkoClarificationEvents(sessionId)],
   waitForEkkoToolApproval,
   waitForEkkoClarification,
   getCodingAgentMcpServers: (id, profile) => getCodingAgentManagedMcpServerConfigs(id as CodingAgentId, profile),

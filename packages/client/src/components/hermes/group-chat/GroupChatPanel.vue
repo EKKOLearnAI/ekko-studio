@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
 import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
 import type { CodingAgentId } from '@/api/coding-agents'
@@ -73,7 +73,7 @@ import {
     createBrowserAnnotationAttachment,
     type BrowserAnnotationSubmission,
 } from '@/utils/browser-annotation-submit'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import {
     inferCodingAgentApiMode,
     normalizeCodingAgentApiMode,
@@ -90,9 +90,9 @@ import { buildRemoteGroupChatRooms, type RemoteGroupChatRoom } from '@/utils/gro
 import { handoffErrorTranslationKey } from './handoff-presentation'
 import { clearGroupChatRoomDraft } from './group-chat-room-drafts'
 import {
-    fetchAgentStatusSnapshot,
-    isAgentStatusAvailable,
-    type AgentStatusSnapshot,
+    fetchAgentAvailabilitySnapshot,
+    isAgentAvailable,
+    type AgentAvailabilitySnapshot,
 } from '@/api/agent-status'
 
 const FilesPanel = defineAsyncComponent(async () => (await import('@/components/hermes/chat/FilesPanel.vue')).default)
@@ -137,7 +137,7 @@ const editingAgent = ref<RoomAgent | null>(null)
 const isSavingAgent = ref(false)
 const isLoadingAgentForm = ref(false)
 let agentDrawerLoadSequence = 0
-const agentStatusSnapshot = ref<AgentStatusSnapshot | null>(null)
+const agentAvailabilitySnapshot = ref<AgentAvailabilitySnapshot | null>(null)
 let agentStatusRequest: Promise<void> | null = null
 const showRoomSettingsModal = ref(false)
 const showUserProfileModal = ref(false)
@@ -257,7 +257,7 @@ type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | '
 const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
 
 const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.filter(option =>
-    isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
+    isAgentAvailable(agentAvailabilitySnapshot.value, option.value)
 ))
 
 const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
@@ -285,7 +285,7 @@ function groupAgentDisplayName(agent: GroupAgentType): string {
 }
 
 function isGroupAgentAvailable(agent: GroupAgentType): boolean {
-    return isAgentStatusAvailable(agentStatusSnapshot.value, agent)
+    return isAgentAvailable(agentAvailabilitySnapshot.value, agent)
 }
 
 function warnAgentUnavailable(agent: GroupAgentType) {
@@ -296,9 +296,9 @@ function refreshAgentAvailability(): Promise<void> {
     if (agentStatusRequest) return agentStatusRequest
     agentStatusRequest = (async () => {
         try {
-            agentStatusSnapshot.value = await fetchAgentStatusSnapshot()
+            agentAvailabilitySnapshot.value = await fetchAgentAvailabilitySnapshot()
         } catch {
-            agentStatusSnapshot.value = null
+            agentAvailabilitySnapshot.value = null
         }
     })().finally(() => { agentStatusRequest = null })
     return agentStatusRequest
@@ -353,6 +353,10 @@ const selectedAgentProviderGroup = computed(() =>
         .find(item => item.provider === selectedAgentProvider.value)
 )
 
+const configuredAgentApiMode = computed(() => configuredProviderApiMode(selectedAgentProviderGroup.value, selectedAgentModel.value))
+watch([configuredAgentApiMode, selectedAgentApiMode], ([mode]) => {
+  if (mode && selectedAgentApiMode.value !== mode) selectedAgentApiMode.value = mode
+}, { flush: 'sync' })
 const agentApiModeOptions = computed(() => [
     { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
     { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
@@ -377,14 +381,18 @@ const pendingAgentPreset = computed(() =>
     agentPresets.value.find(preset => preset.id === pendingAgentPresetId.value) || null
 )
 
-const agentReasoningEffortOptions = computed(() => [
-    { label: t('chat.reasoningEffort.options.default'), value: '' },
+const agentReasoningEffortOptions = computed(() => reasoningOptions([
+    { label: t('chat.reasoningEffort.options.none'), value: '' },
     ...modelReasoningEfforts(
       getAgentModelGroups(selectedProfile.value || ''),
       selectedAgentProvider.value,
       selectedAgentModel.value,
     ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
-])
+]))
+const agentReasoningEffortValue = computed({
+  get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
+  set: (value: string) => { selectedAgentReasoningEffort.value = value },
+})
 
 watch([agentReasoningEffortOptions, selectedAgentReasoningEffort], ([options, effort]) => {
   if (!usesGlobalAgentMode.value && effort && !options.some(option => option.value === effort)) {
@@ -408,6 +416,10 @@ const summaryModelOptions = computed(() =>
         value: model,
     }))
 )
+const configuredSummaryApiMode = computed(() => configuredProviderApiMode(selectedSummaryProviderGroup.value, summaryConfig.value.summaryModel))
+watch([configuredSummaryApiMode, () => summaryConfig.value.summaryApiMode], ([mode]) => {
+  if (mode && summaryConfig.value.summaryApiMode !== mode) summaryConfig.value.summaryApiMode = mode
+}, { flush: 'sync' })
 const summaryApiModeOptions = computed(() => [
     { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
     { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
@@ -517,7 +529,7 @@ const canConfirmAddAgent = computed(() =>
 function syncAgentApiMode() {
     const group = selectedAgentProviderGroup.value
     selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-        group?.api_mode,
+        configuredAgentApiMode.value,
         inferCodingAgentApiMode(group?.provider || selectedAgentProvider.value, group?.base_url),
     )
 }
@@ -1345,7 +1357,7 @@ function currentAgentPresetInput(): GroupAgentPresetInput | null {
         }),
         profile: selectedProfile.value,
         apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
-        reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
+        reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
         agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
         name: agentName.value.trim() || selectedProfile.value,
         description: agentDescription.value.trim(),
@@ -1418,7 +1430,7 @@ function applyAgentPreset(presetId: string | null) {
     selectedAgentProvider.value = input.provider || ''
     selectedAgentModel.value = input.model || ''
     selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-        input.apiMode,
+        configuredAgentApiMode.value || input.apiMode,
         inferCodingAgentApiMode(input.provider),
     )
     selectedAgentReasoningEffort.value = usesGlobalAgentMode.value ? '' : input.reasoningEffort || ''
@@ -1578,7 +1590,7 @@ function handleEditAgent(agent: RoomAgent) {
     selectedAgentProvider.value = agent.provider || ''
     selectedAgentModel.value = agent.model || ''
     selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-        agent.apiMode,
+        configuredAgentApiMode.value || agent.apiMode,
         inferCodingAgentApiMode(agent.provider),
     )
     selectedAgentReasoningEffort.value = usesGlobalAgentMode.value ? '' : agent.reasoningEffort || ''
@@ -1729,7 +1741,7 @@ async function confirmAddAgent() {
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
@@ -1769,7 +1781,7 @@ async function confirmUpdateAgent() {
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
@@ -2898,7 +2910,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             :disabled="isLoadingAgentForm || isSavingAgent"
                             @select="handleAgentModelSelect" />
                     </div>
-                    <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode" class="form-group">
+                    <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode && !configuredAgentApiMode" class="form-group">
                         <label class="form-label">{{ t('codingAgents.protocolScope') }}</label>
                         <NSelect
                             v-model:value="selectedAgentApiMode"
@@ -2913,7 +2925,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                         <NSelect
                             v-else
-                            v-model:value="selectedAgentReasoningEffort"
+                            v-model:value="agentReasoningEffortValue"
                             :options="agentReasoningEffortOptions"
                             :aria-label="t('chat.reasoningEffort.tooltip')"
                             :placeholder="t('chat.reasoningEffort.tooltip')"
@@ -3405,7 +3417,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                     :disabled="!summaryConfig.summaryProvider"
                                 />
                             </div>
-                            <div class="form-group">
+                            <div v-if="!configuredSummaryApiMode" class="form-group">
                                 <label class="form-label">{{ t('groupChat.summaryApiMode') }}</label>
                                 <NSelect v-model:value="summaryConfig.summaryApiMode" :options="summaryApiModeOptions" />
                             </div>

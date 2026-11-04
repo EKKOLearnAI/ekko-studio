@@ -10,6 +10,7 @@ export interface NewChatFormPreferences {
   model: string
   customModel: boolean
   apiMode: CodingAgentApiMode
+  apiModeManual?: boolean
   reasoningEffort: string
   workspace: string
   categoryId: number | null
@@ -45,6 +46,7 @@ export function loadNewChatFormPreferences(account: number | null): NewChatFormP
       provider: stringValue(saved.provider), model: stringValue(saved.model),
       customModel: saved.customModel === true,
       apiMode: isCodingAgentApiMode(saved.apiMode) ? saved.apiMode : 'chat_completions',
+      ...(typeof saved.apiModeManual === 'boolean' ? { apiModeManual: saved.apiModeManual } : {}),
       reasoningEffort: DEFAULT_REASONING_EFFORTS.includes(saved.reasoningEffort) ? saved.reasoningEffort : '',
       workspace: stringValue(saved.workspace),
       categoryId: Number.isSafeInteger(saved.categoryId) && saved.categoryId > 0 ? saved.categoryId : null,

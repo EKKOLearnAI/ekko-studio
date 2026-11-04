@@ -185,7 +185,7 @@ export class GlobalEkkoAgent {
 
   private async jevRuntimeConfig(): Promise<EkkoJevConfig> {
     try {
-      return await getJevRuntimeConfig(this.options.profile || 'default')
+      return await getJevRuntimeConfig()
     } catch {
       logger.warn('[ekko-agent] Studio JEV settings unavailable; JEV is disabled for this run')
       return { ...DEFAULT_EKKO_JEV_CONFIG }

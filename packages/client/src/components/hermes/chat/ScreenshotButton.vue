@@ -18,6 +18,10 @@ const shortcutKey = ref('')
 const available = typeof screenshot?.captureRegion === 'function' && typeof screenshot.cancel === 'function'
 const busy = ref(false)
 const error = ref('')
+const permissionNeeded = ref(false)
+const permissionOpening = ref(false)
+const permissionError = ref('')
+const permissions = desktop?.platform === 'darwin' ? desktop.computerUsePermissions : undefined
 const capabilities = ref<{ capture: string; hideWindows: boolean } | null>(null)
 const checking = ref(typeof screenshot?.getCapabilities === 'function')
 const supported = computed(() => capabilities.value?.capture !== 'unavailable')
@@ -64,6 +68,8 @@ async function start(hideWindows = false) {
   requestId = id
   busy.value = true
   error.value = ''
+  permissionNeeded.value = false
+  permissionError.value = ''
   try {
     const result = await screenshot.captureRegion({
       requestId: id,
@@ -84,6 +90,10 @@ async function start(hideWindows = false) {
   } catch (reason) {
     if (disposed) return
     const detail = reason instanceof Error ? reason.message : String(reason)
+    if (detail.includes('SCREENSHOT_PERMISSION_DENIED') && permissions) {
+      await authorizeScreenRecording()
+      return
+    }
     const key = detail.includes('SCREENSHOT_PERMISSION_DENIED') ? 'permissionDenied'
       : detail.includes('SCREENSHOT_SOURCE_UNAVAILABLE') ? 'sourceUnavailable'
       : detail.includes('SCREENSHOT_HIDE_UNAVAILABLE') ? 'hideUnavailable'
@@ -95,6 +105,22 @@ async function start(hideWindows = false) {
     requestId = null
     busy.value = false
   }
+}
+
+async function authorizeScreenRecording() {
+  if (!permissions || permissionOpening.value || disposed) return
+  permissionOpening.value = true
+  permissionError.value = ''
+  try {
+    await permissions.request('screenRecording')
+    if (!disposed) permissionNeeded.value = false
+  } catch {
+    if (!disposed) {
+      permissionNeeded.value = true
+      permissionError.value = t('computerUsePermissions.openFailed')
+    }
+  }
+  finally { permissionOpening.value = false }
 }
 
 function selectOption(key: string | number) {
@@ -154,6 +180,11 @@ onUnmounted(() => {
       {{ t('chat.screenshot.systemWaiting') }}
       <NButton size="tiny" quaternary @click="cancelCurrent">{{ t('common.cancel') }}</NButton>
     </span>
+  </span>
+  <span v-if="available && permissionNeeded" class="system-wait" role="status" data-testid="screenshot-permission-guide">
+    {{ t('chat.screenshot.permissionDenied') }}
+    <NButton size="tiny" secondary :loading="permissionOpening" :disabled="permissionOpening" data-testid="screenshot-authorize" @click="authorizeScreenRecording">{{ t('computerUsePermissions.authorize') }}</NButton>
+    <span v-if="permissionError" role="alert">{{ permissionError }}</span>
   </span>
   <NModal
     v-if="available"

@@ -1,9 +1,10 @@
 // Shared Responses stream translation for Coding Agent provider proxies.
 import { readSseFrameTexts } from '../sse'
-import { normalizeResponseFunctionCall, responseToolNamespaceForName } from './responses'
+import { type McpToolRoutes, normalizeResponseFunctionCall, responseToolNamespaceForName } from './responses'
 
 export interface ResponsesStreamAdapterTarget {
   model: string
+  mcpToolRoutes?: McpToolRoutes
   annotateMcpToolNamespaces?: boolean
 }
 
@@ -98,6 +99,7 @@ function functionCallItem(input: {
   name: string
   arguments: string
   annotateNamespace?: boolean
+  mcpToolRoutes?: McpToolRoutes
   status?: 'in_progress' | 'completed'
 }) {
   if (input.name === 'tool_search') {
@@ -110,7 +112,7 @@ function functionCallItem(input: {
     }
   }
   const normalized = input.annotateNamespace
-    ? normalizeResponseFunctionCall(input.name, input.arguments)
+    ? normalizeResponseFunctionCall(input.name, input.arguments, input.mcpToolRoutes)
     : { name: input.name, arguments: input.arguments, namespace: undefined }
   const namespace = input.annotateNamespace ? normalized.namespace || responseToolNamespaceForName(input.name) : undefined
   return {
@@ -325,7 +327,7 @@ export async function* openAiChatSseToResponsesEvents(
               data: {
                 type: 'response.output_item.added',
                 output_index: call.outputIndex,
-                item: functionCallItem({ id: call.id, name: call.name, arguments: '', annotateNamespace: target.annotateMcpToolNamespaces, status: 'in_progress' }),
+                item: functionCallItem({ id: call.id, name: call.name, arguments: '', mcpToolRoutes: target.mcpToolRoutes, annotateNamespace: target.annotateMcpToolNamespaces, status: 'in_progress' }),
               },
             }
           }
@@ -406,7 +408,7 @@ export async function* openAiChatSseToResponsesEvents(
   }
 
   for (const call of toolCalls.values()) {
-    const callItem = functionCallItem({ id: call.id, name: call.name, arguments: call.arguments || '{}', annotateNamespace: target.annotateMcpToolNamespaces })
+    const callItem = functionCallItem({ id: call.id, name: call.name, arguments: call.arguments || '{}', mcpToolRoutes: target.mcpToolRoutes, annotateNamespace: target.annotateMcpToolNamespaces })
     indexedOutput.push({ outputIndex: call.outputIndex, item: callItem })
     yield {
       type: 'response.output_item.done',
@@ -553,7 +555,7 @@ export async function* anthropicMessagesSseToResponsesEvents(
         data: {
           type: 'response.output_item.added',
           output_index: block.outputIndex,
-          item: functionCallItem({ id: block.id, name: block.name, arguments: '', annotateNamespace: target.annotateMcpToolNamespaces, status: 'in_progress' }),
+          item: functionCallItem({ id: block.id, name: block.name, arguments: '', mcpToolRoutes: target.mcpToolRoutes, annotateNamespace: target.annotateMcpToolNamespaces, status: 'in_progress' }),
         },
       }
     }
@@ -701,7 +703,7 @@ export async function* anthropicMessagesSseToResponsesEvents(
     }
   }
   for (const block of toolBlocks.values()) {
-    const item = functionCallItem({ id: block.id, name: block.name, arguments: block.arguments || '{}', annotateNamespace: target.annotateMcpToolNamespaces })
+    const item = functionCallItem({ id: block.id, name: block.name, arguments: block.arguments || '{}', mcpToolRoutes: target.mcpToolRoutes, annotateNamespace: target.annotateMcpToolNamespaces })
     indexedOutput.push({ outputIndex: block.outputIndex, item })
     yield {
       type: 'response.output_item.done',

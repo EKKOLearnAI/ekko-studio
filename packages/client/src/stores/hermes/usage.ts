@@ -110,7 +110,7 @@ export const useUsageStore = defineStore('usage', () => {
     }
   }
 
-  const hasData = computed(() => !!stats.value && stats.value.total_sessions > 0)
+  const hasData = computed(() => !!stats.value && (stats.value.total_sessions > 0 || (stats.value.total_api_calls || 0) > 0))
 
   const totalInputTokens = computed(() => stats.value?.total_input_tokens ?? 0)
   const totalOutputTokens = computed(() => stats.value?.total_output_tokens ?? 0)

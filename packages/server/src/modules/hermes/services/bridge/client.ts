@@ -1,3 +1,4 @@
+import { studioModelReasoningEffort } from '../../../studio/public/model-reasoning-effort'
 import { setTimeout as delay } from 'timers/promises'
 import { createConnection, type Socket } from 'net'
 import { tmpdir } from 'os'
@@ -506,6 +507,7 @@ export class AgentBridgeClient {
     profile?: string,
     options: AgentBridgeChatOptions = {},
   ): Promise<AgentBridgeChatStarted> {
+    const reasoningEffort = studioModelReasoningEffort({ ...options, reasoningEffort: options.reasoning_effort })
     return this.request<AgentBridgeChatStarted>({
       action: 'chat',
       session_id: sessionId,
@@ -524,8 +526,7 @@ export class AgentBridgeClient {
       ...(options.background_delegation_enabled !== undefined
         ? { background_delegation_enabled: options.background_delegation_enabled }
         : {}),
-      // Local patch (reasoning-effort): per-session reasoning effort override.
-      ...(options.reasoning_effort ? { reasoning_effort: options.reasoning_effort } : {}),
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     })
   }
 

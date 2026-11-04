@@ -15,7 +15,7 @@ fields to older files without enabling the feature.
 
 Studio exposes the switch and shared parameters in Models → JEV. Saving takes
 effect on the next run; disabling retains the parameters, and deleting settings
-resets them. Studio supplies complete Profile-scoped values, including explicit
+resets them. Studio supplies complete global values, including explicit
 false overrides, without writing to Ekko's local configuration. Standalone users
 can persist these fields in `config.jev` or override them in constructor/runtime
 options. Provider connection settings are shared with other JEV consumers.

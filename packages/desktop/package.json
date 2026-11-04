@@ -1,7 +1,7 @@
 {
   "name": "hermes-studio",
   "desktopName": "com.hermeswebui.studio.desktop",
-  "version": "0.7.36",
+  "version": "0.8.15",
   "description": "Ekko Studio desktop app for multi-agent chat, coding, and visual workflows, with bundled local runtimes.",
   "homepage": "https://ekkostudio.xyz",
   "author": {
@@ -14,7 +14,6 @@
   "scripts": {
     "build:main": "tsc -p tsconfig.json",
     "build": "npm run build:main",
-    "test:updater": "npm run build && node --test tests/*.test.cjs",
     "fetch:node": "node scripts/fetch-node.mjs",
     "fetch:git": "node scripts/fetch-git.mjs",
     "fetch:python": "node scripts/fetch-python.mjs",

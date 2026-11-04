@@ -3,8 +3,8 @@ import type { BusinessEvent } from '../webhooks/business-events'
 
 /** A completion's output can contain every interim reply, starting with the first.
  * Prefer its exact persisted terminal message; never look up unrelated history. */
-export function chatCompletionText(event: BusinessEvent): string {
-  if (event.type !== 'chat.run.completed') return ''
+export function chatCompletionText(event: Pick<BusinessEvent, 'type' | 'subject' | 'payload'>): string {
+  if (event.type !== 'chat.run.completed' && event.type !== 'person.run.completed') return ''
   const sessionId = event.subject.session_id
   const messageId = Number(event.subject.message_id)
   const message = sessionId && Number.isSafeInteger(messageId) && messageId > 0

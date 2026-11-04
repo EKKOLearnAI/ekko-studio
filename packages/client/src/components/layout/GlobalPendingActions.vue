@@ -8,10 +8,12 @@ import { useGroupChatStore, type GroupPendingApproval, type GroupPendingClarify 
 import PendingInteractionCountdown from '@/components/hermes/chat/PendingInteractionCountdown.vue'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
+import { connectChatRun, getChatRunSocket } from '@/api/studio/chat'
 import { copyToClipboard } from '@/utils/clipboard'
 import { playCompletionSound } from '@/utils/completion-sound'
 import { showSystemNotification } from '@/utils/completion-notification'
 import { workflowApprovalKey } from '@/utils/workflow-approval-key'
+import { PERSON_AVATAR } from '@/utils/chat-agent-avatar'
 import { PENDING_INTERACTION_EXPIRED_EVENT } from '@/utils/pending-interaction'
 import { approveWorkflowNode, type WorkflowRecord } from '@/api/studio/workflows'
 import { listWorkflowsSocket, onWorkflowStatusUpdated, subscribeWorkflowStatuses, disconnectWorkflowSocket, type WorkflowRuntimeStatus } from '@/api/studio/workflow-socket'
@@ -111,6 +113,7 @@ function normalizePendingSourceTitle(title: string): string {
 }
 
 function sessionTitle(sessionId: string): string {
+  if (sessionId.startsWith('person-main-')) return PERSON_AVATAR.label
   return normalizePendingSourceTitle(chatStore.sessions.find(session => session.id === sessionId)?.title || sessionId)
 }
 
@@ -152,7 +155,7 @@ function pendingSoundActionKeys(): string[] {
 function pendingActions(suppressVisibleSources = true): GlobalPendingAction[] {
   const actions: GlobalPendingAction[] = []
   const profile = profilesStore.activeProfileName || 'default'
-  const visibleChatSessionId = suppressVisibleSources && ['hermes.chat', 'hermes.session', 'hermes.globalAgent', 'hermes.globalAgentSession'].includes(String(route.name || ''))
+  const visibleChatSessionId = suppressVisibleSources && ['hermes.person', 'hermes.chat', 'hermes.session', 'hermes.globalAgent', 'hermes.globalAgentSession'].includes(String(route.name || ''))
     ? chatStore.activeSessionId
     : null
   const visibleGroupRoomId = suppressVisibleSources && route.name === 'hermes.groupChatRoom' ? groupChatStore.currentRoomId : null
@@ -305,6 +308,7 @@ async function submitWorkflowApproval(action: Extract<GlobalPendingAction, { kin
 function openPendingSource(action: GlobalPendingAction) {
   if (action.kind === 'chat-approval' || action.kind === 'chat-clarify') {
     const sessionId = action.pending.sessionId
+    if (sessionId.startsWith('person-main-')) { void router.push({ name: 'hermes.person', query: { session: sessionId } }); return }
     const session = chatStore.sessions.find(item => item.id === sessionId)
     void router.push({
       name: session?.source === 'global_agent' ? 'hermes.globalAgentSession' : 'hermes.session',
@@ -333,6 +337,7 @@ function systemNotificationCopy(action: GlobalPendingAction): { title: string; b
 function pendingSourceClickUrl(action: GlobalPendingAction): string {
   const profileQuery = `?profile=${encodeURIComponent(action.profile)}`
   if (action.kind === 'chat-approval' || action.kind === 'chat-clarify') {
+    if (action.pending.sessionId.startsWith('person-main-')) return `/person?session=${encodeURIComponent(action.pending.sessionId)}`
     const sessionId = encodeURIComponent(action.pending.sessionId)
     const session = chatStore.sessions.find(item => item.id === action.pending.sessionId)
     return session?.source === 'global_agent'
@@ -450,6 +455,7 @@ watch(pendingActions, actions => {
 }, { deep: true, immediate: true })
 
 onMounted(() => {
+  if (!getChatRunSocket()) connectChatRun(profilesStore.activeProfileName)
   window.addEventListener(PENDING_INTERACTION_EXPIRED_EVENT, showPendingInteractionExpired)
   window.addEventListener('hermes:workflow-approval-visible', handleVisibleWorkflowApproval)
   resetWorkflowSubscriptions(profilesStore.activeProfileName)

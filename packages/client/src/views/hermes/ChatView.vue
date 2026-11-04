@@ -7,6 +7,9 @@ import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
+import { fetchSession } from '@/api/studio/sessions'
+import { useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 const appStore = useAppStore()
 const chatStore = useChatStore()
@@ -14,6 +17,8 @@ const profilesStore = useProfilesStore()
 const settingsStore = useSettingsStore()
 const route = useRoute()
 const router = useRouter()
+const message = useMessage()
+const { t } = useI18n()
 
 const routeSessionId = computed(() => {
   const value = route.params.sessionId
@@ -23,6 +28,11 @@ const routeSessionId = computed(() => {
 const routeProfile = computed(() => {
   const value = route.query.profile
   return typeof value === 'string' && value.trim() ? value : null
+})
+
+const routeMessageId = computed(() => {
+  const value = route.query.message
+  return typeof value === 'string' && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? value : null
 })
 
 const isStandaloneChat = computed(() => route.meta?.standaloneChat === true)
@@ -59,9 +69,23 @@ onUnmounted(() => {
 
 async function loadRouteSession() {
   const sessionId = routeSessionId.value
-  await chatStore.loadSessions(chatStore.sessionProfileFilter, sessionId)
+  const focusId = routeMessageId.value
+  await chatStore.loadSessions(chatStore.sessionProfileFilter, sessionId, focusId)
+  if (disposed || routeSessionId.value !== sessionId || routeMessageId.value !== focusId) return
+  // Task links can point outside the sidebar's first page, including archived chats.
+  if (sessionId && chatStore.activeSessionId !== sessionId) {
+    const session = await fetchSession(sessionId, routeProfile.value)
+    if (disposed || routeSessionId.value !== sessionId || routeMessageId.value !== focusId) return
+    if (session && (!routeProfile.value || (session.profile || 'default') === routeProfile.value)
+      && !['group_chat', 'workflow', 'global_agent'].includes(session.source || '')) {
+      chatStore.ensureSessionLoaded(session)
+      await chatStore.switchSession(sessionId, focusId)
+    }
+  }
   if (!disposed && sessionId && routeSessionId.value === sessionId && chatStore.activeSessionId !== sessionId) {
     await router.replace({ name: 'hermes.chat' })
+  } else if (!disposed && focusId && routeMessageId.value === focusId && chatStore.focusMessageId !== focusId) {
+    message.warning(t('sessionTasks.jumpUnavailable'))
   }
 }
 
@@ -86,11 +110,11 @@ onMounted(async () => {
     if (disposed) return
     chatStore.validateSessionProfileFilter(profilesStore.profiles.map(profile => profile.name))
     do {
-      const target = [routeSessionId.value, routeProfile.value].join(':')
+      const target = [routeSessionId.value, routeProfile.value, routeMessageId.value].join(':')
       await applyRouteProfile()
       if (disposed) return
       await Promise.all([models, loadRouteSession()])
-      if (target === [routeSessionId.value, routeProfile.value].join(':')) break
+      if (target === [routeSessionId.value, routeProfile.value, routeMessageId.value].join(':')) break
     } while (!disposed)
   } catch (error) {
     console.error('Failed to initialize chat page:', error)
@@ -99,7 +123,7 @@ onMounted(async () => {
   }
 })
 
-watch([routeSessionId, routeProfile], async ([sessionId]) => {
+watch([routeSessionId, routeProfile, routeMessageId], async ([sessionId, , focusId]) => {
   if (initializing.value || !chatStore.sessionsLoaded) return
   const sequence = ++routeLoadSequence
   routeLoading.value = true
@@ -110,7 +134,7 @@ watch([routeSessionId, routeProfile], async ([sessionId]) => {
       await chatStore.loadSessions(chatStore.sessionProfileFilter)
       return
     }
-    if (chatStore.activeSessionId === sessionId) return
+    if (chatStore.activeSessionId === sessionId && (!focusId || chatStore.focusMessageId === focusId)) return
 
     const exists = chatStore.sessions.some(session => session.id === sessionId)
     if (!exists) {
@@ -118,7 +142,8 @@ watch([routeSessionId, routeProfile], async ([sessionId]) => {
       return
     }
 
-    await chatStore.switchSession(sessionId)
+    const opened = await chatStore.switchSession(sessionId, focusId)
+    if (sequence === routeLoadSequence && focusId && !opened) message.warning(t('sessionTasks.jumpUnavailable'))
   } catch (error) {
     console.error('Failed to switch chat page:', error)
   } finally {

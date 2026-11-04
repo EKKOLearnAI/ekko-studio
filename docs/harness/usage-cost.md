@@ -5,6 +5,17 @@
 stay NULL, including pre-migration rows. Explicit provider USD zero is known
 free usage; zero from an unpriced native CLI catalog is not proof of free usage.
 
+`origin` partitions the ledger into `internal` (the migration/default for existing
+session, workflow and Coding Agent records) and `external` (every request through
+the [Model API](../model-api.md)). Stats default to internal. External queries must
+never import native Hermes history or session cost fallbacks. A Studio call to
+its own Model API may appear once in each category; do not combine these views
+into a deduplicated upstream bill. External rows use the authenticated `account_id`,
+an empty `session_id`, a unique response `run_id`, and `source=agent=model_api`.
+They count API requests rather than synthetic sessions. If an upstream stream
+fails or is cancelled, retain measured usage; absent token measurements must not
+produce a zero-price estimate, even when manual model prices exist.
+
 Studio keeps `total_cost` and daily `cost` numeric for older clients. New
 `cost_coverage` counts reported, estimated and unknown records. Clients show
 "Not recorded" for wholly unknown usage and label partial totals. Empty days
@@ -155,7 +166,6 @@ whole session falls inside the period. It cannot be added to a partly priced
 session. Native aggregate costs retain Hermes's session-start date; for sessions
 spanning days, daily coverage stays unknown where charges cannot be attributed.
 
-Validation: `model-catalog.test.ts`, `model-context.test.ts`, `usage-cost.test.ts`,
-`usage-store.test.ts`, `usage-analytics-db.test.ts`, native usage/model adapter
-tests and `tests/e2e/usage-cost.spec.ts` cover refresh/offline behavior, shared
-context limits, persistence, precedence, deduplication and UI.
+The legacy usage tests have been removed. For new usage features, add focused
+coverage for the relevant refresh/offline behavior, context limits, persistence,
+precedence, deduplication or UI interaction.

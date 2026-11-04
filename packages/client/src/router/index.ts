@@ -2,10 +2,20 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { hasApiKey, isStoredSuperAdmin } from '@/api/client'
 import { hasDesktopBrowserBridge } from '@/utils/desktop-bridge'
 import { resolveLoginRedirect } from '@/utils/login-redirect'
+import { captureProviderImport } from '@/utils/provider-import'
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
+    { path: '/person', name: 'hermes.person', component: () => import('@/views/hermes/PersonView.vue') },
+    {
+      path: '/hermes/tasks',
+      name: 'hermes.tasks',
+      redirect: to => ({ name: 'hermes.chat', query: {
+        tasks: '1', taskSearch: to.query.search, taskStatus: to.query.status,
+        taskOrder: to.query.order, taskPage: to.query.page,
+      } }),
+    },
     {
       path: '/desktop-pet',
       name: 'desktop.pet',
@@ -190,15 +200,6 @@ const router = createRouter({
       component: () => import('@/views/hermes/ChatView.vue'),
     },
     {
-      path: '/hermes/devices',
-      name: 'hermes.devices',
-      redirect: to => ({
-        name: 'hermes.connections',
-        query: { ...to.query, tab: 'devices' },
-      }),
-      meta: { requiresSuperAdmin: true },
-    },
-    {
       path: '/studio/agents',
       name: 'hermes.agentManager',
       component: () => import('@/views/hermes/ChatView.vue'),
@@ -290,6 +291,11 @@ const router = createRouter({
 // chat tool panel so this route never creates or positions a WebContentsView.
 if (hasDesktopBrowserBridge()) {
   router.addRoute({
+    path: '/hermes/browser/downloads',
+    name: 'hermes.browserDownloads',
+    component: () => import('@/views/hermes/BrowserDownloadsView.vue'),
+  })
+  router.addRoute({
     path: '/hermes/browser',
     name: 'hermes.browser',
     component: () => import('@/views/hermes/DesktopBrowserView.vue'),
@@ -313,6 +319,15 @@ function isDesktopShell(): boolean {
 }
 
 router.beforeEach(async (to, _from, next) => {
+  if (to.path === '/hermes/models' && Object.prototype.hasOwnProperty.call(to.query, 'importProvider')) {
+    captureProviderImport(to.query.importProvider)
+    const query = { ...to.query }
+    delete query.importProvider
+    // Replace before auth redirects; the credential-bearing fragment never
+    // becomes a persisted login redirect or a server request query.
+    next({ path: to.path, query, replace: true })
+    return
+  }
   await ensureDesktopAuth()
 
   if (to.name === 'codingAgent.config' && ['plugins', 'presets'].includes(String(to.params.section)) && to.params.agentId !== 'dsh') {

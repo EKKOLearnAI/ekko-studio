@@ -1,19 +1,26 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import thinkingImage from '@/assets/thinking.gif'
 import type { ChatAgentAvatar } from '@/utils/chat-agent-avatar'
+import { personAvatarAnimation, personAvatarStyle } from '@/utils/chat-agent-avatar'
 
 const props = withDefaults(defineProps<{
   reasoning?: string | null
   reasoningId?: string | number | null
+  hideReasoning?: boolean
+  activityLabel?: string
   elapsed: string
   agent?: ChatAgentAvatar
   deploymentSessionId?: string
 }>(), {
-  agent: () => ({ label: 'Hermes', src: '/coding-agents/hermes.png' }),
+  agent: () => ({ label: 'Hermes', src: deploymentUrl('/coding-agents/hermes.png') }),
 })
 const isEkko = computed(() => props.agent.label === 'Ekko')
+const personThinking = computed(() => personAvatarAnimation(props.agent, 'thinking'))
+const isPerson = computed(() => !!personThinking.value)
+const avatarSrc = computed(() => personThinking.value || (isEkko.value ? thinkingImage : props.agent.src))
 
 const { t } = useI18n()
 const reasoningBody = ref<HTMLElement | null>(null)
@@ -73,8 +80,8 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   <div class="live-reasoning-status">
     <div class="thinking-status">
       <img
-        :key="isEkko ? thinkingImage : agent.src"
-        :src="isEkko ? thinkingImage : agent.src"
+        :key="avatarSrc"
+        :src="avatarSrc"
         data-agent-deployment-image="pending"
         @load="($event.target as HTMLImageElement).dataset.agentDeploymentImage = 'ready'"
         @error="($event.target as HTMLImageElement).dataset.agentDeploymentImage = 'error'"
@@ -82,14 +89,16 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
         aria-hidden="true"
         class="thinking-avatar"
         :data-agent-deployment-target="deploymentSessionId || ''"
-        :class="isEkko ? 'thinking-avatar--animated' : 'thinking-avatar--logo'"
+        :class="isPerson ? 'thinking-avatar--person' : isEkko ? 'thinking-avatar--animated' : 'thinking-avatar--logo'"
+        :style="personAvatarStyle(agent, 'thinking')"
       >
       <div class="thinking-status-copy">
-        <span class="thinking-status-label">{{ t('chat.thinkingInProgress') }}</span>
+        <span class="thinking-status-label">{{ activityLabel || t('chat.thinkingInProgress') }}</span>
         <span class="thinking-status-time">{{ elapsed }}</span>
       </div>
     </div>
     <div
+      v-if="!hideReasoning"
       class="live-reasoning-detail"
       :class="{ 'is-empty': !reasoningLine }"
       :data-reasoning-id="reasoningId"
@@ -105,6 +114,7 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
+@use "@/styles/person-avatar" as *;
 
 .live-reasoning-status {
   display: flex;
@@ -153,6 +163,8 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   object-fit: contain;
   background: #fff;
 }
+
+.thinking-avatar--person { @include person-avatar(40px); }
 
 .thinking-status-copy {
   display: flex;

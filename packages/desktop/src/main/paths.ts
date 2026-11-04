@@ -10,7 +10,7 @@ import {
 import { hermesAgentVersionFromRuntimeTag } from './runtime-version'
 
 const isWin = platform() === 'win32'
-const DEFAULT_HERMES_AGENT_VERSION = '0.20.6'
+const DEFAULT_HERMES_AGENT_VERSION = '0.22.5'
 const PACKAGED_RUNTIME_RELEASE_NAME = 'runtime-release.json'
 const ACTIVE_RUNTIME_VERSION_NAME = 'active-version.json'
 let incompleteActiveWebUiWarningPath = ''
@@ -443,6 +443,7 @@ export function gitPathDirs(): string[] {
   return [
     join(dir, 'cmd'),
     join(dir, 'mingw64', 'bin'),
+    join(dir, 'clangarm64', 'bin'),
     // Do not expose Git for Windows' Unix toolchain on PATH. Its usr/bin
     // includes GNU tools like du.exe/find.exe, which can be picked up by
     // Hermes or subprocesses and recursively scan Windows profile/AppData

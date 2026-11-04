@@ -36,7 +36,8 @@ const loadError = ref('')
 const cliDetailsShow = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-const canSelectRuntimeDirectory = computed(() => typeof desktopBridge()?.selectRuntimeDirectory === 'function')
+const canSelectRuntimeDirectory = computed(() => desktopBridge()?.remoteMode !== true
+  && typeof desktopBridge()?.selectRuntimeDirectory === 'function')
 const isDefaultRuntimeDirectory = computed(() => {
   const defaultDirectory = status.value?.hermes.defaultStorageDirectory
   const selectedDirectory = status.value?.hermes.pendingStorageDirectory || status.value?.hermes.storageDirectory
@@ -232,6 +233,7 @@ async function useRuntime(version: string) {
 }
 
 async function chooseRuntimeDirectory() {
+  if (!canSelectRuntimeDirectory.value) return
   const selectDirectory = desktopBridge()?.selectRuntimeDirectory
   if (!selectDirectory) return
 
@@ -247,6 +249,7 @@ async function chooseRuntimeDirectory() {
 }
 
 async function resetRuntimeDirectory() {
+  if (!canSelectRuntimeDirectory.value) return
   const directory = status.value?.hermes.defaultStorageDirectory
   if (!directory) return
 

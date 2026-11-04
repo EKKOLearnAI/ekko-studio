@@ -116,6 +116,12 @@ Only enable tracking when the run has a concrete local workspace path.
 - Workflow node sessions use the workflow workspace passed to bridge runs.
 - Coding-agent runs use the launched workspace directory.
 - If the path is missing or inaccessible, skip tracking for that run.
+- User home directories, their ancestors and filesystem roots remain valid
+  execution directories, but automatic diff tracking skips them. Apply this
+  boundary to both the supplied path and canonical filesystem/Git roots so a
+  symlink or a home-wide repository cannot trigger a whole-account scan.
+  Protected or cloud-backed directories can block a synchronous filesystem
+  call; the scan's elapsed-time budget cannot interrupt an in-flight call.
 
 ### 2. Run Start Checkpoint
 

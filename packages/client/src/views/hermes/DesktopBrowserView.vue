@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import BrowserDownloadHistory from '@/components/hermes/BrowserDownloadHistory.vue'
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NCard, NInput, NModal, NSelect, NSwitch, NTabPane, NTabs, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { desktopBridge, type DesktopBrowserDownload, type DesktopBrowserProfile, type DesktopBrowserState } from '@/utils/desktop-bridge'
+import { desktopBridge, type DesktopBrowserProfile, type DesktopBrowserState } from '@/utils/desktop-bridge'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -15,7 +16,7 @@ const settingsProfileId = ref('')
 const profileDraft = ref<DesktopBrowserProfile | null>(null)
 const profileName = ref('')
 const profileRootPath = ref('')
-const profileProxyMode = ref<'direct' | 'system' | 'fixed_servers'>('direct')
+const profileProxyMode = ref<'direct' | 'system' | 'fixed_servers'>('system')
 const profileProxyRules = ref('')
 const profileModalMode = ref<'create' | 'edit'>('create')
 const showProfileModal = ref(false)
@@ -53,7 +54,7 @@ function openCreateProfile(): void {
   profileModalMode.value = 'create'
   profileName.value = ''
   profileRootPath.value = ''
-  profileProxyMode.value = 'direct'
+  profileProxyMode.value = 'system'
   profileProxyRules.value = ''
   profileDraft.value = null
   showProfileModal.value = true
@@ -191,40 +192,6 @@ function clearProfileData(kind: 'cache' | 'site-data' | 'permission-audit'): voi
   })
 }
 
-function cancelDownload(downloadId: string): void {
-  void run(async () => applyState(await bridge!.cancelDownload(downloadId)))
-}
-
-function formatBytes(input: number): string {
-  const bytes = Number.isFinite(input) ? Math.max(0, input) : 0
-  if (bytes < 1024) return `${Math.round(bytes)} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let value = bytes / 1024
-  let unit = units[0]
-  for (let index = 1; index < units.length && value >= 1024; index += 1) {
-    value /= 1024
-    unit = units[index]
-  }
-  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`
-}
-
-function downloadPercent(item: DesktopBrowserDownload): number | null {
-  if (item.totalBytes <= 0) return null
-  return Math.min(100, Math.max(0, Math.round(item.receivedBytes / item.totalBytes * 100)))
-}
-
-function downloadStateLabel(stateValue: DesktopBrowserDownload['state']): string {
-  return t(`browser.downloadState${stateValue[0].toUpperCase()}${stateValue.slice(1)}`)
-}
-
-function downloadSummary(item: DesktopBrowserDownload): string {
-  const percent = downloadPercent(item)
-  const transferred = item.totalBytes > 0
-    ? `${formatBytes(item.receivedBytes)} / ${formatBytes(item.totalBytes)}`
-    : formatBytes(item.receivedBytes)
-  return `${downloadStateLabel(item.state)}${percent === null ? '' : ` · ${percent}%`} · ${transferred}`
-}
-
 const initializing = ref(!!bridge)
 
 onMounted(async () => {
@@ -233,6 +200,7 @@ onMounted(async () => {
     const next = await bridge.getState()
     applyState(next)
     stopStateListener = bridge.onStateChange(applyState)
+    if (bridge.refreshDownloads) applyState(await bridge.refreshDownloads())
   } catch (error) {
     loadError.value = `${t('browser.loadFailed')}: ${error instanceof Error ? error.message : String(error)}`
     message.error(loadError.value)
@@ -318,17 +286,7 @@ onUnmounted(() => {
 
           <NTabPane name="downloads" :tab="t('browser.downloads')">
             <label class="profile-filter">{{ t('browser.profiles') }}<NSelect v-model:value="settingsProfileId" :options="profileOptions" /></label>
-            <div v-if="!profileDownloads.length" class="empty">{{ t('common.noData') }}</div>
-            <article v-for="item in profileDownloads" :key="item.id" class="record download-record">
-              <div class="download-record-heading">
-                <strong>{{ item.fileName }}</strong>
-                <NButton v-if="item.state === 'progressing'" size="tiny" type="error" ghost @click="cancelDownload(item.id)">{{ t('common.cancel') }}</NButton>
-              </div>
-              <progress v-if="item.state === 'progressing' && item.totalBytes > 0" :value="item.receivedBytes" :max="item.totalBytes" />
-              <progress v-else-if="item.state === 'progressing'" />
-              <span>{{ downloadSummary(item) }}</span>
-              <span v-if="item.savePath">{{ item.savePath }}</span>
-            </article>
+            <BrowserDownloadHistory :items="profileDownloads" @state="applyState" />
           </NTabPane>
 
           <NTabPane name="permissions" :tab="t('browser.permissions')">

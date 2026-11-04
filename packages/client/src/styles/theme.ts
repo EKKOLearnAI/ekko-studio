@@ -81,7 +81,8 @@ export const lightThemeOverrides: GlobalThemeOverrides = {
     color: '#ffffff',
   },
   Drawer: {
-    borderRadius: '5px',
+    color: 'var(--bg-main-surface)',
+    borderRadius: '0px',
     closeBorderRadius: '5px',
     closeColorHover: 'transparent',
     closeColorPressed: 'transparent',
@@ -165,7 +166,8 @@ export const darkThemeOverrides: GlobalThemeOverrides = {
     color: '#2a2a2a',
   },
   Drawer: {
-    borderRadius: '5px',
+    color: 'var(--bg-main-surface)',
+    borderRadius: '0px',
     closeBorderRadius: '5px',
     closeColorHover: 'transparent',
     closeColorPressed: 'transparent',
@@ -385,7 +387,7 @@ export function getThemeOverrides(
     ...(cardSurface.borderColor ? { actionDividerColor: cardSurface.borderColor } : {}),
   }
   result.Modal = { ...result.Modal, ...surface('overlay') }
-  result.Drawer = { ...result.Drawer, ...surface('overlay') }
+  result.Drawer = { ...result.Drawer, ...surface('overlay'), borderRadius: '0px' }
   // Popover is also Tooltip's peer. Scope its surface to non-tooltip DOM nodes
   // in _theme-surfaces.scss so inverted tooltip colors remain readable.
   result.Dropdown = { ...result.Dropdown, ...surface('overlay') }

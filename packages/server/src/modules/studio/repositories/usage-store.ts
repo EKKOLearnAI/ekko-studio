@@ -46,6 +46,9 @@ export type UsageRowRef = { id: number } | { id: string; sessionId: string }
 export function updateUsage(
   sessionId: string,
   data: {
+    origin?: 'internal' | 'external'
+    accountId?: string
+    modelApiKeyId?: string
     runId?: string
     parentRunId?: string
     createdAt?: number
@@ -77,7 +80,7 @@ export function updateUsage(
   const model = data.model || ''
   const provider = data.provider || ''
   const profile = data.profile || 'default'
-  const account = getSessionUsageAccount(sessionId, profile) ?? null
+  const account = data.accountId ?? getSessionUsageAccount(sessionId, profile) ?? null
   const costUsd = finiteCost(data.costUsd) ?? null
   const costSource = costUsd == null ? 'unknown' : data.costSource || 'reported'
   const costPricing = costUsd == null || !data.costPricing ? null : JSON.stringify(data.costPricing)
@@ -86,6 +89,7 @@ export function updateUsage(
     const columns = [
       'session_id',
       'account_id',
+      'origin',
       'run_id',
       'parent_run_id',
       'api_duration',
@@ -112,6 +116,7 @@ export function updateUsage(
     const params = [
       sessionId,
       account,
+      data.origin || 'internal',
       data.runId || '',
       data.parentRunId || '',
       typeof data.apiDuration === 'number' && Number.isFinite(data.apiDuration) && data.apiDuration > 0 ? data.apiDuration : null,
@@ -134,6 +139,17 @@ export function updateUsage(
       costSource,
       costPricing,
     ]
+    if (data.modelApiKeyId) {
+      columns.push('model_api_key_id')
+      values.push('?')
+      params.push(data.modelApiKeyId)
+      // Replace only our provisional request, once. Ordinary usage records
+      // remain immutable and continue to use the existing deduplication index.
+      const settled = db.prepare(`UPDATE ${TABLE} SET ${columns.map(column => `${column} = ?`).join(', ')}, model_api_pending = 0
+        WHERE model_api_key_id = ? AND account_id = ? AND run_id = ? AND source = 'model_api' AND model_api_pending = 1 RETURNING id`)
+        .get(...params, data.modelApiKeyId, account, data.runId || '') as { id: number } | undefined
+      if (settled) return { id: Number(settled.id) }
+    }
     if (hasUpdatedAtColumn()) {
       columns.push('updated_at')
       values.push('?')
@@ -146,9 +162,11 @@ export function updateUsage(
     return result?.changes ? { id: Number(result.lastInsertRowid) } : undefined
   } else {
     const id = randomUUID()
-    jsonSet(TABLE, sessionId, {
+    jsonSet(TABLE, data.origin === 'external' ? `external:${data.runId || id}` : sessionId, {
       id,
+      origin: data.origin || 'internal',
       account_id: account,
+      ...(data.modelApiKeyId ? { model_api_key_id: data.modelApiKeyId } : {}),
       run_id: data.runId || '',
       parent_run_id: data.parentRunId || '',
       api_duration: data.apiDuration ?? null,
@@ -171,7 +189,7 @@ export function updateUsage(
       cost_source: costSource,
       cost_pricing: costPricing,
     })
-    return { id, sessionId }
+    return { id, sessionId: data.origin === 'external' ? `external:${data.runId || id}` : sessionId }
   }
 }
 
@@ -327,6 +345,12 @@ export function deleteUsage(sessionId: string): void {
 
 // --- Aggregation for stats endpoint ---
 
+// Classify Person's own calls, including historical main/summary/coordinator rows.
+// Worker sessions keep their execution agent; the raw runtime ledger stays intact.
+const statsAgentExpression = `CASE WHEN origin = 'internal' AND source = 'ekko_agent'
+  AND (session_id LIKE 'person-main-%' OR session_id LIKE 'person:%')
+  THEN 'zhezhe' ELSE COALESCE(NULLIF(TRIM(agent), ''), 'unknown') END`
+
 export function getRecordedUsageSessionIds(profile?: string): string[] {
   if (isSqliteAvailable()) {
     const filters = profile ? ' WHERE profile = ?' : ''
@@ -337,6 +361,7 @@ export function getRecordedUsageSessionIds(profile?: string): string[] {
     return rows.map(row => String(row.session_id || '')).filter(Boolean)
   }
   return Object.entries(jsonGetAll(TABLE))
+    .filter(([, row]) => row.origin !== 'external')
     .filter(([, row]) => !profile || (row.profile || 'default') === profile)
     .map(([sessionId]) => sessionId)
     .filter(Boolean)
@@ -363,18 +388,20 @@ export function getLocalUsageStats(profile?: string, days = 30, selection: Usage
     filters.unshift('profile = ?')
     params.unshift(profile)
   }
+  filters.push('origin = ?')
+  params.push(selection.origin || 'internal')
   // Options remain scoped to the period/profile, rather than shrinking with each selection.
   const baseWhere = `WHERE ${filters.join(' AND ')}`
   const optionRows = db.prepare(`SELECT DISTINCT
     COALESCE(NULLIF(TRIM(model), ''), 'unknown') AS model,
-    COALESCE(NULLIF(TRIM(agent), ''), 'unknown') AS agent
+    ${statsAgentExpression} AS agent
     FROM ${TABLE} ${baseWhere}`).all(...params) as Array<{ model: string; agent: string }>
   if (selection.model) {
     filters.push("COALESCE(NULLIF(TRIM(model), ''), 'unknown') = ?")
     params.push(selection.model)
   }
   if (selection.agent) {
-    filters.push("COALESCE(NULLIF(TRIM(agent), ''), 'unknown') = ?")
+    filters.push(`${statsAgentExpression} = ?`)
     params.push(selection.agent)
   }
   if (selection.account) {
@@ -391,7 +418,7 @@ export function getLocalUsageStats(profile?: string, days = 30, selection: Usage
       COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens,
       COALESCE(SUM(api_calls),0) as total_api_calls,
       ${costSelect},
-      COUNT(DISTINCT session_id) as sessions
+      COUNT(DISTINCT NULLIF(session_id, '')) as sessions
     FROM ${TABLE}
     ${whereClause}
   `).get(...params) as any
@@ -403,7 +430,7 @@ export function getLocalUsageStats(profile?: string, days = 30, selection: Usage
       COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
       COALESCE(SUM(cache_write_tokens),0) as cache_write_tokens,
       COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens,
-      COUNT(DISTINCT session_id) as sessions
+      COUNT(DISTINCT NULLIF(session_id, '')) as sessions
     FROM ${TABLE}
     ${whereClause}
     GROUP BY model
@@ -411,16 +438,16 @@ export function getLocalUsageStats(profile?: string, days = 30, selection: Usage
   `).all(...params) as unknown as UsageStatsModelRow[]
 
   const byAgent = db.prepare(`
-    SELECT agent,
+    SELECT ${statsAgentExpression} AS agent,
       COALESCE(SUM(input_tokens),0) as input_tokens,
       COALESCE(SUM(output_tokens),0) as output_tokens,
       COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
       COALESCE(SUM(cache_write_tokens),0) as cache_write_tokens,
       COALESCE(SUM(reasoning_tokens),0) as reasoning_tokens,
-      COUNT(DISTINCT session_id) as sessions
+      COUNT(DISTINCT NULLIF(session_id, '')) as sessions
     FROM ${TABLE}
     ${whereClause}
-    GROUP BY agent
+    GROUP BY ${statsAgentExpression}
     ORDER BY COALESCE(SUM(input_tokens),0) + COALESCE(SUM(output_tokens),0) DESC
   `).all(...params) as unknown as UsageStatsAgentRow[]
 
@@ -431,7 +458,7 @@ export function getLocalUsageStats(profile?: string, days = 30, selection: Usage
       COALESCE(SUM(output_tokens),0) as output_tokens,
       COALESCE(SUM(cache_read_tokens),0) as cache_read_tokens,
       COALESCE(SUM(cache_write_tokens),0) as cache_write_tokens,
-      COUNT(DISTINCT session_id) as sessions
+      COUNT(DISTINCT NULLIF(session_id, '')) as sessions
     FROM ${TABLE}
     ${whereClause}
     GROUP BY date

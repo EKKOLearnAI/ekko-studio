@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
+import { personNotificationRoom } from '../contracts/person-session'
 import type { Server, Socket } from 'socket.io'
 import { io as createClientSocket, type Socket as ClientSocket } from 'socket.io-client'
 import { logger } from '../public/logging'
@@ -12,6 +13,7 @@ import { transcodeToPcmS16le } from '../services/voice/stt/audio-convert'
 import { decodeMcuImaAdpcm, encodeMcuImaAdpcm } from '../services/voice/mcu/adpcm'
 import { MCU_TTS_SAMPLE_RATE, mcuPromptText, mcuPromptUrl } from '../services/voice/mcu/prompts'
 import { createMcuSpeechSegmenter, normalizeMcuSpeechText } from '../services/global-agent/mcu-speech-segmenter'
+import { bindMcuWebhookEvents } from '../services/global-agent/mcu-webhook-events'
 import {
   mcuChatRunFields,
   normalizeMcuAgentRuntime,
@@ -980,6 +982,7 @@ export class GlobalAgentServer {
   }
 
   private onConnection(socket: Socket): void {
+    if (socket.data.globalAgentRole === 'frontend' && socket.data.user?.id) socket.join(personNotificationRoom(socket.data.user.id))
     if (socket.data.globalAgentRole === 'frontend') {
       this.onFrontendConnection(socket)
       return
@@ -996,6 +999,7 @@ export class GlobalAgentServer {
       logger.info('[global-agent] replaced existing client id=%s old_socket=%s new_socket=%s', clientId, existing.id, socket.id)
     }
     this.clients.set(clientId, socket)
+    bindMcuWebhookEvents(socket)
     for (const [sessionId, queue] of this.pendingMcuBackgroundSpeech.entries()) {
       if (queue.some(item => item.options.clientId === clientId)) void this.flushMcuBackgroundSpeech(sessionId)
     }

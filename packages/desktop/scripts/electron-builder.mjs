@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { windowsBuildArgs } from './windows-build-args.mjs'
 
-const args = process.argv.slice(2)
+const args = windowsBuildArgs(process.argv.slice(2))
 const require = createRequire(import.meta.url)
 const electronBuilderCli = require.resolve('electron-builder/cli')
 

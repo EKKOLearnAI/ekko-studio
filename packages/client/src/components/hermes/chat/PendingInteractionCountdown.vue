@@ -31,7 +31,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <span class="pending-interaction-countdown" :class="{ 'pending-interaction-countdown--elapsed': elapsed }">
+  <span v-if="Number.isFinite(deadline)" class="pending-interaction-countdown" :class="{ 'pending-interaction-countdown--elapsed': elapsed }">
     {{ label }}
   </span>
 </template>

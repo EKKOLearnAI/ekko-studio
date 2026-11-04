@@ -1,5 +1,4 @@
-import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { codingAgentWorkingDirectory } from '../runtime/workspace'
 import type { CodingAgentImageInput } from '../../protocol/types'
 import type { ManagedCodingAgentRun } from '../runtime/run-manager'
 import type { OpenCodeTurnHost } from './turn-host'
@@ -52,7 +51,7 @@ export function startOpenCodeTurn(
     ...images.flatMap(image => ['--file', image.path]),
   ]
   const child = host.spawn(run.launch.command, args, {
-    cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),
+    cwd: codingAgentWorkingDirectory(run.launch),
     env: run.launch.mode === 'global'
       ? { ...process.env, ...(run.launch.env || {}) }
       : isolatedCodingAgentChildEnv(run.launch.env),

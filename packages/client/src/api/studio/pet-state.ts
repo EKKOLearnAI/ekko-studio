@@ -1,3 +1,4 @@
+import { socketEndpoint } from '@/utils/deployment-url'
 import { io, type Socket } from 'socket.io-client'
 import { getActiveProfileName, getApiKey, getBaseUrlValue } from '@/api/client'
 
@@ -40,7 +41,8 @@ export function connectPetStateSocket(profile?: string | null): Socket {
   }
 
   socketProfile = nextProfile
-  socket = io(`${getBaseUrlValue()}/pet-state`, {
+  socket = io(socketEndpoint(getBaseUrlValue(), '/pet-state').url, {
+    path: socketEndpoint(getBaseUrlValue(), '/pet-state').path,
     auth: { token: getApiKey() },
     query: { profile: nextProfile },
     transports: ['websocket', 'polling'],

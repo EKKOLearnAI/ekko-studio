@@ -260,6 +260,7 @@ class McuSocketIoRelayClient {
   private audioUploadToken = ''
   private audioUploadPath = '/global-agent/audio'
   private remoteMcuUserToken = ''
+  private mcuWebhookSubscription: Record<string, unknown> | null = null
 
   constructor(private readonly options: OutboundRelayClientOptions) {}
 
@@ -272,6 +273,7 @@ class McuSocketIoRelayClient {
 
   stop(): void {
     this.stopped = true
+    this.mcuWebhookSubscription = null
     for (const listener of [...this.backgroundListeners.values()]) listener.close()
     this.backgroundListeners.clear()
     this.pendingBackgroundSpeech.clear()
@@ -467,16 +469,21 @@ class McuSocketIoRelayClient {
         localBaseUrl,
         instanceId: this.options.instanceId || this.options.deviceCode || undefined,
       }, '[outbound-relay:mcu-sio] local global-agent bridge connected')
+      if (this.mcuWebhookSubscription) socket.emit('mcu.events.subscribe', this.mcuWebhookSubscription)
     })
     socket.on('connect_error', (err: Error) => {
       logger.warn({ err, localBaseUrl }, '[outbound-relay:mcu-sio] local global-agent bridge connection failed')
     })
     socket.on('disconnect', (reason: string) => {
       logger.info({ reason, localBaseUrl }, '[outbound-relay:mcu-sio] local global-agent bridge disconnected')
-      if (this.localAgentSocket === socket) this.localAgentSocket = null
     })
     socket.onAny((eventName: string, payload: unknown) => {
       if (SOCKET_IO_RESERVED_EVENTS.has(eventName)) return
+      if (['mcu.webhook.event', 'mcu.events.subscribed', 'mcu.events.unsubscribed'].includes(eventName) && isRecord(payload)) {
+        if (this.localAgentSocket !== socket || eventName === 'mcu.webhook.event' && !this.mcuWebhookSubscription) return
+        this.sendJson(payload)
+        return
+      }
       this.localMcuForwardQueue = this.localMcuForwardQueue
         .then(() => this.forwardLocalMcuEventToRelay(eventName, payload))
         .catch((err) => {
@@ -512,6 +519,12 @@ class McuSocketIoRelayClient {
       return
     }
     if (!token || token === this.remoteMcuUserToken) return
+    if (this.mcuWebhookSubscription) {
+      this.mcuWebhookSubscription = null
+      // Close the old recipient's channel, including events already in flight.
+      this.localAgentSocket?.disconnect()
+      this.localAgentSocket = null
+    }
     this.remoteMcuUserToken = token
   }
 
@@ -544,7 +557,8 @@ class McuSocketIoRelayClient {
   private sendJson(payload: Record<string, unknown>): void {
     if (!this.socket?.connected || this.stopped) return
     const type = typeof payload.type === 'string' && payload.type.trim() ? payload.type.trim() : 'mcu.event'
-    this.socket.emit(type, payload)
+    if (type === 'mcu.webhook.event') this.socket.volatile.emit(type, payload)
+    else this.socket.emit(type, payload)
   }
 
   private rejectAudioWaiters(error: Error): void {
@@ -625,6 +639,7 @@ class McuSocketIoRelayClient {
       return
     }
     if (event.type === 'relay.replaced') {
+      this.mcuWebhookSubscription = null
       this.reconnectBlockedReason = 'replaced'
       this.stopped = true
       logger.warn({
@@ -639,6 +654,18 @@ class McuSocketIoRelayClient {
       return
     }
     if (!this.authorizeRemoteMcuEvent(event)) return
+    if (event.type === 'mcu.events.subscribe') {
+      this.mcuWebhookSubscription = { ...event }
+      this.connectLocalAgentSocket()
+      if (this.localAgentSocket?.connected) this.localAgentSocket.emit('mcu.events.subscribe', event)
+      return
+    }
+    if (event.type === 'mcu.events.unsubscribe') {
+      this.mcuWebhookSubscription = null
+      this.connectLocalAgentSocket()
+      this.localAgentSocket?.emit('mcu.events.unsubscribe', event)
+      return
+    }
     if (event.type === 'voice.recorded') {
       this.pendingVoice = {
         interactionId: typeof event.interactionId === 'string' && event.interactionId.trim() ? event.interactionId.trim() : `mcu-voice-${Date.now()}`,

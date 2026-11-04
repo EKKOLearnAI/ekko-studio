@@ -30,10 +30,10 @@ function formatTokens(value: number) { return formatUsageTokens(value, locale?.v
       <div v-if="costState && costState !== 'unknown'" class="stat-sub">{{ t(`usage.costStates.${costState}`) }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">{{ t('usage.totalSessions') }}</div>
-      <div class="stat-value">{{ usageStore.totalSessions.toLocaleString(locale) }}</div>
-      <div class="stat-sub">{{ (usageStore.stats?.total_api_calls ?? 0).toLocaleString(locale) }} {{ t('usage.dashboard.apiCalls') }}</div>
-      <div class="stat-sub">{{ t('usage.dashboard.uniqueSessions') }}</div>
+      <div class="stat-label">{{ usageStore.stats?.origin === 'external' ? t('usage.dashboard.apiCalls') : t('usage.totalSessions') }}</div>
+      <div class="stat-value">{{ (usageStore.stats?.origin === 'external' ? (usageStore.stats.total_api_calls || 0) : usageStore.totalSessions).toLocaleString(locale) }}</div>
+      <div v-if="usageStore.stats?.origin !== 'external'" class="stat-sub">{{ (usageStore.stats?.total_api_calls ?? 0).toLocaleString(locale) }} {{ t('usage.dashboard.apiCalls') }}</div>
+      <div class="stat-sub">{{ usageStore.stats?.origin === 'external' ? t('usage.origin.external') : t('usage.dashboard.uniqueSessions') }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">{{ t('usage.cacheHitRate') }}</div>

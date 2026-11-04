@@ -1,4 +1,4 @@
-import { EdgeTTS } from 'node-edge-tts'
+import { EDGE_TTS_TIMEOUT_MS, EdgeTtsClient } from './edge-client'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { readFile, unlink } from 'fs/promises'
@@ -24,12 +24,12 @@ export async function edgeTts(opts: TtsOptions): Promise<Buffer> {
   const tmpFile = join(tmpdir(), `tts-${id}${outputFormat.includes('pcm') ? '.pcm' : '.mp3'}`)
 
   try {
-    const tts = new EdgeTTS({
+    const tts = new EdgeTtsClient({
       voice: opts.voice || FIXED_VOICE,
       outputFormat,
       rate: opts.rate || FIXED_RATE,
       pitch: opts.pitch || FIXED_PITCH,
-      timeout: 15000,
+      timeout: EDGE_TTS_TIMEOUT_MS,
     })
 
     await tts.ttsPromise(opts.text, tmpFile)

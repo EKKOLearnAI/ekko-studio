@@ -6,7 +6,7 @@ import { getStoredUsername } from '@/api/client'
 import FolderPicker from '@/components/hermes/chat/FolderPicker.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import { generateGroupChatInviteCode } from '@/utils/group-chat-invite-code'
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode } from '@/api/coding-agents'
 import type { RoomAgentInput, RoomSummaryConfig } from '@/api/studio/group-chat'
@@ -53,6 +53,10 @@ const summaryModelOptions = computed(() =>
         value: model,
     }))
 )
+const configuredSummaryApiMode = computed(() => configuredProviderApiMode(selectedSummaryProviderGroup.value, summaryModel.value))
+watch([configuredSummaryApiMode, () => summaryApiMode.value], ([mode]) => {
+  if (mode && summaryApiMode.value !== mode) summaryApiMode.value = mode
+}, { flush: 'sync' })
 const summaryApiModeOptions = computed(() => [
     { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
     { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
@@ -184,7 +188,7 @@ onMounted(() => {
                     :placeholder="t('groupChat.summaryModelPlaceholder')"
                 />
             </div>
-            <div class="form-group">
+            <div v-if="!configuredSummaryApiMode" class="form-group">
                 <label class="form-label">{{ t('groupChat.summaryApiMode') }}</label>
                 <NSelect v-model:value="summaryApiMode" :options="summaryApiModeOptions" />
             </div>

@@ -9,6 +9,8 @@ import { appEventEnvelope, canReceiveAppEvent } from '../webhooks/app-events'
 import { decryptPushSecret } from './push-secrets'
 
 const PUSH_EVENTS: Record<string, 'completion' | 'failure' | 'approval' | 'interaction'> = {
+  'person.run.completed': 'completion', 'person.run.failed': 'failure',
+  'person.approval.requested': 'approval', 'person.clarification.requested': 'interaction',
   'chat.run.completed': 'completion', 'chat.run.failed': 'failure',
   'chat.approval.requested': 'approval', 'chat.clarification.requested': 'interaction',
   'group.message.created': 'completion', 'group.run.failed': 'failure',
@@ -61,7 +63,7 @@ export function createRunPushConsumer(send: typeof fetch = (...args) => fetch(..
             // Preview is enabled by default; set 0 to keep notification content private.
             // Custom content requires a gateway that honors notification title/body.
             notification: process.env.STUDIO_PUSH_CONTENT_PREVIEW !== '0'
-              ? notificationPreview(event.type === 'chat.run.completed'
+              ? notificationPreview(event.type === 'chat.run.completed' || event.type === 'person.run.completed'
                 ? { ...('display' in envelope ? envelope.display as Record<string, unknown> : {}), content: currentOutput, preview: '' }
                 : 'display' in envelope ? envelope.display : undefined, kind === 'completion')
               : { title: '', body: '' },

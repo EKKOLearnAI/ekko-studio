@@ -182,17 +182,17 @@ browser_console
   action: read | clear
 ~~~
 
-选择 1 个类目入口和 8 个内部聚合操作的原因：
+选择 1 个类目入口和 13 个内部聚合操作的原因：
 
 - 常驻上下文只有类目说明和入口 Schema；
 - 模型只在需要时读取一个具体操作的完整 Schema；
-- 8 个语义操作仍比十几个按钮级操作更稳定；
+- 13 个语义操作仍比几十个按钮级操作更稳定；
 - Action 枚举较小，参数校验更明确；
 - 大页面定位、分页和控件操作由本地浏览器完成，不依赖 JEV。
 
 所有页面操作都携带明确的 <code>tab_id</code>，结果也必须返回
 <code>tab_id</code>。创建标签页只能通过 <code>browser_tabs</code>，其他操作不会
-隐式跟随用户当前标签页。Snapshot 返回 <code>snapshot_id</code>，click/type 必须
+隐式跟随用户当前标签页。Snapshot 返回 <code>snapshot_id</code>，所有带 ref 的动作必须
 回传该 ID；页面变化后旧引用立即失效。
 
 批量调用使用 `ekko_studio_browser_batch`，一次提交同一标签页的多条指令：
@@ -210,12 +210,34 @@ browser_console
 }
 ~~~
 
-- click/type 的所有 ref 都来自提交时的同一份最新快照。只有按键/滚动时可以省略 snapshot_id。
+- 所有 ref（含 drag 的 target_ref）都来自提交时的同一份最新快照。只有按键/滚动/坐标动作时可以省略 snapshot_id。
 - 执行前验证全部参数和初始引用；每步重新获取快照并按原始 DOM 节点身份定位，不复用可能已变号的 ref，也不猜测替代元素。
 - 整批占用同一标签页的操作队列；其他标签页仍可并发。单步工具保持兼容。
 - 首次失败、目标消失、页面导航/刷新、用户接管或 30 秒执行预算耗尽时，停止后续动作。浏览器不按操作文案进行风险分类或添加确认弹窗；每一步仍检查取消状态与执行预算。
 - 返回 `completed`、`total` 和 `results`；每项带从 0 开始的 `index`、动作类型及 `completed` / `failed` / `skipped` 状态。成功的步骤不会回滚，失败步骤也可能已产生部分效果，请根据结果决定是否重试。
 - 能读取时返回执行后的 `snapshot`；无法读取时返回 `snapshotError`。部分执行会在 MCP 结果标记 `isError: true`，仍保留逐步结果。页面跳转后的操作需要根据新快照再次提交。
+
+指针输入默认走可信事件（CDP `Input.dispatchMouseEvent`），页面看到的 `isTrusted` 为真，弹窗拦截、用户激活类 API 与真人点击一致：
+
+- click 先等待元素可点，再在元素中心发鼠标按下/抬起；中心被遮罩盖住或无法测量时退回原来的 DOM `click()`。double_click / right_click 不退回，被遮挡直接报错。
+- hover 只移动鼠标，触发 `:hover` 和悬停菜单；select 只操作原生 `<select>`，按 option value 或可见文字匹配，自定义下拉请点击选项。
+- drag（ref → target_ref）与 drag_at（坐标）按下后分 8 步移动。HTML5 拖放用 `Input.setInterceptDrags` 截获，不启动系统拖拽，再在目标处回放 dragEnter/dragOver/drop；滑块、排序库这类指针拖动直接看到鼠标移动。
+- click_at / drag_at 使用视口截图的 CSS 像素坐标，超出视口直接拒绝，用于画布、地图等没有 ref 的内容。
+- Agent 的右键不会弹出浏览器自带的标注菜单，页面自己的右键菜单照常触发。
+
+iframe：快照把同进程 iframe（按 frameId 读取）和跨进程 iframe（`Target.setAutoAttach` 自动挂接的子会话）的无障碍节点插在各自 `<iframe>` 节点之后，最多 16 个 frame。ref 记住所属会话与 frame，DOM 节点 id 只在会话内唯一；点击坐标逐级加上 iframe 内容框偏移换算到主视口，键盘输入经主窗口路由到焦点所在 frame。
+
+页面弹窗：alert/confirm 打开后页面被阻塞，当前动作在弹窗出现时立即返回，`observation.dialog` 给出类型和文字，不再读快照。弹窗未处理前，快照与动作都会直接报错并提示用 `ekko_studio_browser_dialog`（status/accept/dismiss，prompt 可填文字）。CDP 处理后 Electron 会同时关掉原生弹框；Electron 本身不支持 prompt()，它会立即返回 null。批量操作遇到弹窗后，剩余步骤标记为 skipped。
+
+系统文件框：Agent 持有标签页控制权期间开启 `Page.setInterceptFileChooserDialog`，页面打开文件选择时不会在用户屏幕上弹出系统对话框，`observation.fileChooser` 提示改用 upload；upload 不传 ref 即把文件交给这个被截获的输入框。控制权释放或用户接管后立即关闭拦截。
+
+网络记录：`ekko_studio_browser_network` 只读记录最近 300 条请求的方法、脱敏 URL、类型、状态码、MIME、耗时、大小和失败原因，不记录请求头和正文；从 Agent 首次操作该标签页开始记录，含 iframe 请求。
+
+文件上传、下载与等待全程不落盘，也不打开系统文件对话框：
+
+- `ekko_studio_browser_upload`：1–4 个文件、合计 10 MB。MCP 读取本机路径（或直接接收 base64），Desktop 在页面里用 `DataTransfer` 构造 `File`；ref 可以是 `<input type=file>`、label、或旁边藏着文件输入框的上传按钮。找不到输入框时默认对元素派发 drop，`method=paste` 用于接受粘贴图片的编辑器。
+- `ekko_studio_browser_download`：最多 20 MB，按 url 或链接/图片/媒体 ref 下载。http(s) 走该标签页的 session（同 Cookie、同代理），每一跳重定向都过地址安全策略；`blob:` 在页面内读取。文件只在 Desktop 内存里保留 5 分钟，按 1 MB 分块读回（远程中继单条消息上限 2 MB），读完即删。给 `save_path` 时写到 MCP 所在主机；不给时图片直接作为图片结果返回、小文本作为文本返回，其余只返回元数据。
+- `ekko_studio_browser_wait`：最长 30 秒等待页面文字出现（text）或消失（text_gone），只读不操作。
 
 ### 6.3 MCP 配置统一注入，能力由桌面 Broker 决定
 

@@ -67,8 +67,8 @@ cpSync(
 const firmwareOutDir = resolve(rootDir, 'dist/mcu')
 const legacyFirmwareOutPath = resolve(firmwareOutDir, 'firmware.bin')
 for (const firmwareVersion of ['v1', 'v2']) {
-  const firmwareBuildSrc = resolve(rootDir, `packages/esp32-c3/${firmwareVersion}/.pio/build/esp32-c3-devkitm-1/firmware.bin`)
-  const firmwareReleaseSrc = resolve(rootDir, `packages/esp32-c3/release/${firmwareVersion}/firmware.bin`)
+  const firmwareBuildSrc = resolve(rootDir, `packages/mcu/esp32-c3/${firmwareVersion}/.pio/build/esp32-c3-devkitm-1/firmware.bin`)
+  const firmwareReleaseSrc = resolve(rootDir, `packages/mcu/esp32-c3/release/${firmwareVersion}/firmware.bin`)
   const firmwareVersionedOutDir = resolve(firmwareOutDir, firmwareVersion)
   const firmwareOutPath = resolve(firmwareVersionedOutDir, 'firmware.bin')
   let firmwareSrc = ''

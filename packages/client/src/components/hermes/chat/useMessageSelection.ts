@@ -19,7 +19,7 @@ export function useMessageSelection(messages: ComputedRef<Message[]>) {
   let generation = 0
   const supported = computed(() => {
     const session = store.activeSession
-    return !!session && !session.isLocalOnly
+    return !!session && !session.isLocalOnly && !session.id.startsWith('person-task-')
       && ['cli', 'api_server', 'desktop', 'builtin_agent'].includes(session.source || '')
       && (isHermesSession(session) || isBuiltinEkkoSession(session))
   })

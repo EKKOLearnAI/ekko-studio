@@ -40,8 +40,6 @@ const { t } = useI18n()
   height: 100%;
   min-height: 0;
   background: var(--theme-sidebar-bg, $bg-sidebar-surface);
-  border-top-right-radius: var(--radius-component, 5px);
-  border-bottom-right-radius: var(--radius-component, 5px);
   overflow: hidden;
 
   :deep(.studio-navigation-rail) {

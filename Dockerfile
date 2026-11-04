@@ -1,7 +1,7 @@
 ARG BASE_IMAGE=nousresearch/hermes-agent:latest
 FROM ${BASE_IMAGE}
 
-ARG NODE_VERSION=24.15.0
+ARG NODE_VERSION=24.22.1
 
 USER root
 

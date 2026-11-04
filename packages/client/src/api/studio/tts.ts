@@ -1,4 +1,4 @@
-import { getActiveProfileName, getApiKey } from '../client'
+import { ensureDesktopAuthReady, getActiveProfileName, getApiKey, getBaseUrlValue } from '../client'
 
 export interface TtsOptions {
   text: string
@@ -74,8 +74,9 @@ function ttsHeaders(explicitProfile?: string): Record<string, string> {
 }
 
 export async function generateSpeech(opts: TtsOptions): Promise<{ audio: Blob; engine: string }> {
+  await ensureDesktopAuthReady()
   const res = await fetch(
-    `${localStorage.getItem('hermes_server_url') || ''}/api/studio/tts`,
+    `${getBaseUrlValue()}/api/studio/tts`,
     {
       method: 'POST',
       headers: ttsHeaders(),
@@ -95,8 +96,11 @@ export async function generateSpeech(opts: TtsOptions): Promise<{ audio: Blob; e
 export async function synthesizeSpeech(
   req: SynthesizeSpeechRequest,
 ): Promise<{ audio: Blob; engine: string; provider: string }> {
+  req.signal?.throwIfAborted()
+  await ensureDesktopAuthReady()
+  req.signal?.throwIfAborted()
   const res = await fetch(
-    `${localStorage.getItem('hermes_server_url') || ''}/api/studio/tts/synthesize`,
+    `${getBaseUrlValue()}/api/studio/tts/synthesize`,
     {
       method: 'POST',
       headers: ttsHeaders(req.profile),

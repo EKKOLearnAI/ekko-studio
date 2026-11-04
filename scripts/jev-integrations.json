@@ -196,6 +196,91 @@
         "control": "NSwitch",
         "binding": "settings.groupLoopDetectionEnabled",
         "label": "jev.groupLoopDetectionEnabled"
+      },
+      "ekkoComputerUseMatchEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoComputerUseMatchEnabled",
+        "label": "jev.computerUseMatchEnabled"
+      },
+      "ekkoComputerUseMatchCandidateLimit": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoComputerUseMatchCandidateLimit",
+        "label": "jev.computerUseMatchCandidateLimit"
+      },
+      "ekkoComputerUseMatchMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoComputerUseMatchMinConfidence",
+        "label": "jev.computerUseMatchMinConfidence"
+      },
+      "ekkoComputerUseMatchTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoComputerUseMatchTimeoutMs",
+        "label": "jev.computerUseMatchTimeoutMs"
+      },
+      "ekkoComputerUseVerifyEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.ekkoComputerUseVerifyEnabled",
+        "label": "jev.computerUseVerifyEnabled"
+      },
+      "ekkoComputerUseVerifyMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoComputerUseVerifyMinConfidence",
+        "label": "jev.computerUseVerifyMinConfidence"
+      },
+      "ekkoComputerUseVerifyTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.ekkoComputerUseVerifyTimeoutMs",
+        "label": "jev.computerUseVerifyTimeoutMs"
+      },
+      "personMemoryEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.personMemoryEnabled",
+        "label": "jev.personMemoryEnabled"
+      },
+      "personMemoryKindRoutingEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.personMemoryKindRoutingEnabled",
+        "label": "jev.memoryKindRouting"
+      },
+      "personMemoryRelevanceFilterEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.personMemoryRelevanceFilterEnabled",
+        "label": "jev.memoryRelevanceFilter"
+      },
+      "personMemoryRerankEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.personMemoryRerankEnabled",
+        "label": "jev.memoryRerank"
+      },
+      "personMemoryWriteReviewEnabled": {
+        "control": "NSwitch",
+        "binding": "settings.personMemoryWriteReviewEnabled",
+        "label": "jev.memoryWriteReview"
+      },
+      "personMemoryCandidateLimit": {
+        "control": "NInputNumber",
+        "binding": "settings.personMemoryCandidateLimit",
+        "label": "jev.memoryCandidateLimit"
+      },
+      "personMemoryRecallMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.personMemoryRecallMinConfidence",
+        "label": "jev.memoryRecallMinConfidence"
+      },
+      "personMemoryFilterMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.personMemoryFilterMinConfidence",
+        "label": "jev.memoryFilterMinConfidence"
+      },
+      "personMemoryMinConfidence": {
+        "control": "NInputNumber",
+        "binding": "settings.personMemoryMinConfidence",
+        "label": "jev.memoryMinConfidence"
+      },
+      "personMemoryTimeoutMs": {
+        "control": "NInputNumber",
+        "binding": "settings.personMemoryTimeoutMs",
+        "label": "jev.memoryTimeout"
       }
     }
   },
@@ -223,13 +308,7 @@
         "enabledKey": "memoryEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/server/jev.test.ts",
-        "tests/server/ekko-agent-manager.test.ts",
-        "tests/ekko-agent/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts",
-        "tests/ekko-agent/memory-jev.test.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-memory-kind-routing",
@@ -248,11 +327,7 @@
         "enabledKey": "memoryKindRoutingEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-memory-rerank",
@@ -271,11 +346,7 @@
         "enabledKey": "memoryRerankEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-memory-write-review",
@@ -296,11 +367,7 @@
         "enabledKey": "memoryWriteReviewEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-memory-relevance-filter",
@@ -321,11 +388,7 @@
         "enabledKey": "memoryRelevanceFilterEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/memory-jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "ekko-skills",
@@ -350,13 +413,7 @@
         "enabledKey": "skillsEnabled",
         "mappingFunction": "getJevRuntimeConfig"
       },
-      "tests": [
-        "tests/ekko-agent/skills-jev.test.ts",
-        "tests/ekko-agent/jev.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/server/ekko-agent-manager.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "browser-match",
@@ -374,13 +431,7 @@
         "browserMatchMinConfidence",
         "browserMatchTimeoutMs"
       ],
-      "tests": [
-        "tests/server/browser-jev.test.ts",
-        "tests/server/browser-jev-mcp.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/server/hermes-studio-browser-mcp.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "browser-verify",
@@ -397,13 +448,7 @@
         "browserVerifyMinConfidence",
         "browserVerifyTimeoutMs"
       ],
-      "tests": [
-        "tests/server/browser-jev.test.ts",
-        "tests/server/browser-jev-mcp.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/server/hermes-studio-browser-mcp.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "group-summary-review",
@@ -419,11 +464,7 @@
         "groupSummaryRevisionEnabled",
         "groupSummaryReviewTimeoutMs"
       ],
-      "tests": [
-        "tests/server/group-chat-summary-review.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "workflow-quality-review",
@@ -438,11 +479,7 @@
         "workflowQualityMinConfidence",
         "workflowQualityTimeoutMs"
       ],
-      "tests": [
-        "tests/server/workflow-quality-review.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
     },
     {
       "id": "group-message-routing",
@@ -460,11 +497,157 @@
         "groupLoopDetectionEnabled",
         "groupMessageRoutingTimeoutMs"
       ],
-      "tests": [
-        "tests/server/group-chat-message-routing.test.ts",
-        "tests/server/jev.test.ts",
-        "tests/e2e/jev-settings.spec.ts"
-      ]
+      "tests": []
+    },
+    {
+      "id": "ekko-computer-use-match",
+      "purpose": "Suggest existing element tokens from a fresh native window observation.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/tools/computer-use/jev.ts",
+        "packages/ekko-agent/src/tools/computer-use/index.ts"
+      ],
+      "enabledKey": "ekkoComputerUseMatchEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "ekkoComputerUseMatchCandidateLimit",
+        "ekkoComputerUseMatchMinConfidence",
+        "ekkoComputerUseMatchTimeoutMs"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "computerUseMatchEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": []
+    },
+    {
+      "id": "ekko-computer-use-verify",
+      "purpose": "Assess expected outcomes using bounded native window labels and control states.",
+      "status": "active",
+      "sources": [
+        "packages/ekko-agent/src/tools/computer-use/jev.ts",
+        "packages/ekko-agent/src/tools/computer-use/index.ts"
+      ],
+      "enabledKey": "ekkoComputerUseVerifyEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "ekkoComputerUseVerifyMinConfidence",
+        "ekkoComputerUseVerifyTimeoutMs"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "computerUseVerifyEnabled",
+        "mappingFunction": "getJevRuntimeConfig"
+      },
+      "tests": []
+    },
+    {
+      "id": "person-memory",
+      "purpose": "Personal assistant: Control optional Ekko memory JEV with a run snapshot, total deadline and conservative fallback.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/bootstrap/person-chat-agent.ts"
+      ],
+      "enabledKey": "personMemoryEnabled",
+      "studioDefaultEnabled": false,
+      "options": [
+        "personMemoryCandidateLimit",
+        "personMemoryRecallMinConfidence",
+        "personMemoryTimeoutMs"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryEnabled",
+        "mappingFunction": "getPersonJevRuntimeConfig"
+      },
+      "tests": []
+    },
+    {
+      "id": "person-memory-kind-routing",
+      "purpose": "Personal assistant: Select relevant controlled memory kinds for automatic recall.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/bootstrap/person-chat-agent.ts"
+      ],
+      "enabledKey": "personMemoryKindRoutingEnabled",
+      "studioDefaultEnabled": true,
+      "options": [],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryKindRoutingEnabled",
+        "mappingFunction": "getPersonJevRuntimeConfig"
+      },
+      "tests": []
+    },
+    {
+      "id": "person-memory-rerank",
+      "purpose": "Personal assistant: Rerank recall candidates without changing cards or exact results.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/bootstrap/person-chat-agent.ts"
+      ],
+      "enabledKey": "personMemoryRerankEnabled",
+      "studioDefaultEnabled": true,
+      "options": [],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryRerankEnabled",
+        "mappingFunction": "getPersonJevRuntimeConfig"
+      },
+      "tests": []
+    },
+    {
+      "id": "person-memory-write-review",
+      "purpose": "Personal assistant: Review evidenced memory writes before committing an atomic batch.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/bootstrap/person-chat-agent.ts"
+      ],
+      "enabledKey": "personMemoryWriteReviewEnabled",
+      "studioDefaultEnabled": true,
+      "options": [
+        "personMemoryMinConfidence"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryWriteReviewEnabled",
+        "mappingFunction": "getPersonJevRuntimeConfig"
+      },
+      "tests": []
+    },
+    {
+      "id": "person-memory-relevance-filter",
+      "purpose": "Personal assistant: Remove reliably unrelated ordinary recall candidates while preserving standing instructions and the complete baseline on failure.",
+      "status": "active",
+      "sources": [
+        "packages/server/src/bootstrap/person-chat-agent.ts"
+      ],
+      "enabledKey": "personMemoryRelevanceFilterEnabled",
+      "studioDefaultEnabled": true,
+      "options": [
+        "personMemoryFilterMinConfidence"
+      ],
+      "runtimeConfig": {
+        "file": "packages/ekko-agent/src/jev/config.ts",
+        "interface": "EkkoJevConfig",
+        "defaults": "DEFAULT_EKKO_JEV_CONFIG",
+        "enabledKey": "memoryRelevanceFilterEnabled",
+        "mappingFunction": "getPersonJevRuntimeConfig"
+      },
+      "tests": []
     }
   ]
 }

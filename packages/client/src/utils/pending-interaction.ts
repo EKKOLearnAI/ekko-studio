@@ -24,6 +24,7 @@ export function pendingInteractionDeadline(
 }
 
 export function pendingInteractionRemainingMs(deadline: number, now = pendingInteractionMonotonicNow()): number {
+  if (deadline === Infinity) return Infinity
   if (!Number.isFinite(deadline)) return 0
   return Math.max(0, deadline - now)
 }

@@ -13,13 +13,9 @@ npm run test:e2e
 npm run build
 ```
 
-- `npm run pack:tos -- --webui-dir /absolute/staged/webui` adds the optional
-  TOS 7 x86_64 headless Deb target. See `packages/tos/README.md` for production
-  dependency staging, runtime requirements and device acceptance.
-
 - `npm run dev` starts the Vite client and Koa server together.
 - `npm run test` runs Vitest unit tests.
-- `npm run test:coverage` is what the Build workflow runs before `npm run build`.
+- `npm run test:coverage` is an optional local command; CI does not run coverage.
 - `npm run test:e2e` runs Playwright browser tests against a mocked BFF API.
 - `npm run build` type-checks and builds both client and server.
 
@@ -65,17 +61,22 @@ npm run build
 
 ## Testing Rules
 
-- Add focused Vitest coverage for server and store logic changes.
-- Add Playwright coverage for browser-visible flows and routing/auth regressions.
-- For frontend browser tests, prefer API/socket mocks over real external services.
-- Before opening a PR, run the smallest relevant tests plus `npm run build`.
-- For broad changes, run:
-
-```bash
-npm run test:coverage
-npm run test:e2e
-npm run build
-```
+- The legacy tests and fixtures have been removed. Every new feature must include
+  small, focused tests; do not rebuild a full regression suite by default.
+- Keep tests scoped to the new behavior. Use Vitest for local logic and include
+  Playwright coverage for new browser journeys.
+- Use local fixtures and mocked external APIs/sockets. Avoid global setup,
+  source-string assertions and repeated platform/theme/viewport matrices.
+- Run `npm run harness:check` and `npm run build` before opening a PR, plus the
+  specific tests added for new functionality.
+- `npm test`, `npm run test:coverage` and `npm run test:e2e` allow an empty suite
+  during the reset while continuing to fail on assertions in any tests that are
+  present. An empty suite does not exempt new features from adding tests.
+- Independent Test and E2E workflows run `npm test` and `npm run test:e2e`
+  automatically on pushes to `main` and pull requests targeting `main` or `base`;
+  both also support manual dispatch. Build reports harness and production-build
+  results separately. Lockfile checks remain separate. Coverage, browser shards
+  and platform test matrices remain removed. See `tests/README.md`.
 
 ## npm Publishing
 
@@ -148,6 +149,15 @@ Use this PR body shape by default:
 Closes #123
 
 ## Validation
-- `npm run test:coverage`
+- `npm run harness:check`
 - `npm run build`
+- Focused tests for each new feature, including E2E for new browser journeys
 ```
+
+## Task Outputs
+
+Keep one-off reports, temporary scripts and test evidence outside every checkout.
+Use `npm run --silent artifacts:new -- <task>` for an owned external directory.
+`npm run artifacts:check` and the existing harness reject known report/scratch
+paths, including ignored files. See `docs/harness/task-artifacts.md` for supported
+test output locations, protected runtime/dependency areas, cleanup and limits.

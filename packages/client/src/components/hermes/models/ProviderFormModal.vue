@@ -44,7 +44,7 @@ const formData = ref({
   api_key: '',
   model: '',
   context_length: null as number | null,
-  api_mode: 'chat_completions' as ProviderApiMode,
+  api_mode: 'chat_completions' as ProviderApiMode | 'auto',
 })
 
 const providerNameInputProps = {
@@ -76,13 +76,14 @@ const providerModelInputProps = {
 }
 
 const modelOptions = ref<Array<{ label: string; value: string }>>([])
-const apiModeOptions: Array<{ label: string; value: ProviderApiMode }> = [
+const apiModeOptions = computed(() => [
   { label: 'chat_completions (/chat/completions)', value: 'chat_completions' },
   { label: 'codex_responses (/responses)', value: 'codex_responses' },
   { label: 'anthropic_messages (/messages)', value: 'anthropic_messages' },
   { label: 'bedrock_converse (Converse API)', value: 'bedrock_converse' },
   { label: 'codex_app_server (App Server)', value: 'codex_app_server' },
-]
+  { label: t('models.apiModeAuto'), value: 'auto' },
+])
 
 const CODEX_KEY = 'openai-codex'
 const NOUS_KEY = 'nous'
@@ -357,7 +358,7 @@ async function handleSave() {
       api_key: formData.value.api_key.trim(),
       model: formData.value.model,
       context_length: contextLength,
-      api_mode: formData.value.api_mode,
+      api_mode: formData.value.api_mode === 'auto' ? null : formData.value.api_mode,
       providerKey,
     })
     message.success(t('models.providerAdded'))

@@ -36,6 +36,7 @@ export interface ChatAgentRuntimeDependencies {
   ekkoAgentReasoningText(...args: any[]): string
   normalizeEkkoAgentReasoning(...args: any[]): any
   serializeEkkoAgentReasoningDetails(...args: any[]): any
+  pendingEkkoInteractions(sessionId: string): Array<{ event: string; data: any }>
   waitForEkkoToolApproval(...args: any[]): Promise<any>
   waitForEkkoClarification(...args: any[]): Promise<any>
   getCodingAgentMcpServers(id: string, profile: string): Record<string, unknown>
@@ -73,6 +74,7 @@ export const redactPrimaryAgentBridgeError = (
 ) => configured().redactPrimaryAgentBridgeError(error, endpoint, replacement)
 
 export const chatCodingAgentRunManager = {
+  waitForSessionExit: (...args: any[]) => configured().codingAgentRunManager.waitForSessionExit(...args),
   hasSession: (...args: any[]) => configured().codingAgentRunManager.hasSession(...args),
   stop: (...args: any[]) => configured().codingAgentRunManager.stop(...args),
   isSessionLaunchCompatible: (...args: any[]) => configured().codingAgentRunManager.isSessionLaunchCompatible(...args),
@@ -106,3 +108,5 @@ export const respondToChatEkkoToolApproval = (...args: any[]) => configured().re
 export const respondToChatEkkoClarification = (...args: any[]) => configured().respondToEkkoClarification(...args)
 
 export const getChatCodingAgentMcpServers = (id: string, profile: string) => configured().getCodingAgentMcpServers(id, profile)
+
+export const pendingChatEkkoInteractions = (sessionId: string): Array<{ event: string; data: any }> => configured().pendingEkkoInteractions(sessionId)

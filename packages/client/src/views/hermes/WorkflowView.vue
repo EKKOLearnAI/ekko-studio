@@ -72,7 +72,7 @@ import {
   workflowLoopBodyNodeIds,
 } from '@/utils/workflow-edge-authoring'
 import WorkflowAgentNode from '@/components/hermes/workflow/WorkflowAgentNode.vue'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import WorkflowFieldHelp from '@/components/hermes/workflow/WorkflowFieldHelp.vue'
 import WorkflowConditionEdge from '@/components/hermes/workflow/WorkflowConditionEdge.vue'
 import FolderPicker from '@/components/hermes/chat/FolderPicker.vue'
@@ -133,9 +133,9 @@ import type {
 } from '@/components/hermes/workflow/types'
 import type { AvailableModelGroup } from '@/api/hermes/system'
 import {
-  fetchAgentStatusSnapshot,
-  isAgentStatusAvailable,
-  type AgentStatusSnapshot,
+  fetchAgentAvailabilitySnapshot,
+  isAgentAvailable,
+  type AgentAvailabilitySnapshot,
 } from '@/api/agent-status'
 
 import '@vue-flow/core/dist/style.css'
@@ -150,7 +150,7 @@ const chatStore = useChatStore()
 const profilesStore = useProfilesStore()
 const message = useMessage()
 const {
-  screenToFlowCoordinate, getViewport, setViewport, setNodes, setEdges, updateNodeInternals,
+  nodes: canvasNodes, screenToFlowCoordinate, getViewport, setViewport, setNodes, setEdges, updateNodeInternals,
   findNode, addSelectedNodes, removeSelectedElements,
 } = useVueFlow('hermes-workflow')
 const defaultViewport: WorkflowViewport = { x: 80, y: 80, zoom: 0.75 }
@@ -166,7 +166,7 @@ const workflowImportConfirmVisible = ref(false)
 const workflowImportPreview = ref<Awaited<ReturnType<typeof previewWorkflowImport>> | null>(null)
 const workflowImportProfile = ref('default')
 const workflowImportConfirming = ref(false)
-const agentStatusSnapshot = ref<AgentStatusSnapshot | null>(null)
+const agentAvailabilitySnapshot = ref<AgentAvailabilitySnapshot | null>(null)
 const WORKFLOW_CHAT_PANEL_MIN_WIDTH = 360
 const WORKFLOW_CHAT_PANEL_DEFAULT_WIDTH = 560
 const WORKFLOW_CANVAS_MIN_WIDTH = 360
@@ -431,7 +431,7 @@ let workflowBudgetClock: number | null = null
 const workflowAgentDefinitions = AGENT_OPTIONS
 
 const agentOptions = computed<WorkflowSelectOption[]>(() => workflowAgentDefinitions.filter(option =>
-  isAgentStatusAvailable(agentStatusSnapshot.value, option.value),
+  isAgentAvailable(agentAvailabilitySnapshot.value, option.value),
 ))
 
 const firstAvailableWorkflowAgent = computed(() =>
@@ -444,9 +444,9 @@ function workflowAgentDisplayName(agent: string): string {
 
 async function refreshAgentAvailability() {
   try {
-    agentStatusSnapshot.value = await fetchAgentStatusSnapshot()
+    agentAvailabilitySnapshot.value = await fetchAgentAvailabilitySnapshot()
   } catch {
-    agentStatusSnapshot.value = null
+    agentAvailabilitySnapshot.value = null
   }
 }
 const workflowRunBudgetOptions = computed(() => WORKFLOW_RUN_BUDGET_PRESETS.map(option => ({
@@ -685,11 +685,27 @@ function makeInitialNodes(): WorkflowNode[] {
   return []
 }
 
-const nodes = ref<WorkflowNode[]>(makeInitialNodes())
+// Keep an authored-only input for Vue Flow's initial mount and workflow switches.
+// Read live nodes from its store so edits never replay stale measurements or geometry.
+const nodeDefinitions = ref<WorkflowNode[]>(makeInitialNodes())
+const nodes = computed<WorkflowNode[]>({
+  get: () => canvasNodes.value as WorkflowNode[],
+  set: (value) => {
+    nodeDefinitions.value = value.map(node => ({
+      id: node.id,
+      type: node.type,
+      position: node.position,
+      dragHandle: node.dragHandle,
+      style: node.style,
+      data: node.data,
+    }))
+    setNodes(nodeDefinitions.value)
+  },
+})
 const edges = ref<WorkflowEdge[]>([])
 
 function unavailableWorkflowAgent() {
-  return nodes.value.find(node => !isAgentStatusAvailable(agentStatusSnapshot.value, node.data.agent))
+  return nodes.value.find(node => !isAgentAvailable(agentAvailabilitySnapshot.value, node.data.agent))
 }
 
 const edgeEditorEdge = computed(() => edges.value.find(edge => edge.id === edgeEditorId.value) || null)
@@ -1056,7 +1072,7 @@ function normalizeNodeModel(data: WorkflowAgentNodeData): Pick<WorkflowAgentNode
   const currentGroup = availableGroups.find(group => group.provider === data.provider)
   // A workflow can retain a manually entered model under a supported provider.
   if (currentGroup && data.model) {
-    return { provider: data.provider, model: data.model, apiMode: data.apiMode || defaultApiMode(data.provider) }
+    return { provider: data.provider, model: data.model, apiMode: configuredProviderApiMode(currentGroup, data.model) || data.apiMode || defaultApiMode(data.provider) }
   }
   const fallbackGroup = availableGroups.find(group => group.models.length > 0)
   return {
@@ -2929,13 +2945,12 @@ async function handleConnectEnd(event?: MouseEvent | TouchEvent) {
   transaction.after.edges[transaction.after.edges.length - 1] = {
     ...transaction.after.edges[transaction.after.edges.length - 1], animated: false, markerEnd: MarkerType.ArrowClosed,
   }
-  setNodes(transaction.after.nodes)
+  nodes.value = transaction.after.nodes
   await nextTick()
   updateNodeInternals([nodeId])
   setEdges(transaction.after.edges)
   await nextTick()
-  // Selection lives in Vue Flow's internal store, not in our definition
-  // array. Apply it after the release gesture has committed Node + Edge.
+  // Apply selection after the release gesture has committed Node + Edge.
   window.setTimeout(() => {
     removeSelectedElements()
     const createdNode = findNode(nodeId)
@@ -2949,7 +2964,7 @@ async function handleConnectEnd(event?: MouseEvent | TouchEvent) {
 function undoLastCanvasTransaction() {
   const transaction = lastCanvasTransaction.value
   if (!transaction || selectedWorkflowRunId.value) return
-  setNodes(transaction.before.nodes)
+  nodes.value = transaction.before.nodes
   setEdges(transaction.before.edges)
   nextNodeIndex.value = Math.max(1, nextNodeIndex.value - 1)
   lastCanvasTransaction.value = null
@@ -3790,7 +3805,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
         <VueFlow
           :key="workflowFlowKey"
           id="hermes-workflow"
-          v-model:nodes="nodes"
+          :nodes="nodeDefinitions"
           v-model:edges="renderedEdges"
           :fit-view-on-init="false"
           :default-viewport="defaultViewport"

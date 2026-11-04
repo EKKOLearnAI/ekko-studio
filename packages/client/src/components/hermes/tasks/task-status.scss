@@ -1,0 +1,26 @@
+@use '@/styles/variables' as *;
+
+@mixin badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: var(--border-width, 1px) solid $border-light;
+  border-radius: var(--radius-component, 6px);
+  color: $text-secondary;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: 1.5;
+  white-space: nowrap;
+  svg { flex-shrink: 0; }
+}
+@mixin completed {
+  color: $success;
+  background: rgba(var(--success-rgb), 0.06);
+  border-color: transparent;
+}
+@mixin closed { color: $text-muted; }
+@mixin mobile {
+  padding: 1px 5px;
+  gap: 4px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+}

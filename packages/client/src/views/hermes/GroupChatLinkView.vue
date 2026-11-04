@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { deploymentUrl } from '@/utils/deployment-url'
+import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
@@ -15,7 +16,7 @@ import {
   parseStoredAvatar,
 } from '@/utils/group-agent-avatar'
 import { nextCodingAgentMode, storedPriorAgentMode, submittedCodingAgentSelection } from '@/utils/coding-agent-mode'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import {
   inferCodingAgentApiMode,
   normalizeCodingAgentApiMode,
@@ -169,19 +170,27 @@ const agentModelOptions = computed(() => (selectedAgentProviderGroup.value?.mode
   label: appStore.displayModelName(model, selectedAgentProvider.value),
   value: model,
 })))
+const configuredAgentApiMode = computed(() => configuredProviderApiMode(selectedAgentProviderGroup.value, selectedAgentModel.value))
+watch([configuredAgentApiMode, selectedAgentApiMode], ([mode]) => {
+  if (mode && selectedAgentApiMode.value !== mode) selectedAgentApiMode.value = mode
+}, { flush: 'sync' })
 const agentApiModeOptions = computed(() => [
   { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
   { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
   { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
-const agentReasoningEffortOptions = computed(() => [
-  { label: t('chat.reasoningEffort.options.default'), value: '' },
+const agentReasoningEffortOptions = computed(() => reasoningOptions([
+  { label: t('chat.reasoningEffort.options.none'), value: '' },
   ...modelReasoningEfforts(
     getAgentModelGroups(selectedProfile.value),
     selectedAgentProvider.value,
     selectedAgentModel.value,
   ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
-])
+]))
+const agentReasoningEffortValue = computed({
+  get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
+  set: (value: string) => { selectedAgentReasoningEffort.value = value },
+})
 const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
@@ -211,7 +220,7 @@ const selectedAgent = computed<RemoteGroupAgentDescriptor | null>(() => {
     }),
     profile: selectedProfile.value,
     apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
-    reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
+    reasoningEffort: usesGlobalAgentMode.value ? '' : agentReasoningEffortValue.value,
     name: agentName.value.trim() || selectedProfile.value,
     description: agentDescription.value.trim(),
     avatar: agentAvatar.value ? JSON.stringify(agentAvatar.value) : '',
@@ -277,7 +286,7 @@ function closeWindow(): void {
 function syncAgentApiMode(): void {
   const group = selectedAgentProviderGroup.value
   selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-    group?.api_mode,
+    configuredAgentApiMode.value,
     inferCodingAgentApiMode(group?.provider || selectedAgentProvider.value, group?.base_url),
   )
 }
@@ -334,7 +343,7 @@ function applyAgentConfiguration(agent: RemoteGroupAgentDescriptor): void {
   selectedAgentProvider.value = agent.provider
   selectedAgentModel.value = agent.model
   selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-    agent.apiMode,
+    configuredAgentApiMode.value || agent.apiMode,
     inferCodingAgentApiMode(agent.provider),
   )
   selectedAgentReasoningEffort.value = agent.reasoningEffort
@@ -628,7 +637,7 @@ onUnmounted(() => {
 <template>
   <PageLoading :show="loading" class="group-chat-link-view">
     <section class="link-card">
-      <img src="/logo.png" alt="" class="link-logo">
+      <img :src="deploymentUrl('/logo.png')" alt="" class="link-logo">
       <h1>
         {{ editingConnection
           ? t('groupChat.editAgentTitle', { name: editingConnection.agent.name })
@@ -722,7 +731,7 @@ onUnmounted(() => {
               @update:value="handleAgentModelChange"
             />
           </div>
-          <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode" class="field">
+          <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode && !configuredAgentApiMode" class="field">
             <label>{{ t('codingAgents.protocolScope') }}</label>
             <NSelect
               v-model:value="selectedAgentApiMode"
@@ -733,7 +742,7 @@ onUnmounted(() => {
           <div v-if="!usesGlobalAgentMode" class="field">
             <label>{{ t('chat.reasoningEffort.tooltip') }}</label>
             <NSelect
-              v-model:value="selectedAgentReasoningEffort"
+              v-model:value="agentReasoningEffortValue"
               :options="agentReasoningEffortOptions"
               :disabled="waitingForApproval"
             />

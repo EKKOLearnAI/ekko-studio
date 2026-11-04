@@ -14,6 +14,7 @@ export function studioSessionAccount(session: { studio_user_id?: unknown; user_i
 }
 
 export interface UsageStatsFilters {
+  origin?: 'internal' | 'external'
   model?: string
   agent?: string
   account?: string

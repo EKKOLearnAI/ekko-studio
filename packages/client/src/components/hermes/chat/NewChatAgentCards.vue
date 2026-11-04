@@ -1,10 +1,9 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends string">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
-import type { AGENT_OPTIONS } from '@/utils/agent-options'
 
-type AgentOption = typeof AGENT_OPTIONS[number]
+type AgentOption = { value: T; label: string; avatar?: string }
 const props = defineProps<{
   value: AgentOption['value']
   options: readonly AgentOption[]
@@ -372,7 +371,7 @@ onUnmounted(() => {
             </span>
             <span class="agent-card-surface">
               <span class="agent-card-art" aria-hidden="true">
-                <span class="agent-card-stone"><img :src="chatSessionAgentAvatar({ codingAgentId: option.value }).src" alt="" draggable="false" /></span>
+                <span class="agent-card-stone"><img :src="option.avatar || chatSessionAgentAvatar({ codingAgentId: option.value }).src" alt="" draggable="false" /></span>
               </span>
               <span class="agent-card-name" :class="{ long: option.label.length > 11 }">{{ option.label }}</span>
               <span class="agent-card-mark" aria-hidden="true"></span>

@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/hermes/app'
 import type { AvailableModelGroup } from '@/api/hermes/system'
 import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
 import ModelCascader from '@/components/hermes/models/ModelCascader.vue'
+import ModelProtocolModal from './ModelProtocolModal.vue'
+import { useModelProtocolSelection } from '@/composables/useModelProtocolSelection'
+import { isAuthModelProvider } from '@/utils/codingAgentProviders'
 
 const props = defineProps<{
   provider: string
@@ -12,6 +15,8 @@ const props = defineProps<{
   groups: AvailableModelGroup[]
   allowMoa?: boolean
   disabled?: boolean
+  selectProtocol?: boolean
+  apiMode?: ProviderApiMode
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +25,14 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const showModels = ref(false)
+const protocol = useModelProtocolSelection(selection => {
+  showModels.value = false
+  emit('select', selection)
+}, computed(() => !!props.disabled))
+const { show: showProtocol, apiMode: selectedApiMode } = protocol
+watch(() => [props.provider, props.model, props.selectProtocol], () => protocol.cancel())
+watch(showModels, value => { if (!value) protocol.cancel() })
 
 const groupsWithCustom = computed(() =>
   props.groups.map(group => ({
@@ -44,6 +57,12 @@ const selectedDisplayName = computed(() => {
 })
 
 function handleSelect(selection: { provider: string; model: string; apiMode?: ProviderApiMode }) {
+  if (props.selectProtocol && !isAuthModelProvider(selection.provider)) {
+    const group = props.groups.find(group => group.provider === selection.provider)
+    protocol.select(selection, { provider: props.provider, model: props.model, apiMode: props.apiMode }, !!group?.api_mode_by_model)
+    return
+  }
+  showModels.value = false
   emit('select', selection)
 }
 </script>
@@ -51,11 +70,13 @@ function handleSelect(selection: { provider: string; model: string; apiMode?: Pr
 <template>
   <div class="scoped-model-selector">
     <ModelCascader
+      v-model:show="showModels"
       :groups="groupsWithCustom"
       :allow-moa="props.allowMoa"
       :provider="props.provider"
       :model="props.model"
       :disabled="props.disabled"
+      :close-on-select="!props.selectProtocol"
       @select="handleSelect"
     >
       <template #trigger="{ show, open, openWithKeyboard }">
@@ -67,6 +88,8 @@ function handleSelect(selection: { provider: string; model: string; apiMode?: Pr
         </button>
       </template>
     </ModelCascader>
+    <ModelProtocolModal v-model:show="showProtocol" v-model:value="selectedApiMode"
+      @confirm="protocol.confirm" @cancel="protocol.cancel" />
   </div>
 </template>
 

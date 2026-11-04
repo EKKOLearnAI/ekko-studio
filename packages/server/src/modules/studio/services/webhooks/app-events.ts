@@ -1,4 +1,5 @@
 import type { Socket } from 'socket.io'
+import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../../contracts/person-session'
 import { randomUUID } from 'crypto'
 import { businessEvents, APP_BUSINESS_TYPES, type BusinessEvent } from './business-events'
 import { authenticateUserToken, type AuthenticatedUser } from '../../public/auth'
@@ -58,11 +59,11 @@ export function appEventEnvelope(event: BusinessEvent) {
   if (event.source === 'workflow' && event.type.startsWith('chat.') && interaction) {
     return { ...base, ...interactionState, notify: false, display: { title: '', preview: '' } }
   }
-  if (event.type.startsWith('chat.')) {
+  if (event.type.startsWith('chat.') || event.type.startsWith('person.')) {
     if (event.source === 'group_chat' || event.source === 'workflow') return null
-    const name = event.type.replace('chat.clarification.', 'clarify.').replace(/^chat\./, '')
+    const name = event.type.replace(/^(?:chat|person)\.clarification\./, 'clarify.').replace(/^(?:chat|person)\./, '')
     const payload = { ...event.payload, session_id: event.subject.session_id,
-      ...(event.type === 'chat.run.completed' ? { output: chatCompletionText(event) } : {}) }
+      ...(event.type.endsWith('.run.completed') ? { output: chatCompletionText(event) } : {}) }
     const notice = foregroundNotification(name, payload)
     if (!notice) return null
     const session = getSession(notice.sessionId)
@@ -89,13 +90,18 @@ export function appEventEnvelope(event: BusinessEvent) {
     profile: event.profile, source: event.source, subject: event.subject, ...interactionState, display: event.payload.display }
 }
 function matches(request: Subscription, event: BusinessEvent): boolean {
-  if (!request.types.includes(event.type) || event.source !== 'group_chat' && request.profile !== event.profile) return false
+  if (!request.types.includes(event.type) || !['group_chat', 'person'].includes(event.source) && request.profile !== event.profile) return false
   const selected = event.subject.room_id ? request.roomIds : event.subject.workflow_id ? request.workflowIds : request.sessionIds
   return !selected.length || selected.includes(event.subject.room_id || event.subject.workflow_id || event.subject.session_id || '')
 }
 /** Notification ownership is stricter than permission to view a shared Profile. */
 export function canReceiveAppEvent(user: AuthenticatedUser | undefined, event: BusinessEvent): boolean {
   if (!user || !Number.isSafeInteger(user.id) || user.id <= 0) return false
+  if (isPrivatePersonSession(event.subject.session_id) || event.type.startsWith('person.') || event.source === 'person') {
+    const session = event.subject.session_id ? getSession(event.subject.session_id) : null
+    return event.source === 'person' && event.type.startsWith('person.') && isPersonSession(event.subject.session_id)
+      && session?.id === event.subject.session_id && ownsPersonSession(user.id, session)
+  }
   if (event.source === 'group_chat') {
     return Boolean(event.subject.room_id && groupAccess?.canReceive(user, event.subject.room_id, event))
   }
@@ -139,10 +145,11 @@ export function bindAppEventSubscription(socket: Socket, localState?: AppStatePr
       // Exact IDs avoid pruning unread sessions merely because a paginated list omits them.
       const unreadSessions = request.unreadSessionIds?.filter(id => {
         const session = getSession(id)
-        return session && !session.is_archived && (session.profile || 'default') === request.profile
-          && session.user_id != null && String(session.user_id) === String(user.id)
+        return session && !session.is_archived && (ownsPersonSession(user.id, session)
+          || !isPrivatePersonSession(id) && (session.profile || 'default') === request.profile
+          && session.user_id != null && String(session.user_id) === String(user.id))
       })
-      ack?.({ ok: true, schema_version: 1, ...(snapshot ? { snapshot, timestamp: Date.now() } : {}),
+      ack?.({ ok: true, schema_version: 1, ...(snapshot ? { snapshot, timestamp: Date.now(), person_state_version: 1 } : {}),
         ...(unreadSessions ? { unread_sessions: unreadSessions } : {}) })
     } catch { if (!closed && ticket === revision) { subscription = null; ack?.({ ok: false, error: 'event_subscription_denied' }) } }
   })

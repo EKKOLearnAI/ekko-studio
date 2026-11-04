@@ -460,7 +460,8 @@ export function useTheme() {
   }
 
   function toggleBrightness() {
-    return setBrightness(isDark.value ? 'light' : 'dark')
+    const next: Record<BrightnessMode, BrightnessMode> = { system: 'light', light: 'dark', dark: 'system' }
+    return setBrightness(next[brightness.value])
   }
 
   function toggleStyle() {

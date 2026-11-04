@@ -1,9 +1,0 @@
-{
-  "name": "hermes-pi-rpc-test-runtime",
-  "private": true,
-  "version": "1.0.0",
-  "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.1",
-    "pi-mcp-adapter": "2.24.0"
-  }
-}
