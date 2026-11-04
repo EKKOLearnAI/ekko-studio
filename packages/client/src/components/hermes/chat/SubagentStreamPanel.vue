@@ -40,6 +40,7 @@ const batchNo = computed(() => {
   if (!stream?.runId) return null
   return subagentBatchNumber([...chatStore.subagentStreams.values()], stream.sessionId, stream.runId)
 })
+function abortSubagent() { chatStore.stopStreaming() }
 
 const isRunning = computed(() => props.stream?.status === 'running')
 
@@ -213,6 +214,16 @@ onBeforeUnmount(stopElapsedTimer)
               {{ statusText() }}
             </span>
             <button
+              v-if="isRunning"
+              type="button"
+              class="subagent-abort"
+              data-theme-surface="card"
+              :title="t('subagent.abort')"
+              @click="abortSubagent"
+            >
+              {{ t('subagent.abort') }}
+            </button>
+            <button
               type="button"
               class="subagent-close"
               :aria-label="t('subagent.close')"
@@ -338,12 +349,15 @@ onBeforeUnmount(stopElapsedTimer)
 }
 
 .subagent-stream-title {
-  margin-top: 6px;
+  margin-top: 8px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   color: $text-primary;
   font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 400;
   line-height: var(--line-height, 1.45);
   overflow-wrap: anywhere;
+  background: var(--theme-userMessage-bg, $bg-secondary);
+  border-radius: var(--radius-component, 10px);
 }
 
 .subagent-stream-metrics {
@@ -438,6 +452,7 @@ onBeforeUnmount(stopElapsedTimer)
   :deep(.message) { max-width: 100%; }
   :deep(.message.assistant) { max-width: 100%; }
   :deep(.message.user) { max-width: 100%; }
+  :deep(.msg-body) { max-width: 100%; }
 }
 
 .subagent-empty {
@@ -561,4 +576,7 @@ onBeforeUnmount(stopElapsedTimer)
     max-height: 55%;
   }
 }
+
+.subagent-abort { padding: 3px 10px; font-size: 12px; line-height: 1.5; font-weight: 600; color: $text-secondary; background: $bg-main-surface; border: var(--border-width, 1px) solid $border-color; border-radius: 8px; cursor: pointer; transition: color .15s ease, border-color .15s ease; }
+.subagent-abort:hover { color: $error; border-color: $error; }
 </style>
