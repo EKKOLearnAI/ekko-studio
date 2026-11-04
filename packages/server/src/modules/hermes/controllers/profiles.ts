@@ -17,6 +17,7 @@ import { detectHermesRootHome } from '../services/runtime/path'
 import { getActiveProfileName, listProfileNamesFromDisk } from '../services/profiles/profile'
 import { listProfilesFromDisk, type HermesProfile } from '../services/profiles/catalog'
 import {
+  applyMicroCompactDefault,
   createProfileWithoutHermes,
   deleteProfileWithoutHermes,
   isReservedProfileName,
@@ -419,6 +420,11 @@ export async function create(ctx: any) {
       gateway: { running: false, profile: name },
     })
 
+    // Apply the Studio-level micro-compaction default to the new profile.
+    // Covers both the hermes-CLI and the native creation paths; best-effort
+    // (a failure here must not fail the profile creation itself).
+    await applyMicroCompactDefault(name)
+
     ctx.body = {
       success: true,
       message: output.trim(),
@@ -429,6 +435,29 @@ export async function create(ctx: any) {
     }
   } catch (err: any) {
     if (respondWithProfileLifecycleError(ctx, err)) return
+    ctx.status = 500
+    ctx.body = { error: err.message }
+  }
+}
+
+/**
+ * Apply the current Studio-level micro-compaction default
+ * (`AppConfig.microCompactDefault`) to every existing profile on disk. This is
+ * the "sync to all profiles" action: new profiles already pick the default up
+ * on creation, but existing profiles need an explicit push to converge.
+ */
+export async function syncCompression(ctx: any) {
+  try {
+    const profiles = listProfilesFromDisk()
+    const synced: string[] = []
+    const skipped: string[] = []
+    for (const p of profiles) {
+      const ok = await applyMicroCompactDefault(p.name)
+      if (ok) synced.push(p.name)
+      else skipped.push(p.name)
+    }
+    ctx.body = { success: true, synced, skipped, count: synced.length }
+  } catch (err: any) {
     ctx.status = 500
     ctx.body = { error: err.message }
   }
