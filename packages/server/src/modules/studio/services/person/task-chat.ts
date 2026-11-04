@@ -99,7 +99,7 @@ export async function continuePersonTask(userId: number, taskId: string, body: R
     }
     if (requirements.flow) {
       assertPersonTaskActor(current, origin)
-      if (requirements.flow.stopped) throw personError('Flow is stopped; its creator must reopen it', 409)
+      if (requirements.flow.stopped) throw personError('Flow is stopped; reopen it before continuing', 409)
       requirements.flow.completed = false
     }
     requirePersonSession(userId, current.session_id)

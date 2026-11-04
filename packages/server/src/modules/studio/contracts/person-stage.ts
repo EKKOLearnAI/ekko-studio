@@ -28,3 +28,9 @@ export interface PersonStageDelivery {
   id: string; owner_user_id: number; flow_id: string; stage_id: string; generation: number
   state: 'pending' | 'queued' | 'failed' | 'delivered' | 'cancelled'; updated_at: number; error: string
 }
+
+/** Control follows the unfinished current group, never historical/future participants. */
+export function canControlPersonFlow(flow: PersonConversationFlow, sessionId: string) {
+  return sessionId === flow.creator_session_id || flow.stages.some(stage => stage.group_position === flow.current_position
+    && ['active','failed'].includes(stage.state) && stage.session_id === sessionId)
+}

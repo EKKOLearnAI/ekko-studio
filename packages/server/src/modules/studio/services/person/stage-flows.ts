@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { PersonTaskOrigin } from '../../contracts/person'
 import { personError, personRevision, personText } from '../../contracts/person'
 import type { PersonStageContext, PersonStageDelivery } from '../../contracts/person-stage'
+import { canControlPersonFlow } from '../../contracts/person-stage'
 import { personDb, personOperation, personTransaction, getPersonTask } from '../../repositories/person-store'
 import { assertPersonStage, enqueuePersonStage, getPersonFlow, getPersonStageDelivery, personFlowHasPendingWork, personStageSources, recordPersonStageFailure, stageDeliveryContext } from '../../repositories/person-stage-store'
 import { requirePersonSession } from '../../repositories/person-session-store'
@@ -88,6 +89,7 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
   if (Object.keys(input).some(key => !['action','flow_id','expected_revision','idempotency_key'].includes(key))) throw personError('Flow route and creator are fixed',403)
   const action = personText(input.action,'action',30), id = personText(input.flow_id,'flow_id',100)
   if (!['complete','stop','resume'].includes(action)) throw personError('Unsupported flow action')
+  let applied = false
   const result = personOperation(userId,`flow:${personText(input.idempotency_key,'idempotency_key',200)}`, { ...input, actor: origin?.sessionId || null, stage: origin?.stage || null }, () => {
     const flow = getPersonFlow(userId,id)
     const active = flow.stages.filter(stage => stage.group_position === flow.current_position && ['active','failed'].includes(stage.state))
@@ -98,7 +100,7 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
     if (expectedRevision > flow.revision || (action !== 'complete' && flow.revision !== expectedRevision)) throw personError('Flow changed; query it again',409)
     if (origin) {
       requirePersonSession(userId,origin.sessionId)
-      if (origin.sessionId !== flow.creator_session_id && !active.some(stage => stage.session_id === origin.sessionId)) throw personError('Only the creator or current role may control this flow',403)
+      if (!canControlPersonFlow(flow,origin.sessionId)) throw personError('Only the creator or an unfinished current role may control this flow',403)
       if (origin.stage) {
         assertPersonStage(userId,origin.stage,origin.sessionId)
         if (origin.stage.flowId !== id) throw personError('Control only the assigned flow in this turn',403)
@@ -116,11 +118,10 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
     } else {
       if (flow.state === 'completed') throw personError('Flow is complete',409)
       if (action === 'resume') {
-        if (origin && ['stopped','failed'].includes(flow.state) && origin.sessionId !== flow.creator_session_id) throw personError('Only the creator can resume a stopped or failed flow',403)
         if (flow.state === 'failed' && personFlowHasPendingWork(userId,id)) throw personError('Wait for the other roles and workers to finish before resuming',409)
         if (db.prepare(`SELECT 1 FROM person_stage_tasks l JOIN person_stages s ON s.id=l.stage_id JOIN person_executions e ON e.task_id=l.task_id
-          WHERE s.flow_id=? AND s.group_position=? AND s.state='active'
-          AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')`).get(id,flow.current_position)) throw personError('Wait for stage workers to finish stopping',409)
+          WHERE s.flow_id=? AND s.group_position=? AND s.state IN ('active','failed') AND l.generation>=?
+          AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')`).get(id,flow.current_position,flow.round_generation)) throw personError('Wait for stage workers to finish stopping',409)
         for (const stage of active) requirePersonSession(userId,stage.session_id)
       } else {
         for (const stage of active) {
@@ -148,8 +149,11 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
       }
     }
     db.prepare('UPDATE person_flows SET revision=revision+1,updated_at=? WHERE id=?').run(now,id)
+    applied = true
     return getPersonFlow(userId,id)
   })
+  // A replayed resume receipt must not abort a newly admitted stage turn.
+  if (action === 'resume' && !applied) return result
   const latest = getPersonFlow(userId,id)
   if (latest.generation !== result.generation || latest.state !== result.state) return result
   if (action !== 'complete') {
