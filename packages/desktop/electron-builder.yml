@@ -13,7 +13,7 @@ directories:
 
 publish:
   provider: generic
-  url: https://download.ekkolearnai.com
+  url: https://download.ekkolearnai.com/latest
 
 # Don't auto-prune our root node_modules; we curate `files` and `extraResources` ourselves.
 buildDependenciesFromSource: false
