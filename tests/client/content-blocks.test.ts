@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blocksQueuePreview, parseContentBlocks } from '../../packages/client/src/utils/content-blocks'
+import { blocksQueuePreview, parseContentBlocks, parseMessageReference } from '../../packages/client/src/utils/content-blocks'
 
 describe('parseContentBlocks', () => {
   it('returns null for plain text content', () => {
@@ -68,5 +68,41 @@ describe('blocksQueuePreview', () => {
   it('never returns an empty preview for non-empty block input', () => {
     const blocks = parseContentBlocks('[{"type":"text","text":"   "}]')!
     expect(blocksQueuePreview(blocks)).toBe('[…]')
+  })
+
+  it('collapses a quoted message to its reply text', () => {
+    const blocks = parseContentBlocks('[{"type":"text","text":"<quoted_message>\\n被引用的原文\\n</quoted_message>\\n\\n新的回复"},{"type":"image","name":"a.png","path":"/a"}]')!
+    expect(blocksQueuePreview(blocks)).toBe('新的回复 [a.png]')
+  })
+
+  it('falls back to the quoted content when the reply is empty', () => {
+    const blocks = parseContentBlocks('[{"type":"text","text":"<quoted_message>\\n被引用的原文\\n</quoted_message>"},{"type":"image","name":"a.png","path":"/a"}]')!
+    expect(blocksQueuePreview(blocks)).toBe('被引用的原文 [a.png]')
+  })
+
+  it('keeps a long quote from hiding the reply via truncation', () => {
+    const longQuote = '很长的引用内容'.repeat(30)
+    const blocks = parseContentBlocks(`[{"type":"text","text":"<quoted_message>\\n${longQuote}\\n</quoted_message>\\n\\n简短回复"},{"type":"image","name":"a.png","path":"/a"}]`)!
+    expect(blocksQueuePreview(blocks)).toBe('简短回复 [a.png]')
+  })
+
+  it('skips a single internal video representative frame', () => {
+    const blocks = parseContentBlocks('[{"type":"text","text":"看视频"},{"type":"file","name":"clip.mp4","path":"/v","media_type":"video/mp4"},{"type":"image","name":"frame-1.jpg","path":"/f1","video_frame":true}]')!
+    expect(blocksQueuePreview(blocks)).toBe('看视频 [clip.mp4]')
+  })
+
+  it('skips multiple internal video representative frames', () => {
+    const blocks = parseContentBlocks('[{"type":"text","text":"看视频"},{"type":"file","name":"clip.mp4","path":"/v","media_type":"video/mp4"},{"type":"image","name":"frame-1.jpg","path":"/f1","video_frame":true},{"type":"image","name":"frame-2.jpg","path":"/f2","video_frame":true}]')!
+    expect(blocksQueuePreview(blocks)).toBe('看视频 [clip.mp4]')
+  })
+})
+
+describe('parseMessageReference', () => {
+  it('extracts quoted content and reply', () => {
+    expect(parseMessageReference('<quoted_message>\n原文\n</quoted_message>\n\n回复')).toEqual({ content: '原文', reply: '回复' })
+  })
+
+  it('returns null for content without a quote wrapper', () => {
+    expect(parseMessageReference('普通消息')).toBeNull()
   })
 })
