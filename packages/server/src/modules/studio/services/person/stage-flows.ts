@@ -10,6 +10,7 @@ import { personRuntime } from '../../public/person-runtime'
 import { personUser } from './catalog'
 import { logger } from '../../public/logging'
 import { personTurnWorkspace, requirePersonWorkspace } from './workspace'
+import { personStageWait, savedStageReply, stageConfirmation, startPersonStageRun, stageReplyHash } from '../../repositories/person-stage-confirmations'
 
 const activeTurns = new Map<string, Set<AbortController>>()
 export function registerPersonStageTurn(context: PersonStageContext) {
@@ -107,6 +108,8 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
     if (action === 'complete') {
       if (!origin?.stage || origin.stage.flowId !== id || !origin.runId) throw personError('Complete the stage from its assigned live turn',403)
       const { stage } = assertPersonStage(userId,origin.stage,origin.sessionId)
+      const tracked = stageConfirmation(origin.stage)
+      if (tracked && tracked.run_id !== origin.runId) throw personError('Stage turn was superseded; do not complete an older reply',409)
       if (stageHasWork(stage.id)) throw personError('Finish or explicitly close the stage subtask before completing; acceptance-enabled children must pass independent verification',409)
       if (stage.completion_run_id && stage.completion_run_id !== origin.runId) throw personError('Stage completion is already being saved',409)
       db.prepare('UPDATE person_stages SET completion_run_id=? WHERE id=?').run(origin.runId,stage.id)
@@ -119,16 +122,28 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
           WHERE s.flow_id=? AND s.group_position=? AND s.state='active'
           AND e.state IN ('pending','queued','starting','running','stopping','waiting_person','waiting_user','waiting_approval')`).get(id,flow.current_position)) throw personError('Wait for stage workers to finish stopping',409)
         for (const stage of active) requirePersonSession(userId,stage.session_id)
+      } else {
+        for (const stage of active) {
+          const candidate = stageConfirmation({flowId:id,stageId:stage.id,generation:flow.generation})
+          if (candidate?.message_id) db.prepare(`INSERT INTO person_stage_confirmations(stage_id,generation,run_id,message_id,source_hash,state,attempts,reason,updated_at)
+            VALUES(?,?,?,?,?,'cancelled',?,?,?)`).run(stage.id,flow.generation+1,candidate.run_id,candidate.message_id,candidate.source_hash,candidate.attempts,candidate.reason,now)
+        }
       }
       db.prepare("UPDATE person_stage_deliveries SET state='cancelled',updated_at=? WHERE flow_id=? AND state IN ('pending','queued')").run(now,id)
       db.prepare("UPDATE person_stages SET completion_run_id='' WHERE flow_id=? AND state='active'").run(id)
       db.prepare('UPDATE person_flows SET state=?,generation=generation+1 WHERE id=?').run(action === 'stop' ? 'stopped' : 'active', id)
+      db.prepare("UPDATE person_stage_confirmations SET claim='',state='cancelled',updated_at=? WHERE stage_id IN (SELECT id FROM person_stages WHERE flow_id=?) AND generation=? AND state!='completed'").run(now,id,flow.generation)
       if (action === 'resume') {
         const updated = getPersonFlow(userId,id)
         for (const stage of active) {
           db.prepare("UPDATE person_stages SET state='active' WHERE id=?").run(stage.id)
           db.prepare('UPDATE person_stage_tasks SET generation=? WHERE stage_id=? AND generation>=?').run(updated.generation,stage.id,updated.round_generation)
-          enqueuePersonStage(userId,stage,updated.generation)
+          const candidate = stageConfirmation({flowId:id,stageId:stage.id,generation:flow.generation})
+          if (candidate?.message_id) {
+            // Explicit resume grants a fresh bounded confirmation budget, never a rerun of saved work.
+            db.prepare(`INSERT INTO person_stage_confirmations(stage_id,generation,run_id,message_id,source_hash,state,updated_at)
+              VALUES(?,?,?,?,?,'pending',?)`).run(stage.id,updated.generation,candidate.run_id,candidate.message_id,candidate.source_hash,now)
+          } else enqueuePersonStage(userId,stage,updated.generation)
         }
       }
     }
@@ -169,20 +184,42 @@ export function failPersonStage(userId: number, context: PersonStageContext, err
 }
 
 /** Commit only after the final assistant message exists. No handoff transcript is stored. */
-export function finishPersonStageTurn(userId: number, context: PersonStageContext, runId: string, messageId: unknown, ok: boolean, error = '') {
+export function finishPersonStageTurn(userId: number, context: PersonStageContext, runId: string, messageId: unknown, ok: boolean, error = '', confirmationClaim?: string) {
+  const tracked = stageConfirmation(context)
+  if (tracked && tracked.run_id !== runId) return
   if (!ok) { failPersonStage(userId,context,error || 'Collaboration stage reply failed'); return }
-  personTransaction(() => {
+  try { personTransaction(() => {
     let current: ReturnType<typeof assertPersonStage>
     try { current = assertPersonStage(userId,context) } catch { return }
     const { flow, stage } = current
-    if (stage.completion_run_id !== runId) return
     const db = personDb()
-    const message = ok && db.prepare("SELECT id,content FROM messages WHERE id=? AND session_id=? AND run_marker=? AND role='assistant' AND finish_reason IN ('stop','end_turn','completed') AND COALESCE(tool_calls,'') IN ('','[]','null')").get(String(messageId || ''),stage.session_id,runId)
+    let candidate = stageConfirmation(context)
+    if (candidate && candidate.run_id !== runId) return
+    if (!candidate) { startPersonStageRun(userId,context,runId); candidate = stageConfirmation(context)! }
+    if (confirmationClaim && (candidate.state !== 'confirming' || candidate.claim !== confirmationClaim || candidate.lease_until < Date.now() || candidate.message_id !== Number(messageId))) return
+    const message = savedStageReply(stage.session_id,runId,messageId)
     if (!message || !String(message.content).trim()) {
-      db.prepare("UPDATE person_stages SET completion_run_id='' WHERE id=?").run(stage.id)
-      return
+      throw personError('No saved final stage reply is available; inspect the conversation and resume.',409)
+    }
+    if (confirmationClaim && candidate.source_hash !== stageReplyHash(message.content)) throw personError('Saved reply changed during confirmation; inspect the original result before resuming.',409)
+    if (stage.completion_run_id !== runId || confirmationClaim) {
+      const waiting = personStageWait(context)
+      if (confirmationClaim && waiting) {
+        db.prepare("UPDATE person_stage_confirmations SET state='waiting',claim='',reason=?,updated_at=? WHERE stage_id=? AND generation=?").run(waiting,Date.now(),stage.id,context.generation)
+        return
+      }
+      if (!confirmationClaim) {
+        if (candidate.state !== 'running') return
+        db.prepare("UPDATE person_stages SET result_message_id=? WHERE id=?").run(message.id,stage.id)
+        db.prepare("UPDATE person_stage_confirmations SET message_id=?,source_hash=?,state=?,reason=?,updated_at=? WHERE stage_id=? AND generation=?")
+          .run(message.id,stageReplyHash(message.content),waiting ? 'waiting' : 'pending',waiting,Date.now(),stage.id,context.generation)
+        db.prepare('UPDATE person_flows SET revision=revision+1,updated_at=? WHERE id=?').run(Date.now(),flow.id)
+        return
+      }
     }
     if (stageHasWork(stage.id)) throw personError('Stage still has unfinished work',409)
+    db.prepare("UPDATE person_stage_confirmations SET state='completed',claim='',message_id=?,reason='',updated_at=? WHERE stage_id=? AND generation=?")
+      .run(message.id,Date.now(),stage.id,context.generation)
     // Save the result even if the destination was removed. Delivery reports that blocker.
     db.prepare("UPDATE person_stages SET state='completed',result_message_id=?,completion_run_id='' WHERE id=?").run(message.id,stage.id)
     db.prepare('INSERT INTO person_stage_results(stage_id,round_number,result_message_id) VALUES(?,?,?)').run(stage.id,flow.round_number,message.id)
@@ -208,7 +245,7 @@ export function finishPersonStageTurn(userId: number, context: PersonStageContex
       db.prepare("UPDATE person_flows SET state='completed',revision=revision+1,updated_at=? WHERE id=?").run(Date.now(),flow.id)
       db.prepare("UPDATE person_occurrences SET state='finished' WHERE flow_id=?").run(flow.id)
     }
-  })
+  }) } catch (failure) { failPersonStage(userId,{...context,deliveryId:undefined},String(failure)) }
   personUpdated(userId)
 }
 

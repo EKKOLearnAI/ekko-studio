@@ -25,6 +25,7 @@ import { personTaskPrompt } from './task-prompt'
 import { dispatchPersonInsertion } from './task-queue'
 import { advanceAutomaticAcceptances } from './automatic-acceptance'
 import { advancePersonRedirects, assertPersonRedirectConversation } from './task-redirection'
+import { recoverStageConfirmations, tickStageConfirmations, stopStageConfirmations } from './stage-confirmation'
 
 const active = new Map<string, { run: PersonExecution; abort: AbortController }>()
 const busyTasks = new Set<string>()
@@ -217,6 +218,7 @@ export async function tickPersonWork() {
     await advanceAutomaticAcceptances()
     await deliverPersonResults()
     await deliverPersonStages()
+    tickStageConfirmations()
     promotePersonFollowups()
     tickPersonSchedules()
     const db = personDb()
@@ -258,6 +260,7 @@ export function startPersonWork() {
   recoverPersonAcceptances()
   recoverBotVerifications()
   recoverPersonStages()
+  recoverStageConfirmations()
   // Queue entries are process-local; recover delivery receipts after restart.
   personDb().prepare("UPDATE person_deliveries SET state='pending',error='' WHERE state='queued'").run()
   personDb().prepare("UPDATE person_deliveries SET state='pending' WHERE state='waiting' AND execution_id IN (SELECT id FROM person_executions WHERE state IN ('finished','failed'))").run()
@@ -266,6 +269,7 @@ export function startPersonWork() {
 }
 export async function stopPersonWork() {
   if (timer) clearInterval(timer); timer = undefined
+  await stopStageConfirmations()
   for (const { run, abort } of active.values()) {
     personDb().prepare("UPDATE person_executions SET state='interrupted',generation=generation+1 WHERE id=? AND generation=?").run(run.id, run.generation)
     interruptPersonAcceptance(run,'Studio stopped during acceptance; inspect and explicitly continue')

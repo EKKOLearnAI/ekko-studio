@@ -22,9 +22,10 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
       creator_session_id:flow.creator_session_id,position:flow.current_position,total:flow.stages.length,error:flow.error,
       round_number:flow.round_number,round_limit:flow.round_limit,
       group_count:Math.max(...flow.stages.map(item => item.group_position)) + 1,
-      current_stages:current.map(item => ({ id:item.id,session_id:item.session_id,state:item.state,goal:item.goal.slice(0,300),task_count:item.tasks.length })),
+      current_stages:current.map(item => ({ id:item.id,session_id:item.session_id,state:item.state,goal:item.goal.slice(0,300),task_count:item.tasks.length,
+        ...(item.confirmation ? {confirmation:{...item.confirmation,reason:item.confirmation.reason.slice(0,300)}} : {}) })),
       tasks:stage.tasks.slice(0,5).map(task=>({ ...task,title:task.title.slice(0,80) })),task_count:stage.tasks.length,
-      results:flow.stages.filter(item=>item.result_message_id).map(item=>({ position:item.position,group:item.group_position,session_id:item.session_id,message_id:item.result_message_id })),
+      results:flow.stages.filter(item=>item.state === 'completed' && item.result_message_id).map(item=>({ position:item.position,group:item.group_position,session_id:item.session_id,message_id:item.result_message_id })),
       goal:stage.goal.slice(0,600),return_expectation:stage.return_expectation.slice(0,600) }
   }
   const string = { type:'string' }

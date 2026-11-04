@@ -6,6 +6,7 @@ export interface PersonStageContext {
   deliveryId?: string
 }
 export interface PersonStage {
+  confirmation?: {decision_pending?: boolean; state: string; attempts: number; reason: string; message_id: number | null}
   session_title?: string
   bot_type?: string | null
   delivery_state?: string

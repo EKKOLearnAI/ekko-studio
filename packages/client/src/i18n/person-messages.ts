@@ -1,5 +1,8 @@
 export const personMessages = {
   "en": {
+    "flowConfirming": "Confirming completion",
+    "flowConfirmationProgress": "Completion checks: {count}/{total}; original reply retained.",
+    "flowConfirmationResume": "Review the saved reply or conversation, then Continue to confirm again without rerunning the task.",
     "flowRound": "Round {number} of {total}",
     "flowRoundContinuous": "Round {number} · repeats until stopped",
     "redirectTaskWaiting": "Stopping the previous work, then continuing with your latest request.",
@@ -175,6 +178,9 @@ export const personMessages = {
     "compressionDisabled": "Automatic compression is disabled in global settings. Model context limits still apply.",
   },
   "zh": {
+    "flowConfirming": "确认完成情况",
+    "flowConfirmationProgress": "完成确认：{count}/{total} 次；原回复已保留。",
+    "flowConfirmationResume": "请先查看原回复或对话，再点“继续”重新确认，不会重做已保存的任务。",
     "flowRound": "第 {number}/{total} 轮",
     "flowRoundContinuous": "第 {number} 轮 · 持续至停止",
     "redirectTaskWaiting": "正在停止之前的工作，随后按最新要求继续。",
@@ -350,6 +356,9 @@ export const personMessages = {
     "compressionDisabled": "全局设置已关闭自动压缩，仍受模型上下文上限约束。",
   },
   "zh-TW": {
+    "flowConfirming": "確認完成情況",
+    "flowConfirmationProgress": "完成確認：{count}/{total} 次；原回覆已保留。",
+    "flowConfirmationResume": "請先查看原回覆或對話，再按「繼續」重新確認，不會重做已儲存的任務。",
     "flowRound": "第 {number}/{total} 輪",
     "flowRoundContinuous": "第 {number} 輪 · 持續至停止",
     "redirectTaskWaiting": "正在停止先前的工作，隨後按最新要求繼續。",
@@ -525,6 +534,9 @@ export const personMessages = {
     "compressionDisabled": "全域設定已關閉自動壓縮，仍受模型上下文上限限制。",
   },
   "ja": {
+    "flowConfirming": "完了を確認中",
+    "flowConfirmationProgress": "完了確認：{count}/{total} 回。元の返信を保持しています。",
+    "flowConfirmationResume": "元の返信または会話を確認し、「続行」で作業を再実行せずに再確認してください。",
     "flowRound": "{total} 回中 {number} 回目",
     "flowRoundContinuous": "{number} 回目 · 停止するまで繰り返し",
     "redirectTaskWaiting": "前の作業を停止してから、最新のご依頼に沿って続行します。",
@@ -700,6 +712,9 @@ export const personMessages = {
     "compressionDisabled": "全体設定で自動圧縮が無効です。モデルのコンテキスト上限は適用されます。",
   },
   "ko": {
+    "flowConfirming": "완료 확인 중",
+    "flowConfirmationProgress": "완료 확인: {count}/{total}회. 원래 답변을 보존합니다.",
+    "flowConfirmationResume": "원래 답변이나 대화를 검토한 뒤 계속을 눌러 작업 재실행 없이 다시 확인하세요.",
     "flowRound": "{total}회 중 {number}회",
     "flowRoundContinuous": "{number}회 · 중지할 때까지 반복",
     "redirectTaskWaiting": "이전 작업을 중지한 뒤 최신 요청에 따라 계속합니다.",
@@ -875,6 +890,9 @@ export const personMessages = {
     "compressionDisabled": "전역 설정에서 자동 압축이 꺼져 있습니다. 모델 컨텍스트 한도는 계속 적용됩니다.",
   },
   "fr": {
+    "flowConfirming": "Confirmation de fin",
+    "flowConfirmationProgress": "Vérifications : {count}/{total}. Réponse originale conservée.",
+    "flowConfirmationResume": "Consultez la réponse ou la conversation, puis Continuer pour confirmer sans refaire la tâche.",
     "flowRound": "Tour {number} sur {total}",
     "flowRoundContinuous": "Tour {number} · répéter jusqu’à l’arrêt",
     "redirectTaskWaiting": "Arrêt du travail précédent, puis poursuite selon votre dernière demande.",
@@ -1050,6 +1068,9 @@ export const personMessages = {
     "compressionDisabled": "La compression automatique est désactivée dans les paramètres globaux. Les limites du modèle restent applicables.",
   },
   "es": {
+    "flowConfirming": "Confirmando finalización",
+    "flowConfirmationProgress": "Comprobaciones: {count}/{total}. Respuesta original guardada.",
+    "flowConfirmationResume": "Revise la respuesta o conversación y pulse Continuar para confirmar sin repetir la tarea.",
     "flowRound": "Ronda {number} de {total}",
     "flowRoundContinuous": "Ronda {number} · repetir hasta detener",
     "redirectTaskWaiting": "Deteniendo el trabajo anterior para continuar con tu última petición.",
@@ -1225,6 +1246,9 @@ export const personMessages = {
     "compressionDisabled": "La compresión automática está desactivada en los ajustes globales. Se mantienen los límites del modelo.",
   },
   "de": {
+    "flowConfirming": "Abschluss wird bestätigt",
+    "flowConfirmationProgress": "Prüfungen: {count}/{total}. Ursprüngliche Antwort gespeichert.",
+    "flowConfirmationResume": "Antwort oder Gespräch prüfen, dann mit Weiter bestätigen, ohne die Aufgabe erneut auszuführen.",
     "flowRound": "Runde {number} von {total}",
     "flowRoundContinuous": "Runde {number} · bis zum Stoppen wiederholen",
     "redirectTaskWaiting": "Die bisherige Arbeit wird gestoppt; danach geht es mit Ihrer neuesten Anfrage weiter.",
@@ -1400,6 +1424,9 @@ export const personMessages = {
     "compressionDisabled": "Automatische Komprimierung ist global deaktiviert. Die Kontextgrenzen des Modells gelten weiterhin.",
   },
   "pt": {
+    "flowConfirming": "Confirmando conclusão",
+    "flowConfirmationProgress": "Verificações: {count}/{total}. Resposta original preservada.",
+    "flowConfirmationResume": "Revise a resposta ou conversa e escolha Continuar para confirmar sem refazer a tarefa.",
     "flowRound": "Rodada {number} de {total}",
     "flowRoundContinuous": "Rodada {number} · repetir até parar",
     "redirectTaskWaiting": "Parando o trabalho anterior para continuar com seu pedido mais recente.",
@@ -1575,6 +1602,9 @@ export const personMessages = {
     "compressionDisabled": "A compressão automática está desativada nos ajustes globais. Os limites do modelo continuam valendo.",
   },
   "ru": {
+    "flowConfirming": "Подтверждение завершения",
+    "flowConfirmationProgress": "Проверки: {count}/{total}. Исходный ответ сохранён.",
+    "flowConfirmationResume": "Проверьте ответ или диалог и нажмите «Продолжить» для подтверждения без повтора задачи.",
     "flowRound": "Раунд {number} из {total}",
     "flowRoundContinuous": "Раунд {number} · повторять до остановки",
     "redirectTaskWaiting": "Останавливаем прежнюю работу, затем продолжим по вашему последнему запросу.",
@@ -1750,6 +1780,9 @@ export const personMessages = {
     "compressionDisabled": "Автоматическое сжатие отключено в общих настройках. Ограничения контекста модели сохраняются.",
   },
   "ar": {
+    "flowConfirming": "تأكيد الاكتمال",
+    "flowConfirmationProgress": "محاولات التأكيد: {count}/{total}. تم الاحتفاظ بالرد الأصلي.",
+    "flowConfirmationResume": "راجع الرد أو المحادثة ثم اختر متابعة للتأكيد دون إعادة تنفيذ المهمة.",
     "flowRound": "الجولة {number} من {total}",
     "flowRoundContinuous": "الجولة {number} · تكرار حتى الإيقاف",
     "redirectTaskWaiting": "جارٍ إيقاف العمل السابق، ثم المتابعة وفقًا لطلبك الأخير.",
@@ -1925,6 +1958,9 @@ export const personMessages = {
     "compressionDisabled": "الضغط التلقائي معطل في الإعدادات العامة. تظل حدود سياق النموذج سارية.",
   },
   "tr": {
+    "flowConfirming": "Tamamlanma doğrulanıyor",
+    "flowConfirmationProgress": "Doğrulamalar: {count}/{total}. İlk yanıt korundu.",
+    "flowConfirmationResume": "Yanıtı veya konuşmayı inceleyip görevi yeniden çalıştırmadan doğrulamak için Devam seçeneğini kullanın.",
     "flowRound": "{total} turdan {number}. tur",
     "flowRoundContinuous": "{number}. tur · durdurulana kadar tekrarlanır",
     "redirectTaskWaiting": "Önceki çalışma durduruluyor, ardından son isteğinize göre devam edilecek.",
