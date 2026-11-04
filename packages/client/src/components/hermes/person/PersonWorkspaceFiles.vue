@@ -173,9 +173,12 @@ function handlePreview(event: Event) {
 }
 
 watch(() => [props.sessionId, props.workspace, props.active] as const, (_, previous) => {
-  reset()
-  activePanel.value = 'files'
-  if (filesStore.previewFile?.workspaceSessionId === previous[0]) filesStore.closePreview()
+  stopResize()
+  requestSequence++
+  if (loading.value || filesStore.previewFile?.workspaceSessionId === previous[0]) filesStore.closePreview()
+  loading.value = false
+  previewOnly.value = false
+  if (!filesStore.hasUnsavedChanges) filesStore.closeEditor()
 })
 watch(show, async value => {
   emit('update:show', value)
@@ -218,6 +221,7 @@ onBeforeUnmount(() => {
           <FilePreview v-else-if="filesStore.previewFile" :custom-close="close" />
         </template>
         <ChatToolsPanel v-else v-model:active-panel="activePanel" :workspace-session-id="sessionId" :workspace="workspace"
+          :context-ready="active && !!sessionId"
           :visible="show" :browser-visible="panelReady" :browser-available="browserAvailable"
           :submit="submitBrowserAnnotations" @attach="file => emit('attach', file)" />
       </template>

@@ -6,14 +6,15 @@ import type { BrowserAnnotationSubmission } from '@/utils/browser-annotation-sub
 const FilesPanel = defineAsyncComponent(() => import('./FilesPanel.vue'))
 const TerminalPanel = defineAsyncComponent(() => import('./TerminalPanel.vue'))
 const DesktopBrowserPanel = defineAsyncComponent(() => import('./DesktopBrowserPanel.vue'))
-defineProps<{
+withDefaults(defineProps<{
+  contextReady?: boolean
   workspaceSessionId?: string | null
   workspace?: string | null
   visible: boolean
   browserVisible: boolean
   browserAvailable: boolean
   submit: (submission: BrowserAnnotationSubmission) => boolean | void | Promise<boolean | void>
-}>()
+}>(), { contextReady: true })
 const activePanel = defineModel<'files' | 'terminal' | 'browser'>('activePanel', { default: 'files' })
 const emit = defineEmits<{ attach: [file: File] }>()
 const { t } = useI18n()
@@ -72,6 +73,7 @@ const { t } = useI18n()
     </div>
     <div class="chat-tool-content">
       <FilesPanel
+        v-if="contextReady"
         v-show="activePanel === 'files'"
         :workspace-session-id="workspaceSessionId"
         :workspace="workspace"
@@ -83,6 +85,7 @@ const { t } = useI18n()
       />
       <DesktopBrowserPanel
         v-if="browserAvailable && activePanel === 'browser'"
+        :submission-context="workspaceSessionId"
         :visible="browserVisible"
         :submit="submit"
       />

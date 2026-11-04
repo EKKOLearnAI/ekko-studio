@@ -13,12 +13,15 @@ import type { BrowserAnnotationSubmission } from '@/utils/browser-annotation-sub
 
 const props = withDefaults(defineProps<{
   visible?: boolean
+  submissionContext?: string | null
   submit: (submission: BrowserAnnotationSubmission) => boolean | void | Promise<boolean | void>
 }>(), {
   visible: true,
 })
 
 const { t } = useI18n()
+let submissionContextRevision = 0
+watch(() => props.submissionContext, () => { submissionContextRevision++ }, { flush: 'sync' })
 const historyOpen = ref(false)
 const downloadsOpen = ref(false)
 async function downloadsVisibility(value: boolean) {
@@ -331,6 +334,7 @@ function undoAnnotation(): void {
 
 async function sendAnnotations(): Promise<void> {
   if (annotationLocked.value) return
+  const context = submissionContextRevision
   annotationSubmitting.value = true
   try {
     await commitPendingAnnotation(false)
@@ -356,6 +360,7 @@ async function sendAnnotations(): Promise<void> {
         },
       }, null, 2),
     }
+    if (context !== submissionContextRevision) return
     const submitted = await props.submit(submission)
     if (submitted === false) return
     resetAnnotationSession()
@@ -454,6 +459,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  submissionContextRevision++
   unmounting = true
   if (bridge && annotatingTabId) void bridge.cancelAnnotation(annotatingTabId)
   if (bridge && annotationTabId.value) void bridge.clearAnnotations(annotationTabId.value)
