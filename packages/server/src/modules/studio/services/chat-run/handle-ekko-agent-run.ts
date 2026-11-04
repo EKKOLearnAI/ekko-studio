@@ -1,3 +1,4 @@
+import { parsePersonFlowReportQueueId, personFlowReportsForRun, finishPersonFlowReport } from '../../repositories/person-flow-report-store'
 import { createPersonDisplayStream } from './person-display'
 import { emitEkkoAbortCompletion } from './ekko-abort-completion'
 import { studioModelReasoningEffort } from '../../public/model-reasoning-effort'
@@ -508,12 +509,15 @@ export async function handleEkkoAgentRun(
   const personReturn = backgroundContinuationContext?.runtime === 'ekko'
     && backgroundContinuationContext.subagentId === data.background_delegation_id
     ? parsePersonResultQueueId(data.background_delegation_id) : undefined
+  const personFlowReport = isPersonSession(sessionId) && backgroundContinuationContext?.runtime === 'ekko'
+    && backgroundContinuationContext.subagentId === data.background_delegation_id
+    ? parsePersonFlowReportQueueId(data.background_delegation_id) : undefined
   const personStageDeliveryId = isPersonSession(sessionId) && backgroundContinuationContext?.runtime === 'ekko'
     && backgroundContinuationContext.subagentId === data.background_delegation_id && data.background_delegation_id?.startsWith('person-stage:')
     ? data.background_delegation_id.slice('person-stage:'.length) : undefined
   const agent = isPersonSession(sessionId) ? personStageDeliveryId
     ? await createPersonChatAgent(Number(authenticatedUserId),sessionId,undefined,personStageDeliveryId)
-    : await createPersonChatAgent(Number(authenticatedUserId), sessionId, personReturn) : getGlobalEkkoAgent(profile)
+    : await createPersonChatAgent(Number(authenticatedUserId), sessionId, personReturn,undefined,personFlowReport) : getGlobalEkkoAgent(profile)
   const personStageContext = 'personStageContext' in agent ? agent.personStageContext as PersonStageContext : undefined
   state.ekkoBoundaryInterrupt = agent.requestBoundaryInterrupt
     ? (expectedRunId: string) => agent.requestBoundaryInterrupt({ sessionId, expectedRunId }) : undefined
@@ -554,6 +558,11 @@ export async function handleEkkoAgentRun(
       stageDecisionEvent(personStageContext,String(payload.run_id),event.endsWith('.requested'))
     if (personStageContext && (event === 'run.completed' || event === 'run.failed')) {
       finishPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''),payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed',String(payload.error || ''))
+    }
+    if (isPersonSession(sessionId) && (event === 'run.completed' || event === 'run.failed')) {
+      for (const row of personFlowReportsForRun(Number(authenticatedUserId),sessionId,String(payload.run_id || '')))
+        finishPersonFlowReport(Number(authenticatedUserId),{ id:row.id,attempt:row.attempts },
+          payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed' && !payload.interrupted,String(payload.error || ''))
     }
     if (!isPrivatePersonSession(sessionId)) observeRunChatPetEvent(profile, event, tagged)
     data.onEvent?.(event, tagged)
@@ -1662,7 +1671,8 @@ export async function handleEkkoAgentRun(
           role: 'assistant',
           content: assistantText,
           timestamp: Math.floor(Date.now() / 1000),
-          finish_reason: result.output.finishReason || (personStageContext ? 'stop' : null),
+          finish_reason: result.output.finishReason || (personStageContext || personFlowReport
+            || (isPersonSession(sessionId) && personFlowReportsForRun(Number(authenticatedUserId),sessionId,persistedRunMarker).length) ? 'stop' : null),
           reasoning: assistantReasoning || null,
           reasoning_details: reasoningDetails,
           reasoning_content: assistantReasoning || null,

@@ -1,3 +1,4 @@
+import { enqueuePersonFlowReport } from '../../repositories/person-flow-report-store'
 import { randomUUID } from 'node:crypto'
 import type { PersonTaskOrigin } from '../../contracts/person'
 import { personError, personRevision, personText } from '../../contracts/person'
@@ -243,6 +244,7 @@ export function finishPersonStageTurn(userId: number, context: PersonStageContex
       for (const item of flow.stages.filter(item => item.group_position === 0)) enqueuePersonStage(userId,item,flow.generation+1)
     } else {
       db.prepare("UPDATE person_flows SET state='completed',revision=revision+1,updated_at=? WHERE id=?").run(Date.now(),flow.id)
+      enqueuePersonFlowReport(flow,stage.session_id,Number(message.id),runId)
       db.prepare("UPDATE person_occurrences SET state='finished' WHERE flow_id=?").run(flow.id)
     }
   }) } catch (failure) { failPersonStage(userId,{...context,deliveryId:undefined},String(failure)) }

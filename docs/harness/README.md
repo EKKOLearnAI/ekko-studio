@@ -21,6 +21,7 @@ agent can discover without chat history.
 - `docs/harness/pr-review.md` provides a PR self-review checklist.
 - `docs/harness/person-task-acceptance.md` documents opt-in background-task acceptance, durable completion gates, supported surfaces and validation.
 - `docs/harness/person-task-redirection.md` documents direction corrections, queue/callback invalidation, confirmed-stop barriers and focused verification.
+- `docs/harness/person-flow-reports.md` documents durable collaboration completion reports, creator wakeup, saved-reply confirmation and retry recovery.
 - `docs/harness/startup-tasks.md` describes one-time startup operations and their persistent execution records.
 - `docs/harness/server-module-boundaries.md` defines backend ownership and the migration target.
 - `docs/harness/jev-integrations.md` defines JEV feature switches, frontend configuration and integration registration.

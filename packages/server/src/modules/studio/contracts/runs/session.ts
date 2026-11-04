@@ -60,6 +60,7 @@ export interface SessionMessage {
 }
 
 export interface QueuedRun {
+  personFlowReport?: { userId: number; identity: import('../person-stage').PersonFlowReportIdentity }
   personStageDelivery?: { userId: number; deliveryId: string }
   /** Internal account-bound Person result delivery. */
   personDelivery?: { userId: number; executionId: string; acceptanceReturnId?: string }
