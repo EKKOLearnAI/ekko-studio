@@ -40,7 +40,7 @@ const batchNo = computed(() => {
   if (!stream?.runId) return null
   return subagentBatchNumber([...chatStore.subagentStreams.values()], stream.sessionId, stream.runId)
 })
-function abortSubagent() { chatStore.stopStreaming() }
+function abortSubagent() { chatStore.abortSession(props.stream?.sessionId || '') }
 
 const isRunning = computed(() => props.stream?.status === 'running')
 
@@ -248,7 +248,7 @@ onBeforeUnmount(stopElapsedTimer)
         ref="streamListRef"
         :messages="streamMessages"
         :virtualized="false"
-        padding="20px"
+        padding="16px"
         :row-gap="16"
       >
         <template #item="{ message }">
