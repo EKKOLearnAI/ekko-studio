@@ -322,6 +322,9 @@ const workspaceDirectories = useDefaultWorkspace()
 const { defaultWorkspaces, recentWorkspaces } = workspaceDirectories
 const taskPanelOpen = ref(false)
 const taskSelections = ref<Record<string, { taskId: string | null; executionId?: string }>>({})
+function taskWithExecution(tasks: PersonTask[] | undefined): PersonTask | undefined {
+  return tasks?.find(task => !!task.execution_id)
+}
 const chatTaskId = computed({
   get: () => taskSelections.value[selectedSessionId.value]?.taskId || null,
   set: (taskId: string | null) => { taskSelections.value[selectedSessionId.value] = { taskId } },
@@ -355,6 +358,13 @@ function attachToolFile(file: File) {
   else chatInputRef.value?.addFiles([file])
 }
 function selectTask(taskId: string, executionId?: string) {
+  if (!taskId || switchingConversation.value) return
+  if (data.value?.session?.id === selectedSessionId.value) {
+    const tasks = [...(data.value.active_tasks || []), ...data.value.tasks]
+      .filter(task => task.session_id === selectedSessionId.value)
+    const task = tasks.find(task => task.id === taskId)
+    if (!taskWithExecution(tasks) || (task && !task.execution_id && !executionId)) return
+  }
   if (!canChangeContext()) return
   showTasks.value = false
   taskSelections.value[selectedSessionId.value] = { taskId, executionId }
@@ -448,12 +458,13 @@ async function refresh() {
     if (taskPanelOpen.value && next.session?.id === sessionId) {
       // A pending/failed/stale read is not evidence that this Bot has no tasks.
       // Only a successful snapshot for the selected Bot can close the UI panel.
-      if (Array.isArray(next.tasks) && !next.tasks.length
-        && !next.active_tasks?.length && !next.active_agent_task_count) {
+      const tasks = [...(next.active_tasks || []), ...next.tasks].filter(task => task.session_id === sessionId)
+      const availableTask = taskWithExecution(tasks)
+      if (!availableTask) {
         taskPanelOpen.value = false
-      } else if (!taskSelections.value[sessionId]?.taskId) {
-        const task = (next.active_tasks?.length ? next.active_tasks : next.tasks)?.[0]
-        if (task) taskSelections.value[sessionId] = { taskId: task.id }
+        delete taskSelections.value[sessionId]
+      } else if (!tasks.some(task => task.id === taskSelections.value[sessionId]?.taskId && task.execution_id)) {
+        taskSelections.value[sessionId] = { taskId: availableTask.id }
       }
     }
     data.value = next

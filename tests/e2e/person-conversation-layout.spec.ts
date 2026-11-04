@@ -33,8 +33,10 @@ async function setup(page: Page, fullShell = false, widths = { agent: 480, tools
     }
     ;(window as any).hermesDesktop = { isDesktop: true, browser: bridge }
   }, widths)
-  const sessions = ['a','b','empty'].map((id,i) => ({ id: 'person-main-' + id, title: ['日常助手','研发 Bot','空 Bot'][i], workspace: '/fixture/' + id, bot_type: 'dachu', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', agent_mode: 'scoped', history_revision: 0, started_at: 1, last_active: 1 }))
-  const tasks = ['a1','a2','b1'].map((id,i) => ({ id, session_id: sessions[i === 2 ? 1 : 0].id, title: ['统一 App 界面（保留顶部）','修复协作流程完成回传','研发任务'][i], summary: '', status: 'open', revision: 1, execution_id: 'run-' + id, execution_state: 'finished', running: true, selection_json: JSON.stringify({ ...selection, agentId: id, agentName: ['前端工程师','后端工程师','研发执行器'][i] }), completion_evidence: '', updated_at: 1 }))
+  const sessions: any[] = ['a','b','empty'].map((id,i) => ({ id: 'person-main-' + id, title: ['日常助手','研发 Bot','空 Bot'][i], workspace: '/fixture/' + id, bot_type: 'dachu', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', agent_mode: 'scoped', history_revision: 0, started_at: 1, last_active: 1 }))
+  sessions.push({ id: 'person-main-orphan', title: '无执行任务 Bot', workspace: '/fixture/orphan', bot_type: 'dachu', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', agent_mode: 'scoped', history_revision: 0, started_at: 1, last_active: 1 })
+  const tasks: any[] = ['a1','a2','b1'].map((id,i) => ({ id, session_id: sessions[i === 2 ? 1 : 0].id, title: ['统一 App 界面（保留顶部）','修复协作流程完成回传','研发任务'][i], summary: '', status: 'open', revision: 1, execution_id: 'run-' + id, execution_state: 'finished', running: true, selection_json: JSON.stringify({ ...selection, agentId: id, agentName: ['前端工程师','后端工程师','研发执行器'][i] }), completion_evidence: '', updated_at: 1 }))
+  tasks.push({ id: 'orphan', session_id: 'person-main-orphan', title: '没有执行记录的任务', summary: '', status: 'open', revision: 1, execution_id: null, execution_state: 'finished', running: false, selection_json: JSON.stringify({ ...selection, agentId: 'orphan', agentName: '未启动 Agent' }), completion_evidence: '', updated_at: 1 })
   const taskSession = (task: any) => ({ id: 'person-task-' + task.id, title: task.title, profile: 'default', source: 'coding_agent', agent: 'codex', agent_mode: 'scoped', workspace: '/fixture/' + task.id, model: 'test-model', started_at: 1, last_active: 1 })
   await page.routeWebSocket('**/socket.io/**', ws => {
     ws.send('0' + JSON.stringify({ sid: 'fixture', upgrades: [], pingInterval: 60000, pingTimeout: 60000 }))
@@ -206,6 +208,22 @@ test('does not treat a failed or stale Bot snapshot as confirmation of no tasks'
   expect(state.taskMutations).toEqual([])
   expect(state.errors).toEqual([])
 })
+
+test('does not open the Agent panel for a Bot whose tasks have no execution to view', async ({ page }) => {
+  await page.setViewportSize({ width: 2048, height: 1152 })
+  const state = await setup(page, true)
+  await chooseTask(page, state.tasks[0].title)
+  await bot(page, '无执行任务 Bot')
+  await expect(page.locator('.person-title')).toHaveText('无执行任务 Bot')
+  await expect(page.locator('.person-task-chat')).toHaveCount(0)
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await bot(page, '日常助手')
+  await chooseTask(page, state.tasks[1].title)
+  await expect(page.locator('.person-task-chat')).toBeVisible()
+  expect(state.taskMutations).toEqual([])
+  expect(state.errors).toEqual([])
+})
+
 
 test('rejects late Agent reads, refreshes files and sends only to the current Agent', async ({ page }) => {
   await page.setViewportSize({ width: 2048, height: 1152 })
