@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 
 const selection = { runtime: 'codex', mode: 'scoped', profile: 'default', provider: 'fixture', model: 'test-model', reasoningEffort: '' }
-async function setup(page: Page, fullShell = false) {
+async function setup(page: Page, fullShell = false, widths = { agent: 480, tools: 600 }) {
   const errors: string[] = [], posts: { path: string; body: any }[] = [], files: string[] = []
   const delayed = new Map<string, { promise: Promise<void>; release: () => void }>()
   function hold(path: string) {
@@ -13,13 +13,16 @@ async function setup(page: Page, fullShell = false) {
     return () => { delayed.delete(path); release() }
   }
   page.on('pageerror', e => errors.push(e.message))
-  await page.addInitScript(() => {
+  await page.addInitScript(widths => {
     localStorage.setItem('hermes_locale', 'zh')
     localStorage.setItem('hermes_api_key', 'fixture.' + btoa(JSON.stringify({ sub: 1, role: 'user', username: 'fixture' })) + '.fixture')
-    localStorage.setItem('hermes.person.agentPanelWidth', '480')
-    localStorage.setItem('hermes.person.toolDrawerWidth', '600')
+    localStorage.setItem('hermes.person.agentPanelWidth', String(widths.agent))
+    localStorage.setItem('hermes.person.toolDrawerWidth', String(widths.tools))
     const state = { available: true, activeProfileId: 'default', activeTabId: 'shared-tab', tabs: [{ id: 'shared-tab', profileId: 'default', title: '共享浏览器页', url: 'https://example.test/shared', loading: false, canGoBack: false, canGoForward: false, agentControl: 'idle' }], profiles: [{ id: 'default', name: 'Default' }], downloads: [], permissions: [], visible: true, maxTabs: 20 }
-    const bridge: any = { getState: async () => state, setViewport: async () => {}, onStateChange: () => () => {}, onAnnotationRequest: (callback: any) => { (window as any).triggerAnnotation = () => callback({ tabId: 'shared-tab', mode: 'region' }); return () => {} } }
+    ;(window as any).nativeViewportCalls = []
+    const bridge: any = { getState: async () => state, setViewport: async (bounds: any, visible: boolean) => {
+      ;(window as any).nativeViewportCalls.push({ ...bounds, visible })
+    }, onStateChange: () => () => {}, onAnnotationRequest: (callback: any) => { (window as any).triggerAnnotation = () => callback({ tabId: 'shared-tab', mode: 'region' }); return () => {} } }
     for (const method of ['createTab','closeTab','activateTab','navigate','navigationAction','createProfile','chooseProfileRootDirectory','renameProfile','profileSwitchImpact','switchProfile','updateProfile','deleteProfile','clearProfileData','cancelDownload','takeOver','annotate','cancelAnnotation','updateAnnotationNote','captureAnnotations','clearAnnotations']) bridge[method] = async () => state
     const screenshot = { data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=', mediaType: 'image/png', width: 1, height: 1 }
     bridge.annotate = async () => ({ tabId: 'shared-tab', url: 'https://example.test/shared', title: '共享浏览器页', screenshot, marker: 1, region: { x: 0, y: 0, width: 1, height: 1 }, viewport: { width: 100, height: 100, scaleFactor: 1 } })
@@ -29,7 +32,7 @@ async function setup(page: Page, fullShell = false) {
       return screenshot
     }
     ;(window as any).hermesDesktop = { isDesktop: true, browser: bridge }
-  })
+  }, widths)
   const sessions = ['a','b','empty'].map((id,i) => ({ id: 'person-main-' + id, title: ['日常助手','研发 Bot','空 Bot'][i], workspace: '/fixture/' + id, bot_type: 'dachu', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', agent_mode: 'scoped', history_revision: 0, started_at: 1, last_active: 1 }))
   const tasks = ['a1','a2','b1'].map((id,i) => ({ id, session_id: sessions[i === 2 ? 1 : 0].id, title: ['统一 App 界面（保留顶部）','修复协作流程完成回传','研发任务'][i], summary: '', status: 'open', revision: 1, execution_id: 'run-' + id, execution_state: 'finished', running: true, selection_json: JSON.stringify({ ...selection, agentId: id, agentName: ['前端工程师','后端工程师','研发执行器'][i] }), completion_evidence: '', updated_at: 1 }))
   const taskSession = (task: any) => ({ id: 'person-task-' + task.id, title: task.title, profile: 'default', source: 'coding_agent', agent: 'codex', agent_mode: 'scoped', workspace: '/fixture/' + task.id, model: 'test-model', started_at: 1, last_active: 1 })
@@ -369,5 +372,95 @@ test('uses the application shell and real chat resume for Agent-only, explicit w
   await expect(page.locator('.person-task-chat textarea')).toBeVisible()
   await expect(page.locator('.person-tools-panel')).toHaveCount(0)
   await evidence(page, '10-full-application-agent-only', { errors: state.errors, files: state.files })
+  expect(state.errors).toEqual([])
+})
+
+test('keeps native browser bounds aligned after position-only layout transitions without covering Agent', async ({ page }) => {
+  await page.setViewportSize({ width: 1988, height: 1248 })
+  const state = await setup(page, true)
+  await tools(page)
+  await page.getByRole('tab', { name: '浏览器', exact: true }).click()
+  await chooseTask(page, state.tasks[0].title)
+  await expect(page.locator('.person-task-chat')).toHaveCSS('width', '480px')
+  const native = () => page.evaluate(() => (window as any).nativeViewportCalls.at(-1))
+  const actual = () => page.locator('.native-viewport').boundingBox()
+  await expect.poll(async () => Math.abs((await native())?.x - (await actual())!.x)).toBeLessThan(1)
+  // Native views are separate from DOM painting: a same-size relocation does
+  // not trigger ResizeObserver. Exercise both an animated and a final position.
+  await page.locator('.browser-panel').evaluate(el => {
+    const panel = el as HTMLElement
+    panel.style.transition = 'transform 120ms linear'
+    panel.style.transform = 'translateX(24px)'
+  })
+  await expect.poll(async () => Math.abs((await native())?.x - (await actual())!.x)).toBeLessThan(1)
+  await expect(page.locator('.browser-panel')).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 24, 0)')
+  await expect.poll(async () => Math.abs((await native())?.x - (await actual())!.x)).toBeLessThan(1)
+  await page.locator('.browser-panel').evaluate(el => { (el as HTMLElement).style.transform = '' })
+  await expect(page.locator('.browser-panel')).toHaveCSS('transform', 'none')
+  await expect.poll(async () => Math.abs((await native())?.x - (await actual())!.x)).toBeLessThan(1)
+  const agent = (await page.locator('.person-task-chat').boundingBox())!
+  const workspace = (await page.locator('.person-tools-panel').boundingBox())!
+  const final = await native()
+  expect(agent.x + agent.width).toBeLessThanOrEqual(workspace.x)
+  expect(final.visible).toBe(true)
+  expect(final.x).toBeGreaterThanOrEqual(agent.x + agent.width)
+  // Unchanged geometry must not flood the Electron IPC channel.
+  const before = await page.evaluate(() => (window as any).nativeViewportCalls.length)
+  await page.waitForTimeout(150)
+  expect(await page.evaluate(() => (window as any).nativeViewportCalls.length)).toBe(before)
+  // A native view must also respect inherited CSS visibility (mobile/route
+  // layouts can hide a panel while leaving its bounding box unchanged).
+  await page.locator('.person-tools-panel').evaluate(el => { (el as HTMLElement).style.visibility = 'hidden' })
+  await expect.poll(async () => (await native())?.visible).toBe(false)
+  await page.locator('.person-tools-panel').evaluate(el => { (el as HTMLElement).style.visibility = '' })
+  await expect.poll(async () => (await native())?.visible).toBe(true)
+  await evidence(page, '11-native-alignment', { agent, workspace, native: final, viewport: await actual(), errors: state.errors })
+  expect(state.errors).toEqual([])
+})
+
+test('keeps Bot Agent workspace order with wide saved panels, Agent close/reopen and workspace remount', async ({ page }) => {
+  await page.setViewportSize({ width: 1988, height: 1248 })
+  const state = await setup(page, true, { agent: 840, tools: 1200 })
+  await tools(page)
+  await page.getByRole('tab', { name: '浏览器', exact: true }).click()
+  await chooseTask(page, state.tasks[0].title)
+  await expect(page.locator('.person-task-chat')).toHaveCSS('width', '840px')
+  async function alignment() {
+    const bot = (await page.locator('.person-chat-surface').boundingBox())!
+    const agent = (await page.locator('.person-task-chat').boundingBox())!
+    const workspace = (await page.locator('.person-tools-panel').boundingBox())!
+    const viewport = (await page.locator('.native-viewport').boundingBox())!
+    const native = await page.evaluate(() => (window as any).nativeViewportCalls.at(-1))
+    expect(bot.width).toBeGreaterThanOrEqual(300)
+    expect(bot.x + bot.width).toBeLessThanOrEqual(agent.x)
+    expect(agent.x + agent.width).toBeLessThanOrEqual(workspace.x)
+    expect(workspace.x + workspace.width).toBeLessThanOrEqual(1988)
+    await expect.poll(async () => {
+      const r = (await page.locator('.native-viewport').boundingBox())!
+      const n = await page.evaluate(() => (window as any).nativeViewportCalls.at(-1))
+      return Math.max(Math.abs(n.x - r.x), Math.abs(n.y - r.y), Math.abs(n.width - r.width), Math.abs(n.height - r.height))
+    }).toBeLessThanOrEqual(1)
+    return { bot, agent, workspace, viewport, native }
+  }
+  const before = await alignment()
+  await page.locator('.task-chat-heading').getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.locator('.person-task-chat')).toHaveCount(0)
+  await expect(page.locator('.person-tools-panel')).toBeVisible()
+  await chooseTask(page, state.tasks[1].title)
+  await expect(page.locator('.person-task-chat')).toHaveCSS('width', '840px')
+  await alignment()
+  await bot(page, '研发 Bot')
+  await expect(page.locator('.task-chat-heading .task-identity-name')).toHaveText('研发执行器')
+  await alignment()
+  await page.locator('.person-tools-close').click()
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await expect.poll(() => page.evaluate(() => (window as any).nativeViewportCalls.at(-1)?.visible)).toBe(false)
+  await bot(page, '日常助手')
+  await chooseTask(page, state.tasks[0].title)
+  await expect(page.locator('.person-tools-panel')).toHaveCount(0)
+  await tools(page)
+  await expect(page.locator('.native-viewport')).toBeVisible()
+  const after = await alignment()
+  await evidence(page, '12-wide-panel-order', { before, after, errors: state.errors })
   expect(state.errors).toEqual([])
 })
