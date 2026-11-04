@@ -2825,6 +2825,12 @@ export class ChatRunSocket {
     if (!state.isWorking) this.dequeueNextQueuedRun(this.socketForBackgroundRun(origin.sessionId), origin.sessionId)
   }
 
+  resumePersonFlowReports(userId: number, sessionId: string) {
+    if (!ownsPersonSession(userId,getSession(sessionId))) throw new Error('Person conversation not found')
+    const state = this.sessionMap.get(sessionId)
+    if (state) state.backgroundWakeStopped = false
+  }
+
   async deliverPersonFlowReport(input: Parameters<NonNullable<PersonRuntimePort['deliverFlowReport']>>[0]) {
     const { user,identity,sessionId } = input
     assertPersonFlowReport(user.id,identity,sessionId)

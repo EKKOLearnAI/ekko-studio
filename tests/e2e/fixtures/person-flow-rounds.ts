@@ -7,14 +7,20 @@ import type { PersonFlow } from '../../../packages/client/src/api/person'
 import '../../../packages/client/src/styles/global.scss'
 
 const flow = ref<PersonFlow>({
-  id:'idiom-chain',title:'成语接龙',goal:'各 Bot 依次接龙三轮',state:'active',revision:1,current_position:0,error:'',round_number:2,round_limit:3,
+  id:'idiom-chain',creator_session_id:'person-main-creator',title:'成语接龙',goal:'各 Bot 依次接龙三轮',state:'active',revision:1,current_position:0,error:'',round_number:2,round_limit:3,
   stages:['甲','乙'].map((name,index)=>({id:`stage-${index}`,position:index,group_position:index,session_id:`person-main-${index}`,session_title:name,
     goal:'接上一个成语',state:index ? 'pending' : 'active',result_message_id:null,tasks:[]})),
 })
 const dark = ref(false)
 const action = ref('')
 const result = ref('')
+const saving = ref(false)
 ;(window as any).flowRoundsFixture = {
+  report(state:NonNullable<PersonFlow['completion_report']>['state']) {
+    flow.value.state='completed';flow.value.round_number=3;flow.value.stages.forEach(stage=>{stage.state='completed'})
+    flow.value.completion_report={id:'report-1',state,attempts:5,attempt_limit:5,run_id:'report-run',result_message_id:state==='delivered'?777:null,error:state==='failed'?'Fixture summary delivery failure':'',next_attempt_at:0}
+  },
+  saving(value:boolean) {saving.value=value},
   continuous() {flow.value.round_limit=0},
   nextRound() {flow.value.round_number=3},
   completed() {flow.value.state='completed';flow.value.stages.forEach(s=>{s.state='completed'})},
@@ -24,10 +30,11 @@ const result = ref('')
     flow.value.stages[0].state='failed'
     flow.value.stages[0].confirmation={state:'blocked',attempts:2,reason:flow.value.error,message_id:16125}
   },
-  theme() {dark.value=true;document.documentElement.classList.add('dark');document.documentElement.style.setProperty('--theme-card-alpha','0.3');return nextTick()},
+  theme(value=true) {dark.value=value;document.documentElement.classList.toggle('dark',value);return nextTick()},
 }
 createApp({setup:()=>()=>h(NConfigProvider,{theme:dark.value?darkTheme:null},()=>h('main',{style:{maxWidth:'1000px',margin:'20px auto'}},[
-  h(PersonFlowCard,{flow:flow.value,saving:false,onAction:(_flow:PersonFlow,value:'stop'|'resume')=>{
+  h(PersonFlowCard,{flow:flow.value,saving:saving.value,onAction:(_flow:PersonFlow,value:'stop'|'resume'|'retry_report')=>{
+    if(value==='retry_report') {action.value=value;flow.value.completion_report={...flow.value.completion_report!,state:'pending',attempt_limit:10,error:''};return}
     action.value=value;flow.value.state=value==='stop'?'stopped':'active'
     if(value==='resume' && flow.value.stages[0].confirmation){flow.value.error='';flow.value.stages[0].state='active';flow.value.stages[0].confirmation={...flow.value.stages[0].confirmation,state:'pending',attempts:0,reason:''}}
   },onOpenResult:(sessionId:string,messageId:number)=>{result.value=`${sessionId}:${messageId}`}}),

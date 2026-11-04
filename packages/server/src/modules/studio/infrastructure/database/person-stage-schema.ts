@@ -43,7 +43,7 @@ export function initPersonStageTables(db: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS person_flow_reports (
       id TEXT PRIMARY KEY, owner_user_id INTEGER NOT NULL, flow_id TEXT NOT NULL,
       generation INTEGER NOT NULL, session_id TEXT NOT NULL, snapshot_json TEXT NOT NULL,
-      state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, attempt_limit INTEGER NOT NULL DEFAULT 5,
       run_id TEXT NOT NULL DEFAULT '', result_message_id INTEGER,
       error TEXT NOT NULL DEFAULT '', next_attempt_at INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
@@ -55,7 +55,10 @@ export function initPersonStageTables(db: DatabaseSync) {
       attempt INTEGER NOT NULL, run_id TEXT NOT NULL, message_id INTEGER,
       error TEXT NOT NULL, created_at INTEGER NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_person_flow_report_events_run ON person_flow_report_events(run_id,report_id);
   `)
+  if (!db.prepare('PRAGMA table_info(person_flow_reports)').all().some(column => column.name === 'attempt_limit'))
+    db.exec('ALTER TABLE person_flow_reports ADD COLUMN attempt_limit INTEGER NOT NULL DEFAULT 5')
   if (!db.prepare('PRAGMA table_info(person_stage_confirmations)').all().some(column => column.name === 'source_hash'))
     db.exec("ALTER TABLE person_stage_confirmations ADD COLUMN source_hash TEXT NOT NULL DEFAULT ''")
   const columns = new Set(db.prepare('PRAGMA table_info(person_flows)').all().map(column => column.name))

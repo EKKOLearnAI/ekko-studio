@@ -1,7 +1,7 @@
 /** Payload deliberately excludes prompts, commands, credentials and message text. */
 export function foregroundNotification(event: string, value: Record<string, unknown>, now = Date.now()) {
   const sessionId = typeof value.session_id === 'string' ? value.session_id : ''
-  if (!sessionId || value.replayed === true || value.restored === true || value.background_snapshot === true) return null
+  if (!sessionId || value.replayed === true || value.restored === true || value.background_snapshot === true || value.notification_suppressed === true) return null
   if (event.endsWith('.resolved') && (value.stale === true || value.resolved === false
     && !['timeout', 'aborted', 'cancelled', 'canceled'].includes(String(value.reason)))) return null
   const requestKind = event.startsWith('approval.') ? 'approval' : event.startsWith('clarify.') ? 'clarify' : ''

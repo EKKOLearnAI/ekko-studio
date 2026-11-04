@@ -60,3 +60,28 @@ Tests use isolated SQLite state and mocked model execution. They exercise the
 real stage completion, worker callback routing, outbox, socket queue, Stop and
 history cleanup. They do not mutate production data or establish provider,
 push-network or device UI delivery.
+
+## Repeated flows and delivery UI
+
+Reports are inserted only in the terminal flow-completion transaction, after the
+round-limit branch. Continuous flows do not report completion while still active.
+The snapshot retains original references from every row of person_stage_results,
+with round and route positions; legacy single-round results fall back to their
+current stage references. Context pages contain at most ten sources and 6000
+characters of source text. Follow bot_flows_query flow_id/result_offset pages and
+read full originals via bot_context_search. Every request validates the entire
+manifest and current ownership, including sources outside its visible page.
+
+The card keeps stage completion separate from summary pending, paused, failed,
+cancelled and delivered states. retry_report on /api/studio/person/flows/apply
+requires the current flow revision, report_id and expected_attempt. An explicit
+retry grants five more attempts without resetting identities, releases that
+creator session’s reporting pause and never redispatches stage work. Outbox write
+failures visibly block while preserving the saved final reply for Resume.
+
+The Ekko run adapter settles summary receipts before invoking the shared event
+consumer. Successful runs without a valid saved summary carry
+notification_suppressed=true; their terminal still clears activity state. This
+includes reasoning-only and tool-only replies; plain empty output already emits
+run.failed. A valid retry may announce delivery after its final message is saved.
+This gate applies to both queued reports and reports claimed by a creator turn.

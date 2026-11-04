@@ -36,13 +36,13 @@ beforeEach(async () => {
 })
 afterEach(()=>{ db.close();rmSync(root,{recursive:true,force:true});vi.restoreAllMocks() })
 
-function create(route = [{session_id:peer,group:0}]) {
-  return flows.createPersonFlow(1,{ session_id:creator,title:'Original collaboration',goal:'Answer the original request',idempotency_key:crypto.randomUUID(),stages:route.map(s=>({...s,goal:'Do assigned work',return_expectation:'Report evidence'})) })
+function create(route = [{session_id:peer,group:0}], rounds=1) {
+  return flows.createPersonFlow(1,{ session_id:creator,title:'Original collaboration',goal:'Answer the original request',rounds,idempotency_key:crypto.randomUUID(),stages:route.map(s=>({...s,goal:'Do assigned work',return_expectation:'Report evidence'})) })
 }
 async function complete(flowId:string, index=0) {
   const flow = stages.getPersonFlow(1,flowId), stage=flow.stages[index]
-  const context = { flowId,stageId:stage.id,generation:flow.generation },runId=`stage-run-${stage.id}`
-  await flows.controlPersonFlow(1,{ action:'complete',flow_id:flowId,expected_revision:flow.revision,idempotency_key:`complete-${stage.id}` },{sessionId:stage.session_id,runId,stage:context,messages:[]})
+  const context = { flowId,stageId:stage.id,generation:flow.generation },runId=`stage-run-${stage.id}-${flow.generation}`
+  await flows.controlPersonFlow(1,{ action:'complete',flow_id:flowId,expected_revision:flow.revision,idempotency_key:`complete-${stage.id}-${flow.generation}` },{sessionId:stage.session_id,runId,stage:context,messages:[]})
   const message = sessions.addMessage({ session_id:stage.session_id,run_marker:runId,role:'assistant',content:`Result ${index}`,finish_reason:'completed' })!
   flows.finishPersonStageTurn(1,context,runId,message,true)
   return { context,runId,message }
@@ -78,16 +78,102 @@ it('atomically creates one outbox item and acknowledges only the creator saved f
   expect(db.prepare("SELECT COUNT(*) n FROM person_flow_report_events WHERE event='creator_report_completed'").get()!.n).toBe(1)
 })
 
-it('rolls back flow completion when the outbox insert fails',async()=>{
+it('rolls back an outbox failure, visibly blocks and retains the saved reply for resume without redispatch',async()=>{
   const flow=create(), stage=flow.stages[0],context={flowId:flow.id,stageId:stage.id,generation:0}
   await flows.controlPersonFlow(1,{action:'complete',flow_id:flow.id,expected_revision:0,idempotency_key:'prepare'}, {sessionId:peer,runId:'r',stage:context,messages:[]})
   const id=sessions.addMessage({session_id:peer,run_marker:'r',role:'assistant',content:'saved',finish_reason:'stop'})!
   db.exec("CREATE TRIGGER reject_outbox BEFORE INSERT ON person_flow_reports BEGIN SELECT RAISE(ABORT,'outbox failure'); END")
-  expect(()=>flows.finishPersonStageTurn(1,context,'r',id,true)).toThrow('outbox failure')
-  expect(stages.getPersonFlow(1,flow.id)).toMatchObject({state:'active',stages:[{state:'active'}]})
-  db.exec('DROP TRIGGER reject_outbox')
   flows.finishPersonStageTurn(1,context,'r',id,true)
+  let current=stages.getPersonFlow(1,flow.id)
+  expect(current).toMatchObject({state:'failed',stages:[{state:'failed',result_message_id:id,confirmation:{state:'blocked',message_id:id}}]})
+  expect(receipt()).toBeUndefined()
+  db.exec('DROP TRIGGER reject_outbox')
+  current=await flows.controlPersonFlow(1,{action:'resume',flow_id:flow.id,expected_revision:current.revision,idempotency_key:'resume'})
+  expect(db.prepare('SELECT count(*) n FROM person_stage_deliveries WHERE generation=?').get(current.generation)!.n).toBe(0)
+  const resumed={...context,generation:current.generation}
+  await flows.controlPersonFlow(1,{action:'complete',flow_id:flow.id,expected_revision:current.revision,idempotency_key:'saved-complete'},{sessionId:peer,runId:'r',stage:resumed,messages:[]})
+  flows.finishPersonStageTurn(1,resumed,'r',id,true)
   expect(receipt().state).toBe('pending')
+  expect(db.prepare('SELECT count(*) n FROM messages').get()!.n).toBe(1)
+  expect(runtime.deliverStage).not.toHaveBeenCalled()
+})
+
+it('reports every round in order, joins terminal peers once, and paginates original references',async()=>{
+  const flow=create([{session_id:peer,group:0},{session_id:other,group:0}],6)
+  db.prepare('UPDATE person_stages SET return_expectation=? WHERE flow_id=?').run('e'.repeat(4000),flow.id)
+  const ids:number[]=[]
+  for(let round=1;round<=6;round++) {
+    ids.push((await complete(flow.id,0)).message)
+    expect(receipt()).toBeUndefined()
+    ids.push((await complete(flow.id,1)).message)
+    if(round<6) expect(receipt()).toBeUndefined()
+  }
+  await delivery.deliverPersonFlowReports()
+  const row=receipt(),context=delivery.personFlowReportContext(1,{id:row.id,attempt:1},creator)
+  expect(context).toMatchObject({round_number:6,round_limit:6,total_sources:12,next_source_offset:10})
+  expect(context.sources.map(s=>s.result_message_id)).toEqual(ids.slice(0,10))
+  expect(context.sources.map(s=>s.round_number)).toEqual([1,1,2,2,3,3,4,4,5,5])
+  expect(context.sources[0]).toMatchObject({return_expectation:'e'.repeat(300),return_expectation_truncated:true})
+  expect(JSON.parse(row.snapshot_json).stage_expectations[flow.stages[0].id]).toHaveLength(4000)
+  expect(row.snapshot_json.length).toBeLessThan(18000)
+  const {personFlowTools}=await import('../../packages/server/src/modules/studio/services/person/stage-tools')
+  const page:any=await personFlowTools(1,creator).find(t=>t.name==='bot_flows_query')!.execute({flow_id:flow.id,result_offset:10},{sessionId:creator,runId:'lookup',messages:[]})
+  expect(page.source_page).toMatchObject({total_sources:12,next_source_offset:null})
+  expect(page.source_page.sources.map((s:any)=>s.result_message_id)).toEqual(ids.slice(10))
+  expect(JSON.stringify(page).length).toBeLessThan(18000)
+  expect(receipt().state).toBe('queued') // Reading evidence alone does not claim the queued summary.
+  // Even an unavailable early page must block later-page summaries rather than silently omit it.
+  db.prepare('DELETE FROM messages WHERE id=?').run(ids[0])
+  expect(()=>delivery.personFlowReportSources(1,flow.id,10)).toThrow('unavailable')
+  expect(runtime.deliverFlowReport).toHaveBeenCalledTimes(1)
+})
+
+it('does not report an unfinished continuous flow or revive it when stopped',async()=>{
+  const flow=create([{session_id:peer,group:0},{session_id:other,group:1}],0)
+  await complete(flow.id,0);await complete(flow.id,1)
+  const current=stages.getPersonFlow(1,flow.id)
+  expect(current).toMatchObject({state:'active',round_number:2})
+  await flows.controlPersonFlow(1,{action:'stop',flow_id:flow.id,expected_revision:current.revision,idempotency_key:'stop-continuous'})
+  reports.recoverPersonFlowReports();await delivery.deliverPersonFlowReports()
+  expect(receipt()).toBeUndefined();expect(runtime.deliverFlowReport).not.toHaveBeenCalled()
+})
+
+it('retries only the failed report with a fresh bounded budget and monotonically fenced attempts',async()=>{
+  const flow=create();await complete(flow.id);await delivery.deliverPersonFlowReports()
+  const old=begin('old-summary')
+  db.prepare('UPDATE person_flow_reports SET attempts=5').run()
+  reports.finishPersonFlowReport(1,{id:old.id,attempt:5},undefined,false,'exhausted')
+  const resume=vi.fn();runtime.resumeFlowReports=resume
+  const current=stages.getPersonFlow(1,flow.id)
+  const input={action:'retry_report',flow_id:flow.id,expected_revision:current.revision,report_id:old.id,expected_attempt:5,idempotency_key:'retry'}
+  await expect(flows.controlPersonFlow(2,input)).rejects.toMatchObject({status:404})
+  await flows.controlPersonFlow(1,input)
+  await flows.controlPersonFlow(1,input)
+  expect(receipt()).toMatchObject({state:'pending',attempts:5,attempt_limit:10})
+  await delivery.deliverPersonFlowReports()
+  expect(receipt()).toMatchObject({state:'queued',attempts:6})
+  const identity=begin('new-summary'),id=summary('new-summary')
+  expect(reports.finishPersonFlowReport(1,old,undefined,false,'late')).toBe(false)
+  expect(reports.finishPersonFlowReport(1,identity,id,true)).toBe(true)
+  expect(resume).toHaveBeenCalledWith(1,creator)
+  expect(runtime.deliverStage).not.toHaveBeenCalled()
+  const latest=stages.getPersonFlow(1,flow.id)
+  await expect(flows.controlPersonFlow(1,{...input,expected_revision:latest.revision,idempotency_key:'stale'})).rejects.toMatchObject({status:409})
+})
+
+it('migrates existing report retry budgets without replacing persisted receipts',async()=>{
+  await complete(create().id)
+  const original=receipt()
+  const current=JSON.parse(original.snapshot_json)
+  const legacy=JSON.stringify({title:current.title,goal:current.goal,workspace:current.workspace,
+    sources:current.sources.map((source:any)=>({session_id:source.session_id,result_message_id:source.result_message_id,return_expectation:'Legacy return expectation'}))})
+  db.prepare("UPDATE person_flow_reports SET state='paused',attempts=3,snapshot_json=? WHERE id=?").run(legacy,original.id)
+  db.exec('ALTER TABLE person_flow_reports DROP COLUMN attempt_limit')
+  const init=await import('../../packages/server/src/modules/studio/infrastructure/database/person-stage-schema')
+  init.initPersonStageTables(db)
+  expect(receipt()).toMatchObject({id:original.id,snapshot_json:legacy,state:'paused',attempts:3,attempt_limit:5})
+  db.prepare("UPDATE person_flow_reports SET state='queued'").run()
+  expect(delivery.personFlowReportContext(1,{id:original.id,attempt:3},creator).sources[0]).toMatchObject({round_number:1,return_expectation:'Legacy return expectation'})
 })
 
 it('waits for every parallel branch and carries all source references and the original workspace',async()=>{

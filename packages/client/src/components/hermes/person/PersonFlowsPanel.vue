@@ -8,7 +8,7 @@ import { personFlowGroups, personFlowState, personFlowStatusKey, type PersonFlow
 import PersonFlowCard from './PersonFlowCard.vue'
 
 const props = defineProps<{ flows: PersonFlow[]; saving: boolean; focus?: { flow: PersonFlow; request: number } | null }>()
-const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
+const emit = defineEmits<{ action: [flow: PersonFlow, action: 'stop' | 'resume' | 'retry_report']; openResult: [sessionId: string, messageId: number]; openTask: [taskId: string]; openConversation: [sessionId: string] }>()
 const { t } = useI18n()
 const expanded = ref<string | null>(null)
 const panel = ref<HTMLElement>()

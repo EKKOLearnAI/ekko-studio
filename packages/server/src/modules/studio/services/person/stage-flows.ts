@@ -1,4 +1,4 @@
-import { enqueuePersonFlowReport } from '../../repositories/person-flow-report-store'
+import { enqueuePersonFlowReport, retryCompletedPersonFlowReport } from '../../repositories/person-flow-report-store'
 import { randomUUID } from 'node:crypto'
 import type { PersonTaskOrigin } from '../../contracts/person'
 import { personError, personRevision, personText } from '../../contracts/person'
@@ -86,9 +86,10 @@ function stageHasWork(stageId: string) {
 }
 
 export async function controlPersonFlow(userId: number, input: Record<string, unknown>, origin?: PersonTaskOrigin) {
-  if (Object.keys(input).some(key => !['action','flow_id','expected_revision','idempotency_key'].includes(key))) throw personError('Flow route and creator are fixed',403)
+  const allowed = ['action','flow_id','expected_revision','idempotency_key',...(input.action === 'retry_report' ? ['report_id','expected_attempt'] : [])]
+  if (Object.keys(input).some(key => !allowed.includes(key))) throw personError('Flow route and creator are fixed',403)
   const action = personText(input.action,'action',30), id = personText(input.flow_id,'flow_id',100)
-  if (!['complete','stop','resume'].includes(action)) throw personError('Unsupported flow action')
+  if (!['complete','stop','resume','retry_report'].includes(action)) throw personError('Unsupported flow action')
   const result = personOperation(userId,`flow:${personText(input.idempotency_key,'idempotency_key',200)}`, { ...input, actor: origin?.sessionId || null, stage: origin?.stage || null }, () => {
     const flow = getPersonFlow(userId,id)
     const active = flow.stages.filter(stage => stage.group_position === flow.current_position && ['active','failed'].includes(stage.state))
@@ -106,7 +107,10 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
       }
     }
     const db = personDb(), now = Date.now()
-    if (action === 'complete') {
+    if (action === 'retry_report') {
+      if (origin && (origin.sessionId !== flow.creator_session_id || origin.stage || origin.returnExecutionId)) throw personError('Only the creator can retry its report',403)
+      retryCompletedPersonFlowReport(userId,flow,personText(input.report_id,'report_id',100),personRevision(input.expected_attempt))
+    } else if (action === 'complete') {
       if (!origin?.stage || origin.stage.flowId !== id || !origin.runId) throw personError('Complete the stage from its assigned live turn',403)
       const { stage } = assertPersonStage(userId,origin.stage,origin.sessionId)
       const tracked = stageConfirmation(origin.stage)
@@ -153,7 +157,9 @@ export async function controlPersonFlow(userId: number, input: Record<string, un
   })
   const latest = getPersonFlow(userId,id)
   if (latest.generation !== result.generation || latest.state !== result.state) return result
-  if (action !== 'complete') {
+  if (action === 'retry_report' && latest.completion_report?.state === 'pending' && latest.completion_report.attempts === Number(input.expected_attempt))
+    personRuntime().resumeFlowReports?.(userId,latest.creator_session_id)
+  if (action === 'stop' || action === 'resume') {
     for (const abort of activeTurns.get(id) || []) abort.abort(new Error('Flow turn superseded or stopped'))
   }
   if (action === 'stop') await stopFlowWorkers(userId,id,'',result.generation)
@@ -176,8 +182,8 @@ async function stopFlowWorkers(userId: number, flowId: string, stageId = '', gen
   }
 }
 
-export function failPersonStage(userId: number, context: PersonStageContext, error: string) {
-  if (!recordPersonStageFailure(userId,context,error)) return false
+export function failPersonStage(userId: number, context: PersonStageContext, error: string, savedReply?: {runId:string;messageId:number;hash:string}) {
+  if (!recordPersonStageFailure(userId,context,error,savedReply)) return false
   // Stop only this branch's children; independent roles keep their live turns.
   void stopFlowWorkers(userId,context.flowId,context.stageId,context.generation).catch(error => logger.warn(error,'Failed Person stage worker cleanup'))
   personUpdated(userId)
@@ -247,7 +253,18 @@ export function finishPersonStageTurn(userId: number, context: PersonStageContex
       enqueuePersonFlowReport(flow,stage.session_id,Number(message.id),runId)
       db.prepare("UPDATE person_occurrences SET state='finished' WHERE flow_id=?").run(flow.id)
     }
-  }) } catch (failure) { failPersonStage(userId,{...context,deliveryId:undefined},String(failure)) }
+  }) } catch (failure) {
+    // A failed completion transaction must retain the already saved reply for Resume.
+    // In particular, an outbox failure must never cause the stage work to run again.
+    const current = {...context,deliveryId:undefined}
+    let savedReply: {runId:string;messageId:number;hash:string} | undefined
+    try {
+      const {stage} = assertPersonStage(userId,current)
+      const message = savedStageReply(stage.session_id,runId,messageId)
+      if (message && String(message.content).trim()) savedReply={runId,messageId:Number(message.id),hash:stageReplyHash(message.content)}
+    } catch { /* Stale or removed stages cannot acquire a saved reply. */ }
+    failPersonStage(userId,current,String(failure),savedReply)
+  }
   personUpdated(userId)
 }
 

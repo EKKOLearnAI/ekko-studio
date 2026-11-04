@@ -6,6 +6,15 @@ import { requirePersonSession } from './person-session-store'
 import { personUpdated } from './person-updates'
 
 export const FLOW_REPORT_MAX_ATTEMPTS = 5
+export interface PersonFlowReportSource {
+  stage_id?: string; position?: number; group_position?: number; round_number: number
+  session_id: string; result_message_id: number; return_expectation?: string
+}
+export interface PersonFlowReportSnapshot {
+  title: string; goal: string; workspace: string; round_number?: number; round_limit?: number
+  stage_expectations?: Record<string,string>
+  sources: PersonFlowReportSource[]
+}
 
 export function getPersonFlowReport(userId: number, id: string) {
   const row = personDb().prepare('SELECT * FROM person_flow_reports WHERE id=? AND owner_user_id=?').get(id,userId)
@@ -22,14 +31,22 @@ export function recordFlowReportEvent(row: PersonFlowReport, event: string) {
 /** Called in the same transaction as flow completion. Originals remain the source of result text. */
 export function enqueuePersonFlowReport(flow: PersonConversationFlow, finalSessionId: string, messageId: number, runId: string) {
   const db = personDb(), now = Date.now(), id = randomUUID()
-  const sources = db.prepare('SELECT session_id,result_message_id,return_expectation FROM person_stages WHERE flow_id=? ORDER BY position').all(flow.id)
+  const sources = db.prepare(`SELECT s.id AS stage_id,s.position,s.group_position,r.round_number,s.session_id,r.result_message_id
+    FROM person_stages s JOIN person_stage_results r ON r.stage_id=s.id WHERE s.flow_id=?
+    UNION ALL
+    SELECT s.id,s.position,s.group_position,?,s.session_id,s.result_message_id
+    FROM person_stages s WHERE s.flow_id=? AND NOT EXISTS(
+      SELECT 1 FROM person_stage_results r WHERE r.stage_id=s.id AND r.round_number=?)
+    ORDER BY round_number,position`).all(flow.id,flow.round_number,flow.id,flow.round_number)
+  // Route text is shared across rounds; keep it once instead of expanding it up to 1000 times.
+  const stage_expectations = Object.fromEntries(flow.stages.map(stage=>[stage.id,stage.return_expectation]))
   // A creator in a parallel final group has only written its own branch result.
   const self = finalSessionId === flow.creator_session_id
     && flow.stages.filter(stage => stage.group_position === flow.current_position).length === 1
   const inserted = db.prepare(`INSERT OR IGNORE INTO person_flow_reports
     (id,owner_user_id,flow_id,generation,session_id,snapshot_json,state,run_id,result_message_id,created_at,updated_at)
     VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(id,flow.owner_user_id,flow.id,flow.generation,flow.creator_session_id,
-      JSON.stringify({ title:flow.title,goal:flow.goal,workspace:flow.workspace,sources }),
+      JSON.stringify({ title:flow.title,goal:flow.goal,workspace:flow.workspace,round_number:flow.round_number,round_limit:flow.round_limit,stage_expectations,sources }),
       self ? 'delivered' : 'pending',self ? runId : '',self ? messageId : null,now,now)
   if (inserted.changes) {
     const row = getPersonFlowReport(flow.owner_user_id,id)
@@ -69,7 +86,7 @@ export function startPersonFlowReport(userId: number, identity: PersonFlowReport
 }
 
 export function retryPersonFlowReport(row: PersonFlowReport, error: string, paused = false) {
-  const state = paused ? 'paused' : row.attempts >= FLOW_REPORT_MAX_ATTEMPTS ? 'failed' : 'pending'
+  const state = paused ? 'paused' : row.attempts >= row.attempt_limit ? 'failed' : 'pending'
   personDb().prepare(`UPDATE person_flow_reports SET state=?,error=?,next_attempt_at=?,updated_at=? WHERE id=?`)
     .run(state,error.slice(0,1000),Date.now()+(paused ? 3000 : Math.min(60000,1000*2**row.attempts)),Date.now(),row.id)
   recordFlowReportEvent(getPersonFlowReport(row.owner_user_id,row.id),paused ? 'creator_report_paused' : 'creator_report_failed')
@@ -96,6 +113,18 @@ export function resumePersonFlowReports(userId: number, sessionId: string) {
   requirePersonSession(userId,sessionId)
   personDb().prepare("UPDATE person_flow_reports SET state='pending',next_attempt_at=0,updated_at=? WHERE owner_user_id=? AND session_id=? AND state='paused'")
     .run(Date.now(),userId,sessionId)
+}
+
+/** Explicit user retry grants a fresh budget without reusing any previous attempt identity. */
+export function retryCompletedPersonFlowReport(userId: number, flow: PersonConversationFlow, reportId: string, expectedAttempt: number) {
+  requirePersonSession(userId,flow.creator_session_id)
+  const row = getPersonFlowReport(userId,reportId)
+  if (flow.state !== 'completed' || row.flow_id !== flow.id || row.generation !== flow.generation
+    || row.session_id !== flow.creator_session_id || row.attempts !== expectedAttempt || !['failed','paused'].includes(row.state))
+    throw personError('Flow report changed; query it again',409)
+  personDb().prepare("UPDATE person_flow_reports SET state='pending',attempt_limit=attempts+?,next_attempt_at=0,error='',updated_at=? WHERE id=?")
+    .run(FLOW_REPORT_MAX_ATTEMPTS,Date.now(),row.id)
+  recordFlowReportEvent(getPersonFlowReport(userId,row.id),'creator_report_retried')
 }
 
 export function cancelPersonFlowReport(userId: number, identity: PersonFlowReportIdentity) {
@@ -131,7 +160,8 @@ export function claimPersonFlowReportForRun(userId: number, flowId: string, sess
       AND f.state='completed' AND f.generation=r.generation AND r.state IN ('pending','queued','paused','failed')`)
       .get(userId,flowId,sessionId) as unknown as PersonFlowReport | undefined
     if (!row) return false
-    personDb().prepare("UPDATE person_flow_reports SET state='running',attempts=attempts+1,run_id=?,error='',updated_at=? WHERE id=?").run(runId,Date.now(),row.id)
+    personDb().prepare("UPDATE person_flow_reports SET state='running',attempt_limit=CASE WHEN state='failed' THEN attempts+? ELSE attempt_limit END,attempts=attempts+1,run_id=?,error='',updated_at=? WHERE id=?")
+      .run(FLOW_REPORT_MAX_ATTEMPTS,runId,Date.now(),row.id)
     recordFlowReportEvent(getPersonFlowReport(userId,row.id),'creator_report_started')
     return true
   })
@@ -140,6 +170,13 @@ export function claimPersonFlowReportForRun(userId: number, flowId: string, sess
 export function personFlowReportsForRun(userId: number, sessionId: string, runId: string) {
   return personDb().prepare("SELECT * FROM person_flow_reports WHERE owner_user_id=? AND session_id=? AND run_id=? AND state='running'")
     .all(userId,sessionId,runId) as unknown as PersonFlowReport[]
+}
+
+/** Preserve the binding after Stop, retry or settlement so late terminals cannot announce delivery. */
+export function personFlowReportRunWasBound(userId: number, sessionId: string, runId: string) {
+  return !!personDb().prepare(`SELECT 1 FROM person_flow_report_events e JOIN person_flow_reports r ON r.id=e.report_id
+    WHERE r.owner_user_id=? AND r.session_id=? AND e.run_id=? AND e.event='creator_report_started' LIMIT 1`)
+    .get(userId,sessionId,runId)
 }
 
 export function finishPersonFlowReport(userId: number, identity: PersonFlowReportIdentity, messageId: unknown, ok: boolean, error = '') {

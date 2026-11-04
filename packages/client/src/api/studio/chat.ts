@@ -58,6 +58,8 @@ export interface StartRunResponse {
 
 // SSE event types from /v1/runs/{id}/events
 export interface RunEvent {
+  /** Host-set terminal state whose summary has not been durably delivered. */
+  notification_suppressed?: boolean
   person_task_return?: import('../person').PersonTaskReturn
   run_usage?: import('@/utils/run-usage').RunUsageSummary
   event: string

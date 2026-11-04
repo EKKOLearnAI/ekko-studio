@@ -6,6 +6,7 @@ import { personError } from '../../contracts/person'
 import { getPersonFlow, listPersonFlows } from '../../repositories/person-stage-store'
 import { createPersonFlow, controlPersonFlow } from './stage-flows'
 import { claimPersonFlowReportForRun } from '../../repositories/person-flow-report-store'
+import { personFlowReportSources } from './flow-reports'
 
 export function personFlowTools(userId: number, sessionId: string): PersonTool[] {
   const namespace = randomUUID()
@@ -62,13 +63,16 @@ export function personFlowTools(userId: number, sessionId: string): PersonTool[]
     try { return await pending } catch (error) { requests.delete(key); throw error }
   }
   return [
-    define('bot_flows_query','Query flows; fresh flow_ref for control. An explicit creator flow lookup claims its pending report for this turn; summarize it in your final reply.',{ flow_id:string,offset:{ type:'integer',minimum:0 } },[],async (args,origin) => {
+    define('bot_flows_query','Query flows; fresh flow_ref for control. An explicit creator flow lookup claims its pending report for this turn; summarize it in your final reply. With flow_id, use result_offset (starting at 0) and follow next_source_offset to read all rounds of saved results.',{ flow_id:string,offset:{ type:'integer',minimum:0 },result_offset:{type:'integer',minimum:0} },[],async (args,origin) => {
       const offset = args.offset === undefined ? 0 : Number(args.offset)
       if (!Number.isSafeInteger(offset) || offset < 0) throw personError('Invalid offset')
+      if (args.result_offset !== undefined && !args.flow_id) throw personError('flow_id is required for result_offset')
+      if (args.result_offset !== undefined && (!Number.isSafeInteger(args.result_offset) || Number(args.result_offset)<0)) throw personError('Invalid source offset')
+      if (args.result_offset !== undefined) return {flow_id:args.flow_id,source_page:personFlowReportSources(userId,String(args.flow_id),Number(args.result_offset))}
       const rows = args.flow_id ? [getPersonFlow(userId,String(args.flow_id))] : listPersonFlows(userId,sessionId,offset)
       return { flows:rows.slice(0,3).map(flow => expose(flow,origin,!!args.flow_id)),next_offset:rows.length > 3 ? offset+3 : null }
     }),
-    define('bot_flow_create','Role flow: equal groups=parallel, omitted=serial. 0,0,1=A+B then C. Follow user intent: add a later result-recipient stage only when a return is needed. return_expectation and completion notices do not schedule returns.',{
+    define('bot_flow_create','Role flow: equal groups=parallel, omitted=serial. 0,0,1=A+B then C. The host summarizes saved results to the creator after the entire flow finishes; do not add a stage only for a completion notice. Add a later role only for requested work or review. return_expectation does not schedule another execution stage.',{
       rounds:{ type:'integer',minimum:0,maximum:1000,description:'Total rounds; omit for one. Opt in only when requested; 0 means until stopped. The host carries the last group result into the next round; do not unroll the route.' },
       title:string,goal:string,stages:{ type:'array',minItems:1,maxItems:13,items:{ type:'object',additionalProperties:false,
         properties:{ session_id:string,goal:string,return_expectation:string,group:{ type:'integer',minimum:0 } },required:['session_id','goal','return_expectation'] } },

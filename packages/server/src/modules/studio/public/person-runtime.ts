@@ -50,6 +50,7 @@ export interface PersonRuntimePort {
   createDefaultWorkspace?(profile: string, sessionId: string): string
   deliver(input: PersonResultDelivery): Promise<void>
   deliverFlowReport?(input: { user: AuthenticatedUser; identity: import('../contracts/person-stage').PersonFlowReportIdentity; sessionId: string }): Promise<void>
+  resumeFlowReports?(userId: number, sessionId: string): void
   deliverStage?(input: { user: AuthenticatedUser; context: import('../contracts/person-stage').PersonStageContext; sessionId: string; input: string }): Promise<void>
   chatAgent?(input: PersonChatAgentOptions): {
     sessionWorkspaceDirectory(sessionId: string): string

@@ -1,4 +1,4 @@
-import { parsePersonFlowReportQueueId, personFlowReportsForRun, finishPersonFlowReport } from '../../repositories/person-flow-report-store'
+import { parsePersonFlowReportQueueId, personFlowReportsForRun, personFlowReportRunWasBound, finishPersonFlowReport } from '../../repositories/person-flow-report-store'
 import { createPersonDisplayStream } from './person-display'
 import { emitEkkoAbortCompletion } from './ekko-abort-completion'
 import { studioModelReasoningEffort } from '../../public/model-reasoning-effort'
@@ -560,9 +560,12 @@ export async function handleEkkoAgentRun(
       finishPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''),payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed',String(payload.error || ''))
     }
     if (isPersonSession(sessionId) && (event === 'run.completed' || event === 'run.failed')) {
-      for (const row of personFlowReportsForRun(Number(authenticatedUserId),sessionId,String(payload.run_id || '')))
-        finishPersonFlowReport(Number(authenticatedUserId),{ id:row.id,attempt:row.attempts },
-          payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed' && !payload.interrupted,String(payload.error || ''))
+      const reports = personFlowReportsForRun(Number(authenticatedUserId),sessionId,String(payload.run_id || ''))
+      const delivered = reports.map(row=>finishPersonFlowReport(Number(authenticatedUserId),{ id:row.id,attempt:row.attempts },
+        payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed' && !payload.interrupted,String(payload.error || '')))
+      // Settle before the shared onEvent notification bus. Runtime success alone is not delivery.
+      if (event === 'run.completed' && (personFlowReport || reports.length || personFlowReportRunWasBound(Number(authenticatedUserId),sessionId,String(payload.run_id || ''))))
+        tagged.notification_suppressed = !delivered.length || !delivered.every(Boolean)
     }
     if (!isPrivatePersonSession(sessionId)) observeRunChatPetEvent(profile, event, tagged)
     data.onEvent?.(event, tagged)

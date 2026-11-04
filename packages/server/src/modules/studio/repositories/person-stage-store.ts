@@ -31,7 +31,7 @@ export function getPersonFlow(userId: number, id: string): PersonConversationFlo
   }
   const error = db.prepare("SELECT error FROM person_stage_deliveries WHERE flow_id=? AND generation=? AND state IN ('pending','failed') AND error!='' ORDER BY updated_at DESC LIMIT 1").get(id,row.generation)?.error || ''
   const confirmationError = db.prepare("SELECT c.reason FROM person_stage_confirmations c JOIN person_stages s ON s.id=c.stage_id WHERE s.flow_id=? AND c.generation=? AND c.state='blocked' AND c.reason!='' ORDER BY c.updated_at DESC LIMIT 1").get(id,row.generation)?.reason || ''
-  const completion_report = db.prepare('SELECT id,state,attempts,run_id,result_message_id,error,next_attempt_at FROM person_flow_reports WHERE flow_id=? AND generation=? AND session_id=?').get(id,row.generation,row.creator_session_id)
+  const completion_report = db.prepare('SELECT id,state,attempts,attempt_limit,run_id,result_message_id,error,next_attempt_at FROM person_flow_reports WHERE flow_id=? AND generation=? AND session_id=?').get(id,row.generation,row.creator_session_id)
   return { ...row, stages, error:error || confirmationError, completion_report: completion_report || null } as unknown as PersonConversationFlow
 }
 export function listPersonFlows(userId: number, sessionId = '', offset = 0) {
@@ -66,12 +66,18 @@ export function assertPersonStage(userId: number, context: PersonStageContext, s
   return { flow, stage }
 }
 /** A failed branch settles until an explicit resume. Peers keep their generation. */
-export function recordPersonStageFailure(userId: number, context: PersonStageContext, error: string) {
+export function recordPersonStageFailure(userId: number, context: PersonStageContext, error: string, savedReply?: {runId:string;messageId:number;hash:string}) {
   return personTransaction(() => {
     let current: ReturnType<typeof assertPersonStage>
     try { current = assertPersonStage(userId,context) } catch { return false }
     const { flow,stage } = current, db = personDb(), now = Date.now()
     const detail = (error || 'Collaboration stage failed').slice(0,1000)
+    if (savedReply) {
+      db.prepare(`INSERT INTO person_stage_confirmations(stage_id,generation,run_id,message_id,source_hash,state,updated_at)
+        VALUES(?,?,?,?,?,'running',?) ON CONFLICT(stage_id,generation) DO UPDATE SET message_id=excluded.message_id,source_hash=excluded.source_hash
+        WHERE run_id=excluded.run_id AND message_id IS NULL`).run(stage.id,flow.generation,savedReply.runId,savedReply.messageId,savedReply.hash,now)
+      db.prepare('UPDATE person_stages SET result_message_id=? WHERE id=?').run(savedReply.messageId,stage.id)
+    }
     db.prepare("UPDATE person_stages SET state='failed',completion_run_id='' WHERE id=?").run(stage.id)
     db.prepare("UPDATE person_stage_confirmations SET state='blocked',claim='',reason=?,updated_at=? WHERE stage_id=? AND generation=? AND state!='completed'").run(detail,now,stage.id,flow.generation)
     db.prepare("UPDATE person_stage_deliveries SET state='failed',error=?,updated_at=? WHERE stage_id=? AND generation=? AND state IN ('pending','queued','delivered')")
