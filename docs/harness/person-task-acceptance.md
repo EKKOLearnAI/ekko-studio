@@ -123,10 +123,19 @@ returns. Build and parse it through the shared helpers: only the first identity
 is the execution lookup key or pending-count exclusion. Keep the optional review
 identity in callback admission, tools, model-request guards and settlement.
 
-Activity counts and task rows share the same SQL pending-work predicate. An
+Activity counts and task rows share the same SQL activity predicate. A developer
+waiting for its linked verifier remains open and dependency-locked, but is not
+listed as another running developer: the verifier owns that activity. Automatic
+dispatch/repair transitions remain visible until their next worker is queued. An
 accepted/completed task with a pending or queued report remains visible until
 delivery settles. The snapshot supplies `active_tasks` separately from the
 recent task page so older pending reports do not vanish from the capsule.
+
+A same-Bot passing review reply includes both the accepted development card and
+the verification card. The callback persists the exact accepted development
+execution together with the verification receipt; realtime and history use the
+same projection. Earlier replies without a recorded pass never gain a development
+card retroactively. Cross-Bot callbacks retain their own conversation ownership.
 
 SQLite gates **overall task completion**, requiring the latest development
 execution/revision, a finished linked verification execution and its recorded
