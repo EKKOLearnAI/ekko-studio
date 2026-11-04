@@ -91,7 +91,7 @@ const transcript = computed(() => {
 const expanded = ref(false)
 function toggleExpanded(ev?: Event) { ev?.stopPropagation(); expanded.value = !expanded.value }
 function openDetail(ev?: Event) { ev?.stopPropagation(); if (sid.value) openSubagentStream(sid.value, props.toolCallId) }
-function abortSubagent(ev?: Event) { ev?.stopPropagation(); chatStore.stopStreaming() }
+function abortSubagent(ev?: Event) { ev?.stopPropagation(); chatStore.abortSession(sid.value) }
 </script>
 
 <template>
