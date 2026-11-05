@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Message, SubagentStream, SubagentStreamEntry, SubagentStreamStatus } from '@/stores/hermes/chat'
+import { useChatStore } from '@/stores/hermes/chat'
+import { subagentBatchNumber } from '@/utils/hermes/subagent-stream'
 import LiveReasoningStatus from './LiveReasoningStatus.vue'
 import type { ChatAgentAvatar } from '@/utils/chat-agent-avatar'
 import MessageItem from './MessageItem.vue'
@@ -32,6 +34,13 @@ const taskPosition = computed(() => {
   if (!stream) return ''
   return `${stream.taskIndex + 1}/${Math.max(1, stream.taskCount)}`
 })
+const chatStore = useChatStore()
+const batchNo = computed(() => {
+  const stream = props.stream
+  if (!stream?.runId) return null
+  return subagentBatchNumber([...chatStore.subagentStreams.values()], stream.sessionId, stream.runId)
+})
+function abortSubagent() { chatStore.abortSession(props.stream?.sessionId || '') }
 
 const isRunning = computed(() => props.stream?.status === 'running')
 
@@ -198,28 +207,39 @@ onBeforeUnmount(stopElapsedTimer)
         <div class="subagent-stream-kicker">
           <span class="subagent-live-dot" :class="{ active: stream?.status === 'running' }" aria-hidden="true"></span>
           <span>{{ t('subagent.title') }}</span>
+          <span v-if="batchNo" class="subagent-task-position">{{ t('subagent.batch', { n: batchNo }) }}</span>
           <span v-if="taskPosition" class="subagent-task-position">{{ taskPosition }}</span>
+          <div class="subagent-header-actions">
+            <span v-if="stream" class="subagent-status" :class="`status-${statusKey(stream.status)}`">
+              {{ statusText() }}
+            </span>
+            <button
+              v-if="isRunning"
+              type="button"
+              class="subagent-abort"
+              data-theme-surface="card"
+              :title="t('subagent.abort')"
+              @click="abortSubagent"
+            >
+              {{ t('subagent.abort') }}
+            </button>
+            <button
+              type="button"
+              class="subagent-close"
+              :aria-label="t('subagent.close')"
+              :title="t('subagent.close')"
+              @click="emit('close')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="subagent-stream-title" dir="auto">{{ stream?.goal || t('subagent.noGoal') }}</div>
         <div v-if="metrics.length" class="subagent-stream-metrics">
           <span v-for="metric in metrics" :key="metric.key">{{ metric.value }}</span>
         </div>
-      </div>
-      <div class="subagent-header-actions">
-        <span v-if="stream" class="subagent-status" :class="`status-${statusKey(stream.status)}`">
-          {{ statusText() }}
-        </span>
-        <button
-          type="button"
-          class="subagent-close"
-          :aria-label="t('subagent.close')"
-          :title="t('subagent.close')"
-          @click="emit('close')"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
-        </button>
       </div>
     </header>
 
@@ -228,7 +248,7 @@ onBeforeUnmount(stopElapsedTimer)
         ref="streamListRef"
         :messages="streamMessages"
         :virtualized="false"
-        padding="20px"
+        padding="16px"
         :row-gap="16"
       >
         <template #item="{ message }">
@@ -329,12 +349,15 @@ onBeforeUnmount(stopElapsedTimer)
 }
 
 .subagent-stream-title {
-  margin-top: 6px;
+  margin-top: 8px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   color: $text-primary;
   font-size: calc(var(--font-size-base, 14px) * 14 / 14);
-  font-weight: 600;
+  font-weight: 400;
   line-height: var(--line-height, 1.45);
   overflow-wrap: anywhere;
+  background: var(--theme-userMessage-bg, $bg-secondary);
+  border-radius: var(--radius-component, 10px);
 }
 
 .subagent-stream-metrics {
@@ -359,6 +382,7 @@ onBeforeUnmount(stopElapsedTimer)
   gap: calc(8px * var(--spacing-scale, 1));
   flex: 0 0 auto;
   min-width: 0;
+  margin-left: auto;
 }
 
 .subagent-status {
@@ -424,6 +448,11 @@ onBeforeUnmount(stopElapsedTimer)
   display: flex;
   flex-direction: column;
   background: var(--theme-content-bg, $bg-main-surface);
+
+  :deep(.message) { max-width: 100%; }
+  :deep(.message.assistant) { max-width: 100%; }
+  :deep(.message.user) { max-width: 100%; }
+  :deep(.msg-body) { max-width: 100%; }
 }
 
 .subagent-empty {
@@ -547,4 +576,7 @@ onBeforeUnmount(stopElapsedTimer)
     max-height: 55%;
   }
 }
+
+.subagent-abort { padding: 3px 10px; font-size: 12px; line-height: 1.5; font-weight: 600; color: $text-secondary; background: $bg-main-surface; border: var(--border-width, 1px) solid $border-color; border-radius: 8px; cursor: pointer; transition: color .15s ease, border-color .15s ease; }
+.subagent-abort:hover { color: $error; border-color: $error; }
 </style>

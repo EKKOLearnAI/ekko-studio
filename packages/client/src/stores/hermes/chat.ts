@@ -149,6 +149,7 @@ export interface SubagentStreamEntry {
 export interface SubagentStream {
   sessionId: string
   subagentId: string
+  runId?: string
   taskIndex: number
   taskCount: number
   goal?: string
@@ -366,6 +367,7 @@ export function reduceSubagentStream(
   return {
     sessionId,
     subagentId,
+    runId: (evt as any).run_id || current?.runId,
     taskIndex: Number.isFinite(incomingTaskIndex) ? incomingTaskIndex : current?.taskIndex || 0,
     taskCount: Number.isFinite(incomingTaskCount) && incomingTaskCount > 0 ? incomingTaskCount : current?.taskCount || 1,
     goal: goal || current?.goal,
@@ -2810,9 +2812,25 @@ function createChatState(scopedSessionId?: string) {
       return
     }
 
-    const subagentId = String((evt as any).subagent_id || `${(evt as any).task_index ?? 0}`)
-    const streamKey = `${sessionId}:${subagentId}`
-    const currentStream = subagentStreams.value.get(streamKey)
+    let subagentId = String((evt as any).subagent_id || `${(evt as any).task_index ?? 0}`)
+    let streamKey = `${sessionId}:${subagentId}`
+    let currentStream = subagentStreams.value.get(streamKey)
+    // 卡死兜底：complete 事件的 subagent_id 与 start 不一致（Hermes 事件偶发缺失）时，
+    // 按 subagent_id 查不到 running stream，完成态刷不上 → 卡死。这里按 run_id + task_index
+    // 找同批次同序号的 running stream，复用它的 key，让 complete 落到正确的卡上。
+    if (eventName === 'subagent.complete' && !currentStream) {
+      const runId = String((evt as any).run_id || '')
+      const taskIndex = Number((evt as any).task_index ?? -1)
+      const fallback = [...subagentStreams.value.values()].find(s =>
+        s.sessionId === sessionId && s.status === 'running'
+        && s.taskIndex === taskIndex && (!runId || s.runId === runId),
+      )
+      if (fallback) {
+        subagentId = fallback.subagentId
+        streamKey = `${sessionId}:${subagentId}`
+        currentStream = fallback
+      }
+    }
     const nextStream = reduceSubagentStream(currentStream, sessionId, evt)
     if (nextStream === currentStream) return
     subagentStreams.value.set(streamKey, nextStream)
@@ -5539,6 +5557,15 @@ function createChatState(scopedSessionId?: string) {
     }
   }
 
+  // 无条件中止指定 session 的 run（含后台 delegation/子任务）。
+  // 与 stopStreaming 不同：不依赖 streamStates/serverWorking 条件，
+  // 子任务 running 但主 run 状态不对时（stopStreaming 不 emit）也能中止。
+  function abortSession(sid: string | null) {
+    if (!sid) return
+    setAbortState(sid, { aborting: true, synced: null })
+    getChatRunSocket(runtimeTransport())?.emit('abort', { session_id: sid })
+  }
+
   // Tab visibility: re-sync when returning to foreground
   if (typeof document !== 'undefined') {
     const onVisibilityChange = () => {
@@ -5810,6 +5837,7 @@ function createChatState(scopedSessionId?: string) {
     archiveSession,
     sendMessage,
     stopStreaming,
+    abortSession,
     respondApproval,
     respondApprovalFor,
     respondToClarify,

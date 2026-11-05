@@ -1083,7 +1083,8 @@ export default {
   subagent: {
     title: 'مهمة في الخلفية', noGoal: 'مهمة في الخلفية بدون عنوان', open: 'فتح المخرجات الحية للمهمة في الخلفية', close: 'إغلاق مخرجات المهمة في الخلفية',
     waiting: 'في انتظار المخرجات الحية...', tool: 'أداة', tools: '{count} أداة', tokens: '{input} داخل · {output} خارج',
-    started: 'بدأت', running: 'قيد التشغيل', completed: 'مكتملة', failed: 'فشلت', cancelled: 'أُلغيت', interrupted: 'تمت المقاطعة',
+    started: 'بدأت', running: 'قيد التشغيل', completed: 'مكتملة', failed: 'فشلت', cancelled: 'أُلغيت', interrupted: 'تمت المقاطعة',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full output', collapseOutput: 'Collapse full output', batch: 'Batch {n}', abort: 'Abort',
+
   },
 
   realtimeVoice: {
