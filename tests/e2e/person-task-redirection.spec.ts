@@ -28,12 +28,32 @@ async function setup(page: Page, failOnce = false) {
     Object.assign(task, { execution_state: 'running', redirect_state: 'completed' }); pending = []
     const user = { id: 3, role: 'user', content: '哦不查贵阳的吧', timestamp: 1793669986 }
     history.push(user)
-    publish('run.peer_user_message', { message: user })
+    publish('run.peer_user_message', { message: { ...user, queued: false } })
     publish('run.started', { run_id: 'next-native-run', run_marker: 'latest-turn' })
     publish('message.delta', { run_id: 'next-native-run', delta: '贵阳天气已经查好了。' })
     history.push({ id: 4, role: 'assistant', content: '贵阳天气已经查好了。', timestamp: 1793670026 })
     publish('run.completed', { run_id: 'next-native-run', output: '贵阳天气已经查好了。', message_id: 4 })
     Object.assign(task, { status: 'completed', running: false, execution_state: 'finished' }); executions.at(-1).state = 'finished'
+    update()
+  }
+  function finishAppends() {
+    executions[0].state = 'finished'
+    publish('run.completed', { run_id: 'old-native-run', output: history[1].content, message_id: 2 })
+    for (const [index, item] of pending.entries()) {
+      const runId = `append-run-${index}`
+      const user = { id: history.length + 1, role: 'user', content: item.input[0].text, timestamp: 1793669986 + index }
+      history.push(user)
+      publish('run.started', { run_id: runId, run_marker: runId })
+      publish('run.peer_user_message', { message: { ...user, queued: false } })
+      const output = `已处理第${index + 1}条续聊。`
+      publish('message.delta', { run_id: runId, delta: output })
+      const assistant = { id: history.length + 1, role: 'assistant', content: output, timestamp: 1793670026 + index }
+      history.push(assistant)
+      publish('run.completed', { run_id: runId, output, message_id: assistant.id })
+      executions.find(e => e.id === item.id).state = 'finished'
+    }
+    pending = []
+    Object.assign(task, { status: 'completed', execution_id: executions.at(-1).id, running: false, execution_state: 'finished' })
     update()
   }
   page.on('pageerror', error => errors.push(error.message))
@@ -59,14 +79,13 @@ async function setup(page: Page, failOnce = false) {
       if (request.method() === 'POST') {
         const body = request.postDataJSON(); requests.push({ path: u.pathname, body })
         if (failOnce) { failOnce = false; return route.fulfill({ status: 409, json: { error: 'Task changed; query it again' } }) }
-        if (body.input[0].text === '哦不查贵阳的吧') {
-          correct()
-          return route.fulfill({ json: { task, execution: executions.at(-1), pending } })
-        }
-        task.revision++; pending.push({ id: 'append', input: body.input }); return route.fulfill({ json: { task, pending } })
+        const execution = { id: `append-${requests.length}`, session_id: sessionId, state: 'pending', created_at: requests.length + 1, requirements_revision: task.requirements_revision }
+        executions.push(execution)
+        task.revision++; pending.push({ id: execution.id, input: body.input })
+        return route.fulfill({ json: { task, execution, pending } })
       }
       const execution = executions.find(e => e.id === (u.searchParams.get('execution_id') || task.execution_id))
-      return route.fulfill({ json: { task, execution, executions: [executions.at(-1)], session: session(), pending, canInsert: task.redirect_state !== 'waiting', canRemove: true, protectedQueueId: task.redirect_state === 'waiting' ? 'next' : '' } })
+      return route.fulfill({ json: { task, execution, executions, session: session(), pending, canInsert: task.redirect_state !== 'waiting', canRemove: true, protectedQueueId: task.redirect_state === 'waiting' ? 'next' : '' } })
     }
     let json: any = {}
     if (u.pathname === '/api/auth/me') json = { user: { id: 1, username: 'fixture', role: 'super_admin' } }
@@ -81,29 +100,33 @@ async function setup(page: Page, failOnce = false) {
   await expect(page.locator('textarea')).toBeVisible()
   await expect(page.getByText('正在查询厦门天气，还没有完成。', { exact: true })).toBeVisible()
   await page.locator('textarea').evaluate(el => el.setAttribute('data-original-composer', 'true'))
-  return { requests, errors, resumes, sessionId, correctFromMain: () => { correct(); update() }, confirmStopAndFinish }
+  return { requests, errors, resumes, sessionId, correctFromMain: () => { correct(); update() }, confirmStopAndFinish, finishAppends }
 }
 async function verifyContinuousHistory(page: Page) {
-  for (const text of ['帮我查下厦门的天气', '正在查询厦门天气，还没有完成。', '哦不查贵阳的吧', '贵阳天气已经查好了。']) await expect(page.getByText(text, { exact: true })).toBeVisible()
+  for (const text of ['帮我查下厦门的天气', '正在查询厦门天气，还没有完成。', '哦不查贵阳的吧', '贵阳天气已经查好了。']) await expect(page.locator('.message-list-shell').getByText(text, { exact: true })).toBeVisible()
 }
 
-test('stops and sends the latest request in the original conversation without replacing its composer or history', async ({ page }) => {
+test('appends every manual task-detail message while preserving the running task, composer and history', async ({ page }) => {
   await page.setViewportSize({width:1280,height:1000})
-  const { requests, errors, resumes, sessionId, confirmStopAndFinish } = await setup(page)
-  await page.locator('textarea').fill('还要注明数据来源')
-  await page.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect.poll(() => requests.length).toBe(1)
-  await expect(page.locator('textarea')).toHaveValue('')
-  await page.locator('textarea').fill('哦不查贵阳的吧')
-  await page.getByRole('button', { name: 'Send', exact: true }).click()
-  await expect.poll(() => requests.length).toBe(2)
+  const { requests, errors, resumes, sessionId, finishAppends } = await setup(page)
+  const texts = ['还要注明数据来源', '哦不查贵阳的吧', '先停下来，不要继续查了']
+  for (const [index, text] of texts.entries()) {
+    await page.locator('textarea').fill(text)
+    await page.getByRole('button', { name: 'Send', exact: true }).click()
+    await expect.poll(() => requests.length).toBe(index + 1)
+    await expect(page.locator('textarea')).toHaveValue('')
+  }
   expect(requests[1]).toMatchObject({ path: '/api/studio/person/tasks/fixture-task/chat', body: { expected_revision: 2, expected_execution_id: 'old', input: [{ type: 'text', text: '哦不查贵阳的吧' }] } })
-  await expect(page.getByText('正在停止之前的工作，随后按最新要求继续。', { exact: true })).toBeVisible()
+  await expect(page.locator('.task-chat-heading')).toContainText('查询厦门天气')
+  await expect(page.getByText('正在停止之前的工作，随后按最新要求继续。', { exact: true })).toHaveCount(0)
   await expect(page.locator('textarea')).toHaveAttribute('data-original-composer', 'true')
   await expect(page.getByText('正在查询厦门天气，还没有完成。', { exact: true })).toBeVisible()
-  for (const selector of ['.task-message-intent', '.task-chat-queue', '.task-executions']) await expect(page.locator(selector)).toHaveCount(0)
-  confirmStopAndFinish()
-  await verifyContinuousHistory(page)
+  await expect(page.locator('.task-chat-queue')).toBeVisible()
+  for (const text of texts) await expect(page.locator('.task-chat-queue')).toContainText(text)
+  finishAppends()
+  await expect(page.locator('.task-chat-queue')).toHaveCount(0)
+  for (const text of texts) await expect(page.locator('.message-list-shell').getByText(text, { exact: true })).toBeVisible()
+  await expect(page.getByText('已处理第3条续聊。', { exact: true })).toBeVisible()
   await expect(page.locator('textarea')).toHaveAttribute('data-original-composer', 'true')
   expect(new Set(resumes)).toEqual(new Set([sessionId]))
   if (process.env.TASK_REDIRECT_EVIDENCE_DIR) {
@@ -111,7 +134,7 @@ test('stops and sends the latest request in the original conversation without re
     await page.screenshot({ path: resolve(process.env.TASK_REDIRECT_EVIDENCE_DIR, 'same-conversation-history.png'), animations: 'disabled' })
   }
   await page.reload()
-  await verifyContinuousHistory(page)
+  for (const text of texts) await expect(page.locator('.message-list-shell').getByText(text, { exact: true })).toBeVisible()
   expect(new Set(resumes)).toEqual(new Set([sessionId]))
   expect(errors).toEqual([])
 })
