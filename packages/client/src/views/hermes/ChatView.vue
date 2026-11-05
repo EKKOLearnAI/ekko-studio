@@ -48,8 +48,14 @@ onUnmounted(() => {
 })
 
 async function loadRouteSession() {
-  await chatStore.loadSessions(chatStore.sessionProfileFilter, routeSessionId.value)
-  if (routeSessionId.value && chatStore.activeSessionId !== routeSessionId.value) {
+  const targetSessionId = routeSessionId.value
+  const targetRouteName = String(route.name)
+  await chatStore.loadSessions(chatStore.sessionProfileFilter, targetSessionId)
+  // 等待期间路由可能已经切到历史页：`/hermes/history/session/:sessionId` 与原聊天路由
+  // 共用 params.sessionId，此时 routeSessionId 会变成历史会话 id，命中下面的 replace
+  // 就会把用户从「历史」弹回「单聊」。路由/目标已变就直接放弃这次跳转。
+  if (String(route.name) !== targetRouteName || routeSessionId.value !== targetSessionId) return
+  if (targetSessionId && chatStore.activeSessionId !== targetSessionId) {
     await router.replace({ name: 'hermes.chat' })
   }
 }

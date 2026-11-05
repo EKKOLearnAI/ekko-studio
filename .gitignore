@@ -58,3 +58,6 @@ packages/client/src/**/*.js
 
 # Local manual backups
 *.bak.20*
+
+# local symlink to build output
+packages/server/client
