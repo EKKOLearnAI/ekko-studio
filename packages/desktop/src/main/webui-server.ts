@@ -528,11 +528,10 @@ async function probeShellPath(shell: string, interactive: boolean): Promise<stri
       [...(interactive ? ['-i'] : []), '-l', '-c', `printf '\\n${PATH_MARKER_START}%s${PATH_MARKER_END}\\n' "$PATH"`],
       {
         encoding: 'utf-8',
+        // Interactive rc init can be slow; a hanging rc is bounded by this timeout.
         timeout: interactive ? 8000 : 1500,
         windowsHide: true,
         env: process.env,
-        // Interactive rc files must never block on stdin (no TTY is attached).
-        stdio: ['ignore', 'pipe', 'pipe'],
       },
     )
     return extractMarkedPath(stdout.replace(ANSI_PATTERN, ''))
