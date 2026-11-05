@@ -3327,6 +3327,9 @@ jobTriggered: 'Job acionado',
 
   // Registro de alteracoes
   groupChat: {
+    migrationNoticeTitle: "O chat de grupo será descontinuado",
+    migrationNoticeMessage: "A funcionalidade de chat de grupo será descontinuada em breve. Recomendamos rever as tarefas, as configurações dos Agents e o contexto importante dos seus grupos, e transferir esse trabalho para Bot para o continuar lá.",
+    migrationNoticeSaveFailed: "Não foi possível guardar a sua confirmação. Verifique o armazenamento do navegador e tente novamente.",
     messageAlreadySummarized: "Já resumido; não é possível excluir",
     messageSummaryBoundaryUnknown: "Limite do resumo indisponível; exclusão desativada",
     messageSelectionHint: "Selecione mensagens de membros ou execuções completas do agente. Mensagens resumidas não podem ser selecionadas.",

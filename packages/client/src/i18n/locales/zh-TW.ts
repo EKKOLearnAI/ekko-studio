@@ -3502,6 +3502,9 @@ export default {
 
   // 群聊
   groupChat: {
+    migrationNoticeTitle: "群聊即將下架",
+    migrationNoticeMessage: "群聊功能即將下架。建議您提前整理現有群聊中的任務、Agent 設定和重要上下文，並將相關業務遷移至 Bot 繼續處理。",
+    migrationNoticeSaveFailed: "暫時無法儲存確認狀態，請檢查瀏覽器儲存空間後重試。",
     messageAlreadySummarized: "已被總結，無法刪除",
     messageSummaryBoundaryUnknown: "無法確定總結邊界，暫不可刪除",
     messageSelectionHint: "可選擇成員訊息或整次 Agent 回覆；已總結的訊息不可選擇。",

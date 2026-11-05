@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import PageLoading from '@/components/common/PageLoading.vue'
 import { useRoute, useRouter } from 'vue-router'
 import GroupChatPanel from '@/components/hermes/group-chat/GroupChatPanel.vue'
+import GroupChatMigrationNotice from '@/components/hermes/group-chat/GroupChatMigrationNotice.vue'
 import { useGroupChatStore } from '@/stores/hermes/group-chat'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
@@ -101,6 +102,7 @@ watch([routeRoomId, routeProfile], async () => {
 <template>
     <PageLoading :show="pageLoading" initial-only class="group-chat-view">
         <GroupChatPanel />
+        <GroupChatMigrationNotice />
     </PageLoading>
 </template>
 

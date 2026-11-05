@@ -3326,6 +3326,9 @@ export default {
 
   // 更新履歴
   groupChat: {
+    migrationNoticeTitle: "グループチャットの提供終了について",
+    migrationNoticeMessage: "グループチャット機能は近日中に提供を終了する予定です。既存のグループ内のタスク、Agent 設定、重要なコンテキストを整理し、Bot に移行して作業を続けることをおすすめします。",
+    migrationNoticeSaveFailed: "確認状態を保存できませんでした。ブラウザーのストレージを確認して、もう一度お試しください。",
     messageAlreadySummarized: "要約済みのため削除できません",
     messageSummaryBoundaryUnknown: "要約の境界を確認できないため削除できません",
     messageSelectionHint: "メンバーのメッセージまたはエージェントの実行全体を選択できます。要約済みのメッセージは選択できません。",
