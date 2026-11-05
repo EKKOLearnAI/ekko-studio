@@ -17,15 +17,24 @@ afterEach(async context => { await f?.close(context.task.name) })
 function call(name: string, args: Record<string,unknown> = {}) {
   return {id:randomUUID(),name,arguments:args}
 }
-function scripted(answer: (step: number, request: ModelRequest) => ModelResponse | Promise<ModelResponse>) {
+const waitingReply = '已安排执行，结果返回后我会继续汇报。'
+function scripted(answer: (step: number, request: ModelRequest) => ModelResponse | Promise<ModelResponse>, reply = waitingReply) {
   let requests = 0
+  const finalRequests: ModelRequest[] = []
   const client: ModelClient = {
     provider:'fixture',requestStyle:'custom-runtime',
     capabilities:{streaming:false,tools:true,vision:false,jsonMode:false,systemPrompt:true,maxInputTokens:1_000_000},
-    create: request => Promise.resolve(answer(++requests,request)),
+    create: request => {
+      requests++
+      if (request.toolChoice === 'none') {
+        finalRequests.push(request)
+        return Promise.resolve({ content: reply, finishReason: 'stop' })
+      }
+      return Promise.resolve(answer(requests,request))
+    },
     async *stream() { throw new Error('Unexpected streaming request') },
   }
-  return {client,requests:()=>requests}
+  return {client,requests:()=>requests,finalRequests}
 }
 async function run(model: ReturnType<typeof scripted>, returned?: string, sessionId = 'person-main-1', stageDeliveryId?: string) {
   const agent = await chat.createPersonChatAgent(1,sessionId,returned ? {executionId:returned} : undefined,stageDeliveryId)
@@ -41,7 +50,10 @@ it.each([false,true])('bounds alternating unchanged task/event reads, repeated e
     : call('bot_execution_events',{execution_id:execution.id,after:0})]}))
   const result = await run(model)
   expect(result.output.finishReason).toBe('waiting_for_tasks')
-  expect(model.requests()).toBeLessThanOrEqual(6)
+  expect(result.output.content).toBe(waitingReply)
+  expect(model.requests()).toBeLessThanOrEqual(7)
+  expect(model.finalRequests).toHaveLength(1)
+  expect(model.finalRequests[0].tools).toEqual([])
   expect(result.events.some(event => event.type === 'run.max_steps')).toBe(false)
   expect(result.steps.filter(step => step.type === 'tool').every(step => step.result.ok)).toBe(true)
   expect(f.get(task.id)).toMatchObject({status:'open',execution_state:'queued'})
@@ -49,12 +61,16 @@ it.each([false,true])('bounds alternating unchanged task/event reads, repeated e
 })
 
 it('dispatches independent tasks across steps before explicit waiting', async () => {
+  const reply = '两个主题都已分别安排研究，结果返回后我会汇总给你。'
   const model = scripted(step => ({content:'',toolCalls:[step < 3
     ? call('bot_task_create',{title:`Independent ${step}`,goal:`Research topic ${step}`,agent_id:'reviewer'})
-    : call('bot_tasks_wait')]}))
+    : call('bot_tasks_wait')]}),reply)
   const result = await run(model)
   expect(result.output.finishReason).toBe('waiting_for_tasks')
-  expect(model.requests()).toBe(3)
+  expect(model.requests()).toBe(4)
+  expect(result.output.content).toBe(reply)
+  expect(model.finalRequests).toHaveLength(1)
+  expect(model.finalRequests[0].messages.filter(message => message.role === 'tool' && message.name === 'bot_task_create')).toHaveLength(2)
   expect(f.store.listPersonTasks(1)).toHaveLength(2)
   expect(f.store.listPersonTasks(1).every(task => task.status === 'open')).toBe(true)
 })
@@ -66,8 +82,9 @@ it('settles every call in the current batch, including work after a wait call', 
     call('bot_task_create',{title:'Second task',goal:'Second independent goal'}),
   ]}))
   const result = await run(model)
-  expect(model.requests()).toBe(1)
+  expect(model.requests()).toBe(2)
   expect(result.output.finishReason).toBe('waiting_for_tasks')
+  expect(result.output.content).toBe(waitingReply)
   expect(result.steps.filter(step => step.type === 'tool')).toHaveLength(3)
   expect(f.store.listPersonTasks(1)).toHaveLength(2)
 })
@@ -103,7 +120,7 @@ it('scopes waiting to the current Bot and does not treat a denied query as progr
   expect(model.requests()).toBe(6)
 })
 
-it('keeps a waiting collaboration stage active without a fabricated final reply or confirmation attempt', async () => {
+it('sends a waiting reply while keeping the collaboration stage active without a completion confirmation', async () => {
   const sessions = await import('../../packages/server/src/modules/studio/repositories/session-store')
   const flows = await import('../../packages/server/src/modules/studio/services/person/stage-flows')
   const stages = await import('../../packages/server/src/modules/studio/repositories/person-stage-store')
@@ -124,6 +141,8 @@ it('keeps a waiting collaboration stage active without a fabricated final reply 
       if (event.type === 'run.completed' && event.output.finishReason === 'waiting_for_tasks') flows.waitPersonStageTurn(1,context,event.runId)
     }})
   expect(result.output.finishReason).toBe('waiting_for_tasks')
+  expect(result.output.content).toBe(waitingReply)
+  expect(model.finalRequests).toHaveLength(1)
   await confirmPersonStage(1,context)
   expect(confirmations.stageConfirmation(context)).toMatchObject({state:'waiting',attempts:0,message_id:null})
   expect(stages.getPersonFlow(1,flow.id)).toMatchObject({state:'active',stages:[{state:'active',result_message_id:null}]})
@@ -175,7 +194,8 @@ it.each(['finished','failed','interrupted'] as const)('yields to a queued %s cal
   })
   const result = await run(model)
   expect(result.output.finishReason).toBe('waiting_for_tasks')
-  expect(model.requests()).toBe(1)
+  expect(model.requests()).toBe(2)
+  expect(result.output.content).toBe(waitingReply)
   server.markExternalRunCompleted('person-main-1','run.completed')
   await callbackDone
   expect(callbackResult?.output.finishReason).toBe('stop')
@@ -185,4 +205,17 @@ it.each(['finished','failed','interrupted'] as const)('yields to a queued %s cal
   expect(f.db.prepare('SELECT state FROM person_deliveries WHERE execution_id=?').get(execution.id)!.state).toBe('delivered')
   await delivery.deliverPersonResults()
   expect(f.runtime.deliver).toHaveBeenCalledTimes(1)
+})
+
+it('keeps waiting acknowledgements out of completion notices and App push envelopes',async()=>{
+  const {foregroundNotification}=await import('../../packages/server/src/modules/studio/services/chat-run/foreground-notification')
+  const {appEventEnvelope}=await import('../../packages/server/src/modules/studio/services/webhooks/app-events')
+  const payload={session_id:'person-main-1',run_id:'dispatch',output:waitingReply,stop_reason:'waiting_for_tasks'}
+  expect(foregroundNotification('run.completed',payload)).toBeNull()
+  const event={schema_version:1 as const,id:'dispatch',type:'person.run.completed',occurred_at:new Date().toISOString(),
+    profile:'default',source:'person',subject:{session_id:'person-main-1',run_id:'dispatch'},payload}
+  expect(appEventEnvelope(event)).toBeNull()
+  const completed={...payload,run_id:'result',output:'已完成核查，结果如下。',stop_reason:'stop'}
+  expect(foregroundNotification('run.completed',completed)).toMatchObject({kind:'completion'})
+  expect(appEventEnvelope({...event,id:'result',payload:completed})).toMatchObject({display:{content:completed.output}})
 })

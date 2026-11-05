@@ -341,15 +341,25 @@ budget; runtime capacity still follows the selected model's context window.
 ## Waiting for task results
 
 After dispatching all independent work, the main Bot calls `bot_tasks_wait`.
-The host ends the current model turn at the end of its tool batch with
-`waiting_for_tasks`, leaving the task and any assigned collaboration stage open.
-Every call in that batch settles before yielding, so a wait cannot discard
+After its entire tool batch settles, the host requests one normal model reply
+with tools disabled. The Bot acknowledges the work in the user's language and
+preserves relevant findings; the host streams and persists this reply before
+ending the turn with `waiting_for_tasks`. This reply is allowed even when the
+dispatch used the last configured step. It does not complete the task or any
+assigned collaboration stage. Every call in the batch settles before yielding, so a wait cannot discard
 another independent dispatch. If a model instead repeatedly reads unchanged
 task state or execution events, three consecutive batches without new evidence
 yield to the existing durable callback. New task state, report pages and new
 persisted event IDs count as progress; new tool-call IDs, task references and
-replayed event pages do not. A ready result callback can take over after the
-current read-only batch immediately.
+replayed event pages do not. A ready result callback can take over after this
+bounded reply; it does not need a status polling loop. A provider that returns
+tool calls or no text despite the tool-free reply request fails explicitly;
+the host never executes those calls or reopens the polling loop.
+
+Person display keeps the waiting reply and `stop_reason=waiting_for_tasks` while
+hiding internal tools. Both direct-send and resumed client handlers treat this
+as waiting, without an empty-output error or a task-completion notification.
+Actual empty ordinary responses still use the existing error detection.
 
 Waiting is restricted to live work or current result receipts owned by this Bot
 and, when assigned, its current collaboration stage. Cancelled, superseded and

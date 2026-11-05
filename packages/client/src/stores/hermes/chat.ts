@@ -4592,11 +4592,13 @@ function createChatState(scopedSessionId?: string) {
               // signal but not required, since some providers/local models
               // legitimately omit usage.
               const queueInsertionInterruption = isQueueInsertionInterruption(evt)
+              const waitingForTasks = evt.stop_reason === 'waiting_for_tasks'
               const swallowedError =
                 !runProducedAssistantText &&
                 !runHadToolActivity &&
                 finalOutputTrimmed === '' &&
-                !queueInsertionInterruption
+                !queueInsertionInterruption &&
+                !waitingForTasks
               if (swallowedError) {
                 addMessage(sid, {
                   id: uid(),
@@ -4604,7 +4606,7 @@ function createChatState(scopedSessionId?: string) {
                   content: 'Error: Agent returned no output. The model call may have failed (e.g. invalid API key, model not supported by provider, or context exceeded). Check the hermes-agent logs for details.',
                   timestamp: Date.now(),
                 })
-              } else {
+              } else if (!waitingForTasks) {
                 playCompletionBellIfEnabled()
                 showCompletionNotificationIfEnabled(sid, completedAssistantMessageId)
               }
@@ -5247,10 +5249,12 @@ function createChatState(scopedSessionId?: string) {
             }
           }
           const queueInsertionInterruption = isQueueInsertionInterruption(evt)
+          const waitingForTasks = evt.stop_reason === 'waiting_for_tasks'
           const swallowedError = !runProducedAssistantText
             && !runHadToolActivity
             && finalOutputTrimmed === ''
             && !queueInsertionInterruption
+            && !waitingForTasks
           if (swallowedError) {
             addMessage(sid, {
               id: uid(),
@@ -5258,7 +5262,7 @@ function createChatState(scopedSessionId?: string) {
               content: 'Error: Agent returned no output. The model call may have failed (e.g. invalid API key, model not supported by provider, or context exceeded). Check the hermes-agent logs for details.',
               timestamp: Date.now(),
             })
-          } else {
+          } else if (!waitingForTasks) {
             playCompletionBellIfEnabled()
             showCompletionNotificationIfEnabled(sid, completedAssistantMessageId)
           }

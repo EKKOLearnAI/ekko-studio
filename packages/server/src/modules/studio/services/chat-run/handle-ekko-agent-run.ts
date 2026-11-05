@@ -1623,7 +1623,6 @@ export async function handleEkkoAgentRun(
     const hadToolActivity = result.steps.some((step: any) => step.type === 'tool')
     const boundaryInterrupted = result.output.finishReason === 'boundary_interrupt'
     const waitingForTasks = result.output.finishReason === 'waiting_for_tasks'
-    if (waitingForTasks) { assistantText = ''; assistantReasoning = '' }
     if (!boundaryInterrupted && !assistantText.trim() && !assistantReasoning.trim() && !hadToolActivity) {
       const error = 'Model provider returned an empty response after streaming and non-streaming attempts.'
       logger.warn({

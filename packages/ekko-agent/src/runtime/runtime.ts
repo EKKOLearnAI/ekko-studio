@@ -541,7 +541,8 @@ export class AgentRuntime {
           }
         }
       }
-      for (let step = 1; step <= maxSteps; step += 1) {
+      let finalReply: { instruction: string; finishReason?: string } | undefined
+      for (let step = 1; step <= maxSteps || !!finalReply; step += 1) {
         throwIfAborted(input.signal)
         if (activeBoundaryRun?.pending) return completeBoundaryInterrupt(step - 1)
         const modelSignal = activeBoundaryRun
@@ -552,13 +553,18 @@ export class AgentRuntime {
         const request = this.modelRequest(input, messages, modelClient, contextKey, modelSignal)
         request.metadata = { ...request.metadata, session_id: contextKey || runId }
         const recoveryDirective = this.currentRecoveryDirective()
-        if (recoveryDirective?.active && request.tools?.length) {
+        if (!finalReply && recoveryDirective?.active && request.tools?.length) {
           const allowed = new Set(recoveryDirective.allowedToolNames)
           const recoveryTools = request.tools.filter(tool => allowed.has(tool.name))
           if (recoveryTools.length) {
             request.tools = recoveryTools
             request.toolChoice = 'required'
           }
+        }
+        if (finalReply) {
+          request.messages = [...request.messages, createSystemMessage(finalReply.instruction)]
+          request.tools = []
+          request.toolChoice = 'none'
         }
         contextEstimate = estimateModelRequestContext(request)
         emit({ type: 'context.estimated', runId, step, estimate: contextEstimate })
@@ -575,7 +581,14 @@ export class AgentRuntime {
         const response = modelResult.response
         const assistantMessage = normalizeToolCallPreamble(modelResponseToAgentMessage(response))
         const toolCalls = assistantMessage.toolCalls ?? []
-        const blockedByRecovery = toolCalls.length === 0 && this.currentRecoveryDirective()?.active === true
+        if (finalReply) {
+          throwIfAborted(input.signal)
+          // A provider ignoring toolChoice must never restart the loop or execute more work.
+          if (toolCalls.length) throw new Error('Model returned tool calls during a tool-free final reply')
+          if (!assistantMessage.content.trim()) throw new Error('Model returned an empty final reply')
+          assistantMessage.finishReason = finalReply.finishReason ?? assistantMessage.finishReason
+        }
+        const blockedByRecovery = !finalReply && toolCalls.length === 0 && this.currentRecoveryDirective()?.active === true
         if (activeBoundaryRun && toolCalls.length > 0) {
           activeBoundaryRun.phase = 'tool_batch'
         }
@@ -664,6 +677,10 @@ export class AgentRuntime {
         const hostCompletion = input.onToolBatchComplete?.()
         if (hostCompletion) {
           throwIfAborted(input.signal)
+          if ('finalReply' in hostCompletion) {
+            finalReply = { instruction: hostCompletion.finalReply, finishReason: hostCompletion.finishReason }
+            continue
+          }
           if (activeBoundaryRun) activeBoundaryRun.terminal = true
           output = hostCompletion
           const context = contextKey ? this.modelContexts.get(contextKey) : undefined
