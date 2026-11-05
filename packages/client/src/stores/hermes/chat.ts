@@ -2603,7 +2603,8 @@ function createChatState(scopedSessionId?: string) {
     if (!s) return
     const idx = s.messages.findIndex(m => m.id === id)
     if (idx !== -1) {
-      s.messages[idx] = { ...s.messages[idx], ...update }
+      // Realtime speech tracks the live object across status updates and ID alignment.
+      Object.assign(s.messages[idx]!, update)
     }
   }
 
