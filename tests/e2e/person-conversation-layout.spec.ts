@@ -334,6 +334,8 @@ test('keeps identity and controls readable through light/dark, wallpaper, region
     }, { brightness, opacity, wallpaper })
     await expect(page.locator('.task-chat-heading .task-identity-name')).toBeVisible()
     await expect(page.locator('.task-chat-heading .task-identity-title')).toBeVisible()
+    // Visibility becomes true before the panel's entrance opacity transition settles.
+    await expect(page.locator('.task-chat-heading').locator('..')).toHaveCSS('opacity', '1')
     const visual = await page.locator('.task-chat-heading').evaluate(el => {
       const n = el.querySelector('.task-identity-name')!, logo = el.querySelector('.task-identity-logo')!
       return { color: getComputedStyle(n).color, background: getComputedStyle(el.parentElement!).backgroundColor, opacity: getComputedStyle(el.parentElement!).opacity, logoHeight: logo.getBoundingClientRect().height, name: n.textContent }

@@ -97,7 +97,7 @@ export function personDeliveryCurrent(userId: number, executionId: string, expec
     try { assertPersonStage(userId,stage,task.session_id) } catch { return false }
   }
   if (flow && !personDb().prepare("SELECT 1 FROM person_deliveries WHERE execution_id=? AND state IN ('pending','queued')").get(executionId)) return false
-  return !flow?.stopped && !flow?.completed && ownsPersonSession(userId, getSession(task.session_id)) && ['finished','failed'].includes(run.state) && task.status !== 'closed' && task.requirements_revision === run.requirements_revision
+  return !flow?.stopped && !flow?.completed && ownsPersonSession(userId, getSession(task.session_id)) && ['finished','failed','interrupted'].includes(run.state) && task.status !== 'closed' && task.requirements_revision === run.requirements_revision
 }
 /** Recheck under the mutation transaction, after any model/resource validation awaits. */
 export function assertPersonDeliveryOrigin(userId: number, origin?: PersonTaskOrigin) {

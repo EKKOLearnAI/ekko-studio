@@ -187,6 +187,16 @@ export function failPersonStage(userId: number, context: PersonStageContext, err
   return true
 }
 
+/** A host yield has no final reply and cannot confirm or fail the assigned stage. */
+export function waitPersonStageTurn(userId: number, context: PersonStageContext, runId: string) {
+  assertPersonStage(userId,context)
+  const waiting = personStageWait(context)
+  if (!waiting) return
+  const changed = personDb().prepare("UPDATE person_stage_confirmations SET state='waiting',reason=?,updated_at=? WHERE stage_id=? AND generation=? AND run_id=? AND state='running'")
+    .run(waiting,Date.now(),context.stageId,context.generation,runId)
+  if (changed.changes) personUpdated(userId)
+}
+
 /** Commit only after the final assistant message exists. No handoff transcript is stored. */
 export function finishPersonStageTurn(userId: number, context: PersonStageContext, runId: string, messageId: unknown, ok: boolean, error = '', confirmationClaim?: string) {
   const tracked = stageConfirmation(context)

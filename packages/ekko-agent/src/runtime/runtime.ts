@@ -661,6 +661,15 @@ export class AgentRuntime {
           pendingBackgroundSubagentIds.clear()
         }
         if (activeBoundaryRun?.pending) return completeBoundaryInterrupt(step)
+        const hostCompletion = input.onToolBatchComplete?.()
+        if (hostCompletion) {
+          throwIfAborted(input.signal)
+          if (activeBoundaryRun) activeBoundaryRun.terminal = true
+          output = hostCompletion
+          const context = contextKey ? this.modelContexts.get(contextKey) : undefined
+          emit({ type: 'run.completed', runId, output, steps: step, context, contextEstimate })
+          return { runId, messages, output, steps, events, context, contextEstimate, memoryContext }
+        }
       }
 
       if (activeBoundaryRun) activeBoundaryRun.terminal = true

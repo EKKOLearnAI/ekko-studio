@@ -203,7 +203,15 @@ async function execute(run: PersonExecution, abort: AbortController) {
   } finally {
     const latest = personDb().prepare('SELECT * FROM person_executions WHERE owner_user_id=? AND id=?').get(userId, run.id) as unknown as PersonExecution | undefined
     if (latest && ['failed','finished','interrupted'].includes(latest.state)) personDb().prepare("UPDATE person_interactions SET state='expired',revision=revision+1 WHERE execution_id=? AND state='pending'").run(run.id)
-    if (latest && ['failed','finished'].includes(latest.state)) readyPersonDelivery(latest)
+    if (latest && ['failed','finished','interrupted'].includes(latest.state)) {
+      if (latest.state === 'interrupted') {
+        personEvent(latest, 'run.interrupted', {
+          execution_id: latest.id,
+          error: latest.error || 'Execution interrupted; inspect and explicitly continue',
+        })
+      }
+      readyPersonDelivery(latest)
+    }
     personUpdated(userId)
     clearInterval(heartbeat); active.delete(run.id); busyTasks.delete(run.task_id); releasePersonRun(run.id)
   }
@@ -263,7 +271,7 @@ export function startPersonWork() {
   recoverStageConfirmations()
   // Queue entries are process-local; recover delivery receipts after restart.
   personDb().prepare("UPDATE person_deliveries SET state='pending',error='' WHERE state='queued'").run()
-  personDb().prepare("UPDATE person_deliveries SET state='pending' WHERE state='waiting' AND execution_id IN (SELECT id FROM person_executions WHERE state IN ('finished','failed'))").run()
+  personDb().prepare("UPDATE person_deliveries SET state='pending' WHERE state='waiting' AND execution_id IN (SELECT id FROM person_executions WHERE state IN ('finished','failed','interrupted'))").run()
   timer = setInterval(() => { void tickPersonWork().catch(error => logger.warn(error, 'Person scheduler failed')) }, 3000)
   timer.unref()
 }

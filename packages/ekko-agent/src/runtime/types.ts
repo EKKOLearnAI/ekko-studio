@@ -146,6 +146,8 @@ export interface AgentRuntimeRunInput {
   onSkillReviewUsage?: (input: SkillReviewUsageEvent) => void
   /** Synchronous durable commit, called before plan.updated is published. Throw to reject an update. */
   onPlanUpdate?: (plan: import('../tools/plan').AgentTaskPlan) => void
+  /** Trusted host completion after every call in a tool batch has settled and been recorded. */
+  onToolBatchComplete?: () => AgentOutputMessage | undefined
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 

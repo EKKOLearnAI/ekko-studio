@@ -4,14 +4,14 @@ import { interruptPersonAcceptance, personAcceptanceSessions } from '../../repos
 import { randomUUID } from 'node:crypto'
 import { personError, personRevision, personText } from '../../contracts/person'
 import type { PersonExecution, PersonTask, PersonTaskOrigin } from '../../contracts/person'
-import { personDb, personTransaction, getPersonExecution, replayPersonOperation, adoptPersonGoal, personOperation, getPersonTask, personTaskRunning, createPersonTask, updatePersonTask, enqueuePersonExecution } from '../../repositories/person-store'
+import { personDb, personTransaction, getPersonExecution, replayPersonOperation, adoptPersonGoal, personOperation, getPersonTask, personTaskRunning, createPersonTask, updatePersonTask, enqueuePersonExecution, personEvent } from '../../repositories/person-store'
 import { personRuntime } from '../../public/person-runtime'
 import { personUpdated } from '../../repositories/person-updates'
 import { logger } from '../../public/logging'
 import { personTurnWorkspace } from './workspace'
 import { validatePersonSelection } from './catalog'
 import { selectPersonExecutionAgent } from './agents'
-import { savePersonTaskOrigin, assertPersonDeliveryOrigin, stopPersonTaskReturns } from './delivery'
+import { savePersonTaskOrigin, assertPersonDeliveryOrigin, stopPersonTaskReturns, readyPersonDelivery } from './delivery'
 import { requirePersonSession } from '../../repositories/person-session-store'
 import { personRequirements } from '../../contracts/person-flow'
 import { advancePersonFlow, assertPersonTaskActor, plannedPersonFlow, stopPersonFlow } from './task-flow'
@@ -31,16 +31,30 @@ function requestStop(userId: number, taskId: string, executionId: string) {
   if (run.state !== 'stopping') {
     const now = Date.now()
     const db = personDb()
+    const stopBeforeStart = ['pending','queued'].includes(run.state)
     db.prepare("UPDATE person_task_redirects SET state='cancelling',updated_at=? WHERE task_id=? AND state='waiting'").run(now,taskId)
     db.prepare('UPDATE person_executions SET state=?,generation=generation+1,updated_at=? WHERE id=?')
       .run(['pending','queued'].includes(run.state) ? 'interrupted' : 'stopping', now, run.id)
-    db.prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND state='pending')").run(now, taskId)
+    db.prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND state='pending') AND execution_id!=?")
+      .run(now, taskId, run.id)
     db.prepare("UPDATE person_executions SET state='interrupted',generation=generation+1,updated_at=? WHERE task_id=? AND state='pending'").run(now, taskId)
+    if (stopBeforeStart) {
+      db.prepare("UPDATE person_executions SET error=? WHERE id=? AND state='interrupted' AND error=''")
+        .run('Task stopped before execution', run.id)
+      db.prepare("UPDATE person_deliveries SET state='pending',error='',updated_at=? WHERE execution_id=? AND state IN ('waiting','pending','queued')")
+        .run(now, run.id)
+      personEvent(getPersonExecution(userId, run.id), 'run.interrupted', {
+        execution_id: run.id,
+        error: 'Task stopped before execution',
+      })
+    }
     const cancelled = db.prepare("SELECT e.* FROM person_executions e JOIN person_acceptance a ON a.execution_id=e.id WHERE e.task_id=? AND e.state='interrupted' AND a.state='pending'").all(taskId) as unknown as PersonExecution[]
     for (const cancelledRun of cancelled) interruptPersonAcceptance(cancelledRun,'Queued task input stopped before execution')
     db.prepare('UPDATE session_tasks SET revision=revision+1,updated_at=? WHERE id=?').run(now, taskId)
     db.prepare("UPDATE person_interactions SET state='expired',revision=revision+1 WHERE execution_id=? AND state='pending'").run(run.id)
-    db.prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id=? AND state IN ('waiting','pending','queued')").run(now, run.id)
+    if (!stopBeforeStart) {
+      db.prepare("UPDATE person_deliveries SET state='waiting',error='',updated_at=? WHERE execution_id=? AND state IN ('waiting','pending','queued')").run(now, run.id)
+    }
     if (run.occurrence_id) db.prepare('UPDATE person_occurrences SET state=? WHERE id=?').run(run.state === 'queued' ? 'interrupted' : 'stopping', run.occurrence_id)
   }
   return { task: getPersonTask(userId, taskId), execution: getPersonExecution(userId, executionId) }
@@ -60,7 +74,16 @@ export function acknowledgePersonStop(run: PersonExecution): Promise<void> {
     personTransaction(() => {
       const changed = personDb().prepare("UPDATE person_executions SET state='interrupted',lease_until=0,updated_at=? WHERE id=? AND generation=? AND state='stopping'")
         .run(Date.now(), run.id, run.generation)
-      if (changed.changes && run.occurrence_id) personDb().prepare("UPDATE person_occurrences SET state='interrupted' WHERE id=?").run(run.occurrence_id)
+      if (changed.changes) {
+        personDb().prepare("UPDATE person_executions SET error=? WHERE id=? AND state='interrupted' AND error=''")
+          .run('Task stopped before completion', run.id)
+        personEvent(getPersonExecution(run.owner_user_id, run.id), 'run.interrupted', {
+          execution_id: run.id,
+          error: 'Task stopped before completion',
+        })
+        if (run.occurrence_id) personDb().prepare("UPDATE person_occurrences SET state='interrupted' WHERE id=?").run(run.occurrence_id)
+        readyPersonDelivery(getPersonExecution(run.owner_user_id, run.id))
+      }
     })
     personUpdated(run.owner_user_id)
   }).finally(() => stopping.delete(run.id))
