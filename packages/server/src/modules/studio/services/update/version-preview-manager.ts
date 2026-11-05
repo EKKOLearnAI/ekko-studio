@@ -1,8 +1,9 @@
 import { isStudioPackageName, readStudioPackageInfo, type StudioPackageName } from '../package-info'
 import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process'
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { appendFileSync, chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { createServer } from 'net'
 import { delimiter, dirname, extname, join, resolve } from 'path'
+import { tmpdir } from 'os'
 
 export interface UpdateRuntimeDependencies {
   getWebUiHome: () => string
@@ -197,10 +198,87 @@ function execFileText(
   })
 }
 
+const GITHUB_AUTH_TIMEOUT_MS = 3_000
+
+export async function resolveGitHubToken(): Promise<string | null> {
+  for (const key of ['GITHUB_TOKEN', 'GH_TOKEN']) {
+    const value = process.env[key]?.trim()
+    if (value) return value
+  }
+
+  try {
+    const value = (await execFileText('gh', ['auth', 'token'], {
+      timeout: GITHUB_AUTH_TIMEOUT_MS,
+      maxBuffer: 64 * 1024,
+    })).trim()
+    return value || null
+  } catch {
+    return null
+  }
+}
+
+function redactSecret(value: unknown, secret?: string | null): string {
+  const text = value instanceof Error ? value.message : String(value ?? '')
+  return secret ? text.split(secret).join('[REDACTED]') : text
+}
+
+type GitHubAuthContext = {
+  env: NodeJS.ProcessEnv
+  cleanup: () => void
+  token: string | null
+}
+
+async function createGitHubAuthContext(): Promise<GitHubAuthContext> {
+  const token = await resolveGitHubToken()
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+  if (!token) return { env, cleanup: () => {}, token: null }
+
+  const directory = mkdtempSync(join(tmpdir(), 'hermes-preview-git-'))
+  const askpassPath = join(directory, process.platform === 'win32' ? 'askpass.cmd' : 'askpass.sh')
+  const askpass = process.platform === 'win32'
+    ? '@echo off\r\nif "%~1"=="Username for *" (echo x-access-token) else (echo %GITHUB_ASKPASS_TOKEN%)\r\n'
+    : '#!/bin/sh\ncase "$1" in\n  *Username*) printf "%s\\n" "x-access-token" ;;\n  *) printf "%s\\n" "$GITHUB_ASKPASS_TOKEN" ;;\nesac\n'
+  writeFileSync(askpassPath, askpass, { encoding: 'utf-8', mode: 0o700 })
+  if (process.platform !== 'win32') chmodSync(askpassPath, 0o700)
+  env.GIT_ASKPASS = askpassPath
+  env.GITHUB_ASKPASS_TOKEN = token
+
+  let cleaned = false
+  return {
+    env,
+    token,
+    cleanup: () => {
+      if (cleaned) return
+      cleaned = true
+      delete env.GITHUB_ASKPASS_TOKEN
+      delete env.GIT_ASKPASS
+      rmSync(directory, { recursive: true, force: true })
+    },
+  }
+}
+
+async function withGitHubAuth<T>(work: (context: GitHubAuthContext) => Promise<T>): Promise<T> {
+  const context = await createGitHubAuthContext()
+  try {
+    return await work(context)
+  } catch (error) {
+    const message = redactSecret(error instanceof Error ? error.message : error, context.token)
+    if (error && typeof error === 'object') {
+      ;(error as any).message = message
+      if ('stderr' in error) (error as any).stderr = redactSecret((error as any).stderr, context.token)
+      if ('stdout' in error) (error as any).stdout = redactSecret((error as any).stdout, context.token)
+    }
+    throw error
+  } finally {
+    context.cleanup()
+  }
+}
+
 async function listPreviewTagsWithGitAsync(): Promise<PreviewTagRef[]> {
-  const output = await execFileText('git', ['ls-remote', '--tags', '--refs', getPreviewRepoGitUrl()], {
+  const output = await withGitHubAuth(context => execFileText('git', ['ls-remote', '--tags', '--refs', getPreviewRepoGitUrl()], {
     timeout: 8_000,
-  })
+    env: context.env,
+  }))
   return parsePreviewTagRefs(output)
 }
 
@@ -851,19 +929,20 @@ function assertTagRef(tag: unknown): string {
 }
 
 async function runGitAsync(args: string[], cwd?: string) {
-  return execFileText('git', args, {
+  return withGitHubAuth(context => execFileText('git', args, {
     cwd,
     timeout: 5 * 60 * 1000,
-  })
+    env: context.env,
+  }))
 }
 
 function networkErrorMessage(err: any): string {
-  const detail = err.stderr?.toString() || err.message || String(err)
+  const detail = redactSecret(err.stderr?.toString() || err.message || String(err))
   return `Unable to connect to GitHub. Please check your network or proxy settings. ${detail}`
 }
 
 function errorMessage(err: any): string {
-  return err.stderr?.toString() || err.message || String(err)
+  return redactSecret(err.stderr?.toString() || err.message || String(err))
 }
 
 function queuePreviewAction(
@@ -907,16 +986,46 @@ function previewActionAccepted(ctx: any) {
   ctx.body = previewPayload({ success: true, accepted: true })
 }
 
-async function downloadGithubZip(ref: string, targetDir: string, type: 'tag' | 'branch' = 'tag') {
+export async function downloadGithubZip(ref: string, targetDir: string, type: 'tag' | 'branch' = 'tag') {
   const { owner, repo } = getPreviewGithubRepoParts()
   const refKind = type === 'branch' ? 'heads' : 'tags'
   const archiveKind = process.platform === 'win32' ? 'zip' : 'tar.gz'
-  const url = `https://codeload.github.com/${owner}/${repo}/${archiveKind}/refs/${refKind}/${encodeURIComponent(ref)}`
-  appendPreviewActionLog(`download archive: ${url}`)
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'hermes-web-ui-preview' },
-    signal: AbortSignal.timeout(60_000),
-  })
+  const token = await resolveGitHubToken()
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}/zipball/${encodeURIComponent(ref)}`
+  const codeloadUrl = `https://codeload.github.com/${owner}/${repo}/${archiveKind}/refs/${refKind}/${encodeURIComponent(ref)}`
+  const headers: Record<string, string> = { 'User-Agent': 'hermes-web-ui-preview' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  appendPreviewActionLog(`download archive: ${apiUrl}`)
+
+  let url = apiUrl
+  let res: Response | undefined
+  for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
+    res = await fetch(url, {
+      headers: { ...headers },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(60_000),
+    })
+    if (res.status < 300 || res.status >= 400) break
+    const location = res.headers.get('location')
+    if (!location) throw new Error(`GitHub archive redirect missing location: HTTP ${res.status}`)
+    url = new URL(location, url).toString()
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase() === 'authorization') delete headers[key]
+    }
+  }
+  if (!res) throw new Error('GitHub archive request did not return a response')
+  if (res.status >= 300 && res.status < 400) throw new Error('Too many GitHub archive redirects')
+  if (!res.ok) {
+    if (url === apiUrl) {
+      url = codeloadUrl
+      appendPreviewActionLog(`GitHub API archive unavailable, trying codeload: ${url}`)
+      res = await fetch(url, {
+        headers: token ? { 'User-Agent': 'hermes-web-ui-preview', Authorization: `Bearer ${token}` } : { 'User-Agent': 'hermes-web-ui-preview' },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(60_000),
+      })
+    }
+  }
   if (!res.ok) throw new Error(`Failed to download GitHub archive: HTTP ${res.status}`)
 
   const tmpRoot = `${targetDir}.download`
@@ -960,7 +1069,7 @@ async function downloadGithubZip(ref: string, targetDir: string, type: 'tag' | '
   }
 }
 
-async function clonePreview(ref: string) {
+export async function clonePreview(ref: string) {
   const previewDir = getPreviewDir()
   appendPreviewActionLog(`prepare preview clone for tag: ${ref}`)
   rmSync(previewDir, { recursive: true, force: true })
@@ -977,7 +1086,7 @@ async function clonePreview(ref: string) {
   }
 }
 
-async function checkoutPreview(ref: string) {
+export async function checkoutPreview(ref: string) {
   const previewDir = getPreviewDir()
   appendPreviewActionLog(`checkout preview tag: ${ref}`)
   if (!existsSync(previewDir)) {
@@ -989,7 +1098,7 @@ async function checkoutPreview(ref: string) {
       appendPreviewActionLog(`git checkout --force ${ref}`)
       await runGitAsync(['checkout', '--force', ref], previewDir)
     } catch (err: any) {
-      appendPreviewActionLog(`git checkout failed, replacing with GitHub zip: ${err.stderr?.toString() || err.message || String(err)}`)
+      appendPreviewActionLog(`git checkout failed, replacing with GitHub zip: ${errorMessage(err)}`)
       rmSync(previewDir, { recursive: true, force: true })
       await downloadGithubZip(ref, previewDir, ref === PREVIEW_MAIN_REF ? 'branch' : 'tag')
     }
@@ -1136,8 +1245,11 @@ export async function previewTags(ctx: any) {
 
   try {
     appendPreviewActionLog('load tags with GitHub API')
+    const token = await resolveGitHubToken()
+    const headers: Record<string, string> = { 'User-Agent': 'hermes-web-ui-preview' }
+    if (token) headers.Authorization = `Bearer ${token}`
     const res = await fetch(`${getPreviewRepoApiUrl()}/tags?per_page=100`, {
-      headers: { 'User-Agent': 'hermes-web-ui-preview' },
+      headers,
       signal: AbortSignal.timeout(15_000),
     })
     if (!res.ok) {
