@@ -3989,6 +3989,9 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_17_1: "Fix missing Bot replies and false ‘Agent returned no output’ errors after background dispatch. Generate, stream and save a normal reply before waiting, even at the step limit; results still return automatically while tasks and collaboration stages remain active (#3699)",
+    new_0_8_17_2: "Do not send completion bells, notifications or App completion pushes while waiting for background tasks, for both direct sends and resumed chats. Preserve polling guards and callback deduplication; empty provider replies or forbidden tool calls still fail explicitly (#3699)",
+    new_0_8_17_3: "Show custom personal Bot names in message headers. Renaming updates existing messages and new replies and persists after reload; unnamed Bots use localized preset names, while avatars and animations retain the selected Bot appearance (#3700)",
     new_0_8_16_1: "Add a one-time group chat retirement notice recommending Bot. Acknowledgement is saved locally and synced across same-origin tabs; no retirement date or automatic data migration is provided (#3693)",
     new_0_8_16_2: "Yield Bot turns through the host while background tasks run, avoiding repeated polling that exhausts model steps. Deliver results without a browser connection and recover interrupted, stopped-before-start and restart-pending terminal callbacks (#3690)",
     new_0_8_16_3: "Append manual follow-ups directly to the original task without a coordinator-model decision. Include the current instructions and attachments in result and related acceptance callbacks so Bots interpret results against the latest request (#3691)",
@@ -4008,9 +4011,5 @@ export default {
     new_0_8_15_5: "Keep only the latest three frontend changelog versions and remove older entries from all 12 languages (#3662)",
     new_0_8_15_6: "Refresh the English and Chinese README screenshots with the running UI’s new-chat Agent carousel, visual workflow and complete Agent Manager; remove outdated example images (#3661)",
     new_0_8_15_7: "Store development and CI task reports and test output outside repository worktrees, with directory commands and read-only location checks; update coverage, browser reports and upload paths without automatically deleting files (#3657)",
-    new_0_8_14_1: "Fixed Bot task corrections opening a separate conversation: describe a revised goal or approach naturally and the owning Bot continues in the original task, Agent, workspace and execution conversation, preserving history and applicable constraints (#3656)",
-    new_0_8_14_2: "Task corrections stop previous work, linked verification and old result handling before continuing with the complete latest request; failed stops retain the request for retry and restart recovery, successive corrections keep the latest intent, and obsolete queued inputs and results cannot interfere (#3656)",
-    new_0_8_14_3: "Compatible additions remain queued in order in the same conversation; explicit Stop cancels a pending correction, while tasks with acceptance enabled retain their criteria and presets and undergo fresh verification for the revised requirements (#3656)",
-    new_0_8_14_4: "Task corrections keep chat history and the composer mounted, show stopping and error states, preserve drafts when stale requests are rejected, and protect saved corrections from ordinary queue removal (#3656)",
   },
 }

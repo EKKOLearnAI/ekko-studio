@@ -168,6 +168,9 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_17_1: "Arka plan görevleri başlatıldıktan sonra Bot yanıtının kaybolması ve yanlış ‘Agent returned no output’ hatası düzeltildi. Beklemeden önce normal bir yanıt oluşturulur, akışla gönderilir ve kaydedilir; adım sınırında da bu yanıt tamamlanır. Sonuçlar otomatik dönmeye devam ederken görevler ve iş birliği aşamaları etkin kalır (#3699)",
+    new_0_8_17_2: "Arka plan görevleri beklenirken hem doğrudan gönderimde hem de devam ettirilen sohbetlerde yanlış tamamlanma sesi, bildirimi veya App anlık bildirimi gönderilmez. Tekrarlanan sorgu koruması ve geri çağrı tekilleştirmesi korunur; sağlayıcının boş yanıtları veya yasak araç çağrıları açık hata vermeye devam eder (#3699)",
+    new_0_8_17_3: "Kişisel Bot mesaj başlıklarında özel adlar önceliklidir. Yeniden adlandırma mevcut mesajları ve yeni yanıtları günceller, yeniden yüklemeden sonra da korunur. Adsız Bot’lar yerelleştirilmiş hazır adları kullanır; avatar ve animasyonlar seçilen Bot görünümünü korur (#3700)",
     new_0_8_16_1: "Grup sohbetine Bot kullanımını öneren tek seferlik sonlandırma bildirimi eklendi. Onay yerelde kaydedilir ve aynı kökendeki sekmelerle eşitlenir; sonlandırma tarihi veya otomatik veri taşıma sunulmaz (#3693)",
     new_0_8_16_2: "Arka plan görevleri beklenirken ana süreç Bot turunu askıya alarak tekrarlanan sorguların model adımlarını tüketmesini önler. Tarayıcı bağlı olmasa da sonuçları iletir; kesinti, başlamadan durdurma ve yeniden başlatma sonrası son durum bildirimlerini kurtarır (#3690)",
     new_0_8_16_3: "Elle verilen devam talimatları koordinatör modelin kararını beklemeden asıl göreve eklenir. Sonuç ve ilgili doğrulama dönüşleri, Botun en son isteği dikkate alması için bu turun talimatlarını ve eklerini içerir (#3691)",
@@ -187,10 +190,6 @@ export default {
     new_0_8_15_5: "Arayüz değişiklik günlüğü son üç sürümle sınırlandırıldı ve eski kayıtlar 12 dilin tamamından kaldırıldı (#3662)",
     new_0_8_15_6: "İngilizce ve Çince README görüntüleri çalışan arayüzün yeni sohbet Agent karuseli, görsel iş akışı ve tam Agent Yöneticisi ile yenilendi; eski örnek görüntüler kaldırıldı (#3661)",
     new_0_8_15_7: "Geliştirme ve CI görev raporları ile test çıktıları depo worktree’lerinin dışında saklanıyor. Dizin komutları ve salt okunur konum denetimleri eklendi; kapsam, tarayıcı raporu ve yükleme yolları güncellendi. Dosyalar otomatik silinmiyor (#3657)",
-    new_0_8_14_1: "Bot görevi düzeltilince ayrı konuşma açılması giderildi: Yeni hedefi veya yaklaşımı doğal dille anlatın; sorumlu Bot aynı görev, Agent, çalışma alanı ve yürütme konuşmasında geçmişi ve geçerli kısıtları koruyarak devam eder (#3656)",
-    new_0_8_14_2: "Görev düzeltmeleri, en son tam isteğe geçmeden önce önceki işin, bağlı doğrulamanın ve eski sonuç işlemenin durmasını bekler. Durdurma başarısız olursa istek yeniden deneme ve yeniden başlatma sonrası kurtarma için saklanır; ardışık düzeltmelerde son istek geçerlidir, eski kuyruk girdileri ve sonuçlar müdahale etmez (#3656)",
-    new_0_8_14_3: "Uyumlu ek istekler aynı konuşmada sırayla bekler; açık Durdur isteği bekleyen düzeltmeyi iptal eder. Kabul denetimi etkin görevler ölçütlerini ve ön ayarlarını korur, değişen gereksinimler için yeniden doğrulanır (#3656)",
-    new_0_8_14_4: "Görev düzeltmeleri sohbet geçmişini ve yazma alanını korur, durdurma ve hata durumlarını gösterir, eski istek reddedildiğinde taslakları saklar ve kayıtlı düzeltmeleri normal kuyruk silme işlemlerinden korur (#3656)",
   },
 
   profiles: {
