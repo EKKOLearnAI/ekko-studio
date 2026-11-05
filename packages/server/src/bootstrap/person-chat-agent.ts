@@ -116,7 +116,8 @@ export function createPersonAgent(options: PersonChatAgentOptions) {
       try {
         const result = await runtime.run(isolated({ ...input, messages,
           onToolBatchComplete: () => taskWait?.finishBatch()
-            ? {role:'assistant',content:'',finishReason:'waiting_for_tasks'} : undefined,
+            ? { finalReply: 'Background work or a result callback is pending. Write your normal brief reply to the user in their language, acknowledging only the work actually dispatched or continued and any verified progress. Preserve relevant findings already obtained. Explain that the remaining result will be reported when it returns; do not claim the overall task is complete. Do not call tools, poll, invent results or describe internal routing. This reply ends only the current turn, not the task or collaboration stage.',
+                finishReason: 'waiting_for_tasks' } : undefined,
           onEvent: event => {
             if ('runId' in event) runId = event.runId
             if ('step' in event) step = event.step

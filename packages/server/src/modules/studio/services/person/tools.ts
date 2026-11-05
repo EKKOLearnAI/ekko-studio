@@ -74,7 +74,7 @@ export function personTools(userId: number, role: PersonRole, taskId?: string, s
       return personEvents(userId, run.id, Number(args.after) || 0).map((event: any) => ({ ...event, payload: event.payload.slice(0,1200) })).slice(0,8)
     }),
   ]
-  if (role === 'main') tools.push(personTool('bot_tasks_wait', 'After dispatching all independent work, yield this turn to automatic task callbacks. Never poll task status or events just to wait. This does not complete tasks or stages. No pending callback means no wait.', {}, [], async (_args,origin) => {
+  if (role === 'main') tools.push(personTool('bot_tasks_wait', 'After dispatching all independent work, request a brief tool-free reply to the user, then yield to automatic task callbacks. Never poll task status or events just to wait. This does not complete tasks or stages. No pending callback means no wait.', {}, [], async (_args,origin) => {
     const pending = personTaskWaitState(userId,sessionId || '',origin?.returnExecutionId,origin?.stage)
     return {waiting:pending.length > 0,execution_ids:pending.map(target => target.executionId)}
   }))

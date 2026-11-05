@@ -146,8 +146,11 @@ export interface AgentRuntimeRunInput {
   onSkillReviewUsage?: (input: SkillReviewUsageEvent) => void
   /** Synchronous durable commit, called before plan.updated is published. Throw to reject an update. */
   onPlanUpdate?: (plan: import('../tools/plan').AgentTaskPlan) => void
-  /** Trusted host completion after every call in a tool batch has settled and been recorded. */
-  onToolBatchComplete?: () => AgentOutputMessage | undefined
+  /**
+   * Trusted host decision after the entire tool batch has settled. A finalReply
+   * requests one tool-free model reply, even at maxSteps, instead of cutting off text.
+   */
+  onToolBatchComplete?: () => AgentOutputMessage | { finalReply: string; finishReason?: string } | undefined
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 

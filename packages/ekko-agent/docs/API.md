@@ -2981,7 +2981,7 @@ export interface AgentRuntimeRunInput {
   logContext?: EkkoRuntimeLogContext
   onSkillReviewUsage?: (input: SkillReviewUsageEvent) => void
   onPlanUpdate?: (plan: import('../tools/plan').AgentTaskPlan) => void
-  onToolBatchComplete?: () => AgentOutputMessage | undefined
+  onToolBatchComplete?: () => AgentOutputMessage | { finalReply: string; finishReason?: string } | undefined
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 

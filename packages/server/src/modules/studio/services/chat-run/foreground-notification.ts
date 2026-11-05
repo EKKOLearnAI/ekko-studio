@@ -11,7 +11,8 @@ export function foregroundNotification(event: string, value: Record<string, unkn
     return { id: `${sessionId}:${requestKind}:${id}`, sessionId, kind: 'approval', resolved: event.endsWith('.resolved'), timestamp: now }
   }
   if (!['run.completed', 'run.failed'].includes(event) || Number(value.queue_remaining || 0) > 0
-    || value.interrupted === true || value.stop_reason === 'queue_insertion' || value.stop_reason === 'aborted') return null
+    || value.interrupted === true || value.stop_reason === 'queue_insertion' || value.stop_reason === 'aborted'
+    || value.stop_reason === 'waiting_for_tasks') return null
   return { id: `${sessionId}:run:${id}`, sessionId, kind: event === 'run.failed' ? 'failure' : 'completion', resolved: false, timestamp: now }
 }
 
