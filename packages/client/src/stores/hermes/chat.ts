@@ -85,6 +85,8 @@ export interface Attachment {
   type: string
   size: number
   url: string
+  /** Original uploaded path when this attachment came from a persisted message. */
+  path?: string
   file?: File
   /** Structured context sent to the model but rendered collapsed in the UI. */
   context?: string
@@ -392,6 +394,7 @@ export interface MessageReference {
   content: string
   sender?: string
   senderId?: string
+  attachments?: Attachment[]
 }
 
 export { parseMessageReference } from '@/utils/content-blocks'
@@ -413,6 +416,22 @@ export function formatMessageWithReference(reference: MessageReference, content:
   const reply = content.trim()
   const referenceBlock = `${openTag}\n${quotedContent}\n</quoted_message>`
   return reply ? `${referenceBlock}\n\n${reply}` : referenceBlock
+}
+
+export async function buildReferencedMessageInput(
+  content: string,
+  reference?: MessageReference | null,
+  attachments?: Attachment[],
+  uploadedFiles?: { name: string; path: string }[],
+): Promise<ContentBlock[]> {
+  const submittedContent = reference
+    ? formatMessageWithReference(reference, content)
+    : content.trim()
+  return buildContentBlocks(
+    submittedContent,
+    [...(reference?.attachments || []), ...(attachments || [])],
+    uploadedFiles,
+  )
 }
 
 export interface PendingApproval {
@@ -633,17 +652,18 @@ export async function buildContentBlocks(
   }
 
   // Add attachment blocks using uploaded file paths
-  if (attachments && attachments.length > 0 && uploadedFiles) {
-    for (let i = 0; i < uploadedFiles.length; i++) {
-      const uploaded = uploadedFiles[i]
-      const attachment = attachments[i]
+  if (attachments && attachments.length > 0 && (uploadedFiles || attachments.some(attachment => attachment.path))) {
+    for (const attachment of attachments) {
+      const uploaded = uploadedFiles?.find(file => file.name === attachment.name)
+      const path = attachment.path || uploaded?.path
+      if (!path) continue
 
       // Check if it's an image
       if (attachment?.type.startsWith('image/')) {
         blocks.push({
           type: 'image',
-          name: uploaded.name,
-          path: uploaded.path,
+          name: attachment.name,
+          path,
           media_type: attachment.type,
           ...(attachment.context?.trim() ? { context: attachment.context.trim() } : {}),
           ...(attachment.videoFrameFor ? { video_frame: true } : {}),
@@ -652,8 +672,8 @@ export async function buildContentBlocks(
         // Other files
         blocks.push({
           type: 'file',
-          name: uploaded.name,
-          path: uploaded.path,
+          name: attachment.name,
+          path,
           media_type: attachment?.type,
           ...(attachment?.context?.trim() ? { context: attachment.context.trim() } : {}),
         })
@@ -3819,6 +3839,10 @@ function createChatState(scopedSessionId?: string) {
     }
 
     const visibleAttachments = attachments?.filter(attachment => !attachment.videoFrameFor)
+    const inputAttachments = [
+      ...(messageReference?.attachments || []),
+      ...(attachments || []),
+    ]
     const userMsg: Message = {
       id: uid(),
       role: isSessionSlashCommand ? 'command' : 'user',
@@ -3851,9 +3875,9 @@ function createChatState(scopedSessionId?: string) {
       // Build input in Anthropic format
       let input: string | ContentBlock[]
       let displayInput: string | ContentBlock[] | undefined
-      if (attachments && attachments.length > 0) {
+      if (inputAttachments.length > 0) {
         // Has attachments: upload first, then build content blocks
-        const uploaded = await uploadFiles(attachments)
+        const uploaded = await uploadFiles(attachments || [])
         if (generation !== runtimeGeneration) return
 
         // Update attachment URLs on the user message for display
@@ -3878,10 +3902,10 @@ function createChatState(scopedSessionId?: string) {
         }
 
         // Build content blocks with uploaded file paths
-        input = await buildContentBlocks(submittedContent, attachments, uploaded)
+        input = await buildContentBlocks(submittedContent, inputAttachments, uploaded)
         if (generation !== runtimeGeneration) return
-        if (attachments.some(attachment => attachment.context?.trim())) {
-          displayInput = await buildContentBlocks(submittedContent, attachments, uploaded, false)
+        if (inputAttachments.some(attachment => attachment.context?.trim())) {
+          displayInput = await buildContentBlocks(submittedContent, inputAttachments, uploaded, false)
           if (generation !== runtimeGeneration) return
         }
       } else {

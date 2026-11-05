@@ -244,11 +244,23 @@ function referenceBubbleContent() {
   const content = quotableContent.value
   const sessionId = chatStore.activeSessionId
   if (!content || !sessionId) return
+  const attachments = [
+    ...(props.message.attachments || []),
+    ...(contentFiles.value || []),
+  ].filter(file => file.type === 'image' && (file.path || file.url)).map((file, index) => ({
+    id: `${props.message.id}-reference-${index}`,
+    name: file.name,
+    type: 'image/*',
+    size: 0,
+    url: file.url || (file.path ? getDownloadUrl(file.path, file.name) : ''),
+    path: file.path,
+  }))
   chatStore.setMessageReference(sessionId, {
     id: props.message.id,
     role: props.message.role as 'user' | 'assistant',
     content,
     sender: props.message.role,
+    attachments: attachments.length ? attachments : undefined,
   })
 }
 
