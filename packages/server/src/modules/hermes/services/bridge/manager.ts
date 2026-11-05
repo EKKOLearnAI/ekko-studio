@@ -8,6 +8,20 @@ import { OPENROUTER_APP_HEADERS } from '../../../studio/public/openrouter-attrib
 import { resolveHermesInstallationEnvironment } from '../runtime/installation'
 import { detectHermesHome, getHermesBin } from '../runtime/path'
 import { AgentBridgeClient, DEFAULT_AGENT_BRIDGE_ENDPOINT } from './client'
+import {
+  bridgeOwnerRecordDir,
+  bridgeOwnerRecordPath,
+  currentProcessIdentity,
+  ensurePrivateRecordDir,
+  posixDescendantIdentities,
+  posixProcessInfo,
+  readBridgeOwnerRecord,
+  reapOrphanedOwnedBridge,
+  removeBridgeOwnerRecord,
+  sameProcessRuns,
+  writeBridgeOwnerRecord,
+  type ProcessIdentity,
+} from './orphan-reaper'
 
 const DEFAULT_AGENT_BRIDGE_STARTUP_TIMEOUT_MS = 120000
 const DEFAULT_AGENT_BRIDGE_RESTART_DELAY_MS = 1000
@@ -512,6 +526,36 @@ function posixDescendantPids(rootPid: number): number[] {
   }
 }
 
+let cachedSelfIdentity: ProcessIdentity | null = null
+
+/** This server's pid and start time. Only a successful lookup is cached. */
+function selfIdentity(): ProcessIdentity | null {
+  if (!cachedSelfIdentity) cachedSelfIdentity = currentProcessIdentity()
+  return cachedSelfIdentity
+}
+
+/**
+ * Stop an orphaned bridge tree. Every process is checked again (pid plus start
+ * time) right before it is signalled, so a pid that was reused meanwhile is
+ * never touched. Children go first, then the root.
+ */
+function killOrphanedBridgeTree(root: ProcessIdentity): void {
+  const runs = (identity: ProcessIdentity) => sameProcessRuns(identity, { processInfo: posixProcessInfo }) === true
+  // Throws when the process table cannot be read: then nothing is signalled.
+  const descendants = posixDescendantIdentities(root.pid)
+  if (!runs(root)) return
+  for (const identity of descendants) {
+    if (!runs(identity)) continue
+    try {
+      process.kill(identity.pid, 'SIGKILL')
+    } catch {}
+  }
+  if (!runs(root)) return
+  try {
+    process.kill(root.pid, 'SIGKILL')
+  } catch {}
+}
+
 function forceKillBridgeEndpointProcesses(endpoint: string): void {
   for (const pid of bridgePidsForEndpoint(endpoint)) {
     try {
@@ -993,6 +1037,13 @@ export class AgentBridgeManager {
 
     const script = bridgeScriptPath()
     const command = resolveAgentBridgeCommand(this.options)
+    try {
+      await this.reapOrphanedBridge()
+    } catch (err) {
+      // Retry later within the normal startup attempt cap, as for other startup failures.
+      this.scheduleRestart(null, null, true)
+      throw err
+    }
     await this.prepareEndpoint()
     const args = [...command.argsPrefix, script, '--endpoint', this.endpoint]
     const agentRoot = command.agentRoot
@@ -1013,8 +1064,11 @@ export class AgentBridgeManager {
     this.child = child
     this.attached = false
     this.ready = false
+    this.recordBridgeOwner(child.pid, script)
 
     child.once('exit', (code, signal) => {
+      const recordPath = this.ownerRecordPath()
+      if (recordPath && child.pid) removeBridgeOwnerRecord(recordPath, child.pid)
       const isCurrentChild = this.child === child
       if (!isCurrentChild) {
         logger.warn('[agent-bridge] stale managed child exit ignored code=%s signal=%s pid=%s', code, signal, child.pid)
@@ -1098,6 +1152,101 @@ export class AgentBridgeManager {
     }
   }
 
+  /** Path of this endpoint's owner record, or null when records cannot be kept safely. */
+  private ownerRecordPath(): string | null {
+    if (process.platform === 'win32') return null
+    const dir = bridgeOwnerRecordDir()
+    return ensurePrivateRecordDir(dir) ? bridgeOwnerRecordPath(this.endpoint, dir) : null
+  }
+
+  /**
+   * Remember which bridge this server spawned, so that a restarted server can
+   * stop it if this server dies without stopping it (see orphan-reaper.ts).
+   */
+  private recordBridgeOwner(bridgePid: number | undefined, script: string): void {
+    const path = this.ownerRecordPath()
+    const server = selfIdentity()
+    const bridgeInfo = bridgePid ? posixProcessInfo(bridgePid) : 'absent'
+    const bridgeStart = typeof bridgeInfo === 'object' ? bridgeInfo.start : undefined
+    if (!path || !server || !bridgePid || !bridgeStart) return
+    try {
+      writeBridgeOwnerRecord(path, {
+        version: 2,
+        endpoint: this.endpoint,
+        script,
+        bridge: { pid: bridgePid, start: bridgeStart },
+        server,
+        createdAt: new Date().toISOString(),
+      })
+    } catch (err) {
+      logger.debug(err, '[agent-bridge] could not write bridge owner record')
+    }
+  }
+
+  /**
+   * After attaching to a bridge whose recorded server is gone, take over its
+   * record. A record of a server that still runs is left alone: that server
+   * owns the bridge.
+   */
+  private adoptBridgeOwner(): void {
+    const path = this.ownerRecordPath()
+    const server = selfIdentity()
+    if (!path || !server) return
+    try {
+      const record = readBridgeOwnerRecord(path)
+      if (!record || record.endpoint !== this.endpoint) return
+      if (record.server.pid === server.pid && record.server.start === server.start) return
+      if (sameProcessRuns(record.server, { processInfo: posixProcessInfo }) !== false) return
+      writeBridgeOwnerRecord(path, { ...record, server })
+    } catch (err) {
+      logger.debug(err, '[agent-bridge] could not adopt bridge owner record')
+    }
+  }
+
+  /**
+   * Called only after attaching to the endpoint failed: stop a bridge that a
+   * previous, now dead, server of this user spawned for the same endpoint.
+   * Without this, the new broker unlinks the socket and the old process tree
+   * keeps running unreachable. The record is removed only when the old bridge
+   * is confirmed gone, so a failed kill is retried by the next start.
+   */
+  private async reapOrphanedBridge(): Promise<void> {
+    const path = this.ownerRecordPath()
+    const server = selfIdentity()
+    if (!path || !server) return
+    const result = reapOrphanedOwnedBridge(path, this.endpoint, server, {
+      processInfo: posixProcessInfo,
+      killProcessTree: killOrphanedBridgeTree,
+    })
+    if (!result.reaped) {
+      if (result.reason === 'lookup-failed') {
+        // Ownership is unknown: a new broker could orphan a bridge that still runs. Retry later.
+        throw new Error(`could not read the process table to check for an orphaned agent bridge on ${this.endpoint}`)
+      }
+      return
+    }
+    const record = readBridgeOwnerRecord(path)
+    const bridge = record?.bridge.pid === result.bridgePid ? record.bridge : null
+    const stillRuns = () => Boolean(bridge) && sameProcessRuns(bridge as ProcessIdentity, { processInfo: posixProcessInfo }) !== false
+    const deadline = Date.now() + DEFAULT_AGENT_BRIDGE_FORCE_KILL_WAIT_MS
+    while (stillRuns() && Date.now() < deadline) {
+      await new Promise(resolveWait => setTimeout(resolveWait, 50))
+    }
+    if (stillRuns()) {
+      // Do not start a second bridge next to one we could not stop: the new
+      // broker would unlink the socket and orphan it for good. The record is
+      // kept, so the next start attempt tries again.
+      throw new Error(`orphaned agent bridge pid=${result.bridgePid} left by dead server pid=${result.serverPid} did not stop`)
+    }
+    removeBridgeOwnerRecord(path, result.bridgePid)
+    logger.warn(
+      '[agent-bridge] stopped orphaned bridge pid=%d left by dead server pid=%d on %s',
+      result.bridgePid,
+      result.serverPid,
+      this.endpoint,
+    )
+  }
+
   private async attachExistingBridge(): Promise<boolean> {
     try {
       const client = new AgentBridgeClient({
@@ -1110,6 +1259,7 @@ export class AgentBridgeManager {
       this.attached = true
       this.ready = true
       this.restartAttempts = 0
+      this.adoptBridgeOwner()
       logger.info('[agent-bridge] attached to existing bridge at %s', this.endpoint)
       return true
     } catch (err) {
