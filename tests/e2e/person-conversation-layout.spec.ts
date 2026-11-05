@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 
 const selection = { runtime: 'codex', mode: 'scoped', profile: 'default', provider: 'fixture', model: 'test-model', reasoningEffort: '' }
 async function setup(page: Page, fullShell = false, widths = { agent: 480, tools: 600 }) {
-  const errors: string[] = [], posts: { path: string; body: any }[] = [], files: string[] = [], taskMutations: string[] = []
+  const errors: string[] = [], posts: { path: string; body: any }[] = [], files: string[] = [], taskMutations: string[] = [], pinMutations: { path: string; body: any }[] = []
   const delayed = new Map<string, { promise: Promise<void>; release: () => void }>()
   function hold(path: string) {
     let release!: () => void
@@ -58,7 +58,22 @@ async function setup(page: Page, fullShell = false, widths = { agent: 480, tools
     else if (u.pathname === '/api/auth/avatar') json = { avatar: '' }
     else if (u.pathname === '/api/hermes/available-models') json = { groups: [{ provider: 'fixture', models: ['test-model'], label: 'Fixture' }], allProviders: [], default: 'test-model', default_provider: 'fixture' }
     else if (u.pathname.includes('/profiles')) json = { profiles: [{ name: 'default', active: true }] }
-    else if (u.pathname === '/api/studio/person/conversations') json = { sessions, next_offset: null }
+    else if (u.pathname.endsWith('/pin') && u.pathname.startsWith('/api/studio/sessions/')) {
+      const id = decodeURIComponent(u.pathname.split('/').at(-2)!)
+      const session = sessions.find(item => item.id === id)
+      if (!session) return route.fulfill({ status: 404, json: { error: 'Conversation not found' } })
+      pinMutations.push({ path: u.pathname, body: request.postDataJSON() })
+      session.is_pinned = Boolean(request.postDataJSON()?.is_pinned)
+      json = { ok: true, is_pinned: session.is_pinned }
+    } else if (u.pathname === '/api/studio/person/conversations') {
+      json = {
+        sessions: [...sessions].sort((left, right) =>
+          Number(Boolean(right.is_pinned)) - Number(Boolean(left.is_pinned))
+          || Number(right.last_active || 0) - Number(left.last_active || 0)
+          || left.id.localeCompare(right.id)),
+        next_offset: null,
+      }
+    }
     else if (u.pathname === '/api/studio/person') {
       const session = sessions.find(s => s.id === u.searchParams.get('session_id'))
       const ownTasks = tasks.filter(t => t.session_id === session?.id)
@@ -81,7 +96,7 @@ async function setup(page: Page, fullShell = false, widths = { agent: 480, tools
   await page.route('**/__conversation_layout__', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><html lang="zh"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div><script type="module" src="${entry}"></script></body></html>` }))
   await page.goto('/__conversation_layout__' + (fullShell ? '#/person' : ''))
   await expect(page.locator('.person-title')).toHaveText('日常助手')
-  return { errors, posts, files, tasks, hold, taskMutations }
+  return { errors, posts, files, tasks, sessions, hold, taskMutations, pinMutations }
 }
 async function chooseTask(page: Page, title: string) {
   await page.getByRole('button', { name: /日常助手.*Agent/ }).click()
@@ -207,6 +222,35 @@ test('does not treat a failed or stale Bot snapshot as confirmation of no tasks'
   await evidence(page, 'empty-stale-ignored', { taskMutations: state.taskMutations, errors: state.errors })
   expect(state.taskMutations).toEqual([])
   expect(state.errors).toEqual([])
+})
+
+test('pins Person conversations ahead of newer unpinned conversations and persists the pin state', async ({ page }) => {
+  const state = await setup(page, true)
+  state.sessions[0].title = 'Older Bot'
+  state.sessions[0].last_active = 100
+  state.sessions[1].title = 'Newer Bot'
+  state.sessions[1].last_active = 200
+  state.sessions[2].last_active = 50
+  await page.reload()
+  const rows = () => page.locator('.person-sidebar .session-item')
+  await expect(rows()).toHaveCount(4)
+  await expect(rows().nth(0)).toContainText('Newer Bot')
+  await expect(rows().nth(1)).toContainText('Older Bot')
+  await rows().filter({ hasText: 'Older Bot' }).click({ button: 'right' })
+  await page.locator('.n-dropdown-option:visible').filter({ hasText: /^置顶$|^Pin$/ }).click()
+  await expect(rows().nth(0)).toContainText('Older Bot')
+  await expect(rows().nth(0).locator('.session-item-pin')).toBeVisible()
+  expect(state.pinMutations.at(-1)).toEqual({
+    path: '/api/studio/sessions/person-main-a/pin',
+    body: { is_pinned: true },
+  })
+  await rows().filter({ hasText: 'Older Bot' }).click({ button: 'right' })
+  const unpin = page.locator('.n-dropdown-option:visible').filter({ hasText: /^取消置顶$|^Unpin$/ })
+  await expect(unpin).toBeVisible()
+  await expect(unpin).not.toHaveClass(/n-dropdown-option--disabled/)
+  await page.reload()
+  await expect(rows().nth(0)).toContainText('Older Bot')
+  await expect(rows().nth(0).locator('.session-item-pin')).toBeVisible()
 })
 
 test('does not open the Agent panel for a Bot whose tasks have no execution to view', async ({ page }) => {

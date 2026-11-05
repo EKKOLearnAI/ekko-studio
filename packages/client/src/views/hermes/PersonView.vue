@@ -8,7 +8,7 @@ import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
 import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import SessionListItem from '@/components/hermes/chat/SessionListItem.vue'
 import { usePageSidebarState } from '@/composables/usePageSidebar'
-import { batchDeleteSessions, renameSession, type SessionSummary } from '@/api/studio/sessions'
+import { batchDeleteSessions, renameSession, setSessionPinned, type SessionSummary } from '@/api/studio/sessions'
 import { ref, nextTick, onMounted, onBeforeUnmount, computed, watch, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NInput, NButton, NAlert, NTabs, NTabPane, NDrawer, NDrawerContent, NTooltip, NModal, NPopconfirm, NDropdown, useMessage } from 'naive-ui'
@@ -98,6 +98,7 @@ const isNewConversation = computed(() => showNewConversation.value || (!!data.va
 const renameConversationId = ref<string | null>(null)
 const showConversationMenu = ref(false)
 const contextConversationId = ref<string | null>(null)
+const pinningConversationId = ref<string | null>(null)
 const conversationMenuX = ref(0)
 const conversationMenuY = ref(0)
 const showDeleteConversation = ref(false)
@@ -106,11 +107,23 @@ const batchMode = ref(false)
 const selectedConversationIds = ref(new Set<string>())
 const showBatchDeleteConfirm = ref(false)
 const conversationMenuOptions = computed(() => [
+  {
+    key: 'pin',
+    label: contextConversationId.value
+      ? (Boolean(conversations.value.find(session => session.id === contextConversationId.value)?.is_pinned)
+          ? t('chat.unpin')
+          : t('chat.pin'))
+      : t('chat.pin'),
+    disabled: pending.value || pinningConversationId.value === contextConversationId.value,
+  },
   { key: 'rename', label: t('chat.rename'), disabled: pending.value },
   { key: 'delete', label: t('common.delete'), disabled: pending.value },
   { key: 'batch', label: t('chat.toggleBatchMode'), disabled: pending.value },
 ])
-const sidebarSessions = computed(() => conversations.value.map(mapHermesSession))
+const sidebarSessions = computed(() => [...conversations.value]
+  .sort((left, right) => Number(Boolean(right.is_pinned)) - Number(Boolean(left.is_pinned))
+    || (Number(right.last_active || 0) - Number(left.last_active || 0)))
+  .map(mapHermesSession))
 function resetConversationDraft() {
   newConversationBot.value = DEFAULT_PERSON_BOT_TYPE; newConversationName.value = selectedBotName.value
   newConversationModel.value = null; newConversationEffort.value = ''
@@ -145,7 +158,9 @@ function selectConversationAction(action: string) {
   if (!session || pending.value) return
   error.value = ''
   if (action !== 'batch' && isMobile.value) showSessions.value = false
-  if (action === 'rename') {
+  if (action === 'pin') {
+    void toggleConversationPinned(session)
+  } else if (action === 'rename') {
     renameConversationId.value = session.id
     conversationName.value = session.title || ''
     showCreate.value = true
@@ -156,6 +171,18 @@ function selectConversationAction(action: string) {
     batchMode.value = true
     selectedConversationIds.value = new Set([session.id])
   }
+}
+async function toggleConversationPinned(session: SessionSummary) {
+  if (pending.value || pinningConversationId.value) return
+  pinningConversationId.value = session.id
+  try {
+    const result = await setSessionPinned(session.id, !Boolean(session.is_pinned))
+    session.is_pinned = result.is_pinned
+    await loadConversations()
+  } catch (e) {
+    error.value = String(e)
+    message.error(t('common.saveFailed'))
+  } finally { pinningConversationId.value = null }
 }
 function toggleBatchMode() {
   if (pending.value) return
@@ -672,7 +699,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           @select-all="selectAllConversations" @delete="deleteSelectedConversations" @cancel="toggleBatchMode" />
       </template>
       <template #default>
-            <SessionListItem v-for="session in sidebarSessions" :key="session.id" :session="session" :active="session.id === selectedSessionId" :pinned="false" :can-delete="!isMobile" :delete-disabled="pending"
+            <SessionListItem v-for="session in sidebarSessions" :key="session.id" :session="session" :active="session.id === selectedSessionId" :pinned="Boolean(session.isPinned)" :can-delete="!isMobile" :delete-disabled="pending"
               :selectable="batchMode" :selected="selectedConversationIds.has(session.id)" @toggle-select="toggleConversationSelection(session.id)"
               single-line :show-profile="false" :show-time="false" :streaming="sessionStates.isWorking(session.id, chatStore.isSessionWorking(session.id))"
               :completed-unread="sessionStates.isUnread(session.id)" :to="router.resolve({ name: 'hermes.person', query: { session: session.id } }).href"
