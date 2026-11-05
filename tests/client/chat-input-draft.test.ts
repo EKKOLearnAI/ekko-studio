@@ -421,10 +421,19 @@ describe('ChatInput draft persistence', () => {
       id: 'assistant-1',
       role: 'assistant',
       content: 'A referenced assistant response',
+      attachments: [{
+        id: 'image-1',
+        name: 'reference.png',
+        type: 'image/png',
+        size: 1,
+        url: '/reference.png',
+        path: '/tmp/reference.png',
+      }],
     })
     await nextTick()
 
     expect(wrapper.get('.message-reference-preview').text()).toContain('A referenced assistant response')
+    expect(wrapper.get('.message-reference-thumb').attributes('src')).toBe('/reference.png')
     expect(wrapper.get('.message-reference-preview').element.parentElement?.classList.contains('input-wrapper')).toBe(false)
     expect(chatStore.activeMessageReference?.id).toBe('assistant-1')
 

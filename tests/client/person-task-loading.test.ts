@@ -7,12 +7,17 @@ import PersonTaskConversation from '@/components/hermes/person/PersonTaskConvers
 import SessionTasksDrawer from '@/components/hermes/tasks/SessionTasksDrawer.vue'
 
 const mocks = vi.hoisted(() => ({
-  request: vi.fn(), remove: vi.fn(), switchSession: vi.fn(), subscribers: new Set<(event: { session_id?: string }) => void>(),
+  request: vi.fn(), remove: vi.fn(), switchSession: vi.fn(), buildReferencedMessageInput: vi.fn(), uploadFiles: vi.fn(),
+  subscribers: new Set<(event: { session_id?: string }) => void>(),
   route: { query: {} as Record<string, string> },
 }))
 vi.mock('@/api/person', () => ({ personRequest: mocks.request, personTaskCanStop: () => false, stopPersonTask: vi.fn(), removePersonTaskMessage: mocks.remove }))
 vi.mock('@/api/studio/chat', () => ({ onPersonUpdated: (fn: (event: { session_id?: string }) => void) => { mocks.subscribers.add(fn); return () => mocks.subscribers.delete(fn) } }))
-vi.mock('@/stores/hermes/chat', () => ({ provideScopedChatStore: () => ({ ensureSessionLoaded: vi.fn(), switchSession: mocks.switchSession }), buildContentBlocks: vi.fn(), uploadFiles: vi.fn() }))
+vi.mock('@/stores/hermes/chat', () => ({
+  provideScopedChatStore: () => ({ ensureSessionLoaded: vi.fn(), switchSession: mocks.switchSession, activeMessageReference: null, clearMessageReference: vi.fn() }),
+  buildReferencedMessageInput: mocks.buildReferencedMessageInput,
+  uploadFiles: mocks.uploadFiles,
+}))
 vi.mock('@/api/studio/session-tasks', () => ({ fetchSessionTasks: vi.fn(), updateSessionTaskStatus: vi.fn() }))
 vi.mock('@/components/hermes/chat/MessageList.vue', () => ({ default: { template: '<div class="test-messages" />' } }))
 vi.mock('@/components/hermes/chat/ChatInput.vue', () => ({ default: { template: '<div class="test-input" />' } }))
@@ -37,7 +42,12 @@ const response = { task: { id: 'task', title: 'Loaded task', status: 'open', rev
 const row = (title: string) => ({ id: title, title, summary: 'Summary', status: 'open', updated_at: 1, session_id: 'main', selection_json: '{}' })
 const emitUpdate = () => { for (const fn of mocks.subscribers) fn({ session_id: 'main' }) }
 let wrapper: VueWrapper | undefined
-beforeEach(() => { mocks.request.mockReset(); mocks.remove.mockReset(); mocks.switchSession.mockReset().mockResolvedValue(true); mocks.subscribers.clear(); mocks.route = reactive({ query: {} }) })
+beforeEach(() => {
+  mocks.request.mockReset(); mocks.remove.mockReset(); mocks.switchSession.mockReset().mockResolvedValue(true)
+  mocks.buildReferencedMessageInput.mockReset().mockResolvedValue([{ type: 'text', text: 'quoted payload' }])
+  mocks.uploadFiles.mockReset().mockResolvedValue([])
+  mocks.subscribers.clear(); mocks.route = reactive({ query: {} })
+})
 afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers() })
 
 describe('Person task loading and recovery', () => {
@@ -163,6 +173,16 @@ describe('Person task removal with queued refreshes', () => {
     expect(conversation().props('pending')).toEqual(confirmed.pending)
     expect(conversation().props('queueDisabled')).toBe(false)
     expect(wrapper.text()).toContain('sessionTasks.loadFailed')
+  })
+
+  it('includes the selected reference when submitting a task follow-up', async () => {
+    mocks.request.mockResolvedValueOnce(current()).mockResolvedValueOnce({ task: { ...current().task, revision: 2 }, pending: [] })
+    wrapper = mount(PersonTaskChat, { props: { taskId: 'task', mainSessionId: 'main' } })
+    await flushPromises()
+    const reference = { id: 'image-message', role: 'assistant', content: 'Look at this', attachments: [{ id: 'image', name: 'image.png', type: 'image/png', size: 1, url: '/image.png', path: '/tmp/image.png' }] }
+    await wrapper.getComponent(PersonTaskConversation).props('send')('Follow-up', [], reference as any)
+    expect(mocks.buildReferencedMessageInput).toHaveBeenCalledWith('Follow-up', reference, [], [])
+    expect(mocks.request.mock.calls[1][1].input).toEqual([{ type: 'text', text: 'quoted payload' }])
   })
 
   it('keeps removal disabled for a coalesced follow-up and reenables it after a read timeout', async () => {

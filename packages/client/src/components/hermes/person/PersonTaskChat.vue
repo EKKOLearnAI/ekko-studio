@@ -5,7 +5,7 @@ import { NAlert, NButton, NDrawer, NDrawerContent, NSpin, NSelect } from 'naive-
 import { useTaskDrawerLayout } from '@/components/hermes/tasks/useTaskDrawerLayout'
 import PersonTaskConversation from './PersonTaskConversation.vue'
 import PersonWorkspaceFiles from './PersonWorkspaceFiles.vue'
-import { buildContentBlocks, uploadFiles, type Attachment } from '@/stores/hermes/chat'
+import { buildReferencedMessageInput, uploadFiles, type Attachment, type MessageReference } from '@/stores/hermes/chat'
 import { personRequest, personTaskCanStop, stopPersonTask, removePersonTaskMessage, type PersonTask, type PersonExecutionSummary, type PersonTaskQueueState } from '@/api/person'
 import { onPersonUpdated } from '@/api/studio/chat'
 import type { SessionSummary } from '@/api/studio/sessions'
@@ -65,12 +65,13 @@ const stopUpdates = onPersonUpdated(event => {
   if ((!event.session_id || event.session_id === props.mainSessionId) && !sending.value && !stopping.value && !requestingInsertion.value && !requestingRemoval.value) void refresh()
 })
 onMounted(() => { void refresh() })
-async function send(text: string, attachments?: Attachment[]) {
+async function send(text: string, attachments?: Attachment[], reference?: MessageReference | null) {
   if (disabled.value || !task.value) return false
   sending.value = true; error.value = ''; removalError.value = ''; refreshing.value = false
   reads.cancel()
   try {
-    const input = await buildContentBlocks(text, attachments, await uploadFiles(attachments || []))
+    const uploaded = await uploadFiles(attachments || [])
+    const input = await buildReferencedMessageInput(text, reference, attachments, uploaded)
     const result = await personRequest<{ task: PersonTask; pending?: typeof pending.value }>(`/tasks/${encodeURIComponent(props.taskId)}/chat`, {
       input, execution_id: selectedExecutionId.value || undefined, expected_execution_id: task.value.execution_id || null, expected_revision: task.value.revision, idempotency_key: crypto.randomUUID(),
     }, 'POST', lifetime.signal)

@@ -10,6 +10,7 @@ import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { fetchContextLength } from '@/api/studio/sessions'
 import { setModelContext } from '@/api/hermes/model-context'
+import { getDownloadUrl } from '@/api/studio/download'
 import { fetchSkills, type SkillCategory, type SkillInfo } from '@/api/hermes/skills'
 import { deleteSkillBundleApi, fetchSkillBundles, type SkillBundleInfo } from '@/api/hermes/skill-bundles'
 import { NSpin, NButton, NTooltip, NModal, NInputNumber, NPopover, NSlider, NDropdown, useDialog, useMessage, type DropdownOption } from 'naive-ui'
@@ -202,6 +203,9 @@ const isComposing = ref(false)
 const activeMessageReference = computed(() => props.draft ? null : chatStore.activeMessageReference)
 const messageReferencePreview = computed(() =>
   activeMessageReference.value?.content.replace(/\s+/g, ' ').trim() || '',
+)
+const messageReferenceAttachments = computed(() =>
+  activeMessageReference.value?.attachments?.filter(attachment => attachment.url || attachment.path) || [],
 )
 const isMobileViewport = ref(typeof window !== 'undefined' ? isMobileChatInputViewport(window.innerWidth) : false)
 const manualTextareaResize = ref(false)
@@ -1238,7 +1242,18 @@ function openAttachmentPreview(attachment: Attachment) {
     />
 
     <div v-if="activeMessageReference" class="message-reference-preview">
-      <span class="message-reference-text">{{ messageReferencePreview }}</span>
+      <div class="message-reference-body">
+        <span class="message-reference-text">{{ messageReferencePreview }}</span>
+        <div v-if="messageReferenceAttachments.length" class="message-reference-attachments">
+          <img
+            v-for="attachment in messageReferenceAttachments"
+            :key="attachment.id"
+            :src="attachment.url || getDownloadUrl(attachment.path!, attachment.name)"
+            :alt="attachment.name"
+            class="message-reference-thumb"
+          />
+        </div>
+      </div>
       <button
         type="button"
         class="message-reference-remove"
@@ -2386,6 +2401,9 @@ function openAttachmentPreview(attachment: Attachment) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.message-reference-body { min-width: 0; display: grid; gap: 4px; }
+.message-reference-attachments { display: flex; gap: 6px; flex-wrap: wrap; }
+.message-reference-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; }
 
 .message-reference-remove {
   display: flex;

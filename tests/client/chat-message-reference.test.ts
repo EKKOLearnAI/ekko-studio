@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { formatMessageWithReference, formatReferencedContentForDisplay, parseMessageReference } from '@/stores/hermes/chat'
+import { buildReferencedMessageInput, formatMessageWithReference, formatReferencedContentForDisplay, parseMessageReference } from '@/stores/hermes/chat'
 
 describe('single-chat message references', () => {
   it('formats a referenced message as a readable Markdown quote', () => {
@@ -45,5 +45,26 @@ describe('single-chat message references', () => {
       reply: 'Continue from there',
     })
     expect(formatReferencedContentForDisplay(parsed!.content)).toBe('> @Reviewer previous answer')
+  })
+
+  it('keeps referenced images as model input blocks while retaining the text quote', async () => {
+    const input = await buildReferencedMessageInput('Describe it', {
+      id: 'assistant-image',
+      role: 'assistant',
+      content: 'The image is below.',
+      attachments: [{
+        id: 'image-1',
+        name: 'reference.png',
+        type: 'image/png',
+        size: 10,
+        url: '/api/studio/files/download?path=%2Ftmp%2Freference.png',
+        path: '/tmp/reference.png',
+      }],
+    })
+
+    expect(input).toEqual([
+      { type: 'text', text: '<quoted_message>\nThe image is below.\n</quoted_message>\n\nDescribe it' },
+      { type: 'image', name: 'reference.png', path: '/tmp/reference.png', media_type: 'image/png' },
+    ])
   })
 })
