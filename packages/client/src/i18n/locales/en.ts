@@ -3559,6 +3559,9 @@ export default {
 
   // Group Chat
   groupChat: {
+    migrationNoticeTitle: "Group chat is being retired",
+    migrationNoticeMessage: "The group chat feature will be retired soon. We recommend reviewing your existing group tasks, Agent settings, and important context, and moving this work to Bot to continue there.",
+    migrationNoticeSaveFailed: "Your acknowledgement could not be saved. Please check browser storage and try again.",
     messageAlreadySummarized: "Already summarized; cannot delete",
     messageSummaryBoundaryUnknown: "Summary boundary unavailable; deletion disabled",
     messageSelectionHint: "Select member messages or entire agent runs. Summarized messages cannot be selected.",

@@ -3541,6 +3541,9 @@ export default {
 
   // Group Chat
   groupChat: {
+    migrationNoticeTitle: "سيتم إيقاف الدردشة الجماعية قريبًا",
+    migrationNoticeMessage: "سيتم إيقاف ميزة الدردشة الجماعية قريبًا. نوصي بمراجعة مهام المجموعات الحالية وإعدادات Agent والسياق المهم مسبقًا، ونقل هذا العمل إلى Bot لمتابعته هناك.",
+    migrationNoticeSaveFailed: "تعذر حفظ تأكيدك. يرجى التحقق من تخزين المتصفح والمحاولة مجددًا.",
     messageAlreadySummarized: "تم تلخيصها بالفعل؛ لا يمكن حذفها",
     messageSummaryBoundaryUnknown: "حد الملخص غير متاح؛ الحذف معطل",
     messageSelectionHint: "حدد رسائل الأعضاء أو عمليات تشغيل الوكيل كاملة. لا يمكن تحديد الرسائل الملخصة.",

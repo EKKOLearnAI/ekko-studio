@@ -3327,6 +3327,9 @@ jobTriggered: 'Job declenche',
 
   // Journal des modifications
   groupChat: {
+    migrationNoticeTitle: "Fin prochaine des discussions de groupe",
+    migrationNoticeMessage: "La fonctionnalité de discussion de groupe sera bientôt retirée. Nous vous recommandons de faire le point sur vos tâches, les paramètres des Agents et le contexte important de vos groupes, puis de transférer ce travail vers Bot pour le poursuivre.",
+    migrationNoticeSaveFailed: "Votre confirmation n’a pas pu être enregistrée. Vérifiez le stockage du navigateur et réessayez.",
     messageAlreadySummarized: "Déjà résumé ; suppression impossible",
     messageSummaryBoundaryUnknown: "Limite du résumé indisponible ; suppression désactivée",
     messageSelectionHint: "Sélectionnez des messages de membres ou des exécutions complètes. Les messages résumés ne peuvent pas être sélectionnés.",

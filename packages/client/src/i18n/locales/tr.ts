@@ -586,6 +586,9 @@ export default {
     runUsageOutput: 'Çıktı jetonları', runUsageInput: 'Girdi jetonları', runUsageCache: 'Önbellek isabetleri', runUsageCost: 'Tahmini maliyet', runUsageSpeed: 'Jeton hızı', runUsageAverageSpeed: 'Ortalama hız', runUsageEstimatedSpeed: 'Tahmini hız',
   },
   groupChat: {
+    migrationNoticeTitle: "Grup sohbeti kullanımdan kaldırılıyor",
+    migrationNoticeMessage: "Grup sohbeti özelliği yakında kullanımdan kaldırılacak. Mevcut gruplarınızdaki görevleri, Agent ayarlarını ve önemli bağlamı gözden geçirmenizi ve bu işleri sürdürmek için Bot’a taşımanızı öneririz.",
+    migrationNoticeSaveFailed: "Onayınız kaydedilemedi. Lütfen tarayıcı depolamasını kontrol edip tekrar deneyin.",
     messageAlreadySummarized: "Zaten özetlendi; silinemez",
     messageSummaryBoundaryUnknown: "Özet sınırı bilinmiyor; silme devre dışı",
     messageSelectionHint: "Üye mesajlarını veya tüm ajan çalıştırmalarını seçin. Özetlenmiş mesajlar seçilemez.",

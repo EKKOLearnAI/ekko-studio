@@ -3326,6 +3326,9 @@ export default {
 
   // 변경 이력
   groupChat: {
+    migrationNoticeTitle: "그룹 채팅 기능 종료 안내",
+    migrationNoticeMessage: "그룹 채팅 기능이 곧 종료될 예정입니다. 기존 그룹의 작업, Agent 설정 및 중요한 맥락을 미리 정리하고 관련 업무를 Bot으로 옮겨 계속 진행하시기를 권장합니다.",
+    migrationNoticeSaveFailed: "확인 상태를 저장하지 못했습니다. 브라우저 저장소를 확인한 후 다시 시도해 주세요.",
     messageAlreadySummarized: "이미 요약되어 삭제할 수 없습니다",
     messageSummaryBoundaryUnknown: "요약 경계를 확인할 수 없어 삭제할 수 없습니다",
     messageSelectionHint: "멤버 메시지 또는 에이전트 실행 전체를 선택하세요. 요약된 메시지는 선택할 수 없습니다.",

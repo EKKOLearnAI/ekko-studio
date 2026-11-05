@@ -3327,6 +3327,9 @@ jobTriggered: 'Job ausgelost',
 
   // Anderungsprotokoll
   groupChat: {
+    migrationNoticeTitle: "Gruppenchat wird eingestellt",
+    migrationNoticeMessage: "Die Gruppenchat-Funktion wird demnächst eingestellt. Wir empfehlen, bestehende Aufgaben, Agent-Einstellungen und wichtige Kontextinformationen aus den Gruppen zu sichten und diese Arbeit zu Bot zu verlagern, um sie dort fortzusetzen.",
+    migrationNoticeSaveFailed: "Deine Bestätigung konnte nicht gespeichert werden. Bitte prüfe den Browserspeicher und versuche es erneut.",
     messageAlreadySummarized: "Bereits zusammengefasst; Löschen nicht möglich",
     messageSummaryBoundaryUnknown: "Zusammenfassungsgrenze unbekannt; Löschen deaktiviert",
     messageSelectionHint: "Mitgliedernachrichten oder ganze Agentenläufe auswählen. Zusammengefasste Nachrichten können nicht ausgewählt werden.",
