@@ -42,6 +42,8 @@ export interface PersonResultDelivery {
   status: string
   output: string
   error: string
+  /** User adjustment bound to one execution, including on its linked review callback. */
+  manualFollowup?: { executionId: string; input: import('../contracts/runs/session').ContentBlock[] }
   acceptance?: Record<string, unknown>
   returnExpectation?: string
   flow?: { index: number; total: number; stopped: boolean; completed: boolean; next_session_id: string | null }

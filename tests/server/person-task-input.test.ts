@@ -1,167 +1,161 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import type { Context } from 'koa'
 import { acceptanceFixture, type AcceptanceFixture } from './fixtures/person-acceptance'
 
 let f: AcceptanceFixture
-beforeEach(async () => { f = await acceptanceFixture() })
-afterEach(async context => { await f.close(context.task.name) })
-function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r }); return { promise, resolve } }
+beforeEach(async () => {
+  f = await acceptanceFixture()
+  vi.mocked(f.runtime.model).mockRejectedValue(new Error('The coordinator must not run for manual task input'))
+})
+afterEach(async context => {
+  try { expect(f.runtime.model).not.toHaveBeenCalled() }
+  finally { await f.close(context.task.name) }
+})
 function request(taskId: string, text: string) {
-  const t = f.get(taskId)
-  return { input: [{ type: 'text', text }], expected_revision: t.revision, expected_execution_id: t.execution_id, idempotency_key: randomUUID() }
+  const task = f.get(taskId)
+  return { input: [{ type: 'text', text }], expected_revision: task.revision, expected_execution_id: task.execution_id, idempotency_key: randomUUID() }
 }
-async function send(taskId: string, body: ReturnType<typeof request>, signal?: AbortSignal) {
-  return (await import('../../packages/server/src/modules/studio/services/person/task-input')).submitPersonTaskInput(1, taskId, body, signal)
+async function send(taskId: string, body: Record<string, unknown>, userId = 1) {
+  return (await import('../../packages/server/src/modules/studio/services/person/task-input')).submitPersonTaskInput(userId, taskId, body)
 }
-function decide(value: Record<string, unknown>) {
-  vi.mocked(f.runtime.model).mockImplementation(async call => { call.beforeRequest?.(); await call.tools[0].execute(value); return '' })
+function active(executionId: string) {
+  f.db.prepare("UPDATE person_executions SET state='running',lease_until=? WHERE id=?").run(Date.now() + 90_000, executionId)
 }
-const replacement = { action: 'redirect', goal: '查询贵阳实时天气和今日预报；注明来源和查询时间，不编造数据。', title: '查询贵阳天气' }
 
-it('handles the actual Xiamen to Guiyang wording through ordinary chat and waits for stop confirmation', async () => {
-  const { task, execution } = await f.create({ title: '查询厦门天气', goal: '查询厦门实时天气和今日预报；注明来源和查询时间，不编造数据。' })
-  f.db.prepare("UPDATE person_executions SET state='running' WHERE id=?").run(execution.id)
-  const oldInput = await f.chat.continuePersonTask(1, task.id, request(task.id, '旧城市还要湿度'))
-  const barrier = deferred(); vi.mocked(f.runtime.stop).mockImplementation(() => barrier.promise)
-  decide(replacement)
-  try {
-    const result = await send(task.id, request(task.id, '哦不查贵阳的吧'))
-    expect(f.runtime.model).toHaveBeenCalledTimes(1)
-    const call = vi.mocked(f.runtime.model).mock.calls[0][0]
-    const context = JSON.parse(String(call.messages[0].content))
-    expect(context.goal).toContain('厦门'); expect(context.new_user_input[0].text).toBe('哦不查贵阳的吧')
-    expect(context.pending[0].input[0].text).toBe('旧城市还要湿度')
-    expect(call.tools.map(t => t.name)).toEqual(['choose_task_input'])
-    expect(result.task.title).toBe('查询贵阳天气')
-    expect(f.store.listPersonTasks(1)).toHaveLength(1)
+it.each(['不要漏掉数据来源，其他继续', '哦不查贵阳的吧', '先停下来，不要继续查了'])(
+  'appends manual input without interpreting its intent: %s', async text => {
+    const { task, execution } = await f.create({ title: '查询厦门天气', goal: '查询厦门实时天气并注明来源。' })
+    active(execution.id)
+    const older = await send(task.id, request(task.id, '旧城市还要湿度'))
+    const result = await send(task.id, request(task.id, text))
     expect(result.execution.state).toBe('pending')
-    expect(f.store.getPersonExecution(1, execution.id).state).toBe('stopping')
-    expect(f.store.getPersonExecution(1, oldInput.execution.id).state).toBe('interrupted')
-    await f.runner.tickPersonWork(); expect(f.execute).not.toHaveBeenCalled()
-    barrier.resolve(); await f.tasks.acknowledgePersonStop(f.store.getPersonExecution(1, execution.id))
-    await f.run(task.id)
-    expect(f.execute).toHaveBeenCalledTimes(1)
-    expect(f.execute.mock.calls[0][0].sessionId).toBe(result.execution.session_id)
-  } finally { barrier.resolve() }
-})
+    expect(result.execution.session_id).toBe(execution.session_id)
+    expect(JSON.parse(result.execution.input_json)).toEqual([{ type: 'text', text }])
+    expect(result.pending.map(item => item.id)).toEqual([older.execution.id, result.execution.id])
+    expect(f.store.getPersonExecution(1, execution.id).state).toBe('running')
+    expect(f.get(task.id)).toMatchObject({ title: task.title, requirements_revision: task.requirements_revision })
+    expect(f.get(task.id).requirements_json).toBe(task.requirements_json)
+    expect(f.runtime.stop).not.toHaveBeenCalled()
+    expect(f.db.prepare('SELECT COUNT(*) AS n FROM person_task_redirects WHERE task_id=?').get(task.id)!.n).toBe(0)
+    await f.runner.tickPersonWork()
+    expect(f.execute).not.toHaveBeenCalled()
+  },
+)
 
-it('keeps compatible input in the same queue without keyword-based cancellation', async () => {
-  const { task, execution } = await f.create(); f.db.prepare("UPDATE person_executions SET state='running' WHERE id=?").run(execution.id)
-  decide({ action: 'append' })
-  const result = await send(task.id, request(task.id, '不要漏掉数据来源，其他继续'))
-  expect(result.execution.state).toBe('pending')
-  expect(result.execution.session_id).toBe(execution.session_id)
-  expect(f.get(task.id).requirements_revision).toBe(0)
-  expect(f.runtime.stop).not.toHaveBeenCalled()
-})
-
-it('honors a stop-only instruction without creating replacement work', async () => {
-  const { task, execution } = await f.create(); f.db.prepare("UPDATE person_executions SET state='running' WHERE id=?").run(execution.id)
-  decide({ action: 'stop' })
-  await send(task.id, request(task.id, '先停下来，不要继续查了'))
-  await f.tasks.acknowledgePersonStop(f.store.getPersonExecution(1, execution.id))
-  expect(f.store.getPersonExecution(1, execution.id).state).toBe('interrupted')
-  expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(1)
-  expect(f.execute).not.toHaveBeenCalled()
-})
-
-it('does not accept contradictory model decisions or truncate a valid long request key', async () => {
+it('accepts manual HTTP input without consulting the Bot model', async () => {
   const { task } = await f.create()
-  vi.mocked(f.runtime.model).mockImplementation(async call => {
-    await call.tools[0].execute({ action: 'append' })
-    try { await call.tools[0].execute(replacement) } catch { /* model tool errors are recoverable in the runtime */ }
-    return ''
-  })
-  await expect(send(task.id, request(task.id, '哦不查贵阳的吧'))).rejects.toMatchObject({ status: 502 })
-  expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(1)
-  decide(replacement)
-  const body = { ...request(task.id, '哦不查贵阳的吧'), idempotency_key: 'x'.repeat(200) }
-  const result = await send(task.id, body)
-  const replay = await send(task.id, body)
-  expect(replay.execution.id).toBe(result.execution.id)
-  expect(f.store.listPersonTasks(1)).toHaveLength(1)
-})
-
-it('rejects a stale classification before it can stop newer work', async () => {
-  const { task } = await f.create(); const barrier = deferred(), entered = deferred()
-  vi.mocked(f.runtime.model).mockImplementation(async call => { entered.resolve(); await barrier.promise; await call.tools[0].execute(replacement); return '' })
-  const pending = send(task.id, request(task.id, '哦不查贵阳的吧'))
-  const rejected = expect(pending).rejects.toMatchObject({ status: 409 })
-  await entered.promise
-  await f.chat.continuePersonTask(1, task.id, request(task.id, 'Another accepted input'))
-  barrier.resolve(); await rejected
-  expect(f.get(task.id).requirements_revision).toBe(0)
+  vi.mocked(f.runtime.modelConfig).mockClear().mockRejectedValue(new Error('Bot model configuration unavailable'))
+  const { taskContinue } = await import('../../packages/server/src/modules/studio/controllers/person')
+  const ctx = { state: { user: { id: 1 } }, params: { id: task.id }, request: { body: request(task.id, '继续补充来源') }, set: vi.fn() } as unknown as Context
+  await taskContinue(ctx)
+  expect(ctx.body).toMatchObject({ task: { id: task.id }, execution: { state: 'pending' } })
+  expect(f.runtime.modelConfig).not.toHaveBeenCalled()
   expect(f.runtime.stop).not.toHaveBeenCalled()
 })
 
-it('retains replay meaning after a newer correction even when the caller omits expected execution', async () => {
-  const { task } = await f.create(); decide(replacement)
-  const body: any = request(task.id, '哦不查贵阳的吧'); delete body.expected_execution_id
-  const first = await send(task.id, body)
-  const latest = await send(task.id, request(task.id, '再改一次'))
-  const replay = await send(task.id, body)
-  expect(replay.execution.id).toBe(first.execution.id)
-  expect(replay.task.execution_id).toBe(latest.execution.id)
-  expect(f.runtime.model).toHaveBeenCalledTimes(2)
-  expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(3)
+it('queues and executes attachments in the existing conversation after the prior turn finishes', async () => {
+  const { task, execution } = await f.create()
+  await f.run(task.id)
+  f.execute.mockClear()
+  const input = [
+    { type: 'text', text: '补充这些材料' },
+    { type: 'file', name: 'notes.txt', path: '/fixture/notes.txt', media_type: 'text/plain' },
+    { type: 'image', name: 'screen.png', path: '/fixture/screen.png', media_type: 'image/png' },
+  ]
+  const result = await send(task.id, { ...request(task.id, ''), input })
+  expect(result.execution.state).toBe('queued')
+  expect(result.execution.session_id).toBe(execution.session_id)
+  expect(result.execution.selection_json).toBe(execution.selection_json)
+  expect(JSON.parse(result.execution.input_json)).toEqual(input)
+  expect(f.get(task.id).status).toBe('open')
+  await f.run(task.id)
+  expect(f.execute).toHaveBeenCalledTimes(1)
+  expect(f.execute.mock.calls[0][0]).toMatchObject({ sessionId: execution.session_id, prompt: input })
+  expect(f.store.getPersonExecution(1, result.execution.id).state).toBe('finished')
 })
 
-it('continues the original conversation through older execution links after correcting requirements', async () => {
-  const { task, execution } = await f.create(); decide(replacement)
-  const corrected = await send(task.id, request(task.id, '哦不查贵阳的吧'))
-  expect(corrected.execution.session_id).toBe(execution.session_id)
-  const chat = await f.chat.personTaskChat(1, task.id, execution.id)
-  expect(chat.execution?.id).toBe(execution.id)
-  expect(chat.task.execution_id).toBe(corrected.execution.id)
-  expect(chat.session?.id).toBe(execution.session_id)
-  expect(chat.executions).toHaveLength(1)
-  decide({ action: 'append' })
+it('deduplicates concurrent and later retries, including a 200-character request key', async () => {
+  const { task } = await f.create()
+  const body = { ...request(task.id, '补充来源'), idempotency_key: 'x'.repeat(200) }
+  const [a, b] = await Promise.all([send(task.id, body), send(task.id, body)])
+  const replay = await send(task.id, body)
+  expect(b.execution.id).toBe(a.execution.id)
+  expect(replay.execution.id).toBe(a.execution.id)
+  expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(2)
+  expect(f.db.prepare("SELECT COUNT(*) AS n FROM person_operations WHERE operation_key LIKE 'task-input:%'").get()!.n).toBe(0)
+})
+
+it('replays an append receipt accepted by the previous model-routing endpoint', async () => {
+  const { task } = await f.create()
+  const body = request(task.id, '  补充来源  ')
+  const accepted = await f.chat.continuePersonTask(1, task.id, {
+    ...body, input: f.chat.personTaskInput(body.input), idempotency_key: `input:${createHash('sha256').update(body.idempotency_key).digest('hex')}`,
+  })
+  const replay = await send(task.id, body)
+  expect(replay.execution.id).toBe(accepted.execution.id)
+  expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(2)
+})
+
+it.each(['revision', 'execution'])('rejects a stale expected %s without enqueuing', async field => {
+  const { task } = await f.create()
+  const body = request(task.id, '补充来源')
+  if (field === 'revision') f.db.prepare('UPDATE session_tasks SET revision=revision+1 WHERE id=?').run(task.id)
+  else body.expected_execution_id = 'not-current'
+  await expect(send(task.id, body)).rejects.toMatchObject({ status: 409 })
+  expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(1)
+})
+
+it.each(['closed', 'stopping'])('preserves the %s task barrier', async state => {
+  const { task, execution } = await f.create()
+  if (state === 'closed') f.db.prepare("UPDATE session_tasks SET status='closed' WHERE id=?").run(task.id)
+  else f.db.prepare("UPDATE person_executions SET state='stopping' WHERE id=?").run(execution.id)
+  await expect(send(task.id, request(task.id, '继续'))).rejects.toMatchObject({ status: 409 })
+  expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(1)
+})
+
+it('preserves account ownership and input validation', async () => {
+  const { task } = await f.create()
+  await expect(send(task.id, request(task.id, '继续'), 2)).rejects.toMatchObject({ status: 404 })
+  await expect(send(task.id, { ...request(task.id, '继续'), input: [] })).rejects.toMatchObject({ status: 400 })
+  await expect(send(task.id, { ...request(task.id, '继续'), idempotency_key: 'x'.repeat(201) })).rejects.toMatchObject({ status: 400 })
+  expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(1)
+})
+
+it('leaves Bot redirection intact and permits manual appends through the original conversation link', async () => {
+  const { task, execution } = await f.create()
+  const tools = f.personTaskTools(1, task.session_id)
+  const query: any = await tools.find(t => t.name === 'bot_tasks_query')!.execute({ task_id: task.id })
+  const corrected: any = await tools.find(t => t.name === 'bot_task_control')!.execute({
+    task_ref: query.task.task_ref, action: 'redirect', goal: '查询贵阳天气并注明来源', title: '查询贵阳天气', message: '哦不查贵阳的吧',
+  })
+  expect(corrected.ok).toBe(true)
+  expect(f.get(task.id)).toMatchObject({ title: '查询贵阳天气', requirements_revision: 1 })
   const followup = await send(task.id, { ...request(task.id, '补充数据来源'), execution_id: execution.id })
   expect(followup.execution.session_id).toBe(execution.session_id)
   expect(followup.execution.requirements_revision).toBe(1)
   expect(f.store.listPersonTasks(1)).toHaveLength(1)
-  expect(f.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE id LIKE ?').get('person-task-%')!.n).toBe(1)
 })
 
-it('keeps a genuinely separate obsolete conversation read-only without hiding it', async () => {
+it('leaves explicit Bot stop control able to cancel pending manual followups', async () => {
+  const { task, execution } = await f.create()
+  active(execution.id)
+  const followup = await send(task.id, request(task.id, '补充来源'))
+  const tools = f.personTaskTools(1, task.session_id)
+  const query: any = await tools.find(t => t.name === 'bot_tasks_query')!.execute({ task_id: task.id })
+  const stopped: any = await tools.find(t => t.name === 'bot_task_control')!.execute({ task_ref: query.task.task_ref, action: 'stop' })
+  expect(stopped.ok).toBe(true)
+  await f.tasks.acknowledgePersonStop(f.store.getPersonExecution(1, execution.id))
+  expect(f.store.getPersonExecution(1, execution.id).state).toBe('interrupted')
+  expect(f.store.getPersonExecution(1, followup.execution.id).state).toBe('interrupted')
+  expect(f.runtime.stop).toHaveBeenCalledWith(execution.session_id)
+})
+
+it('keeps a genuinely separate obsolete conversation read-only', async () => {
   const { task, execution } = await f.create()
   f.db.prepare("UPDATE person_executions SET state='finished' WHERE id=?").run(execution.id)
-  const updated = await f.tasks.applyPersonTask(1,{ action:'update',task_id:task.id,goal:'A different explicit start',expected_revision:f.get(task.id).revision,idempotency_key:randomUUID() })
-  await f.tasks.applyPersonTask(1,{ action:'start',task_id:task.id,expected_revision:updated.task.revision,idempotency_key:randomUUID() })
-  const body = { ...request(task.id, '补充数据来源'), execution_id:execution.id }
-  await expect(send(task.id, body)).rejects.toMatchObject({ status:409 })
-  await expect(f.chat.continuePersonTask(1,task.id,body)).rejects.toMatchObject({ status:409 })
-  expect(f.runtime.model).not.toHaveBeenCalled()
-  const chat = await f.chat.personTaskChat(1,task.id,execution.id)
-  expect(chat.execution?.id).toBe(execution.id)
-  expect(chat.executions).toHaveLength(2)
-})
-
-it('deduplicates concurrent copies of one input without stopping the new correction', async () => {
-  const { task } = await f.create(); decide(replacement)
-  const body = request(task.id, '哦不查贵阳的吧')
-  const results = await Promise.allSettled([send(task.id, body), send(task.id, body)])
-  // A duplicate model request may finish after the first mutation; it must replay
-  // the already saved decision rather than reclassify/replace the replacement.
-  expect(results.every(r => r.status === 'fulfilled')).toBe(true)
-  const [a, b] = results.map(r => (r as PromiseFulfilledResult<any>).value)
-  expect(a.execution.id).toBe(b.execution.id)
+  const updated = await f.tasks.applyPersonTask(1, { action: 'update', task_id: task.id, goal: 'A different explicit start', expected_revision: f.get(task.id).revision, idempotency_key: randomUUID() })
+  await f.tasks.applyPersonTask(1, { action: 'start', task_id: task.id, expected_revision: updated.task.revision, idempotency_key: randomUUID() })
+  await expect(send(task.id, { ...request(task.id, '补充来源'), execution_id: execution.id })).rejects.toMatchObject({ status: 409 })
   expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(2)
-  expect(f.runtime.stop).not.toHaveBeenCalled()
-})
-
-it.each(['missing', 'invalid', 'failure', 'aborted'])('does not silently append or stop when routing is %s', async mode => {
-  const { task, execution } = await f.create()
-  const controller = new AbortController()
-  vi.mocked(f.runtime.model).mockImplementation(async call => {
-    if (mode === 'invalid') await call.tools[0].execute({ action: 'redirect', goal: '' })
-    if (mode === 'failure') throw new Error('Provider unavailable')
-    if (mode === 'aborted') { await call.tools[0].execute(replacement); controller.abort() }
-    return ''
-  })
-  await expect(send(task.id, request(task.id, '哦不查贵阳的吧'), controller.signal)).rejects.toBeDefined()
-  expect(f.store.taskPersonExecutions(1, task.id)).toHaveLength(1)
-  expect(f.get(task.id).execution_id).toBe(execution.id)
-  expect(f.get(task.id).requirements_revision).toBe(0)
-  expect(f.runtime.stop).not.toHaveBeenCalled()
 })

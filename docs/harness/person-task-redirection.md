@@ -1,6 +1,6 @@
 # Correct a task in its existing conversation
 
-Users send ordinary task messages. The Bot compares each follow-up with the
+When users message the main Bot, the Bot compares each follow-up with the
 saved goal and conversation. Compatible additions use the existing FIFO queue.
 A replacement instruction stops the current execution and then sends the latest
 request in the SAME task, Agent, workspace and native conversation. Never create
@@ -8,12 +8,39 @@ or switch to another conversation as part of correction, clear history, or ask
 the user to choose an internal mode. Independent verifier sessions and scheduled
 occurrences keep their existing lifecycle; they are not correction branches.
 
-POST `/api/studio/person/tasks/:id/chat` uses the owning Bot's model and a
-decision-only tool to route input. The model cannot run workers or write memory.
-A saved idempotent decision dispatches existing continue/redirect/stop operations.
-Stale revisions, invalid/contradictory model output and provider failure do not
-silently append a possible correction. Internal Bot follow-ups use structured
-task controls; no separate public direction-mode endpoint is needed.
+Manual messages sent from task details through POST
+`/api/studio/person/tasks/:id/chat` always append through the existing continuation
+service. This endpoint does not call the Bot model, interpret correction/stop
+intent, cancel earlier inputs or change the saved goal. It retains input,
+ownership, revision, conversation and queue checks, and the previous append
+idempotency key format. Active work finishes before its queued follow-ups run.
+Bot-originated follow-ups still use the unchanged structured task controls:
+continue, redirect or stop according to the Bot's own decision. Explicit Stop
+and queue insertion controls also retain their existing behavior.
+
+## Manual follow-up result context
+
+Task-detail input still returns to the owning Bot after execution. The trusted
+HTTP entry records the normalized manual input on that execution's delivery
+outbox, inside the admission transaction. The record is durable across pending
+queue promotion, idempotent retries and callback recovery. It does not rewrite
+the task title, saved goal, acceptance criteria or role route, and is removed
+from any origin reused for later Bot work or schedules.
+
+The callback includes the manual request's execution id, complete text and
+attachment blocks, plus the returned execution's status, output and error. Its
+continuation history includes the manual request after the older Bot context.
+The Bot is told to report this user adjustment and its result, and not to treat
+a changed target as an error solely because the saved title or original request
+differs. Genuine failures still require accurate reporting. Explicit acceptance
+and flow instructions remain active; a conflict with saved criteria must be
+reported as a scope conflict rather than silently rewriting those criteria.
+Linked verification callbacks carry the associated development execution's
+manual request as context while retaining their own execution identity.
+
+Bot-originated executions retain their existing callback receipt, instructions,
+acceptance/repair progression and flow routing. Unmarked historical receipts
+are not retrospectively inferred to be manual or rewritten on replay.
 
 ## Stop before sending in the same conversation
 
@@ -76,6 +103,7 @@ on the native runtime's termination guarantee; performed actions cannot be undon
 by host cancellation.
 
 Run person-task-redirection and person-task-input service tests, both acceptance
-regression suites and person-task-redirection Playwright tests. Check actual
+regression suites, person-manual-result integration tests, person-result-prompt
+tests and person-task-redirection Playwright tests. Check actual
 session identity, uninterrupted history/composer, latest authoritative input,
 stop/unwind barriers, stale callbacks, retries and same-direction queue behavior.

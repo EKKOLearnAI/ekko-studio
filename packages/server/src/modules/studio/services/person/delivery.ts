@@ -1,4 +1,6 @@
 import type { PersonExecution, PersonTaskOrigin } from '../../contracts/person'
+import type { ContentBlock } from '../../contracts/runs/session'
+import type { PersonResultDelivery } from '../../public/person-runtime'
 import { personError } from '../../contracts/person'
 import { ownsPersonSession } from '../../contracts/person-session'
 import { getSession, getSessionDetail } from '../../repositories/session-store'
@@ -46,8 +48,14 @@ export function savePersonTaskOrigin(userId: number, taskId: string, supplied?: 
     .slice(-20).map(message => ({ role: message.role as 'user' | 'assistant', content: String(message.content || '').slice(0,6000) })) }
   const stage = personTaskStage(userId,taskId)
   if (stage) { origin.stage = stage; origin.messages = [] }
-  personDb().prepare('INSERT INTO person_task_origins VALUES (?,?,?) ON CONFLICT(task_id) DO UPDATE SET origin_json=excluded.origin_json')
+  // A callback origin may carry per-execution metadata; never inherit it on the task.
+  personDb().prepare("INSERT INTO person_task_origins VALUES (?,?,json_remove(?,'$.manualFollowup')) ON CONFLICT(task_id) DO UPDATE SET origin_json=excluded.origin_json")
     .run(taskId, userId, JSON.stringify(origin))
+}
+/** Only the trusted task-detail entry supplies this input, inside the admission transaction. */
+export function savePersonManualFollowup(executionId: string, input: ContentBlock[]) {
+  personDb().prepare("UPDATE person_deliveries SET origin_json=json_set(origin_json,'$.manualFollowup',json(?)) WHERE execution_id=?")
+    .run(JSON.stringify({ executionId, input }), executionId)
 }
 export function readyPersonDelivery(run: PersonExecution) {
   personDb().prepare("UPDATE person_deliveries SET state='pending',updated_at=? WHERE execution_id=? AND state='waiting'").run(Date.now(), run.id)
@@ -106,7 +114,7 @@ export async function deliverPersonResults() {
     }
     const run = getPersonExecution(row.owner_user_id, row.execution_id)
     const task = getPersonTask(row.owner_user_id, run.task_id)
-    const origin = JSON.parse(row.origin_json) as PersonTaskOrigin
+    const { manualFollowup: ownFollowup, ...origin } = JSON.parse(row.origin_json) as PersonTaskOrigin & Pick<PersonResultDelivery, 'manualFollowup'>
     if (origin.sessionId !== task.session_id) {
       db.prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id=?").run(run.id)
       continue
@@ -124,9 +132,14 @@ export async function deliverPersonResults() {
       if (!admitted) continue
       const user = personUser(row.owner_user_id)
       const context = personFlowSummary(task)
+      const acceptance = botAcceptanceContext(run)
+      // A linked review reports on the developer's request, without marking future Bot turns manual.
+      const development = acceptance?.kind === 'verification' ? db.prepare('SELECT origin_json FROM person_deliveries WHERE execution_id=? AND owner_user_id=?')
+        .get(String(acceptance.development_execution_id), row.owner_user_id) : undefined
+      const manualFollowup = ownFollowup || (development ? JSON.parse(String(development.origin_json)).manualFollowup as PersonResultDelivery['manualFollowup'] : undefined)
       await personRuntime().deliver({ user, origin, executionId: run.id, taskId: task.id, title: task.title,
         status: run.state, output: run.output.slice(0,12000), error: run.error.slice(0,2000),
-        acceptance: botAcceptanceContext(run),
+        acceptance, ...(manualFollowup ? { manualFollowup } : {}),
         ...(context.flow ? { returnExpectation: context.return_expectation, flow: context.flow } : {}) })
     } catch (error) { finishPersonDelivery(row.owner_user_id, run.id, false, String(error),origin.acceptanceReturnId) }
   }
