@@ -113,7 +113,7 @@ let finishActiveSegmentAudio: (() => void) | null = null
 let previousBodyOverflow = ''
 let previousDocumentOverflow = ''
 let responseStartMessageIndex = 0
-let lastResponseAssistantId: string | null = null
+let lastResponseAssistantMessage: Message | null = null
 let responseFinalizing = false
 let playbackGeneration = 0
 let ttsSegmentIndex = 0
@@ -130,7 +130,8 @@ let localStreamSessionId: string | null = null
 const speechQueueIdleWaiters = new Set<() => void>()
 const synthesisControllers = new Set<AbortController>()
 const synthesisJobs: SpeechSynthesisJob[] = []
-const processedAssistantText = new Map<string, string>()
+// Terminal workspace metadata can replace a message's ID while keeping the same object.
+let processedAssistantText = new WeakMap<Message, string>()
 const processedToolMessageIds = new Set<string>()
 const speechSegmenter = createMcuSpeechSegmenter({ emitOnSentenceEnd: true })
 
@@ -400,11 +401,11 @@ function resetResponseSpeechState() {
   speechSegments.value = []
   activeSpeechSegment.value = null
   responseStartMessageIndex = chatStore.messages.length
-  lastResponseAssistantId = null
+  lastResponseAssistantMessage = null
   responseFinalizing = false
   responseAudioStarted.value = false
   ttsSegmentIndex = 0
-  processedAssistantText.clear()
+  processedAssistantText = new WeakMap()
   processedToolMessageIds.clear()
   speechSegmenter.reset()
 }
@@ -994,7 +995,7 @@ function enqueueSpeechSegment(text: string, assistantId = 'assistant') {
   void drainSpeechSegments()
 }
 
-function flushSpeechSegmenter(assistantId = lastResponseAssistantId || 'assistant') {
+function flushSpeechSegmenter(assistantId = lastResponseAssistantMessage?.id || 'assistant') {
   const segment = speechSegmenter.flush()
   if (segment) enqueueSpeechSegment(segment, assistantId)
 }
@@ -1004,16 +1005,16 @@ function processResponseMessages() {
   for (const message of responseMessages) {
     if (message.role === 'assistant') {
       const content = message.content || ''
-      const previous = processedAssistantText.get(message.id) || ''
-      processedAssistantText.set(message.id, content)
+      const previous = processedAssistantText.get(message) || ''
+      processedAssistantText.set(message, content)
 
       if (!content.startsWith(previous)) continue
       const delta = content.slice(previous.length)
       if (!delta) continue
-      if (lastResponseAssistantId && lastResponseAssistantId !== message.id) {
-        flushSpeechSegmenter(lastResponseAssistantId)
+      if (lastResponseAssistantMessage && lastResponseAssistantMessage !== message) {
+        flushSpeechSegmenter(lastResponseAssistantMessage.id)
       }
-      lastResponseAssistantId = message.id
+      lastResponseAssistantMessage = message
       for (const segment of speechSegmenter.pushDelta(delta)) {
         enqueueSpeechSegment(segment, message.id)
       }
