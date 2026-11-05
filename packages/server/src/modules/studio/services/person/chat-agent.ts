@@ -18,6 +18,7 @@ import { recordSessionUsage } from '../usage/usage-recorder'
 import { capturePersonMemoryRequest, personReturnMemoryInput } from './return-memory'
 import type { PersonResultIdentity } from '../../contracts/person-session'
 import { registerPersonReturnTurn } from './delivery'
+import { personTaskWaitState } from './task-wait'
 
 export function personChatBusy(userId: number, sessionId?: string): boolean {
   const server = getChatRunServer()
@@ -71,6 +72,7 @@ export async function createPersonChatAgent(userId: number, sessionId: string, r
   const summaryRunId = randomUUID()
   let summaryCall = 0, requestedAt = Date.now()
   const agent = factory({ selection, tools: personTools(userId, 'main', undefined, sessionId),
+    taskWaitState: () => personTaskWaitState(userId,sessionId,returnExecutionId,stageContext),
     returnExecutionId,
     acceptanceReturnId: returned?.acceptanceReturnId,
     captureMemoryRequest: () => capturePersonMemoryRequest(userId, sessionId, throughMessageId),

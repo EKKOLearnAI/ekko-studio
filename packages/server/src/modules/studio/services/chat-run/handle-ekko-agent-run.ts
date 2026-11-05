@@ -3,7 +3,7 @@ import { emitEkkoAbortCompletion } from './ekko-abort-completion'
 import { studioModelReasoningEffort } from '../../public/model-reasoning-effort'
 import { personBackgroundPendingCount } from '../../repositories/person-store'
 import { isPersonSession, isPrivatePersonSession, parsePersonResultQueueId } from '../../contracts/person-session'
-import { finishPersonStageTurn } from '../person/stage-flows'
+import { finishPersonStageTurn, waitPersonStageTurn } from '../person/stage-flows'
 import { startPersonStageRun, stageDecisionEvent } from '../../repositories/person-stage-confirmations'
 import type { PersonStageContext } from '../../contracts/person-stage'
 import { createPersonChatAgent } from '../person/chat-agent'
@@ -553,7 +553,8 @@ export async function handleEkkoAgentRun(
     if (personStageContext && ['clarify.requested','approval.requested','clarify.resolved','approval.resolved'].includes(event))
       stageDecisionEvent(personStageContext,String(payload.run_id),event.endsWith('.requested'))
     if (personStageContext && (event === 'run.completed' || event === 'run.failed')) {
-      finishPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''),payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed',String(payload.error || ''))
+      if (payload.waiting_for_tasks) waitPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''))
+      else finishPersonStageTurn(Number(authenticatedUserId),personStageContext,String(payload.run_id || ''),payload.message_id || payload.run_usage?.assistantMessageId,event === 'run.completed',String(payload.error || ''))
     }
     if (!isPrivatePersonSession(sessionId)) observeRunChatPetEvent(profile, event, tagged)
     data.onEvent?.(event, tagged)
@@ -1621,6 +1622,8 @@ export async function handleEkkoAgentRun(
     assistantReasoning = agentReasoningText(result.output.reasoning) || assistantReasoning
     const hadToolActivity = result.steps.some((step: any) => step.type === 'tool')
     const boundaryInterrupted = result.output.finishReason === 'boundary_interrupt'
+    const waitingForTasks = result.output.finishReason === 'waiting_for_tasks'
+    if (waitingForTasks) { assistantText = ''; assistantReasoning = '' }
     if (!boundaryInterrupted && !assistantText.trim() && !assistantReasoning.trim() && !hadToolActivity) {
       const error = 'Model provider returned an empty response after streaming and non-streaming attempts.'
       logger.warn({
@@ -1710,6 +1713,7 @@ export async function handleEkkoAgentRun(
       output: assistantText,
       context: result.context,
       ...(result.output.finishReason === 'max_steps' ? { stop_reason: 'max_steps' } : {}),
+      ...(waitingForTasks ? {stop_reason:'waiting_for_tasks',waiting_for_tasks:true} : {}),
       interrupted: boundaryInterrupted,
       boundary_interrupt: boundaryInterrupted,
       contextTokens: contextEstimate?.contextTokens,

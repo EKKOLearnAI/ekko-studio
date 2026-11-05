@@ -2927,7 +2927,7 @@ export class ChatRunSocket {
         finishPersonStageDelivery(next.personStageDelivery!.userId,next.personStageDelivery!.deliveryId,event === 'run.completed',String(payload?.error || ''))
       } : next.personDelivery ? (event: string, payload: any) => {
         if (event !== 'run.completed' && event !== 'run.failed') return
-        payload.person_task_return = savePersonTaskReturn(next.personDelivery!.userId, next.personDelivery!.executionId,
+        if (!payload.waiting_for_tasks) payload.person_task_return = savePersonTaskReturn(next.personDelivery!.userId, next.personDelivery!.executionId,
           sessionId, payload.message_id || payload.run_usage?.assistantMessageId)
         deliverySettled = true
         finishPersonDelivery(next.personDelivery!.userId, next.personDelivery!.executionId, event === 'run.completed', String(payload?.error || ''),next.personDelivery!.acceptanceReturnId)
@@ -3465,6 +3465,7 @@ export class ChatRunSocket {
   }
 
   private socketForQueuedRun(sessionId: string, next?: QueuedRun): Socket | null {
+    if (next?.personDelivery || next?.personStageDelivery) return this.socketForBackgroundRun(sessionId)
     if (next?.originSocketId) {
       const origin = this.nsp.sockets.get(next.originSocketId)
       if (origin) return origin

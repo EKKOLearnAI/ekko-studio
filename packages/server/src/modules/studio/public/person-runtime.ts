@@ -24,6 +24,7 @@ export interface PersonModelCall {
   onPrepared?: (request: ModelRequest) => void
 }
 export interface PersonChatAgentOptions extends Pick<PersonModelCall, 'selection' | 'tools' | 'systemPrompt' | 'maxSteps' | 'contextTokens' | 'compression' | 'beforeRequest' | 'summaryCache' | 'onSummaryUsage'> {
+  taskWaitState?: () => Array<{ executionId: string; ready: boolean }>
   returnExecutionId?: string
   acceptanceReturnId?: string
   stage?: import('../contracts/person-stage').PersonStageContext

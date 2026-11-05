@@ -338,6 +338,27 @@ account isolation, stale corrections/deletion, callback injection and the full
 toolset under a 10k model request budget. This is the full-toolset validation
 budget; runtime capacity still follows the selected model's context window.
 
+## Waiting for task results
+
+After dispatching all independent work, the main Bot calls `bot_tasks_wait`.
+The host ends the current model turn at the end of its tool batch with
+`waiting_for_tasks`, leaving the task and any assigned collaboration stage open.
+Every call in that batch settles before yielding, so a wait cannot discard
+another independent dispatch. If a model instead repeatedly reads unchanged
+task state or execution events, three consecutive batches without new evidence
+yield to the existing durable callback. New task state, report pages and new
+persisted event IDs count as progress; new tool-call IDs, task references and
+replayed event pages do not. A ready result callback can take over after the
+current read-only batch immediately.
+
+Waiting is restricted to live work or current result receipts owned by this Bot
+and, when assigned, its current collaboration stage. Cancelled, superseded and
+closed work cannot create a wait. A result callback excludes its own execution,
+so it can read all report pages, record acceptance or memory when authorized,
+and write its final answer. Result callbacks use the normal serialized chat
+queue, including when no browser socket remains connected. Restart recovery
+continues using durable task deliveries rather than an in-process polling loop.
+
 ## Stopping a task
 
 The task list and task conversation expose Stop task for queued, active and
