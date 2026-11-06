@@ -1,12 +1,16 @@
 import { randomUUID } from 'crypto'
 import { startDeviceFlow, pollDeviceFlow } from '../services/providers/copilot-device-flow'
-import { saveEnvValue, updateConfigYaml } from '../../studio/public/profile-config'
+import { saveEnvValueForProfile, updateConfigYamlForProfile } from '../../studio/public/profile-config'
 import {
   invalidateAllCaches,
   resolveCopilotOAuthTokenWithSource,
   type CopilotTokenSource,
 } from '../services/providers/copilot-models'
-import { getActiveEnvPath } from '../services/profiles/profile'
+import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
+import { resolveAgentBridgeCommand } from '../services/bridge/manager'
+import { prepareCopilotRuntime } from '../services/providers/copilot-runtime'
+import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
+import { join } from 'path'
 import { readAppConfig, writeAppConfig } from '../../studio/public/app-config'
 import { readFile } from 'fs/promises'
 import { logger } from '../../studio/public/logging'
@@ -17,6 +21,7 @@ const SESSION_GC_GRACE_MS = 60 * 1000
 
 interface CopilotLoginSession {
   id: string
+  profile: string
   deviceCode: string
   userCode: string
   verificationUrl: string
@@ -38,19 +43,24 @@ function cleanupSessions(): void {
   })
 }
 
-async function persistToken(token: string): Promise<void> {
+function requestedProfile(ctx: any): string {
+  return ctx.state?.profile?.name || getActiveProfileName() || 'default'
+}
+
+async function persistToken(token: string, profile: string): Promise<void> {
   // 与 disable 对称：只动 ~/.hermes/.env，apps.json 是 VS Code 的文件不要碰。
   // 同时把 enabled 置 true —— device flow 完成后用户已显式同意启用 Copilot。
   // NOTE: 故意不写 process.env.COPILOT_GITHUB_TOKEN —— 否则该值会跨 profile 持续覆盖
   // resolveCopilotOAuthTokenWithSource 的 .env 读取，导致切到别的 profile 仍解析到当前
   // profile 的 token。invalidateAllCaches() + .env 文件本身已能保证下次解析读到新 token。
-  await saveEnvValue('COPILOT_GITHUB_TOKEN', token)
+  await prepareCopilotRuntime(resolveAgentBridgeCommand({ hermesHome: getProfileDir(profile) }), { token, enableDisabled: true })
   await writeAppConfig({ copilotEnabled: true })
   invalidateAllCaches()
+  invalidateProviderRuntime(profile, 'copilot')
 }
 
-async function readEnvContent(): Promise<string> {
-  try { return await readFile(getActiveEnvPath(), 'utf-8') } catch { return '' }
+async function readEnvContent(profile: string): Promise<string> {
+  try { return await readFile(join(getProfileDir(profile), '.env'), 'utf-8') } catch { return '' }
 }
 
 async function loginWorker(session: CopilotLoginSession): Promise<void> {
@@ -65,7 +75,7 @@ async function loginWorker(session: CopilotLoginSession): Promise<void> {
 
     if (result.kind === 'success') {
       try {
-        await persistToken(result.access_token)
+        await persistToken(result.access_token, session.profile)
         session.status = 'approved'
         logger.info('Copilot OAuth login successful')
       } catch (err: any) {
@@ -100,11 +110,13 @@ async function loginWorker(session: CopilotLoginSession): Promise<void> {
 
 export async function start(ctx: any): Promise<void> {
   cleanupSessions()
+  const profile = requestedProfile(ctx)
   try {
     const data = await startDeviceFlow()
     const sessionId = randomUUID()
     const session: CopilotLoginSession = {
       id: sessionId,
+      profile,
       deviceCode: data.device_code,
       userCode: data.user_code,
       verificationUrl: data.verification_uri,
@@ -160,8 +172,9 @@ export async function poll(ctx: any): Promise<void> {
  */
 export async function checkToken(ctx: any): Promise<void> {
   invalidateAllCaches()
-  const env = await readEnvContent()
-  const { token, source } = await resolveCopilotOAuthTokenWithSource(env)
+  const profile = requestedProfile(ctx)
+  const env = await readEnvContent(profile)
+  const { token, source } = await resolveCopilotOAuthTokenWithSource(env, { inheritProcessEnv: profile === 'default' })
   const cfg = await readAppConfig()
   ctx.body = {
     has_token: Boolean(token),
@@ -171,9 +184,17 @@ export async function checkToken(ctx: any): Promise<void> {
 }
 
 export async function enable(ctx: any): Promise<void> {
-  await writeAppConfig({ copilotEnabled: true })
-  invalidateAllCaches()
-  ctx.body = { ok: true }
+  const profile = requestedProfile(ctx)
+  try {
+    await prepareCopilotRuntime(resolveAgentBridgeCommand({ hermesHome: getProfileDir(profile) }), { enableDisabled: true })
+    await writeAppConfig({ copilotEnabled: true })
+    invalidateAllCaches()
+    invalidateProviderRuntime(profile, 'copilot')
+    ctx.body = { ok: true }
+  } catch (err: any) {
+    ctx.status = 500
+    ctx.body = { error: err?.message || 'GitHub Copilot could not be enabled' }
+  }
 }
 
 /**
@@ -186,14 +207,15 @@ export async function enable(ctx: any): Promise<void> {
  * The user can re-add Copilot any time via "Add Provider".
  */
 export async function disable(ctx: any): Promise<void> {
-  const env = await readEnvContent()
-  const { source } = await resolveCopilotOAuthTokenWithSource(env)
+  const profile = requestedProfile(ctx)
+  const env = await readEnvContent(profile)
+  const { source } = await resolveCopilotOAuthTokenWithSource(env, { inheritProcessEnv: profile === 'default' })
 
   // 步骤 1：先清掉默认模型（最容易失败的一步：写 yaml 可能失败）。
   // 不能 swallow —— 否则会出现 "list 已隐藏 copilot 但 default 仍是 copilot" 的中间态。
   let clearedDefault = false
   try {
-    clearedDefault = await updateConfigYaml((cfg) => {
+    clearedDefault = await updateConfigYamlForProfile(profile, (cfg) => {
       const modelSection = cfg.model
       if (typeof modelSection === 'object' && modelSection !== null) {
         const provider = String(modelSection.provider || '').trim().toLowerCase()
@@ -214,8 +236,7 @@ export async function disable(ctx: any): Promise<void> {
   // 步骤 2：清 .env（仅当 source='env'）。失败也不能让 enabled flag 偷偷置 false。
   try {
     if (source === 'env') {
-      await saveEnvValue('COPILOT_GITHUB_TOKEN', '')
-      delete process.env.COPILOT_GITHUB_TOKEN
+      await saveEnvValueForProfile(profile, 'COPILOT_GITHUB_TOKEN', '')
     }
   } catch (err: any) {
     logger.error(err, 'Copilot disable failed: cannot clear .env')

@@ -1,4 +1,4 @@
-export const DEFAULT_DESKTOP_NODE_VERSION = '22.22.0'
+export const DEFAULT_DESKTOP_NODE_VERSION = '26.13.0'
 
 export function desktopNodeVersion(env = process.env) {
   const version = (

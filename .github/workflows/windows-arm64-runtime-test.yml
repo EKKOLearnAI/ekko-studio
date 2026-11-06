@@ -1,13 +1,27 @@
 name: Test Windows ARM64 Runtime
 on:
   workflow_dispatch:
+    inputs:
+      hermes_version:
+        description: "Hermes version override (supply source ref and commit together)"
+        type: string
+      hermes_source_ref:
+        description: "Hermes Git tag/ref for the version override"
+        type: string
+      hermes_source_commit:
+        description: "Pinned full Hermes source commit for the version override"
+        type: string
   pull_request:
     paths:
       - ".github/workflows/windows-arm64-runtime-test.yml"
       - "packages/desktop/scripts/fetch-python.mjs"
+      - "packages/desktop/scripts/fetch-node.mjs"
+      - "packages/desktop/scripts/check-prepared-runtime.mjs"
       - "packages/desktop/scripts/fetch-git.mjs"
       - "packages/desktop/scripts/python-build-env.mjs"
       - "packages/desktop/scripts/install-hermes.mjs"
+      - "packages/desktop/scripts/prepare-hermes-browser.py"
+      - "packages/desktop/scripts/node-runtime-config.mjs"
       - "packages/desktop/scripts/setup-windows-arm64-openssl.ps1"
 concurrency:
   group: windows-arm64-runtime-${{ github.event.pull_request.number || github.ref }}
@@ -22,6 +36,9 @@ jobs:
       TARGET_OS: win32
       TARGET_ARCH: arm64
       HERMES_SKIP_BROWSER_RUNTIME: 'true'
+      HERMES_VERSION: ${{ inputs.hermes_version }}
+      HERMES_SOURCE_REF: ${{ inputs.hermes_source_ref }}
+      HERMES_SOURCE_COMMIT: ${{ inputs.hermes_source_commit }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

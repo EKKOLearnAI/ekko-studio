@@ -498,7 +498,7 @@ async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): 
       if (!preset?.base_url) continue
       if (provider === 'copilot') {
         if (!copilotEnabled) continue
-        const oauthToken = await resolveCopilotOAuthToken(envContent)
+        const oauthToken = await resolveCopilotOAuthToken(envContent, profile === 'default')
         if (!oauthToken) continue
         mergeCandidate(candidates, {
           provider,

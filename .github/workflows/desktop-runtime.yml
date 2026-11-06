@@ -26,6 +26,10 @@ on:
         description: "python-build-standalone release tag for the Python override (e.g. 20260901)"
         required: false
         type: string
+      node_version:
+        description: "Bundled Node.js version override (e.g. 26.13.0 for Hermes 0.23.0)"
+        required: false
+        type: string
       rebuild:
         description: "Rebuild and replace existing runtime assets after validation"
         required: false
@@ -48,7 +52,7 @@ jobs:
       matrix:
         include:
           - label: macOS arm64
-            runner: macos-14
+            runner: macos-15
             target_os: darwin
             target_arch: arm64
           - label: macOS x64
@@ -151,6 +155,7 @@ jobs:
           HERMES_SKIP_BROWSER_RUNTIME: ${{ matrix.skip_browser_runtime || 'false' }}
           PBS_PY: ${{ github.event.inputs.python_version }}
           PBS_TAG: ${{ github.event.inputs.python_build_tag }}
+          HERMES_DESKTOP_NODE_VERSION: ${{ github.event.inputs.node_version }}
         run: npm --prefix packages/desktop run prepare:runtime
 
       - name: Package runtime

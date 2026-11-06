@@ -126,6 +126,8 @@ python/                 Hermes Agent Git checkout and source root
   agent-browser/
   node/                  browser CLI npm prefix
   ms-playwright/
+  manifest.json         Hermes PM payload paths on newer runtimes
+  runtime-tools/        PM-pinned Chromium on newer runtimes
 node/                    bundled Node.js
 git/                     bundled MinGit on Windows
 runtime-manifest.json
@@ -143,6 +145,23 @@ GitHub/CF archive and records them in schema 2 of the runtime manifest. Do not
 patch tracked Hermes source during this build:
 Studio-specific integration belongs in Studio, and the clean checkout is what
 allows users to run the upstream `hermes update` command directly.
+
+Hermes 0.23 runtime builds use Python 3.14.7 and Node.js 26.13.0 by default.
+Fetch steps reject cached interpreters from another pinned version before reuse.
+When the source exposes the native `tools.browser_launcher`, the build stages Chromium
+through PM's build-owned `prepare_tools` operation and writes a relative payload
+manifest. PM can then find the bundled executable after extraction without a
+profile-specific path or a first-use download. Older runtimes retain the
+agent-browser packaging path. Generated PM files are excluded through Git's
+local `info/exclude`; tracked upstream files remain unchanged. Packaging checks
+the PM-selected browser again after moving the source into its staging directory.
+
+Copilot activation prepares the `github-copilot` provider plugin when the selected
+Hermes release requires it, then stores the accepted OAuth credential in that
+profile's `.env`. Existing enabled profiles migrate on worker startup; read-only
+token detection does not install plugins. Model catalogs use runtime-readable
+credentials, while explicit Add can discover and accept a gh/VS Code login.
+Startup respects disabled lazy installation and never re-enables a disabled plugin.
 
 ## Validation Surface
 

@@ -154,6 +154,17 @@ try {
     console.error(`Relocated Hermes version mismatch: expected ${hermesAgentVersion}, found ${stagedVersion}`)
     process.exit(1)
   }
+  const browserManifest = join(stagedSource, 'manifest.json')
+  if (existsSync(browserManifest) && JSON.parse(readFileSync(browserManifest, 'utf-8')).studioRuntime === 1) {
+    output(stagedPython, ['-c', [
+      'from pathlib import Path',
+      'from hermes_cli.browser_runtime import chromium_executable',
+      'executable = chromium_executable(allow_override=False)',
+      `source = Path(${JSON.stringify(stagedSource)}).resolve()`,
+      'assert executable and Path(executable).resolve().is_relative_to(source / "runtime-tools"), executable',
+      'print(executable)',
+    ].join('\n')], { env: { ...process.env, HERMES_RUNTIME_DIR: undefined, HERMES_DISABLE_LAZY_INSTALLS: '1' } })
+  }
   const stagedCommit = output('git', ['rev-parse', 'HEAD'], { cwd: stagedSource }).toLowerCase()
   const stagedDirtySource = output('git', ['status', '--porcelain'], { cwd: stagedSource })
   if (stagedCommit !== sourceCommit || stagedDirtySource) {

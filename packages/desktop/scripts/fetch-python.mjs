@@ -18,6 +18,7 @@ import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { tmpdir, platform as osPlatform, arch as osArch } from 'node:os'
+import { checkPreparedRuntime } from './check-prepared-runtime.mjs'
 import {
   bundledBaseHomePath,
   bundledBasePythonPath,
@@ -29,8 +30,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
 
 // Pin a known-good python-build-standalone release. Bump intentionally.
-const PBS_TAG = process.env.PBS_TAG || '20260510'
-const PYTHON_VERSION = process.env.PBS_PY || '3.12.13'
+const PBS_TAG = process.env.PBS_TAG || '20260901'
+const PYTHON_VERSION = process.env.PBS_PY || '3.14.7'
 
 const TARGET_OS = process.env.TARGET_OS || osPlatform() // darwin | win32 | linux
 const TARGET_ARCH = process.env.TARGET_ARCH || osArch() // arm64 | x64
@@ -64,6 +65,7 @@ const URL = `${PBS_BASE_URL}/${PBS_TAG}/${FILE}`
 const preparedPython = venvPythonPath(VENV_DIR, TARGET_OS)
 const preparedBasePython = bundledBasePythonPath(OUT_DIR, TARGET_OS)
 if (existsSync(preparedPython) && (TARGET_OS !== 'win32' || existsSync(preparedBasePython))) {
+  checkPreparedRuntime(preparedPython, ['-I', '-c', 'import platform; print(platform.python_version())'], PYTHON_VERSION, 'Python')
   console.log(`✓ Python already present at ${VENV_DIR}, skipping`)
   process.exit(0)
 }
