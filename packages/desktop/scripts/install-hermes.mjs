@@ -659,10 +659,18 @@ if (!SKIP_BROWSER_RUNTIME) {
       `os.environ["PLAYWRIGHT_BROWSERS_PATH"] = ${JSON.stringify(PLAYWRIGHT_BROWSERS_PATH)}`,
       // Hermes 0.21.3 moved browser installation checks into a separate module.
       'module = "tools.browser_tool_install" if importlib.util.find_spec("tools.browser_tool_install") else "tools.browser_tool"',
-      '_chromium_installed = importlib.import_module(module)._chromium_installed',
+      '_chromium_installed = getattr(importlib.import_module(module), "_chromium_installed", None)',
       'assert shutil.which("agent-browser") is not None',
-      'assert _chromium_installed()',
-    ].join('; '),
+      'if _chromium_installed is not None:',
+      '    assert _chromium_installed()',
+      'else:',
+      // Hermes 0.23 removed the legacy API in favor of browser_exec. The
+      // bundled Chrome executable is checked by installBrowserRuntime above;
+      // this checks its new engine without downloading PM-managed packages.
+      '    from tools.browser_use_cli import browser_exec_available',
+      '    assert browser_exec_available(), "Hermes browser_exec engine is unavailable"',
+      '    print("browser_exec engine available; Chromium selection uses Hermes PM or browser.executable_path")',
+    ].join('\n'),
   ], { env: browserRuntimeEnv() })
 }
 
