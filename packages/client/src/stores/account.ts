@@ -1,11 +1,13 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { getStoredUsername } from '@/api/client'
-import { fetchCurrentUser, fetchMyAvatar, type UserAvatar } from '@/api/studio/auth'
+import { getStoredUsername, isStoredSuperAdmin } from '@/api/client'
+import { fetchCurrentUser, fetchMyAvatar, type UserAvatar, type UserRole } from '@/api/studio/auth'
 
 export const useAccountStore = defineStore('account', () => {
   const username = ref(getStoredUsername() || '')
+  const role = ref<UserRole | null>(null)
   const avatar = ref<UserAvatar | null>(null)
+  const isSuperAdmin = computed(() => role.value === 'super_admin' || isStoredSuperAdmin())
   const profileAvatar = computed(() => avatar.value?.type === 'image'
     ? { type: 'image' as const, dataUrl: avatar.value.dataUrl }
     : null)
@@ -17,7 +19,10 @@ export const useAccountStore = defineStore('account', () => {
     if (loaded) return Promise.resolve()
     pending = Promise.allSettled([fetchCurrentUser(), fetchMyAvatar()])
       .then(([userResult, avatarResult]) => {
-        if (userResult.status === 'fulfilled') username.value = userResult.value.username
+        if (userResult.status === 'fulfilled') {
+          username.value = userResult.value.username
+          role.value = userResult.value.role
+        }
         if (avatarResult.status === 'fulfilled') avatar.value = avatarResult.value
         loaded = userResult.status === 'fulfilled' && avatarResult.status === 'fulfilled'
       })
@@ -25,5 +30,5 @@ export const useAccountStore = defineStore('account', () => {
     return pending
   }
 
-  return { username, avatar, profileAvatar, loadAccount }
+  return { username, role, isSuperAdmin, avatar, profileAvatar, loadAccount }
 })
