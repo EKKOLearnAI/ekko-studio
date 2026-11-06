@@ -63,7 +63,7 @@ async function copilotStatus(command: CopilotRuntimeCommand) {
 /** Called only after the user enables Copilot, or for a previously enabled profile. */
 export async function prepareCopilotRuntime(
   command: CopilotRuntimeCommand,
-  options: { token?: string; enableDisabled?: boolean } = {},
+  options: { token?: string; enableDisabled?: boolean; allowInstall?: boolean } = {},
 ): Promise<void> {
   await mkdir(command.hermesHome, { recursive: true })
   const envText = await readFile(join(command.hermesHome, '.env'), 'utf-8').catch(() => '')
@@ -73,6 +73,9 @@ export async function prepareCopilotRuntime(
   if (!token || /[\r\n]/.test(token)) throw new Error('GitHub Copilot requires sign-in before it can be enabled')
   const pending = await copilotStatus(command)
   if (pending.needs_plugin) {
+    if (options.allowInstall === false) {
+      throw new Error(pending.hint || 'The GitHub Copilot plugin must be installed explicitly')
+    }
     if (pending.present && !options.enableDisabled) {
       throw new Error(pending.hint || 'The GitHub Copilot plugin is unavailable')
     }
@@ -113,5 +116,9 @@ export async function prepareConfiguredCopilotRuntime(command: CopilotRuntimeCom
     inheritProcessEnv: basename(dirname(command.hermesHome)) !== 'profiles',
   })
   if (!selected && !token) return
-  await prepareCopilotRuntime(command, { token })
+  const installDisabled = ['1', 'true', 'yes'].includes(String(process.env.HERMES_DISABLE_LAZY_INSTALLS || '').toLowerCase())
+  await prepareCopilotRuntime(command, {
+    token,
+    allowInstall: cfg.security?.allow_lazy_installs !== false && !installDisabled,
+  })
 }

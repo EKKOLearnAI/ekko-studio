@@ -160,6 +160,7 @@ Hermes release requires it, then stores the accepted OAuth credential in that
 profile's `.env`. Existing enabled profiles migrate on worker startup; read-only
 token detection does not install plugins. Model catalogs use runtime-readable
 credentials, while explicit Add can discover and accept a gh/VS Code login.
+Startup respects disabled lazy installation and never re-enables a disabled plugin.
 
 ## Validation Surface
 

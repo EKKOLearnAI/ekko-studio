@@ -69,6 +69,14 @@ describe('Copilot runtime activation', () => {
     expect(mocks.save).not.toHaveBeenCalled()
   })
 
+  it('honors the profile prohibition on lazy installs during startup', async () => {
+    mocks.readYaml.mockResolvedValue({ model: { provider: 'copilot' }, security: { allow_lazy_installs: false } })
+    mocks.exec.mockResolvedValue(status(true))
+    await expect(prepareConfiguredCopilotRuntime(command)).rejects.toThrow('Copilot plugin needs attention')
+    expect(mocks.exec).toHaveBeenCalledTimes(1)
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+
   it('prepares a previously enabled provider even when the default model uses another provider', async () => {
     mocks.readYaml.mockResolvedValue({ model: { provider: 'custom' } })
     mocks.readApp.mockResolvedValue({ copilotEnabled: true })
