@@ -384,6 +384,7 @@ useKeyboard();
               <div
                 class="app-layout"
                 :class="{
+                  'app-layout--shell-sidebar': usesShellSidebar,
                   'no-sidebar': isLoginPage || !showAppSidebar,
                   'has-hermes-config-sidebar': usesHermesConfigSidebar,
                   'has-ekko-config-sidebar': usesEkkoConfigSidebar,
@@ -717,6 +718,31 @@ useKeyboard();
     border-radius: 0;
     box-shadow: none;
   }
+
+  // The shell sidebar and page form one surface with a straight inner seam.
+  .app-layout--shell-sidebar {
+    --studio-layout-start-radius: var(--theme-sidebar-radius, var(--studio-content-radius));
+    --studio-layout-end-radius: var(--theme-content-radius, var(--studio-content-radius));
+    --studio-layout-clip: inset(0 round var(--studio-layout-start-radius) var(--studio-layout-end-radius) var(--studio-layout-end-radius) var(--studio-layout-start-radius));
+    border-radius: 0;
+    clip-path: var(--studio-layout-clip);
+
+    &:dir(rtl) {
+      --studio-layout-clip: inset(0 round var(--studio-layout-end-radius) var(--studio-layout-start-radius) var(--studio-layout-start-radius) var(--studio-layout-end-radius));
+    }
+
+    > :deep(:is(.sidebar, .hermes-config-sidebar, .ekko-config-sidebar, .coding-agent-config-sidebar)) {
+      border-radius: 0;
+      border-start-start-radius: var(--studio-layout-start-radius);
+      border-end-start-radius: var(--studio-layout-start-radius);
+    }
+
+    > .app-main--card {
+      border-radius: 0;
+      border-start-end-radius: var(--studio-layout-end-radius);
+      border-end-end-radius: var(--studio-layout-end-radius);
+    }
+  }
 }
 
 .app-shell--custom-background {
@@ -733,7 +759,7 @@ useKeyboard();
       // Composite the image and surfaces before rounding them together. Separate
       // rounded clips leave antialiased pixels that expose the unfiltered image.
       border-radius: 0;
-      clip-path: inset(0 round var(--studio-content-radius));
+      clip-path: var(--studio-layout-clip, inset(0 round var(--studio-content-radius)));
     }
   }
 
