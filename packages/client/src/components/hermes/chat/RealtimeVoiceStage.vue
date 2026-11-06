@@ -113,6 +113,7 @@ let finishActiveSegmentAudio: (() => void) | null = null
 let previousBodyOverflow = ''
 let previousDocumentOverflow = ''
 let responseStartMessageIndex = 0
+let responsePromptMessage: Message | null = null
 let lastResponseAssistantMessage: Message | null = null
 let responseFinalizing = false
 let playbackGeneration = 0
@@ -130,8 +131,10 @@ let localStreamSessionId: string | null = null
 const speechQueueIdleWaiters = new Set<() => void>()
 const synthesisControllers = new Set<AbortController>()
 const synthesisJobs: SpeechSynthesisJob[] = []
-// Terminal workspace metadata can replace a message's ID while keeping the same object.
-let processedAssistantText = new WeakMap<Message, string>()
+type AssistantSpeechProgress = { message: Message; text: string }
+// Object identity survives terminal ID alignment; persisted IDs survive history rebuilds.
+let processedAssistantText = new WeakMap<Message, AssistantSpeechProgress>()
+const processedAssistantIds = new Map<string, AssistantSpeechProgress>()
 const processedToolMessageIds = new Set<string>()
 const speechSegmenter = createMcuSpeechSegmenter({ emitOnSentenceEnd: true })
 
@@ -199,8 +202,7 @@ const orbStyle = computed(() => ({
 }))
 const voiceToolCalls = computed(() => {
   if (!responseStartedAt.value) return []
-  return chatStore.messages
-    .slice(responseStartMessageIndex)
+  return responseMessagesForTurn()
     .filter((message): message is Message => message.role === 'tool' && Boolean(message.toolName))
     .slice(-4)
     .reverse()
@@ -401,11 +403,13 @@ function resetResponseSpeechState() {
   speechSegments.value = []
   activeSpeechSegment.value = null
   responseStartMessageIndex = chatStore.messages.length
+  responsePromptMessage = null
   lastResponseAssistantMessage = null
   responseFinalizing = false
   responseAudioStarted.value = false
   ttsSegmentIndex = 0
   processedAssistantText = new WeakMap()
+  processedAssistantIds.clear()
   processedToolMessageIds.clear()
   speechSegmenter.reset()
 }
@@ -1000,13 +1004,31 @@ function flushSpeechSegmenter(assistantId = lastResponseAssistantMessage?.id || 
   if (segment) enqueueSpeechSegment(segment, assistantId)
 }
 
+function responseMessagesForTurn() {
+  const messages = chatStore.messages
+  responsePromptMessage ||= messages.slice(responseStartMessageIndex).find(message =>
+    message.role === 'user' && message.timestamp >= responseStartedAt.value,
+  ) || null
+  const promptIndex = responsePromptMessage
+    ? messages.findIndex(message => message === responsePromptMessage || message.id === responsePromptMessage!.id)
+    : -1
+  // Anchoring on the submitted prompt keeps prepended history outside the voice turn.
+  return messages.slice(promptIndex >= 0 ? promptIndex + 1 : responseStartMessageIndex)
+}
+
 function processResponseMessages() {
-  const responseMessages = chatStore.messages.slice(responseStartMessageIndex)
+  const responseMessages = responseMessagesForTurn()
   for (const message of responseMessages) {
     if (message.role === 'assistant') {
       const content = message.content || ''
-      const previous = processedAssistantText.get(message) || ''
-      processedAssistantText.set(message, content)
+      const progress = processedAssistantText.get(message) || processedAssistantIds.get(message.id)
+        || { message, text: '' }
+      const previous = progress.text
+      if (lastResponseAssistantMessage === progress.message) lastResponseAssistantMessage = message
+      progress.message = message
+      progress.text = content
+      processedAssistantText.set(message, progress)
+      processedAssistantIds.set(message.id, progress)
 
       if (!content.startsWith(previous)) continue
       const delta = content.slice(previous.length)
@@ -1032,7 +1054,7 @@ function finishResponseIfReady() {
   if (!waitingForResponse.value) return
   processResponseMessages()
   if (chatStore.isStreaming || responseFinalizing) return
-  const responseMessages = chatStore.messages.slice(responseStartMessageIndex)
+  const responseMessages = responseMessagesForTurn()
   const response = [...responseMessages].reverse().find(message =>
     message.role === 'assistant' && Boolean(message.content.trim()),
   )

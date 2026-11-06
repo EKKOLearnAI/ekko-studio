@@ -2,13 +2,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { nextTick, ref } from 'vue'
+import { computed, h, nextTick, ref } from 'vue'
+import ToolRunSummary from '../../packages/client/src/components/hermes/chat/ToolRunSummary.vue'
+import { groupCompletedToolsByRun } from '../../packages/client/src/components/hermes/chat/tool-run-grouping'
 import RealtimeVoiceStage from '../../packages/client/src/components/hermes/chat/RealtimeVoiceStage.vue'
 import { alignWorkspaceChangeAssistantMessage, useChatStore, type Message } from '../../packages/client/src/stores/hermes/chat'
 import { synthesizeSpeech } from '../../packages/client/src/api/studio/tts'
 import type { RunEvent } from '../../packages/client/src/api/studio/chat'
 
 const transport = vi.hoisted(() => ({ start: vi.fn(), resume: vi.fn(), register: vi.fn() }))
+const history = vi.hoisted(() => ({ page: vi.fn() }))
+vi.mock('@/api/studio/sessions', () => ({ fetchSessionMessagesPage: history.page }))
 vi.mock('@/api/studio/chat', () => ({
   startRunViaSocket: transport.start, resumeSession: transport.resume, registerSessionHandlers: transport.register,
   unregisterSessionHandlers: vi.fn(), getChatRunSocket: vi.fn(() => ({ emit: vi.fn() })),
@@ -77,6 +81,17 @@ function spoken() {
   return vi.mocked(synthesizeSpeech).mock.calls.map(([request]) => request.text)
 }
 
+function snapshot() {
+  const messages = chat.messages.map(message => ({
+    id: message.id, role: message.role, content: message.content, timestamp: message.timestamp / 1000,
+  }))
+  return { session: { id: sid }, messages, total: messages.length, hasMore: false }
+}
+
+function audioResult() {
+  return { audio: new Blob(['audio']), engine: 'edge', provider: 'edge' }
+}
+
 function align(id: string) {
   const message = chat.messages.at(-1)!
   alignWorkspaceChangeAssistantMessage(chat.messages, { assistant_message_id: id } as Parameters<typeof alignWorkspaceChangeAssistantMessage>[1], message.id)
@@ -94,7 +109,7 @@ beforeEach(async () => {
   chat.activeSessionId = sid
   transport.start.mockReturnValue({ abort: vi.fn() })
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Unexpected network request') }))
-  vi.mocked(synthesizeSpeech).mockReset().mockResolvedValue(new Blob(['audio']))
+  vi.mocked(synthesizeSpeech).mockReset().mockResolvedValue(audioResult())
   played.mockReset()
   vi.stubGlobal('Audio', class {
     onended: (() => void) | null = null
@@ -104,7 +119,10 @@ beforeEach(async () => {
   })
   vi.stubGlobal('requestAnimationFrame', vi.fn())
   vi.stubGlobal('URL', class extends URL {
-    static createObjectURL = vi.fn(() => 'blob:voice-test')
+    static createObjectURL = vi.fn((audio: Blob) => {
+      expect(audio).toBeInstanceOf(Blob)
+      return 'blob:voice-test'
+    })
     static revokeObjectURL = vi.fn()
   })
   wrapper = mount(RealtimeVoiceStage)
@@ -125,6 +143,147 @@ afterEach(() => {
 })
 
 describe('realtime voice message alignment', () => {
+  it.each([false, true])('keeps a pending sentence through reconnect (pending synthesis: %s)', async pending => {
+    let finish: ((audio: ReturnType<typeof audioResult>) => void) | undefined
+    if (pending) vi.mocked(synthesizeSpeech).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    event('message.delta', { delta: 'First sentence. A partial' })
+    event('workspace.diff.completed', { change: { assistant_message_id: 'persisted-id' } })
+    await settle()
+    const previous = chat.messages.at(-1)!
+    const data = snapshot()
+    const options = transport.start.mock.calls[0]![5]
+    options.onReconnectResume({ session_id: sid, ...data, isWorking: true, events: [] })
+    await settle()
+    expect(chat.messages.at(-1)).not.toBe(previous)
+    expect(spoken()).toEqual(['First sentence.'])
+    event('message.delta', { delta: ' sentence without punctuation' })
+    await settle()
+    complete()
+    await settle()
+    finish?.(audioResult())
+    await settle()
+    expect(spoken()).toEqual(['First sentence.', 'A partial sentence without punctuation'])
+    expect(played).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not replay after a foreground refresh while completed audio is pending', async () => {
+    let finish!: (audio: ReturnType<typeof audioResult>) => void
+    vi.mocked(synthesizeSpeech).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    event('message.delta', { delta: 'First sentence. Tail' })
+    await settle()
+    complete()
+    await settle()
+    history.page.mockResolvedValueOnce(snapshot())
+    await chat.refreshActiveSession()
+    event('workspace.diff.completed', { change: { assistant_message_id: 'later-persisted-id' } })
+    await settle()
+    finish(audioResult())
+    await settle()
+    expect(spoken()).toEqual(['First sentence.', 'Tail'])
+    expect(played).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores older replies prepended during the voice turn', async () => {
+    event('message.delta', { delta: 'Current sentence. A partial' })
+    await settle()
+    chat.activeSession!.hasMoreBefore = true
+    chat.activeSession!.loadedMessageCount = chat.messages.length
+    history.page.mockResolvedValueOnce({
+      messages: [{ id: 'older-reply', role: 'assistant', content: 'Historical sentence. ', timestamp: 1 }],
+      total: chat.messages.length + 1, hasMore: false,
+    })
+    expect(await chat.loadOlderMessages(sid)).toBe(true)
+    await settle()
+    expect(spoken()).toEqual(['Current sentence.'])
+    event('message.delta', { delta: ' sentence' })
+    complete()
+    await settle()
+    expect(spoken()).toEqual(['Current sentence.', 'A partial sentence'])
+  })
+
+  it('reactively renders ordinary chat completion without a voice subscriber', async () => {
+    wrapper.unmount()
+    wrapper = mount({ setup: () => () => h('output', chat.messages.map(m => `${m.role}:${m.content}:${!!m.isStreaming}`).join('|')) })
+    event('message.delta', { delta: 'Visible reply' })
+    await settle()
+    const reply = chat.messages.at(-1)!
+    expect(wrapper.text()).toContain('assistant:Visible reply:true')
+    complete({ parsed_content: 'Visible reply with final content', parsed_reasoning: 'Final reasoning' })
+    await settle()
+    expect(wrapper.text()).toContain('assistant:Visible reply with final content:false')
+    expect(reply.content).toBe('Visible reply with final content')
+    expect(reply.reasoning).toBe('Final reasoning')
+    expect(chat.messages.at(-1)).toBe(reply)
+    expect(spoken()).toEqual([])
+  })
+
+  it.each(['tool.completed', 'tool.failed'] as const)('reactively settles and groups a tool on %s without changing historical rows', async terminal => {
+    wrapper.unmount()
+    const historical: Message = { id: 'old-tool', role: 'tool', content: '', timestamp: 1,
+      toolName: 'read_file', toolCallId: 'tool-id', runMarker: 'old-run', toolStatus: 'done', toolResult: 'old result' }
+    chat.messages.unshift(historical)
+    const savedHistory = structuredClone(historical)
+    const tools = computed(() => chat.messages.filter(m => m.role === 'tool' && m.runMarker === 'test-run'))
+    wrapper = mount({ setup: () => () => h(ToolRunSummary, { runId: 'test-run', tools: tools.value, active: tools.value.some(m => m.toolStatus === 'running') }) })
+    event('tool.started', { tool: 'read_file', tool_call_id: 'tool-id', arguments: { path: '/fixture' } })
+    await settle()
+    const tool = tools.value[0]!
+    expect(wrapper.find('[aria-busy]').exists()).toBe(true)
+    event('tool.started', { tool: 'read_file', tool_call_id: 'tool-id', preview: 'Reading fixture' })
+    event(terminal, { tool: 'read_file', tool_call_id: 'tool-id', result: 'new result', error: terminal === 'tool.failed' ? 'failed' : undefined })
+    await settle()
+    expect(tools.value).toHaveLength(1)
+    expect(tools.value[0]).toBe(tool)
+    expect(tool.toolStatus).toBe(terminal === 'tool.failed' ? 'error' : 'done')
+    expect(tool.toolResult).toBe('new result')
+    expect(tool.toolArgs).toEqual({ path: '/fixture' })
+    expect(wrapper.find('[aria-busy]').exists()).toBe(false)
+    expect(wrapper.find(terminal === 'tool.failed' ? '.tool-run-error' : '.tool-run-success').exists()).toBe(true)
+    expect(groupCompletedToolsByRun(chat.messages).find(m => m.toolRunId === 'test-run')?.toolMessages).toEqual([tool])
+    expect(chat.messages[0]).toEqual(savedHistory)
+  })
+
+  it('updates a subagent row and telemetry without speaking its private output', async () => {
+    event('message.delta', { delta: 'Parent sentence. ' })
+    await settle()
+    event('subagent.start', { subagent_id: 'worker', goal: 'Inspect fixture', task_index: 0, task_count: 1 })
+    await settle()
+    const row = chat.messages.find(m => m.toolCallId === 'subagent:worker')!
+    expect(row.toolStatus).toBe('running')
+    event('subagent.text', { subagent_id: 'worker', text: 'Private worker answer.' })
+    event('subagent.complete', { subagent_id: 'worker', status: 'completed', summary: 'Fixture checked' })
+    await settle()
+    expect(chat.messages.find(m => m.toolCallId === 'subagent:worker')).toBe(row)
+    expect(row.toolStatus).toBe('done')
+    expect(row.toolResult).toContain('Fixture checked')
+    expect(chat.getSubagentStream(sid, 'worker')?.status).toBe('completed')
+    expect(spoken()).toEqual(['Parent sentence.'])
+    complete()
+    await settle()
+    expect(spoken()).toEqual(['Parent sentence.'])
+  })
+
+  it('updates MoA reference/aggregation rows and speaks only the parent answer', async () => {
+    event('moa.reference', { index: 0, model: 'reference', text: 'Private reference.' })
+    await settle()
+    const reference = chat.messages.find(m => m.toolName === 'moa_reference')!
+    event('moa.reference', { index: 0, model: 'reference', text: 'Updated private reference.' })
+    event('moa.aggregating', { aggregator: 'first' })
+    await settle()
+    const aggregation = chat.messages.find(m => m.toolName === 'moa_aggregating')!
+    event('moa.aggregating', { aggregator: 'final' })
+    await settle()
+    expect(chat.messages.find(m => m.toolName === 'moa_reference')).toBe(reference)
+    expect(reference.toolResult).toBe('Updated private reference.')
+    expect(chat.messages.find(m => m.toolName === 'moa_aggregating')).toBe(aggregation)
+    expect(aggregation.toolArgs).toEqual({ aggregator: 'final' })
+    event('message.delta', { delta: 'Aggregated sentence. ' })
+    complete()
+    await settle()
+    expect(chat.messages.find(m => m.toolName === 'moa_aggregating')!.toolStatus).toBe('done')
+    expect(spoken()).toEqual(['Aggregated sentence.'])
+  })
+
   it.each(['usage', 'workspace', 'task-return'] as const)('does not replay through the real run.completed handler (%s metadata)', async (metadata) => {
     event('message.delta', { delta: 'First sentence. ' })
     await settle()
@@ -256,7 +415,7 @@ describe('realtime voice message alignment', () => {
   })
 
   it('does not enqueue a second copy while synthesis is pending at completion', async () => {
-    let finish!: (audio: Blob) => void
+    let finish!: (audio: ReturnType<typeof audioResult>) => void
     vi.mocked(synthesizeSpeech).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     event('message.delta', { delta: 'First sentence. Tail' })
     await settle()
@@ -264,7 +423,7 @@ describe('realtime voice message alignment', () => {
     await settle()
     expect(spoken()).toEqual(['First sentence.', 'Tail'])
     expect(played).not.toHaveBeenCalled()
-    finish(new Blob(['audio']))
+    finish(audioResult())
     await settle()
     expect(played).toHaveBeenCalledTimes(2)
     expect(spoken()).toEqual(['First sentence.', 'Tail'])
@@ -330,13 +489,13 @@ describe('realtime voice message alignment', () => {
   })
 
   it('discards interrupted synthesis and still speaks the next turn', async () => {
-    let finish!: (audio: Blob) => void
+    let finish!: (audio: ReturnType<typeof audioResult>) => void
     vi.mocked(synthesizeSpeech).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
     chat.messages.push(assistant('interrupted', 'Same sentence. '))
     await settle()
     await stage.stopActiveTurn()
     event('abort.completed')
-    finish(new Blob(['stale audio']))
+    finish(audioResult())
     await settle()
     expect(played).not.toHaveBeenCalled()
     await stage.submitTranscript('Repeat it')
