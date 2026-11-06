@@ -101,6 +101,7 @@ type DisplayContentFile = {
   name: string
   path?: string
   url?: string
+  mediaType?: string
   context?: string
 }
 
@@ -119,6 +120,15 @@ function getImageUrlFromBlock(block: any): string | null {
   if (typeof raw === 'string') return raw
   if (raw && typeof raw === 'object' && typeof raw.url === 'string') return raw.url
   return null
+}
+
+function getImagePathFromUrl(url: string | null): string | undefined {
+  if (!url || !url.includes('/api/studio/files/download?')) return undefined
+  try {
+    return new URL(url, 'http://localhost').searchParams.get('path') || undefined
+  } catch {
+    return undefined
+  }
 }
 
 function imageNameFromDataUrl(url: string, index: number): string {
@@ -164,12 +174,16 @@ const contentFiles = computed<DisplayContentFile[] | null>(() => {
   return contentBlocks.value!.flatMap<DisplayContentFile>((block, index) => {
     if ((block as any).video_frame === true) return []
     if (block.type === 'image') {
+      const path = String((block as any).path || '')
+      const url = typeof (block as any).url === 'string' ? (block as any).url : undefined
       return [{
         type: 'image' as const,
         name: String((block as any).name || `image-${index + 1}`),
-        path: String((block as any).path || ''),
+        path: path || getImagePathFromUrl(url || null),
+        url,
+        mediaType: typeof (block as any).media_type === 'string' ? (block as any).media_type : 'image/png',
         context: typeof (block as any).context === 'string' ? (block as any).context : undefined,
-      }].filter(file => file.path)
+      }].filter(file => file.path || file.url)
     }
     if (block.type === 'file') {
       const name = String((block as any).name || `file-${index + 1}`)
@@ -182,11 +196,13 @@ const contentFiles = computed<DisplayContentFile[] | null>(() => {
       }].filter(file => file.path)
     }
     const imageUrl = getImageUrlFromBlock(block)
-    if (imageUrl?.startsWith('data:image/')) {
+    if (imageUrl) {
       return [{
         type: 'image' as const,
         name: imageNameFromDataUrl(imageUrl, index),
         url: imageUrl,
+        path: getImagePathFromUrl(imageUrl),
+        mediaType: typeof (block as any).media_type === 'string' ? (block as any).media_type : undefined,
       }]
     }
     return []
@@ -250,7 +266,7 @@ function referenceBubbleContent() {
   ].filter(file => file.type === 'image' && (file.path || file.url)).map((file, index) => ({
     id: `${props.message.id}-reference-${index}`,
     name: file.name,
-    type: 'image/*',
+    type: ('mediaType' in file ? file.mediaType : file.type === 'image' ? undefined : file.type) || 'image/png',
     size: 0,
     url: file.url || (file.path ? getDownloadUrl(file.path, file.name) : ''),
     path: file.path,

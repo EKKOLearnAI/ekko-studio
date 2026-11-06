@@ -638,6 +638,15 @@ export async function uploadFiles(attachments: Attachment[]): Promise<{ name: st
   return data.files
 }
 
+function downloadPathFromUrl(url: string | undefined): string | undefined {
+  if (!url || !url.includes('/api/studio/files/download?')) return undefined
+  try {
+    return new URL(url, 'http://localhost').searchParams.get('path') || undefined
+  } catch {
+    return undefined
+  }
+}
+
 export async function buildContentBlocks(
   content: string,
   attachments?: Attachment[],
@@ -652,10 +661,13 @@ export async function buildContentBlocks(
   }
 
   // Add attachment blocks using uploaded file paths
-  if (attachments && attachments.length > 0 && (uploadedFiles || attachments.some(attachment => attachment.path))) {
+  if (attachments && attachments.length > 0 && (
+    uploadedFiles
+    || attachments.some(attachment => attachment.path || downloadPathFromUrl(attachment.url))
+  )) {
     for (const attachment of attachments) {
       const uploaded = uploadedFiles?.find(file => file.name === attachment.name)
-      const path = attachment.path || uploaded?.path
+      const path = attachment.path || uploaded?.path || downloadPathFromUrl(attachment.url)
       if (!path) continue
 
       // Check if it's an image
@@ -1248,6 +1260,7 @@ type ChatRuntimeMode = 'default' | 'global_agent'
 let activeRuntimeMode: ChatRuntimeMode = 'default'
 const LEGACY_STORAGE_KEY = 'hermes_active_session'
 const SESSION_PROFILE_FILTER_STORAGE_KEY = 'hermes_session_profile_filter_v1'
+const MESSAGE_REFERENCE_STORAGE_KEY_PREFIX = 'hermes_message_references_v1_'
 
 // 获取当前 profile 名称，用于隔离缓存。
 // 从 profiles store 的 activeProfileName（同步 localStorage）读取，
@@ -1266,6 +1279,9 @@ function runtimeStoragePrefix(): string {
 
 function storageKey(): string { return runtimeStoragePrefix() + getProfileName() }
 function legacyStorageKey(): string | null { return activeRuntimeMode === 'default' && getProfileName() === 'default' ? LEGACY_STORAGE_KEY : null }
+function messageReferenceStorageKey(): string {
+  return MESSAGE_REFERENCE_STORAGE_KEY_PREFIX + runtimeStoragePrefix() + getProfileName()
+}
 
 function isProviderAgentSession(session?: Pick<Session, 'source' | 'agent' | 'codingAgentId'> | null): boolean {
   return session?.source === 'builtin_agent' || session?.source === 'coding_agent' ||
@@ -1347,6 +1363,39 @@ function removeItem(key: string) {
   } catch {
     // ignore
   }
+}
+
+function loadMessageReferences(): Map<string, MessageReference> {
+  const raw = getItemBestEffort(messageReferenceStorageKey())
+  if (!raw) return new Map()
+  try {
+    const parsed = JSON.parse(raw) as Record<string, MessageReference>
+    const entries = Object.entries(parsed).filter(([, reference]) =>
+      reference && typeof reference.id === 'string' && typeof reference.content === 'string',
+    )
+    return new Map(entries.map(([sessionId, reference]) => [
+      sessionId,
+      {
+        ...reference,
+        attachments: Array.isArray(reference.attachments)
+          ? reference.attachments.map(({ file: _file, ...attachment }) => attachment)
+          : undefined,
+      },
+    ]))
+  } catch {
+    return new Map()
+  }
+}
+
+function persistMessageReferences(references: Map<string, MessageReference>) {
+  const serializable = Object.fromEntries([...references.entries()].map(([sessionId, reference]) => {
+    const { file: _file, ...safeReference } = reference as MessageReference & { file?: File }
+    return [sessionId, {
+      ...safeReference,
+      attachments: safeReference.attachments?.map(({ file: _attachmentFile, ...attachment }) => attachment),
+    }]
+  }))
+  setItemBestEffort(messageReferenceStorageKey(), JSON.stringify(serializable))
 }
 
 // Strip the circular `file: File` reference from attachments before caching —
@@ -1476,7 +1525,7 @@ function createChatState(scopedSessionId?: string) {
   /** sessionId → queue ids that server reported as dequeued before the peer message arrived */
   const dequeuedQueueIds = ref<Map<string, Set<string>>>(new Map())
   /** sessionId → message selected as the reference for the next user turn */
-  const messageReferences = ref<Map<string, MessageReference>>(new Map())
+  const messageReferences = ref<Map<string, MessageReference>>(loadMessageReferences())
   const activeMessageReference = computed(() => {
     const sid = activeSessionId.value
     return sid ? messageReferences.value.get(sid) || null : null
@@ -1670,6 +1719,7 @@ function createChatState(scopedSessionId?: string) {
     const next = new Map(messageReferences.value)
     next.set(sessionId, reference)
     messageReferences.value = next
+    persistMessageReferences(next)
   }
 
   function clearMessageReference(sessionId: string) {
@@ -1677,6 +1727,7 @@ function createChatState(scopedSessionId?: string) {
     const next = new Map(messageReferences.value)
     next.delete(sessionId)
     messageReferences.value = next
+    persistMessageReferences(next)
   }
 
   function markSessionCompletedUnread(sessionId: string, hasQueue = false) {
