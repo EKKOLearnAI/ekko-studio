@@ -18,6 +18,7 @@ import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { tmpdir, platform as osPlatform, arch as osArch } from 'node:os'
+import { checkPreparedRuntime } from './check-prepared-runtime.mjs'
 import {
   bundledBaseHomePath,
   bundledBasePythonPath,
@@ -64,6 +65,7 @@ const URL = `${PBS_BASE_URL}/${PBS_TAG}/${FILE}`
 const preparedPython = venvPythonPath(VENV_DIR, TARGET_OS)
 const preparedBasePython = bundledBasePythonPath(OUT_DIR, TARGET_OS)
 if (existsSync(preparedPython) && (TARGET_OS !== 'win32' || existsSync(preparedBasePython))) {
+  checkPreparedRuntime(preparedPython, ['-I', '-c', 'import platform; print(platform.python_version())'], PYTHON_VERSION, 'Python')
   console.log(`✓ Python already present at ${VENV_DIR}, skipping`)
   process.exit(0)
 }

@@ -147,6 +147,7 @@ Studio-specific integration belongs in Studio, and the clean checkout is what
 allows users to run the upstream `hermes update` command directly.
 
 Hermes 0.23 runtime builds use Python 3.14.7 and Node.js 26.13.0 by default.
+Fetch steps reject cached interpreters from another pinned version before reuse.
 When the source exposes the native `tools.browser_launcher`, the build stages Chromium
 through PM's build-owned `prepare_tools` operation and writes a relative payload
 manifest. PM can then find the bundled executable after extraction without a
