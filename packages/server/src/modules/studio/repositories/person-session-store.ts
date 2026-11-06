@@ -29,7 +29,7 @@ export function listPersonSessions(userId: number, search = '', offset = 0, limi
       WHERE m.session_id=s.id AND ?!='' AND instr(lower(m.content),lower(?))>0 ORDER BY m.id DESC LIMIT 1)
     WHERE CAST(s.studio_user_id AS TEXT)=? AND s.id LIKE 'person-main-%'
       AND (?='' OR instr(lower(s.title),lower(?))>0 OR hit.id IS NOT NULL)
-    ORDER BY s.last_active DESC,s.id LIMIT ? OFFSET ?`)
+    ORDER BY COALESCE(s.is_pinned, 0) DESC,s.last_active DESC,s.id LIMIT ? OFFSET ?`)
     .all(search, search, search, String(userId), search, search, Math.min(100, Math.max(1, limit)), Math.max(0, offset))
     .filter(session => !deleting.has(String(session.id))) as unknown as Array<NonNullable<ReturnType<typeof getSession>> & { matched_message_id: number | null; snippet: string | null }>
 

@@ -203,3 +203,20 @@ it('preserves legacy/manual bindings and explicit empty settings through migrati
   expect(local('person-main-user-default').workspace).toBe(legacyDefault)
   expect(existsSync(legacyDefault)).toBe(false)
 })
+
+it('keeps pinned Person conversations ahead of recent unpinned conversations', async () => {
+  const { createPersonConversation, personConversations } = conversations
+  const { setSessionPinned, updateSession } = sessions
+  const older = await createPersonConversation(1, 'Older')
+  const newer = await createPersonConversation(1, 'Newer')
+  updateSession('person-main-1', { last_active: 50 })
+  updateSession(older.id, { last_active: 100 })
+  updateSession(newer.id, { last_active: 200 })
+
+  expect(personConversations(1).sessions.map(session => session.id)).toEqual([newer.id, older.id])
+  expect(setSessionPinned(older.id, true)).toBe(true)
+  expect(personConversations(1).sessions.map(session => session.id)).toEqual([older.id, newer.id])
+  expect(personConversations(1).sessions.find(session => session.id === older.id)?.is_pinned).toBe(1)
+  expect(setSessionPinned(older.id, false)).toBe(true)
+  expect(personConversations(1).sessions.map(session => session.id)).toEqual([newer.id, older.id])
+})
