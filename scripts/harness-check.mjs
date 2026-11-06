@@ -305,8 +305,8 @@ for (const phrase of [
   }
 }
 
-if (!desktopNodeRuntimeConfig.includes("DEFAULT_DESKTOP_NODE_VERSION = '22.22.0'")) {
-  fail('desktop runtime Node.js must stay pinned to the Hermes-compatible 22.22.0 release')
+if (!desktopNodeRuntimeConfig.includes("DEFAULT_DESKTOP_NODE_VERSION = '26.13.0'")) {
+  fail('desktop runtime Node.js must stay pinned to the Hermes 0.23-compatible 26.13.0 release')
 }
 if (!desktopNodeRuntimeConfig.includes('HERMES_DESKTOP_NODE_VERSION')) {
   fail('desktop runtime Node.js pin must keep an explicit environment override')

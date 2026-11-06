@@ -74,10 +74,10 @@ function unquote(raw: string): string {
   return v
 }
 
-function readEnvVar(envContent: string, key: string): string {
-  if (process.env[key]) return unquote(process.env[key]!)
+function readEnvVar(envContent: string, key: string, inheritProcessEnv = true): string {
   const m = envContent.match(new RegExp(`^${key}\\s*=[ \\t]*(.+)`, 'm'))
   if (m && m[1].trim() && !m[1].trim().startsWith('#')) return unquote(m[1])
+  if (inheritProcessEnv && process.env[key]) return unquote(process.env[key]!)
   return ''
 }
 
@@ -119,11 +119,13 @@ export type CopilotTokenSource = 'env' | 'gh-cli' | 'apps-json' | null
 
 export async function resolveCopilotOAuthTokenWithSource(
   envContent: string,
+  options: { inheritProcessEnv?: boolean; allowExternal?: boolean } = {},
 ): Promise<{ token: string; source: CopilotTokenSource }> {
   for (const key of ['COPILOT_GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN']) {
-    const v = readEnvVar(envContent, key)
+    const v = readEnvVar(envContent, key, options.inheritProcessEnv !== false)
     if (isUsableOAuthToken(v)) return { token: v, source: 'env' }
   }
+  if (options.allowExternal === false) return { token: '', source: null }
   const appsToken = await readGhAppsToken()
   if (appsToken) return { token: appsToken, source: 'apps-json' }
   try {
@@ -134,8 +136,10 @@ export async function resolveCopilotOAuthTokenWithSource(
   return { token: '', source: null }
 }
 
-export async function resolveCopilotOAuthToken(envContent: string): Promise<string> {
-  const { token } = await resolveCopilotOAuthTokenWithSource(envContent)
+export async function resolveCopilotOAuthToken(envContent: string, inheritProcessEnv = true): Promise<string> {
+  // Catalogs describe credentials the Hermes runtime can actually use. The
+  // explicit Add flow may detect external credentials and migrate them first.
+  const { token } = await resolveCopilotOAuthTokenWithSource(envContent, { allowExternal: false, inheritProcessEnv })
   return token
 }
 
@@ -227,9 +231,9 @@ export async function fetchCopilotModelsWithOAuthToken(oauthToken: string): Prom
  * - 负缓存 60 秒（失败时缓存 fallback，避免抖动重复打慢路径）
  * - 并发请求合并：同一 token 的同时多次调用复用 inflight Promise
  */
-export async function getCopilotModelsDetailed(envContent: string): Promise<CopilotModelMeta[]> {
+export async function getCopilotModelsDetailed(envContent: string, inheritProcessEnv = true): Promise<CopilotModelMeta[]> {
   // 先解析 oauth token —— 这一步本身有 fs 读取，但不会发网络请求；用作 cache key。
-  const oauth = await resolveCopilotOAuthToken(envContent)
+  const oauth = await resolveCopilotOAuthToken(envContent, inheritProcessEnv)
   const key = tokenCacheKey(oauth)
   const now = Date.now()
   const hit = cacheByToken.get(key)

@@ -29,8 +29,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
 
 // Pin a known-good python-build-standalone release. Bump intentionally.
-const PBS_TAG = process.env.PBS_TAG || '20260510'
-const PYTHON_VERSION = process.env.PBS_PY || '3.12.13'
+const PBS_TAG = process.env.PBS_TAG || '20260901'
+const PYTHON_VERSION = process.env.PBS_PY || '3.14.7'
 
 const TARGET_OS = process.env.TARGET_OS || osPlatform() // darwin | win32 | linux
 const TARGET_ARCH = process.env.TARGET_ARCH || osArch() // arm64 | x64

@@ -386,10 +386,9 @@ function cachedProviderModels(
 }
 
 
-// Copilot 授权检测：复用同一套 token 解析逻辑（含 ~/.config/github-copilot/apps.json
-// 与 ghp_ PAT 跳过），与 getCopilotModels 行为一致，避免出现"模型能拉到却被判未授权"。
-async function isCopilotAuthorized(envContent: string): Promise<boolean> {
-  return !!(await resolveCopilotOAuthToken(envContent))
+// Only advertise credentials the active Hermes profile can read at execution time.
+async function isCopilotAuthorized(envContent: string, profile: string): Promise<boolean> {
+  return !!(await resolveCopilotOAuthToken(envContent, profile === 'default'))
 }
 
 async function buildAvailableForProfile(
@@ -483,14 +482,11 @@ async function buildAvailableForProfile(
 
   for (const [providerKey, envMapping] of Object.entries(PROVIDER_ENV_MAP)) {
     const oauthAuthorized = providerSupportsStoredOAuth(providerKey) ? isOAuthAuthorized(providerKey) : false
-    if (envMapping.api_key_env && !envHasValue(envMapping.api_key_env) && !oauthAuthorized) continue
-    if (!envMapping.api_key_env) {
-      if (providerKey === 'copilot') {
-        if (!copilotEnabled) continue
-        if (!(await isCopilotAuthorized(envContent))) continue
-      } else if (!isOAuthAuthorized(providerKey)) {
-        continue
-      }
+    if (providerKey === 'copilot') {
+      if (!copilotEnabled || !(await isCopilotAuthorized(envContent, profile))) continue
+    } else {
+      if (envMapping.api_key_env && !envHasValue(envMapping.api_key_env) && !oauthAuthorized) continue
+      if (!envMapping.api_key_env && !oauthAuthorized) continue
     }
     const preset = PROVIDER_PRESETS.find((p: any) => p.value === providerKey)
     const label = preset?.label || providerKey.replace(/^custom:/, '')
@@ -829,7 +825,7 @@ export async function getAvailable(ctx: any) {
     let copilotLiveModels: CopilotModelMeta[] | null = null
     const getCopilotLive = async (): Promise<CopilotModelMeta[]> => {
       if (copilotLiveModels !== null) return copilotLiveModels
-      try { copilotLiveModels = await getCopilotModelsDetailed(envContent) }
+      try { copilotLiveModels = await getCopilotModelsDetailed(envContent, getActiveProfileName() === 'default') }
       catch { copilotLiveModels = [] }
       return copilotLiveModels
     }
@@ -852,14 +848,11 @@ export async function getAvailable(ctx: any) {
 
     for (const [providerKey, envMapping] of Object.entries(PROVIDER_ENV_MAP)) {
       const oauthAuthorized = providerSupportsStoredOAuth(providerKey) ? isOAuthAuthorized(providerKey) : false
-      if (envMapping.api_key_env && !envHasValue(envMapping.api_key_env) && !oauthAuthorized) continue
-      if (!envMapping.api_key_env) {
-        if (providerKey === 'copilot') {
-          if (!copilotEnabled) continue
-          if (!(await isCopilotAuthorized(envContent))) continue
-        } else if (!isOAuthAuthorized(providerKey)) {
-          continue
-        }
+      if (providerKey === 'copilot') {
+        if (!copilotEnabled || !(await isCopilotAuthorized(envContent, getActiveProfileName()))) continue
+      } else {
+        if (envMapping.api_key_env && !envHasValue(envMapping.api_key_env) && !oauthAuthorized) continue
+        if (!envMapping.api_key_env && !oauthAuthorized) continue
       }
       const preset = PROVIDER_PRESETS.find((p: any) => p.value === providerKey)
       const label = preset?.label || providerKey.replace(/^custom:/, '')

@@ -8,6 +8,7 @@ import { OPENROUTER_APP_HEADERS } from '../../../studio/public/openrouter-attrib
 import { resolveHermesInstallationEnvironment } from '../runtime/installation'
 import { detectHermesHome, getHermesBin } from '../runtime/path'
 import { AgentBridgeClient, DEFAULT_AGENT_BRIDGE_ENDPOINT } from './client'
+import { prepareConfiguredCopilotRuntime } from '../providers/copilot-runtime'
 
 const DEFAULT_AGENT_BRIDGE_STARTUP_TIMEOUT_MS = 120000
 const DEFAULT_AGENT_BRIDGE_RESTART_DELAY_MS = 1000
@@ -993,6 +994,13 @@ export class AgentBridgeManager {
 
     const script = bridgeScriptPath()
     const command = resolveAgentBridgeCommand(this.options)
+    try {
+      await prepareConfiguredCopilotRuntime(command)
+    } catch (err) {
+      // A disabled/broken optional provider must not prevent other providers
+      // in this profile from starting. Native resolution retains its error.
+      logger.warn(err, '[agent-bridge] Copilot runtime preparation failed')
+    }
     await this.prepareEndpoint()
     const args = [...command.argsPrefix, script, '--endpoint', this.endpoint]
     const agentRoot = command.agentRoot
