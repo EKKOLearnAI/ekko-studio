@@ -486,7 +486,7 @@ async function buildAvailableForProfile(
       if (!copilotEnabled || !(await isCopilotAuthorized(envContent, profile))) continue
     } else {
       if (envMapping.api_key_env && !envHasValue(envMapping.api_key_env) && !oauthAuthorized) continue
-      if (!envMapping.api_key_env && !oauthAuthorized) continue
+      if (!envMapping.api_key_env && !isOAuthAuthorized(providerKey)) continue
     }
     const preset = PROVIDER_PRESETS.find((p: any) => p.value === providerKey)
     const label = preset?.label || providerKey.replace(/^custom:/, '')
@@ -852,7 +852,7 @@ export async function getAvailable(ctx: any) {
         if (!copilotEnabled || !(await isCopilotAuthorized(envContent, getActiveProfileName()))) continue
       } else {
         if (envMapping.api_key_env && !envHasValue(envMapping.api_key_env) && !oauthAuthorized) continue
-        if (!envMapping.api_key_env && !oauthAuthorized) continue
+        if (!envMapping.api_key_env && !isOAuthAuthorized(providerKey)) continue
       }
       const preset = PROVIDER_PRESETS.find((p: any) => p.value === providerKey)
       const label = preset?.label || providerKey.replace(/^custom:/, '')

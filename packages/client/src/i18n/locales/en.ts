@@ -3989,6 +3989,7 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_19_1: "Fix authorized providers such as Codex, Nous, xAI, and Qwen disappearing from the model list, while preserving Copilot activation and credential requirements (#3720)",
     new_0_8_18_1: "Add Pin and Unpin for Person conversations. Pinned conversations appear first, with recent activity ordering within each group; database persistence preserves the state after refresh (#3704)",
     new_0_8_18_2: "Prevent realtime speech replay after reply completion, tool events, reconnects or message rebuilds on refresh. Preserve turn progress and sentence boundaries, exclude older history, and allow identical text in later turns (#3708)",
     new_0_8_18_3: "Give wide-screen sidebars and main content one rounded outer outline without curved gaps at their seam. Cover regular and Agent settings sidebars while preserving regional radii, explicit zero, wallpaper clipping and RTL mirroring (#3709)",
@@ -3999,17 +4000,5 @@ export default {
     new_0_8_17_1: "Fix missing Bot replies and false ‘Agent returned no output’ errors after background dispatch. Generate, stream and save a normal reply before waiting, even at the step limit; results still return automatically while tasks and collaboration stages remain active (#3699)",
     new_0_8_17_2: "Do not send completion bells, notifications or App completion pushes while waiting for background tasks, for both direct sends and resumed chats. Preserve polling guards and callback deduplication; empty provider replies or forbidden tool calls still fail explicitly (#3699)",
     new_0_8_17_3: "Show custom personal Bot names in message headers. Renaming updates existing messages and new replies and persists after reload; unnamed Bots use localized preset names, while avatars and animations retain the selected Bot appearance (#3700)",
-    new_0_8_16_1: "Add a one-time group chat retirement notice recommending Bot. Acknowledgement is saved locally and synced across same-origin tabs; no retirement date or automatic data migration is provided (#3693)",
-    new_0_8_16_2: "Yield Bot turns through the host while background tasks run, avoiding repeated polling that exhausts model steps. Deliver results without a browser connection and recover interrupted, stopped-before-start and restart-pending terminal callbacks (#3690)",
-    new_0_8_16_3: "Append manual follow-ups directly to the original task without a coordinator-model decision. Include the current instructions and attachments in result and related acceptance callbacks so Bots interpret results against the latest request (#3691)",
-    new_0_8_16_4: "Improve multi-round Bot collaboration, bounded stage-completion confirmation and stopped-state recovery while preserving original results. Let current collaborators continue unfinished tasks with completed peers, routes, rounds and stale-callback guards preserved (#3675, #3680)",
-    new_0_8_16_5: "Show only the active worker in the activity capsule during independent acceptance. On approval, show both development and verification cards, each opening its own execution, consistently in live messages and reloaded history (#3682)",
-    new_0_8_16_6: "Preserve panels, widths, tool tabs and per-Bot Agent selection across conversation switches; retain explicit workspace visibility. Correct panel order, task Agent identity and browser positioning, and guard against stale content reads (#3676)",
-    new_0_8_16_7: "Use the enabled server-side local or cloud STT configuration for desktop voice input, with setup guidance when missing. Allow retry after failure, preserve final text on stop, prevent duplicate or stale insertion, and dismiss idle hints by clicking outside (#3688)",
-    new_0_8_16_8: "Decode queued text and attachments, show attachment filenames in previews and keep attachment-only previews meaningful. Render attachments once when both native attachments and serialized content are present (#3668)",
-    new_0_8_16_9: "Update extension-management prompts to list Agents and ask for a target before installing, removing or configuring Skills, MCP or Plugins when unspecified. Cancellation and timeout do not choose a target; ordinary queries and existing extension use are unaffected (#3683)",
-    new_0_8_16_10: "Fix OpenCode child processes inheriting stale PWD and OLDPWD that misdirect relative paths; align the working directory, PWD and --dir argument (#3684)",
-    new_0_8_16_11: "Point the packaged desktop update source at /latest so relative installer URLs resolve correctly, and guard the configuration against regression (#3677)",
-    new_0_8_16_12: "Add Bot collaboration regression checks preserving existing flows: no extra creator reports or old report-queue replay, one delivery to explicit recipients and side-effect-free status reads. This PR adds tests only (#3678)",
   },
 }

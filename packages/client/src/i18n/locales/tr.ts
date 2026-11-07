@@ -168,6 +168,7 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_19_1: "Codex, Nous, xAI ve Qwen gibi yetkilendirilmiş sağlayıcıların model listesinden kaybolması düzeltildi; Copilot etkinleştirme ve kimlik bilgisi gereksinimleri korundu (#3720)",
     new_0_8_18_1: "Person konuşmalarına sabitleme ve sabitlemeyi kaldırma eklendi. Sabitlenenler önce, her grup son etkinliğe göre sıralanır; durum veritabanına kaydedilir ve yenilemeden sonra korunur (#3704)",
     new_0_8_18_2: "Yanıt tamamlanması, araç olayları, yeniden bağlanma veya mesajların yeniden oluşturulmasında gerçek zamanlı sesin tekrarı önlendi. Tur ilerlemesi ve cümle sınırları korunur, eski geçmiş okunmaz; sonraki turlarda aynı metin okunabilir (#3708)",
     new_0_8_18_3: "Geniş ekranlarda kenar çubuğu ve ana içerik, birleşimde kavisli boşluk bırakmayan tek yuvarlatılmış dış hat kullanır. Agent ayarları da kapsanır; bölgesel yarıçaplar, açık sıfır, duvar kâğıdı kırpması ve RTL yansıtma korunur (#3709)",
@@ -178,18 +179,6 @@ export default {
     new_0_8_17_1: "Arka plan görevleri başlatıldıktan sonra Bot yanıtının kaybolması ve yanlış ‘Agent returned no output’ hatası düzeltildi. Beklemeden önce normal bir yanıt oluşturulur, akışla gönderilir ve kaydedilir; adım sınırında da bu yanıt tamamlanır. Sonuçlar otomatik dönmeye devam ederken görevler ve iş birliği aşamaları etkin kalır (#3699)",
     new_0_8_17_2: "Arka plan görevleri beklenirken hem doğrudan gönderimde hem de devam ettirilen sohbetlerde yanlış tamamlanma sesi, bildirimi veya App anlık bildirimi gönderilmez. Tekrarlanan sorgu koruması ve geri çağrı tekilleştirmesi korunur; sağlayıcının boş yanıtları veya yasak araç çağrıları açık hata vermeye devam eder (#3699)",
     new_0_8_17_3: "Kişisel Bot mesaj başlıklarında özel adlar önceliklidir. Yeniden adlandırma mevcut mesajları ve yeni yanıtları günceller, yeniden yüklemeden sonra da korunur. Adsız Bot’lar yerelleştirilmiş hazır adları kullanır; avatar ve animasyonlar seçilen Bot görünümünü korur (#3700)",
-    new_0_8_16_1: "Grup sohbetine Bot kullanımını öneren tek seferlik sonlandırma bildirimi eklendi. Onay yerelde kaydedilir ve aynı kökendeki sekmelerle eşitlenir; sonlandırma tarihi veya otomatik veri taşıma sunulmaz (#3693)",
-    new_0_8_16_2: "Arka plan görevleri beklenirken ana süreç Bot turunu askıya alarak tekrarlanan sorguların model adımlarını tüketmesini önler. Tarayıcı bağlı olmasa da sonuçları iletir; kesinti, başlamadan durdurma ve yeniden başlatma sonrası son durum bildirimlerini kurtarır (#3690)",
-    new_0_8_16_3: "Elle verilen devam talimatları koordinatör modelin kararını beklemeden asıl göreve eklenir. Sonuç ve ilgili doğrulama dönüşleri, Botun en son isteği dikkate alması için bu turun talimatlarını ve eklerini içerir (#3691)",
-    new_0_8_16_4: "Çok turlu Bot işbirliği, sınırlı denemeli aşama tamamlama onayı ve durmuş durumların kurtarılması iyileştirildi. Mevcut işbirlikçiler; özgün sonuçlar, tamamlanan katılımcılar, yollar, turlar ve eski geri çağrı korumaları korunarak bitmemiş görevleri sürdürebilir (#3675, #3680)",
-    new_0_8_16_5: "Bağımsız kabul sırasında etkinlik göstergesi yalnızca o anki çalışanı gösterir. Onaydan sonra geliştirme ve doğrulama kartları kendi yürütmelerini açar; canlı mesajlar ve yeniden yüklenen geçmiş aynı davranır (#3682)",
-    new_0_8_16_6: "Konuşma değişiminde paneller, genişlikler, araç sekmeleri, Bot başına Agent seçimi ve açıkça seçilmiş çalışma alanı görünürlüğü korunur. Panel sırası, görev Agent kimliği ve tarayıcı konumu düzeltildi; eski okumaların güncel içeriği ezmesi önlendi (#3676)",
-    new_0_8_16_7: "Masaüstü ses girişi sunucunun etkin yerel veya bulut STT ayarını kullanır ve eksikse ayarlara yönlendirir. Hata sonrası yeniden deneme, durdurmada son metni koruma, yinelenen veya eski eklemeleri önleme ve boşta duran ipuçlarını dışarı tıklayarak kapatma desteklenir (#3688)",
-    new_0_8_16_8: "Kuyruktaki metin ve ekler çözümlenir; önizlemeler dosya adlarını gösterir ve yalnızca ek içeren mesajlar boş kalmaz. Yerel ekler ve serileştirilmiş içerik birlikteyken ekler yalnızca bir kez gösterilir (#3668)",
-    new_0_8_16_9: "Uzantı yönetimi talimatları, hedef belirtilmediyse Skill, MCP veya Plugin kurma, kaldırma ya da ayarlama öncesinde Agent listesinden seçim sorar. İptal veya zaman aşımı kendiliğinden seçim yapmaz; normal sorgular ve mevcut uzantıları kullanma değişmez (#3683)",
-    new_0_8_16_10: "OpenCode alt süreçlerinin eski PWD ve OLDPWD değerlerini devralması düzeltildi; göreli yolların doğru çözülmesi için çalışma dizini, PWD ve --dir eşitlendi (#3684)",
-    new_0_8_16_11: "Masaüstü paketinin güncelleme kaynağı, göreli yükleyici URL adreslerini doğru çözmek için /latest dizinine yöneltildi ve yapılandırma gerileme denetimi eklendi (#3677)",
-    new_0_8_16_12: "Bot işbirliği için gerileme testleri eklendi: oluşturucuya fazladan rapor veya eski rapor kuyruğu tekrarı yok; açık alıcılara tek teslimat ve yan etkisiz durum sorguları korunur. Bu PR yalnızca test ekler (#3678)",
   },
 
   profiles: {
