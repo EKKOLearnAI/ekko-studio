@@ -168,6 +168,13 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_18_1: "Person konuşmalarına sabitleme ve sabitlemeyi kaldırma eklendi. Sabitlenenler önce, her grup son etkinliğe göre sıralanır; durum veritabanına kaydedilir ve yenilemeden sonra korunur (#3704)",
+    new_0_8_18_2: "Yanıt tamamlanması, araç olayları, yeniden bağlanma veya mesajların yeniden oluşturulmasında gerçek zamanlı sesin tekrarı önlendi. Tur ilerlemesi ve cümle sınırları korunur, eski geçmiş okunmaz; sonraki turlarda aynı metin okunabilir (#3708)",
+    new_0_8_18_3: "Geniş ekranlarda kenar çubuğu ve ana içerik, birleşimde kavisli boşluk bırakmayan tek yuvarlatılmış dış hat kullanır. Agent ayarları da kapsanır; bölgesel yarıçaplar, açık sıfır, duvar kâğıdı kırpması ve RTL yansıtma korunur (#3709)",
+    new_0_8_18_4: "Hermes 0.23 tarayıcı uyumluluğu iyileştirildi: upstream paket yöneticisiyle sabit Chromium, göreli yol bildirimleri ve paket taşıma sonrası yeniden kontrol. Eski yollar korunur, geç yüklenen MCP SDK başlatılır ve yönergeler mevcut çalışma ortamının tarayıcı araçlarına göre hazırlanır (#3712)",
+    new_0_8_18_5: "GitHub Copilot eklenti hazırlığı ve kimlik bilgisi kaydı iyileştirildi. Modeller yalnızca hedef profilin çalışma ortamının okuyabildiği bilgilerle listelenir. Giriş başlangıç profiline bağlanır; başlangıç geçişi otomatik kurulum yasağına ve kullanıcının kapattığı eklentilere uyar (#3712)",
+    new_0_8_18_6: "Çalışma ortamı derleme varsayılanları Python 3.14.7 ve Node.js 26.13.0 oldu; sürümü uyuşmayan yorumlayıcı önbellekleri reddedilir ve Node sürümü değiştirilebilir. Varsayılan Hermes 0.22.5 olarak kalır, 0.23 sürümüne otomatik geçilmez (#3712)",
+    new_0_8_18_7: "Gerçek zamanlı ses, konuşma sabitleme, Copilot ve çalışma ortamı derlemeleri için odaklı testler eklendi. E2E mevcut Playwright tarafından desteklenen Ubuntu 24.04 sürümüne sabitlendi; Windows ARM64 doğrulamasında Hermes kaynak sürümü seçilebilir (#3704, #3708, #3712)",
     new_0_8_17_1: "Arka plan görevleri başlatıldıktan sonra Bot yanıtının kaybolması ve yanlış ‘Agent returned no output’ hatası düzeltildi. Beklemeden önce normal bir yanıt oluşturulur, akışla gönderilir ve kaydedilir; adım sınırında da bu yanıt tamamlanır. Sonuçlar otomatik dönmeye devam ederken görevler ve iş birliği aşamaları etkin kalır (#3699)",
     new_0_8_17_2: "Arka plan görevleri beklenirken hem doğrudan gönderimde hem de devam ettirilen sohbetlerde yanlış tamamlanma sesi, bildirimi veya App anlık bildirimi gönderilmez. Tekrarlanan sorgu koruması ve geri çağrı tekilleştirmesi korunur; sağlayıcının boş yanıtları veya yasak araç çağrıları açık hata vermeye devam eder (#3699)",
     new_0_8_17_3: "Kişisel Bot mesaj başlıklarında özel adlar önceliklidir. Yeniden adlandırma mevcut mesajları ve yeni yanıtları günceller, yeniden yüklemeden sonra da korunur. Adsız Bot’lar yerelleştirilmiş hazır adları kullanır; avatar ve animasyonlar seçilen Bot görünümünü korur (#3700)",
@@ -183,13 +190,6 @@ export default {
     new_0_8_16_10: "OpenCode alt süreçlerinin eski PWD ve OLDPWD değerlerini devralması düzeltildi; göreli yolların doğru çözülmesi için çalışma dizini, PWD ve --dir eşitlendi (#3684)",
     new_0_8_16_11: "Masaüstü paketinin güncelleme kaynağı, göreli yükleyici URL adreslerini doğru çözmek için /latest dizinine yöneltildi ve yapılandırma gerileme denetimi eklendi (#3677)",
     new_0_8_16_12: "Bot işbirliği için gerileme testleri eklendi: oluşturucuya fazladan rapor veya eski rapor kuyruğu tekrarı yok; açık alıcılara tek teslimat ve yan etkisiz durum sorguları korunur. Bu PR yalnızca test ekler (#3678)",
-    new_0_8_15_1: "Agent seçildikten veya başlık düzenlendikten sonra yeni iş akışı düğümlerinin kaybolması düzeltildi. Eski boyutların tuval durumunu ezmesi önleniyor; bağlantıyla düğüm oluşturma ve geri alma da aynı güncelleme sınırını kullanıyor (#3670)",
-    new_0_8_15_2: "Hesaptaki tüm BOT planları 50 kayıt sınırı olmadan gösteriliyor. Sahip BOT’un avatarı ve adı, hedef önizlemesi, tam talimatlar, zaman ifadesi, saat dilimi, durum ve sonraki çalışma ayrıntıları eklendi. Başka BOT’un planını düzenlerken sahiplik ve arka plan görevi adı korunuyor (#3663)",
-    new_0_8_15_3: "OpenAI uyumlu akışın devam parçaları boş id veya işlev adı gönderdiğinde bilinen araç çağrısı kimliği korunarak yanlış invalid_tool_call hataları önleniyor. Bağımsız değişken birleştirme ve eksik kimlik doğrulaması korunuyor (#3647)",
-    new_0_8_15_4: "Grup sohbeti yönlendirmesi hedef Agent seçmediğinde eksik devir uyarısı artık gösterilmiyor. Seçilen Agent’lar için mevcut uyarı kuralları korunuyor (#3626)",
-    new_0_8_15_5: "Arayüz değişiklik günlüğü son üç sürümle sınırlandırıldı ve eski kayıtlar 12 dilin tamamından kaldırıldı (#3662)",
-    new_0_8_15_6: "İngilizce ve Çince README görüntüleri çalışan arayüzün yeni sohbet Agent karuseli, görsel iş akışı ve tam Agent Yöneticisi ile yenilendi; eski örnek görüntüler kaldırıldı (#3661)",
-    new_0_8_15_7: "Geliştirme ve CI görev raporları ile test çıktıları depo worktree’lerinin dışında saklanıyor. Dizin komutları ve salt okunur konum denetimleri eklendi; kapsam, tarayıcı raporu ve yükleme yolları güncellendi. Dosyalar otomatik silinmiyor (#3657)",
   },
 
   profiles: {
