@@ -4,11 +4,11 @@ import { computed } from 'vue'
 import { NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { isStoredSuperAdmin } from '@/api/client'
 import { useSessionSearch } from '@/composables/useSessionSearch'
 import DesktopUpdateDownloadTab from './DesktopUpdateDownloadTab.vue'
 import RelayCampaignBadge from '@/components/hermes/RelayCampaignBadge.vue'
 import { useNavigationRail } from '@/composables/useNavigationRail'
+import { useAccountStore } from '@/stores/account'
 
 type ActiveSection = 'person' | 'chat' | 'history' | 'connections' | 'agents' | 'models' | 'usage' | 'apiRelay' | 'group' | 'global' | 'workflow'
 
@@ -24,7 +24,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const router = useRouter()
 const { openSessionSearch } = useSessionSearch()
-const canManageAgents = computed(() => isStoredSuperAdmin())
+const accountStore = useAccountStore()
+const canManageAgents = computed(() => accountStore.isSuperAdmin)
 const hasNavigationRail = useNavigationRail()
 
 const primaryText = computed(() => props.primaryLabel || t('chat.newChat'))
