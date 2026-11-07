@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { blocksQueuePreview, parseContentBlocks, parseMessageReference } from '../../packages/client/src/utils/content-blocks'
 
@@ -108,5 +109,45 @@ describe('parseMessageReference', () => {
 
   it('returns null for content without a quote wrapper', () => {
     expect(parseMessageReference('普通消息')).toBeNull()
+  })
+})
+
+
+describe('referenced message input', () => {
+  it('keeps referenced image media in the outbound content blocks', async () => {
+    ;(globalThis as any).__APP_VERSION__ = 'test'
+    const { buildReferencedMessageInput } = await import('../../packages/client/src/stores/hermes/chat')
+    await expect(buildReferencedMessageInput('Describe it', {
+      id: 'image-message',
+      role: 'assistant',
+      content: 'Look at this image',
+      attachments: [{
+        id: 'image-1', name: 'reference.png', type: 'image/png', size: 1,
+        url: '/reference.png', path: '/tmp/reference.png',
+      }],
+    })).resolves.toEqual([
+      { type: 'text', text: '<quoted_message>\nLook at this image\n</quoted_message>\n\nDescribe it' },
+      { type: 'image', name: 'reference.png', path: '/tmp/reference.png', media_type: 'image/png' },
+    ])
+  })
+
+  it('recovers the persisted upload path from a download URL', async () => {
+    ;(globalThis as any).__APP_VERSION__ = 'test'
+    const { buildReferencedMessageInput } = await import('../../packages/client/src/stores/hermes/chat')
+    await expect(buildReferencedMessageInput('继续', {
+      id: 'image-message',
+      role: 'user',
+      content: '你好',
+      attachments: [{
+        id: 'image-1',
+        name: 'reference.png',
+        type: 'image/png',
+        size: 1,
+        url: '/api/studio/files/download?path=%2Fuploads%2Freference.png&name=reference.png',
+      }],
+    })).resolves.toEqual([
+      { type: 'text', text: '<quoted_message>\n你好\n</quoted_message>\n\n继续' },
+      { type: 'image', name: 'reference.png', path: '/uploads/reference.png', media_type: 'image/png' },
+    ])
   })
 })
