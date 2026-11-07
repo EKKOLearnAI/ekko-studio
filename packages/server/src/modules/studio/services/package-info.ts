@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'fs'
-import { resolve } from 'path'
+import { dirname, resolve } from 'path'
 
 export type StudioPackageName = 'ekko-studio' | 'hermes-web-ui'
 
@@ -11,6 +11,7 @@ export function readStudioPackageInfo(): {
   name: StudioPackageName
   version: string
   repositoryUrl: string
+  rootDir: string
 } | null {
   // Read the running installation before considering the caller's working directory.
   const candidatePaths = [
@@ -26,7 +27,7 @@ export function readStudioPackageInfo(): {
       const repositoryUrl = typeof pkg.repository === 'string'
         ? pkg.repository
         : typeof pkg.repository?.url === 'string' ? pkg.repository.url : ''
-      return { name: pkg.name, version: pkg.version, repositoryUrl }
+      return { name: pkg.name, version: pkg.version, repositoryUrl, rootDir: dirname(packagePath) }
     } catch {
       // Try the next installation layout.
     }

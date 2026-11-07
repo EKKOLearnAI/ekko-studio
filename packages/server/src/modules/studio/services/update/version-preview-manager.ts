@@ -1,8 +1,9 @@
 import { isStudioPackageName, readStudioPackageInfo, type StudioPackageName } from '../package-info'
+import { resolveGlobalInstallPrefix } from './install-target'
 import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process'
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { createServer } from 'net'
-import { delimiter, dirname, extname, join, resolve } from 'path'
+import { delimiter, basename, dirname, extname, join, resolve } from 'path'
 
 export interface UpdateRuntimeDependencies {
   getWebUiHome: () => string
@@ -1006,7 +1007,21 @@ async function checkoutPreview(ref: string) {
   appendPreviewActionLog(`preview tag ready: ${ref}`)
 }
 
+/**
+ * Directory the running process was installed into, e.g. `/usr/local/lib/node_modules/ekko-studio`.
+ * Returns null for source checkouts, where the package does not live inside a `node_modules` folder.
+ */
+function getRunningInstallRoot(): string | null {
+  const rootDir = readStudioPackageInfo()?.rootDir
+  return rootDir && existsSync(join(rootDir, 'package.json')) ? rootDir : null
+}
+
 function getGlobalRoot() {
+  const installRoot = getRunningInstallRoot()
+  if (installRoot) {
+    const nodeModulesDir = dirname(installRoot)
+    if (basename(nodeModulesDir) === 'node_modules') return nodeModulesDir
+  }
   return runNpmSync(['root', '-g'])
 }
 
@@ -1025,7 +1040,14 @@ function runUpdateInstall(packageName: StudioPackageName) {
     console.warn('[update] failed to clean npm cache, continuing update:', err)
   }
 
-  return runNpmSync(['install', '-g', `${packageName}@latest`], { timeout: 10 * 60 * 1000 })
+  const installRoot = getRunningInstallRoot()
+  const prefix = installRoot ? resolveGlobalInstallPrefix(installRoot) : null
+  if (prefix) {
+    console.log(`[update] installing ${packageName}@latest with --prefix ${prefix} (running install: ${installRoot})`)
+  }
+
+  const args = ['install', '-g', ...(prefix ? ['--prefix', prefix] : []), `${packageName}@latest`]
+  return runNpmSync(args, { timeout: 10 * 60 * 1000 })
 }
 
 function spawnRestart(port: string, packageName: StudioPackageName) {
@@ -1070,6 +1092,10 @@ export async function handleUpdate(ctx: any) {
     const packageName = readStudioPackageInfo()?.name
     if (!packageName) throw new Error('Cannot identify the installed Studio npm package')
     const output = runUpdateInstall(packageName)
+
+    // Fail loudly instead of reporting success when the install landed outside the tree the
+    // launcher boots from (see resolveGlobalInstallPrefix).
+    getGlobalCliScript(packageName)
 
     ctx.body = {
       success: true,
