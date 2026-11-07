@@ -204,6 +204,8 @@ class AgentPool:
         self._compression_requests: dict[str, queue.Queue[dict[str, Any]]] = {}
         self._background_notification_claims: dict[tuple[str, str], dict[str, Any]] = {}
         self._suppressed_background_delegations: set[str] = set()
+        # Sessions whose background task state changed since the last poll.
+        self._background_dirty: set[str] = set()
         self._clarify_requests: dict[str, queue.Queue[str]] = {}
         self._run_context = threading.local()
         self._approval_handlers: dict[str, Callable[..., str]] = {}
@@ -1065,6 +1067,7 @@ class AgentPool:
         event: dict[str, Any],
     ) -> dict[str, Any]:
         """Attach stable UI routing metadata without touching agent messages."""
+        self._background_dirty.add(session.session_id)
         session.background_event_seq += 1
         payload = dict(event)
         payload["background_seq"] = session.background_event_seq
@@ -1124,6 +1127,8 @@ class AgentPool:
     def poll_background(self, recover_session_ids: list[Any] | None = None) -> dict[str, Any]:
         """Drain worker-level UI telemetry and claim owned async completions."""
         with self._lock:
+            dirty_sessions = set(self._background_dirty)
+            self._background_dirty.clear()
             loaded_session_ids = set(self._sessions)
             loaded_session_ids.update(
                 str(session_id).strip()
@@ -1135,7 +1140,11 @@ class AgentPool:
                 events = list(session.background_events)
                 session.background_events.clear()
                 tasks = list(session.background_tasks.values())
-                if events or any(task.get("status") == "running" for task in tasks):
+                if (
+                    events
+                    or any(task.get("status") == "running" for task in tasks)
+                    or session.session_id in dirty_sessions
+                ):
                     session_payloads.append({
                         "session_id": session.session_id,
                         "events": _jsonable(events),
