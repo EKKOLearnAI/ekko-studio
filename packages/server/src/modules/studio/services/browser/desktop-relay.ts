@@ -43,6 +43,13 @@ export class DesktopBrowserRelayRegistry {
       }
     }
   }
+  private promoteAvailableOwner(group: Group, userId: number, profile: string): void {
+    const candidate = [...this.peers.values()]
+      .filter(connection => connection.peer.userId === userId && connection.peer.profile === profile)
+      .sort((left, right) => right.lastActivity - left.lastActivity)[0]
+    group.ownerId = candidate?.peer.id || null
+    group.epoch++
+  }
   register(peer: RelayPeer): () => void {
     // An id is a connection capability, not a reusable device name.
     if (this.peers.has(peer.id)) throw new Error('Desktop browser connection already registered')
@@ -52,7 +59,7 @@ export class DesktopBrowserRelayRegistry {
       if (this.peers.get(peer.id)?.peer !== peer) return
       this.peers.delete(peer.id)
       const group = this.group(peer.userId, peer.profile)
-      if (group.ownerId === peer.id) { group.ownerId = null; group.epoch++ }
+      if (group.ownerId === peer.id) this.promoteAvailableOwner(group, peer.userId, peer.profile)
       // Keep tombstones so a disconnected run cannot jump to another browser.
       peer.revoke()
       this.notify(peer.userId, peer.profile)
