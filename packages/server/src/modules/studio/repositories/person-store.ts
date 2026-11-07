@@ -271,7 +271,7 @@ export function personBackgroundPendingCount(sessionId: string, reportingExecuti
   return Number((db.prepare(`SELECT COUNT(*) AS n FROM person_deliveries d
     JOIN person_executions e ON e.id=d.execution_id
     JOIN session_tasks t ON t.id=e.task_id
-    WHERE json_extract(d.origin_json,'$.sessionId')=? AND d.execution_id!=?
+    WHERE CASE WHEN json_valid(d.origin_json) THEN json_extract(d.origin_json,'$.sessionId') END=? AND d.execution_id!=?
       AND d.state IN ('waiting','pending','queued') AND e.state NOT IN ('interrupted','stopping')
       AND t.status!='closed' AND t.requirements_revision=e.requirements_revision`)
     .get(sessionId, reportingExecutionId) as { n: number }).n)
