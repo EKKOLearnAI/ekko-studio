@@ -381,7 +381,7 @@ export function toOpenAIChatPayload(config: ModelProviderConfig, request: ModelR
   )
   const supportsToolChoice = supportsOpenAIChatToolChoice(model)
   const tools = request.tools?.length ? request.tools.map(toOpenAIToolDefinition) : undefined
-  const messages = sanitizeOpenAIChatToolHistory(request.messages)
+  const messages = consolidateChatSystemMessages(sanitizeOpenAIChatToolHistory(request.messages))
   const chatMessages: OpenAIChatMessage[] = []
   const toolImageMessages: OpenAIChatMessage[] = []
   for (const message of messages) {
@@ -691,6 +691,18 @@ function invalidOpenAIToolCallError(provider: string): ModelProviderError {
       details: { reason: 'invalid_tool_call' },
     },
   )
+}
+
+function consolidateChatSystemMessages(messages: AgentMessage[]): AgentMessage[] {
+  const systemMessages = messages.filter(message => message.role === 'system')
+  if (systemMessages.length === 0 || systemMessages.length === 1 && messages[0] === systemMessages[0]) {
+    return messages
+  }
+  // Strict chat templates require one leading system message, as in the other transports.
+  return [{
+    ...systemMessages[0]!,
+    content: systemMessages.map(message => message.content).join('\n\n'),
+  }, ...messages.filter(message => message.role !== 'system')]
 }
 
 function sanitizeOpenAIChatToolHistory(messages: AgentMessage[]): AgentMessage[] {
