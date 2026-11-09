@@ -75,6 +75,29 @@ it.each(['direct','resumed'] as const)('shows the projected waiting reply then t
   expect(api.bell).toHaveBeenCalledTimes(1)
 })
 
+it('restores a selected message reference with its image after the chat store is recreated', () => {
+  const reference = {
+    id: 'image-message',
+    role: 'user' as const,
+    content: '你好',
+    attachments: [{
+      id: 'image-1',
+      name: 'reference.png',
+      type: 'image/png',
+      size: 1,
+      url: '/api/studio/files/download?path=%2Fuploads%2Freference.png&name=reference.png',
+      path: '/uploads/reference.png',
+    }],
+  }
+  store.setMessageReference(sid, reference)
+  store.$dispose()
+  setActivePinia(createPinia())
+  store = useChatStore()
+  store.sessions = [{ id: sid, title: 'Fixture', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', agentPreset: 'person', messages: [], createdAt: 1, updatedAt: 1 } as any]
+  store.activeSessionId = sid
+  expect(store.activeMessageReference).toEqual(reference)
+})
+
 it.each(['direct','resumed'] as const)('accepts legacy empty waits but still reports an ordinary empty response (%s)',async mode=>{
   const onEvent=await listen(mode)
   onEvent(event('run.started'))

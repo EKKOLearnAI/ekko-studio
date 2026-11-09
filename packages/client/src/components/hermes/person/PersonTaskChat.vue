@@ -6,7 +6,7 @@ import { usePersonTaskPanel } from './usePersonTaskPanel'
 import PersonTaskChatContent from './PersonTaskChatContent.vue'
 import PersonTaskIdentity from './PersonTaskIdentity.vue'
 import { useReducedMotion } from '@/composables/useReducedMotion'
-import type { Attachment } from '@/stores/hermes/chat'
+import type { Attachment, MessageReference } from '@/stores/hermes/chat'
 import type { PersonAgentPreset } from '@/api/person'
 const props = defineProps<{ taskId?: string | null; mainSessionId: string; executionId?: string; agents?: PersonAgentPreset[]; loading?: boolean; canClose?: () => boolean }>()
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
@@ -43,7 +43,7 @@ function handleEscape(event: KeyboardEvent) {
 onMounted(() => window.addEventListener('keydown', handleEscape))
 onBeforeUnmount(() => { disposed = true; window.removeEventListener('keydown', handleEscape) })
 defineExpose({ session, panelWidth: width,
-  send: (text: string, attachments?: Attachment[]) => !closing.value && currentContent.value?.send(text, attachments) || Promise.resolve(false),
+  send: (text: string, attachments?: Attachment[], reference?: MessageReference | null) => !closing.value && currentContent.value?.send(text, attachments, reference) || Promise.resolve(false),
   addFiles: (files: File[]) => { if (!closing.value) currentContent.value?.addFiles(files) },
 })
 </script>

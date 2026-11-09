@@ -85,6 +85,8 @@ export interface Attachment {
   type: string
   size: number
   url: string
+  /** Original uploaded path when this attachment came from a persisted message. */
+  path?: string
   file?: File
   /** Structured context sent to the model but rendered collapsed in the UI. */
   context?: string
@@ -392,6 +394,7 @@ export interface MessageReference {
   content: string
   sender?: string
   senderId?: string
+  attachments?: Attachment[]
 }
 
 export { parseMessageReference } from '@/utils/content-blocks'
@@ -413,6 +416,22 @@ export function formatMessageWithReference(reference: MessageReference, content:
   const reply = content.trim()
   const referenceBlock = `${openTag}\n${quotedContent}\n</quoted_message>`
   return reply ? `${referenceBlock}\n\n${reply}` : referenceBlock
+}
+
+export async function buildReferencedMessageInput(
+  content: string,
+  reference?: MessageReference | null,
+  attachments?: Attachment[],
+  uploadedFiles?: { name: string; path: string }[],
+): Promise<ContentBlock[]> {
+  const submittedContent = reference
+    ? formatMessageWithReference(reference, content)
+    : content.trim()
+  return buildContentBlocks(
+    submittedContent,
+    [...(reference?.attachments || []), ...(attachments || [])],
+    uploadedFiles,
+  )
 }
 
 export interface PendingApproval {
@@ -619,6 +638,15 @@ export async function uploadFiles(attachments: Attachment[]): Promise<{ name: st
   return data.files
 }
 
+function downloadPathFromUrl(url: string | undefined): string | undefined {
+  if (!url || !url.includes('/api/studio/files/download?')) return undefined
+  try {
+    return new URL(url, 'http://localhost').searchParams.get('path') || undefined
+  } catch {
+    return undefined
+  }
+}
+
 export async function buildContentBlocks(
   content: string,
   attachments?: Attachment[],
@@ -633,17 +661,21 @@ export async function buildContentBlocks(
   }
 
   // Add attachment blocks using uploaded file paths
-  if (attachments && attachments.length > 0 && uploadedFiles) {
-    for (let i = 0; i < uploadedFiles.length; i++) {
-      const uploaded = uploadedFiles[i]
-      const attachment = attachments[i]
+  if (attachments && attachments.length > 0 && (
+    uploadedFiles
+    || attachments.some(attachment => attachment.path || downloadPathFromUrl(attachment.url))
+  )) {
+    for (const attachment of attachments) {
+      const uploaded = uploadedFiles?.find(file => file.name === attachment.name)
+      const path = attachment.path || uploaded?.path || downloadPathFromUrl(attachment.url)
+      if (!path) continue
 
       // Check if it's an image
       if (attachment?.type.startsWith('image/')) {
         blocks.push({
           type: 'image',
-          name: uploaded.name,
-          path: uploaded.path,
+          name: attachment.name,
+          path,
           media_type: attachment.type,
           ...(attachment.context?.trim() ? { context: attachment.context.trim() } : {}),
           ...(attachment.videoFrameFor ? { video_frame: true } : {}),
@@ -652,8 +684,8 @@ export async function buildContentBlocks(
         // Other files
         blocks.push({
           type: 'file',
-          name: uploaded.name,
-          path: uploaded.path,
+          name: attachment.name,
+          path,
           media_type: attachment?.type,
           ...(attachment?.context?.trim() ? { context: attachment.context.trim() } : {}),
         })
@@ -1228,6 +1260,7 @@ type ChatRuntimeMode = 'default' | 'global_agent'
 let activeRuntimeMode: ChatRuntimeMode = 'default'
 const LEGACY_STORAGE_KEY = 'hermes_active_session'
 const SESSION_PROFILE_FILTER_STORAGE_KEY = 'hermes_session_profile_filter_v1'
+const MESSAGE_REFERENCE_STORAGE_KEY_PREFIX = 'hermes_message_references_v1_'
 
 // 获取当前 profile 名称，用于隔离缓存。
 // 从 profiles store 的 activeProfileName（同步 localStorage）读取，
@@ -1246,6 +1279,9 @@ function runtimeStoragePrefix(): string {
 
 function storageKey(): string { return runtimeStoragePrefix() + getProfileName() }
 function legacyStorageKey(): string | null { return activeRuntimeMode === 'default' && getProfileName() === 'default' ? LEGACY_STORAGE_KEY : null }
+function messageReferenceStorageKey(): string {
+  return MESSAGE_REFERENCE_STORAGE_KEY_PREFIX + runtimeStoragePrefix() + getProfileName()
+}
 
 function isProviderAgentSession(session?: Pick<Session, 'source' | 'agent' | 'codingAgentId'> | null): boolean {
   return session?.source === 'builtin_agent' || session?.source === 'coding_agent' ||
@@ -1327,6 +1363,39 @@ function removeItem(key: string) {
   } catch {
     // ignore
   }
+}
+
+function loadMessageReferences(): Map<string, MessageReference> {
+  const raw = getItemBestEffort(messageReferenceStorageKey())
+  if (!raw) return new Map()
+  try {
+    const parsed = JSON.parse(raw) as Record<string, MessageReference>
+    const entries = Object.entries(parsed).filter(([, reference]) =>
+      reference && typeof reference.id === 'string' && typeof reference.content === 'string',
+    )
+    return new Map(entries.map(([sessionId, reference]) => [
+      sessionId,
+      {
+        ...reference,
+        attachments: Array.isArray(reference.attachments)
+          ? reference.attachments.map(({ file: _file, ...attachment }) => attachment)
+          : undefined,
+      },
+    ]))
+  } catch {
+    return new Map()
+  }
+}
+
+function persistMessageReferences(references: Map<string, MessageReference>) {
+  const serializable = Object.fromEntries([...references.entries()].map(([sessionId, reference]) => {
+    const { file: _file, ...safeReference } = reference as MessageReference & { file?: File }
+    return [sessionId, {
+      ...safeReference,
+      attachments: safeReference.attachments?.map(({ file: _attachmentFile, ...attachment }) => attachment),
+    }]
+  }))
+  setItemBestEffort(messageReferenceStorageKey(), JSON.stringify(serializable))
 }
 
 // Strip the circular `file: File` reference from attachments before caching —
@@ -1456,7 +1525,7 @@ function createChatState(scopedSessionId?: string) {
   /** sessionId → queue ids that server reported as dequeued before the peer message arrived */
   const dequeuedQueueIds = ref<Map<string, Set<string>>>(new Map())
   /** sessionId → message selected as the reference for the next user turn */
-  const messageReferences = ref<Map<string, MessageReference>>(new Map())
+  const messageReferences = ref<Map<string, MessageReference>>(loadMessageReferences())
   const activeMessageReference = computed(() => {
     const sid = activeSessionId.value
     return sid ? messageReferences.value.get(sid) || null : null
@@ -1650,6 +1719,7 @@ function createChatState(scopedSessionId?: string) {
     const next = new Map(messageReferences.value)
     next.set(sessionId, reference)
     messageReferences.value = next
+    persistMessageReferences(next)
   }
 
   function clearMessageReference(sessionId: string) {
@@ -1657,6 +1727,7 @@ function createChatState(scopedSessionId?: string) {
     const next = new Map(messageReferences.value)
     next.delete(sessionId)
     messageReferences.value = next
+    persistMessageReferences(next)
   }
 
   function markSessionCompletedUnread(sessionId: string, hasQueue = false) {
@@ -3819,6 +3890,10 @@ function createChatState(scopedSessionId?: string) {
     }
 
     const visibleAttachments = attachments?.filter(attachment => !attachment.videoFrameFor)
+    const inputAttachments = [
+      ...(messageReference?.attachments || []),
+      ...(attachments || []),
+    ]
     const userMsg: Message = {
       id: uid(),
       role: isSessionSlashCommand ? 'command' : 'user',
@@ -3851,9 +3926,9 @@ function createChatState(scopedSessionId?: string) {
       // Build input in Anthropic format
       let input: string | ContentBlock[]
       let displayInput: string | ContentBlock[] | undefined
-      if (attachments && attachments.length > 0) {
+      if (inputAttachments.length > 0) {
         // Has attachments: upload first, then build content blocks
-        const uploaded = await uploadFiles(attachments)
+        const uploaded = await uploadFiles(attachments || [])
         if (generation !== runtimeGeneration) return
 
         // Update attachment URLs on the user message for display
@@ -3878,10 +3953,10 @@ function createChatState(scopedSessionId?: string) {
         }
 
         // Build content blocks with uploaded file paths
-        input = await buildContentBlocks(submittedContent, attachments, uploaded)
+        input = await buildContentBlocks(submittedContent, inputAttachments, uploaded)
         if (generation !== runtimeGeneration) return
-        if (attachments.some(attachment => attachment.context?.trim())) {
-          displayInput = await buildContentBlocks(submittedContent, attachments, uploaded, false)
+        if (inputAttachments.some(attachment => attachment.context?.trim())) {
+          displayInput = await buildContentBlocks(submittedContent, inputAttachments, uploaded, false)
           if (generation !== runtimeGeneration) return
         }
       } else {

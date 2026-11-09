@@ -3,7 +3,7 @@ import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NSpin, NSelect } from 'naive-ui'
 import PersonTaskConversation from './PersonTaskConversation.vue'
-import { buildContentBlocks, uploadFiles, type Attachment } from '@/stores/hermes/chat'
+import { buildReferencedMessageInput, uploadFiles, type Attachment, type MessageReference } from '@/stores/hermes/chat'
 import { personRequest, personTaskCanStop, stopPersonTask, removePersonTaskMessage, type PersonTask, type PersonExecutionSummary, type PersonTaskQueueState } from '@/api/person'
 import { onPersonUpdated } from '@/api/studio/chat'
 import { clientUuid } from '@/utils/secure-uuid'
@@ -61,12 +61,13 @@ const stopUpdates = onPersonUpdated(event => {
   if ((!event.session_id || event.session_id === props.mainSessionId) && !sending.value && !stopping.value && !requestingInsertion.value && !requestingRemoval.value) void refresh()
 })
 onMounted(() => { void refresh() })
-async function send(text: string, attachments?: Attachment[]) {
+async function send(text: string, attachments?: Attachment[], reference?: MessageReference | null) {
   if (disabled.value || !task.value) return false
   sending.value = true; error.value = ''; removalError.value = ''; refreshing.value = false
   reads.cancel()
   try {
-    const input = await buildContentBlocks(text, attachments, await uploadFiles(attachments || []))
+    const uploaded = await uploadFiles(attachments || [])
+    const input = await buildReferencedMessageInput(text, reference, attachments, uploaded)
     const result = await personRequest<{ task: PersonTask; execution?: PersonExecutionSummary; pending?: typeof pending.value }>(`/tasks/${encodeURIComponent(props.taskId)}/chat`, {
       input, execution_id: selectedExecutionId.value || undefined, expected_execution_id: task.value.execution_id || null, expected_revision: task.value.revision, idempotency_key: clientUuid(),
     }, 'POST', lifetime.signal)
