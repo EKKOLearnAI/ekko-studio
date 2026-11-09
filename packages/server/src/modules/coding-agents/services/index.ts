@@ -7,6 +7,7 @@ import { prepareOpenCodeBaseConfig } from './opencode/runtime-config'
 import { prepareZcodeGlobalModel } from './zcode/runtime-config'
 import { NATIVE_CODING_AGENTS, prepareNativeScopedRuntime, nativeScopedUsesChatCompletions, checkNativeCodingAgentEnvironment, checkNativeCodingAgentPlatform } from './registry/native-agents'
 import { resolveZcodeCommand } from './zcode/installation'
+import { createLoginShellPathResolver, scanNodeVersionBins } from './shell-path'
 import { isNativeCodingAgent, nativeCodingAgentSupportsScoped, isGlobalOnlyCodingAgent } from '../../studio/contracts/agents/native-coding-agents'
 import { prioritizeManagedNpmBin } from './managed-command-path'
 import { readTomlAssignment } from './toml-assignment'
@@ -342,8 +343,7 @@ export interface CodingAgentRunStartResult extends CodingAgentLaunchResult {
 
 const installingTools = new Set<CodingAgentId>()
 const deletingTools = new Set<CodingAgentId>()
-let cachedGlobalNpmBin: string | null | undefined
-let cachedLoginShellPath: string | null | undefined
+let cachedGlobalNpmBinPromise: Promise<string | null> | undefined
 const MAX_CONFIG_FILE_SIZE = parseInt(process.env.MAX_EDIT_SIZE || '', 10) || 10 * 1024 * 1024
 
 const { opencodeRuntimeConfig } = createOpenCodeConfig({
@@ -402,24 +402,17 @@ function compareNodeVersionDesc(left: string, right: string): number {
   return right.localeCompare(left)
 }
 
-function getNvmNodeBinPaths(): string {
+function getManagedNodeBinPaths(): string {
   if (process.env.HERMES_DESKTOP !== 'true' || process.platform === 'win32') return ''
 
+  const paths: string[] = []
+  // nvm: $NVM_DIR/versions/node/<v>/bin
   const nvmDir = process.env.NVM_DIR?.trim() || join(homedir(), '.nvm')
-  const versionsDir = join(nvmDir, 'versions', 'node')
-  if (!existsSync(versionsDir)) return ''
-
-  try {
-    return readdirSync(versionsDir, { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name)
-      .sort(compareNodeVersionDesc)
-      .map(version => join(versionsDir, version, 'bin'))
-      .filter(binDir => existsSync(binDir))
-      .join(delimiter)
-  } catch {
-    return ''
-  }
+  paths.push(...scanNodeVersionBins(join(nvmDir, 'versions', 'node'), versionDir => join(versionDir, 'bin')))
+  // fnm: $FNM_DIR/node-versions/<v>/installation/bin
+  const fnmDir = process.env.FNM_DIR?.trim() || join(homedir(), '.local', 'share', 'fnm')
+  paths.push(...scanNodeVersionBins(join(fnmDir, 'node-versions'), versionDir => join(versionDir, 'installation', 'bin')))
+  return paths.join(delimiter)
 }
 
 function getLoginShellCandidates(): string[] {
@@ -440,27 +433,18 @@ function getLoginShell(): string | null {
   return null
 }
 
-async function getLoginShellPath(): Promise<string | null> {
-  if (process.env.HERMES_DESKTOP !== 'true' || process.platform === 'win32') return null
-  if (typeof cachedLoginShellPath !== 'undefined') return cachedLoginShellPath
+// GUI launches inherit neither the interactive shell's PATH nor the rc files
+// that version managers and CLI installers edit, so an interactive login shell
+// probe (with marker-protected output) resolves what `-lc` alone misses.
+const loginShellPathResolver = createLoginShellPathResolver({
+  execFileAsync,
+  getLoginShell,
+  isDesktop: process.env.HERMES_DESKTOP === 'true',
+  platform: process.platform,
+})
 
-  const shell = getLoginShell()
-  if (!shell) {
-    cachedLoginShellPath = null
-    return cachedLoginShellPath
-  }
-
-  try {
-    const { stdout } = await execFileAsync(shell, ['-lc', 'printf %s "$PATH"'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      windowsHide: true,
-    })
-    cachedLoginShellPath = stdout.trim() || null
-  } catch {
-    cachedLoginShellPath = null
-  }
-  return cachedLoginShellPath
+function getLoginShellPath(): Promise<string | null> {
+  return loginShellPathResolver.getPath()
 }
 
 function getDesktopCommonBinPaths(): string[] {
@@ -473,6 +457,12 @@ function getDesktopCommonBinPaths(): string[] {
     join(home, '.config', 'yarn', 'global', 'node_modules', '.bin'),
     join(home, '.pnpm'),
     join(home, 'Library', 'pnpm'),
+    // CLI installers that only edit interactive rc files by default.
+    join(home, '.opencode', 'bin'),
+    join(home, '.kimi-code', 'bin'),
+    // Node version managers without per-shell activation.
+    join(home, '.volta', 'bin'),
+    join(home, '.asdf', 'shims'),
     '/opt/homebrew/bin',
     '/usr/local/bin',
   ]
@@ -2287,7 +2277,7 @@ function getCurrentNodeEnv(): NodeJS.ProcessEnv {
   const pathDelimiter = process.platform === 'win32' ? ';' : delimiter
   return {
     ...process.env,
-    PATH: [getNodeBinDir(), getNvmNodeBinPaths(), process.env.PATH].filter(Boolean).join(pathDelimiter),
+    PATH: [getNodeBinDir(), getManagedNodeBinPaths(), process.env.PATH].filter(Boolean).join(pathDelimiter),
     npm_node_execpath: process.execPath,
   }
 }
@@ -2502,15 +2492,16 @@ function extractVersion(raw: string): string {
 }
 
 async function getGlobalNpmBin(): Promise<string | null> {
-  if (typeof cachedGlobalNpmBin !== 'undefined') return cachedGlobalNpmBin
-  try {
-    const { stdout } = await runNpm(['prefix', '-g'], { timeout: 5000 })
-    const prefix = stdout.trim()
-    cachedGlobalNpmBin = prefix ? (process.platform === 'win32' ? prefix : join(prefix, 'bin')) : null
-  } catch {
-    cachedGlobalNpmBin = null
-  }
-  return cachedGlobalNpmBin
+  if (cachedGlobalNpmBinPromise) return cachedGlobalNpmBinPromise
+  // Memoized per promise: the agent-status fan-out calls this concurrently and
+  // must not spawn one `npm prefix -g` per agent.
+  cachedGlobalNpmBinPromise = runNpm(['prefix', '-g'], { timeout: 5000 })
+    .then(({ stdout }) => {
+      const prefix = stdout.trim()
+      return prefix ? (process.platform === 'win32' ? prefix : join(prefix, 'bin')) : null
+    })
+    .catch(() => null)
+  return cachedGlobalNpmBinPromise
 }
 
 async function commandEnv(): Promise<NodeJS.ProcessEnv> {
@@ -2814,7 +2805,7 @@ export async function installCodingAgent(id: string, options: DshInstallOptions 
       if (tool.id === 'pi' && !userSettingsProvidesPiMcpAdapter(await readPiSettings())) {
         await installBundledPiMcpAdapter()
       }
-      cachedGlobalNpmBin = undefined
+      cachedGlobalNpmBinPromise = undefined
     }
     const status = await getCodingAgentStatus(tool)
     const allStatus = await getCodingAgentsStatus()
@@ -2896,7 +2887,7 @@ export async function deleteCodingAgent(id: string): Promise<CodingAgentMutation
       }
     }
     codingAgentRunManager.stopMatching(launch => launch.agentId === tool.id, { reportClosed: true })
-    cachedGlobalNpmBin = undefined
+    cachedGlobalNpmBinPromise = undefined
     const status = await getCodingAgentStatus(tool)
     const allStatus = await getCodingAgentsStatus()
     return {
