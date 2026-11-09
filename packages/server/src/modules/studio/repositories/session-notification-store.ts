@@ -1,6 +1,11 @@
 import { getDb } from '../infrastructure/database'
 import { initSessionStateTables } from '../infrastructure/database/session-state-schema'
+import { isPrivatePersonSession } from '../contracts/person-session'
 import { getSessionGeneration } from './session-store'
+
+/** Dispositions shown in the timeline and published live; `silent` is recorded only. */
+const VISIBLE_DISPOSITIONS = ['notified', 'status_only', 'unknown'] as const
+export const isVisibleNoticeDisposition = (disposition: string) => (VISIBLE_DISPOSITIONS as readonly string[]).includes(disposition)
 
 /** Producer of a passive notice. Notices are never `messages` rows and never model history. */
 export type SessionNotificationKind = 'script_report'
@@ -66,7 +71,7 @@ function rowToRecord(row: Record<string, unknown>): SessionNotificationRecord {
 
 export type FencedAcceptance =
   | { status: 'accepted' | 'duplicate'; record: SessionNotificationRecord }
-  | { status: 'generation_mismatch' | 'conflict' }
+  | { status: 'generation_mismatch' | 'conflict' | 'unsupported' }
 
 /**
  * Accept a producer-identified notice only while the session is still the generation the producer
@@ -87,6 +92,8 @@ export function acceptFencedSessionNotification(input: {
 }): FencedAcceptance {
   const now = input.now ?? Date.now()
   const attention = input.disposition !== 'silent'
+  // Private Person conversations are not notice destinations.
+  if (isPrivatePersonSession(input.sessionId)) return { status: 'unsupported' }
   const db = database()
   db.exec('BEGIN IMMEDIATE')
   try {
@@ -101,7 +108,10 @@ export function acceptFencedSessionNotification(input: {
     if (existing) {
       db.exec('COMMIT')
       const record = rowToRecord(existing)
-      return record.disposition === input.disposition && JSON.stringify(record.payload) === JSON.stringify(input.payload)
+      // A key is bound to its destination too: another session, generation or kind is a conflict.
+      return record.session_id === input.sessionId && record.session_generation === input.expectedGeneration
+        && record.kind === input.kind && record.disposition === input.disposition
+        && JSON.stringify(record.payload) === JSON.stringify(input.payload)
         ? { status: 'duplicate', record } : { status: 'conflict' }
     }
     const result = db.prepare(`INSERT INTO session_notifications
@@ -128,7 +138,7 @@ export function getSessionNotificationById(id: number): SessionNotificationRecor
 
 /** Shown notices of the session's current generation, oldest first. */
 export function listVisibleSessionNotifications(sessionId: string): SessionNotificationRecord[] {
-  if (!getDb()) return []
+  if (!getDb() || isPrivatePersonSession(sessionId)) return []
   const generation = getSessionGeneration(sessionId)
   if (!generation) return []
   const rows = database().prepare(`SELECT * FROM session_notifications

@@ -105,7 +105,7 @@ import type {
 import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
 import { findUserById, userCanAccessProfile } from '../repositories/users-store'
 import { noticeToMessage, withSessionNotices } from '../services/session-notifications/presentation'
-import type { SessionNotificationRecord } from '../repositories/session-notification-store'
+import { isVisibleNoticeDisposition, type SessionNotificationRecord } from '../repositories/session-notification-store'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observePersonPresenceEvent } from '../services/person/presence'
 import { SessionStateSync } from '../services/session-state'
@@ -637,7 +637,8 @@ export class ChatRunSocket {
    */
   publishSessionNotice(record: SessionNotificationRecord) {
     const session = getSession(record.session_id)
-    if (!session || (session.profile || 'default') !== record.profile || isPersonSession(session.id)
+    if (!session || (session.profile || 'default') !== record.profile || isPrivatePersonSession(session.id)
+      || !isVisibleNoticeDisposition(record.disposition)
       || getSessionGeneration(record.session_id) !== record.session_generation) return
     const payload = { event: 'session.notice', session_id: record.session_id, profile: record.profile,
       attention: record.attention_pending === 1, message: noticeToMessage(record) }

@@ -531,12 +531,15 @@ export function deleteSession(id: string): boolean {
   }
 }
 
-/** Timestamp of the stored row at a database page offset (`id DESC`), or null past the end. */
-export function getSessionMessageTimestampAtOffset(id: string, offset: number): number | null {
+/**
+ * Latest timestamp among the stored rows at or after a database page offset (`id DESC`), or null
+ * past the end. It never increases with the offset, even when stored timestamps are not monotonic.
+ */
+export function getSessionMessageBoundaryAtOffset(id: string, offset: number): number | null {
   if (!isSqliteAvailable() || offset < 0) return null
-  const row = getDb()!.prepare(`SELECT timestamp FROM ${MESSAGES_TABLE} WHERE session_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?`)
-    .get(id, offset) as { timestamp?: number } | undefined
-  return row?.timestamp == null ? null : Number(row.timestamp)
+  const row = getDb()!.prepare(`SELECT MAX(timestamp) AS boundary FROM (SELECT timestamp FROM ${MESSAGES_TABLE}
+    WHERE session_id = ? ORDER BY id DESC LIMIT -1 OFFSET ?)`).get(id, offset) as { boundary?: number | null } | undefined
+  return row?.boundary == null ? null : Number(row.boundary)
 }
 
 /** A reset or deleted conversation keeps no attention for passive notices of its old generation. */
