@@ -408,6 +408,7 @@ export async function update(ctx: any) {
     const profile = requestedProfile(ctx)
     const isCustom = poolKey.startsWith('custom:')
     if (isCustom) {
+      let keyEnv = ''
       const found = await updateConfigYamlForProfile(profile, (config) => {
         if (!Array.isArray(config.custom_providers)) return { data: config, result: false, write: false }
         const entry = (config.custom_providers as any[]).find((e: any) => {
@@ -416,7 +417,12 @@ export async function update(ctx: any) {
         if (!entry) return { data: config, result: false, write: false }
         if (name !== undefined) entry.name = name
         if (base_url !== undefined) entry.base_url = base_url
-        if (api_key !== undefined) entry.api_key = api_key
+        if (api_key !== undefined) {
+          // An entry with key_env reads its credential from .env only (credentialInfo in
+          // provider-editor.ts), so the new key goes there; an existing inline copy stays in sync.
+          keyEnv = normalizeCustomProviderEntry(entry)?.key_env || ''
+          if (!keyEnv || String(entry.api_key || '').trim()) entry.api_key = api_key
+        }
         if (model !== undefined) entry.model = model
         applyCustomProviderApiMode(entry, api_mode === null ? null : customApiMode)
         return { data: config, result: true }
@@ -424,6 +430,7 @@ export async function update(ctx: any) {
       if (!found) {
         ctx.status = 404; ctx.body = { error: `Custom provider "${poolKey}" not found` }; return
       }
+      if (keyEnv && api_key !== undefined) await saveEnvValueForProfile(profile, keyEnv, api_key)
     } else {
       const envMapping = PROVIDER_ENV_MAP[poolKey]
       if (!envMapping?.api_key_env) {
