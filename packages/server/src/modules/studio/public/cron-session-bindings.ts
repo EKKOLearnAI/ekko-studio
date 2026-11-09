@@ -4,6 +4,7 @@ import { dirname } from 'path'
 import { cronBindingsDbPath, studioInstanceId } from './session-notifications'
 import { isPrivatePersonSession } from '../contracts/person-session'
 import { getSession, getSessionGeneration } from '../repositories/session-store'
+import { setCronJobObservationState, setCronJobObserveCursor } from '../repositories/session-notification-store'
 import { findUserById, userCanAccessProfile } from '../repositories/users-store'
 
 /**
@@ -75,6 +76,10 @@ export function writeCronSessionBinding(input: { profile: string; jobId: string;
   } finally {
     db.close()
   }
+  // A deliberate (re)binding resumes observation: a job stopped earlier (for example after an
+  // out-of-band delivery change, since restored to local) is observed again from this binding on.
+  setCronJobObservationState(studioInstanceId(), input.profile, input.jobId, 'observing')
+  setCronJobObserveCursor(studioInstanceId(), input.profile, input.jobId, null)
 }
 
 export interface CronSessionBinding {

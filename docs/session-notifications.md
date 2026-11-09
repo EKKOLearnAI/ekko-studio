@@ -1,8 +1,8 @@
 # Passive session notices
 
 Studio can append a passive notice to one existing Hermes chat. A notice is display data: it is
-never a `messages` row, never enters model history and never starts or queues a turn. Producers
-(the first is the opt-in script invocation report) arrive in follow-up changes.
+never a `messages` row, never enters model history and never starts or queues a turn. Cron results
+of explicitly bound jobs are a producer (below); others arrive in follow-up changes.
 
 **Session generation.** `getSessionGeneration(id)` returns the session's `generation_id`:
 assigned on first read, rotated by a history clear (`clearSessionMessages`) and new for a session
@@ -44,8 +44,8 @@ the accepting generation is current. Unread attention is synced through the sess
 
 Hermes captures a Cron `origin` only from a chat id. The Agent Bridge has none, so a job created
 from a Studio chat is stored with `deliver=local`. A binding records, explicitly, which Studio
-session should receive that job's results; delivering them is a follow-up change that reads these
-bindings. Nothing in Hermes is changed.
+session should receive that job's results, and the observer below delivers them. Nothing in
+Hermes is changed.
 
 `POST /api/hermes/cron/session-bindings` with
 `{ profile, session_id, expected_session_generation, job_id }` binds an existing agent-backed
@@ -67,5 +67,27 @@ until the user binds it.
   stored Hermes chat, never a private Person conversation (`422 unsupported_notification_target`).
   Script-only jobs (`422 script_job_requires_script_report`), explicit targets such as `slack:…`
   (`422 explicit_delivery_target`) and unknown jobs (`404 job_not_found`) are refused.
-- Every (re)binding replaces the job's previous binding and writes a strictly later `bound_at`
-  revision.
+- Every (re)binding replaces the job's previous binding, writes a strictly later `bound_at`
+  revision and resumes observation of a job the observer had stopped.
+
+## Cron results in the bound session
+
+Every 15 seconds, while a bindings database exists, `ChatRunSocket` asks the profile's bridge
+worker (`studio_cron_observe`, `bridge_studio_cron.py`) for terminal executions of bound jobs since
+their binding. The worker reads the native execution ledger 50 rows at a time, continuing from the
+job's stored `observe_before` cursor, so a backlog is recovered over later passes. For agent-backed
+fires it reads the canonical admission result of `cron_request_id(job, execution_id)`; it never
+correlates output files by name or time. Manual `run` executions are ignored.
+
+- Each scheduled execution is accepted once into the session notice inbox as kind `cron`, keyed by
+  job and native execution id and fenced to the binding's frozen generation. A replay is a
+  duplicate with no effects; a reset, deleted or re-profiled owner receives nothing and nothing is
+  rerouted.
+- An exact answer is shown as plain text (clipped at 100,000 characters and flagged); a known
+  failure is shown even without answer text; Hermes silence and empty answers are recorded but
+  never shown; script-only jobs and missing receipts are shown status-only; an unknown execution
+  is shown as unknown and never re-run.
+- A binding replaced while Hermes was answering owns the job: the stale answer is dropped. A job
+  that disappeared, or whose stored `deliver` was changed out of band, stops being observed until
+  it is deliberately bound again.
+- Bindings written by another Studio instance are ignored.

@@ -1111,6 +1111,11 @@ export default {
   // Chat
   chat: {
     sessionNotice: {
+      cronTitle: 'La tâche planifiée « {name} » est terminée',
+      cronFailedTitle: 'La tâche planifiée « {name} » a échoué',
+      outputUnavailable: 'Résultat indisponible pour cet environnement (script seul) ; statut uniquement.',
+      receiptUnavailable: 'Le reçu exact de cette exécution était indisponible ; statut uniquement.',
+      unknown: 'Résultat inconnu. Studio ne relancera pas cette tâche.',
       truncated: "Résultat tronqué pour l’affichage.",
       scriptReportTitle: "Le script « {name} » a signalé",
       scriptReportFailedTitle: "Le script « {name} » a échoué",

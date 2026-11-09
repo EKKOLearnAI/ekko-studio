@@ -249,6 +249,29 @@ export interface AgentBridgeBackgroundPoll extends AgentBridgeResponse {
   notifications: AgentBridgeBackgroundNotification[]
 }
 
+export interface AgentBridgeCronObservedExecution {
+  job_id: string
+  job_name?: string | null
+  execution_id: string
+  source?: string | null
+  scheduled_instant?: string | null
+  status: 'completed' | 'failed' | 'unknown'
+  finished_at?: string | null
+  error?: string | null
+  delivery_outcome?: string | null
+  no_agent: boolean
+  receipt: 'exact' | 'unavailable'
+  success?: boolean
+  answer?: string
+  result_error?: string | null
+  silent?: boolean
+}
+
+export interface AgentBridgeCronObservation extends AgentBridgeResponse {
+  executions: AgentBridgeCronObservedExecution[]
+  jobs: Array<{ job_id: string; state: 'present' | 'missing'; name?: string | null; deliver?: string | null; older_before?: string | null }>
+}
+
 export interface AgentBridgeBackgroundRoute {
   profile: string
   session_ids: string[]
@@ -762,6 +785,15 @@ export class AgentBridgeClient {
       action: 'background_poll',
       ...(routes?.length ? { routes } : {}),
     }, options)
+  }
+
+  /** Terminal executions of bound native cron jobs with their exact admission result when available. */
+  studioCronObserve(
+    profile: string,
+    jobs: Array<{ job_id: string; since: number; before?: string }>,
+    options: AgentBridgeRequestOptions = {},
+  ): Promise<AgentBridgeCronObservation> {
+    return this.request<AgentBridgeCronObservation>({ action: 'studio_cron_observe', profile, jobs }, options)
   }
 
   completeBackgroundNotification(
