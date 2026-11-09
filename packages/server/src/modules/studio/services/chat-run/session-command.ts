@@ -5,6 +5,7 @@ import { logger } from '../../public/logging'
 import type { PrimaryAgentBridgeClient as AgentBridgeClient } from '../../public/chat-agent-runtime'
 import { readConfigYamlForProfile } from '../../public/profile-config'
 import { flushBridgePendingToDb } from './bridge-message'
+import { settleQueuedMachineEvents } from '../session-notifications/machine-events'
 import { advanceRunOwnership } from './run-ownership'
 import { buildDbSnapshotAwareHistory, forceCompressBridgeHistory, getOrCreateSession, replaceState } from './compression'
 import { handleAbort } from './abort'
@@ -951,6 +952,8 @@ export async function handleSessionCommand(
     }
 
     case 'destroy': {
+      // Revoke an admitted machine run before the interrupt/destroy/usage awaits below.
+      state.machineRunMarker = undefined
       const wasWorking = state.isWorking
       // The owner this command destroys, captured before any await: the same state object at the same
       // owner revision. Every accepted run owner and every Stop advances the revision (run-ownership.ts),
@@ -998,6 +1001,7 @@ export async function handleSessionCommand(
           state.responseRun = undefined
           state.activeRunMarker = undefined
           state.events = []
+          settleQueuedMachineEvents(state.queue, ctx.bridge)
           state.queue = []
           state.bridgePendingAssistantContent = undefined
           state.bridgePendingReasoningContent = undefined

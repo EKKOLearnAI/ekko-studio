@@ -44,6 +44,8 @@ export interface AgentBridgeRequestOptions {
 
 export interface AgentBridgeChatOptions {
   force_compress?: boolean
+  /** Studio owner session generation for this turn; terminal completions it starts carry this value. */
+  studio_session_generation?: string
   /** Agent-session creation policy. False keeps delegate_task available but
    * makes background=true fall back to synchronous execution. */
   background_delegation_enabled?: boolean
@@ -242,11 +244,29 @@ export interface AgentBridgeBackgroundNotification {
   event: Record<string, unknown>
 }
 
+/** A Hermes ``notify_on_complete`` terminal completion owned by a loaded session. */
+export interface AgentBridgeProcessNotification {
+  kind: 'process_completion'
+  producer_key: string
+  claim_id: string
+  session_id: string
+  profile: string
+  process_id: string
+  started_at?: number
+  /** Owner session generation declared for the turn that started the process. */
+  owner_generation?: string | null
+  exit_code?: number | null
+  status: 'succeeded' | 'failed'
+  message: string
+}
+
 export interface AgentBridgeBackgroundPoll extends AgentBridgeResponse {
   broker_id?: string
   pending_count?: number
   sessions: AgentBridgeBackgroundSession[]
   notifications: AgentBridgeBackgroundNotification[]
+  process_notifications?: AgentBridgeProcessNotification[]
+  notify_pending?: Array<{ profile: string; session_id: string }>
 }
 
 export interface AgentBridgeBackgroundRoute {
@@ -527,6 +547,7 @@ export class AgentBridgeClient {
         ? { background_delegation_enabled: options.background_delegation_enabled }
         : {}),
       ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      ...(options.studio_session_generation ? { studio_session_generation: options.studio_session_generation } : {}),
     })
   }
 
@@ -762,6 +783,19 @@ export class AgentBridgeClient {
       action: 'background_poll',
       ...(routes?.length ? { routes } : {}),
     }, options)
+  }
+
+  processNotification(
+    action: 'admit' | 'complete' | 'release',
+    notification: Pick<AgentBridgeProcessNotification, 'session_id' | 'profile' | 'producer_key' | 'claim_id'>,
+  ): Promise<AgentBridgeResponse & { admitted?: boolean; reason?: string }> {
+    return this.request({
+      action: `process_notification_${action}`,
+      session_id: notification.session_id,
+      profile: notification.profile,
+      producer_key: notification.producer_key,
+      claim_id: notification.claim_id,
+    })
   }
 
   completeBackgroundNotification(

@@ -40,7 +40,17 @@ import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
 import { saveTaskPlan } from '../repositories/task-plan-store'
 import { getSessionTasks, updateSessionTasks, SessionTasksError } from '../services/session-tasks'
 import { getSessionTaskPlans } from '../services/task-plans'
+import {
+  acceptSessionNotification,
+  getSessionNotification,
+  settleInterruptedProcessAdmissions,
+  transitionSessionNotification,
+  type SessionNotificationDisposition,
+} from '../repositories/session-notification-store'
+import { settleQueuedMachineEvents } from '../services/session-notifications/machine-events'
 import { advanceRunOwnership } from '../services/chat-run/run-ownership'
+import { studioInstanceId } from '../public/session-notifications'
+import { getDb } from '../infrastructure/database'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { bindAppEventSubscription } from '../services/webhooks/app-events'
 import { mobileDeviceRoom, mobileDeviceId, sameMobileDevice, mobileEventAllowed, type MobileDeviceTarget } from '../services/chat-run/mobile-device-target'
@@ -57,7 +67,7 @@ import type { Server, Socket } from 'socket.io'
 import { randomUUID } from 'crypto'
 import { logger } from '../public/logging'
 import { getSystemPrompt } from '../public/runs/prompt'
-import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
+import { clearSessionMessages, deleteSession, getSession, getSessionGeneration, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
 import { deleteSessionMessageGroups } from '../repositories/session-message-deletion'
 import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
 import { getSessionCategory } from '../repositories/session-category-store'
@@ -813,6 +823,15 @@ export class ChatRunSocket {
     this.backgroundPollTimer = setInterval(() => void this.pollBackgroundWork(), 500)
     this.backgroundPollTimer.unref?.()
     void this.pollBackgroundWork()
+    // A crash between admission and dispatch leaves the completion unknown, never re-dispatched.
+    // studioInstanceId() writes under the Web UI home, so only settle when Studio storage exists.
+    if (getDb()) {
+      try {
+        settleInterruptedProcessAdmissions(studioInstanceId())
+      } catch (err) {
+        logger.warn(err, '[chat-run-socket] failed to settle interrupted machine-event admissions')
+      }
+    }
     logger.info('[chat-run-socket] Socket.IO ready at /chat-run')
   }
 
@@ -1298,6 +1317,7 @@ export class ChatRunSocket {
       const state = this.sessionMap.get(data.session_id)
       if (!state?.queue.length) return
       const before = state.queue.length
+      settleQueuedMachineEvents(state.queue.filter(item => item.queue_id === data.queue_id), this.bridge)
       state.queue = state.queue.filter(item => item.queue_id !== data.queue_id)
       if (state.queue.length === before) return
       if (state.queueInsertion?.queueId === data.queue_id) {
@@ -1790,7 +1810,7 @@ export class ChatRunSocket {
     data: {
       input: string | ContentBlock[]
       display_input?: string | ContentBlock[] | null
-      display_role?: 'user' | 'command'
+      display_role?: 'user' | 'command' | 'system'
       storage_message?: string
       session_id?: string
       model?: string
@@ -1835,6 +1855,10 @@ export class ChatRunSocket {
       background_delegation_id?: string
       background_claim_id?: string
       autonomous?: boolean
+      run_marker?: string
+      machine_fence?: () => string | null
+      on_machine_dispatch?: () => void
+      on_machine_discard?: (reason: string) => void
       onEvent?: (event: string, payload: any) => void
     },
     profile: string,
@@ -1909,7 +1933,19 @@ export class ChatRunSocket {
         if (data.session_id) {
           const state = this.sessionMap.get(data.session_id)
           queueRemaining = state?.queue?.length ?? 0
+          // A known refusal settles an admitted machine run; only a still-owned session is released.
+          const machineRun = typeof data.machine_fence === 'function'
+          const ownsMachineRun = machineRun && Boolean(state && data.run_marker)
+            && state!.machineRunMarker === data.run_marker && state!.activeRunMarker === data.run_marker
+          if (machineRun) {
+            if (ownsMachineRun) {
+              state!.activeRunMarker = undefined
+              state!.machineRunMarker = undefined
+            }
+            data.on_machine_discard?.(ownsMachineRun ? 'bridge_unavailable' : 'owner_stopped')
+          }
           const canReleaseCurrentRun = state && !state.runId && !state.abortController && !state.activeRunMarker
+            && (!machineRun || ownsMachineRun)
           if (canReleaseCurrentRun) {
             if (queueRemaining > 0) {
               const nextQueuedRun = state.queue[0]
@@ -2035,7 +2071,7 @@ export class ChatRunSocket {
       await handleEkkoAgentRun(
         this.nsp,
         socket,
-        { ...data, onEvent, resolved_mcp_servers: ekkoMcpServers },
+        { ...data, display_role: data.display_role === 'system' ? 'user' : data.display_role, onEvent, resolved_mcp_servers: ekkoMcpServers },
         profile,
         this.sessionMap,
         this.dequeueNextQueuedRun.bind(this),
@@ -2296,11 +2332,116 @@ export class ChatRunSocket {
     this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
   }
 
+  /** Typed Hermes terminal completion for its exact owner session; never a disguised delegation. */
+  private async scheduleProcessNotification(notification: any) {
+    const sessionId = String(notification?.session_id || '').trim()
+    const producerKey = String(notification?.producer_key || '').trim()
+    const claimId = String(notification?.claim_id || '').trim()
+    const profile = String(notification?.profile || 'default')
+    if (!sessionId || !producerKey || !claimId || !notification.message) return
+    const complete = () => this.backgroundBridge.processNotification('complete', notification).catch((err: unknown) => {
+      logger.warn(err, '[chat-run-socket] failed to settle process notification %s', producerKey)
+    })
+    if (this.closing) {
+      await this.backgroundBridge.processNotification('release', notification).catch(() => undefined)
+      return
+    }
+    const namespace = studioInstanceId()
+    // The bridge redelivers a claim until Studio acts on it: an in-flight record keeps it, a settled one completes it.
+    const existing = getSessionNotification(namespace, profile, producerKey)
+    if (existing) {
+      if (existing.disposition !== 'admitting' && existing.disposition !== 'admitted') await complete()
+      return
+    }
+    const ownerGeneration = typeof notification.owner_generation === 'string' && notification.owner_generation
+      ? notification.owner_generation : null
+    const payload = {
+      process_id: notification.process_id,
+      exit_code: notification.exit_code ?? null,
+      status: notification.status,
+      started_at: notification.started_at ?? null,
+    }
+    const event: NonNullable<QueuedRun['machineEvent']> = {
+      kind: 'process_completion', notificationId: 0, sessionId, producerKey, claimId, profile, ownerGeneration,
+      processId: String(notification.process_id || ''),
+    }
+    const session = getSession(sessionId)
+    const state = session ? await this.sessionStateForBackground(sessionId) : null
+    // The producer's owner (profile + generation) must still be this session's current owner.
+    const ownerDisposition = !state ? 'owner_missing' : this.machineOwnerVerdict(event)
+    if (ownerDisposition) {
+      acceptSessionNotification({ namespace, profile, producerKey, sessionId, sessionGeneration: ownerGeneration,
+        kind: 'process_completion', disposition: ownerDisposition, payload })
+      await complete()
+      return
+    }
+    const record = acceptSessionNotification({ namespace, profile, producerKey, sessionId, sessionGeneration: ownerGeneration,
+      kind: 'process_completion', disposition: 'admitting', payload })
+    if (!record) {
+      // Already accepted once (replay): never a second turn.
+      await complete()
+      return
+    }
+    event.notificationId = record.id
+    const next: QueuedRun = {
+      queue_id: `process_${record.id}`,
+      input: notification.message,
+      displayInput: notification.message,
+      displayRole: 'system',
+      model: session!.model || undefined,
+      provider: session!.provider || undefined,
+      profile: session!.profile || profile,
+      workspace: session!.workspace,
+      source: resolveRunSource(session!.source || undefined, sessionId),
+      autonomous: true,
+      machineEvent: event,
+    }
+    if (state!.isWorking) {
+      state!.queue.push(next)
+      logger.info('[chat-run-socket] queued process completion %s for busy session %s', producerKey, sessionId)
+      return
+    }
+    state!.isWorking = true
+    advanceRunOwnership(state!)
+    state!.profile = next.profile
+    state!.source = next.source
+    this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
+  }
+
+  /** Why a machine event may no longer run for its owner, or null when the owner is current. */
+  private machineOwnerVerdict(event: NonNullable<QueuedRun['machineEvent']>): 'owner_missing' | 'owner_reset' | 'owner_stopped' | null {
+    const session = getSession(event.sessionId)
+    if (!session || (session.profile || 'default') !== event.profile) return 'owner_missing'
+    if (!event.ownerGeneration || getSessionGeneration(event.sessionId) !== event.ownerGeneration) return 'owner_reset'
+    if (this.sessionMap.get(event.sessionId)?.backgroundWakeStopped) return 'owner_stopped'
+    return null
+  }
+
+  /** Bridge admission is the consumption decision; the owner is re-checked after the awaited RPC. */
+  private async admitMachineEvent(next: QueuedRun, fence: () => SessionNotificationDisposition | null): Promise<boolean> {
+    const event = next.machineEvent!
+    const ref = { session_id: event.sessionId, profile: event.profile, producer_key: event.producerKey, claim_id: event.claimId }
+    let verdict: SessionNotificationDisposition | null = fence()
+    if (!verdict) {
+      try {
+        const admitted = await this.backgroundBridge.processNotification('admit', ref)
+        verdict = admitted.admitted ? fence() ?? 'admitted' : admitted.reason === 'consumed' ? 'consumed' : 'unknown'
+      } catch (err) {
+        logger.warn(err, '[chat-run-socket] process completion admission check failed for %s', event.producerKey)
+        verdict = 'unknown'
+      }
+    }
+    transitionSessionNotification(event.notificationId, 'admitting', verdict)
+    await this.backgroundBridge.processNotification('complete', ref).catch(() => undefined)
+    return verdict === 'admitted'
+  }
+
   private needsBackgroundPoll(): boolean {
     if (this.closing) return false
     if (this.backgroundRecoveryNeeded) return true
     if (Date.now() < this.backgroundActivityGraceUntil) return true
     for (const state of this.sessionMap.values()) {
+      if (state.processNotifyPending) return true
       if (Object.values(state.backgroundDelegations || {})
         .some(item => item.status === 'running' || item.status === 'delivering')) return true
       if (Object.values(state.backgroundTasks || {})
@@ -2331,6 +2472,9 @@ export class ChatRunSocket {
       const routes = recovering ? this.backgroundRecoveryRoutes() : undefined
       const result = await this.backgroundBridge.backgroundPoll(routes, { timeoutMs: recovering ? 120_000 : 1000 })
       if (this.closing) {
+        await Promise.allSettled((result.process_notifications || []).map((notification: any) => (
+          this.backgroundBridge.processNotification('release', notification)
+        )))
         await Promise.allSettled((result.notifications || []).map((notification: any) => (
           this.backgroundBridge.releaseBackgroundNotification(
             notification.session_id,
@@ -2356,6 +2500,17 @@ export class ChatRunSocket {
       }
       for (const notification of result.notifications || []) {
         await this.scheduleBackgroundNotification(notification)
+      }
+      const notifyPending = new Set<string>((result.notify_pending || []).map((item: any) => String(item?.session_id || '')))
+      for (const [sessionId, state] of this.sessionMap) {
+        if (state.processNotifyPending && !notifyPending.has(sessionId)) state.processNotifyPending = false
+      }
+      for (const sessionId of notifyPending) {
+        const state = this.sessionMap.get(sessionId)
+        if (state) state.processNotifyPending = true
+      }
+      for (const notification of result.process_notifications || []) {
+        await this.scheduleProcessNotification(notification)
       }
     } catch (err) {
       this.backgroundPollRetryAt = Date.now() + 5000
@@ -2871,6 +3026,43 @@ export class ChatRunSocket {
   }
 
   private runQueuedItem(socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile = 'default') {
+    if (next.machineEvent) {
+      const event = next.machineEvent
+      // Stop, /destroy or a new turn replaces this run's marker, so the fence refuses even with an unchanged generation.
+      const state = this.sessionMap.get(sessionId)
+      const runMarker = `cli_run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+      if (state) {
+        state.activeRunMarker = runMarker
+        state.machineRunMarker = runMarker
+      }
+      const owned = () => Boolean(state) && this.sessionMap.get(sessionId) === state
+        && state!.isWorking && !state!.isAborting && state!.activeRunMarker === runMarker && state!.machineRunMarker === runMarker
+      const fence = (): SessionNotificationDisposition | null => (owned() ? this.machineOwnerVerdict(event) : 'owner_stopped')
+      // Re-checked at the final seams: before the stored machine turn and immediately before bridge.chat.
+      const admitted: QueuedRun = {
+        ...next,
+        machineEvent: undefined,
+        runMarker,
+        machineFence: fence,
+        onMachineDispatch: () => { transitionSessionNotification(event.notificationId, 'admitted', 'dispatched') },
+        onMachineDiscard: (reason: string) => {
+          transitionSessionNotification(event.notificationId, 'admitted', reason as SessionNotificationDisposition)
+        },
+      }
+      void this.admitMachineEvent(next, fence).then(ok => {
+        if (ok) {
+          this.runQueuedItem(socket, sessionId, admitted, fallbackProfile)
+          return
+        }
+        // Only release a session this run still owns; a destroyed or replaced owner is left alone.
+        if (!owned()) return
+        state!.isWorking = false
+        state!.activeRunMarker = undefined
+        state!.machineRunMarker = undefined
+        this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
+      })
+      return
+    }
     if (next.personStageDelivery) {
       const { userId,deliveryId } = next.personStageDelivery
       try {
@@ -2974,6 +3166,10 @@ export class ChatRunSocket {
       reasoning_effort: next.reasoningEffort,
       background_delegation_id: next.backgroundDelegationId,
       background_claim_id: next.backgroundClaimId,
+      run_marker: next.runMarker,
+      machine_fence: next.machineFence,
+      on_machine_dispatch: next.onMachineDispatch,
+      on_machine_discard: next.onMachineDiscard,
       autonomous: next.autonomous,
     }, runProfile, skipUserMessage, backgroundContinuationContext, next.pushTargetId)
     void execution.catch(error => {
@@ -2996,7 +3192,7 @@ export class ChatRunSocket {
     data: {
       input: string | ContentBlock[]
       display_input?: string | ContentBlock[] | null
-      display_role?: 'user' | 'command'
+      display_role?: 'user' | 'command' | 'system'
       storage_message?: string
       session_id: string
       model?: string
@@ -3415,6 +3611,7 @@ export class ChatRunSocket {
       state.cacheWriteTokens = 0
       state.contextTokens = 0
       state.events = []
+      settleQueuedMachineEvents(state.queue, this.backgroundBridge)
       state.queue = []
       state.queueInsertion = undefined
       state.bridgePendingAssistantContent = undefined

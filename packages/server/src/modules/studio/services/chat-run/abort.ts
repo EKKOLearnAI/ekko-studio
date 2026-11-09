@@ -12,6 +12,7 @@ import {
   hasChatEkkoBackgroundTasks as hasGlobalEkkoBackgroundTasks,
 } from '../../public/chat-agent-runtime'
 import { flushBridgePendingToDb } from './bridge-message'
+import { settleQueuedMachineEvents } from '../session-notifications/machine-events'
 import { advanceRunOwnership } from './run-ownership'
 import { flushResponseRunToDb } from './response-stream'
 import { replaceState } from './compression'
@@ -69,11 +70,14 @@ export async function handleAbort(
   const isCodingAgentRun = state?.source === 'coding_agent' || state?.source === 'builtin_agent' || state?.webhookAgent === 'ekko' || hasCodingAgentRun || hasEkkoBackgroundTasks
   if (state) {
     state.backgroundWakeStopped = true
+    // Revoke an admitted machine run before any await; ordinary run markers stay for their finalizers.
+    state.machineRunMarker = undefined
     // Stop ends the current owner: identities captured before it (an outstanding /destroy) no longer match.
     advanceRunOwnership(state)
     const dropped = state.queue.filter(item => item.goalContinuation || item.autonomous || item.backgroundDelegationId)
     state.queue = state.queue.filter(item => !dropped.includes(item))
     for (const item of dropped) if (item.personDelivery) cancelPersonDelivery(item.personDelivery.userId, item.personDelivery.executionId,item.personDelivery.acceptanceReturnId)
+    settleQueuedMachineEvents(dropped, bridge, err => logger.warn(err, '[chat-run-socket] failed to settle stopped process completion'))
     for (const item of dropped) {
       if (item.backgroundDelegationId && item.backgroundClaimId) {
         // Releasing a claim requeues it, undoing the user's Stop.

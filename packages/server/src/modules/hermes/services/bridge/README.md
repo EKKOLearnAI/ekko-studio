@@ -193,3 +193,8 @@ run (a fraction in [0, 1]); zero or unknown total input yields `null`. Cache wri
 count toward input, never toward hits. No legacy-table migration is needed.
 The UI displays this non-expandable card above the turn's file changes, after
 completion only. The thinking indicator carries no token speed.
+
+### Terminal completions
+
+`bridge_studio_notifications.py` adapts Hermes terminal completions for Studio;
+the protocol is described in `docs/session-notifications.md`.
