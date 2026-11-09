@@ -1,4 +1,4 @@
-import { getSessionMessageTimestampAtOffset } from '../../repositories/session-store'
+import { getSessionMessageBoundaryAtOffset } from '../../repositories/session-store'
 import { listVisibleSessionNotifications, type SessionNotificationRecord } from '../../repositories/session-notification-store'
 
 /**
@@ -62,10 +62,11 @@ export function noticeToMessage(record: SessionNotificationRecord): StudioNotice
 /**
  * Merge passive notices into one page of stored messages. Pages are database pages (`id DESC`,
  * `offset`, `storedCount` rows); a notice belongs to the page whose interval
- * (timestamp of the next older stored row, timestamp of the page's newest stored row] contains it,
- * the newest page has no upper bound and the oldest page no lower bound. Adjacent pages therefore
- * share boundaries exactly (equal timestamps go to the older side) and stored-row offsets are
- * unaffected: callers must count only stored rows.
+ * (boundary after the page, boundary at the page] contains it, where a boundary is the latest
+ * timestamp at or after that offset; the newest page has no upper bound and the oldest page no
+ * lower bound. Boundaries never increase with the offset, so every notice is on exactly one page
+ * (equal timestamps go to the older side) even for non-monotonic stored timestamps. Stored rows
+ * keep their order and offsets: callers must count only stored rows.
  */
 export function withSessionNotices<T extends { timestamp?: unknown }>(
   sessionId: string,
@@ -80,11 +81,19 @@ export function withSessionNotices<T extends { timestamp?: unknown }>(
   }
   if (!notices.length) return messages
   const upper = page.offset > 0
-    ? getSessionMessageTimestampAtOffset(sessionId, page.offset) ?? Number.POSITIVE_INFINITY
+    ? getSessionMessageBoundaryAtOffset(sessionId, page.offset) ?? Number.POSITIVE_INFINITY
     : Number.POSITIVE_INFINITY
-  const lower = getSessionMessageTimestampAtOffset(sessionId, page.offset + page.storedCount) ?? Number.NEGATIVE_INFINITY
+  const lower = getSessionMessageBoundaryAtOffset(sessionId, page.offset + page.storedCount) ?? Number.NEGATIVE_INFINITY
   const selected = notices.map(noticeToMessage).filter(notice => notice.timestamp > lower && notice.timestamp <= upper)
+    .sort((a, b) => a.timestamp - b.timestamp)
   if (!selected.length) return messages
-  // Stable: a notice sorts after stored rows with the same timestamp.
-  return [...messages, ...selected].sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
+  // Insert each notice before the first stored row that is newer; stored rows are never reordered,
+  // and a notice goes after stored rows with the same timestamp.
+  const merged: Array<T | StudioNoticeMessage> = []
+  let next = 0
+  for (const message of messages) {
+    while (next < selected.length && selected[next].timestamp < Number(message.timestamp || 0)) merged.push(selected[next++])
+    merged.push(message)
+  }
+  return merged.concat(selected.slice(next))
 }
