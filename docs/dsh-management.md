@@ -2,7 +2,33 @@
 
 This page describes the current integration. The proposed next stages for reusing Web Profiles, Agent presets, native plugins and browser plugin runtimes are documented in [DSH 配置复用与插件完整接入规划](planning/dsh-profiles-and-plugins.md); those stages are not implemented by this planning document.
 
-Open **Agent Manager → DeepSeek Harness** to install `@deepseek-ai/dsh`, detect an existing `dsh` CLI, check for updates, or uninstall the CLI. Installation uses the official npm registry and the same global package management path as other Coding Agents. Update checks include prerelease ordering, such as `rc.1` to `rc.2`.
+Open **Agent Manager → DeepSeek Harness** to install `@deepseek-ai/dsh`, detect an existing `dsh` CLI, check for updates, or uninstall the CLI. Studio-managed installation uses the official npm registry and private version directories under the Web UI Home; an existing external CLI remains available until a candidate passes validation. Update checks include prerelease ordering, such as `rc.1` to `rc.2`.
+
+The version controls accept an exact npm release (for example `0.2.2-rc.1`) and
+pin it for manual and automatic updates. **Check and use latest** explicitly
+removes the pin after a successful install. **Restore** rechecks the previous
+installation, switches back to its retained dependency graph and pins that
+release. On the first managed install, an external CLI becomes a restore target
+only if its compatibility probe passes. If no working history exists, choose
+an exact supported release to recover. Studio does not change the shell's global
+`dsh`; Studio launches its selected installation first in its own child PATH.
+
+Candidates are resolved to an exact release and installed into separate prefixes.
+Studio adapts ACP, resolves imports against that candidate, checks the configured
+Web profile, and starts a clean ACP runtime without copying profile credentials for an initialize
+handshake before atomically switching the active selection. Failed probes keep
+the active installation and pin unchanged. Adapter revision 5 is tested with
+ACP `0.2.1-rc.5` and `0.2.2-rc.1`; missing or ambiguous required seams still reject
+activation. This is capability checking, not a promise about future releases or
+all third-party Web plugins. The candidate's clean startup excludes user plugins;
+custom composition is checked without running it. No model inference occurs.
+
+The install endpoint also accepts an optional JSON body, for DSH only:
+`{"version":"0.2.2-rc.1"}`, `{"version":"latest"}`, or `{"rollback":true}`.
+An empty body honors the existing pin, otherwise it resolves latest. Stored
+release graphs remain for recovery until uninstall; uninstall removes Studio's
+managed versions as well as discovered global CLI installations. Native DSH
+configuration and session data are retained.
 
 DSH installs and updates use npm's `--prefer-dedupe` option. Duplicate copies of
 its native dependencies can register the same FFI types twice and stop plugin

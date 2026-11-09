@@ -5,6 +5,7 @@ import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesPt } from '../social-messages-locales'
 
 export default {
+  dshVersions: {"compatibility": "Adaptador ACP {revision} · testado: 0.2.1-rc.5 / 0.2.2-rc.1", "verified": "Instalação verificada: {version}", "pinned": "Versão fixada: {version}", "version": "Versão npm exata (ex.: 0.2.2-rc.1)", "pin": "Instalar e fixar", "latest": "Verificar e usar a mais recente", "restore": "Restaurar {version}"},
   person: personMessages['pt'],
   sessionTasks: {
       "title": "Tarefas",

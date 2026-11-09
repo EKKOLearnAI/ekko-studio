@@ -1,7 +1,20 @@
-import { mkdir, readdir, readFile, symlink, writeFile, rm } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, stat, symlink, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeManagedPromptFile } from '../prompt-file'
 import { linkAntigravityNativeKeychain } from './native-keychain'
+
+/** A copy is a private run snapshot when the OS cannot create a link. Never
+ * overwrite an existing native state path or copy generated settings upstream. */
+async function shareNativeEntry(source: string, target: string, directory: boolean): Promise<void> {
+  directory ||= (await stat(source)).isDirectory()
+  try {
+    await symlink(source, target, directory ? 'junction' : 'file')
+  } catch (error: any) {
+    if (error.code === 'EEXIST') return
+    if (!['EPERM', 'ENOTSUP', 'EINVAL'].includes(error.code)) throw error
+    await cp(source, target, { recursive: directory, dereference: true, force: false, errorOnExist: false })
+  }
+}
 
 export const ANTIGRAVITY_INSTALL_URL = 'https://antigravity.google/docs/cli/install'
 export const ANTIGRAVITY_DEFAULT_SETTINGS = '{\n  "toolPermission": "request-review"\n}\n'
@@ -51,18 +64,14 @@ export async function prepareAntigravityRuntime(input: {
   for (const entry of await readdir(source, { withFileTypes: true }).catch(() => [])) {
     if (input.externalModel) continue
     if (entry.name === 'config' || entry.name === 'antigravity-cli') continue
-    await symlink(join(source, entry.name), join(shadow, entry.name), entry.isDirectory() ? 'junction' : 'file').catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'EEXIST') throw error
-    })
+    await shareNativeEntry(join(source, entry.name), join(shadow, entry.name), entry.isDirectory())
   }
   for (const directory of ['config', 'antigravity-cli']) {
     await mkdir(join(shadow, directory), { recursive: true })
     for (const entry of await readdir(join(source, directory), { withFileTypes: true }).catch(() => [])) {
       if (input.externalModel && directory === 'antigravity-cli') continue
       if (entry.name === 'mcp_config.json' || entry.name === 'settings.json' || entry.name === 'AGENTS.md' || entry.name === 'skills') continue
-      await symlink(join(source, directory, entry.name), join(shadow, directory, entry.name), entry.isDirectory() ? 'junction' : 'file').catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'EEXIST') throw error
-      })
+      await shareNativeEntry(join(source, directory, entry.name), join(shadow, directory, entry.name), entry.isDirectory())
     }
   }
   const settings = await readFile(join(source, 'antigravity-cli', 'settings.json'), 'utf8').catch((error: NodeJS.ErrnoException) => {
@@ -81,9 +90,7 @@ export async function prepareAntigravityRuntime(input: {
   for (const skills of [join(source, 'config', 'skills'), join(input.home, '.agents', 'skills')]) {
     for (const entry of await readdir(skills, { withFileTypes: true }).catch(() => [])) {
       if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
-      await symlink(join(skills, entry.name), join(skillRoot, entry.name), 'junction').catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'EEXIST') throw error
-      })
+      await shareNativeEntry(join(skills, entry.name), join(skillRoot, entry.name), true)
     }
   }
   const mcpPath = join(shadow, 'config', 'mcp_config.json')

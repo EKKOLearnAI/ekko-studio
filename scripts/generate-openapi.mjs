@@ -1318,6 +1318,14 @@ const pluginError = description => ({ description, content: { 'application/json'
   type: 'object', properties: { code: { type: 'string' }, error: { type: 'string' }, retryable: { type: 'boolean' } },
 } } } })
 const pluginAuth = { security: [{ BearerAuth: [] }], tags: ['Coding Agents'] }
+const codingAgentInstall = openapi.paths['/api/coding-agents/{id}/install'].post
+codingAgentInstall.description = 'Install or update a coding agent. DSH candidates use isolated prefixes and must pass ACP compatibility/startup checks before activation. Empty options honor the current pin. Version/rollback options are DSH-only.'
+codingAgentInstall.requestBody = { required: false, content: { 'application/json': { schema: {
+  type: 'object', properties: {
+    version: { type: 'string', description: 'DSH exact npm version, or latest to explicitly remove a pin after successful activation.' },
+    rollback: { type: 'boolean', description: 'DSH only: revalidate and restore the previous working graph, then pin it. Mutually exclusive with version.' },
+  },
+} } } }
 openapi.paths['/api/coding-agents/dsh/plugin-inventory'] = { get: {
   ...pluginAuth, operationId: 'getNativeDshPluginInventory', summary: 'Discover native DSH preset plugin entries',
   description: 'Super admin only. Reads the installed CLI dependency graph and native shipped/user preset compositions, recursively flattening groups. Includes disabled entries. Does not execute YAML expressions or connect to the Web runtime. Custom deployment roots and overlays are not resolved. Counts are per preset, not npm package counts. Includes separately counted packages installed in the native Web profile. Runtime phases remain unknown for this static inventory.',

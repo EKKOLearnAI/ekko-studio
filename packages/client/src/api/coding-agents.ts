@@ -62,6 +62,7 @@ export interface CodingAgentToolStatus {
   source?: 'user-cli' | 'not-installed'
   path?: string
   error?: string
+  compatibility?: { pinnedVersion: string; previousVersion: string; adapterRevision: number; verifiedVersion: string }
 }
 
 export interface CodingAgentsStatus {
@@ -178,8 +179,8 @@ export async function fetchCodingAgentsStatus(): Promise<CodingAgentsStatus> {
   return request<CodingAgentsStatus>('/api/coding-agents')
 }
 
-export async function installCodingAgent(id: CodingAgentId): Promise<CodingAgentMutationResult> {
-  return request<CodingAgentMutationResult>(`/api/coding-agents/${id}/install`, { method: 'POST' })
+export async function installCodingAgent(id: CodingAgentId, options: { version?: string; rollback?: boolean } = {}): Promise<CodingAgentMutationResult> {
+  return request<CodingAgentMutationResult>(`/api/coding-agents/${id}/install`, { method: 'POST', body: JSON.stringify(options) })
 }
 
 export async function checkCodingAgentUpdate(id: CodingAgentId): Promise<CodingAgentUpdateResult> {

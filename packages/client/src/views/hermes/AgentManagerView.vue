@@ -29,6 +29,7 @@ import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
 import { desktopBridge } from '@/utils/desktop-bridge'
 
+const DshVersions = defineAsyncComponent(() => import('@/components/coding-agents/dsh/DshVersions.vue'))
 const AiHelpChatPanel = defineAsyncComponent(async () => (await import('@/components/hermes/chat/ChatPanel.vue')).default)
 
 interface CodingAgentCard {
@@ -275,6 +276,7 @@ function applyAgentStatusSnapshot(snapshot: AgentStatusSnapshot) {
       source: status?.source === 'user-cli' ? 'user-cli' : 'not-installed',
       path: status?.path || '',
       error: status?.error || '',
+      compatibility: status?.compatibility,
     }
   })
 }
@@ -416,13 +418,13 @@ async function maybePromptLegacyWindowsDataMigration() {
   }
 }
 
-async function handleInstall(id: CodingAgentId) {
+async function handleInstall(id: CodingAgentId, options: { version?: string; rollback?: boolean } = {}) {
   installing.value[id] = true
   try {
     if ((id === 'cursor' || id === 'antigravity' || agentMetadata(id)?.installation.method === 'manual') && typeof window !== 'undefined') {
       window.open(agentMetadata(id)?.installation.docsUrl || (id === 'antigravity' ? 'https://antigravity.google/docs/cli/install' : 'https://cursor.com/install'), '_blank', 'noopener,noreferrer')
     }
-    const result = await installCodingAgent(id)
+    const result = await installCodingAgent(id, options)
     tools.value = result.tools
     if (result.updateState) updatePolicies.value[id] = result.updateState
     if ((id === 'cursor' || id === 'antigravity' || agentMetadata(id)?.installation.method === 'manual') && !result.success) {
@@ -694,6 +696,7 @@ onUnmounted(() => {
                   {{ t('agentManager.deleteConfirm', { name: agent.name }) }}
                 </NPopconfirm>
               </div>
+              <DshVersions v-if="agent.id === 'dsh'" :info="toolStatus(agent.id)?.compatibility" :busy="installing.dsh || deleting.dsh" @install="handleInstall('dsh', $event)" />
               <div v-if="toolStatus(agent.id)?.installed && updatePolicies[agent.id]" class="agent-update-policy">
                 <div class="agent-update-policy-row"><span>{{ t('agentAutoUpdate.label') }}</span><NSwitch class="agent-update-switch" size="small" :theme-overrides="{ railHeightSmall: '16px', railWidthSmall: '28px', buttonHeightSmall: '12px', buttonWidthSmall: '12px' }" :disabled="!updatePolicies[agent.id]?.autoUpdateSupported" :value="updatePolicies[agent.id]?.autoUpdate" @update:value="toggleAutoUpdate(agent.id, $event)" /></div>
 
