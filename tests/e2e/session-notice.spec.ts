@@ -40,3 +40,26 @@ test('renders a script invocation report as plain text with its wrapper provenan
   // A notice is display-only: it is the only message, and no turn was added for it.
   await expect(page.locator('.message')).toHaveCount(1)
 })
+
+test('renders a scheduled-task result as plain text attributed to its job', async ({ page }) => {
+  await openNotices(page)
+  const content = '**Digest ready** <b>raw</b>'
+  await page.evaluate(content => {
+    const sid = (window as any).sessionNoticeFixture.sid
+    ;(window as any).sessionNoticeFixture.deliver({
+      event: 'session.notice', session_id: sid, attention: true,
+      message: {
+        id: 'studio-notice-5', session_id: sid, role: 'system', display_role: 'system', content,
+        timestamp: Math.floor(Date.now() / 1000) + 1,
+        studio_notice: { kind: 'cron', notification_id: 5, disposition: 'notified', job_id: 'job-5', job_name: 'Morning digest',
+          execution_id: 'exec-5', status: 'completed', success: true, reason: null, error: null, truncated: false, finished_at: null },
+      },
+    })
+  }, content)
+  const header = page.locator('.studio-notice-header').filter({ hasText: 'Morning digest' })
+  await expect(header.locator('.studio-notice-title')).toHaveText('Scheduled task “Morning digest” finished')
+  await expect(header.locator('.studio-notice-detail')).toHaveCount(0)
+  await expect(page.locator('.studio-notice-text')).toHaveText(content)
+  await expect(page.locator('.markdown-body strong, .studio-notice-text b')).toHaveCount(0)
+  await expect(page.locator('.message')).toHaveCount(1)
+})

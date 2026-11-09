@@ -1125,6 +1125,11 @@ export default {
   // 對話
   chat: {
     sessionNotice: {
+      cronTitle: '排程任務「{name}」已完成',
+      cronFailedTitle: '排程任務「{name}」失敗',
+      outputUnavailable: '此執行環境無法取得結果（僅腳本任務），僅顯示狀態。',
+      receiptUnavailable: '找不到本次執行的確切結果憑據，僅顯示狀態。',
+      unknown: '結果未知。Studio 不會重新執行此任務。',
       truncated: "結果已截斷顯示。",
       scriptReportTitle: "腳本「{name}」已回報",
       scriptReportFailedTitle: "腳本「{name}」失敗",

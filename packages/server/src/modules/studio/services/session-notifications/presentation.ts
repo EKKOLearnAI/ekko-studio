@@ -5,7 +5,7 @@ import { listVisibleSessionNotifications, type SessionNotificationRecord } from 
  * Report of one invocation of an enrolled script wrapper. The invocation id is the wrapper's own
  * identity; there is no native execution id and no claim that the invocation was scheduled.
  */
-export interface StudioNoticeView {
+export interface ScriptReportNoticeView {
   kind: 'script_report'
   notification_id: number
   disposition: string
@@ -19,6 +19,24 @@ export interface StudioNoticeView {
   reason: string | null
   truncated: boolean
 }
+
+/** Result of one scheduled fire of a bound native cron job, by its native execution id. */
+export interface CronNoticeView {
+  kind: 'cron'
+  notification_id: number
+  disposition: string
+  job_id: string
+  job_name: string
+  execution_id: string
+  status: string
+  success: boolean | null
+  reason: string | null
+  error: string | null
+  truncated: boolean
+  finished_at: string | null
+}
+
+export type StudioNoticeView = ScriptReportNoticeView | CronNoticeView
 
 export interface StudioNoticeMessage {
   id: string
@@ -42,7 +60,20 @@ export function noticeToMessage(record: SessionNotificationRecord): StudioNotice
     display_role: 'system',
     content: text(payload.content),
     timestamp: Math.floor(record.created_at / 1000),
-    studio_notice: {
+    studio_notice: record.kind === 'cron' ? {
+      kind: 'cron',
+      notification_id: record.id,
+      disposition: record.disposition,
+      job_id: text(payload.job_id),
+      job_name: text(payload.job_name) || text(payload.job_id),
+      execution_id: text(payload.execution_id),
+      status: text(payload.status),
+      success: typeof payload.success === 'boolean' ? payload.success : null,
+      reason: typeof payload.reason === 'string' ? payload.reason : null,
+      error: typeof payload.error === 'string' ? payload.error : null,
+      truncated: payload.truncated === true,
+      finished_at: typeof payload.finished_at === 'string' ? payload.finished_at : null,
+    } : {
       kind: 'script_report',
       notification_id: record.id,
       disposition: record.disposition,

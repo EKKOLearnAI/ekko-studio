@@ -69,6 +69,11 @@ const studioNotice = computed(() => props.message.studioNotice ?? null);
 const studioNoticeTitle = computed(() => {
   const notice = studioNotice.value;
   if (!notice) return "";
+  if (notice.kind === "cron") {
+    return notice.success === false || notice.status === "failed"
+      ? t("chat.sessionNotice.cronFailedTitle", { name: notice.job_name })
+      : t("chat.sessionNotice.cronTitle", { name: notice.job_name });
+  }
   return notice.outcome === "failed" || notice.outcome === "launch_failed"
     ? t("chat.sessionNotice.scriptReportFailedTitle", { name: notice.job_name })
     : t("chat.sessionNotice.scriptReportTitle", { name: notice.job_name });
@@ -77,6 +82,15 @@ const studioNoticeTitle = computed(() => {
 const studioNoticeDetail = computed(() => {
   const notice = studioNotice.value;
   if (!notice) return "";
+  if (notice.kind === "cron") {
+    if (notice.disposition === "unknown") return t("chat.sessionNotice.unknown");
+    if (notice.reason === "output_unavailable_for_runtime") return t("chat.sessionNotice.outputUnavailable");
+    if (notice.reason === "receipt_unavailable") return t("chat.sessionNotice.receiptUnavailable");
+    if (notice.truncated) return t("chat.sessionNotice.truncated");
+    // A known failure without result text shows its native error.
+    if (notice.success === false && notice.error && !props.message.content) return notice.error;
+    return "";
+  }
   if (notice.disposition === "unknown") return t("chat.sessionNotice.scriptReportUnknown");
   if (notice.disposition === "status_only") return t("chat.sessionNotice.scriptReportUnavailable");
   return notice.truncated
@@ -1244,7 +1258,7 @@ onBeforeUnmount(() => {
             <template v-if="studioNotice">
               <div class="studio-notice-header">
                 <div class="studio-notice-title">{{ studioNoticeTitle }}</div>
-                <div class="studio-notice-detail">{{ studioNoticeDetail }}</div>
+                <div v-if="studioNoticeDetail" class="studio-notice-detail">{{ studioNoticeDetail }}</div>
               </div>
               <div v-if="message.content" class="studio-notice-text">{{ message.content }}</div>
             </template>

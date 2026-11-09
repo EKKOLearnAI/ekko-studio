@@ -8,7 +8,7 @@ const VISIBLE_DISPOSITIONS = ['notified', 'status_only', 'unknown'] as const
 export const isVisibleNoticeDisposition = (disposition: string) => (VISIBLE_DISPOSITIONS as readonly string[]).includes(disposition)
 
 /** Producer of a passive notice. Notices are never `messages` rows and never model history. */
-export type SessionNotificationKind = 'script_report'
+export type SessionNotificationKind = 'script_report' | 'cron'
 
 /** Only `notified`, `status_only` and `unknown` are shown; `silent` is recorded, never shown. */
 export type SessionNotificationDisposition = 'notified' | 'status_only' | 'unknown' | 'silent'
@@ -45,6 +45,11 @@ function database() {
       UNIQUE(namespace, profile, producer_key)
     );
     CREATE INDEX IF NOT EXISTS idx_session_notifications_session ON session_notifications(session_id, created_at);
+    CREATE TABLE IF NOT EXISTS session_notification_cron_jobs (
+      namespace TEXT NOT NULL, profile TEXT NOT NULL, job_id TEXT NOT NULL,
+      state TEXT NOT NULL, updated_at INTEGER NOT NULL, observe_before TEXT,
+      PRIMARY KEY(namespace, profile, job_id)
+    );
   `)
   initSessionStateTables(db)
   initialized.add(db)
@@ -145,4 +150,31 @@ export function listVisibleSessionNotifications(sessionId: string): SessionNotif
     WHERE session_id=? AND session_generation=? AND disposition IN ('notified','status_only','unknown')
     ORDER BY created_at, id`).all(sessionId, generation) as Record<string, unknown>[]
   return rows.map(rowToRecord)
+}
+
+/** Observation state of a bound native cron job: `stopped` after it went missing or its target changed. */
+export function cronJobObservationState(namespace: string, profile: string, jobId: string): string | null {
+  const row = database().prepare('SELECT state FROM session_notification_cron_jobs WHERE namespace=? AND profile=? AND job_id=?')
+    .get(namespace, profile, jobId) as { state?: string } | undefined
+  return row?.state ?? null
+}
+
+/** Cursor into older native executions still to be observed (bounded recovery across passes). */
+export function cronJobObserveCursor(namespace: string, profile: string, jobId: string): string | null {
+  const row = database().prepare('SELECT observe_before FROM session_notification_cron_jobs WHERE namespace=? AND profile=? AND job_id=?')
+    .get(namespace, profile, jobId) as { observe_before?: string | null } | undefined
+  return row?.observe_before ?? null
+}
+
+export function setCronJobObserveCursor(namespace: string, profile: string, jobId: string, before: string | null): void {
+  database().prepare(`INSERT INTO session_notification_cron_jobs (namespace, profile, job_id, state, updated_at, observe_before)
+    VALUES (?, ?, ?, 'observing', ?, ?) ON CONFLICT(namespace, profile, job_id) DO UPDATE SET
+      observe_before=excluded.observe_before, updated_at=excluded.updated_at`)
+    .run(namespace, profile, jobId, Date.now(), before)
+}
+
+export function setCronJobObservationState(namespace: string, profile: string, jobId: string, state: 'observing' | 'stopped'): void {
+  database().prepare(`INSERT INTO session_notification_cron_jobs (namespace, profile, job_id, state, updated_at)
+    VALUES (?, ?, ?, ?, ?) ON CONFLICT(namespace, profile, job_id) DO UPDATE SET state=excluded.state, updated_at=excluded.updated_at`)
+    .run(namespace, profile, jobId, state, Date.now())
 }

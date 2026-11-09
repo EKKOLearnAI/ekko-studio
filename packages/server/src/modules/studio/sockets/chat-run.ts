@@ -104,6 +104,10 @@ import type {
 import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
 import { findUserById, userCanAccessProfile } from '../repositories/users-store'
 import { noticeToMessage, withSessionNotices } from '../services/session-notifications/presentation'
+import { observeCronBindings } from '../services/session-notifications/cron-observer'
+import { existsSync } from 'fs'
+import { getDb } from '../infrastructure/database'
+import { cronBindingsDbPath, studioInstanceId } from '../public/session-notifications'
 import { isVisibleNoticeDisposition, type SessionNotificationRecord } from '../repositories/session-notification-store'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observePersonPresenceEvent } from '../services/person/presence'
@@ -365,6 +369,7 @@ type PendingMobileLocationRequest = {
   timer: NodeJS.Timeout
 }
 
+const CRON_OBSERVE_INTERVAL_MS = 15_000
 const MOBILE_LOCATION_MIN_TIMEOUT_MS = 3_000
 const MOBILE_LOCATION_MAX_TIMEOUT_MS = 60_000
 const MOBILE_LOCATION_DEVICE_TIMEOUT_MS = 30_000
@@ -474,6 +479,8 @@ export class ChatRunSocket {
   private readonly pendingMobileCalendar = new Map<string, PendingMobileCalendarRequest>()
   private readonly pendingMobileHealth = new Map<string, PendingMobileHealthRequest>()
   private backgroundPollTimer?: NodeJS.Timeout
+  private cronObserveTimer?: NodeJS.Timeout
+  private cronObserveInFlight = false
   private backgroundPollInFlight = false
   private backgroundRecoveryNeeded = true
   private backgroundBrokerId?: string
@@ -631,6 +638,29 @@ export class ChatRunSocket {
    * account as they exist now, and only while the accepting generation is current. Attention goes
    * through the session-state sync. Never a model turn.
    */
+  /** Results of explicitly bound native cron jobs, observed through the profile's bridge worker. */
+  private async observeCronSessionResults() {
+    // Only explicit bindings are observed; without a bindings database there is nothing to ask Hermes.
+    if (this.closing || this.cronObserveInFlight || !getDb() || !existsSync(cronBindingsDbPath())) return
+    this.cronObserveInFlight = true
+    try {
+      await observeCronBindings({
+        namespace: studioInstanceId(),
+        bindingsPath: cronBindingsDbPath(),
+        observe: (profile, jobs) => this.backgroundBridge.studioCronObserve(profile, jobs, { timeoutMs: 30_000 }),
+        getSession: sessionId => {
+          const session = getSession(sessionId)
+          return session ? { profile: session.profile, generation: getSessionGeneration(sessionId) } : null
+        },
+        publish: record => this.publishSessionNotice(record),
+      })
+    } catch (err) {
+      logger.debug(err, '[chat-run-socket] cron session observation unavailable')
+    } finally {
+      this.cronObserveInFlight = false
+    }
+  }
+
   publishSessionNotice(record: SessionNotificationRecord) {
     const session = getSession(record.session_id)
     if (!session || (session.profile || 'default') !== record.profile || isPrivatePersonSession(session.id)
@@ -848,6 +878,8 @@ export class ChatRunSocket {
     this.backgroundPollTimer = setInterval(() => void this.pollBackgroundWork(), 500)
     this.backgroundPollTimer.unref?.()
     void this.pollBackgroundWork()
+    this.cronObserveTimer = setInterval(() => void this.observeCronSessionResults(), CRON_OBSERVE_INTERVAL_MS)
+    this.cronObserveTimer.unref?.()
     logger.info('[chat-run-socket] Socket.IO ready at /chat-run')
   }
 
@@ -3779,6 +3811,10 @@ export class ChatRunSocket {
     if (this.backgroundPollTimer) {
       clearInterval(this.backgroundPollTimer)
       this.backgroundPollTimer = undefined
+    }
+    if (this.cronObserveTimer) {
+      clearInterval(this.cronObserveTimer)
+      this.cronObserveTimer = undefined
     }
     for (const requestId of [...this.pendingMobileLocations.keys()]) {
       this.finishMobileLocationRequest(requestId, {

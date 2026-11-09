@@ -35,6 +35,7 @@ beforeEach(async () => {
     users: await import(`${STUDIO}/repositories/users-store`),
     auth: await import(`${STUDIO}/middleware/auth`),
     bindings: await import(`${STUDIO}/public/cron-session-bindings`),
+    inbox: await import(`${STUDIO}/repositories/session-notification-store`),
     notifications: await import(`${STUDIO}/public/session-notifications`),
   }
   for (const [name, profiles] of [['member', ['default']], ['outsider', ['other']]] as const) {
@@ -81,6 +82,55 @@ describe('explicit cron session binding', () => {
     expect((await bind('slack1')).body.error).toBe('explicit_delivery_target')
     expect((await bind('missing')).body.error).toBe('job_not_found')
     expect(m.bindings.readCronSessionBindings(m.notifications.cronBindingsDbPath(), m.notifications.studioInstanceId())).toEqual([])
+  })
+
+  it('a deliberate rebinding of a stopped job resumes its observation', async () => {
+    expect((await bind('agent1')).status).toBe(201)
+    const namespace = m.notifications.studioInstanceId()
+    // The observer stopped it, e.g. after an out-of-band delivery change since restored to local.
+    m.inbox.setCronJobObservationState(namespace, 'default', 'agent1', 'stopped')
+    m.inbox.setCronJobObserveCursor(namespace, 'default', 'agent1', '2026-11-01T00:00:00')
+    expect((await bind('agent1')).status).toBe(201)
+    expect(m.inbox.cronJobObservationState(namespace, 'default', 'agent1')).toBe('observing')
+    expect(m.inbox.cronJobObserveCursor(namespace, 'default', 'agent1')).toBeNull()
+    const { observeCronBindings } = await import(`${STUDIO}/services/session-notifications/cron-observer`)
+    const observed: string[] = []
+    await observeCronBindings({
+      namespace, bindingsPath: m.notifications.cronBindingsDbPath(),
+      observe: async (_profile: string, jobs: Array<{ job_id: string }>) => { observed.push(...jobs.map(job => job.job_id)); return { jobs: [], executions: [] } },
+      getSession: () => ({ profile: 'default', generation: m.store.getSessionGeneration('chat-1') }),
+      publish: () => {},
+    } as any)
+    expect(observed).toEqual(['agent1'])
+  })
+
+  it.each(['changed-target', 'missing-job'])('an older in-flight %s answer does not stop the replacement binding', async (scenario) => {
+    expect((await bind('agent1')).status).toBe(201)
+    const namespace = m.notifications.studioInstanceId()
+    const { observeCronBindings } = await import(`${STUDIO}/services/session-notifications/cron-observer`)
+    const published: any[] = []
+    const deps = {
+      namespace, bindingsPath: m.notifications.cronBindingsDbPath(),
+      getSession: () => ({ profile: 'default', generation: m.store.getSessionGeneration('chat-1') }),
+      publish: (record: any) => published.push(record),
+    }
+    let release!: (response: any) => void
+    const pending = observeCronBindings({ ...deps, observe: () => new Promise<any>(resolve => { release = resolve }) } as any)
+    // Possibly within the same millisecond as the first binding: the revision still moves forward.
+    expect((await bind('agent1')).status).toBe(201)
+    release({ jobs: [scenario === 'changed-target'
+      ? { job_id: 'agent1', state: 'present', deliver: 'slack:old', older_before: '2026-11-01T00:00:00' }
+      : { job_id: 'agent1', state: 'missing' }], executions: [] })
+    await pending
+    expect(m.inbox.cronJobObservationState(namespace, 'default', 'agent1')).toBe('observing')
+    expect(m.inbox.cronJobObserveCursor(namespace, 'default', 'agent1')).toBeNull()
+    const next = vi.fn(async () => ({ jobs: [{ job_id: 'agent1', state: 'present', deliver: 'local' }], executions: [{
+      job_id: 'agent1', execution_id: 'after-rebind', source: 'builtin', status: 'ok', no_agent: false,
+      receipt: 'exact', success: true, answer: 'fresh result',
+    }] }))
+    await observeCronBindings({ ...deps, observe: next } as any)
+    expect(next).toHaveBeenCalledTimes(1)
+    expect(published).toEqual([expect.objectContaining({ session_id: 'chat-1', disposition: 'notified' })])
   })
 
   it('requires a login token and fences the destination', async () => {
