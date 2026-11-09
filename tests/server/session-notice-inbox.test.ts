@@ -107,6 +107,40 @@ describe('passive notice inbox', () => {
     expect(pages.map(rows => rows.filter((row: any) => !row.studio_notice).length)).toEqual([5, 5])
     expect(pages[1].some((row: any) => row.timestamp === 50 && row.studio_notice)).toBe(true) // equal timestamp: older page
   })
+
+  it('binds a key to its destination: the same content for another session or generation is a conflict', () => {
+    m.store.createSession({ id: 'chat-2', profile: 'default', source: 'cli' })
+    accept()
+    expect(accept({ sessionId: 'chat-2', expectedGeneration: m.store.getSessionGeneration('chat-2') }).status).toBe('conflict')
+    m.store.clearSessionMessages('chat-1')
+    expect(accept({ expectedGeneration: m.store.getSessionGeneration('chat-1') }).status).toBe('conflict')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM session_notifications').get()).toEqual({ n: 1 })
+  })
+
+  it('never accepts or shows notices for private Person conversations', () => {
+    for (const id of ['person-main-1', 'person-task-1']) {
+      m.store.createSession({ id, profile: 'default', source: 'cli' })
+      expect(accept({ producerKey: `script-report:${id}`, sessionId: id, expectedGeneration: m.store.getSessionGeneration(id) }).status).toBe('unsupported')
+      expect(m.inbox.listVisibleSessionNotifications(id)).toEqual([])
+    }
+    expect(accept().status).toBe('accepted')
+    expect(db.prepare('SELECT session_id FROM session_notifications').all()).toEqual([{ session_id: 'chat-1' }])
+  })
+
+  it('keeps exactly-one-page placement and stored order when stored timestamps are not monotonic', () => {
+    for (const ts of [10, 80, 20, 100]) m.store.addMessage({ session_id: 'chat-1', role: 'user', content: `t${ts}`, timestamp: ts })
+    accept({ producerKey: 'mid', now: 50 * 1000 })
+    const page = (offset: number) => {
+      const stored = db.prepare('SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT 1 OFFSET ?').all('chat-1', offset) as any[]
+      return m.presentation.withSessionNotices('chat-1', stored.reverse(), { offset, storedCount: stored.length })
+    }
+    const pages = [0, 1, 2, 3].map(page)
+    expect(pages.map(rows => rows.filter((row: any) => row.studio_notice).length)).toEqual([0, 0, 1, 0])
+    const all = db.prepare('SELECT * FROM messages WHERE session_id=? ORDER BY id').all('chat-1') as any[]
+    const merged = m.presentation.withSessionNotices('chat-1', all, { offset: 0, storedCount: all.length })
+    expect(merged.filter((row: any) => !row.studio_notice).map((row: any) => row.content)).toEqual(['t10', 't80', 't20', 't100'])
+    expect(merged.filter((row: any) => row.studio_notice)).toHaveLength(1)
+  })
 })
 
 describe('live notice publication', () => {
@@ -141,5 +175,17 @@ describe('live notice publication', () => {
     m.store.clearSessionMessages('chat-1')
     fake.publishSessionNotice(record)
     expect(sent).toEqual([])
+  })
+
+  it('never publishes a silent record or a private Person task notice', async () => {
+    const { fake, sent, stateSync } = await publisher()
+    const { record: silent } = accept({ producerKey: 'script-report:silent', disposition: 'silent' })
+    fake.publishSessionNotice(silent)
+    m.store.createSession({ id: 'person-task-1', profile: 'default', source: 'cli' })
+    // A record that bypassed acceptance still never reaches same-profile accounts.
+    fake.publishSessionNotice({ ...silent, disposition: 'notified', session_id: 'person-task-1',
+      session_generation: m.store.getSessionGeneration('person-task-1') })
+    expect(sent).toEqual([])
+    expect(stateSync.publish).not.toHaveBeenCalled()
   })
 })
