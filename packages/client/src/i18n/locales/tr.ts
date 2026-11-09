@@ -169,6 +169,13 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_20_1: "Büyük veri kümelerinde tam tablo taramalarını azaltmak için bekleyen Person teslimat sayıları kaynak oturuma göre indekslenir. Hatalı eski JSON kabul edilir ve geçmiş yeniden yazılmaz (#3723)",
+    new_0_8_20_2: "Ekko OpenAI Chat sistem talimatları, katı sohbet şablonları için özgün sıralarıyla tek bir başlangıç system mesajında birleştirilir. Normal mesajlar, araçlar, görüntüler ve akıl yürütme korunur (#3728)",
+    new_0_8_20_3: "Kesin DSH sürümleri ayrı dizinlere kurulur; etkinleştirmeden önce çalışma zamanı bileşimi, bağımlılıklar ve ACP başlatması denetlenir. Başarısızlıkta mevcut kurulum ve sürüm sabitlemesi korunur; çalışan mevcut CLI kurtarma hedefi olarak tutulabilir (#3730)",
+    new_0_8_20_4: "Agent yönetimine DSH için kesin sürüm kurma ve sabitleme, açık latest seçimi, yeniden doğrulanmış önceki sürüme dönüş ve bağdaştırıcı/doğrulanmış sürüm bilgileri eklenir. Otomatik güncellemeler sürüm sabitlemesini gözetir (#3730)",
+    new_0_8_20_5: "DSH ACP bağdaştırıcısı, doğrulanmış 0.2.1-rc.5 ve 0.2.2-rc.1 yapıları için revizyon 5'e güncellenir. Yerel başlatma, ön ayar seçimi ve geri yükleme, izin politikası ve tur kaydı korunur. Kritik yetenekler yoksa etkinleştirme reddedilir (#3730)",
+    new_0_8_20_6: "Grup sohbetindeki global Agent model ve akıl yürütme yoğunluğu ayarları ekleme, düzenleme ve yeniden başlatma sonrasında korunur. Önceden silinmiş seçimlerin yeniden ayarlanması gerekir (#3730)",
+    new_0_8_20_7: "Antigravity yerel yapılandırma veya beceri bağlantıları EPERM, ENOTSUP ya da EINVAL ile başarısız olursa yerel ayarlar korunarak çalıştırmaya özel kopyalar kullanılır. Kopyalar anlık görüntüdür ve sonraki kimlik bilgisi değişikliklerini otomatik eşitlemez (#3730)",
     new_0_8_19_1: "Codex, Nous, xAI ve Qwen gibi yetkilendirilmiş sağlayıcıların model listesinden kaybolması düzeltildi; Copilot etkinleştirme ve kimlik bilgisi gereksinimleri korundu (#3720)",
     new_0_8_18_1: "Person konuşmalarına sabitleme ve sabitlemeyi kaldırma eklendi. Sabitlenenler önce, her grup son etkinliğe göre sıralanır; durum veritabanına kaydedilir ve yenilemeden sonra korunur (#3704)",
     new_0_8_18_2: "Yanıt tamamlanması, araç olayları, yeniden bağlanma veya mesajların yeniden oluşturulmasında gerçek zamanlı sesin tekrarı önlendi. Tur ilerlemesi ve cümle sınırları korunur, eski geçmiş okunmaz; sonraki turlarda aynı metin okunabilir (#3708)",
@@ -177,9 +184,6 @@ export default {
     new_0_8_18_5: "GitHub Copilot eklenti hazırlığı ve kimlik bilgisi kaydı iyileştirildi. Modeller yalnızca hedef profilin çalışma ortamının okuyabildiği bilgilerle listelenir. Giriş başlangıç profiline bağlanır; başlangıç geçişi otomatik kurulum yasağına ve kullanıcının kapattığı eklentilere uyar (#3712)",
     new_0_8_18_6: "Çalışma ortamı derleme varsayılanları Python 3.14.7 ve Node.js 26.13.0 oldu; sürümü uyuşmayan yorumlayıcı önbellekleri reddedilir ve Node sürümü değiştirilebilir. Varsayılan Hermes 0.22.5 olarak kalır, 0.23 sürümüne otomatik geçilmez (#3712)",
     new_0_8_18_7: "Gerçek zamanlı ses, konuşma sabitleme, Copilot ve çalışma ortamı derlemeleri için odaklı testler eklendi. E2E mevcut Playwright tarafından desteklenen Ubuntu 24.04 sürümüne sabitlendi; Windows ARM64 doğrulamasında Hermes kaynak sürümü seçilebilir (#3704, #3708, #3712)",
-    new_0_8_17_1: "Arka plan görevleri başlatıldıktan sonra Bot yanıtının kaybolması ve yanlış ‘Agent returned no output’ hatası düzeltildi. Beklemeden önce normal bir yanıt oluşturulur, akışla gönderilir ve kaydedilir; adım sınırında da bu yanıt tamamlanır. Sonuçlar otomatik dönmeye devam ederken görevler ve iş birliği aşamaları etkin kalır (#3699)",
-    new_0_8_17_2: "Arka plan görevleri beklenirken hem doğrudan gönderimde hem de devam ettirilen sohbetlerde yanlış tamamlanma sesi, bildirimi veya App anlık bildirimi gönderilmez. Tekrarlanan sorgu koruması ve geri çağrı tekilleştirmesi korunur; sağlayıcının boş yanıtları veya yasak araç çağrıları açık hata vermeye devam eder (#3699)",
-    new_0_8_17_3: "Kişisel Bot mesaj başlıklarında özel adlar önceliklidir. Yeniden adlandırma mevcut mesajları ve yeni yanıtları günceller, yeniden yüklemeden sonra da korunur. Adsız Bot’lar yerelleştirilmiş hazır adları kullanır; avatar ve animasyonlar seçilen Bot görünümünü korur (#3700)",
   },
 
   profiles: {
