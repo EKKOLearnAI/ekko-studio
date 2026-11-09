@@ -2906,6 +2906,11 @@ export default {
       protectLastNHint: 'Keep this many latest messages uncompressed',
       protectFirstN: 'Protect First Messages',
       protectFirstNHint: 'Keep this many earliest messages uncompressed',
+      microCompactDefault: 'Rolling micro-compaction (global switch)',
+      microCompactDefaultHint: 'When on, all hermes profiles (existing and new) enable rolling micro-compaction (micro_compact); off disables all. Applies instantly on toggle.',
+      microCompactApplied: 'Applied to {count} profile(s)',
+      microCompactSkipped: 'Skipped {count} (no config): {list}',
+      microCompactFailed: 'Apply failed',
     },
     session: {
       mode: 'Reset Mode',

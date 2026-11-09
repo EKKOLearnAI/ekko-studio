@@ -2944,6 +2944,11 @@ export default {
       protectLastNHint: '最近多少条消息不参与压缩',
       protectFirstN: '保护开头消息',
       protectFirstNHint: '最早多少条消息不参与压缩',
+      microCompactDefault: '滚动微压缩（全局开关）',
+      microCompactDefaultHint: '开启后，所有 hermes Profile（含已有与新建）都会启用滚动微压缩（micro_compact）；关闭则全部停用。切换即时应用。',
+      microCompactApplied: '已应用到 {count} 个 Profile',
+      microCompactSkipped: '跳过 {count} 个（无 config）：{list}',
+      microCompactFailed: '应用失败',
     },
     session: {
       mode: '重置模式',
