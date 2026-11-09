@@ -11,6 +11,8 @@ import { isNativeCodingAgent, nativeCodingAgentSupportsScoped, isGlobalOnlyCodin
 import { prioritizeManagedNpmBin } from './managed-command-path'
 import { readTomlAssignment } from './toml-assignment'
 import { studioMcpCapabilities } from '../../studio/public/runs/mcp-capabilities'
+import { DshManagedInstall, validateDshInstallOptions, type DshInstallOptions } from './dsh/managed-install'
+import { preflightDsh } from './dsh/preflight'
 import { prepareDshRuntime, DSH_API_KEY_ENV } from './dsh/runtime-config'
 import { readDshMcpServers, validateDshSettings } from './dsh/config'
 import { createDshHost } from './dsh/host'
@@ -253,6 +255,7 @@ export interface CodingAgentToolStatus extends CodingAgentDefinition {
   source: 'user-cli' | 'not-installed'
   path: string
   error?: string
+  compatibility?: { pinnedVersion: string; previousVersion: string; adapterRevision: number; verifiedVersion: string }
 }
 
 export interface CodingAgentsStatus {
@@ -2362,7 +2365,7 @@ function normalizeError(err: any): string {
 
 function normalizeErrorCode(err: any): string | undefined {
   return isNodeEnvironmentMissingError(err) ? NODE_ENVIRONMENT_MISSING_CODE
-    : err?.code === 'coding_agent_environment_unavailable' ? err.code : undefined
+    : err?.code === 'coding_agent_environment_unavailable' || String(err?.code || '').startsWith('DSH_') ? err.code : undefined
 }
 
 async function findCommandPaths(command: string, env: NodeJS.ProcessEnv): Promise<string[]> {
@@ -2444,6 +2447,7 @@ function commandExecution(command: string, args: string[]): CommandExecution {
   return { command: normalizedCommand, args }
 }
 
+const dshInstall = new DshManagedInstall(join(getWebUiHome(), 'coding-agents/dsh/installations'))
 const dshHost = createDshHost({ commandEnv, findCommandPaths, resolveCommandForExecution, commandExecution, getSourceHome: () => join(getGlobalConfigHome(), '.dsh') })
 export const getNativeDshPluginInventory = dshHost.getNativeDshPluginInventory
 export const dshPluginUi = dshHost.ui
@@ -2519,6 +2523,8 @@ async function commandEnv(): Promise<NodeJS.ProcessEnv> {
     ...getDesktopCommonBinPaths(),
   ])
   prioritizeManagedNpmBin(env, npmBin)
+  const dsh = await dshInstall.info().catch(() => undefined)
+  if (dsh?.command) prioritizeManagedNpmBin(env, dirname(dsh.command))
   return env
 }
 
@@ -2588,6 +2594,7 @@ export function getCodingAgentConfigFileDefinitions(id: string): CodingAgentConf
 
 export async function getCodingAgentStatus(definition: CodingAgentDefinition): Promise<CodingAgentToolStatus> {
   let resolvedCommand = ''
+  const compatibility = definition.id === 'dsh' ? await dshInstall.info().catch(() => undefined) : undefined
   try {
     const env = await commandEnv()
     let environmentError: string | undefined
@@ -2596,7 +2603,9 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
       catch (error) { environmentError = normalizeError(error) }
     }
     const zcode = definition.id === 'zcode' ? await resolveZcodeCommand(['--version'], env, findCommandPaths) : undefined
-    resolvedCommand = zcode?.path || await resolveCommandForExecution(definition.command, env)
+    resolvedCommand = zcode?.path || (definition.id === 'dsh' && process.platform !== 'win32'
+      ? (await findCommandPaths('dsh', env))[0] || definition.command
+      : await resolveCommandForExecution(definition.command, env))
     const execution = commandExecution(zcode?.command || resolvedCommand, zcode?.args || ['--version'])
     const { stdout, stderr } = await execFileAsync(execution.command, execution.args, {
       encoding: 'utf-8',
@@ -2629,6 +2638,7 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
       rawVersion,
       source: 'user-cli',
       path: resolvedCommand,
+      ...(compatibility ? { compatibility } : {}),
       ...(environmentError ? { error: environmentError } : {}),
     }
     recordCodingAgentStatus(status)
@@ -2643,6 +2653,7 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
       source: commandLocated ? 'user-cli' : 'not-installed',
       path: commandLocated ? resolvedCommand : '',
       error: normalizeError(err),
+      ...(compatibility ? { compatibility } : {}),
     }
     recordCodingAgentStatus(status)
     return status
@@ -2659,6 +2670,7 @@ function recordCodingAgentStatus(status: CodingAgentToolStatus): void {
     source: status.source,
     path: status.path,
     error: status.error || '',
+    compatibility: status.compatibility,
     installations: [],
   })
 }
@@ -2754,7 +2766,7 @@ export async function checkUpdateAgent(id: string): Promise<CodingAgentUpdateRes
       withCodingAgentRegistry(tool.id, ['view', tool.packageName, 'version']),
       { timeout: 15_000, env },
     )
-    const latestVersion = stdout.trim()
+    const latestVersion = id === 'dsh' ? (await dshInstall.info()).pinnedVersion || stdout.trim() : stdout.trim()
     const status = await getCodingAgentStatus(tool)
     const updateAvailable = !!latestVersion && status.installed && !versionGte(status.version, latestVersion, id === 'dsh')
     return { success: true, tool: status, latestVersion, updateAvailable }
@@ -2764,14 +2776,16 @@ export async function checkUpdateAgent(id: string): Promise<CodingAgentUpdateRes
   }
 }
 
-export async function installCodingAgent(id: string): Promise<CodingAgentMutationResult> {
+export async function installCodingAgent(id: string, options: DshInstallOptions = {}): Promise<CodingAgentMutationResult> {
   const tool = getCodingAgentDefinition(id)
   if (!tool) {
     const err = new Error('Unknown coding agent')
     ;(err as any).status = 400
     throw err
   }
-  if (installingTools.has(tool.id)) {
+  if (tool.id === 'dsh') validateDshInstallOptions(options)
+  else if (options.version !== undefined || options.rollback !== undefined) throw Object.assign(new Error('Version selection is available for DSH only'), { status: 400 })
+  if (installingTools.has(tool.id) || deletingTools.has(tool.id)) {
     const err = new Error('Install is already running')
     ;(err as any).status = 409
     throw err
@@ -2782,13 +2796,21 @@ export async function installCodingAgent(id: string): Promise<CodingAgentMutatio
     if (isNativeCodingAgent(tool.id)) checkNativeCodingAgentPlatform(tool.id)
     if (codingAgentUsesNpm(tool.id)) {
       const env = await commandEnv()
-      await runNpm(withCodingAgentRegistry(
-        tool.id,
-        ['install', '-g', tool.packageName],
-      ), {
-        timeout: 10 * 60 * 1000,
-        env,
-      })
+      if (tool.id === 'dsh') {
+        await dshHost.management.close()
+        await dshInstall.install(options, {
+          resolveVersion: async spec => (await runNpm(withCodingAgentRegistry('dsh', ['view', `${tool.packageName}@${spec}`, 'version']), { env, timeout: 15_000 })).stdout.trim(),
+          install: async (prefix, version) => { await runNpm(withCodingAgentRegistry('dsh', ['install', '-g', '--prefix', prefix, `${tool.packageName}@${version}`]), { env, timeout: 10 * 60_000 }) },
+          preflight: command => preflightDsh(command, join(dshInstall.root, 'scratch'), { env, commandExecution, sourceHome: process.env.DSH_HOME?.trim() || join(getGlobalConfigHome(), '.dsh') }),
+          existing: async () => {
+            const current = await getCodingAgentStatus(tool)
+            const command = process.platform === 'win32' ? await resolveCommandForExecution('dsh', env) : (await findCommandPaths('dsh', env))[0]
+            return current.installed && command ? { command, version: current.version } : undefined
+          },
+        })
+      } else {
+        await runNpm(withCodingAgentRegistry(tool.id, ['install', '-g', tool.packageName]), { timeout: 10 * 60_000, env })
+      }
       if (tool.id === 'pi' && !userSettingsProvidesPiMcpAdapter(await readPiSettings())) {
         await installBundledPiMcpAdapter()
       }
@@ -2833,7 +2855,7 @@ export async function deleteCodingAgent(id: string): Promise<CodingAgentMutation
     ;(err as any).status = 400
     throw err
   }
-  if (deletingTools.has(tool.id)) {
+  if (deletingTools.has(tool.id) || installingTools.has(tool.id)) {
     const err = new Error('Delete is already running')
     ;(err as any).status = 409
     throw err
@@ -2855,7 +2877,8 @@ export async function deleteCodingAgent(id: string): Promise<CodingAgentMutation
   try {
     if (codingAgentUsesNpm(tool.id)) {
       const env = await commandEnv()
-      const packagePrefixes = await getCommandPackagePrefixes(tool, env)
+      if (tool.id === 'dsh') { await dshHost.management.close(); await dshInstall.clear() }
+      const packagePrefixes = await getCommandPackagePrefixes(tool, await commandEnv())
       const uninstallArgsList = packagePrefixes.length > 0
         ? packagePrefixes.map(prefix => ['uninstall', '-g', '--prefix', prefix, tool.packageName])
         : [['uninstall', '-g', tool.packageName]]

@@ -612,7 +612,7 @@ function storedGroupAgentRunIdentity(row: any): {
     return match?.[1] ? { ownerId, idPrefix: `${match[1]}_part_` } : null
 }
 
-class ChatStorage {
+export class ChatStorage {
     private readonly trustedAgentMessageMetadata = new Map<string, { mentionDepth: number; handoffChainId: string; continuationAttemptId: string }>()
     private roomAgentOnlineProvider: ((roomId: string, agentId: string) => boolean) | null = null
 
@@ -2683,9 +2683,9 @@ class ChatStorage {
         const agentMode = metadata.agentMode === 'global' ? 'global' : 'scoped'
         const priorAgentMode = storedPriorAgentMode(metadata.priorAgentMode)
         const provider = agentMode === 'global' ? '' : String(metadata.provider || '').trim()
-        const model = agentMode === 'global' ? '' : String(metadata.model || '').trim()
+        const model = String(metadata.model || '').trim()
         const apiMode = agent === 'hermes' || agentMode === 'global' ? '' : String(metadata.apiMode || '').trim()
-        const reasoningEffort = agentMode === 'global' ? '' : String(metadata.reasoningEffort || '').trim()
+        const reasoningEffort = String(metadata.reasoningEffort || '').trim()
         const agentPreset = typeof metadata.agentPreset === 'string' ? metadata.agentPreset.trim() : ''
         const avatar = String(metadata.avatar || '').trim()
         const executorType = metadata.executorType === 'remote' ? 'remote' : 'server'
@@ -2764,9 +2764,9 @@ class ChatStorage {
         const agentMode = metadata.agentMode === 'global' ? 'global' : 'scoped'
         const priorAgentMode = storedPriorAgentMode(metadata.priorAgentMode)
         const provider = agentMode === 'global' ? '' : String(metadata.provider || '').trim()
-        const model = agentMode === 'global' ? '' : String(metadata.model || '').trim()
+        const model = String(metadata.model || '').trim()
         const apiMode = agent === 'hermes' || agentMode === 'global' ? '' : String(metadata.apiMode || '').trim()
-        const reasoningEffort = agentMode === 'global' ? '' : String(metadata.reasoningEffort || '').trim()
+        const reasoningEffort = String(metadata.reasoningEffort || '').trim()
         const agentPreset = typeof metadata.agentPreset === 'string' ? metadata.agentPreset.trim() : ''
         const avatar = String(metadata.avatar || '').trim()
         this.db()?.prepare(

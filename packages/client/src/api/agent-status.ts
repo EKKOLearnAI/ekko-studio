@@ -10,6 +10,7 @@ export interface AgentStatusRecord {
   path: string
   version: string
   error?: string
+  compatibility?: { pinnedVersion: string; previousVersion: string; adapterRevision: number; verifiedVersion: string }
 }
 
 export interface AgentStatusSnapshot {

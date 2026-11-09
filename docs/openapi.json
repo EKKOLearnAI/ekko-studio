@@ -3498,7 +3498,7 @@
           "Coding Agents"
         ],
         "summary": "Create install",
-        "description": "POST /api/coding-agents/:id/install",
+        "description": "Install or update a coding agent. DSH candidates use isolated prefixes and must pass ACP compatibility/startup checks before activation. Empty options honor the current pin. Version/rollback options are DSH-only.",
         "operationId": "install",
         "security": [
           {
@@ -3525,7 +3525,27 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string",
+                    "description": "DSH exact npm version, or latest to explicitly remove a pin after successful activation."
+                  },
+                  "rollback": {
+                    "type": "boolean",
+                    "description": "DSH only: revalidate and restore the previous working graph, then pin it. Mutually exclusive with version."
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/coding-agents/{id}/launch/native": {

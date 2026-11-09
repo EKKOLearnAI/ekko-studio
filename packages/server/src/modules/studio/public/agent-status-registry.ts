@@ -24,6 +24,7 @@ export interface AgentStatusRecord {
   source: AgentStatusSource
   path: string
   error: string
+  compatibility?: { pinnedVersion: string; previousVersion: string; adapterRevision: number; verifiedVersion: string }
   installations: AgentInstallationStatus[]
   updatedAt: string
 }
@@ -181,6 +182,7 @@ for (const id of AGENT_ORDER) {
 function cloneRecord(record: AgentStatusRecord): AgentStatusRecord {
   return {
     ...record,
+    ...(record.compatibility ? { compatibility: { ...record.compatibility } } : {}),
     installations: record.installations.map(item => ({ ...item })),
   }
 }

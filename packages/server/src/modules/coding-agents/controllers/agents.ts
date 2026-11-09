@@ -38,7 +38,7 @@ export async function status(ctx: Context) {
 
 export async function install(ctx: Context) {
   try {
-    const result = await installAgentAndPublish(ctx.params.id)
+    const result = await installAgentAndPublish(ctx.params.id, (ctx.request.body || {}) as { version?: string; rollback?: boolean })
     ctx.body = result
   } catch (err: any) {
     ctx.status = err.status || 500

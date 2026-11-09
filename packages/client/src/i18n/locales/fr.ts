@@ -5,6 +5,7 @@ import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesFr } from '../social-messages-locales'
 
 export default {
+  dshVersions: {"compatibility": "Adaptateur ACP {revision} · testé : 0.2.1-rc.5 / 0.2.2-rc.1", "verified": "Installation vérifiée : {version}", "pinned": "Version épinglée : {version}", "version": "Version npm exacte (ex. 0.2.2-rc.1)", "pin": "Installer et épingler", "latest": "Vérifier et utiliser la dernière", "restore": "Restaurer {version}"},
   person: personMessages['fr'],
   sessionTasks: {
       "title": "Tâches",

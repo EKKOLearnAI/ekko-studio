@@ -31,6 +31,7 @@ const writeApprovalMessages = {
 }
 
 export default {
+  dshVersions: {"compatibility": "ACP bağdaştırıcısı {revision} · test: 0.2.1-rc.5 / 0.2.2-rc.1", "verified": "Doğrulanmış kurulum: {version}", "pinned": "Sabitlenen sürüm: {version}", "version": "Tam npm sürümü (ör. 0.2.2-rc.1)", "pin": "Yükle ve sabitle", "latest": "En yeniyi denetle ve kullan", "restore": "{version} sürümünü geri yükle"},
   apiRelay: {
     campaignSlogan: "Çifte 11: yüklemelerde %11.11 ek kredi, en fazla 1111 ek kredi",
     campaignBadge: "11.11",

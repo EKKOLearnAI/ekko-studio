@@ -5,6 +5,7 @@ import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesKo } from '../social-messages-locales'
 
 export default {
+  dshVersions: {"compatibility": "ACP 어댑터 {revision} · 테스트: 0.2.1-rc.5 / 0.2.2-rc.1", "verified": "검증된 설치: {version}", "pinned": "고정 버전: {version}", "version": "정확한 npm 버전 (예: 0.2.2-rc.1)", "pin": "설치 및 고정", "latest": "최신 버전 검사 및 사용", "restore": "{version} 복원"},
   person: personMessages['ko'],
   sessionTasks: {
       "title": "작업",

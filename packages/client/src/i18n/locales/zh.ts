@@ -5,6 +5,7 @@ import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesZh } from '../social-messages'
 
 export default {
+  dshVersions: {"compatibility": "ACP 适配器 {revision} · 已测试：0.2.1-rc.5 / 0.2.2-rc.1", "verified": "已验证安装：{version}", "pinned": "固定版本：{version}", "version": "精确 npm 版本（如 0.2.2-rc.1）", "pin": "安装并固定", "latest": "检查并使用最新版", "restore": "恢复 {version}"},
   person: personMessages['zh'],
   sessionTasks: {
       "title": "任务",

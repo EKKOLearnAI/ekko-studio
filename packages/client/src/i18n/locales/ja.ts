@@ -5,6 +5,7 @@ import { themeAppearanceMessages } from '../theme-appearance-locales'
 import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
+  dshVersions: {"compatibility": "ACP アダプター {revision} · テスト済み: 0.2.1-rc.5 / 0.2.2-rc.1", "verified": "検証済み: {version}", "pinned": "固定バージョン: {version}", "version": "正確な npm バージョン（例: 0.2.2-rc.1）", "pin": "インストールして固定", "latest": "最新版を検証して使用", "restore": "{version} に戻す"},
   person: personMessages['ja'],
   sessionTasks: {
       "title": "タスク",
