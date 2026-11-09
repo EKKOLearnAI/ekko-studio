@@ -1,3 +1,4 @@
+import './fixtures/isolated-studio-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { readFileSync } from 'node:fs'

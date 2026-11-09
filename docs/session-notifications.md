@@ -103,8 +103,7 @@ parser reads it. Accepted values are stored exactly; nothing is truncated.
 **Idempotency.** A notice is identified by Studio instance, profile, account, session,
 generation, `source` and `event_id`. The generation is checked first, so an old receipt never
 reports delivery to a reset or recreated session. An identical retry adds no timeline entry,
-attention, live publication or context, and does not re-arm a notice that was already read
-or projected. Changed `title`, `content` or `url` never overwrites the accepted notice.
+attention or live publication, and does not re-arm a notice that was already read. Changed `title`, `content` or `url` never overwrites the accepted notice.
 
 **Display and delivery.** The notice shows its title, the unverified source label, the
 content as plain text (never Markdown, HTML, images or file previews) and the link, which opens

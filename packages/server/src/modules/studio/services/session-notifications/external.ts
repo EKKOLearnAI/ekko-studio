@@ -64,8 +64,8 @@ export function parseExternalNotice(body: unknown): ExternalNotice | { invalid: 
 }
 
 /**
- * V1 targets ordinary, locally stored Hermes bridge chats: the runtime whose next intentional
- * question receives the notice projection. Other runtimes and special surfaces are refused.
+ * V1 targets ordinary, locally stored Hermes bridge chats. Other runtimes and special surfaces
+ * are refused.
  */
 export function isExternalNoticeTarget(session: { id: string; source?: string | null; agent?: string | null; agent_session_id?: string | null }): boolean {
   return !isPrivatePersonSession(session.id)
