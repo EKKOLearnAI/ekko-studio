@@ -40,6 +40,7 @@ import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
 import { saveTaskPlan } from '../repositories/task-plan-store'
 import { getSessionTasks, updateSessionTasks, SessionTasksError } from '../services/session-tasks'
 import { getSessionTaskPlans } from '../services/task-plans'
+import { advanceRunOwnership } from '../services/chat-run/run-ownership'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { bindAppEventSubscription } from '../services/webhooks/app-events'
 import { mobileDeviceRoom, mobileDeviceId, sameMobileDevice, mobileEventAllowed, type MobileDeviceTarget } from '../services/chat-run/mobile-device-target'
@@ -1116,6 +1117,9 @@ export class ChatRunSocket {
           }
           const command = parseSessionCommand(data.input)
           if (command && ((!ekkoExecution && isBridgeRunSource(source)) || command.name === 'branch')) {
+            // /destroy may wait a long time on bridge cleanup. Run ownership fences any turn accepted
+            // meanwhile, so that turn does not wait here; every other command keeps its place in order.
+            if (command.name === 'destroy' && !ekkoExecution && isBridgeRunSource(source)) releaseAdmission()
             try {
               const handled = await handleSessionCommand(data.session_id, command, {
                 nsp: this.nsp,
@@ -1230,6 +1234,7 @@ export class ChatRunSocket {
           // Person setup awaits again inside handleRun. Reserve its slot before
           // that await so later inputs queue instead of starting parallel turns.
           state.isWorking = ekkoExecution || !isProviderAgentExecution(source, data)
+          advanceRunOwnership(state)
           state.runStartedAt = Date.now()
           state.profile = runProfile
           state.source = source
@@ -1909,6 +1914,7 @@ export class ChatRunSocket {
             if (queueRemaining > 0) {
               const nextQueuedRun = state.queue[0]
               state.isWorking = true
+              advanceRunOwnership(state)
               state.profile = nextQueuedRun?.profile || profile
               state.source = nextQueuedRun?.source
               shouldDequeueNext = true
@@ -2284,6 +2290,7 @@ export class ChatRunSocket {
     }
 
     state.isWorking = true
+    advanceRunOwnership(state)
     state.profile = next.profile
     state.source = next.source
     this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
@@ -2479,6 +2486,7 @@ export class ChatRunSocket {
         state.runStartedAt = Date.now()
       }
       state.isWorking = true
+      advanceRunOwnership(state)
       state.isAborting = state.isAborting === true
       state.runId = runId
       state.activeRunMarker = undefined
@@ -2847,6 +2855,7 @@ export class ChatRunSocket {
       state.queueInsertion = undefined
     }
     state.isWorking = true
+    advanceRunOwnership(state)
     state.profile = next.profile || fallbackProfile
     state.source = next.source
     logger.info('[chat-run-socket] dequeuing queued run for session %s (remaining: %d)', sessionId, state.queue.length)
@@ -3046,6 +3055,7 @@ export class ChatRunSocket {
     const state = getOrCreateSession(this.sessionMap, sessionId)
     state.events = []
     state.isWorking = !isProviderAgentExecution(source, data)
+    advanceRunOwnership(state)
     state.runStartedAt = Date.now()
     state.profile = profile
     state.source = source
