@@ -94,7 +94,14 @@ export class NativeDeviceSwitcher {
       this.authorize(event, true)
       this.openMenu()
     })
-    ipcMain.handle(channel('dismiss'), event => { this.authorize(event, true);this.closeMenu() })
+    ipcMain.handle(channel('dismiss'), event => {
+      if (event.sender === this.manager?.webContents) {
+        this.authorizeManager(event)
+        this.manager?.close()
+        return
+      }
+      this.authorize(event, true);this.closeMenu()
+    })
     ipcMain.handle(channel('manage'), event => { this.authorize(event, true);this.openManager() })
     ipcMain.handle(channel('add'), (event, input: unknown) => {
       this.authorizeManager(event)

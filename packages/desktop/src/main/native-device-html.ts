@@ -22,7 +22,7 @@ export function nativeDeviceHtml(kind: 'button' | 'manager' | 'action'): string 
       <span id="toolbar-icon">${icons.monitor}</span><span id="device-label">Ekko Studio</span><span id="device-arrow">${icons.chevron}</span>
     </button><nav id="device-menu" role="menu" hidden></nav>` : kind === 'manager' ? `
     <main class="manager-shell">
-      <header class="manager-header"><span class="hero-icon">${icons.monitor}</span><div><p class="eyebrow">STUDIO</p><h1 id="title"></h1><p id="description" class="muted"></p></div></header>
+      <header class="manager-header"><span class="hero-icon">${icons.monitor}</span><div><p class="eyebrow">STUDIO</p><h1 id="title"></h1><p id="description" class="muted"></p></div><button id="manager-close" type="button">${icons.close}<span id="manager-close-label"></span></button></header>
       <div class="manager-content">
         <section class="list-heading"><h2 id="list-title"></h2><button id="toggle-add" class="primary">${icons.plus}<span id="toggle-add-label"></span></button></section>
         <form id="add-form" class="surface-card" novalidate hidden>
@@ -102,6 +102,7 @@ h2 { font-size:13px; font-weight:600; }
 .manager-shell { display:flex; flex-direction:column; min-height:100vh; max-width:800px; margin:auto; }
 .manager-header { display:flex; align-items:center; gap:14px; padding:28px 28px 24px; }
 .manager-header h1 { margin:2px 0 6px; }
+#manager-close { margin-inline-start:auto; flex-shrink:0; }
 .manager-content { padding:0 28px 24px; flex:1; }
 .list-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; }
 .list-heading h2 { color:var(--device-secondary); }
@@ -214,6 +215,7 @@ function renderToolbar(data) {
 }
 function renderManager(data) {
  text('title', labels.manageTitle);text('description', labels.description);text('list-title',labels.savedDevices + ' · ' + number(data.state.devices.length+1));
+ text('manager-close-label',labels.close);$('manager-close').disabled = working || data.busy;
  text('toggle-add-label',labels.add);text('add-title',labels.add);text('name-label',labels.name);text('address-label',labels.address);text('add',labels.add);text('add-hint',labels.addHint);text('storage-note',labels.storedLocally);
  $('hide-add').title = labels.close;$('hide-add').setAttribute('aria-label', labels.close);
  const signature = JSON.stringify([data.state,data.busy,working,data.failed,labels]);
@@ -294,6 +296,9 @@ if ($('device-button')) {
  });
 }
 if ($('add-form')) {
+ const closeManager = () => { if (!working && !latest?.busy) void api.dismiss(); };
+ $('manager-close').addEventListener('click', closeManager);
+ document.addEventListener('keydown', event => { if (event.key === 'Escape') closeManager(); });
  const setAddOpen = open => { $('add-form').hidden = !open;$('toggle-add').setAttribute('aria-expanded',String(open));if (open) $('name').focus(); };
  $('toggle-add').addEventListener('click', () => setAddOpen($('add-form').hidden));$('hide-add').addEventListener('click', () => setAddOpen(false));
  $('add-form').addEventListener('submit', event => { event.preventDefault();void perform(async () => { await api.add({name:$('name').value,serverUrl:$('address').value});$('add-form').reset();setAddOpen(false);status('saved'); }); });
