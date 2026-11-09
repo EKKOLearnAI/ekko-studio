@@ -138,7 +138,7 @@ async function openCreateConversation() {
   renameConversationId.value = null
   resetConversationDraft(); error.value = ''
   if (!canChangeContext()) return
-  showPanel.value = false; showTasks.value = false; taskPanelOpen.value = false; showModelPicker.value = false
+  showModelPicker.value = false
   if (isMobile.value) showSessions.value = false
   showNewConversation.value = true
   try { newConversationDefaults.value = await personRequest<PersonSnapshot>('', undefined, 'GET', lifetime.signal) }
@@ -236,7 +236,6 @@ function selectConversation(id: string) {
   showNewConversation.value = false
   showConversationMenu.value = false
   if (isMobile.value) showSessions.value = false
-  showTasks.value = false
   return router.push({ name: 'hermes.person', query: { session: id } })
 }
 async function saveConversationName() {
@@ -718,7 +717,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           <HeaderSidebarToggle class="header-sidebar-toggle" :expanded="showSessions" @toggle="showSessions = !showSessions" />
           <span class="person-title">{{ isNewConversation ? t('person.newConversation') : conversations.find(session => session.id === selectedSessionId)?.title || data?.session?.title || t('person.title') }}</span>
         </div>
-        <div v-if="!isNewConversation" class="person-header-actions">
+        <div class="person-header-actions">
           <NTooltip trigger="hover">
             <template #trigger><NButton quaternary circle size="small" :aria-label="t('person.tasks')" :aria-expanded="showTasks" :disabled="!data?.session" @click="openPanel('tasks')"><SessionTaskIcon :size="17" /></NButton></template>
             {{ t('person.tasks') }}
@@ -729,7 +728,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           </NTooltip>
           <PersonWorkspaceFiles v-model:show="toolsOpen" panel-target="#person-tools-target" :reserved-width="taskPanelOpen ? taskChatRef?.panelWidth || 0 : 0"
             :session-id="toolsSession?.id" :workspace="toolsSession?.workspace" :submit="submitTools"
-            :active="data?.session?.id === selectedSessionId" @attach="attachToolFile" />
+            :active="!!toolsSession && data?.session?.id === selectedSessionId" @attach="attachToolFile" />
           <NPopconfirm v-model:show="showClearConfirm" :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" :positive-button-props="{ loading: pending }" :disabled="!data?.can_clear || busy || pending || settingsWrites > 0" @positive-click="clearHistory">
             <template #trigger>
               <NTooltip trigger="hover">
@@ -748,7 +747,8 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
     </PageHeader>
     <NAlert v-if="error" class="person-alert" type="error" closable @close="error = ''">{{ error }}</NAlert>
     <template v-if="data">
-      <NewChatPage v-if="isNewConversation" :title="t('person.newConversation')" :subtitle="t('person.welcome')">
+      <div class="person-chat-layout">
+      <NewChatPage v-if="isNewConversation" class="person-new-conversation-surface" :title="t('person.newConversation')" :subtitle="t('person.welcome')">
         <template #cards>
           <PersonBotPicker :value="newConversationBot" :disabled="draftLocked" @update:value="selectDraftBot" />
         </template>
@@ -770,19 +770,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           :scoped-reasoning-efforts="draftReasoningEfforts" :default-effort-label="t('person.defaultEffort')"
           @update:reasoning-effort="selectEffort" @model-click="openModels" />
       </NewChatPage>
-      <NModal v-model:show="showWorkspace" preset="dialog" :title="t('chat.setWorkspaceTitle')" :positive-text="t('common.ok')" :negative-text="t('common.cancel')"
-        :positive-button-props="{ loading: settingsWrites > 0, disabled: isNewConversation ? draftLocked : !workspaceValue?.trim() || busy || pending }" style="width: var(--studio-workspace-picker-width)" @positive-click="saveWorkspace">
-        <p>{{ t(isNewConversation ? 'person.newWorkspaceHint' : 'person.workspaceHint') }}</p>
-        <div v-if="defaultWorkspaces.length" class="person-workspace-shortcuts">
-          <NButton v-for="path in defaultWorkspaces" :key="path" size="tiny" :title="path" @click="workspaceValue = path">{{ folderName(path) }}</NButton>
-        </div>
-        <FolderPicker v-model="workspaceValue" show-favorite :favorite="!!workspaceValue && workspaceDirectories.isDefaultWorkspace(workspaceValue)" :favorite-disabled="!workspaceValue"
-          @toggle-favorite="workspaceValue && workspaceDirectories.toggleDefaultWorkspace(workspaceValue).catch(e => { error = String(e) })" />
-        <div v-if="recentWorkspaces.length" class="person-workspace-shortcuts">
-          <NButton v-for="entry in recentWorkspaces" :key="entry.path" size="tiny" :title="entry.path" @click="workspaceValue = entry.path">{{ folderName(entry.path) }}</NButton>
-        </div>
-      </NModal>
-      <div v-if="!isNewConversation" class="person-chat-layout">
+      <template v-else>
       <div ref="chatSurface" class="person-chat-surface" :inert="isMobile && (taskPanelOpen || toolsOpen) || undefined">
       <div v-if="data.session" class="person-chat-messages">
       <PersonTaskActivity :key="selectedSessionId" :session-id="data.session.id" :count="sessionStates.backgroundCount(selectedSessionId)" :agent-count="data.active_agent_task_count" :tasks="data.active_tasks || data.tasks" :flows="data.active_flows || data.flows || []" :flow-count="data.active_flow_count"
@@ -799,10 +787,23 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           :scoped-reasoning-efforts="data.reasoning_efforts" @update:reasoning-effort="selectEffort" @model-click="openModels" />
       </div>
       </div>
+      </template>
       <PersonTaskChat v-if="taskPanelOpen" ref="taskChatRef" :inert="isMobile && toolsOpen || undefined"
         :loading="switchingConversation" :can-close="canChangeContext" :agents="data.settings.agents" :execution-id="chatExecutionId" :task-id="chatTaskId" :main-session-id="selectedSessionId" @close="closeTaskChat" />
       <div id="person-tools-target" class="person-tools-host" />
       </div>
+      <NModal v-model:show="showWorkspace" preset="dialog" :title="t('chat.setWorkspaceTitle')" :positive-text="t('common.ok')" :negative-text="t('common.cancel')"
+        :positive-button-props="{ loading: settingsWrites > 0, disabled: isNewConversation ? draftLocked : !workspaceValue?.trim() || busy || pending }" style="width: var(--studio-workspace-picker-width)" @positive-click="saveWorkspace">
+        <p>{{ t(isNewConversation ? 'person.newWorkspaceHint' : 'person.workspaceHint') }}</p>
+        <div v-if="defaultWorkspaces.length" class="person-workspace-shortcuts">
+          <NButton v-for="path in defaultWorkspaces" :key="path" size="tiny" :title="path" @click="workspaceValue = path">{{ folderName(path) }}</NButton>
+        </div>
+        <FolderPicker v-model="workspaceValue" show-favorite :favorite="!!workspaceValue && workspaceDirectories.isDefaultWorkspace(workspaceValue)" :favorite-disabled="!workspaceValue"
+          @toggle-favorite="workspaceValue && workspaceDirectories.toggleDefaultWorkspace(workspaceValue).catch(e => { error = String(e) })" />
+        <div v-if="recentWorkspaces.length" class="person-workspace-shortcuts">
+          <NButton v-for="entry in recentWorkspaces" :key="entry.path" size="tiny" :title="entry.path" @click="workspaceValue = entry.path">{{ folderName(entry.path) }}</NButton>
+        </div>
+      </NModal>
       <NModal v-model:show="showAgentSetup" preset="dialog" :title="t('person.agentSetupTitle')" :aria-label="t('person.agentSetupTitle')"
         :positive-text="t('person.configureAgents')" :negative-text="t('common.cancel')"
         :closable="true" :close-on-esc="true" @positive-click="configureAgents">

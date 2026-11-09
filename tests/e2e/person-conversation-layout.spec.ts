@@ -593,3 +593,31 @@ test('keeps Bot Agent workspace order with wide saved panels, Agent close/reopen
   await evidence(page, '12-wide-panel-order', { before, after, errors: state.errors })
   expect(state.errors).toEqual([])
 })
+
+test('keeps the browser DOM, tab and address while switching between BOT menu entries', async ({ page }) => {
+  await page.setViewportSize({ width: 2048, height: 1152 })
+  const state = await setup(page, true)
+  await chooseTask(page, state.tasks[0].title)
+  await tools(page)
+  await page.getByRole('tab', { name: '浏览器', exact: true }).click()
+
+  const browserPanel = page.locator('.browser-panel')
+  const browserPanelHandle = await browserPanel.elementHandle()
+  await expect(browserPanel).toBeVisible()
+  await expect(browserPanel.locator('.tab')).toContainText('共享浏览器页')
+  await expect(browserPanel.locator('.toolbar input')).toHaveValue('https://example.test/shared')
+
+  await page.getByRole('button', { name: /新建/ }).click()
+  await expect(page.locator('.person-title')).toHaveText(/新建 BOT/)
+  await expect(browserPanel).toBeVisible()
+  await expect(browserPanel.locator('.tab')).toContainText('共享浏览器页')
+  await expect(browserPanel.locator('.toolbar input')).toHaveValue('https://example.test/shared')
+  expect(await page.evaluate(panel => panel === document.querySelector('.browser-panel'), browserPanelHandle)).toBe(true)
+
+  await bot(page, '日常助手')
+  await expect(browserPanel).toBeVisible()
+  await expect(browserPanel.locator('.tab')).toContainText('共享浏览器页')
+  await expect(browserPanel.locator('.toolbar input')).toHaveValue('https://example.test/shared')
+  expect(await page.evaluate(panel => panel === document.querySelector('.browser-panel'), browserPanelHandle)).toBe(true)
+  expect(state.errors).toEqual([])
+})
