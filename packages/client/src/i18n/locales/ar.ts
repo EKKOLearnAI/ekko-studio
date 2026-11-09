@@ -1124,6 +1124,15 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      truncated: "تم اقتطاع النتيجة للعرض.",
+      scriptReportTitle: "أبلغ البرنامج النصي “{name}”",
+      scriptReportFailedTitle: "فشل البرنامج النصي “{name}”",
+      scriptReportProvenance: "تقرير استدعاء برنامج نصي من مُغلِّف Ekko (ليس إيصال تنفيذ أصلي من Hermes).",
+      scriptReportUnavailable: "لم يتم التقاط مخرجات البرنامج النصي لهذا الاستدعاء؛ الحالة فقط.",
+      scriptReportUnknown: "تقرير غير مكتمل: تمت مقاطعة استدعاء البرنامج النصي. النتيجة غير معروفة؛ لن يعيد Studio تشغيله.",
+      externalSource: 'إشعار خارجي من "{source}" (المرسل غير موثّق)',
+    },
     selectMessages: "تحديد الرسائل",
     messagesSelected: "تم تحديد {count}",
     deleteSelectedMessages: "حذف المحدد",

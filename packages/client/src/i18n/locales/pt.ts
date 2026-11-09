@@ -1110,6 +1110,15 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      truncated: "Resultado truncado para exibição.",
+      scriptReportTitle: "O script “{name}” relatou",
+      scriptReportFailedTitle: "O script “{name}” falhou",
+      scriptReportProvenance: "Relatório de invocação de script do wrapper Ekko (não é um recibo de execução nativo do Hermes).",
+      scriptReportUnavailable: "A saída do script não foi capturada nesta invocação; apenas status.",
+      scriptReportUnknown: "Relatório incompleto: a invocação do script foi interrompida. Resultado desconhecido; o Studio não a executará novamente.",
+      externalSource: 'Notificação externa de “{source}” (remetente não verificado)',
+    },
     selectMessages: "Selecionar mensagens",
     messagesSelected: "{count} selecionados",
     deleteSelectedMessages: "Excluir seleção",

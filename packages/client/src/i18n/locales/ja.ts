@@ -1110,6 +1110,15 @@ export default {
 
   // チャット
   chat: {
+    sessionNotice: {
+      truncated: "表示のため結果を切り詰めました。",
+      scriptReportTitle: "スクリプト「{name}」の報告",
+      scriptReportFailedTitle: "スクリプト「{name}」が失敗しました",
+      scriptReportProvenance: "Ekko ラッパーによるスクリプト呼び出しレポート（Hermes ネイティブの実行レシートではありません）。",
+      scriptReportUnavailable: "この呼び出しのスクリプト出力は取得されませんでした。ステータスのみです。",
+      scriptReportUnknown: "レポート不完全：スクリプト呼び出しが中断されました。結果は不明で、Studio は再実行しません。",
+      externalSource: '外部通知・送信元「{source}」（送信者は未検証）',
+    },
     selectMessages: "メッセージを選択",
     messagesSelected: "{count} 件選択中",
     deleteSelectedMessages: "選択項目を削除",
