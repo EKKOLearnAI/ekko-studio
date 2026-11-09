@@ -4,15 +4,16 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NTooltip } from 'naive-ui'
-import { isStoredSuperAdmin } from '@/api/client'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import PageSidebarFooter from './PageSidebarFooter.vue'
 import RelayCampaignBadge from '@/components/hermes/RelayCampaignBadge.vue'
 import { useMobileNavigation } from '@/composables/usePageSidebar'
+import { useAccountStore } from '@/stores/account'
 
 const route = useRoute()
 const { t } = useI18n()
-const canManageAgents = computed(() => isStoredSuperAdmin())
+const accountStore = useAccountStore()
+const canManageAgents = computed(() => accountStore.isSuperAdmin)
 const entries = computed(() => [
   { key: 'person', route: 'hermes.person', label: 'person.subtitle', avatar: deploymentUrl('/person/idle.gif') },
   { key: 'chat', route: 'hermes.chat', label: 'sidebar.singleChat', path: 'M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
