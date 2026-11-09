@@ -1458,6 +1458,8 @@ export async function remove(ctx: any) {
   const sessionId = ctx.params.id
   const existing = localGetSession(sessionId)
   if (denySessionAccess(ctx, existing)) return
+  // Before any await: the transcript room must not survive into a session recreated under this id.
+  getChatRunServer()?.evictSessionViewers?.(sessionId)
   if (isPersonSession(sessionId) && existing) {
     const { deletePersonConversation } = await import('../services/person/conversations')
     ctx.body = { ok: true, ...await deletePersonConversation(ctx.state.user.id, sessionId, existing.history_revision) }
@@ -1469,6 +1471,9 @@ export async function remove(ctx: any) {
   const hermes = providerAgentSession
     ? { attempted: false, deleted: false, profile: hermesProfile }
     : await deleteHermesSessionIfPresent(sessionId, hermesProfile)
+  // Again right before the row goes, with no await in between: a viewer may have rejoined while the
+  // native delete was pending, because the old row still authorized it.
+  getChatRunServer()?.evictSessionViewers?.(sessionId)
   const localDeleted = existing ? localDeleteSession(sessionId) : true
   if (!localDeleted) {
     ctx.status = 500
@@ -1529,6 +1534,7 @@ export async function batchRemove(ctx: any) {
       continue
     }
     if (isPersonSession(id) && existing) {
+      getChatRunServer()?.evictSessionViewers?.(id)
       try {
         const { deletePersonConversation } = await import('../services/person/conversations')
         await deletePersonConversation(ctx.state.user.id, id, existing.history_revision)
@@ -1551,6 +1557,7 @@ export async function batchRemove(ctx: any) {
       continue
     }
 
+    getChatRunServer()?.evictSessionViewers?.(id)
     const providerAgentSession = isProviderAgentSession(existing)
     if (providerAgentSession) stopCodingAgentSessionRun(id, { reportClosed: false })
     const hermes = providerAgentSession
@@ -1565,6 +1572,8 @@ export async function batchRemove(ctx: any) {
 
     const shouldDeleteLocal = Boolean(existing && (!targetProfile || existing.profile === targetProfile))
     if (shouldDeleteLocal) {
+      // Again right before the row goes (see `remove`).
+      getChatRunServer()?.evictSessionViewers?.(id)
       const ok = localDeleteSession(id)
       if (ok) {
         deleteWorkspaceRunChangesForSession(id)
