@@ -139,7 +139,45 @@ export interface HermesSessionPage {
   limit: number
 }
 
+/**
+ * Passive Studio notice: one invocation of an enrolled script wrapper. Not a native Hermes
+ * execution receipt, never model history.
+ */
+/** Result of one scheduled fire of a bound native cron job. */
+export interface CronStudioNoticeView {
+  kind: 'cron'
+  notification_id: number
+  disposition: string
+  job_id: string
+  job_name: string
+  execution_id: string
+  status: string
+  success: boolean | null
+  reason: string | null
+  error: string | null
+  truncated: boolean
+  finished_at: string | null
+}
+
+export type StudioNoticeView = ScriptReportStudioNoticeView | CronStudioNoticeView
+
+export interface ScriptReportStudioNoticeView {
+  kind: 'script_report'
+  notification_id: number
+  disposition: string
+  identity_kind: 'wrapper_invocation'
+  job_id: string
+  job_name: string
+  invocation_id: string
+  outcome: string
+  exit_code: number | null
+  signal: number | null
+  reason: string | null
+  truncated: boolean
+}
+
 export interface HermesMessage {
+  studio_notice?: StudioNoticeView
   person_task_return?: import('../person').PersonTaskReturn
   run_usage?: import('@/utils/run-usage').RunUsageSummary
   id: number

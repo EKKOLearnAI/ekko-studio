@@ -1110,6 +1110,19 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      cronTitle: 'Geplante Aufgabe „{name}“ abgeschlossen',
+      cronFailedTitle: 'Geplante Aufgabe „{name}“ fehlgeschlagen',
+      outputUnavailable: 'Für diese Laufzeit ist kein Ergebnis verfügbar (nur Skript); nur Status.',
+      receiptUnavailable: 'Der genaue Ergebnisbeleg dieses Laufs war nicht verfügbar; nur Status.',
+      unknown: 'Ergebnis unbekannt. Studio führt diese Aufgabe nicht erneut aus.',
+      truncated: "Ergebnis für die Anzeige gekürzt.",
+      scriptReportTitle: "Skript „{name}“ hat berichtet",
+      scriptReportFailedTitle: "Skript „{name}“ ist fehlgeschlagen",
+      scriptReportProvenance: "Skriptaufruf-Bericht des Ekko-Wrappers (keine native Hermes-Ausführungsquittung).",
+      scriptReportUnavailable: "Für diesen Aufruf wurde keine Skriptausgabe erfasst; nur Status.",
+      scriptReportUnknown: "Bericht unvollständig: Der Skriptaufruf wurde unterbrochen. Ergebnis unbekannt; Studio führt ihn nicht erneut aus.",
+    },
     selectMessages: "Nachrichten auswählen",
     messagesSelected: "{count} ausgewählt",
     deleteSelectedMessages: "Auswahl löschen",

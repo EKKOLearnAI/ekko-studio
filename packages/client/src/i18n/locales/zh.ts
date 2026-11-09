@@ -1131,6 +1131,19 @@ export default {
 
   // 对话
   chat: {
+    sessionNotice: {
+      cronTitle: '定时任务“{name}”已完成',
+      cronFailedTitle: '定时任务“{name}”失败',
+      outputUnavailable: '此运行时无法获取结果（仅脚本任务），仅显示状态。',
+      receiptUnavailable: '未找到本次运行的确切结果凭据，仅显示状态。',
+      unknown: '结果未知。Studio 不会重新运行此任务。',
+      truncated: "结果已截断显示。",
+      scriptReportTitle: "脚本“{name}”已报告",
+      scriptReportFailedTitle: "脚本“{name}”失败",
+      scriptReportProvenance: "来自 Ekko 包装器的脚本调用报告（不是 Hermes 原生执行回执）。",
+      scriptReportUnavailable: "本次调用未捕获脚本输出，仅显示状态。",
+      scriptReportUnknown: "报告不完整：脚本调用被中断。结果未知，Studio 不会重新运行。",
+    },
     selectMessages: "多选消息",
     messagesSelected: "已选 {count} 条",
     deleteSelectedMessages: "删除所选",

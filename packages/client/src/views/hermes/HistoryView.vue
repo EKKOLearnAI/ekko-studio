@@ -13,6 +13,7 @@ import { useProfilesStore } from '@/stores/hermes/profiles'
 import { NSpin, NButton, NDropdown, NPopconfirm, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getSourceLabel } from '@/shared/session-display'
+import { storedMessageCount } from '@/shared/session-notices'
 import { historySessionSource, sessionAgentFields } from '@/utils/hermes/session-agent'
 import { copyToClipboard } from '@/utils/clipboard'
 import { mergeTaskPlanMessages } from '@/utils/task-plan'
@@ -181,6 +182,7 @@ function mapHistoryMessages(messages: HermesMessage[]): Session['messages'] {
       id: String(m.id),
       role: displayRole === 'moa' ? 'system' : displayRole,
       content: m.content || '',
+      ...(m.studio_notice ? { studioNotice: m.studio_notice } : {}),
       timestamp: m.timestamp * 1000,
       reasoning: m.reasoning || undefined,
       systemType: displayRole === 'command' ? 'command' : undefined,
@@ -253,7 +255,7 @@ async function loadHistorySession(sessionId: string, profile?: string | null) {
       sessionData.profile = summary?.profile || sessionProfile || undefined
       sessionData.messageCount = page.total
       sessionData.messageTotal = page.total
-      sessionData.loadedMessageCount = page.messages.length
+      sessionData.loadedMessageCount = storedMessageCount(page.messages)
       sessionData.hasMoreBefore = page.hasMore
     } else {
       // Some imported/legacy Hermes sessions may only exist in Hermes state.db.
@@ -319,7 +321,7 @@ async function loadOlderHistoryMessages(sessionId: string): Promise<boolean> {
     const existingIds = new Set(target.messages.map(message => message.id))
     const olderMessages = mapHistoryMessages(page.messages).filter(message => !existingIds.has(message.id))
     target.messages = mergeTaskPlanMessages([...olderMessages, ...target.messages], page.taskPlans || [], sessionId)
-    target.loadedMessageCount = offset + page.messages.length
+    target.loadedMessageCount = offset + storedMessageCount(page.messages)
     target.messageTotal = page.total
     target.messageCount = page.total
     target.hasMoreBefore = page.hasMore

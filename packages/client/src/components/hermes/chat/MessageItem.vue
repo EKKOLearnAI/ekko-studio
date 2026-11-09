@@ -62,6 +62,41 @@ const props = withDefaults(defineProps<{
   userProfileAvatar: null,
 });
 const { t } = useI18n();
+
+// A passive notice carries untrusted script output: plain text, never Markdown.
+const studioNotice = computed(() => props.message.studioNotice ?? null);
+
+const studioNoticeTitle = computed(() => {
+  const notice = studioNotice.value;
+  if (!notice) return "";
+  if (notice.kind === "cron") {
+    return notice.success === false || notice.status === "failed"
+      ? t("chat.sessionNotice.cronFailedTitle", { name: notice.job_name })
+      : t("chat.sessionNotice.cronTitle", { name: notice.job_name });
+  }
+  return notice.outcome === "failed" || notice.outcome === "launch_failed"
+    ? t("chat.sessionNotice.scriptReportFailedTitle", { name: notice.job_name })
+    : t("chat.sessionNotice.scriptReportTitle", { name: notice.job_name });
+});
+
+const studioNoticeDetail = computed(() => {
+  const notice = studioNotice.value;
+  if (!notice) return "";
+  if (notice.kind === "cron") {
+    if (notice.disposition === "unknown") return t("chat.sessionNotice.unknown");
+    if (notice.reason === "output_unavailable_for_runtime") return t("chat.sessionNotice.outputUnavailable");
+    if (notice.reason === "receipt_unavailable") return t("chat.sessionNotice.receiptUnavailable");
+    if (notice.truncated) return t("chat.sessionNotice.truncated");
+    // A known failure without result text shows its native error.
+    if (notice.success === false && notice.error && !props.message.content) return notice.error;
+    return "";
+  }
+  if (notice.disposition === "unknown") return t("chat.sessionNotice.scriptReportUnknown");
+  if (notice.disposition === "status_only") return t("chat.sessionNotice.scriptReportUnavailable");
+  return notice.truncated
+    ? `${t("chat.sessionNotice.scriptReportProvenance")} ${t("chat.sessionNotice.truncated")}`
+    : t("chat.sessionNotice.scriptReportProvenance");
+});
 const toast = useMessage();
 
 const isSystem = computed(() => props.message.role === "system");
@@ -1220,9 +1255,16 @@ onBeforeUnmount(() => {
               @select="file => openAssistantWorkspaceChangeFile(file, change)"
             />
 
+            <template v-if="studioNotice">
+              <div class="studio-notice-header">
+                <div class="studio-notice-title">{{ studioNoticeTitle }}</div>
+                <div v-if="studioNoticeDetail" class="studio-notice-detail">{{ studioNoticeDetail }}</div>
+              </div>
+              <div v-if="message.content" class="studio-notice-text">{{ message.content }}</div>
+            </template>
             <!-- Render system message content -->
             <MarkdownRenderer
-              v-if="message.role === 'system' && message.content && !isCommandMessage"
+              v-if="message.role === 'system' && message.content && !isCommandMessage && !studioNotice"
               :content="message.content"
             />
             <div v-if="isStatusCommand" class="command-result command-status">
@@ -2138,5 +2180,24 @@ onBeforeUnmount(() => {
     padding-inline-start: 8px !important;
     padding-inline-end: 8px !important;
   }
+}
+.studio-notice-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.studio-notice-title {
+  font-weight: 600;
+}
+
+.studio-notice-detail {
+  font-size: 12px;
+}
+
+.studio-notice-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 </style>
