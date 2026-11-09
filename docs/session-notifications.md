@@ -39,3 +39,33 @@ rendered as plain text, never Markdown.
 signed-in account sockets, each authorized again at publication: the account as stored now must be
 active with access to the profile (a share viewer only for its shared session), and only while
 the accepting generation is current. Unread attention is synced through the session-state sync.
+
+## Cron session bindings
+
+Hermes captures a Cron `origin` only from a chat id. The Agent Bridge has none, so a job created
+from a Studio chat is stored with `deliver=local`. A binding records, explicitly, which Studio
+session should receive that job's results; delivering them is a follow-up change that reads these
+bindings. Nothing in Hermes is changed.
+
+`POST /api/hermes/cron/session-bindings` with
+`{ profile, session_id, expected_session_generation, job_id }` binds an existing agent-backed
+native job whose stored `deliver` is `local` to the session's frozen generation. It writes
+`<Web UI home>/session-notifications/cron-bindings.db`; the Agent Bridge never wraps
+`cronjob_manage` or writes bindings, so a job a model creates in a chat stays a plain native job
+until the user binds it.
+
+- The bearer token must be an interactive login token. `POST /api/auth/login` signs
+  `purpose: "login"` into it (`authenticateLoginUserToken`); tokens Studio issues to model runs
+  carry `purpose: "model_run"`, so a model run cannot bind on its own. App tokens, share links and
+  tokens issued before purposes existed are refused here (`403 login_token_required`); every other
+  endpoint keeps accepting them.
+- `GET /api/studio/sessions/{id}` returns `session.session_generation`. Freeze it when the
+  destination is chosen: a history clear or a delete and same-id recreation changes it, and a stale
+  value returns `409 session_generation_mismatch` without writing.
+- The account must be active with access to the profile, which must match any `x-hermes-profile`
+  header or `profile` query (`400 profile_mismatch`). The target must be an ordinary, locally
+  stored Hermes chat, never a private Person conversation (`422 unsupported_notification_target`).
+  Script-only jobs (`422 script_job_requires_script_report`), explicit targets such as `slack:…`
+  (`422 explicit_delivery_target`) and unknown jobs (`404 job_not_found`) are refused.
+- Every (re)binding replaces the job's previous binding and writes a strictly later `bound_at`
+  revision.

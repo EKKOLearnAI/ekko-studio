@@ -3,6 +3,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { config } from './config'
 
+/** Explicit cron job to session bindings, written only by Studio's binding API. */
+export function cronBindingsDbPath(): string {
+  return join(config.appHome, 'session-notifications', 'cron-bindings.db')
+}
+
 let cachedInstanceId: string | null = null
 
 /** Stable identity of this Studio installation's state directory; namespaces notice producer keys. */
