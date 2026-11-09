@@ -86,6 +86,9 @@ export function initPersonTables(db: DatabaseSync): void {
       execution_id TEXT PRIMARY KEY, owner_user_id INTEGER NOT NULL, origin_json TEXT NOT NULL,
       state TEXT NOT NULL DEFAULT 'waiting', updated_at INTEGER NOT NULL, error TEXT NOT NULL DEFAULT ''
     );
+    CREATE INDEX IF NOT EXISTS idx_person_pending_origin_session ON person_deliveries (
+      CASE WHEN json_valid(origin_json) THEN json_extract(origin_json,'$.sessionId') END, execution_id
+    ) WHERE state IN ('waiting','pending','queued');
     CREATE TABLE IF NOT EXISTS person_task_returns (
       session_id TEXT NOT NULL, assistant_message_id TEXT NOT NULL,
       execution_id TEXT NOT NULL, owner_user_id INTEGER NOT NULL,
