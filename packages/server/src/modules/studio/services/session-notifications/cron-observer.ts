@@ -137,7 +137,8 @@ export async function observeCronBindings(deps: CronObserverDeps): Promise<Sessi
   for (const [profile, profileBindings] of byProfile) {
     const response = await deps.observe(profile, profileBindings.map(binding => {
       const before = cronJobObserveCursor(deps.namespace, profile, binding.job_id)
-      return { job_id: binding.job_id, since: binding.bound_at - 1, ...(before ? { before } : {}) }
+      // The binding time itself is the cutoff: a fire claimed before it belongs to the previous binding.
+      return { job_id: binding.job_id, since: binding.bound_at, ...(before ? { before } : {}) }
     }))
     // A binding replaced while Hermes answered owns the job now: drop this stale answer for it.
     const live = new Map(readCronSessionBindings(deps.bindingsPath, deps.namespace)

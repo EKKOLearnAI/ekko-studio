@@ -105,11 +105,11 @@ describe('cron session notifications', () => {
   })
 
   it('fails closed for an owner reset under the same session id', async () => {
-    await writeBinding({ job_id: 'job-1', session_id: 'session-A', bound_at: 1000, generation: '7:900:0' })
+    await writeBinding({ job_id: 'job-1', session_id: 'session-A', bound_at: 1000, generation: 'g-A1' })
     const published: any[] = []
-    // history_cleared_at changed: the conversation was reset after the job was bound.
+    // A history clear rotated the session generation after the job was bound.
     await observeOnce({ jobs: [{ job_id: 'job-1', state: 'present', deliver: 'local' }], executions: [execution()] },
-      { 'session-A': { profile: 'default', started_at: 900, generation: '7:900:1793300000000' } }, published)
+      { 'session-A': { profile: 'default', generation: 'g-A2' } }, published)
     expect(published).toEqual([])
     expect(row('cron:job-1:exec-1')).toBeUndefined()
   })
@@ -170,6 +170,31 @@ describe('cron session notifications', () => {
       { 'session-A': { profile: 'default', generation: 'g-A1' } }, published)
     expect(published.map(record => record.disposition)).toEqual(['notified'])
     expect(published[0].payload).toMatchObject({ success: false, error: 'provider timeout' })
+  })
+
+  it('never delivers a fire claimed before the binding, even one the previous binding never observed', async () => {
+    // Rebound to session B at T; a fire claimed at T-0.5s still belongs to the previous owner.
+    const T = 1_793_300_000.25
+    await writeBinding({ job_id: 'job-1', session_id: 'session-B', bound_at: T, generation: 'g-B1' })
+    const fires = [{ claimed: T - 0.5, ...execution({ execution_id: 'before-rebind', answer: 'old owner result' }) },
+      { claimed: T + 0.5, ...execution({ execution_id: 'after-rebind', answer: 'new owner result' }) }]
+    const asked: number[] = []
+    const { observeCronBindings } = await import(OBSERVER)
+    const published: any[] = []
+    // The bridge returns terminal fires claimed at or after `since`, as bridge_studio_cron.py does.
+    await observeCronBindings({
+      namespace: 'inst-1', bindingsPath,
+      observe: async (_profile: string, jobs: Array<{ job_id: string; since: number }>) => {
+        asked.push(jobs[0].since)
+        return { jobs: [{ job_id: 'job-1', state: 'present', deliver: 'local' }],
+          executions: fires.filter(fire => fire.claimed >= jobs[0].since).map(({ claimed, ...fire }) => fire) }
+      },
+      getSession: (id: string) => (id === 'session-B' ? { profile: 'default', generation: 'g-B1' } : null),
+      publish: (record: any) => published.push(record),
+    })
+    expect(asked).toEqual([T])
+    expect(published.map(record => record.payload.execution_id)).toEqual(['after-rebind'])
+    expect(row('cron:job-1:before-rebind')).toBeUndefined()
   })
 
   it('ignores bindings written by another Studio instance', async () => {
