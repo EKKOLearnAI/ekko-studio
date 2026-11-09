@@ -3990,6 +3990,13 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_20_1: "Index pending Person delivery counts by origin session to reduce full table scans on large datasets; tolerate malformed legacy JSON without rewriting history (#3723)",
+    new_0_8_20_2: "Combine Ekko OpenAI Chat system instructions into one leading system message in their original order for strict chat templates, preserving regular messages, tools, images and reasoning (#3728)",
+    new_0_8_20_3: "Stage exact DSH releases in separate directories and check runtime composition, dependencies and ACP initialization before activation. Failed upgrades preserve the current installation and pin; a working existing CLI can be retained for recovery (#3730)",
+    new_0_8_20_4: "Add exact DSH version installation and pinning, explicit latest selection, revalidated rollback, and adapter/verified-version details to Agent Manager. Automatic updates honor version pins (#3730)",
+    new_0_8_20_5: "Update the DSH ACP adapter to revision 5 for the verified 0.2.1-rc.5 and 0.2.2-rc.1 shapes, retaining native setup, preset selection and restoration, permission policy and turn persistence. Reject activation when critical capabilities are missing (#3730)",
+    new_0_8_20_6: "Preserve global group Agent model and reasoning settings across creation, edits and restarts. Previously erased selections must be set again (#3730)",
+    new_0_8_20_7: "Fall back to private run copies when Antigravity native configuration or skill links fail with EPERM, ENOTSUP or EINVAL, preserving native settings. Copies are run snapshots and do not automatically sync later credential changes (#3730)",
     new_0_8_19_1: "Fix authorized providers such as Codex, Nous, xAI, and Qwen disappearing from the model list, while preserving Copilot activation and credential requirements (#3720)",
     new_0_8_18_1: "Add Pin and Unpin for Person conversations. Pinned conversations appear first, with recent activity ordering within each group; database persistence preserves the state after refresh (#3704)",
     new_0_8_18_2: "Prevent realtime speech replay after reply completion, tool events, reconnects or message rebuilds on refresh. Preserve turn progress and sentence boundaries, exclude older history, and allow identical text in later turns (#3708)",
@@ -3998,8 +4005,5 @@ export default {
     new_0_8_18_5: "Improve GitHub Copilot plugin preparation and credential persistence; list models only with credentials readable by the target runtime profile. Bind login to its initiating profile and respect disabled automatic installation and user-disabled plugins during startup migration (#3712)",
     new_0_8_18_6: "Update runtime build defaults to Python 3.14.7 and Node.js 26.13.0, reject mismatched cached interpreters and support Node version overrides. The default Hermes remains 0.22.5; this release does not switch it to 0.23 automatically (#3712)",
     new_0_8_18_7: "Add focused tests for realtime speech, conversation pinning, Copilot and runtime builds. Pin E2E to Ubuntu 24.04 supported by the current Playwright, and allow Hermes source version overrides in Windows ARM64 runtime validation (#3704, #3708, #3712)",
-    new_0_8_17_1: "Fix missing Bot replies and false ‘Agent returned no output’ errors after background dispatch. Generate, stream and save a normal reply before waiting, even at the step limit; results still return automatically while tasks and collaboration stages remain active (#3699)",
-    new_0_8_17_2: "Do not send completion bells, notifications or App completion pushes while waiting for background tasks, for both direct sends and resumed chats. Preserve polling guards and callback deduplication; empty provider replies or forbidden tool calls still fail explicitly (#3699)",
-    new_0_8_17_3: "Show custom personal Bot names in message headers. Renaming updates existing messages and new replies and persists after reload; unnamed Bots use localized preset names, while avatars and animations retain the selected Bot appearance (#3700)",
   },
 }
