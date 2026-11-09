@@ -543,6 +543,8 @@ export default {
     voiceInput: {
       backendSttRequired: 'Masaüstü uygulamasında sesli giriş için sunucu taraflı STT gerekir. Modeller → STT bölümünde yerel konuşma tanımayı etkinleştirin veya bir bulut sağlayıcısını yapılandırıp etkinleştirin.',
     },
+    markUnread: 'Okunmadı olarak işaretle',
+    markUnreadFailed: 'Okunmadı olarak işaretlenemedi',
     selectMessages: "Mesajları seç",
     messagesSelected: "{count} seçildi",
     deleteSelectedMessages: "Seçilenleri sil",

@@ -1451,6 +1451,8 @@ export default {
     openSessionInNewWindow: '在新窗口打开',
     sessionLinkCopied: 'Session link copied',
     copySessionId: '复制会话 ID',
+    markUnread: '标为未读',
+    markUnreadFailed: '无法标为未读',
     export: '导出',
     exportFull: '全量导出 (JSON)',
     exportCompressed: '压缩导出 (TXT)',

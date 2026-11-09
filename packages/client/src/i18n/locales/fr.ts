@@ -1388,6 +1388,8 @@ export default {
     openSessionInNewWindow: 'Ouvrir dans une nouvelle fenêtre',
     sessionLinkCopied: 'Session link copied',
     copySessionId: "Copier l'ID de session",
+    markUnread: 'Marquer comme non lu',
+    markUnreadFailed: 'Impossible de marquer comme non lu',
     export: 'Exporter',
     editConfig: 'Modifier la configuration',
     exportFull: 'Export complet (JSON)',

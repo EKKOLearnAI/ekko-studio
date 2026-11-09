@@ -2,6 +2,7 @@
  * Self-built session database — completely replaces Hermes CLI dependency.
  * Uses the same ensureTable/getDb pattern as usage-store.ts.
  */
+import { randomUUID } from 'node:crypto'
 import { isSqliteAvailable, getDb } from '../infrastructure/database'
 import { TASK_PLANS_TABLE, SESSION_TASKS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE, SESSION_CATEGORIES_TABLE } from '../infrastructure/database/schemas'
 import { normalizeMessageContentForStorageRole } from './message-content'
@@ -528,6 +529,22 @@ export function deleteSession(id: string): boolean {
   }
 }
 
+/**
+ * Exact identity of this session's current incarnation. Assigned on first read, rotated by a
+ * history clear (reset), and new for a session recreated under the same id.
+ */
+export function getSessionGeneration(id: string): string | null {
+  if (!isSqliteAvailable()) return null
+  const db = getDb()!
+  const row = db.prepare(`SELECT generation_id FROM ${SESSIONS_TABLE} WHERE id = ?`).get(id) as { generation_id?: string } | undefined
+  if (!row) return null
+  if (row.generation_id) return row.generation_id
+  const generation = randomUUID()
+  db.prepare(`UPDATE ${SESSIONS_TABLE} SET generation_id = ? WHERE id = ? AND generation_id = ''`).run(generation, id)
+  const current = db.prepare(`SELECT generation_id FROM ${SESSIONS_TABLE} WHERE id = ?`).get(id) as { generation_id?: string } | undefined
+  return current?.generation_id || null
+}
+
 export function clearSessionMessages(id: string): number {
   if (!isSqliteAvailable()) return 0
   const db = getDb()!
@@ -543,6 +560,7 @@ export function clearSessionMessages(id: string): number {
            task_summary_revision = task_summary_revision + 1,
            task_summary_updated_at = 0,
            history_cleared_at = ?,
+           generation_id = '',
            message_count = 0,
            last_active = started_at
        WHERE id = ?`,

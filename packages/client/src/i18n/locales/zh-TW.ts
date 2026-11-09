@@ -1441,6 +1441,8 @@ export default {
     openSessionInNewWindow: '在新視窗開啟',
     sessionLinkCopied: 'Session link copied',
     copySessionId: '複製工作階段 ID',
+    markUnread: '標為未讀',
+    markUnreadFailed: '無法標為未讀',
     export: '匯出',
     editConfig: '編輯設定檔',
     exportFull: '完整匯出 (JSON)',

@@ -1388,6 +1388,8 @@ export default {
     openSessionInNewWindow: '新しいウィンドウで開く',
     sessionLinkCopied: 'Session link copied',
     copySessionId: 'セッション ID をコピー',
+    markUnread: '未読にする',
+    markUnreadFailed: '未読にできませんでした',
     export: 'エクスポート',
     editConfig: '設定を編集',
     exportFull: 'フルエクスポート (JSON)',

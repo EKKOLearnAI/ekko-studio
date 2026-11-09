@@ -116,6 +116,8 @@ const conversationMenuOptions = computed(() => [
       : t('chat.pin'),
     disabled: pending.value || pinningConversationId.value === contextConversationId.value,
   },
+  ...(contextConversationId.value && sessionStates.canMarkUnread(contextConversationId.value)
+    ? [{ key: 'mark-unread', label: t('chat.markUnread'), disabled: pending.value }] : []),
   { key: 'rename', label: t('chat.rename'), disabled: pending.value },
   { key: 'delete', label: t('common.delete'), disabled: pending.value },
   { key: 'batch', label: t('chat.toggleBatchMode'), disabled: pending.value },
@@ -157,6 +159,11 @@ function selectConversationAction(action: string) {
   const session = conversations.value.find(item => item.id === contextConversationId.value)
   if (!session || pending.value) return
   error.value = ''
+  if (action === 'mark-unread') {
+    // The open conversation stays on screen; it is read again only when selected again.
+    void sessionStates.markUnread(session.id).then(ok => { if (!ok && !disposed) message.error(t('chat.markUnreadFailed')) })
+    return
+  }
   if (action !== 'batch' && isMobile.value) showSessions.value = false
   if (action === 'pin') {
     void toggleConversationPinned(session)
@@ -232,6 +239,7 @@ async function loadConversations(offset = 0) {
 }
 function selectConversation(id: string) {
   if (batchMode.value) { toggleConversationSelection(id); return }
+  sessionStates.acknowledge(id)
   error.value = ''
   showNewConversation.value = false
   showConversationMenu.value = false
@@ -517,10 +525,12 @@ function flowAction(flow: PersonFlow, action: 'stop' | 'resume') {
 }
 function openFlowResult(sessionId: string, messageId: number) {
   showPanel.value = false
+  sessionStates.acknowledge(sessionId)
   return router.push({ name: 'hermes.person', query: { session: sessionId, message: String(messageId) } })
 }
 function openFlowConversation(sessionId: string) {
   showPanel.value = false
+  sessionStates.acknowledge(sessionId)
   return router.push({ name:'hermes.person',query:{ session:sessionId } })
 }
 function openFlowTask(taskId: string) { showPanel.value = false; selectTask(taskId) }
