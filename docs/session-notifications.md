@@ -33,7 +33,9 @@ or after that page offset, so boundaries never increase with the offset; a notic
 page between its two boundaries (equal timestamps go to the older page) and is on exactly one
 page even if stored timestamps are not monotonic. Stored rows keep their order; `offset` keeps
 counting stored rows only, and the clients count stored rows only. Notice text is
-rendered as plain text, never Markdown.
+rendered with the chat Markdown renderer in passive mode (GFM tables, lists, links, code): raw
+HTML is escaped, images are not loaded, Mermaid fences show as code without rendering, and
+`data:` and other unsafe link schemes stay inert.
 
 **Live delivery.** After commit, `session.notice` goes to members of the session room and to
 signed-in account sockets, each authorized again at publication: the account as stored now must be

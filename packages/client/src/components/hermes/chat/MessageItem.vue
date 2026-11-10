@@ -63,7 +63,7 @@ const props = withDefaults(defineProps<{
 });
 const { t } = useI18n();
 
-// A passive notice carries untrusted script output: plain text, never Markdown.
+// A passive notice carries untrusted script output: Markdown in passive mode (see MarkdownRenderer `passive`).
 const studioNotice = computed(() => props.message.studioNotice ?? null);
 
 const studioNoticeTitle = computed(() => {
@@ -1246,7 +1246,7 @@ onBeforeUnmount(() => {
                 <div class="studio-notice-title">{{ studioNoticeTitle }}</div>
                 <div class="studio-notice-detail">{{ studioNoticeDetail }}</div>
               </div>
-              <div v-if="message.content" class="studio-notice-text">{{ message.content }}</div>
+              <MarkdownRenderer v-if="message.content" :content="message.content" passive />
             </template>
             <!-- Render system message content -->
             <MarkdownRenderer
@@ -2182,8 +2182,4 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.studio-notice-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 </style>

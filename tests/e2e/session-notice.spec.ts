@@ -15,9 +15,17 @@ async function openNotices(page: Page) {
   return guard
 }
 
-test('renders a script invocation report as plain text with its wrapper provenance', async ({ page }) => {
+test('renders a script invocation report as passive Markdown with its wrapper provenance', async ({ page }) => {
   await openNotices(page)
-  const content = '**3 new items** <b>raw</b>'
+  const content = [
+    '**3 new items** <b>raw</b>',
+    '',
+    '| Item | Link |',
+    '| --- | --- |',
+    '| First | [#1](https://example.invalid/items/1) |',
+    '',
+    '![pixel](https://external.example/pixel.png)',
+  ].join('\n')
   await page.evaluate(content => {
     const sid = (window as any).sessionNoticeFixture.sid
     // Raw server event, delivered through the real socket listener.
@@ -35,8 +43,12 @@ test('renders a script invocation report as plain text with its wrapper provenan
   const header = page.locator('.studio-notice-header').filter({ hasText: 'Daily digest' })
   await expect(header.locator('.studio-notice-title')).toHaveText('Script “Daily digest” reported')
   await expect(header.locator('.studio-notice-detail')).toContainText('not a native Hermes execution receipt')
-  await expect(page.locator('.studio-notice-text')).toHaveText(content)
-  await expect(page.locator('.markdown-body strong, .studio-notice-text b')).toHaveCount(0)
+  const body = page.locator('.markdown-body').filter({ hasText: '3 new items' })
+  await expect(body.locator('strong')).toHaveText('3 new items')
+  await expect(body).toContainText('<b>raw</b>')
+  await expect(body.locator('table th')).toHaveText(['Item', 'Link'])
+  await expect(body.getByRole('link', { name: '#1' })).toHaveAttribute('href', 'https://example.invalid/items/1')
+  await expect(page.locator('.markdown-body b, img')).toHaveCount(0)
   // A notice is display-only: it is the only message, and no turn was added for it.
   await expect(page.locator('.message')).toHaveCount(1)
 })
