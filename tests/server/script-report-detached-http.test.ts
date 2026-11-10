@@ -216,4 +216,46 @@ describe('detached script report import read back over HTTP', { timeout: 30_000 
     expect(status).toBe(200)
     expect(notices).toHaveLength(0)
   })
+
+  it('an appended notice is visible over HTTP before the terminal report, deduplicated, then closed by it', async () => {
+    // A fresh binding takes the session's current generation (the reset case above rotated it).
+    const appendBinding = bind()
+    const run = reserve(appendBinding)
+    const append = (eventId: string, kind: string, body: string) => helper(appendBinding,
+      ['append', '--event-id', eventId, '--event-kind', kind, '--content-file', '-'], body, { EKKO_SCRIPT_REPORT_INVOCATION: run })
+    const eventReceipt = (eventId: string) => {
+      const path = join(m.paths.scriptReportReceiptsDir(appendBinding.binding_id), 'events', `${createHash('sha256').update(eventId).digest('hex')}.json`)
+      return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null
+    }
+    const started = 'Job started: 2 repositories'
+    expect(append('run-1:start', 'start', started)).toMatchObject({ status: 3, json: { status: 'queued', event_id: 'run-1:start', invocation_id: run, sequence: 1 } })
+    // Imported while the invocation still runs, and read back through the production session route.
+    expect(await importOverHttp()).toMatchObject({ accepted: 1 })
+    let read = await sessionNotices()
+    expect(read.status).toBe(200)
+    expect(read.notices.map((notice: any) => [notice.content, notice.studio_notice.invocation_id])).toEqual([[started, run]])
+    expect(read.notices[0]).toMatchObject({ role: 'system', studio_notice: { kind: 'script_report', job_name: 'Daily digest' } })
+    expect(m.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE session_id='chat-1'").get().n).toBe(0)
+    const sha = createHash('sha256').update(started).digest('hex')
+    expect(eventReceipt('run-1:start')).toMatchObject({ stream: 'append', binding_id: appendBinding.binding_id, invocation_id: run,
+      event_id: 'run-1:start', event_kind: 'start', sequence: 1, state: 'accepted', notification_id: expect.any(Number),
+      submitted_sha256: sha, accepted_sha256: sha, exact: true })
+    expect(helper(appendBinding, ['receipt', '--stream', 'append', '--event-id', 'run-1:start'])).toMatchObject({ status: 0,
+      json: { status: 'accepted', invocation_id: run } })
+
+    // The same event again, before and after another import: no second notice.
+    expect(append('run-1:start', 'start', started).json).toMatchObject({ event_id: 'run-1:start', sequence: 1 })
+    expect(await importOverHttp()).toMatchObject({ accepted: 0 })
+    expect((await sessionNotices()).notices).toHaveLength(1)
+
+    // The terminal report closes the invocation after the appended notice, which stays first.
+    expect(helper(appendBinding, ['complete', '--event-id', 'run-1:final', '--outcome', 'output', '--content-file', '-'], 'Digest done',
+      { EKKO_SCRIPT_REPORT_INVOCATION: run })).toMatchObject({ status: 3 })
+    await importOverHttp()
+    read = await sessionNotices()
+    expect(read.notices.map((notice: any) => [notice.content, notice.studio_notice.invocation_id])).toEqual([[started, run], ['Digest done', run]])
+    expect(receipt(appendBinding, run)).toMatchObject({ event_id: 'run-1:final', state: 'accepted', invocation_id: run })
+    expect(append('run-1:late', 'body', 'too late').status).not.toBe(0)
+    expect(m.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE session_id='chat-1'").get().n).toBe(0)
+  })
 })
