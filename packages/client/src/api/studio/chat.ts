@@ -263,6 +263,7 @@ const sessionEventHandlers = new Map<string, {
 
 const peerUserMessageHandlers = new Set<(event: RunEvent) => void>()
 const sessionCommandHandlers = new Set<(event: RunEvent) => void>()
+const cronConsentHandlers = new Set<(sessionId: string) => void>()
 export interface SessionNoticeEvent {
   event: 'session.notice'
   session_id: string
@@ -742,6 +743,14 @@ export function onPeerUserMessage(handler: (event: RunEvent) => void): () => voi
   }
 }
 
+/** Content-free hint that a session's pending cron consents changed; refetch with a login token. */
+export function onCronConsentUpdated(handler: (sessionId: string) => void): () => void {
+  cronConsentHandlers.add(handler)
+  return () => {
+    cronConsentHandlers.delete(handler)
+  }
+}
+
 export function onSessionNotice(handler: (event: SessionNoticeEvent) => void): () => void {
   sessionNoticeHandlers.add(handler)
   return () => {
@@ -930,6 +939,7 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
     on('agent.event', globalAgentEventHandler)
     on('run.reattach_failed', globalRunReattachFailedHandler)
     on('session.command', globalSessionCommandHandler)
+    on('cron_consent.updated', (event: any) => { for (const handler of cronConsentHandlers) handler(String(event?.session_id || '')) })
     on('session.notice', (event: any) => { for (const handler of sessionNoticeHandlers) handler(event as SessionNoticeEvent) })
     on('session.title.updated', globalSessionTitleUpdatedHandler)
     on('session.workspace.updated', globalSessionWorkspaceUpdatedHandler)
