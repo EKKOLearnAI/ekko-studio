@@ -70,6 +70,8 @@ const props = withDefaults(defineProps<{
     headingIdPrefix?: string
     resolveImageUrl?: (path: string) => string
     deferImages?: boolean
+    // Untrusted passive content (script reports): no images, no Mermaid execution, no data: links.
+    passive?: boolean
 }>(), {
     mentionNames: () => [],
     headingIdPrefix: '',
@@ -99,6 +101,10 @@ const md: MarkdownIt = new MarkdownItConstructor({
 // Preserve literal quote characters from user and assistant messages while
 // retaining typographer's other replacements (for example, dashes and ellipses).
 md.disable('smartquotes')
+// markdown-it allows raster data: URLs; passive content rejects every data: destination.
+const defaultValidateLink = md.validateLink.bind(md)
+md.validateLink = (url: string) => !(props.passive && /^data:/i.test(url.trim())) && defaultValidateLink(url)
+
 // Bare source filenames such as DESIGN.md overlap real domain suffixes.
 // Explicit URLs and email addresses still use markdown-it's linkifier.
 md.linkify.set({ fuzzyLink: false })
@@ -138,7 +144,7 @@ md.renderer.rules.fence = (tokens, idx, options, env, self) => {
     return renderLatexFence(token.content)
   }
 
-  if (isMermaidFence(token.info)) {
+  if (isMermaidFence(token.info) && !props.passive) {
     return renderMermaidPlaceholder(token.content)
   }
 
@@ -257,7 +263,7 @@ function hasExtension(path: string, extensions: Set<string>): boolean {
 
 const renderedHtml = computed(() => {
   let html = md.render(repairNestedMarkdownFences(stripToolCallMarkup(props.content)))
-  if (props.deferImages) html = html.replace(/<img\b[^>]*>/gi, '')
+  if (props.deferImages || props.passive) html = html.replace(/<img\b[^>]*>/gi, '')
 
   // Add IDs to headings for anchor links
   const prefix = props.headingIdPrefix ? `${props.headingIdPrefix}-` : ''
@@ -302,6 +308,12 @@ const renderedHtml = computed(() => {
     const { path } = location
     const fileName = renderedLinkText(innerHtml)
     const downloadName = inferDownloadFileName(path, fileName)
+
+    // Passive content never gets a media player: preload fetches on display. The
+    // plain local link downloads only when clicked (see handleMarkdownClick).
+    if (props.passive && (hasExtension(path, VIDEO_EXTENSIONS) || hasExtension(path, AUDIO_EXTENSIONS))) {
+      return `<a class="markdown-media-link" href="${md.utils.escapeHtml(path)}">${innerHtml}</a>`
+    }
 
     // Media already has an immediate inline preview and is not presented as a
     // downloadable document, so keep the player instead of opening source view.
