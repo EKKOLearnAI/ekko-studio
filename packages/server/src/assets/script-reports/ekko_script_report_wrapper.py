@@ -9,11 +9,16 @@ The report identifies this wrapper invocation (a fresh UUID). It is not a native
 execution receipt: ``native_execution_id`` is always null and every launch of this file is
 reported, whether scheduled, run manually or started directly.
 
+With ``completion: "detached"`` in the manifest the target is a launcher that hands this
+invocation to a detached worker: a clean launcher exit records a handoff, never a final report,
+and the worker completes the invocation with ``python <this file> complete``. See ``helper``.
+
 Standard library only. Nothing here imports Hermes or reads credentials.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -46,6 +51,9 @@ PREFLIGHT_EXIT = 2
 
 class PreflightError(Exception):
     """Report storage is unusable before the target starts: the target is not launched."""
+
+
+COMPLETIONS = ("sync", "detached")
 
 
 # --- manifest -----------------------------------------------------------------------------------
@@ -86,6 +94,13 @@ def load_manifest(path: str | None) -> dict:
             raise PreflightError("manifest binding incomplete")
     if not isinstance(manifest.get("binding_revision"), int):
         raise PreflightError("manifest revision missing")
+    manifest.setdefault("completion", "sync")
+    if manifest["completion"] not in COMPLETIONS:
+        raise PreflightError("manifest completion unsupported")
+    if manifest["completion"] == "detached":
+        for key in ("outbox_dir", "receipts_dir"):
+            if not isinstance(manifest.get(key), str) or not os.path.isabs(manifest[key]):
+                raise PreflightError("manifest completion incomplete")
     return manifest
 
 
@@ -265,7 +280,8 @@ def serialize(record: dict) -> bytes:
 
 
 def publish_json(directory: str, name: str, record: dict) -> None:
-    """Exclusive temp file, fsync, atomic rename, directory fsync. Never overwrites."""
+    """Exclusive temp file, fsync, atomic no-replace link, directory fsync. Never overwrites, so two
+    publishers of one record (a detached launcher and its worker) cannot replace each other."""
     data = serialize(record)
     final = os.path.join(directory, name)
     temp = os.path.join(directory, f".{name}.{uuid.uuid4().hex}.tmp")
@@ -279,15 +295,12 @@ def publish_json(directory: str, name: str, record: dict) -> None:
     finally:
         os.close(fd)
     try:
-        if os.path.lexists(final):
-            raise FileExistsError(final)
-        os.rename(temp, final)
-    except BaseException:
+        os.link(temp, final)  # fails with FileExistsError when the record already exists
+    finally:
         try:
             os.unlink(temp)
         except OSError:
             pass
-        raise
     _fsync_dir(directory)
 
 
@@ -323,7 +336,7 @@ def _reserve_locked(manifest: dict, spool: str, invocation_id: str, started_at: 
             "schema_version": SCHEMA_VERSION, "phase": "started", "identity_kind": "wrapper_invocation",
             "binding_id": manifest["binding_id"], "binding_revision": manifest["binding_revision"],
             "invocation_id": invocation_id, "native_execution_id": None, "wrapper_version": WRAPPER_VERSION,
-            "started_at": started_at,
+            "started_at": started_at, **({"completion": "detached"} if manifest.get("completion") == "detached" else {}),
         })
     except OSError as exc:
         try:
@@ -408,34 +421,44 @@ def classify(returncode: int, stdout: Capture, stderr: Capture, interrupted: int
     return {"outcome": "output", "exit_code": 0, "signal": None, "detail": output, "reason": None}
 
 
-def build_final(manifest: dict, invocation_id: str, started_at: float, monotonic_start: float,
-                result: dict, launched: bool) -> dict:
-    content, truncated, redaction = None, False, "not_applicable"
-    omitted = result.get("reason") if result.get("detail") is None else None
-    if result.get("detail") is not None:
-        try:
-            # Studio refuses NUL in a report body (find -print0, git -z): show it as a visible symbol.
-            sanitized, changed = sanitize(result["detail"].replace("\x00", "\u2400"))
-            content, truncated = clip_utf8(sanitized, BODY_LIMIT_BYTES)
-            redaction = "redacted" if changed else "clean"
-        except Exception:
-            content, omitted, redaction = None, "redaction_failed", "failed"
-    record = {
-        "schema_version": SCHEMA_VERSION, "phase": "final", "identity_kind": "wrapper_invocation",
-        "binding_id": manifest["binding_id"], "binding_revision": manifest["binding_revision"],
-        "invocation_id": invocation_id, "native_execution_id": None,
-        "wrapper_version": WRAPPER_VERSION, "policy_version": POLICY_VERSION, "sanitizer_version": SANITIZER_VERSION,
-        "child_launched": launched, "outcome": result["outcome"], "exit_code": result.get("exit_code"),
-        "signal": result.get("signal"), "content": content, "truncated": truncated, "omitted_reason": omitted,
-        "redaction_status": redaction, "started_at": started_at, "finished_at": time.time(),
-        "duration_ms": int((time.monotonic() - monotonic_start) * 1000),
-    }
+def render_body(detail: str | None, reason: str | None) -> dict:
+    """Sanitized, clipped body fields of a final record: sanitization precedes any durable write."""
+    if detail is None:
+        return {"content": None, "truncated": False, "omitted_reason": reason, "redaction_status": "not_applicable"}
+    try:
+        # Studio refuses NUL in a report body (find -print0, git -z): show it as a visible symbol.
+        sanitized, changed = sanitize(detail.replace("\x00", "\u2400"))
+        content, truncated = clip_utf8(sanitized, BODY_LIMIT_BYTES)
+        return {"content": content, "truncated": truncated, "omitted_reason": None,
+                "redaction_status": "redacted" if changed else "clean"}
+    except Exception:
+        return {"content": None, "truncated": False, "omitted_reason": "redaction_failed", "redaction_status": "failed"}
+
+
+def fit_record(record: dict) -> dict:
     # JSON escaping can multiply the body (control characters become \\u0001): shrink it until the
     # serialized record fits instead of producing a report Studio must refuse.
     while record["content"] and len(serialize(record)) > RECORD_LIMIT_BYTES:
         record["content"], _ = clip_utf8(record["content"], len(record["content"].encode("utf-8")) * 3 // 4)
         record["truncated"] = True
     return record
+
+
+def build_final(manifest: dict, invocation_id: str, started_at: float, monotonic_start: float,
+                result: dict, launched: bool) -> dict:
+    body = render_body(result.get("detail"), result.get("reason"))
+    record = {
+        "schema_version": SCHEMA_VERSION, "phase": "final", "identity_kind": "wrapper_invocation",
+        "binding_id": manifest["binding_id"], "binding_revision": manifest["binding_revision"],
+        "invocation_id": invocation_id, "native_execution_id": None,
+        "wrapper_version": WRAPPER_VERSION, "policy_version": POLICY_VERSION, "sanitizer_version": SANITIZER_VERSION,
+        "child_launched": launched, "outcome": result["outcome"], "exit_code": result.get("exit_code"),
+        "signal": result.get("signal"), **body, "started_at": started_at, "finished_at": time.time(),
+        "duration_ms": int((time.monotonic() - monotonic_start) * 1000),
+    }
+    if manifest.get("completion") == "detached":
+        record.update({"completion": "detached", "event_id": None, "submitted_sha256": None, "retry_of": None})
+    return fit_record(record)
 
 
 def _exit_like(returncode: int) -> None:
@@ -504,8 +527,12 @@ def main() -> None:
 
     stdout, stderr = Capture(), Capture()
     interrupted: list[int] = []
+    detached = manifest["completion"] == "detached"
+    # Detached completion: the launcher passes this reserved invocation to its worker by inheritance.
+    env = dict(os.environ, EKKO_SCRIPT_REPORT_INVOCATION=invocation_id, EKKO_SCRIPT_REPORT_HELPER=os.path.realpath(__file__),
+               EKKO_SCRIPT_REPORT_PYTHON=sys.executable) if detached else None
     try:
-        child = subprocess.Popen(argv, cwd=target["cwd"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        child = subprocess.Popen(argv, cwd=target["cwd"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     except OSError as exc:
         message = f"Script execution failed: {exc}"
         sys.stderr.write(message + "\n")
@@ -544,8 +571,17 @@ def main() -> None:
 
     result = classify(returncode, stdout, stderr, interrupted[0] if interrupted else None)
     try:
-        publish_json(directory, "final.json", build_final(manifest, invocation_id, started_at, monotonic_start,
-                                                          result, True))
+        if detached and result["outcome"] in ("output", "silent", "output_unavailable"):
+            # A clean launcher exit is a handoff, not the report: the worker completes the invocation.
+            # Without its completion the invocation stays incomplete; nothing is inferred from time.
+            publish_json(directory, "handoff.json", {
+                "schema_version": SCHEMA_VERSION, "phase": "handoff", "binding_id": manifest["binding_id"],
+                "binding_revision": manifest["binding_revision"], "invocation_id": invocation_id,
+                "launcher_exit_code": 0, "handed_off_at": time.time()})
+        else:
+            # Never overwrites: a worker that already completed this invocation keeps its report.
+            publish_json(directory, "final.json", build_final(manifest, invocation_id, started_at, monotonic_start,
+                                                              result, True))
     except Exception:
         # Report storage failed after the target ran: never rerun it and never change its
         # streams or exit status. Studio sees a started invocation without a final report.
@@ -553,5 +589,235 @@ def main() -> None:
     _exit_like(returncode)
 
 
+# --- detached completion helper ------------------------------------------------------------------
+#
+# ``python <wrapper> complete --event-id ID --content-file PATH|- [--outcome output|silent|failed]
+#                            [--invocation UUID] [--wait SECONDS]``
+# ``python <wrapper> receipt --event-id ID [--wait SECONDS]``
+#
+# The destination is the embedded manifest's binding; nothing here selects a session. ``complete``
+# persists the original delivery envelope of ``ID`` (sanitized body, digest of the submitted bytes,
+# the reserved invocation) before publishing its final report. A later call for the same ID reuses
+# that envelope and its ORIGINAL invocation: identical bytes are a retry (the new invocation, if any,
+# is recorded as silent ``event_retry``), different bytes are refused as a conflict. Delivery is
+# proven only by Studio's receipt for the original invocation, never by the spool or stdout.
+
+HELPER_EXIT = {"accepted": 0, "silent": 0, "queued": 3, "incomplete": 3, "rejected": 4, "quarantined": 4,
+               "conflict": 5, "unknown": 6}
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+EVENT_LIMIT = 200
+WAIT_LIMIT_SECONDS = 600
+
+
+class HelperError(Exception):
+    def __init__(self, code: str, status: str = "unknown", exit_code: int = PREFLIGHT_EXIT) -> None:
+        super().__init__(code)
+        self.code, self.status, self.exit_code = code, status, exit_code
+
+
+def _read_json(path: str, limit: int):
+    try:
+        return json.loads(_read_private_file(path, limit).decode("utf-8"))
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        raise HelperError("unreadable_record") from exc
+
+
+def _started(manifest: dict, invocation_id: str) -> dict | None:
+    """The started record of a reserved detached invocation of this binding revision, else None."""
+    if not UUID_RE.match(invocation_id or ""):
+        return None
+    directory = os.path.join(manifest["spool_dir"], invocation_id)
+    try:
+        _private_dir(directory)
+        started = _read_json(os.path.join(directory, "started.json"), 4096)
+    except (OSError, PreflightError, HelperError):
+        return None
+    if not isinstance(started, dict) or started.get("completion") != "detached" or started.get("invocation_id") != invocation_id \
+            or started.get("binding_id") != manifest["binding_id"] or started.get("binding_revision") != manifest["binding_revision"]:
+        return None
+    return started
+
+
+def _receipt(manifest: dict, invocation_id: str) -> dict | None:
+    receipt = _read_json(os.path.join(manifest["receipts_dir"], f"{invocation_id}.json"), 64 * 1024)
+    if receipt is not None and (not isinstance(receipt, dict) or receipt.get("binding_id") != manifest["binding_id"]
+                                or receipt.get("invocation_id") != invocation_id):
+        raise HelperError("receipt_invalid")
+    return receipt
+
+
+def _complete_invocation(manifest: dict, invocation_id: str, started: dict, outcome: str, body: dict,
+                         event_id: str, submitted: str | None, retry_of: str | None = None) -> None:
+    now = time.time()
+    record = {
+        "schema_version": SCHEMA_VERSION, "phase": "final", "identity_kind": "wrapper_invocation",
+        "binding_id": manifest["binding_id"], "binding_revision": manifest["binding_revision"],
+        "invocation_id": invocation_id, "native_execution_id": None,
+        "wrapper_version": WRAPPER_VERSION, "policy_version": POLICY_VERSION, "sanitizer_version": SANITIZER_VERSION,
+        "child_launched": True, "outcome": outcome, "exit_code": 0 if outcome != "failed" else None, "signal": None,
+        **body, "started_at": started["started_at"], "finished_at": now,
+        "duration_ms": max(0, int((now - started["started_at"]) * 1000)),
+        "completion": "detached", "event_id": event_id, "submitted_sha256": submitted, "retry_of": retry_of,
+    }
+    publish_json(os.path.join(manifest["spool_dir"], invocation_id), "final.json", fit_record(record))
+
+
+def _status(manifest: dict, envelope: dict, publish: bool) -> tuple[str, dict | None]:
+    """Where the original invocation of an envelope stands; publishes its final report when missing."""
+    original = envelope["invocation_id"]
+    receipt = _receipt(manifest, original)
+    if receipt is not None:
+        # The original invocation may have been settled by something else (a failed launcher): only a
+        # receipt of this envelope's event and bytes says anything about this delivery.
+        if receipt.get("event_id") != envelope["event_id"] or receipt.get("submitted_sha256") != envelope["submitted_sha256"]:
+            return "unknown", receipt
+        return receipt.get("state", "unknown"), receipt
+    if os.path.lexists(os.path.join(manifest["spool_dir"], original, "final.json")):
+        return "queued", None
+    started = _started(manifest, original)
+    if started is None:
+        return "unknown", None
+    if not publish:
+        return "incomplete", None
+    _complete_invocation(manifest, original, started, envelope["outcome"], envelope["body"], envelope["event_id"],
+                         envelope["submitted_sha256"])
+    return "queued", None
+
+
+def _envelope_path(manifest: dict, event_id: str) -> str:
+    return os.path.join(manifest["outbox_dir"], hashlib.sha256(event_id.encode("utf-8")).hexdigest() + ".json")
+
+
+def _load_envelope(manifest: dict, path: str, event_id: str) -> dict | None:
+    envelope = _read_json(path, 256 * 1024)
+    if envelope is None:
+        return None
+    if not isinstance(envelope, dict) or envelope.get("schema_version") != SCHEMA_VERSION \
+            or envelope.get("binding_id") != manifest["binding_id"] or envelope.get("binding_revision") != manifest["binding_revision"] \
+            or envelope.get("event_id") != event_id or not UUID_RE.match(str(envelope.get("invocation_id"))) \
+            or not isinstance(envelope.get("body"), dict) or envelope.get("outcome") not in ("output", "silent", "failed"):
+        # Preserved as is: a malformed pending delivery is never replaced or guessed.
+        raise HelperError("envelope_invalid")
+    return envelope
+
+
+def _event(value: str) -> str:
+    if not value or len(value) > EVENT_LIMIT or any(unicodedata.category(ch).startswith("C") for ch in value):
+        raise HelperError("invalid_event_id")
+    return value
+
+
+def _read_content(path: str) -> bytes:
+    handle = sys.stdin.buffer if path == "-" else open(path, "rb")
+    try:
+        data = handle.read(CAPTURE_LIMIT_BYTES + 1)
+    finally:
+        if handle is not sys.stdin.buffer:
+            handle.close()
+    if len(data) > CAPTURE_LIMIT_BYTES:
+        raise HelperError("content_too_large")
+    return data
+
+
+def _locked(manifest: dict):
+    import fcntl
+    _private_dir(manifest["outbox_dir"])
+    lock = os.open(os.path.join(manifest["outbox_dir"], ".lock"), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    return lock
+
+
+def complete(manifest: dict, args) -> dict:
+    event_id = _event(args.event_id)
+    raw = _read_content(args.content_file)
+    submitted = hashlib.sha256(raw).hexdigest()
+    text = raw.decode("utf-8", errors="replace")
+    if args.outcome != "silent" and not text.strip():
+        raise HelperError("empty_content")
+    current = args.invocation or os.environ.get("EKKO_SCRIPT_REPORT_INVOCATION") or None
+    lock = _locked(manifest)
+    try:
+        path = _envelope_path(manifest, event_id)
+        envelope = _load_envelope(manifest, path, event_id)
+        started = _started(manifest, current) if current else None
+        # The reserved invocation this call may still complete (the "vehicle"); a repeated call after
+        # its report exists, or after Studio settled it, only reads the envelope's status.
+        finished = started is not None and os.path.lexists(os.path.join(manifest["spool_dir"], current, "final.json"))
+        vehicle = None if finished else started
+        if envelope is None:
+            if vehicle is None:
+                raise HelperError("invocation_finalized" if finished else "invocation_not_reserved" if current else "invocation_required")
+            envelope = {"schema_version": SCHEMA_VERSION, "binding_id": manifest["binding_id"],
+                        "binding_revision": manifest["binding_revision"], "event_id": event_id, "invocation_id": current,
+                        "outcome": args.outcome, "submitted_sha256": submitted, "created_at": time.time(),
+                        "body": render_body(None, "producer_silent") if args.outcome == "silent" else render_body(text, None)}
+            # Durable before the report exists: a crash after this line retries the same identity and bytes.
+            publish_json(manifest["outbox_dir"], os.path.basename(path), envelope)
+        elif envelope["submitted_sha256"] != submitted or envelope["outcome"] != args.outcome:
+            # Never on the envelope's own invocation: it stays reserved for the original bytes.
+            if vehicle is not None and current != envelope["invocation_id"]:
+                detail = (f"Report event {event_id} was already submitted with different content "
+                          f"(invocation {envelope['invocation_id']}); this submission was refused.")
+                _complete_invocation(manifest, current, vehicle, "failed", render_body(detail, None), event_id, submitted)
+            return {"status": "conflict", "event_id": event_id, "invocation_id": envelope["invocation_id"],
+                    "vehicle_invocation_id": current, "receipt": None}
+        elif vehicle is not None and current != envelope["invocation_id"]:
+            _complete_invocation(manifest, current, vehicle, "silent", render_body(None, "event_retry"), event_id, submitted,
+                                 retry_of=envelope["invocation_id"])
+        status, receipt = _status(manifest, envelope, publish=True)
+    finally:
+        os.close(lock)
+    return {"status": status, "event_id": event_id, "invocation_id": envelope["invocation_id"],
+            "vehicle_invocation_id": current, "receipt": receipt}
+
+
+def receipt(manifest: dict, args) -> dict:
+    event_id = _event(args.event_id)
+    envelope = _load_envelope(manifest, _envelope_path(manifest, event_id), event_id)
+    if envelope is None:
+        return {"status": "unknown", "event_id": event_id, "invocation_id": None, "receipt": None}
+    status, found = _status(manifest, envelope, publish=False)
+    return {"status": status, "event_id": event_id, "invocation_id": envelope["invocation_id"], "receipt": found}
+
+
+def helper(argv: list[str]) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(prog="ekko-script-report")
+    commands = parser.add_subparsers(dest="command", required=True)
+    done = commands.add_parser("complete")
+    done.add_argument("--event-id", required=True)
+    done.add_argument("--content-file", required=True)
+    done.add_argument("--outcome", choices=("output", "silent", "failed"), default="output")
+    done.add_argument("--invocation")
+    done.add_argument("--wait", type=float, default=0)
+    read = commands.add_parser("receipt")
+    read.add_argument("--event-id", required=True)
+    read.add_argument("--wait", type=float, default=0)
+    args = parser.parse_args(argv)
+    try:
+        manifest = load_manifest(MANIFEST_PATH)
+        if manifest["completion"] != "detached":
+            raise HelperError("completion_not_detached")
+        result = (complete if args.command == "complete" else receipt)(manifest, args)
+        deadline = time.monotonic() + max(0.0, min(args.wait, WAIT_LIMIT_SECONDS))
+        while result["status"] in ("queued", "incomplete") and result["invocation_id"] and time.monotonic() < deadline:
+            time.sleep(0.5)
+            # The same envelope match as the first answer: a receipt of another event or other bytes
+            # for that invocation (a failed launcher) never confirms this delivery.
+            envelope = _load_envelope(manifest, _envelope_path(manifest, result["event_id"]), result["event_id"])
+            status, found = _status(manifest, envelope, publish=False) if envelope else ("unknown", None)
+            result.update(status=status, receipt=found)
+    except (HelperError, PreflightError, OSError) as exc:
+        code = exc.code if isinstance(exc, HelperError) else type(exc).__name__
+        sys.stdout.write(json.dumps({"status": "error", "error": code}) + "\n")
+        return exc.exit_code if isinstance(exc, HelperError) else PREFLIGHT_EXIT
+    sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
+    return HELPER_EXIT.get(result["status"], HELPER_EXIT["unknown"])
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] in ("complete", "receipt"):
+        sys.exit(helper(sys.argv[1:]))
     main()
