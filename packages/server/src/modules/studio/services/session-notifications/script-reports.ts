@@ -1,12 +1,13 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmSync } from 'fs'
-import { randomUUID } from 'crypto'
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmSync, writeSync } from 'fs'
+import { createHash, randomUUID } from 'crypto'
 import { basename, dirname, join } from 'path'
 import { isPrivatePersonSession } from '../../contracts/person-session'
 import { studioInstanceId } from '../../public/session-notifications'
-import { scriptReportQuarantineDir, scriptReportSpoolDir } from '../../public/script-report-paths'
+import { scriptReportQuarantineDir, scriptReportReceiptsDir, scriptReportSpoolDir } from '../../public/script-report-paths'
 import {
   acceptFencedSessionNotification,
   getSessionNotificationByKey,
+  getSessionNotificationById,
   type SessionNotificationDisposition,
   type SessionNotificationRecord,
 } from '../../repositories/session-notification-store'
@@ -28,6 +29,8 @@ export const SCRIPT_REPORT_LIMITS = { contentBytes: 32 * 1024, recordBytes: 96 *
 const OUTCOMES = new Set(['output', 'silent', 'failed', 'launch_failed', 'interrupted', 'output_unavailable'])
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const REDACTIONS = new Set(['not_applicable', 'clean', 'redacted', 'failed'])
+const SHA256 = /^[0-9a-f]{64}$/
+const EVENT_ID = /^[^\u0000-\u001f\u007f-\u009f]{1,200}$/
 
 export interface ScriptReportRecord {
   binding_id: string
@@ -47,6 +50,11 @@ export interface ScriptReportRecord {
   wrapper_version: string
   policy_version: string
   sanitizer_version: string
+  /** Detached completion only: the producer's business event, its submitted bytes and the original invocation a retry reuses. */
+  completion?: 'detached'
+  event_id?: string | null
+  submitted_sha256?: string | null
+  retry_of?: string | null
 }
 
 // Same rules as the wrapper's sanitizer, applied again at acceptance (defense in depth). Linear on
@@ -163,6 +171,13 @@ export function parseScriptReport(raw: Buffer, binding: ScriptReportBinding, inv
   for (const key of ['wrapper_version', 'policy_version', 'sanitizer_version']) {
     if (typeof value[key] !== 'string' || value[key].length > 64) return null
   }
+  // The binding's frozen completion mode decides the shape; a report never switches it.
+  if (binding.completion === 'detached') {
+    if (value.completion !== 'detached') return null
+    if (!(value.event_id === null || (typeof value.event_id === 'string' && EVENT_ID.test(value.event_id)))) return null
+    if (!(value.submitted_sha256 === null || (typeof value.submitted_sha256 === 'string' && SHA256.test(value.submitted_sha256)))) return null
+    if (!(value.retry_of === null || (typeof value.retry_of === 'string' && UUID.test(value.retry_of)))) return null
+  } else if (value.completion !== undefined) return null
   return value as ScriptReportRecord
 }
 
@@ -244,11 +259,81 @@ function quarantine(binding: ScriptReportBinding, invocation: string, dir: strin
   }
 }
 
-function settle(binding: ScriptReportBinding, invocation: string, dir: string, state: ScriptReportInvocationState,
-  outcome: string | null, detail: string | null, notificationId: number | null = null): void {
-  recordScriptReportInvocation({ binding_id: binding.binding_id, invocation_id: invocation, state, outcome, notification_id: notificationId, detail })
-  if (state === 'quarantined') quarantine(binding, invocation, dir)
+const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex')
+
+/**
+ * Detached completion: the producer-readable receipt of an invocation's durable disposition, written
+ * (first one wins, fsynced) before its spool entry is acknowledged, so a crash in between rewrites
+ * the same receipt on replay. A spool entry's disappearance is never the delivery proof.
+ */
+function writeReceipt(binding: ScriptReportBinding, invocation: string, report: ScriptReportRecord | null): void {
+  if (binding.completion !== 'detached' || !UUID.test(invocation)) return
+  const entry = getScriptReportInvocation(binding.binding_id, invocation)
+  const dir = scriptReportReceiptsDir(binding.binding_id)
+  const path = join(dir, `${invocation}.json`)
+  if (!entry) return
+  // A receipt linked before a crash still needs its directory entry to be durable before the spool
+  // entry is acknowledged.
+  if (existsSync(path)) return syncDirectory(dir)
+  const notice = entry.notification_id === null ? null : getSessionNotificationById(entry.notification_id)
+  const stored = entry.state === 'accepted' && typeof notice?.payload.content === 'string' ? notice.payload.content : null
+  // An accepted or silent disposition carries the identity it was committed with: a replayed spool
+  // entry may since have been rewritten with another event, and must never be certified as it.
+  const identity: Partial<ScriptReportRecord> = notice ? notice.payload as Partial<ScriptReportRecord> : report ?? {}
+  const submitted = identity.submitted_sha256 ?? null
+  const accepted = stored === null ? null : sha256(stored)
+  const receipt = {
+    schema_version: 1, binding_id: binding.binding_id, binding_revision: binding.revision, job_id: binding.job_id,
+    session_id: binding.session_id, session_generation: notice?.session_generation ?? binding.session_generation,
+    invocation_id: invocation, event_id: identity.event_id ?? null, retry_of: identity.retry_of ?? null,
+    state: entry.state, outcome: entry.outcome, reason: entry.detail, notification_id: entry.notification_id,
+    submitted_sha256: submitted, accepted_sha256: accepted, exact: submitted !== null && accepted === submitted,
+    settled_at: entry.updated_at,
+  }
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const temp = join(dir, `.${invocation}.${randomUUID()}.tmp`)
+  const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600)
+  try {
+    writeSync(fd, `${JSON.stringify(receipt)}\n`)
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+  try {
+    linkSync(temp, path) // never replaces an existing receipt
+  } catch (error: any) {
+    if (error?.code !== 'EEXIST') throw error
+  } finally {
+    rmSync(temp, { force: true })
+  }
+  syncDirectory(dir)
+}
+
+/** Durable directory entry; a failure propagates so the spool entry stays for a later pass. */
+function syncDirectory(dir: string): void {
+  const dirFd = openSync(dir, constants.O_RDONLY)
+  try {
+    fsyncSync(dirFd)
+  } finally {
+    closeSync(dirFd)
+  }
+}
+
+/** Receipt (detached completion), then acknowledgement of the spool entry. */
+function acknowledge(binding: ScriptReportBinding, invocation: string, dir: string, report: ScriptReportRecord | null, quarantined: boolean): void {
+  try {
+    writeReceipt(binding, invocation, report)
+  } catch {
+    return // the disposition is durable: the entry stays and a later pass writes the same receipt
+  }
+  if (quarantined) quarantine(binding, invocation, dir)
   else finish(dir)
+}
+
+function settle(binding: ScriptReportBinding, invocation: string, dir: string, state: ScriptReportInvocationState,
+  outcome: string | null, detail: string | null, notificationId: number | null = null, report: ScriptReportRecord | null = null): void {
+  recordScriptReportInvocation({ binding_id: binding.binding_id, invocation_id: invocation, state, outcome, notification_id: notificationId, detail })
+  acknowledge(binding, invocation, dir, report, state === 'quarantined')
 }
 
 /**
@@ -257,10 +342,10 @@ function settle(binding: ScriptReportBinding, invocation: string, dir: string, s
  * acceptance is recorded. Nothing is published again and no attention is added.
  */
 function rejectUnlessCommitted(namespace: string, binding: ScriptReportBinding, invocation: string, dir: string,
-  outcome: string, reason: string): void {
+  report: ScriptReportRecord, reason: string): void {
   const committed = getSessionNotificationByKey(namespace, binding.profile, scriptReportProducerKey(binding, invocation))
-  if (committed) settle(binding, invocation, dir, committed.disposition === 'silent' ? 'silent' : 'accepted', outcome, null, committed.id)
-  else settle(binding, invocation, dir, 'rejected', outcome, reason)
+  if (committed) settle(binding, invocation, dir, committed.disposition === 'silent' ? 'silent' : 'accepted', report.outcome, null, committed.id, report)
+  else settle(binding, invocation, dir, 'rejected', report.outcome, reason, null, report)
 }
 
 /**
@@ -310,13 +395,12 @@ export function importScriptReports(options: { namespace?: string; limit?: numbe
       const prior = getScriptReportInvocation(binding.binding_id, invocation)
       // A durable rejection or quarantine is final: a replay (crash before acknowledgement) only
       // completes the acknowledgement, even if the destination became valid again meanwhile.
-      if (prior?.state === 'rejected') { finish(dir); continue }
-      if (prior?.state === 'quarantined') { quarantine(binding, invocation, dir); continue }
+      if (prior?.state === 'rejected' || prior?.state === 'quarantined') { acknowledge(binding, invocation, dir, report, prior.state === 'quarantined'); continue }
       const verdict = ownerVerdict(binding)
       if (verdict) {
         // A late report of a revoked binding or a lost destination is dropped, never rerouted.
-        if (prior) finish(dir)
-        else rejectUnlessCommitted(namespace, binding, invocation, dir, report.outcome, verdict)
+        if (prior) acknowledge(binding, invocation, dir, report, false)
+        else rejectUnlessCommitted(namespace, binding, invocation, dir, report, verdict)
         continue
       }
       const content = report.content === null ? null : sanitizeScriptReportText(report.content)
@@ -347,13 +431,15 @@ export function importScriptReports(options: { namespace?: string; limit?: numbe
           started_at: report.started_at,
           finished_at: report.finished_at,
           content: content ?? '',
+          ...(binding.completion === 'detached' ? { completion: 'detached', event_id: report.event_id ?? null,
+            retry_of: report.retry_of ?? null, submitted_sha256: report.submitted_sha256 ?? null } : {}),
         },
       })
       if (!('record' in result)) {
-        if (result.status === 'conflict') settle(binding, invocation, dir, 'quarantined', report.outcome, 'notification_conflict')
-        else rejectUnlessCommitted(namespace, binding, invocation, dir, report.outcome, 'owner_missing')
+        if (result.status === 'conflict') settle(binding, invocation, dir, 'quarantined', report.outcome, 'notification_conflict', null, report)
+        else rejectUnlessCommitted(namespace, binding, invocation, dir, report, 'owner_missing')
       } else {
-        settle(binding, invocation, dir, visible ? 'accepted' : 'silent', report.outcome, null, result.record.id)
+        settle(binding, invocation, dir, visible ? 'accepted' : 'silent', report.outcome, null, result.record.id, report)
         if (result.status === 'accepted' && visible) accepted.push(result.record)
       }
     }
@@ -362,18 +448,20 @@ export function importScriptReports(options: { namespace?: string; limit?: numbe
 }
 
 /** Spool entries of a binding that started but have no final report (running, or killed). */
-export function incompleteScriptReports(binding: ScriptReportBinding): Array<{ invocation_id: string; started_at: number | null }> {
+export function incompleteScriptReports(binding: ScriptReportBinding): Array<{ invocation_id: string; started_at: number | null; handed_off?: boolean }> {
   const spool = scriptReportSpoolDir(binding.binding_id)
   let entries: string[]
   try { entries = readdirSync(spool).filter(name => UUID.test(name)) } catch { return [] }
-  const pending: Array<{ invocation_id: string; started_at: number | null }> = []
+  const pending: Array<{ invocation_id: string; started_at: number | null; handed_off?: boolean }> = []
   for (const invocation of entries) {
     const dir = join(spool, invocation)
     try { lstatSync(join(dir, 'final.json')); continue } catch { /* no final report */ }
     const raw = readPrivateFile(join(dir, 'started.json'), 4096)
     let startedAt: number | null = null
     try { const parsed = raw ? JSON.parse(raw.toString('utf8')) : null; startedAt = num(parsed?.started_at) ? parsed.started_at : null } catch { /* unreadable */ }
-    pending.push({ invocation_id: invocation, started_at: startedAt })
+    // Detached completion: the launcher exited cleanly and a worker owns the invocation now.
+    const handedOff = binding.completion === 'detached' ? { handed_off: existsSync(join(dir, 'handoff.json')) } : {}
+    pending.push({ invocation_id: invocation, started_at: startedAt, ...handedOff })
   }
   return pending.sort((a, b) => (a.started_at ?? 0) - (b.started_at ?? 0))
 }

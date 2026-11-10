@@ -3,7 +3,8 @@ import { config } from './config'
 
 /**
  * Private script invocation report state under the Web UI home (never in Hermes state):
- * immutable per-revision manifests, revocation markers, the wrapper spool and quarantine.
+ * immutable per-revision manifests, revocation markers, the wrapper spool and quarantine, and for
+ * detached completion the producer's delivery envelopes (outbox) and import receipts.
  */
 export function scriptReportsRoot(): string {
   return join(config.appHome, 'script-reports')
@@ -27,4 +28,12 @@ export function scriptReportSpoolDir(bindingId: string): string {
 
 export function scriptReportQuarantineDir(bindingId: string): string {
   return join(scriptReportsRoot(), 'quarantine', bindingId)
+}
+
+export function scriptReportOutboxDir(bindingId: string): string {
+  return join(scriptReportsRoot(), 'outbox', bindingId)
+}
+
+export function scriptReportReceiptsDir(bindingId: string): string {
+  return join(scriptReportsRoot(), 'receipts', bindingId)
 }
