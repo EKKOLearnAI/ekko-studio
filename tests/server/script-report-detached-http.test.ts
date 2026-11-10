@@ -176,8 +176,12 @@ describe('detached script report import read back over HTTP', { timeout: 30_000 
     expect(receipt(binding, retry)).toMatchObject({ invocation_id: retry, event_id: 'digest:2026-11-10', retry_of: invocation })
   })
 
-  it('another account cannot read the session notices', async () => {
-    expect((await sessionNotices(outsiderToken)).status).toBeGreaterThanOrEqual(403)
+  it('an account without the session\'s profile is refused before any session data is returned', async () => {
+    // Cross-profile denial by the sessions route's profile access check; this does not test same-profile ownership.
+    const { status, notices, body } = await sessionNotices(outsiderToken)
+    expect(status).toBe(403)
+    expect(body).toEqual({ error: 'Profile "default" is not available for this user' })
+    expect(notices).toEqual([])
   })
 
   it('a history reset, a disabled account and a revoked binding fail closed with rejection receipts', async () => {
