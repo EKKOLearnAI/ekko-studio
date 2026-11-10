@@ -61,7 +61,8 @@ export async function enroll(ctx: Context) {
       paused: input.paused === true,
     })
     ctx.status = 201
-    ctx.body = { binding: { ...result.binding, identity_kind: 'wrapper_invocation' }, job: result.job, resumed: result.resumed }
+    ctx.body = { binding: { ...result.binding, identity_kind: 'wrapper_invocation' }, job: result.job, resumed: result.resumed,
+      ...(result.nativeState ? { native_state: result.nativeState } : {}) }
   } catch (error) {
     sendError(ctx, error)
   }

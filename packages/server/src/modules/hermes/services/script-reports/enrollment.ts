@@ -175,6 +175,8 @@ export interface EnrollmentResult {
   binding: ScriptReportBinding
   job: Record<string, any> | null
   resumed: boolean
+  /** Set when the job could not be read back after a successful resume: its state was not observed. */
+  nativeState?: 'unknown'
 }
 
 /**
@@ -288,7 +290,15 @@ async function enrollLocked(bindingId: string, request: EnrollmentRequest, runne
     noteScriptReportBindingError(bindingId, 'native_resume_failed')
     throw new EnrollmentError(502, 'native_resume_failed', error?.message, jobId, await ensurePaused(profile, jobId, runner))
   }
-  return { binding: findScriptReportBinding(bindingId)!, job: readNativeJob(profile, jobId), resumed: true }
+  // The resume succeeded; only the snapshot can fail to read. Keep the binding (with its job id) and
+  // report the native state as unobserved instead of failing the request.
+  let snapshot: Record<string, any> | null
+  try {
+    snapshot = readNativeJob(profile, jobId)
+  } catch {
+    return { binding: findScriptReportBinding(bindingId)!, job: null, resumed: true, nativeState: 'unknown' }
+  }
+  return { binding: findScriptReportBinding(bindingId)!, job: snapshot, resumed: true }
 }
 
 /**
