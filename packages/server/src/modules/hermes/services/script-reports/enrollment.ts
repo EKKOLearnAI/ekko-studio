@@ -28,7 +28,9 @@ const CLI_TIMEOUT_MS = 60_000
 const MAX_PENDING = 200
 
 export class EnrollmentError extends Error {
-  constructor(readonly status: number, readonly code: string, message?: string, readonly jobId?: string) {
+  /** `nativeState` is what Studio last observed of the native job after a failure, never assumed. */
+  constructor(readonly status: number, readonly code: string, message?: string, readonly jobId?: string,
+    readonly nativeState?: 'paused' | 'unknown') {
     super(message || code)
   }
 }
@@ -181,7 +183,9 @@ export interface EnrollmentResult {
  * binding, create the native job paused **with the original target** (so Hermes' create-time
  * lifecycle guard checks the real script), record its id, write the generated wrapper and point the
  * job at it with `hermes cron edit`, verify the stored configuration by id, activate the binding,
- * then resume. A failure after creation leaves the native job paused. Existing jobs are never
+ * then resume. The destination is authorized again, as it is now, before activation and before
+ * resume. A failure after creation leaves the native job paused, or reports that its state is
+ * unknown when a pause could not be confirmed. Existing jobs are never
  * converted. Enrollment and revocation of one binding never interleave.
  */
 export async function enrollScriptReport(request: EnrollmentRequest, runner: HermesCronRunner = defaultCronRunner): Promise<EnrollmentResult> {
@@ -264,18 +268,38 @@ async function enrollLocked(bindingId: string, request: EnrollmentRequest, runne
   if (!job || job.script !== wrapperRelative || job.no_agent !== true || job.deliver !== 'local' || job.enabled !== false) {
     fail('native_config_mismatch')
   }
+  // The awaited CLI calls can outlast the destination: never activate or resume on stale authority.
+  const reauthorize = () => authorizeNoticeDestination(request.userId, profile, request.sessionId, request.expectedGeneration)
+  const beforeActivation = reauthorize()
+  if (beforeActivation !== 'ok') fail('destination_changed', 409, beforeActivation)
   if (!activateScriptReportBinding(bindingId)) {
     // Revoked (or otherwise settled) meanwhile: never resume a job whose reports are refused.
     throw new EnrollmentError(409, 'binding_revoked', undefined, jobId)
   }
   if (request.paused) return { binding: findScriptReportBinding(bindingId)!, job, resumed: false }
+  const beforeResume = reauthorize()
+  if (beforeResume !== 'ok') {
+    noteScriptReportBindingError(bindingId, 'destination_changed')
+    throw new EnrollmentError(409, 'destination_changed', beforeResume, jobId, 'paused')
+  }
   try {
     await runner(profile, ['resume', jobId])
   } catch (error: any) {
     noteScriptReportBindingError(bindingId, 'native_resume_failed')
-    throw new EnrollmentError(502, 'native_resume_failed', error?.message, jobId)
+    throw new EnrollmentError(502, 'native_resume_failed', error?.message, jobId, await ensurePaused(profile, jobId, runner))
   }
   return { binding: findScriptReportBinding(bindingId)!, job: readNativeJob(profile, jobId), resumed: true }
+}
+
+/** A failed resume may still have enabled the job: pause it by id and report only what is observed. */
+async function ensurePaused(profile: string, jobId: string, runner: HermesCronRunner): Promise<'paused' | 'unknown'> {
+  if (readNativeJob(profile, jobId)?.enabled === false) return 'paused'
+  try {
+    await runner(profile, ['pause', jobId])
+  } catch {
+    // Reported as unknown below.
+  }
+  return readNativeJob(profile, jobId)?.enabled === false ? 'paused' : 'unknown'
 }
 
 /**

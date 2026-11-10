@@ -20,7 +20,7 @@ let origin: string
 let root: string
 let hermesHome: string
 let m: any
-const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean } = { calls: [], jobs: [] }
+const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean; resumeCommitsThenFails?: boolean; failPause?: boolean } = { calls: [], jobs: [] }
 const users: Record<string, { id: number; token: string; modelRun: string }> = {}
 
 function saveJobs() { mkdirSync(join(hermesHome, 'cron'), { recursive: true }); writeFileSync(join(hermesHome, 'cron', 'jobs.json'), JSON.stringify({ jobs: cli.jobs })) }
@@ -36,7 +36,7 @@ beforeEach(async () => {
   vi.stubEnv('HERMES_WEB_UI_HOME', join(root, 'studio'))
   vi.stubEnv('HERMES_HOME', hermesHome)
   vi.stubEnv('HERMES_WEB_UI_TEST_DB_DIR', join(root, 'db'))
-  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false
+  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false; cli.resumeCommitsThenFails = false; cli.failPause = false
   vi.doMock(`${HERMES}/services/runtime/process`, () => ({
     execHermesWithBin: async (_bin: string, args: string[], options: any) => {
       cli.calls.push(args.slice(1))
@@ -55,8 +55,13 @@ beforeEach(async () => {
       }
       const job = cli.jobs.find(item => item.id === rest[0])
       if (command === 'edit') { await cli.editGate; job.script = flag('--script') }
-      if (command === 'resume') { if (cli.failResume) throw new Error('resume refused'); job.enabled = true }
-      if (command === 'pause') job.enabled = false
+      if (command === 'resume') {
+        if (cli.failResume) throw new Error('resume refused')
+        job.enabled = true
+        // Like a CLI that commits the change and then times out.
+        if (cli.resumeCommitsThenFails) { saveJobs(); throw new Error('resume timed out') }
+      }
+      if (command === 'pause') { if (cli.failPause) throw new Error('pause refused'); job.enabled = false }
       saveJobs()
       return { stdout: '', stderr: '' }
     },
@@ -202,9 +207,51 @@ describe('script report enrollment', () => {
   it('leaves the job paused when resume fails', async () => {
     cli.failResume = true
     const failed = await enroll()
-    expect(failed.body).toMatchObject({ error: 'native_resume_failed', job_id: 'job1' })
+    expect(failed.body).toMatchObject({ error: 'native_resume_failed', job_id: 'job1', native_state: 'paused' })
     expect(cli.jobs[0].enabled).toBe(false)
   })
+
+  it('pauses again a job that a failed resume had already enabled', async () => {
+    cli.resumeCommitsThenFails = true
+    const failed = await enroll()
+    expect(failed.body).toEqual({ error: 'native_resume_failed', job_id: 'job1', native_state: 'paused' })
+    expect(commands()).toEqual(['create', 'edit', 'resume', 'pause'])
+    expect(cli.jobs[0].enabled).toBe(false)
+  })
+
+  it('reports an unknown native state when that pause cannot be confirmed', async () => {
+    cli.resumeCommitsThenFails = true
+    cli.failPause = true
+    const failed = await enroll()
+    expect(failed.body).toEqual({ error: 'native_resume_failed', job_id: 'job1', native_state: 'unknown' })
+    expect(cli.jobs[0].enabled).toBe(true)
+  })
+
+  // The destination is authorized before any write, then again after the awaited CLI calls.
+  const changes: Array<[string, 'create' | 'edit', () => void]> = [
+    ['the account is disabled', 'edit', () => m.users.updateUser({ userId: users.member.id, status: 'disabled' })],
+    ['profile access is removed', 'edit', () => m.users.replaceUserProfiles(users.member.id, ['other'])],
+    ['the session history is cleared', 'create', () => m.store.clearSessionMessages('chat-1')],
+    ['the session is deleted', 'create', () => m.store.deleteSession('chat-1')],
+  ]
+  for (const [label, gate, change] of changes) {
+    it(`never activates or resumes when ${label} during the native calls`, async () => {
+      let open!: () => void
+      const deferred = new Promise<void>(resolve => { open = resolve })
+      if (gate === 'create') cli.createGate = deferred
+      else cli.editGate = deferred
+      const pending = enroll()
+      await vi.waitFor(() => expect(commands()).toContain(gate))
+      change()
+      open()
+      const failed = await pending
+      expect(failed.status).toBe(409)
+      expect(failed.body).toMatchObject({ error: 'destination_changed', job_id: 'job1' })
+      expect(commands()).toEqual(['create', 'edit'])
+      expect(cli.jobs[0].enabled).toBe(false)
+      expect(m.db.prepare('SELECT state, job_id FROM script_report_bindings').all()).toEqual([{ state: 'failed', job_id: 'job1' }])
+    })
+  }
 
   it('end to end: an enrolled wrapper run by its native script path reaches the session; health lists it', async () => {
     const { body } = await enroll()

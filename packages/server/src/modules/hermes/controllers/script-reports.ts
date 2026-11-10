@@ -32,7 +32,7 @@ function requestProfile(ctx: Context, value: unknown): string | null {
 function sendError(ctx: Context, error: unknown): void {
   if (error instanceof EnrollmentError) {
     ctx.status = error.status
-    ctx.body = { error: error.code, ...(error.jobId ? { job_id: error.jobId } : {}) }
+    ctx.body = { error: error.code, ...(error.jobId ? { job_id: error.jobId } : {}), ...(error.nativeState ? { native_state: error.nativeState } : {}) }
     return
   }
   ctx.status = 500
