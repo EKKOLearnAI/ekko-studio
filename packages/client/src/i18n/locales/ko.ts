@@ -1126,6 +1126,7 @@ export default {
       staysPaused: "일시 중지 유지",
       currentBinding: "현재 전달 대상",
       movesFrom: "“{session}”에서 전달을 옮깁니다",
+      otherSession: "결과는 이 요청이 표시된 채팅이 아니라 위의 다른 채팅으로 전달됩니다.",
       requestedVia: "요청 자격 증명",
       viaRuntime: "MCP 런타임 자격 증명",
       viaLogin: "Studio 로그인",
@@ -1145,6 +1146,11 @@ export default {
         create_job: "이 채팅에 보고하는 예약 스크립트 작업 만들기",
         modify_job: "기존 스크립트 작업이 이 채팅에 보고 시작(일시 중지 후 래핑하고 재개)",
         subscribe_job: "기존 에이전트 cron 작업의 결과를 이 채팅으로 전달",
+      },
+      actionOther: {
+        create_job: "아래 채팅에 보고하는 예약 스크립트 작업 만들기",
+        modify_job: "기존 스크립트 작업이 아래 채팅에 보고하도록 시작 (작업은 일시 중지, 래핑 후 재개됨)",
+        subscribe_job: "기존 에이전트 cron 작업의 결과를 아래 채팅으로 전달",
       },
     },
     sessionNotice: {

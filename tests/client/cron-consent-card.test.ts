@@ -70,6 +70,26 @@ describe('CronConsentCard', () => {
     expect(wrapper.find('[data-testid="cron-consent-outcome"]').text()).toContain('chat.cronConsent.approved')
   })
 
+  it('names a different target session by title, stable id and profile; a same-session request shows no target', async () => {
+    api.listCronConsents.mockResolvedValue([
+      makeRequest({ id: 'req-x', target: { session_id: 'chat-9', profile: 'default', title: 'Weekly <i>notes</i>' } }),
+      makeRequest({ id: 'req-same' }),
+    ])
+    const wrapper = mount(CronConsentCard, { props: { sessionId: 'chat-1', profile: 'default' } })
+    await flushPromises()
+    const [cross, same] = wrapper.findAll('[data-testid="cron-consent-request"]')
+    const target = cross.find('[data-testid="cron-consent-target"]')
+    expect(target.text()).toContain('Weekly <i>notes</i>')
+    expect(target.text()).toContain('chat-9')
+    expect(target.text()).toContain('default')
+    expect(target.find('i').exists()).toBe(false)
+    expect(cross.text()).toContain('chat.cronConsent.otherSession')
+    expect(cross.text()).toContain('chat.cronConsent.actionOther.create_job')
+    expect(same.text()).toContain('chat.cronConsent.action.create_job')
+    expect(same.find('[data-testid="cron-consent-target"]').exists()).toBe(false)
+    expect(same.text()).not.toContain('chat.cronConsent.otherSession')
+  })
+
   it('reports a refused decision and refetches on a socket hint for its session only', async () => {
     api.listCronConsents.mockResolvedValue([makeRequest({ action: 'subscribe_job', kind: 'cron_session_binding', script: undefined, prompt: 'Summarize', prior_binding: { session_id: 'chat-2', session_title: 'Chat two' } })])
     api.decideCronConsent.mockRejectedValue(Object.assign(new Error('API Error 409'), { code: 'binding_changed' }))

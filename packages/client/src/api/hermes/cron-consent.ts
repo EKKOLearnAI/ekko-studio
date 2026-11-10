@@ -25,6 +25,8 @@ export interface CronConsentRequest {
   prompt?: string
   prompt_truncated?: boolean
   prior_binding?: { session_id: string; session_title: string | null } | null
+  /** Present only when results go to another session than the one holding this request. */
+  target?: { session_id: string; profile: string; title: string | null }
 }
 
 export interface CronConsentContext {

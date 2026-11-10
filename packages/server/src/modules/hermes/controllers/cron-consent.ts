@@ -78,7 +78,12 @@ export async function prepare(ctx: Context) {
 export async function request(ctx: Context) {
   const user = ctx.state.sessionShare ? undefined : ctx.state.user
   if (!user) { ctx.status = 403; ctx.body = { error: 'credential_not_permitted' }; return }
-  const input = body(ctx)
+  // The accepted fields, typed so the generated API catalog lists them; the service validates every value.
+  const raw = ctx.request.body as {
+    profile: string; context_id: string; kind: string; job_id?: string; mode?: string; name?: string; schedule?: string
+    script?: string; workdir?: string; interpreter?: string; paused?: boolean; target_session_id?: string
+  } | undefined
+  const input = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
   if (!requestProfile(ctx, input.profile)) return
   try {
     ctx.status = 202

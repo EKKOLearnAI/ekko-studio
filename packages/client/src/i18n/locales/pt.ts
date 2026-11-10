@@ -1126,6 +1126,7 @@ export default {
       staysPaused: "Permanece pausada",
       currentBinding: "Entrega atualmente para",
       movesFrom: "Move a entrega de “{session}”",
+      otherSession: "Os resultados vão para este outro chat, não para o que mostra este pedido.",
       requestedVia: "Solicitado com",
       viaRuntime: "Credencial de execução MCP",
       viaLogin: "Login do Studio",
@@ -1145,6 +1146,11 @@ export default {
         create_job: "Criar uma tarefa de script agendada que reporta a este chat",
         modify_job: "Fazer uma tarefa de script existente reportar a este chat (pausada, encapsulada e retomada)",
         subscribe_job: "Entregar a este chat os resultados de uma tarefa cron de agente existente",
+      },
+      actionOther: {
+        create_job: "Criar uma tarefa de script agendada que reporta ao chat indicado abaixo",
+        modify_job: "Fazer uma tarefa de script existente reportar ao chat indicado abaixo (a tarefa é pausada, envolvida e retomada)",
+        subscribe_job: "Entregar os resultados de uma tarefa cron de agente existente ao chat indicado abaixo",
       },
     },
     sessionNotice: {

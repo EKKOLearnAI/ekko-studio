@@ -110,8 +110,9 @@ chat card (login)  -> POST /api/hermes/cron/consent-requests/:id/approve | deny
   scheduled-result setup" in the session menu. It calls `POST /api/hermes/cron/consent-contexts`
   (login only) for the current session and profile and shows the returned `context_id` to copy.
   Opening a new one replaces the account's earlier unused setup context for that session. The
-  destination session, profile, account and generation come from the context, never from the
-  request body.
+  origin session, profile, account and generation come from the context; a body `session_id`,
+  generation or account is refused (`400 destination_override_refused`), and another destination
+  can only be named with `target_session_id` (below).
 - **Card.** `GET /api/hermes/cron/consent-requests?profile=&session_id=` lists the account's
   pending requests for the open session. Each shows the frozen operation as plain text: destination,
   job, schedule, script and its SHA-256, working directory, interpreter, prompt, whether the job runs
@@ -124,3 +125,15 @@ chat card (login)  -> POST /api/hermes/cron/consent-requests/:id/approve | deny
   `script_report_enrollment` with `mode: "new"` or `mode: "existing"` (adoption of an existing
   script-only job). A binding is recorded as described in [Cron session bindings](#cron-session-bindings)
   with the approving account; enrollment and adoption run the script report enrollment service.
+- **Cross-session target.** An optional `target_session_id` asks for delivery into another session.
+  The context stays the origin authority: the request, its card, capacity and refresh hints stay in
+  the context's session, and the card names the target by title, stable id and profile. The target
+  must be a session of the same profile attributed to the requesting account; unknown or
+  other-profile (`target_session_not_found`), unattributed (`target_session_unattributed`) and
+  other-account (`target_session_account_mismatch`) targets are refused. Its generation is frozen at
+  request time and rechecked, with the origin, at approval, once the job lock is held, and after the
+  native create/edit awaits before the job is activated or resumed. Naming the context's own session
+  is the same-session request. An account that lost access is refused
+  at approval, once the job lock is held, and after the native
+  create/edit awaits before activation or resume (an adoption's initial pause can precede its next
+  check; nothing is activated without one).

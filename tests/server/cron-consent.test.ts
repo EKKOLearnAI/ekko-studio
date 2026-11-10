@@ -507,6 +507,156 @@ describe('agent job binding', () => {
   })
 })
 
+describe('explicit cross-session target', () => {
+  const generation = (id: string) => m.store.getSessionGeneration(id)
+
+  it('a live turn in the origin asks for another own session: the card stays in the origin and the binding targets it', async () => {
+    const pending = await request(turn('chat-1', users.member.id), { ...bindAgent, target_session_id: 'chat-2' })
+    expect(pending).toMatchObject({ status: 202, body: { session_id: 'chat-1', target_session_id: 'chat-2' } })
+    expect(published).toEqual(['chat-1'])
+    expect((await list('chat-2')).body.requests).toEqual([])
+    const [shown] = (await list('chat-1')).body.requests
+    expect(shown).toMatchObject({ session_id: 'chat-1', session_title: 'Chat one', target: { session_id: 'chat-2', profile: 'default', title: 'Chat two' } })
+    m.store.renameSession('chat-2', 'Renamed target')
+    expect((await list('chat-1')).body.requests[0].target.title).toBe('Renamed target')
+    expect((await approve(pending.body.request_id)).body.binding).toMatchObject({ job_id: 'agent1', session_id: 'chat-2' })
+    expect(cronBindings()[0]).toMatchObject({ session_id: 'chat-2', session_generation: generation('chat-2'), account_id: users.member.id })
+  })
+
+  it('new and existing script jobs report to the target, never to the origin', async () => {
+    const created = await request((await prepare()).body.context_id, { ...newScript, target_session_id: 'chat-2' })
+    const adopted = await request((await prepare()).body.context_id, { ...adopt, target_session_id: 'chat-2' })
+    expect([created.body.target_session_id, adopted.body.target_session_id]).toEqual(['chat-2', 'chat-2'])
+    expect((await approve(created.body.request_id)).body.status).toBe('approved')
+    expect((await approve(adopted.body.request_id)).body.status).toBe('approved')
+    expect(bindingRows().map((row: any) => [row.job_id, row.session_id, row.session_generation])).toEqual([
+      ['job4', 'chat-2', generation('chat-2')], ['legacy1', 'chat-2', generation('chat-2')],
+    ])
+  })
+
+  it('denies unknown, unattributed, foreign and other-profile targets and keeps every other override refused', async () => {
+    m.store.createSession({ id: 'other-profile', profile: 'other', source: 'cli', studio_user_id: users.member.id, title: 'Elsewhere' })
+    const context = turn('chat-1', users.member.id)
+    const refused = async (target: unknown) => (await request(context, { ...bindAgent, target_session_id: target })).body.error
+    expect(await refused('missing-chat')).toBe('target_session_not_found')
+    expect(await refused('other-profile')).toBe('target_session_not_found')
+    expect(await refused('unowned-1')).toBe('target_session_unattributed')
+    expect(await refused('peer-1')).toBe('target_session_account_mismatch')
+    for (const invalid of ['', '  ', 7, null, 'x'.repeat(201)]) expect(await refused(invalid)).toBe('invalid_target_session')
+    for (const key of ['session_id', 'sessionId', 'expected_session_generation', 'session_generation', 'account_id', 'user_id']) {
+      expect((await request(context, { ...bindAgent, target_session_id: 'chat-2', [key]: 'chat-2' })).body.error).toBe('destination_override_refused')
+    }
+    expect((await list()).body.requests).toEqual([])
+    expect(published).toEqual([])
+  })
+
+  it('an explicit same-session target keeps the same-session contract, including an unattributed origin', async () => {
+    const same = await request(turn('chat-1', users.member.id), { ...bindAgent, target_session_id: 'chat-1' })
+    expect(same.body).not.toHaveProperty('target_session_id')
+    expect((await list()).body.requests[0]).not.toHaveProperty('target')
+    const unowned = await request((await prepare('unowned-1')).body.context_id, { ...newScript, target_session_id: 'unowned-1' })
+    expect(unowned).toMatchObject({ status: 202, body: { session_id: 'unowned-1' } })
+  })
+
+  it('a target reset, deletion, recreation or ownership change while pending refuses approval and creates nothing', async () => {
+    const ask = async () => (await request(turn('chat-1', users.member.id), { ...newScript, target_session_id: 'chat-2' })).body.request_id
+    const reset = await ask()
+    m.store.clearSessionMessages('chat-2')
+    expect((await approve(reset)).body.error).toBe('session_generation_mismatch')
+    const moved = await ask()
+    m.store.updateSession('chat-2', { studio_user_id: String(users.peer.id) })
+    expect((await approve(moved)).body.error).toBe('target_session_account_mismatch')
+    m.store.updateSession('chat-2', { studio_user_id: String(users.member.id) })
+    const recreate = () => m.store.createSession({ id: 'chat-2', profile: 'default', source: 'cli', studio_user_id: users.member.id, title: 'Chat two again' })
+    const recreated = await ask()
+    m.store.deleteSession('chat-2')
+    recreate()
+    expect((await approve(recreated)).body.error).toBe('session_generation_mismatch')
+    const deleted = await ask()
+    m.store.deleteSession('chat-2')
+    expect((await approve(deleted)).body.error).toBe('target_session_not_found')
+    recreate()
+    const listed = await ask()
+    m.store.deleteSession('chat-2')
+    expect((await list()).body.requests).toEqual([])
+    expect((await approve(listed)).body.error).toBe('consent_not_found')
+    expect(cli.calls).toEqual([])
+    expect(bindingRows()).toEqual([])
+  })
+
+  it('a target reset during the native create await stops before resume; the job stays paused', async () => {
+    let release!: () => void
+    cli.createGate = new Promise(resolve => { release = resolve })
+    const pending = await request(turn('chat-1', users.member.id), { ...newScript, target_session_id: 'chat-2' })
+    const approval = approve(pending.body.request_id)
+    // The approved plan is inside the native create call, which waits on the gate.
+    await until(() => commands().includes('create'), 'native create entered')
+    m.store.clearSessionMessages('chat-2')
+    release()
+    expect((await approval).body.error).toBe('session_generation_mismatch')
+    expect(commands()).not.toContain('resume')
+    expect(job('job4').enabled).toBe(false)
+  })
+
+  it('an agent binding rechecks target ownership after waiting for the job lock; the prior binding is moved only as shown', async () => {
+    await approve((await request(turn('chat-1', users.member.id), bindAgent)).body.request_id)
+    const transfer = await request(turn('chat-1', users.member.id), { ...bindAgent, target_session_id: 'chat-2' })
+    expect((await list()).body.requests[0].prior_binding).toMatchObject({ session_id: 'chat-1', session_title: 'Chat one' })
+    let release!: () => void
+    const held = m.jobLock.withCronJobLock('default', 'agent1', () => new Promise<void>(resolve => { release = resolve }))
+    const decided = published.length
+    const approval = approve(transfer.body.request_id)
+    // The decision publishes, passes its admission check and queues on the job lock in one synchronous step,
+    // so once it has published, only the post-lock recheck can see the ownership change below.
+    await until(() => published.length > decided, 'approval queued on the job lock')
+    m.store.updateSession('chat-2', { studio_user_id: String(users.peer.id) })
+    release()
+    await held
+    expect((await approval).body.error).toBe('target_session_account_mismatch')
+    expect(cronBindings()[0]).toMatchObject({ session_id: 'chat-1' })
+  })
+})
+
+describe('long-lived binding after approval (simulated clock and restart, not real time)', () => {
+  it('same-session and cross-session agent bindings outlive the contexts, both JWTs and a Studio restart', async () => {
+    cli.jobs.push({ ...structuredClone(job('agent1')), id: 'agent2', name: 'Evening brief' })
+    saveJobs()
+    const start = Date.now()
+    const same = await request((await prepare()).body.context_id, bindAgent)
+    const cross = await request(turn('chat-1', users.member.id), { ...bindAgent, job_id: 'agent2', target_session_id: 'chat-2' })
+    expect((await approve(same.body.request_id)).body.status).toBe('approved')
+    expect((await approve(cross.body.request_id)).body.status).toBe('approved')
+    // 31 days later: setup/turn contexts, pending TTL, model-run JWT (1 h) and login JWT (30 d) have all expired.
+    vi.spyOn(Date, 'now').mockReturnValue(start + 31 * 24 * 3600_000)
+    expect((await list()).status).toBe(401)
+    expect((await request('any-context', bindAgent)).status).toBe(401)
+    // Restart: fresh modules and an empty consent store over the same state directories.
+    vi.resetModules()
+    const fresh = {
+      consent: await import(`${HERMES}/services/cron-consent/consent`),
+      store: await import(`${STUDIO}/repositories/session-store`),
+      notifications: await import(`${STUDIO}/public/session-notifications`),
+      observer: await import(`${STUDIO}/services/session-notifications/cron-observer`),
+    }
+    expect(fresh.consent.cronConsentStore.list(users.member.id, 'default', 'chat-1')).toEqual([])
+    const fire = (jobId: string) => ({ job_id: jobId, execution_id: `exec-${jobId}`, source: 'builtin', scheduled_instant: '2026-12-04T09:00:00+00:00',
+      status: 'completed', no_agent: false, receipt: 'exact', success: true, answer: `answer from ${jobId}`, silent: false })
+    const delivered: any[] = []
+    await fresh.observer.observeCronBindings({
+      namespace: fresh.notifications.studioInstanceId(), bindingsPath: fresh.notifications.cronBindingsDbPath(),
+      observe: async () => ({ jobs: ['agent1', 'agent2'].map(id => ({ job_id: id, state: 'present', deliver: 'local' })), executions: [fire('agent1'), fire('agent2')] }),
+      getSession: (id: string) => {
+        const session = fresh.store.getSession(id)
+        return session ? { profile: session.profile, generation: fresh.store.getSessionGeneration(id) } : null
+      },
+      publish: (record: any) => delivered.push(record),
+    })
+    expect(delivered.map(record => [record.sessionId ?? record.session_id, record.disposition, record.payload?.content]).sort()).toEqual([
+      ['chat-1', 'notified', 'answer from agent1'], ['chat-2', 'notified', 'answer from agent2'],
+    ])
+  })
+})
+
 describe('isolation of the consent journey', () => {
   it('writes no file before approval except the issued runtime credential', async () => {
     await prepare()
@@ -746,5 +896,20 @@ describe('queued job API mutations', () => {
       () => m.db.prepare("UPDATE users SET status='disabled' WHERE id=?").run(users.peer.id))
     expect(response.status).toBe(403)
     expect(cli.calls).toEqual([])
+  })
+})
+
+describe('approval route native state', () => {
+  it('reports native_state and the job id when an approved enrollment fails after the CLI enabled the job', async () => {
+    const pending = await request(turn('chat-1', users.member.id), newScript)
+    expect(pending.status).toBe(202)
+    // The native resume commits (job enabled) and then errors.
+    cli.onResume = () => { saveJobs(); throw new Error('resume timed out') }
+    const approved = await approve(pending.body.request_id)
+    cli.onResume = undefined
+    expect(approved.status).toBe(502)
+    expect(approved.body).toMatchObject({ error: 'native_resume_failed', native_state: 'paused' })
+    expect(typeof approved.body.job_id).toBe('string')
+    expect(cli.jobs.find((job: any) => job.id === approved.body.job_id)?.enabled).toBe(false)
   })
 })

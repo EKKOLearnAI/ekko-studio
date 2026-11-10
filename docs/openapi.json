@@ -7076,7 +7076,7 @@
           "Cron Consent"
         ],
         "summary": "Create consent-requests",
-        "description": "MCP runtime credential: ask the user to approve cron result delivery into a chat. Body { profile, context_id (current turn or prepared), kind: \"cron_session_binding\" + job_id | \"script_report_enrollment\" + mode \"new\" (name, schedule, script) or \"existing\" + job_id }. No session_id. 202 pending; nothing runs until approved in Studio.",
+        "description": "MCP runtime credential: ask the user to approve cron result delivery into a chat. Body { profile, context_id (current turn or prepared), kind: \"cron_session_binding\" + job_id | \"script_report_enrollment\" + mode \"new\" (name, schedule, script) or \"existing\" + job_id, optional target_session_id (another session of the same account and profile; the card stays in the context's session) }. No session_id. 202 pending; nothing runs until approved in Studio.",
         "operationId": "request",
         "security": [
           {
@@ -7092,6 +7092,59 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "context_id": {
+                    "type": "string"
+                  },
+                  "interpreter": {
+                    "type": "string"
+                  },
+                  "job_id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "paused": {
+                    "type": "boolean"
+                  },
+                  "profile": {
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "type": "string"
+                  },
+                  "script": {
+                    "type": "string"
+                  },
+                  "target_session_id": {
+                    "type": "string"
+                  },
+                  "workdir": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "context_id",
+                  "kind",
+                  "profile"
+                ]
+              }
+            }
           }
         }
       }

@@ -1126,6 +1126,7 @@ export default {
       staysPaused: "一時停止のまま",
       currentBinding: "現在の配信先",
       movesFrom: "「{session}」から配信を移動します",
+      otherSession: "結果はこのリクエストを表示しているチャットではなく、上記の別のチャットに届きます。",
       requestedVia: "リクエスト資格情報",
       viaRuntime: "MCP 実行時資格情報",
       viaLogin: "Studio ログイン",
@@ -1145,6 +1146,11 @@ export default {
         create_job: "このチャットに報告するスケジュールスクリプトジョブを作成",
         modify_job: "既存のスクリプトジョブがこのチャットに報告を開始（一時停止・ラップ後に再開）",
         subscribe_job: "既存のエージェント cron ジョブの結果をこのチャットに配信",
+      },
+      actionOther: {
+        create_job: "下記のチャットに報告するスケジュールスクリプトジョブを作成",
+        modify_job: "既存のスクリプトジョブが下記のチャットに報告を開始（一時停止・ラップ後に再開）",
+        subscribe_job: "既存のエージェント cron ジョブの結果を下記のチャットに配信",
       },
     },
     sessionNotice: {

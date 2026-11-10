@@ -1126,6 +1126,7 @@ export default {
       staysPaused: "Bleibt pausiert",
       currentBinding: "Stellt derzeit zu an",
       movesFrom: "Verschiebt die Zustellung weg von „{session}“",
+      otherSession: "Ergebnisse gehen an diesen anderen Chat, nicht an den Chat mit dieser Anfrage.",
       requestedVia: "Angefragt mit",
       viaRuntime: "MCP-Laufzeit-Anmeldedaten",
       viaLogin: "Studio-Anmeldung",
@@ -1145,6 +1146,11 @@ export default {
         create_job: "Einen geplanten Skript-Job erstellen, der an diesen Chat berichtet",
         modify_job: "Bestehenden Skript-Job an diesen Chat berichten lassen (wird pausiert, umhüllt und fortgesetzt)",
         subscribe_job: "Ergebnisse eines bestehenden Agent-Cron-Jobs an diesen Chat zustellen",
+      },
+      actionOther: {
+        create_job: "Einen geplanten Skript-Job erstellen, der an den unten genannten Chat berichtet",
+        modify_job: "Bestehenden Skript-Job an den unten genannten Chat berichten lassen (wird pausiert, umhüllt und fortgesetzt)",
+        subscribe_job: "Ergebnisse eines bestehenden Agent-Cron-Jobs an den unten genannten Chat zustellen",
       },
     },
     sessionNotice: {

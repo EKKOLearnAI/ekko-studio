@@ -1147,6 +1147,7 @@ export default {
       staysPaused: "保持暂停",
       currentBinding: "当前投递到",
       movesFrom: "将投递从“{session}”移走",
+      otherSession: "结果将投递到上面这个对话，而不是显示此请求的当前对话。",
       requestedVia: "请求凭证",
       viaRuntime: "MCP 运行凭证",
       viaLogin: "Studio 登录",
@@ -1166,6 +1167,11 @@ export default {
         create_job: "创建一个向本对话汇报的定时脚本任务",
         modify_job: "让现有脚本任务开始向本对话汇报（任务会暂停、包装后再恢复）",
         subscribe_job: "把现有 Agent 定时任务的结果投递到本对话",
+      },
+      actionOther: {
+        create_job: "创建一个向下方所示对话汇报的定时脚本任务",
+        modify_job: "让现有脚本任务开始向下方所示对话汇报（任务会暂停、包装后再恢复）",
+        subscribe_job: "把现有 Agent 定时任务的结果投递到下方所示对话",
       },
     },
     sessionNotice: {

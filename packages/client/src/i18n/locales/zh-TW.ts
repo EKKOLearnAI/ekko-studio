@@ -1140,6 +1140,7 @@ export default {
       staysPaused: "保持暫停",
       currentBinding: "目前投遞到",
       movesFrom: "將投遞從「{session}」移走",
+      otherSession: "結果將投遞到上面這個對話，而不是顯示此請求的目前對話。",
       requestedVia: "請求憑證",
       viaRuntime: "MCP 執行憑證",
       viaLogin: "Studio 登入",
@@ -1159,6 +1160,11 @@ export default {
         create_job: "建立一個向本對話回報的排程腳本任務",
         modify_job: "讓現有腳本任務開始向本對話回報（任務會暫停、包裝後再恢復）",
         subscribe_job: "將現有 Agent 排程任務的結果投遞到本對話",
+      },
+      actionOther: {
+        create_job: "建立一個向下方所示對話匯報的定時腳本任務",
+        modify_job: "讓現有腳本任務開始向下方所示對話匯報（任務會暫停、包裝後再恢復）",
+        subscribe_job: "把現有 Agent 定時任務的結果投遞到下方所示對話",
       },
     },
     sessionNotice: {

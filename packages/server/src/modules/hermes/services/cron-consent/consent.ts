@@ -34,6 +34,10 @@ import {
  * context of the same account (another session or profile it can use) can therefore be named; the
  * request then visibly targets that context's session and still needs that account's login approval.
  * This is not cryptographic isolation between one account's sessions.
+ *
+ * Cross-session delivery: an optional `target_session_id` names another session of the same account
+ * and profile. The context stays the origin authority (its session shows the card and holds the
+ * request); the target is frozen separately and must be attributed to the requesting account.
  */
 
 export const CONSENT_TTL_MS = 10 * 60_000
@@ -42,7 +46,7 @@ const MAX_PREPARED_PER_SESSION = 3
 const MAX_ENTRIES = 500
 const PROMPT_PREVIEW_CHARS = 1000
 /** Fields that would let a caller choose the destination; the authority decides it. */
-const DESTINATION_OVERRIDES = ['session_id', 'sessionId', 'expected_session_generation', 'session_generation', 'account_id', 'user_id', 'target_session_id']
+const DESTINATION_OVERRIDES = ['session_id', 'sessionId', 'expected_session_generation', 'session_generation', 'account_id', 'user_id']
 /** Credentials that may ask; approval always requires `login`. */
 const REQUEST_CREDENTIALS: ReadonlySet<RequestCredentialKind> = new Set(['model_run', 'login'])
 
@@ -72,9 +76,17 @@ interface PreparedContext {
   expiresAt: number
 }
 
+/** A frozen delivery session other than the origin; it never holds the request. */
+interface ConsentTarget {
+  sessionId: string
+  generation: string
+}
+
 interface PendingConsent {
   id: string
   authority: ConsentAuthority
+  /** Null: results go to the origin session (the same-session contract). */
+  target: ConsentTarget | null
   operation: ConsentOperation
   display: Record<string, unknown>
   createdAt: number
@@ -131,11 +143,11 @@ export class CronConsentStore {
   }
 
   /** Synchronously moves a prepared context into the pending phase with its frozen operation. */
-  addPending(authority: ConsentAuthority, operation: ConsentOperation, display: Record<string, unknown>, preparedId?: string): PendingConsent {
+  addPending(authority: ConsentAuthority, target: ConsentTarget | null, operation: ConsentOperation, display: Record<string, unknown>, preparedId?: string): PendingConsent {
     this.assertCapacity(authority, 'pending')
     if (preparedId && !this.prepared.delete(preparedId)) throw new ConsentError(409, 'context_unavailable')
     const now = this.now()
-    const entry = { id: randomUUID(), authority, operation, display, createdAt: now, expiresAt: now + CONSENT_TTL_MS }
+    const entry = { id: randomUUID(), authority, target, operation, display, createdAt: now, expiresAt: now + CONSENT_TTL_MS }
     this.pending.set(entry.id, entry)
     return entry
   }
@@ -191,6 +203,34 @@ function consentDestinationVerdict(authority: ConsentAuthority): { status: numbe
 function assertConsentDestination(authority: ConsentAuthority): void {
   const refused = consentDestinationVerdict(authority)
   if (refused) throw new ConsentError(refused.status, refused.code)
+}
+
+/**
+ * An explicit other target must be a session of the origin's profile attributed to the same account
+ * (an unattributed session is not this account's), then pass the ordinary destination policy.
+ */
+function targetVerdict(authority: ConsentAuthority, target: ConsentTarget): { status: number; code: string } | null {
+  const view = consentSessionView(target.sessionId)
+  if (!view || view.profile !== authority.profile) return { status: 404, code: 'target_session_not_found' }
+  if (view.ownerAccount === null) return { status: 403, code: 'target_session_unattributed' }
+  if (view.ownerAccount !== authority.accountId) return { status: 403, code: 'target_session_account_mismatch' }
+  return consentDestinationVerdict({ ...authority, sessionId: target.sessionId, generation: target.generation })
+}
+
+/** Both the origin (which holds the request) and any explicit target must still authorize. */
+function pendingVerdict(entry: Pick<PendingConsent, 'authority' | 'target'>): { status: number; code: string } | null {
+  return consentDestinationVerdict(entry.authority) ?? (entry.target ? targetVerdict(entry.authority, entry.target) : null)
+}
+
+function resolveTarget(authority: ConsentAuthority, value: unknown): ConsentTarget | null {
+  if (value === undefined) return null
+  const sessionId = text(value, 'target_session', 200)
+  // Naming the origin itself keeps the same-session contract.
+  if (sessionId === authority.sessionId) return null
+  const target = { sessionId, generation: consentSessionView(sessionId)?.generation ?? '' }
+  const refused = targetVerdict(authority, target)
+  if (refused) throw new ConsentError(refused.status, refused.code)
+  return target
 }
 
 function text(value: unknown, field: string, max = 200): string {
@@ -290,26 +330,33 @@ export function requestConsent(deps: ConsentDeps, store: CronConsentStore, user:
   const contextId = text(input.context_id, 'context', 200)
   const { authority, preparedId } = resolveAuthority(deps, store, user, profile, contextId)
   assertConsentDestination(authority)
+  const target = resolveTarget(authority, input.target_session_id)
   const { operation, display } = freezeOperation(profile, input)
-  const entry = store.addPending(authority, operation, {
+  const entry = store.addPending(authority, target, operation, {
     ...display, profile, session_id: authority.sessionId, session_title: sessionTitle(authority.sessionId),
     context_kind: authority.contextKind, requested_via: credential,
   }, preparedId)
   deps.publish(authority.sessionId)
-  return { request_id: entry.id, kind: operation.kind, status: 'pending_user_consent' as const, session_id: authority.sessionId, expires_at: entry.expiresAt }
+  return {
+    request_id: entry.id, kind: operation.kind, status: 'pending_user_consent' as const, session_id: authority.sessionId,
+    ...(target ? { target_session_id: target.sessionId } : {}), expires_at: entry.expiresAt,
+  }
 }
 
 /** GET /consent-requests: the login account's pending requests for one session, still valid now. */
 export function listConsents(store: CronConsentStore, user: AuthenticatedUser, profile: string, sessionId: string) {
   return store.list(user.id, profile, sessionId).flatMap(entry => {
     // A reset/deleted session or lost access invalidates the request instead of showing it.
-    if (consentDestinationVerdict(entry.authority)) {
+    if (pendingVerdict(entry)) {
       store.discard(entry.id)
       return []
     }
-    // The destination is shown with its current title; identity is the frozen session id.
+    // Sessions are shown with their current titles; identity is the frozen session id.
+    const target = entry.target
+      ? { target: { session_id: entry.target.sessionId, profile: entry.authority.profile, title: sessionTitle(entry.target.sessionId) } }
+      : {}
     return [{ id: entry.id, created_at: entry.createdAt, expires_at: entry.expiresAt, ...entry.display,
-      session_title: sessionTitle(entry.authority.sessionId) }]
+      session_title: sessionTitle(entry.authority.sessionId), ...target }]
   })
 }
 
@@ -322,22 +369,22 @@ export async function decideConsent(deps: ConsentDeps, store: CronConsentStore, 
   deps.publish(entry.authority.sessionId)
   if (decision === 'deny') return { status: 'denied', request_id: entry.id }
   const { authority, operation } = entry
-  assertConsentDestination(authority)
-  const destination = {
-    userId: authority.accountId, profile: authority.profile, sessionId: authority.sessionId, expectedGeneration: authority.generation,
-  }
+  const refusedNow = pendingVerdict(entry)
+  if (refusedNow) throw new ConsentError(refusedNow.status, refusedNow.code)
+  const { sessionId, generation } = entry.target ?? authority
+  const destination = { userId: authority.accountId, profile: authority.profile, sessionId, expectedGeneration: generation }
   if (operation.kind === 'cron_session_binding') {
     const binding = await executeAgentBinding(operation.plan, {
-      userId: authority.accountId, sessionId: authority.sessionId, generation: authority.generation,
+      userId: authority.accountId, sessionId, generation,
       recheck: () => {
-        const refused = consentDestinationVerdict(authority)
+        const refused = pendingVerdict(entry)
         if (refused) throw new CronBindingError(refused.status, refused.code)
       },
     })
     return { status: 'approved', request_id: entry.id, kind: operation.kind, binding }
   }
   const recheck = () => {
-    const refused = consentDestinationVerdict(authority)
+    const refused = pendingVerdict(entry)
     if (refused) throw new EnrollmentError(refused.status, refused.code)
   }
   const runner = deps.runner || defaultCronRunner

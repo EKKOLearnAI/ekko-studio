@@ -93,7 +93,7 @@ function dismissOutcome(id: string) {
   outcome.value = rest
 }
 
-const actionLabel = (item: CronConsentRequest) => t(`chat.cronConsent.action.${item.action}`)
+const actionLabel = (item: CronConsentRequest) => t(`chat.cronConsent.${item.target ? 'actionOther' : 'action'}.${item.action}`)
 const formatTime = (value: number) => new Date(value).toLocaleTimeString()
 
 watch(() => [props.sessionId, props.profile], () => {
@@ -129,7 +129,11 @@ defineExpose({ prepare, refresh })
       <div class="cron-consent__action">{{ actionLabel(item) }}</div>
       <dl class="cron-consent__fields">
         <dt>{{ t('chat.cronConsent.target') }}</dt>
-        <dd>{{ item.session_title || item.session_id }} · {{ item.profile }}</dd>
+        <dd v-if="item.target" data-testid="cron-consent-target">
+          <strong>{{ item.target.title || item.target.session_id }}</strong> · <code>{{ item.target.session_id }}</code> · {{ item.target.profile }}
+          <div class="cron-consent__hint">{{ t('chat.cronConsent.otherSession') }}</div>
+        </dd>
+        <dd v-else>{{ item.session_title || item.session_id }} · {{ item.profile }}</dd>
         <dt>{{ t('chat.cronConsent.job') }}</dt>
         <dd>{{ item.name }}<template v-if="item.job_id"> ({{ item.job_id }})</template></dd>
         <dt>{{ t('chat.cronConsent.schedule') }}</dt>

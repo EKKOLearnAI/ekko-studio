@@ -1147,6 +1147,7 @@ export default {
       staysPaused: "Stays paused",
       currentBinding: "Currently delivers to",
       movesFrom: "Moves delivery away from “{session}”",
+      otherSession: "Results go to this other chat, not the one showing this request.",
       requestedVia: "Requested with",
       viaRuntime: "MCP runtime credential",
       viaLogin: "Studio login",
@@ -1166,6 +1167,11 @@ export default {
         create_job: "Create a scheduled script job that reports to this chat",
         modify_job: "Start reporting an existing script job to this chat (the job is paused, wrapped and resumed)",
         subscribe_job: "Deliver an existing agent cron job's results to this chat",
+      },
+      actionOther: {
+        create_job: "Create a scheduled script job that reports to the chat named below",
+        modify_job: "Start reporting an existing script job to the chat named below (the job is paused, wrapped and resumed)",
+        subscribe_job: "Deliver an existing agent cron job's results to the chat named below",
       },
     },
     sessionNotice: {
