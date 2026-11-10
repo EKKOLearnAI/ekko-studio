@@ -309,6 +309,12 @@ const renderedHtml = computed(() => {
     const fileName = renderedLinkText(innerHtml)
     const downloadName = inferDownloadFileName(path, fileName)
 
+    // Passive content never gets a media player: preload fetches on display. The
+    // plain local link downloads only when clicked (see handleMarkdownClick).
+    if (props.passive && (hasExtension(path, VIDEO_EXTENSIONS) || hasExtension(path, AUDIO_EXTENSIONS))) {
+      return `<a class="markdown-media-link" href="${md.utils.escapeHtml(path)}">${innerHtml}</a>`
+    }
+
     // Media already has an immediate inline preview and is not presented as a
     // downloadable document, so keep the player instead of opening source view.
     if (hasExtension(path, VIDEO_EXTENSIONS)) {

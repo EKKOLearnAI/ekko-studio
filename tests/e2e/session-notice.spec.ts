@@ -16,6 +16,8 @@ async function openNotices(page: Page) {
 }
 
 test('renders a script invocation report as passive Markdown with its wrapper provenance', async ({ page }) => {
+  const downloads: string[] = []
+  page.on('request', request => { if (request.url().includes('/files/download')) downloads.push(request.url()) })
   await openNotices(page)
   const content = [
     '**3 new items** <b>raw</b>',
@@ -25,6 +27,8 @@ test('renders a script invocation report as passive Markdown with its wrapper pr
     '| First | [#1](https://example.invalid/items/1) |',
     '',
     '![pixel](https://external.example/pixel.png)',
+    '',
+    '[clip](/tmp/report.mp4) [audio](/tmp/report.mp3)',
   ].join('\n')
   await page.evaluate(content => {
     const sid = (window as any).sessionNoticeFixture.sid
@@ -49,6 +53,9 @@ test('renders a script invocation report as passive Markdown with its wrapper pr
   await expect(body.locator('table th')).toHaveText(['Item', 'Link'])
   await expect(body.getByRole('link', { name: '#1' })).toHaveAttribute('href', 'https://example.invalid/items/1')
   await expect(page.locator('.markdown-body b, img')).toHaveCount(0)
+  await expect(body.locator('a.markdown-media-link')).toHaveCount(2)
+  await expect(page.locator('video, audio')).toHaveCount(0)
+  expect(downloads).toEqual([])
   // A notice is display-only: it is the only message, and no turn was added for it.
   await expect(page.locator('.message')).toHaveCount(1)
 })

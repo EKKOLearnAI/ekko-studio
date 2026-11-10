@@ -25,6 +25,14 @@ vi.mock('naive-ui', () => ({
   }),
 }))
 
+// Local file links resolve to tokenized download URLs; record every download the renderer starts.
+vi.mock('@/api/studio/download', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/api/studio/download')>()),
+  downloadFile: vi.fn(() => Promise.resolve()),
+  getDownloadUrl: vi.fn((path: string) => `/api/studio/files/download?path=${encodeURIComponent(path)}&token=session-token`),
+}))
+
+import { downloadFile, getDownloadUrl } from '@/api/studio/download'
 import MessageItem from '@/components/hermes/chat/MessageItem.vue'
 import type { Message } from '@/stores/hermes/chat'
 
@@ -71,6 +79,8 @@ function scriptReport(content: string): Message {
 
 describe('MessageItem studio notices', () => {
   beforeEach(() => {
+    vi.mocked(downloadFile).mockClear()
+    vi.mocked(getDownloadUrl).mockClear()
     setActivePinia(createPinia())
     Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
     Object.defineProperty(navigator, 'clipboard', {
@@ -175,5 +185,38 @@ describe('MessageItem studio notices', () => {
     await flushPromises()
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(REPORT)
+  })
+
+  it('never creates a media player or starts a download for audio or video in a script report', async () => {
+    const wrapper = mount(MessageItem, { props: { message: scriptReport('[clip](/tmp/report.mp4) [audio](/tmp/report.mp3)') } })
+    await flushPromises()
+    const body = wrapper.find('.markdown-body')
+
+    expect(body.findAll('video, audio, source, [preload], [src]')).toHaveLength(0)
+    expect(body.html()).not.toContain('session-token')
+    expect(body.findAll('a.markdown-media-link').map(link => link.attributes('href'))).toEqual(['/tmp/report.mp4', '/tmp/report.mp3'])
+    expect(getDownloadUrl).not.toHaveBeenCalled()
+    expect(downloadFile).not.toHaveBeenCalled()
+  })
+
+  it('downloads script report media only when its link is clicked', async () => {
+    const wrapper = mount(MessageItem, { props: { message: scriptReport('[audio](/tmp/report.mp3)') } })
+    await flushPromises()
+    expect(downloadFile).not.toHaveBeenCalled()
+
+    await wrapper.find('a.markdown-media-link').trigger('click')
+    await flushPromises()
+
+    expect(downloadFile).toHaveBeenCalledTimes(1)
+    expect(downloadFile).toHaveBeenCalledWith('/tmp/report.mp3', 'report.mp3')
+  })
+
+  it('keeps the inline media players for ordinary system messages', async () => {
+    const wrapper = mount(MessageItem, { props: { message: systemMessage('[clip](/tmp/report.mp4) [audio](/tmp/report.mp3)') } })
+    await flushPromises()
+
+    expect(wrapper.find('.markdown-body video').attributes('preload')).toBe('metadata')
+    expect(wrapper.find('.markdown-body audio').attributes('preload')).toBe('metadata')
+    expect(wrapper.find('.markdown-body video').attributes('src')).toContain('session-token')
   })
 })
