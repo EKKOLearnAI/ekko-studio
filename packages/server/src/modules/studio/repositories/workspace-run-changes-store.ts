@@ -144,10 +144,68 @@ function readWorkspaceRunChange(db: HermesDb, sessionId: string, changeId: strin
   return mapSummary(row, files.map(mapFileSummary))
 }
 
+/**
+ * #2404: overlapping runs sharing one workspace attribute the same physical
+ * change to every concurrently-active run, because the run-end diff is taken
+ * over the whole shared directory. A file's (path, change_type, sizes, line
+ * counts) uniquely identifies one physical change; if another run whose time
+ * window OVERLAPS this one already recorded it, this row is the directory-diff
+ * echo of the same write and must not be attributed again.
+ *
+ * The overlap guard is essential: two sequential runs can legitimately make
+ * byte-identical changes to the same file (e.g. re-applying the same fix), and
+ * those are distinct real events that must both be recorded. Only concurrently
+ * active runs can echo each other's writes, so only they are deduped.
+ */
+function hasDuplicatePhysicalChange(
+  db: HermesDb,
+  changeId: string,
+  file: SaveWorkspaceRunChangeInput['files'][number],
+  startedAt: number,
+  finishedAt: number,
+): boolean {
+  const row = db.prepare(
+    `SELECT 1 FROM ${WORKSPACE_RUN_CHANGE_FILES_TABLE} f
+     JOIN ${WORKSPACE_RUN_CHANGES_TABLE} c ON c.change_id = f.change_id
+     WHERE f.change_id != ?
+       AND f.path = ?
+       AND f.change_type = ?
+       AND f.additions = ?
+       AND f.deletions = ?
+       AND f.size_before IS ?
+       AND f.size_after IS ?
+       AND c.started_at < ? AND c.finished_at > ?
+     LIMIT 1`,
+  ).get(
+    changeId,
+    file.path,
+    file.change_type,
+    file.additions,
+    file.deletions,
+    file.size_before ?? null,
+    file.size_after ?? null,
+    finishedAt,
+    startedAt,
+  ) as { '1': number } | undefined
+  return !!row
+}
+
 export function insertWorkspaceRunChange(db: HermesDb, change: SaveWorkspaceRunChangeInput): WorkspaceRunChangeSummary | null {
   const createdAt = Math.floor(Date.now() / 1000)
   db.prepare(`DELETE FROM ${WORKSPACE_RUN_CHANGE_FILES_TABLE} WHERE change_id = ?`).run(change.change_id)
   db.prepare(`DELETE FROM ${WORKSPACE_RUN_CHANGES_TABLE} WHERE change_id = ?`).run(change.change_id)
+
+  // #2404: drop directory-diff echoes of writes already attributed to a
+  // concurrently-active run (see hasDuplicatePhysicalChange). A fully-duplicated
+  // change has nothing left to record — the attribution belongs to the first run.
+  // An EMPTY file list is not deduplication: zero-file changes (e.g. a pure
+  // workspace_diff card) must still be persisted as before.
+  const files = change.files.filter(file => !hasDuplicatePhysicalChange(db, change.change_id, file, change.started_at, change.finished_at))
+  if (change.files.length > 0 && files.length === 0) return null
+  const additions = files.reduce((n, f) => n + f.additions, 0)
+  const deletions = files.reduce((n, f) => n + f.deletions, 0)
+  const totalPatchBytes = files.reduce((n, f) => n + f.patch_bytes, 0)
+
   db.prepare(
     `INSERT INTO ${WORKSPACE_RUN_CHANGES_TABLE} (
       change_id, room_id, message_id, assistant_message_id, session_id, run_id, source, workspace, workspace_kind, started_at, finished_at,
@@ -165,11 +223,11 @@ export function insertWorkspaceRunChange(db: HermesDb, change: SaveWorkspaceRunC
     change.workspace_kind || 'git',
     change.started_at,
     change.finished_at,
-    change.files_changed,
-    change.additions,
-    change.deletions,
+    files.length,
+    additions,
+    deletions,
     change.truncated ? 1 : 0,
-    change.total_patch_bytes,
+    totalPatchBytes,
     createdAt,
   )
 
@@ -179,7 +237,7 @@ export function insertWorkspaceRunChange(db: HermesDb, change: SaveWorkspaceRunC
       size_before, size_after, patch, patch_bytes, truncated, binary, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
-  for (const file of change.files) {
+  for (const file of files) {
     insertFile.run(
       change.change_id,
       change.session_id,
