@@ -57,6 +57,7 @@ it('includes account-wide schedules in snapshots regardless of the selected BOT'
   vi.doMock('../../packages/server/src/modules/studio/services/person/agents', () => ({}))
   vi.doMock('../../packages/server/src/modules/studio/repositories/person-history-store', () => ({ personHasPendingWork: () => false }))
   vi.doMock('../../packages/server/src/modules/studio/repositories/person-stage-store', () => ({ listPersonFlows: () => [], personFlowActivity: () => ({}) }))
+  vi.doMock('../../packages/server/src/modules/studio/services/person/flow-conversation', () => ({ personConversationFlows: () => ({ flows: [], active_flow_count: 0, active_flows: [], history_cleared_at: 0 }) }))
   vi.doMock('../../packages/server/src/modules/studio/repositories/person-presence-store', () => ({ personBackgroundTaskCount: () => 0 }))
   vi.doMock('../../packages/server/src/modules/studio/repositories/person-store', async importOriginal => ({ ...await importOriginal<typeof store>(), listPersonTasks: () => [], personInteractions: () => [] }))
   const { personSnapshot } = await import('../../packages/server/src/modules/studio/services/person/service')

@@ -19305,6 +19305,15 @@
               "type": "string"
             },
             "description": "Selected owned conversation; omitted returns shared settings with session=null and creates no conversation."
+          },
+          {
+            "name": "include_flows",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            },
+            "description": "Include collaboration history and activity. Studio uses false because resume and person.updated deliver personFlows with the conversation."
           }
         ]
       }
@@ -19792,6 +19801,61 @@
             }
           }
         }
+      }
+    },
+    "/api/studio/person/flows/{id}/messages": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get messages",
+        "description": "Read the original visible messages of one account-owned collaboration in a unified conversation. Correlates exact creator/stage run identities across rounds and resume generations; never includes unrelated turns from the same Bot. Older flows use their exact persisted confirmations and result references. Returns flow metadata, chronological messages with source Bot identity, has_more, next_before_id and history_key. Hidden reasoning, tool payloads and system prompts are projected out as in ordinary Bot chat. Cleared/deleted creator history is unavailable. Read-only; does not copy messages, mark participant chats read, send messages or wake any Bot.",
+        "operationId": "flowConversation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Exclusive message ID cursor for earlier entries; omit for the latest page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            }
+          }
+        ]
       }
     },
     "/api/studio/person/interactions/{id}/answer": {
@@ -22331,7 +22395,7 @@
           "Sessions"
         ],
         "summary": "Get paginated",
-        "description": "GET /api/studio/sessions/conversations/:id/messages/paginated\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
+        "description": "GET /api/studio/sessions/conversations/:id/messages/paginated\nWith timeline=true, personFlows.cards contains lightweight cards and personFlows.timeline contains ordered item references, per-item cursors, before, has_more, history_revision and reset. Resume supplies the same first page. Replies inside a collaboration remain separately paginated.\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getConversationMessagesPaginated",
         "security": [
           {
@@ -22377,6 +22441,23 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "timeline",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Studio Person chat: page message and collaboration-card references together (at most 150 combined items). Omit to retain raw-message OFFSET pagination."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque personFlows.timeline.before cursor from the preceding page. Used only with timeline=true; a changed history revision resets the page."
           }
         ],
         "x-session-share-permission": "read"

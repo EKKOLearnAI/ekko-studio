@@ -1,4 +1,5 @@
 import { personDisplayMessages, personDisplayPage, personDisplayMetadata, PERSON_DISPLAY_PROJECTION } from '../services/chat-run/person-display'
+import { personConversationFlows, personConversationTimeline } from '../services/person/flow-conversation'
 import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage } from '../public/usage'
@@ -2322,7 +2323,10 @@ export async function getConversationMessagesPaginated(ctx: any) {
   }
   const session = { ...result.session, profile: (result.session as any).profile || profile || 'default' }
   if (denySessionAccess(ctx, session)) return
-  const assistantMessageIds = result.messages
+  const timeline = ctx.query.timeline === 'true' && isPersonSession(session.id)
+    ? personConversationTimeline(ctx.state.user.id,session.id,{ before:ctx.query.before,limit:ctx.query.limit }) : null
+  const pageMessages = timeline?.messages || result.messages
+  const assistantMessageIds = pageMessages
     .filter((message: any) => String(message.display_role || message.role || '') === 'assistant')
     .map((message: any) => message.id)
 
@@ -2351,13 +2355,14 @@ export async function getConversationMessagesPaginated(ctx: any) {
       input_tokens: session.input_tokens,
       output_tokens: session.output_tokens,
     },
-    messages: personDisplayMessages(session.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages))),
+    messages: personDisplayMessages(session.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, pageMessages))),
+    ...(isPersonSession(session.id) ? { personFlows: timeline?.personFlows || personConversationFlows(ctx.state.user.id, session.id) } : {}),
     ...(isPersonSession(session.id) ? { projection: PERSON_DISPLAY_PROJECTION, consumedCount: result.messages.length, nextOffset: result.offset + result.messages.length } : {}),
-    taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
+    taskPlans: getSessionTaskPlans(ctx.params.id, pageMessages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
     total: result.total,
     offset: result.offset,
     limit: result.limit,
-    hasMore: result.hasMore,
+    hasMore: timeline?.hasMoreBefore ?? result.hasMore,
   }
 }

@@ -18,12 +18,13 @@ import ChatInput from '@/components/hermes/chat/ChatInput.vue'
 import NewChatPage from '@/components/hermes/chat/NewChatPage.vue'
 import PersonBotPicker from '@/components/hermes/person/PersonBotPicker.vue'
 import MessageList from '@/components/hermes/chat/MessageList.vue'
-import SessionTasksDrawer from '@/components/hermes/tasks/SessionTasksDrawer.vue'
+import SessionTasksPanel from '@/components/hermes/tasks/SessionTasksPanel.vue'
 import PersonTaskChat from '@/components/hermes/person/PersonTaskChat.vue'
 import PersonWorkspaceFiles from '@/components/hermes/person/PersonWorkspaceFiles.vue'
 import { personTaskNavigation, personWorkspacePreviewContext } from '@/components/hermes/person/task-navigation'
 import PersonSchedulesPanel from '@/components/hermes/person/PersonSchedulesPanel.vue'
 import PersonFlowsPanel from '@/components/hermes/person/PersonFlowsPanel.vue'
+import PersonFlowConversation from '@/components/hermes/person/PersonFlowConversation.vue'
 import PersonMemoryPanel from '@/components/hermes/person/PersonMemoryPanel.vue'
 import PersonPanelIcon from '@/components/hermes/person/PersonPanelIcon.vue'
 import { useTaskDrawerLayout } from '@/components/hermes/tasks/useTaskDrawerLayout'
@@ -138,10 +139,10 @@ async function openCreateConversation() {
   renameConversationId.value = null
   resetConversationDraft(); error.value = ''
   if (!canChangeContext()) return
-  showPanel.value = false; showTasks.value = false; taskPanelOpen.value = false; showModelPicker.value = false
+  showPanel.value = false; taskPanelOpen.value = false; showModelPicker.value = false
   if (isMobile.value) showSessions.value = false
   showNewConversation.value = true
-  try { newConversationDefaults.value = await personRequest<PersonSnapshot>('', undefined, 'GET', lifetime.signal) }
+  try { newConversationDefaults.value = await personRequest<PersonSnapshot>('?include_flows=false', undefined, 'GET', lifetime.signal) }
   catch (e) { if (!disposed) error.value = String(e) }
 }
 function openConversationMenu(event: MouseEvent, id: string) {
@@ -236,7 +237,7 @@ function selectConversation(id: string) {
   showNewConversation.value = false
   showConversationMenu.value = false
   if (isMobile.value) showSessions.value = false
-  showTasks.value = false
+  showPanel.value = false
   return router.push({ name: 'hermes.person', query: { session: id } })
 }
 async function saveConversationName() {
@@ -328,15 +329,24 @@ const sessionStates = useSessionReadState(() => !initializing.value && !isNewCon
 const error = ref('')
 const pending = ref(false)
 const tab = ref('general')
-const showTasks = ref(false)
 const showPanel = ref(false)
 const flowsPanelRef = ref<InstanceType<typeof PersonFlowsPanel> | null>(null)
 const requestedFlow = ref<{ flow: PersonFlow; request: number } | null>(null)
+const conversationFlow = ref<PersonFlow | null>(null)
+const flowSnapshot = computed(() => chatStore.activeSessionId === selectedSessionId.value && chatStore.activeSession?.id === selectedSessionId.value
+  ? chatStore.activeSession.personFlows : undefined)
+const collaborations = computed(() => {
+  const snapshot = flowSnapshot.value
+  if (!snapshot) return []
+  return (snapshot.cards || snapshot.flows).filter(flow => ['completed','stopped','failed'].includes(flow.state) && flow.creator_session_id === selectedSessionId.value
+    && (flow.created_at ?? 0) >= snapshot.history_cleared_at && flow.stages.some(stage => stage.session_id !== selectedSessionId.value))
+})
+watch(selectedSessionId,() => {conversationFlow.value=null})
 let flowFocusSequence = 0
 const flowFocus = computed(() => {
   const request = requestedFlow.value
   if (!request) return null
-  const candidates = [...(data.value?.active_flows || []),...(data.value?.flows || [])].filter(flow => flow.id === request.flow.id)
+  const candidates = [...(flowSnapshot.value?.active_flows || []),...(flowSnapshot.value?.flows || [])].filter(flow => flow.id === request.flow.id)
   const flow = candidates.reduce((current,next) => next.revision >= current.revision ? next : current,request.flow)
   return { ...request,flow }
 })
@@ -393,7 +403,7 @@ function selectTask(taskId: string, executionId?: string) {
     if (!taskWithExecution(tasks) || (task && !task.execution_id && !executionId)) return
   }
   if (!canChangeContext()) return
-  showTasks.value = false
+  showPanel.value = false
   taskSelections.value[selectedSessionId.value] = { taskId, executionId }
   taskPanelOpen.value = true
 }
@@ -404,7 +414,7 @@ async function closeTaskChat(restoreFocus: boolean) {
   void refresh()
   if (!restoreFocus) return
   await nextTick()
-  if (!taskPanelOpen.value && !toolsOpen.value && !showPanel.value && !showTasks.value && !isNewConversation.value) chatInputRef.value?.focusComposer()
+  if (!taskPanelOpen.value && !toolsOpen.value && !showPanel.value && !isNewConversation.value) chatInputRef.value?.focusComposer()
 }
 provide(personTaskNavigation, selectTask)
 const showModelPicker = ref(false)
@@ -456,9 +466,8 @@ function displayModel(model: string, provider: string) {
 }
 const modelLabel = computed(() => currentModel.value ? displayModel(currentModel.value.model, pickerProvider.value) : t('models.selectModel'))
 const reasoningEffort = computed(() => isNewConversation.value ? newConversationEffort.value : optimisticEffort.value ?? data.value?.settings.reasoningEffort ?? '')
-function openPanel(name: string) { requestedFlow.value=null; if (name === 'tasks') { showTasks.value = true; return }; tab.value = name; showPanel.value = true; void refresh() }
+function openPanel(name: string) { requestedFlow.value=null; tab.value = name; showPanel.value = true; void refresh() }
 async function openActivityFlow(flow: PersonFlow) {
-  showTasks.value=false
   openPanel('flows')
   const request = ++flowFocusSequence
   requestedFlow.value={ flow,request }
@@ -480,7 +489,7 @@ async function refresh() {
   snapshotRequest = request; refreshAgain = false
   const isCurrent = () => !disposed && snapshotRequest === request && sequence === snapshotSequence && sessionId === selectedSessionId.value
   try {
-    const next = await personRequest<PersonSnapshot>(sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '', undefined, 'GET', request.controller.signal)
+    const next = await personRequest<PersonSnapshot>(`?include_flows=false${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ''}`, undefined, 'GET', request.controller.signal)
     if (!isCurrent()) return
     if (taskPanelOpen.value && next.session?.id === sessionId) {
       // A pending/failed/stale read is not evidence that this Bot has no tasks.
@@ -560,7 +569,7 @@ async function clearHistory() {
     const next = await personRequest<PersonSnapshot>(selectedSessionId.value ? `?session_id=${encodeURIComponent(selectedSessionId.value)}` : '', undefined, 'GET', lifetime.signal)
     if (disposed) return true
     snapshotSequence++; data.value = next; syncSession(next)
-    showTasks.value = false; chatTaskId.value = null; showClearConfirm.value = false
+    showPanel.value = false; chatTaskId.value = null; showClearConfirm.value = false
     if (next.session) await chatStore.switchSession(next.session.id)
     message.success(t('person.cleared'))
     return true
@@ -661,7 +670,7 @@ function resumeSelectedConversation() {
 watch([selectedSessionId, () => route.query.message], async () => {
   if (bootstrapping) return
   snapshotSequence++
-  showTasks.value = false
+  showPanel.value = false
   // Keep the shared message list and composer mounted, as ordinary chat does.
   resumeSelectedConversation()
   await refresh()
@@ -719,10 +728,6 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           <span class="person-title">{{ isNewConversation ? t('person.newConversation') : conversations.find(session => session.id === selectedSessionId)?.title || data?.session?.title || t('person.title') }}</span>
         </div>
         <div v-if="!isNewConversation" class="person-header-actions">
-          <NTooltip trigger="hover">
-            <template #trigger><NButton quaternary circle size="small" :aria-label="t('person.tasks')" :aria-expanded="showTasks" :disabled="!data?.session" @click="openPanel('tasks')"><SessionTaskIcon :size="17" /></NButton></template>
-            {{ t('person.tasks') }}
-          </NTooltip>
           <NTooltip trigger="hover">
             <template #trigger><NButton quaternary circle size="small" :disabled="busy || pending || settingsWrites > 0" :aria-label="t('chat.workspace')" :aria-expanded="showWorkspace" @click="openWorkspace"><FolderIcon /></NButton></template>
             {{ data?.settings.workspace || t('chat.workspace') }}
@@ -785,10 +790,11 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       <div v-if="!isNewConversation" class="person-chat-layout">
       <div ref="chatSurface" class="person-chat-surface" :inert="isMobile && (taskPanelOpen || toolsOpen) || undefined">
       <div v-if="data.session" class="person-chat-messages">
-      <PersonTaskActivity :key="selectedSessionId" :session-id="data.session.id" :count="sessionStates.backgroundCount(selectedSessionId)" :agent-count="data.active_agent_task_count" :tasks="data.active_tasks || data.tasks" :flows="data.active_flows || data.flows || []" :flow-count="data.active_flow_count"
-        :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :name="data.session.title || undefined" :agents="data.settings.agents"
+      <PersonTaskActivity :key="selectedSessionId" :session-id="selectedSessionId" :count="sessionStates.backgroundCount(selectedSessionId)" :agent-count="data.session.id === selectedSessionId ? data.active_agent_task_count : 0" :tasks="data.session.id === selectedSessionId ? data.active_tasks || data.tasks : []" :flows="flowSnapshot?.active_flows || []" :flow-count="flowSnapshot?.active_flow_count || 0"
+        :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :name="chatStore.activeSession?.title || undefined" :agents="data.settings.agents"
         @refresh="refresh" @open-task="openTask" @open-flow="openActivityFlow" />
-      <MessageList v-if="data.session" :user-label="t('person.you')" hide-tool-calls hide-run-usage hide-reasoning :activity-label="t('person.executing')" />
+      <MessageList v-if="data.session" :user-label="t('person.you')" hide-tool-calls hide-run-usage hide-reasoning :activity-label="t('person.executing')"
+        :collaborations="collaborations" @open-collaboration="conversationFlow=$event" />
       </div>
       <div v-if="data.session" class="person-compose">
         <button v-if="!currentModel" type="button" class="person-model-hint" @click="openModels">{{ t('person.defaultUnavailable') }}</button>
@@ -830,9 +836,13 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="agents" :size="17" />{{ t('person.agentsTab') }}<span class="workspace-tab-count">{{ data.settings.agents.length }}</span></span></template>
                 <PersonAgentSettings :agents="data.settings.agents" :save-error="error" :saving="settingsWrites > 0" @save="saveSettings({ agents: JSON.parse(JSON.stringify($event)) })" />
               </NTabPane>
+              <NTabPane name="tasks" display-directive="show:lazy" :tab-props="{ role: 'tab', 'aria-selected': tab === 'tasks' }">
+                <template #tab><span class="workspace-tab"><SessionTaskIcon :size="17" />{{ t('person.tasks') }}</span></template>
+                <SessionTasksPanel v-if="data.session" class="person-settings-tasks" :active="showPanel && tab === 'tasks'" person :person-session-id="data.session.id" @open-person-task="openTask" />
+              </NTabPane>
               <NTabPane name="flows" :tab-props="{ role: 'tab', 'aria-selected': tab === 'flows' }">
-                <template #tab><span class="workspace-tab"><SessionTaskIcon :size="17" />{{ t('person.flows') }}</span></template>
-                <PersonFlowsPanel ref="flowsPanelRef" :flows="data.flows || []" :focus="flowFocus" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
+                <template #tab><span class="workspace-tab"><PersonPanelIcon name="flows" :size="17" />{{ t('person.flows') }}</span></template>
+                <PersonFlowsPanel ref="flowsPanelRef" :flows="flowSnapshot?.flows || []" :focus="flowFocus" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
               </NTabPane>
               <NTabPane name="schedules" :tab-props="{ role: 'tab', 'aria-selected': tab === 'schedules' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="schedule" :size="17" />{{ t('person.schedules') }}<span class="workspace-tab-count">{{ data.schedules.length }}</span></span></template>
@@ -846,7 +856,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           </div>
         </NDrawerContent>
       </NDrawer>
-      <SessionTasksDrawer v-if="data.session" v-model:show="showTasks" person :person-session-id="data.session.id" @open-person-task="openTask" />
+      <PersonFlowConversation v-if="conversationFlow" :key="`${selectedSessionId}:${conversationFlow.id}`" :flow="conversationFlow" @close="conversationFlow=null" />
     </template>
   </PageLoading>
     <NDropdown trigger="manual" placement="bottom-start" :show="showConversationMenu" :x="conversationMenuX" :y="conversationMenuY" :options="conversationMenuOptions"
@@ -885,6 +895,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
 .person-chat-messages { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .person-model-hint { display: block; margin: 0 auto; border: 0; background: transparent; color: $accent-primary; cursor: pointer; font: inherit; font-size: 12px; padding: 8px; }
 .person-workspace { padding: 0 24px 28px; min-width: 0; }
+.person-settings-tasks { height: calc(100dvh - 240px); min-height: 280px; }
 .workspace-tab { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; }
 .workspace-tab-count { color: $text-muted; font-size: 11px; font-variant-numeric: tabular-nums; margin-inline-start: 4px; }
 .workspace-error { margin-top: 20px; }

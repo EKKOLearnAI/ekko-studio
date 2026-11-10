@@ -7,7 +7,7 @@ import { chatSessionAgentAvatar, personAvatarAnimation } from '@/utils/chat-agen
 import { personFlowAnimation, personFlowGroups, personFlowStageStatus, personFlowStatusKey } from '@/utils/person-flow'
 import { personFlowLayout } from '@/utils/person-flow-layout'
 
-const props = defineProps<{ flow: PersonFlow }>()
+const props = withDefaults(defineProps<{ flow: PersonFlow; interactive?: boolean }>(), { interactive: true })
 const emit = defineEmits<{ open: [flow: PersonFlow] }>()
 const { t, locale } = useI18n()
 const reducedMotion = useReducedMotion()
@@ -47,25 +47,26 @@ onBeforeUnmount(() => { observer?.disconnect(); cancelAnimationFrame(frame) })
 </script>
 
 <template>
-  <div ref="graph" class="person-flow-graph" :style="{ height: `${layout.height}px` }" @click.self="emit('open',flow)">
+  <span ref="graph" class="person-flow-graph" :style="{ height: `${layout.height}px` }" @click.self="interactive && emit('open',flow)">
     <svg class="flow-edges" :viewBox="`0 0 ${Math.max(1,width)} ${Math.max(1,layout.height)}`" aria-hidden="true">
       <path v-for="edge in edges" :key="edge.from" class="route-line" :class="edge.passed ? 'route-passed' : 'route-pending'"
         :d="edge.path" :data-from="edge.from" :data-to="edge.to" :data-source="edge.source" :data-target="edge.target" />
     </svg>
-    <ol class="flow-steps" :aria-label="flow.title">
-      <li v-for="(bot,index) in bots" :key="bot.stage.id" class="flow-step" :data-row="layout.nodes[index].row" :data-group="layout.nodes[index].group" :data-turn="layout.nodes[index].turn"
+    <span class="flow-steps" role="list" :aria-label="flow.title">
+      <span v-for="(bot,index) in bots" :key="bot.stage.id" class="flow-step" role="listitem" :data-row="layout.nodes[index].row" :data-group="layout.nodes[index].group" :data-turn="layout.nodes[index].turn"
         :style="{ left: `${layout.nodes[index].x}px`, top: `${layout.nodes[index].y}px`, width: `${layout.nodes[index].width}px`, height: `${layout.nodes[index].height}px` }">
-        <button type="button" class="bot-sprite" :title="bot.label" :aria-label="bot.label" aria-haspopup="dialog" @click="emit('open',flow)">
+        <component :is="interactive ? 'button' : 'span'" :type="interactive ? 'button' : undefined" class="bot-sprite" :title="bot.label" :aria-label="bot.label"
+          :role="interactive ? undefined : 'img'" :aria-haspopup="interactive ? 'dialog' : undefined" @click="interactive && emit('open',flow)">
           <img :src="reducedMotion ? bot.avatar.src : bot.animation" alt="" width="32" height="32" />
-        </button>
-      </li>
-    </ol>
-  </div>
+        </component>
+      </span>
+    </span>
+  </span>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-.person-flow-graph { position: relative; width: 100%; margin: 0 0 12px; cursor: pointer; }
+.person-flow-graph { display: block; position: relative; width: 100%; margin: 0 0 12px; cursor: pointer; }
 .flow-edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .route-line { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .route-pending { color: $text-muted; opacity: .45; stroke-dasharray: 3 5; }

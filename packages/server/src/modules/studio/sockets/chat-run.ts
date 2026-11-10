@@ -3,6 +3,7 @@ import { personSessionIds } from '../repositories/person-session-store'
 import type { PersonResultDelivery } from '../public/person-runtime'
 import { personResultPrompt } from '../services/person/result-prompt'
 import { personUser } from '../services/person/catalog'
+import { personConversationFlows, personConversationTimeline } from '../services/person/flow-conversation'
 import { personBackgroundPendingCount } from '../repositories/person-store'
 import { personDeliveryCurrent, finishPersonDelivery, cancelPersonDelivery } from '../services/person/delivery'
 import { stageDeliveryContext, assertPersonStage } from '../repositories/person-stage-store'
@@ -516,7 +517,10 @@ export class ChatRunSocket {
     if (this.closing) return
     this.sessionStateSync.refreshPerson(userId)
     for (const sid of personSessionIds(userId)) {
-      this.nsp.to(`session:${sid}`).emit('person.updated', { session_id: sid })
+      this.nsp.to(`session:${sid}`).emit('person.updated', {
+        session_id: sid,
+        ...(this.nsp.adapter.rooms.get(`session:${sid}`)?.size ? { personFlows: personConversationFlows(userId, sid) } : {}),
+      })
       if (this.isSessionRunning(sid)) continue
       const before = this.personQuestions.get(sid)
       const next = personChatInteraction(userId, sid)
@@ -1331,7 +1335,7 @@ export class ChatRunSocket {
       await this.resumeSession(socket, sid)
     })
 
-    socket.on('app.resume', async (data: { session_id?: string; id?: string }) => {
+    socket.on('app.resume', async (data: { session_id?: string; id?: string; timeline?: boolean }) => {
       if (!data.session_id || typeof data.id !== 'string' || data.id.length > 128) return
       const sid = data.session_id
       try {
@@ -1345,7 +1349,7 @@ export class ChatRunSocket {
         return
       }
       socket.join(`session:${sid}`)
-      await this.resumeSession(socket, sid, { event: 'app.resumed', cachedId: data.id })
+      await this.resumeSession(socket, sid, { event: 'app.resumed', cachedId: data.id, timeline: data.timeline === true })
     })
 
     socket.on('abort', (data: { session_id?: string }) => {
@@ -2363,7 +2367,7 @@ export class ChatRunSocket {
   private async resumeSession(
     socket: Socket,
     sid: string,
-    options?: { event: 'app.resumed'; cachedId: string },
+    options?: { event: 'app.resumed'; cachedId: string; timeline?: boolean },
   ) {
     let state = this.sessionMap.get(sid)
     if (!state) {
@@ -2386,7 +2390,7 @@ export class ChatRunSocket {
       if (question && !resumeEvents.some(entry => entry.data?.approval_id === question.data.approval_id && entry.data?.clarify_id === question.data.clarify_id)) resumeEvents.push(question)
     }
     const sessionDetail = getSessionMetadata(sid)
-    const messagePage = buildResumeMessagePage(state.messages, {
+    const messagePage = (!options || options.timeline) && isPersonSession(sid) ? personConversationTimeline(Number(socket.data.user.id),sid) : buildResumeMessagePage(state.messages, {
       limit: state.messagePageLimit,
       messageTotal: state.messageTotal,
       messageStateBaselineCount: state.messageStateBaselineCount,
@@ -3435,6 +3439,7 @@ export class ChatRunSocket {
     })
     this.nsp.to(isPrivatePersonSession(sessionId) ? `session:${sessionId}` : ['studio-account', `session:${sessionId}`]).emit('resumed', {
       session_id: sessionId,
+      ...(isPersonSession(sessionId) ? { personFlows: personConversationTimeline(Number(getSessionMetadata(sessionId)?.studio_user_id), sessionId).personFlows } : {}),
       messages: [],
       messageTotal: 0,
       messageLoadedCount: 0,

@@ -16,7 +16,7 @@ vi.mock('@/api/studio/sessions', () => ({ fetchSessionMessagesPage: history.page
 vi.mock('@/api/studio/chat', () => ({
   startRunViaSocket: transport.start, resumeSession: transport.resume, registerSessionHandlers: transport.register,
   unregisterSessionHandlers: vi.fn(), getChatRunSocket: vi.fn(() => ({ emit: vi.fn() })),
-  onUnobservedRunStarted: vi.fn(() => vi.fn()), onPeerUserMessage: vi.fn(() => vi.fn()), onSessionCommand: vi.fn(() => vi.fn()),
+  onUnobservedRunStarted: vi.fn(() => vi.fn()), onPeerUserMessage: vi.fn(() => vi.fn()), onPersonUpdated: vi.fn(() => vi.fn()), onSessionCommand: vi.fn(() => vi.fn()),
   onSessionTitleUpdated: vi.fn(() => vi.fn()), onSessionWorkspaceUpdated: vi.fn(() => vi.fn()),
   onSessionSettingsUpdated: vi.fn(() => vi.fn()), onRunUsageUpdated: vi.fn(() => vi.fn()),
   respondToolApproval: vi.fn(), respondClarify: vi.fn(),

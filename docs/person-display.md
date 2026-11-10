@@ -56,6 +56,21 @@ plan selection and workspace binding. `projection` participates in the hash and
 is echoed on cache hits. Existing full-page IDs therefore miss. Cached responses
 still contain live state and safe events.
 
+New Apps opt into the shared Person timeline with `app.resume` payload
+`{session_id, id, timeline:true}`. The first page contains at most 150 combined
+message/card references in `personFlows.timeline`, lightweight `personFlows.cards`,
+and the matching projected messages. Messages, cards and cursor all participate
+in the conditional cache ID; on a hit the App restores them together from its
+scoped cache. Released Apps omitting `timeline:true` retain raw message paging.
+
+Timeline clients request older pages at the existing paginated-history endpoint
+with `timeline=true&before=<opaque cursor>&limit=150`. Use `timeline.has_more` and
+`timeline.before` to advance even when `messages` is empty. Keep at most 300
+combined references, preserve an older reading window on reconnect, and reload
+the latest page explicitly when returning to the tail. Recent `person.updated`
+snapshots merge into retained cards rather than replacing paged history. Clear
+history changes the timeline revision and invalidates previous cursors/windows.
+
 No App repository change is required for the server filtering or raw-offset
 compatibility. Already-installed Apps can display their old local cache before
 the new server responds, or while offline. A server cannot erase those historical

@@ -3,6 +3,7 @@ import type { ProviderApiMode } from './provider-api-mode'
 import { fetchAuthenticatedBlob, saveBlob } from './binary-content'
 
 export interface SessionSummary {
+  history_cleared_at?: number
   id: string
   profile?: string | null
   source: string
@@ -105,6 +106,7 @@ export interface SessionContext {
 }
 
 export interface PaginatedSessionMessages {
+  personFlows?: import('../person').PersonFlowSnapshot
   session: SessionSummary
   messages: HermesMessage[]
   taskPlans?: import('@/utils/task-plan').TaskPlanSnapshot[]
@@ -464,12 +466,17 @@ export async function fetchSessionMessagesPage(
   offset: number,
   limit = 150,
   profile?: string | null,
+  timeline?: { before?: string | null },
 ): Promise<PaginatedSessionMessages | null> {
   try {
     const params = new URLSearchParams()
     params.set('offset', String(offset))
     params.set('limit', String(limit))
     if (profile) params.set('profile', profile)
+    if (timeline) {
+      params.set('timeline', 'true')
+      if (timeline.before) params.set('before', timeline.before)
+    }
     const res = await request<PaginatedSessionMessages>(
       `/api/studio/sessions/conversations/${encodeURIComponent(id)}/messages/paginated?${params}`,
     )

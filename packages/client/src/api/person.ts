@@ -16,10 +16,41 @@ export interface PersonQuestion { id: string; task_id: string | null; question: 
 export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed'; relatedTasks?: PersonTaskReturn[] }
 export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; taskTimeoutMinutes: number; timezone: string }
 export interface PersonFlow {
+  timeline_at?: number | null
+  created_at?: number; updated_at?: number
+  creator_session_title?: string | null; creator_bot_type?: string | null
   round_number?: number; round_limit?: number
   creator_session_id?: string
   id: string; title: string; goal: string; revision: number; state: 'active' | 'failed' | 'stopped' | 'completed'; current_position: number; error: string
   stages: Array<{ confirmation?: {decision_pending?: boolean; state: string; attempts: number; reason: string; message_id: number | null}; id: string; position: number; group_position: number; session_id: string; session_title?: string; bot_type?: string | null; delivery_state?: string; delivery_error?: string; goal: string; state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; tasks: Array<{ id: string; title: string; status: string; execution_state?: string; agent?: string }> }>
+}
+export interface PersonFlowMessage {
+  id: number; session_id: string; session_title: string; bot_type: string | null
+  stage_id: string; round_number: number | null; role: 'user' | 'assistant'; content: string; timestamp: number
+}
+export interface PersonFlowSnapshot {
+  cards?: PersonFlow[]
+  card_updates?: PersonTimelineItem[]
+  timeline?: PersonTimeline
+  flows: PersonFlow[]
+  active_flows: PersonFlow[]
+  active_flow_count: number
+  history_cleared_at: number
+}
+export interface PersonTimelineItem { id: string; kind: 'message' | 'flow'; timestamp: number; cursor: string }
+export interface PersonTimeline {
+  items: PersonTimelineItem[]
+  before: string | null
+  has_more: boolean
+  history_revision: number
+  reset?: boolean
+  has_newer?: boolean
+}
+export interface PersonFlowConversation {
+  flow: PersonFlow; messages: PersonFlowMessage[]; has_more: boolean; next_before_id: number | null; history_key: string
+}
+export function fetchPersonFlowConversation(flowId: string, beforeId?: number, signal?: AbortSignal) {
+  return personRequest<PersonFlowConversation>(`/flows/${encodeURIComponent(flowId)}/messages${beforeId ? `?before_id=${beforeId}` : ''}`,undefined,'GET',signal)
 }
 export interface PersonSnapshot {
   active_tasks?: PersonTask[]

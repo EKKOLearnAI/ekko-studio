@@ -58,6 +58,7 @@ export interface StartRunResponse {
 
 // SSE event types from /v1/runs/{id}/events
 export interface RunEvent {
+  personFlows?: import('../person').PersonFlowSnapshot
   person_task_return?: import('../person').PersonTaskReturn
   run_usage?: import('@/utils/run-usage').RunUsageSummary
   event: string
@@ -167,6 +168,7 @@ export interface RunEvent {
 }
 
 export interface ResumeSessionPayload {
+  personFlows?: import('../person').PersonFlowSnapshot
   taskPlans?: TaskPlanSnapshot[]
   session_id: string
   messages: any[]

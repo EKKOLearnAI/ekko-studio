@@ -46,6 +46,7 @@ export function clearPersonHistory(userId: number, mainId: string, historyRevisi
         db.prepare(`DELETE FROM ${table} WHERE task_id=?`).run(task.id)
     }
     for (const { id } of rows) {
+      db.prepare('DELETE FROM person_flow_runs WHERE session_id=?').run(id)
       for (const table of ['messages', TASK_PLANS_TABLE, 'session_tasks', COMPRESSION_SNAPSHOT_TABLE, RUN_USAGE_TABLE,
         SESSION_UPLOADS_TABLE, WORKSPACE_RUN_CHANGE_FILES_TABLE, WORKSPACE_RUN_CHANGES_TABLE,
         'person_context_chunks', 'person_context_summaries', 'person_context_progress']) {

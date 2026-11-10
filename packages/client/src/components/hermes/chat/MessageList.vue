@@ -34,6 +34,9 @@ import { groupCompletedToolsByRun } from "./tool-run-grouping";
 import { useMessageSelection } from './useMessageSelection';
 import type { MessageSelectionRow } from './message-selection';
 import { desktopBridge } from '@/utils/desktop-bridge';
+import type { PersonFlow } from '@/api/person';
+import PersonFlowConversationCard from '../person/PersonFlowConversationCard.vue';
+import { personFlowMessageRows } from '../person/person-flow-message-rows';
 
 const props = withDefaults(defineProps<{
   userLabel?: string
@@ -44,12 +47,14 @@ const props = withDefaults(defineProps<{
   approvalPortalToBody?: boolean
   scrollScope?: string
   selectionActionsTarget?: HTMLElement | null
+  collaborations?: PersonFlow[]
 }>(), {
   approvalPortalToBody: false,
   hideToolCalls: false,
   scrollScope: "chat",
   selectionActionsTarget: null,
 })
+const emit = defineEmits<{openCollaboration:[flow:PersonFlow]}>()
 
 const chatStore = useChatStore();
 const profilesStore = useProfilesStore();
@@ -221,7 +226,7 @@ const showEmptyConversation = computed(() => {
   const session = chatStore.activeSession;
   return !chatStore.isLoadingMessages && !isRunIndicatorActive.value
     && !!session && (session.messagesLoaded === true || session.isLocalOnly === true)
-    && chatStore.messages.length === 0 && (session.messageTotal ?? session.messageCount ?? 0) === 0;
+    && chatStore.messages.length === 0 && !props.collaborations?.length && (session.messageTotal ?? session.messageCount ?? 0) === 0;
 });
 
 function assistantMessageBody(message: Message): string {
@@ -298,9 +303,10 @@ const displayMessagesWithForkDivider = computed<Message[]>(() => {
 
 const {
   selecting, loading: selectionLoading, deleting: deletingMessages, selected: selectedMessages,
-  supported: supportsMessageSelection, unavailable: selectionUnavailable, rows: messageRows,
+  supported: supportsMessageSelection, unavailable: selectionUnavailable, rows: selectionRows,
   start: startSelection, cancel: cancelSelection, toggle: toggleSelection, remove: deleteSelectedMessages,
 } = useMessageSelection(displayMessagesWithForkDivider);
+const messageRows = computed(() => personFlowMessageRows(selectionRows.value,props.collaborations || [],!chatStore.activeSession?.personFlows?.timeline && !!chatStore.activeSession?.hasMoreBefore));
 const showDeleteConfirmation = ref(false);
 watch(selecting, value => { if (!value) showDeleteConfirmation.value = false; });
 const selectionMenu = ref({ show: false, x: 0, y: 0 });
@@ -453,7 +459,7 @@ const activeSessionScrollKey = computed(() => {
 
 const showHistoryArchiveLink = computed(() => {
   const session = chatStore.activeSession;
-  return !!session?.hasMoreBefore && (session.loadedMessageCount || 0) >= LIVE_CHAT_MAX_LOADED_MESSAGES;
+  return !session?.personFlows?.timeline && !!session?.hasMoreBefore && (session.loadedMessageCount || 0) >= LIVE_CHAT_MAX_LOADED_MESSAGES;
 });
 
 const historyArchiveHref = computed(() => {
@@ -560,14 +566,15 @@ async function scrollToAnchor(messageId: string, anchorId: string) {
 }
 
 function updateScrollBottomButton() {
-  showScrollBottomButton.value = displayMessages.value.length > 0 && !(listRef.value?.isNearBottom(1000) ?? true);
+  showScrollBottomButton.value = !!chatStore.activeSession?.personFlows?.timeline?.has_newer || messageRows.value.length > 0 && !(listRef.value?.isNearBottom(1000) ?? true);
 }
 
 function handleListScroll() {
   updateScrollBottomButton();
 }
 
-function handleScrollBottomClick() {
+async function handleScrollBottomClick() {
+  if (chatStore.activeSession?.personFlows?.timeline?.has_newer && !await chatStore.refreshActiveSession({ latest:true })) return;
   scrollToBottom({ frames: 4, keepAliveMs: 600 });
 }
 
@@ -614,11 +621,13 @@ async function handleTopReach() {
   if (chatStore.isLoadingMessages || isSearchLoading.value) return;
   const session = chatStore.activeSession;
   if (!session?.hasMoreBefore || session.isLoadingOlderMessages || showHistoryArchiveLink.value) return;
-  const snapshot = listRef.value?.captureScrollPosition() ?? null;
+  const viewport = session.personFlows?.timeline ? listRef.value?.captureViewportPosition() : null;
+  const snapshot = viewport ? null : listRef.value?.captureScrollPosition() ?? null;
   const loaded = await chatStore.loadOlderMessages(session.id);
   if (!loaded) return;
   await nextTick();
-  listRef.value?.restoreScrollPosition(snapshot);
+  if (viewport) listRef.value?.restoreViewportPosition({ ...viewport,wasNearBottom:false });
+  else listRef.value?.restoreScrollPosition(snapshot);
   updateScrollBottomButton();
 }
 
@@ -645,7 +654,7 @@ watch(
 );
 
 watch(
-  () => displayMessages.value.length,
+  () => messageRows.value.length,
   () => {
     void nextTick(updateScrollBottomButton);
   },
@@ -823,11 +832,13 @@ defineExpose({
           v-else-if="chatStore.activeSession?.hasMoreBefore || chatStore.activeSession?.isLoadingOlderMessages"
           class="history-loader"
         >
+          <NButton v-if="!messageRows.length && chatStore.activeSession?.personFlows?.timeline && !chatStore.activeSession.isLoadingOlderMessages" quaternary @click="handleTopReach">{{ t('person.older') }}</NButton>
           <span v-if="chatStore.activeSession?.isLoadingOlderMessages" class="history-loader-spinner" role="status" :aria-label="t('common.loading')"></span>
         </div>
       </template>
       <template #item="{ message: row }">
-        <div @contextmenu="openSelectionMenu" @click.capture="handleSelectionRowClick($event, row)" :class="{
+        <PersonFlowConversationCard v-if="row.flow" :flow="row.flow" @open="emit('openCollaboration',$event)" />
+        <div v-else @contextmenu="openSelectionMenu" @click.capture="handleSelectionRowClick($event, row)" :class="{
           'message-selection-row': selecting && row.group,
           'message-selection-user': selecting && row.group?.kind === 'message' && ['user', 'command'].includes(row.messages[0]?.role),
           'is-selected': row.group && selectedMessages.has(row.group.id),

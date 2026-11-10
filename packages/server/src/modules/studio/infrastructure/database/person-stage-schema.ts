@@ -40,10 +40,23 @@ export function initPersonStageTables(db: DatabaseSync) {
       FOREIGN KEY(stage_id) REFERENCES person_stages(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_person_stage_confirmations_pending ON person_stage_confirmations(state,updated_at);
+    CREATE TABLE IF NOT EXISTS person_flow_runs (
+      flow_id TEXT NOT NULL, session_id TEXT NOT NULL, run_id TEXT NOT NULL,
+      stage_id TEXT NOT NULL DEFAULT '', round_number INTEGER NOT NULL,
+      PRIMARY KEY(flow_id,session_id,run_id),
+      FOREIGN KEY(flow_id) REFERENCES person_flows(id) ON DELETE CASCADE
+    );
   `)
   if (!db.prepare('PRAGMA table_info(person_stage_confirmations)').all().some(column => column.name === 'source_hash'))
     db.exec("ALTER TABLE person_stage_confirmations ADD COLUMN source_hash TEXT NOT NULL DEFAULT ''")
   const columns = new Set(db.prepare('PRAGMA table_info(person_flows)').all().map(column => column.name))
+  if (!columns.has('timeline_at')) {
+    db.exec('ALTER TABLE person_flows ADD COLUMN timeline_at INTEGER; UPDATE person_flows SET timeline_at=updated_at WHERE state IN (\'completed\',\'stopped\',\'failed\');')
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_person_flow_timeline_settled ON person_flows(owner_user_id,creator_session_id,timeline_at,id) WHERE state IN ('completed','stopped','failed');
+    CREATE TRIGGER IF NOT EXISTS person_flow_timeline_set AFTER UPDATE OF state ON person_flows
+      WHEN NEW.state IN ('completed','stopped','failed') AND (OLD.state='active' OR OLD.timeline_at IS NULL)
+      BEGIN UPDATE person_flows SET timeline_at=NEW.updated_at WHERE id=NEW.id; END;`)
   for (const [name, value] of [['round_limit',1],['round_number',1],['round_generation',0]] as const) {
     if (!columns.has(name)) db.exec(`ALTER TABLE person_flows ADD COLUMN ${name} INTEGER NOT NULL DEFAULT ${value}`)
   }

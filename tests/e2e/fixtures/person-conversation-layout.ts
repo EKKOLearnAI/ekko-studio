@@ -17,10 +17,14 @@ await router.push('/person')
 const pinia = createPinia()
 const app = createApp({ render: () => h(NConfigProvider, { theme: theme.isDark.value ? darkTheme : null, themeOverrides: getThemeOverrides(theme.isDark.value, false, theme.customization.value, theme.hasCustomBackground.value) }, { default: () => h(NMessageProvider, {}, { default: () => h(NDialogProvider, {}, { default: () => h('main', { style: { display: 'flex', height: '100vh', width: '100vw', backgroundImage: 'var(--app-background-image)', backgroundSize: 'cover' } }, [h(RouterView)]) }) }) }) })
 app.use(pinia); app.use(await i18nReady); app.use(router)
-// Only sending/switching the live chat transport is replaced. Form and picker are real.
+// Flow journeys exercise the real resume handler; other UI fixtures may replace switching.
 const chat = useChatStore(pinia)
 const sent: string[] = []
-chat.switchSession = async id => { chat.activeSessionId = id }
+if (!new URLSearchParams(location.search).has('resume')) chat.switchSession = async id => {
+  chat.activeSessionId = id
+  // Restore cached messages immediately, independently of the Person snapshot.
+  chat.activeSession = chat.sessions.find(session => session.id === id) || null
+}
 chat.sendMessage = async text => { sent.push(text) }
 ;(window as any).personWorkspaceFixture = { sent, router, chat, theme, files: useFilesStore(pinia), settings: useSettingsStore(pinia) }
 await router.isReady(); app.mount('#app')

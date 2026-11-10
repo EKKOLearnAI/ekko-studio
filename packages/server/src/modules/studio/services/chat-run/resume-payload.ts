@@ -36,6 +36,7 @@ export interface ResumeMessagePageOptions {
 
 export interface ResumeMessagePage {
   projection?: string
+  personFlows?: ReturnType<typeof import('../person/flow-conversation').personConversationTimeline>['personFlows']
   taskPlans?: import('../../contracts/task-plan').TaskPlanSnapshot[]
   messages: SessionMessage[]
   workspaceRunChanges?: WorkspaceRunChangeSummary[]

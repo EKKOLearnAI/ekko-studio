@@ -6,7 +6,8 @@ import { historySessionSource, isBuiltinEkkoSession } from '@/utils/hermes/sessi
 import { isKnownEkkoSessionCommand } from '@/utils/hermes/bridge-session-commands'
 import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
-import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
+import { applyPersonTimelinePage, applyPersonFlowUpdate, preservePersonTimelineWindow } from '@/utils/person-timeline'
+import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
 import { onAuthInvalidated } from '@/api/auth-invalidation'
@@ -450,6 +451,7 @@ export interface QueueInsertionState {
 }
 
 export interface Session {
+  personFlows?: import('@/api/person').PersonFlowSnapshot
   historyRevision?: number
   id: string
   profile?: string
@@ -2014,22 +2016,26 @@ function createChatState(scopedSessionId?: string) {
   }
 
   // Re-pull active session from server. Used on tab-visible events.
-  async function refreshActiveSession(options: { canApply?: () => boolean } = {}): Promise<boolean> {
+  async function refreshActiveSession(options: { canApply?: () => boolean; latest?: boolean } = {}): Promise<boolean> {
     const sid = activeSessionId.value
     if (!sid) return false
     try {
       const target = sessions.value.find(s => s.id === sid)
       if (!target) return false
+      if (target.personFlows?.timeline?.has_newer && !options.latest && !options.canApply) return true
       const revision = messageHistoryRevisions.get(sid)
-      const limit = focusMessageId.value
+      const previousPersonFlows = target.personFlows
+      const limit = target.personFlows?.timeline ? LIVE_CHAT_MESSAGE_PAGE_SIZE : focusMessageId.value
         ? Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE)
         : Math.min(
           Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE),
           LIVE_CHAT_MAX_LOADED_MESSAGES,
         )
-      const detail = await fetchSessionMessagesPage(sid, 0, limit, activeSession.value?.profile)
+      const detail = await fetchSessionMessagesPage(sid, 0, limit, activeSession.value?.profile, sid.startsWith('person-main-') ? {} : undefined)
       if (revision !== messageHistoryRevisions.get(sid) || options.canApply?.() === false) return false
       if (!detail) return false
+      if ((target.personFlows?.timeline?.history_revision ?? -1) > (detail.personFlows?.timeline?.history_revision ?? Infinity)) return false
+      const pushedFlows = target.personFlows !== previousPersonFlows ? target.personFlows : undefined
       const mapped = mapHermesMessages(detail.messages || [], detail.taskPlans, target.messages)
       target.messages = mapped
       target.messagesLoaded = true
@@ -2039,6 +2045,8 @@ function createChatState(scopedSessionId?: string) {
       target.messageTotal = detail.total
       target.messageCount = detail.total
       target.hasMoreBefore = detail.hasMore
+      if (!applyPersonTimelinePage(target,detail.personFlows,mapped) && target.personFlows === previousPersonFlows && detail.personFlows) target.personFlows=detail.personFlows
+      if (pushedFlows && detail.personFlows?.timeline) applyPersonFlowUpdate(target,pushedFlows)
       if (detail.session.title) target.title = detail.session.title
       target.workspace = detail.session.workspace || target.workspace || null
       target.botType = detail.session.bot_type || target.botType
@@ -2212,7 +2220,7 @@ function createChatState(scopedSessionId?: string) {
           target.parentTitle = (data as any).parentTitle || target.parentTitle || null
           target.parentLastMessage = (data as any).parentLastMessage || target.parentLastMessage || null
           target.parentLastMessageRole = (data as any).parentLastMessageRole || target.parentLastMessageRole || null
-          if (Array.isArray(data.messages)) {
+          if (Array.isArray(data.messages) && !preservePersonTimelineWindow(target,data.personFlows)) {
             target.messages = mapHermesMessages(data.messages as any[], data.taskPlans, target.messages)
             target.messagesLoaded = true
             restorePersistedSubagentStreams(sessionId)
@@ -2221,6 +2229,7 @@ function createChatState(scopedSessionId?: string) {
             target.messageTotal = data.messageTotal ?? target.messageCount ?? target.loadedMessageCount
             target.messageCount = target.messageTotal
             target.hasMoreBefore = data.hasMoreBefore ?? target.loadedMessageCount < target.messageTotal
+            if (!applyPersonTimelinePage(target,data.personFlows,target.messages) && data.personFlows) target.personFlows=data.personFlows
           }
           if (!target.title) {
             const firstUser = target.messages.find(m => m.role === 'user')
@@ -2316,9 +2325,9 @@ function createChatState(scopedSessionId?: string) {
       while (focusId && isCurrentSelection()) {
         const target = activeSession.value
         if (!target || target.messages.some(message => message.id === focusId)) break
-        const offset = target.loadedMessageCount || 0
+        const offset = target.personFlows?.timeline?.before ?? target.loadedMessageCount ?? 0
         if (!await loadOlderMessages(sessionId, isCurrentSelection)) break
-        if ((target.loadedMessageCount || 0) <= offset) break
+        if (target.personFlows?.timeline ? target.personFlows.timeline.before === offset : (target.loadedMessageCount || 0) <= Number(offset)) break
       }
       loaded = isCurrentSelection() && (!focusId || !!activeSession.value?.messages.some(message => message.id === focusId))
       if (isCurrentSelection() && !loaded) focusMessageId.value = null
@@ -2342,20 +2351,32 @@ function createChatState(scopedSessionId?: string) {
     if (!target || (!searchSelection && target.isLoadingOlderMessages) || !target.hasMoreBefore) return false
     const offset = target.loadedMessageCount || 0
     const personMain = sessionId.startsWith('person-main-')
+    const timeline = target.personFlows?.timeline
     const budgetCount = personMain ? target.messages.length : offset
-    if (!searchSelection && budgetCount >= LIVE_CHAT_MAX_LOADED_MESSAGES) return false
-    const limit = searchSelection
+    if (!timeline && !searchSelection && budgetCount >= LIVE_CHAT_MAX_LOADED_MESSAGES) return false
+    const limit = timeline || searchSelection
       ? LIVE_CHAT_MESSAGE_PAGE_SIZE
       : Math.min(LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MAX_LOADED_MESSAGES - budgetCount)
     const loadToken = {}
     const previousMessages = target.messages
+    const previousPersonFlows = target.personFlows
     olderMessageLoads.set(target, loadToken)
     target.isLoadingOlderMessages = true
     try {
-      const page = await fetchSessionMessagesPage(sessionId, offset, limit, target.profile)
+      const page = await fetchSessionMessagesPage(sessionId, offset, limit, target.profile, timeline ? { before:timeline.before } : undefined)
       if (olderMessageLoads.get(target) !== loadToken || target.messages !== previousMessages
         || (searchSelection && !searchSelection())) return false
       if (!page) return false
+      if ((target.personFlows?.timeline?.history_revision ?? -1) > (page.personFlows?.timeline?.history_revision ?? Infinity)) return false
+      if (page.personFlows?.timeline) {
+        const incoming = mapHermesMessages(page.messages,page.taskPlans)
+        applyPersonTimelinePage(target,page.personFlows,incoming,true)
+        restorePersistedSubagentStreams(sessionId)
+        mergeWorkspaceRunChanges(sessionId,page.workspaceRunChanges || [])
+        target.messageTotal=page.total;target.messageCount=page.total
+        return page.personFlows.timeline.items.length > 0
+      }
+      if (target.personFlows === previousPersonFlows && page.personFlows) target.personFlows = page.personFlows
       if (page.messages.length === 0) {
         target.hasMoreBefore = false
         return false
@@ -3056,7 +3077,10 @@ function createChatState(scopedSessionId?: string) {
     }
 
     if (action === 'clear' && command === 'clear') {
-      if (target) target.messages = []
+      if (target) {
+        target.messages = []
+        if (target.personFlows) target.personFlows = { ...target.personFlows, history_cleared_at: Date.now() }
+      }
       queuedUserMessages.value.delete(sid)
       pendingUserMessageIds.delete(sid)
       queueLengths.value.delete(sid)
@@ -3783,6 +3807,10 @@ function createChatState(scopedSessionId?: string) {
 
     // Capture session ID at send time — all callbacks use this, not activeSessionId
     const sid = activeSessionId.value!
+    if (activeSession.value?.personFlows?.timeline?.has_newer) {
+      await refreshActiveSession({latest:true})
+      if (generation !== runtimeGeneration || activeSessionId.value !== sid) return
+    }
     const shouldSendInitialSessionConfig = activeSession.value
       ? activeSession.value.messageCount == null || activeSession.value.messageCount === 0
       : false
@@ -4034,7 +4062,7 @@ function createChatState(scopedSessionId?: string) {
         applySessionTokenUsage(target, data)
         applyResumedSessionSettings(data)
 
-        if (Array.isArray(data.messages)) {
+        if (Array.isArray(data.messages) && !preservePersonTimelineWindow(target,data.personFlows)) {
           const previousActiveAssistantMessageId = activeAssistantMessageId
           const previousReasoningAssistantMessageId = reasoningAssistantMessageId
           const replayRunMarker = getReplayRunMarker(data.events) ?? activeRunMarker
@@ -4046,6 +4074,7 @@ function createChatState(scopedSessionId?: string) {
           target.messageTotal = data.messageTotal ?? target.messageCount ?? target.loadedMessageCount
           target.messageCount = target.messageTotal
           target.hasMoreBefore = data.hasMoreBefore ?? target.loadedMessageCount < target.messageTotal
+          if (!applyPersonTimelinePage(target,data.personFlows,target.messages) && data.personFlows) target.personFlows=data.personFlows
           const resumedAssistantState = data.isWorking
             ? resolveResumedAssistantState(target.messages, {
                 previousActiveAssistantMessageId,
@@ -5494,6 +5523,11 @@ function createChatState(scopedSessionId?: string) {
   }
 
   disposeSubscription(onSessionCommand(handleGlobalSessionCommand))
+  disposeSubscription(onPersonUpdated(event => {
+    if (!event.session_id || !event.personFlows) return
+    const target = sessions.value.find(session => session.id === event.session_id)
+    if (target && applyPersonFlowUpdate(target,event.personFlows) && activeSessionId.value === target.id) void refreshActiveSession()
+  }))
 
   disposeSubscription(onSessionTitleUpdated(applyGeneratedSessionTitle))
   disposeSubscription(onSessionWorkspaceUpdated(applySessionWorkspaceUpdate))
@@ -5573,7 +5607,7 @@ function createChatState(scopedSessionId?: string) {
             if (!data.isWorking) setCompressionState(sid, null)
             applyResumedSessionSettings(data)
             if (activeSession.value) applySessionTokenUsage(activeSession.value, data)
-            if (Array.isArray(data.messages) && activeSession.value) {
+            if (Array.isArray(data.messages) && activeSession.value && !preservePersonTimelineWindow(activeSession.value,data.personFlows)) {
               if (typeof data.workspace === 'string') {
                 activeSession.value.workspace = data.workspace.trim() || null
                 activeSession.value.isLocalOnly = false
@@ -5586,6 +5620,7 @@ function createChatState(scopedSessionId?: string) {
               activeSession.value.messageTotal = data.messageTotal ?? activeSession.value.messageCount ?? activeSession.value.loadedMessageCount
               activeSession.value.messageCount = activeSession.value.messageTotal
               activeSession.value.hasMoreBefore = data.hasMoreBefore ?? activeSession.value.loadedMessageCount < activeSession.value.messageTotal
+              if (!applyPersonTimelinePage(activeSession.value,data.personFlows,activeSession.value.messages) && data.personFlows) activeSession.value.personFlows=data.personFlows
             }
             resumeServerWorkingRun(sid, (data.backgroundPending || 0) > 0, !data.isWorking)
           }, activeSession.value?.profile, runtimeTransport())

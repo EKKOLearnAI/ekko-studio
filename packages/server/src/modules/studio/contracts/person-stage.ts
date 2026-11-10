@@ -16,6 +16,9 @@ export interface PersonStage {
   state: 'pending' | 'active' | 'failed' | 'completed'; result_message_id: number | null; completion_run_id: string
 }
 export interface PersonConversationFlow {
+  timeline_at?: number | null
+  creator_session_title?: string | null
+  creator_bot_type?: string | null
   /** Zero means repeat until explicitly stopped; existing flows run once. */
   round_limit: number; round_number: number; round_generation: number
   workspace: string
