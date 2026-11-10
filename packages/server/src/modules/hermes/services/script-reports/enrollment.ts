@@ -651,6 +651,16 @@ export async function executeAdoption(plan: AdoptionPlan, destination: Enrollmen
       failScriptReportBinding(bindingId, code)
       throw new EnrollmentError(status, code, message, jobId)
     }
+    // An unreadable jobs file verifies nothing: fail with the job id, pause again and report only the
+    // observed native state. Nothing is resumed.
+    const readBack = async (): Promise<Record<string, any> | null> => {
+      try {
+        return readNativeJob(profile, jobId)
+      } catch {
+        failScriptReportBinding(bindingId, 'native_config_mismatch')
+        throw new EnrollmentError(502, 'native_config_mismatch', undefined, jobId, await ensurePaused(profile, jobId, runner))
+      }
+    }
     if (before.enabled !== false) {
       try {
         await runner(profile, ['pause', jobId])
@@ -658,7 +668,7 @@ export async function executeAdoption(plan: AdoptionPlan, destination: Enrollmen
         fail('native_pause_failed', 502, error?.message)
       }
     }
-    const paused = readNativeJob(profile, jobId)
+    const paused = await readBack()
     if (!paused || paused.enabled !== false || jobFingerprint(paused) !== plan.jobFingerprint) fail('job_changed', 409)
     if (busy(home, jobId)) fail('job_busy', 409)
     try {
@@ -668,7 +678,7 @@ export async function executeAdoption(plan: AdoptionPlan, destination: Enrollmen
     } catch (error: any) {
       fail('native_edit_failed', 502, error?.message)
     }
-    const edited = readNativeJob(profile, jobId)
+    const edited = await readBack()
     // Only the script may differ from the approved configuration.
     if (!edited || edited.script !== wrapperRelative || edited.enabled !== false
       || jobFingerprint(edited, { script: plan.configuredScript }) !== plan.jobFingerprint) {

@@ -21,10 +21,11 @@ let m: any
 let turns: any
 const published: string[] = []
 const guard = { verdict: { ok: true } as any, calls: [] as string[] }
-const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; resumeGate?: Promise<void>; onCreate?: (id: string) => void; onResume?: (job: any) => void } = { calls: [], jobs: [] }
+const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; resumeGate?: Promise<void>; onCreate?: (id: string) => void; onResume?: (job: any) => void; onCommand?: (command: string) => void; afterSave?: (command: string) => void } = { calls: [], jobs: [] }
 const users: Record<string, { id: number; token: string; modelRun: string; legacy: string }> = {}
 
 function saveJobs() { mkdirSync(join(hermesHome, 'cron'), { recursive: true }); writeFileSync(join(hermesHome, 'cron', 'jobs.json'), JSON.stringify({ jobs: cli.jobs })) }
+function corruptJobs() { writeFileSync(join(hermesHome, 'cron', 'jobs.json'), '{ not json') }
 const job = (id: string) => cli.jobs.find(item => item.id === id)
 
 beforeEach(async () => {
@@ -39,7 +40,7 @@ beforeEach(async () => {
   vi.stubEnv('HERMES_WEB_UI_HOME', studioHome)
   vi.stubEnv('HERMES_HOME', hermesHome)
   vi.stubEnv('HERMES_WEB_UI_TEST_DB_DIR', join(root, 'db'))
-  cli.calls = []; cli.createGate = undefined; cli.editGate = undefined; cli.resumeGate = undefined; cli.onCreate = undefined; cli.onResume = undefined
+  cli.calls = []; cli.createGate = undefined; cli.editGate = undefined; cli.resumeGate = undefined; cli.onCreate = undefined; cli.onResume = undefined; cli.onCommand = undefined; cli.afterSave = undefined
   cli.jobs = [
     { id: 'agent1', name: 'Morning brief', prompt: 'Summarize the news', no_agent: false, deliver: 'local', enabled: true,
       schedule: { kind: 'cron', expr: '0 9 * * *', display: '0 9 * * *' }, schedule_display: '0 9 * * *', repeat: { times: null, completed: 4 },
@@ -67,6 +68,8 @@ beforeEach(async () => {
         return { stdout: `Created job: ${id}\n`, stderr: '' }
       }
       const target = job(rest[0])
+      // A command the CLI refuses changes nothing.
+      cli.onCommand?.(command)
       if (command === 'edit') {
         await cli.editGate
         if (rest.includes('--script')) target.script = flag('--script')
@@ -75,6 +78,8 @@ beforeEach(async () => {
       if (command === 'resume') { await cli.resumeGate; target.enabled = true; cli.onResume?.(structuredClone(target)) }
       if (command === 'pause') target.enabled = false
       saveJobs()
+      // After the change is saved: an unreadable jobs file, or a CLI that fails after committing.
+      cli.afterSave?.(command)
       return { stdout: '', stderr: '' }
     },
   }))
@@ -614,6 +619,63 @@ describe('exact-head review regressions', () => {
     expect(approved).toMatchObject({ status: 200, body: { status: 'approved', mode: 'existing', resumed: true } })
     expect(commands()).toEqual(['pause', 'edit', 'resume'])
     expect(approved.body.binding).toMatchObject({ state: 'active', job_id: 'legacy1', target_script: 'reports/legacy.sh' })
+  })
+})
+
+describe('native readback and state through approval', () => {
+  it('an unreadable job after the adoption pause fails the binding with its job id and pauses again, never wrapping or resuming', async () => {
+    let pauses = 0
+    cli.afterSave = command => { if (command === 'pause' && ++pauses === 1) corruptJobs() }
+    const pending = await request(turn('chat-1', users.member.id), adopt)
+    const result = await approve(pending.body.request_id)
+    expect(result.status).toBe(502)
+    expect(result.body).toEqual({ error: 'native_config_mismatch', job_id: 'legacy1', native_state: 'paused' })
+    expect(commands()).toEqual(['pause', 'pause'])
+    expect(job('legacy1')).toMatchObject({ enabled: false, script: 'reports/legacy.sh' })
+    expect(bindingRows()).toMatchObject([{ state: 'failed', job_id: 'legacy1', error: 'native_config_mismatch' }])
+  })
+
+  it('an unreadable job after the adoption edit fails the binding with its job id and an unconfirmed pause, never resuming', async () => {
+    let broken = false
+    cli.afterSave = command => { if (command === 'edit') broken = true; if (broken) corruptJobs() }
+    const pending = await request(turn('chat-1', users.member.id), adopt)
+    const result = await approve(pending.body.request_id)
+    expect(result.status).toBe(502)
+    expect(result.body).toEqual({ error: 'native_config_mismatch', job_id: 'legacy1', native_state: 'unknown' })
+    expect(commands()).toEqual(['pause', 'edit', 'pause'])
+    expect(job('legacy1').enabled).toBe(false)
+    expect(bindingRows()).toMatchObject([{ state: 'failed', job_id: 'legacy1', error: 'native_config_mismatch' }])
+  })
+
+  it('a refused resume on approval reports the job id and the observed paused state', async () => {
+    cli.onCommand = command => { if (command === 'resume') throw new Error('resume refused') }
+    const pending = await request(turn('chat-1', users.member.id), newScript)
+    const result = await approve(pending.body.request_id)
+    expect(result.status).toBe(502)
+    expect(result.body).toEqual({ error: 'native_resume_failed', job_id: 'job4', native_state: 'paused' })
+    expect(commands()).toEqual(['create', 'edit', 'resume'])
+    expect(job('job4').enabled).toBe(false)
+  })
+
+  it('a resume that committed then failed, with a refused pause, reports an unknown native state', async () => {
+    cli.afterSave = command => { if (command === 'resume') throw new Error('resume timed out') }
+    cli.onCommand = command => { if (command === 'pause') throw new Error('pause refused') }
+    const pending = await request(turn('chat-1', users.member.id), newScript)
+    const result = await approve(pending.body.request_id)
+    expect(result.status).toBe(502)
+    expect(result.body).toEqual({ error: 'native_resume_failed', job_id: 'job4', native_state: 'unknown' })
+    expect(commands()).toEqual(['create', 'edit', 'resume', 'pause'])
+    expect(job('job4').enabled).toBe(true)
+  })
+
+  it('a successful resume whose job cannot be read back stays approved with an unknown native state', async () => {
+    cli.afterSave = command => { if (command === 'resume') corruptJobs() }
+    const pending = await request(turn('chat-1', users.member.id), newScript)
+    const result = await approve(pending.body.request_id)
+    expect(result.status).toBe(200)
+    expect(result.body).toMatchObject({ status: 'approved', mode: 'new', job: null, resumed: true, native_state: 'unknown',
+      binding: { state: 'active', job_id: 'job4', identity_kind: 'wrapper_invocation' } })
+    expect(commands()).toEqual(['create', 'edit', 'resume'])
   })
 })
 
