@@ -121,6 +121,18 @@ def _set_bridge_session_vars(
     return set_session_vars(**supported)
 
 
+class DispatchNotAdmitted(RuntimeError):
+    """A Studio dispatch that was already admitted or already resolved as not admitted."""
+
+    def __init__(self, state: str) -> None:
+        super().__init__(f"dispatch_{state}")
+        self.state = state
+
+
+class DispatchStartFailed(RuntimeError):
+    """An admitted Studio dispatch whose worker never started; its receipt is settled ``failed``."""
+
+
 class SessionDbHolder:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -1772,6 +1784,7 @@ class AgentPool:
         source: str | None = None,
         reasoning_effort: str | None = None,
         background_delegation_enabled: bool | None = None,
+        dispatch_id: str | None = None,
     ) -> RunRecord:
         session = self.get_or_create(
             session_id,
@@ -1794,6 +1807,13 @@ class AgentPool:
             if session.running:
                 raise RuntimeError(f"session {session_id} is already running")
             run_id = uuid.uuid4().hex
+            if dispatch_id:
+                # Durable admission before any run state: a dispatch Studio already resolved as not
+                # admitted, or one admitted earlier, never starts a run.
+                import bridge_dispatch_receipts
+                admitted = bridge_dispatch_receipts.admit(_hermes_home(), dispatch_id, run_id)
+                if admitted != "accepted":
+                    raise DispatchNotAdmitted(admitted)
             record = RunRecord(run_id=run_id, session_id=session_id)
             with self._lock:
                 self._runs[run_id] = record
@@ -1811,6 +1831,7 @@ class AgentPool:
                     record.events.append(_jsonable(context_event))
             except BaseException as exc:
                 self._fail_unexpected_run(session, record, exc)
+                self._settle_dispatch_start_failure(dispatch_id, exc)
                 raise
             finally:
                 if session_cwd_bound:
@@ -1830,8 +1851,20 @@ class AgentPool:
                 thread.start()
             except BaseException as exc:
                 self._fail_unexpected_run(session, record, exc)
+                self._settle_dispatch_start_failure(dispatch_id, exc)
                 raise
+        if dispatch_id:
+            import bridge_dispatch_receipts
+            bridge_dispatch_receipts.confirm_dispatched(_hermes_home(), dispatch_id)
         return record
+
+    def _settle_dispatch_start_failure(self, dispatch_id: str | None, exc: BaseException) -> None:
+        """A definite startup failure after admission: settle the receipt and report it as such."""
+        if not dispatch_id:
+            return
+        import bridge_dispatch_receipts
+        bridge_dispatch_receipts.settle_failed(_hermes_home(), dispatch_id)
+        raise DispatchStartFailed(f"dispatch_start_failed: {exc}") from exc
 
     def _run_chat(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None) -> None:
         try:
@@ -3035,6 +3068,10 @@ class AgentPool:
             "killed_processes": killed_processes,
             "released_claims": released_claims,
         }
+
+    def resolve_dispatch(self, dispatch_id: str) -> dict[str, Any]:
+        import bridge_dispatch_receipts
+        return {"dispatch_id": dispatch_id, "state": bridge_dispatch_receipts.resolve(_hermes_home(), dispatch_id)}
 
     def status(self, session_id: str) -> dict[str, Any]:
         with self._lock:

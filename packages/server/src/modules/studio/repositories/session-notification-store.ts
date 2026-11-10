@@ -28,6 +28,8 @@ export interface SessionNotificationRecord {
   disposition: SessionNotificationDisposition
   payload: Record<string, unknown>
   attention_pending: number
+  /** When the notice was shown to the model on an intentional turn; null until then. */
+  projected_at: number | null
   created_at: number
 }
 
@@ -46,6 +48,9 @@ function database() {
     );
     CREATE INDEX IF NOT EXISTS idx_session_notifications_session ON session_notifications(session_id, created_at);
   `)
+  const columns = new Set((db.prepare('PRAGMA table_info(session_notifications)').all() as Array<{ name: string }>).map(column => column.name))
+  if (!columns.has('projected_at')) db.exec('ALTER TABLE session_notifications ADD COLUMN projected_at INTEGER')
+  if (!columns.has('projection_dispatch_id')) db.exec('ALTER TABLE session_notifications ADD COLUMN projection_dispatch_id TEXT')
   initSessionStateTables(db)
   initialized.add(db)
   return db
@@ -64,6 +69,7 @@ function rowToRecord(row: Record<string, unknown>): SessionNotificationRecord {
     kind: String(row.kind) as SessionNotificationKind,
     disposition: String(row.disposition) as SessionNotificationDisposition,
     payload,
+    projected_at: row.projected_at == null ? null : Number(row.projected_at),
     attention_pending: Number(row.attention_pending || 0),
     created_at: Number(row.created_at),
   }
@@ -145,4 +151,50 @@ export function listVisibleSessionNotifications(sessionId: string): SessionNotif
     WHERE session_id=? AND session_generation=? AND disposition IN ('notified','status_only','unknown')
     ORDER BY created_at, id`).all(sessionId, generation) as Record<string, unknown>[]
   return rows.map(rowToRecord)
+}
+
+/** Shown notices of the current generation not yet given to the model on an intentional turn. */
+export function listUnprojectedSessionNotifications(sessionId: string, limit: number): SessionNotificationRecord[] {
+  if (!getDb() || isPrivatePersonSession(sessionId)) return []
+  const generation = getSessionGeneration(sessionId)
+  if (!generation) return []
+  const rows = database().prepare(`SELECT * FROM session_notifications
+    WHERE session_id=? AND session_generation=? AND disposition IN ('notified','status_only','unknown')
+      AND projected_at IS NULL AND projection_dispatch_id IS NULL
+    ORDER BY created_at, id LIMIT ?`).all(sessionId, generation, limit) as Record<string, unknown>[]
+  return rows.map(rowToRecord)
+}
+
+/** Marks notices as given to the model once; a notice is never projected twice. */
+export function markSessionNotificationsProjected(ids: number[], now = Date.now()): void {
+  if (!ids.length) return
+  const statement = database().prepare('UPDATE session_notifications SET projected_at=? WHERE id=? AND projected_at IS NULL')
+  for (const id of ids) statement.run(now, id)
+}
+
+/** Reserves pending notices for one dispatch before it is sent; returns the ids actually reserved. */
+export function reserveSessionNotificationsForDispatch(ids: number[], dispatchId: string): number[] {
+  const statement = database().prepare(`UPDATE session_notifications SET projection_dispatch_id=?
+    WHERE id=? AND projected_at IS NULL AND projection_dispatch_id IS NULL`)
+  return ids.filter(id => statement.run(dispatchId, id).changes > 0)
+}
+
+/** The bridge admitted the dispatch: its reserved notices are consumed and never projected again. */
+export function consumeDispatchNotifications(dispatchId: string, now = Date.now()): void {
+  database().prepare('UPDATE session_notifications SET projected_at=? WHERE projection_dispatch_id=? AND projected_at IS NULL')
+    .run(now, dispatchId)
+}
+
+/** The dispatch was definitely not admitted: its notices are pending again for a later question. */
+export function releaseDispatchNotifications(dispatchId: string): void {
+  database().prepare('UPDATE session_notifications SET projection_dispatch_id=NULL WHERE projection_dispatch_id=? AND projected_at IS NULL')
+    .run(dispatchId)
+}
+
+/** Dispatches of this session whose admission is still unresolved (an acknowledgement was lost). */
+export function unresolvedProjectionDispatches(sessionId: string): string[] {
+  if (!getDb()) return []
+  return (database().prepare(`SELECT DISTINCT projection_dispatch_id AS id FROM session_notifications
+    WHERE session_id=? AND projection_dispatch_id IS NOT NULL AND projected_at IS NULL`).all(sessionId) as Array<{ id: string }>)
+    .map(row => row.id)
 }
