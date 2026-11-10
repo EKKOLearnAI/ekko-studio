@@ -218,7 +218,7 @@ describe('generated script report wrapper', () => {
     const { wrapper } = enroll('slow.py', 'import time\nprint("begin", flush=True)\ntime.sleep(30)\n')
     const child = spawn(PYTHON, [wrapper], { cwd: join(scripts, 'ekko-script-reports'), stdio: ['ignore', 'pipe', 'ignore'], detached: true })
     await new Promise(resolve => child.stdout!.once('data', resolve))
-    process.kill(-child.pid!, 'SIGKILL')
+    signalOwnGroup(child, ownGroupLeader(child), 'SIGKILL')
     await new Promise(resolve => child.on('exit', resolve))
     const { started, final } = only()
     expect(started.phase).toBe('started')
@@ -281,7 +281,31 @@ function probe(wrapper: string, code: string, cwd?: string, timeout = 60_000) {
   return result
 }
 
-const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch { return false } }
+interface ProcessIdentity { pid: number; pgid: number; started: string }
+
+/** Read-only process-table identity (pid, process group, start time); never a signal. Null when absent. */
+function processIdentity(pid: number): ProcessIdentity | null {
+  const result = spawnSync('ps', ['-o', 'pid=,pgid=,lstart=', '-p', String(pid)], { encoding: 'utf8' })
+  const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(result.stdout || '')
+  return result.status === 0 && match ? { pid: Number(match[1]), pgid: Number(match[2]), started: match[3] } : null
+}
+
+const sameProcess = (a: ProcessIdentity | null, b: ProcessIdentity) => !!a && a.pid === b.pid && a.pgid === b.pgid && a.started === b.started
+
+/** The detached child the test spawned, as the leader of its own process group. */
+function ownGroupLeader(child: ReturnType<typeof spawn>): ProcessIdentity {
+  const identity = processIdentity(child.pid!)
+  expect(identity, 'spawned child in the process table').not.toBeNull()
+  expect(identity!.pgid, 'spawned child leads its own group').toBe(child.pid)
+  return identity!
+}
+
+/** Signal only the test's own spawned group, after revalidating that the same leader still runs. */
+function signalOwnGroup(child: ReturnType<typeof spawn>, leader: ProcessIdentity, signal: NodeJS.Signals): void {
+  expect(child.exitCode === null && child.signalCode === null, 'own child not yet exited').toBe(true)
+  expect(sameProcess(processIdentity(child.pid!), leader), 'own group leader unchanged').toBe(true)
+  process.kill(-leader.pgid, signal)
+}
 
 describe('sanitizer, quota and record limits', () => {
   it('sanitizes adversarial 128 KiB inputs in linear time', () => {
@@ -382,16 +406,24 @@ describe('process and storage failure boundaries', () => {
     return child
   }
   const tree = 'import subprocess, time\nchild = subprocess.Popen(["sleep", "300"])\nopen("grandchild.pid", "w").write(str(child.pid))\nprint("ready", flush=True)\ntime.sleep(300)\n'
+  /** Identities recorded before any signal: the own group leader and the descendant inside that group. */
+  function ownTree(child: ReturnType<typeof spawn>) {
+    const leader = ownGroupLeader(child)
+    const grandchild = processIdentity(Number(readFileSync(join(scripts, 'jobs', 'grandchild.pid'), 'utf8')))
+    expect(grandchild, 'descendant in the process table').not.toBeNull()
+    expect(grandchild!.pgid, 'descendant inside the own group').toBe(leader.pgid)
+    return { leader, grandchild: grandchild! }
+  }
 
   it('SIGTERM to the group stops the target and its descendant and reports an interrupted invocation', async () => {
     const { wrapper } = enroll('tree-term.py', tree)
     const child = startGroup(wrapper)
     await new Promise(resolve => child.stdout!.once('data', resolve))
-    const grandchild = Number(readFileSync(join(scripts, 'jobs', 'grandchild.pid'), 'utf8'))
-    process.kill(-child.pid!, 'SIGTERM')
+    const { leader, grandchild } = ownTree(child)
+    signalOwnGroup(child, leader, 'SIGTERM')
     const signal = await new Promise(resolve => child.on('exit', (_code, sig) => resolve(sig)))
     expect(signal).toBe('SIGTERM')
-    await vi.waitFor(() => expect(alive(grandchild)).toBe(false), { timeout: 5000 })
+    await vi.waitFor(() => expect(sameProcess(processIdentity(grandchild.pid), grandchild)).toBe(false), { timeout: 5000 })
     expect(only().final).toMatchObject({ outcome: 'interrupted', signal: 15, content: null })
   })
 
@@ -399,10 +431,10 @@ describe('process and storage failure boundaries', () => {
     const { wrapper } = enroll('tree-kill.py', tree)
     const child = startGroup(wrapper)
     await new Promise(resolve => child.stdout!.once('data', resolve))
-    const grandchild = Number(readFileSync(join(scripts, 'jobs', 'grandchild.pid'), 'utf8'))
-    process.kill(-child.pid!, 'SIGKILL')
+    const { leader, grandchild } = ownTree(child)
+    signalOwnGroup(child, leader, 'SIGKILL')
     await new Promise(resolve => child.on('exit', resolve))
-    await vi.waitFor(() => expect(alive(grandchild)).toBe(false), { timeout: 5000 })
+    await vi.waitFor(() => expect(sameProcess(processIdentity(grandchild.pid), grandchild)).toBe(false), { timeout: 5000 })
     const { started, final } = only()
     expect(started.phase).toBe('started')
     expect(final).toBeNull()
