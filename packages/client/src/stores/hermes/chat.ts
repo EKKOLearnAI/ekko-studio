@@ -1,3 +1,4 @@
+import { storedMessageCount } from '@/shared/session-notices'
 import { deploymentUrl } from '@/utils/deployment-url'
 import { chatSessionAgentAvatar, PERSON_AVATAR } from '@/utils/chat-agent-avatar'
 import { deleteSessionMessages, type MessageDeletionResult } from '@/api/studio/sessions'
@@ -7,7 +8,7 @@ import { isKnownEkkoSessionCommand } from '@/utils/hermes/bridge-session-command
 import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
 import { applyPersonTimelinePage, applyPersonFlowUpdate, preservePersonTimelineWindow } from '@/utils/person-timeline'
-import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
+import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionNotice, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
 import { onAuthInvalidated } from '@/api/auth-invalidation'
@@ -95,6 +96,8 @@ export interface Attachment {
 
 export interface Message {
   personTaskReturn?: import('@/api/person').PersonTaskReturn
+  /** Passive Studio session notice (script report); display only, never model history. */
+  studioNotice?: import('@/api/studio/sessions').StudioNoticeView
   storedMessageId?: number
   taskPlan?: TaskPlanSnapshot
   id: string
@@ -1119,6 +1122,7 @@ function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], pre
       id: String(msg.id),
       role: displayRole === 'moa' ? 'system' : displayRole,
       content: displayContent || '',
+      ...(msg.studio_notice ? { studioNotice: msg.studio_notice } : {}),
       runUsage: normalizeRunUsage(msg.run_usage),
       personTaskReturn: msg.person_task_return,
       timestamp: Math.round(msg.timestamp * 1000),
@@ -2041,7 +2045,7 @@ function createChatState(scopedSessionId?: string) {
       target.messagesLoaded = true
       restorePersistedSubagentStreams(sid)
       setWorkspaceRunChanges(sid, detail.workspaceRunChanges || [])
-      target.loadedMessageCount = detail.messages.length
+      target.loadedMessageCount = storedMessageCount(detail.messages)
       target.messageTotal = detail.total
       target.messageCount = detail.total
       target.hasMoreBefore = detail.hasMore
@@ -2387,7 +2391,7 @@ function createChatState(scopedSessionId?: string) {
       target.messages = mergeTaskPlanMessages([...olderMessages, ...target.messages], page.taskPlans || [], sessionId)
       restorePersistedSubagentStreams(sessionId)
       mergeWorkspaceRunChanges(sessionId, page.workspaceRunChanges || [])
-      target.loadedMessageCount = offset + page.messages.length
+      target.loadedMessageCount = offset + storedMessageCount(page.messages)
       target.messageTotal = page.total
       target.messageCount = page.total
       target.hasMoreBefore = page.hasMore
@@ -5527,6 +5531,20 @@ function createChatState(scopedSessionId?: string) {
     if (!event.session_id || !event.personFlows) return
     const target = sessions.value.find(session => session.id === event.session_id)
     if (target && applyPersonFlowUpdate(target,event.personFlows) && activeSessionId.value === target.id) void refreshActiveSession()
+  }))
+
+  disposeSubscription(onSessionNotice(evt => {
+    const sid = evt.session_id
+    const notice = evt.message
+    if (!sid || !notice?.id) return
+    const session = sessions.value.find(item => item.id === sid)
+    // A loaded timeline may be empty; an unloaded one gets the notice from its next load.
+    const loaded = session?.messagesLoaded === true || !!session?.messages.length
+    if (session && loaded && !session.messages.some(item => item.id === String(notice.id))) {
+      const [mapped] = mapHermesMessages([notice as any])
+      if (mapped) addMessageInTimelineOrder(sid, mapped)
+    }
+    if (evt.attention) markSessionCompletedUnread(sid)
   }))
 
   disposeSubscription(onSessionTitleUpdated(applyGeneratedSessionTitle))
