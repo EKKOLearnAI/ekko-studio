@@ -1977,11 +1977,16 @@ async function callCategoryToolset(args = {}, signal) {
   return errorText('Invalid category toolset action. Allowed: list, describe, call.')
 }
 
-async function callTool(name, args = {}, signal) {
-  return browserCallContext.run({ ...(browserCallContext.getStore() || {}), ...(args.profile ? { profile: args.profile } : {}), ...(args.token ? { token: args.token } : {}) }, () => callToolInner(name, args, signal))
+async function callTool(name, args = {}, signal, meta) {
+  return browserCallContext.run({ ...(browserCallContext.getStore() || {}), ...(args.profile ? { profile: args.profile } : {}), ...(args.token ? { token: args.token } : {}) }, () => callToolInner(name, args, signal, meta))
 }
 
-async function callToolInner(name, args = {}, signal) {
+// Trusted current-session Cron admission is authorized only by the authority Studio's Bridge
+// attaches to this one call; never by a token argument, the profile token or a credential file.
+const CRON_CURRENT_SESSION_PATH = '/api/hermes/cron/current-session'
+const CRON_CAPABILITY_META = 'ekko.studio/cron-capability'
+
+async function callToolInner(name, args = {}, signal, meta) {
   if (!isToolCallable(name)) {
     return errorText(`Tool is not available in the active '${ACTIVE_TOOLSET}' MCP toolset: ${name}`)
   }
@@ -2081,6 +2086,15 @@ async function callToolInner(name, args = {}, signal) {
       const path = normalizeApiPath(args.path)
       if (!method) return errorText('Invalid method. Allowed: GET, POST, PUT, PATCH, DELETE, HEAD.')
       if (!path) return errorText('Invalid path. Use a relative /api/... or /health path from ekko_studio_api_openapi_get; full URLs are not allowed.')
+      if (pathWithoutQuery(path) === CRON_CURRENT_SESSION_PATH) {
+        const capability = meta?.[CRON_CAPABILITY_META]
+        if (method !== 'POST' || typeof capability !== 'string' || !capability.startsWith('studio_run_')) {
+          // An ordinary API refusal, not a tool failure: it must not trip the shared server's breaker.
+          return jsonText({ status: 403, body: { error: 'trusted_capability_unavailable',
+            hint: 'Needs the account\'s trusted Cron automation policy and a live Studio chat turn; otherwise request user consent.' } })
+        }
+        return jsonText(await requestEnvelope(path, { method, body: args.body, profile: args.profile, token: capability, allowTokenFile: false }))
+      }
       const validationError = await validateApiRequest(method, path, args)
       if (validationError) return errorText(`Invalid API request for ${method} ${pathWithoutQuery(path)}: ${validationError}. Use ekko_studio_api_openapi_get to inspect required parameters and requestBody.`)
       const options = withAuthArgs(args, {
@@ -2321,7 +2335,7 @@ async function handle(message) {
         try {
           return {
             jsonrpc: '2.0', id: message.id,
-            result: await callTool(message.params?.name, message.params?.arguments || {}, abort?.signal),
+            result: await callTool(message.params?.name, message.params?.arguments || {}, abort?.signal, message.params?._meta),
           }
         } finally { pendingInteractions.delete(message.id) }
       }

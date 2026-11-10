@@ -5,6 +5,8 @@ import { readConfigYamlForProfile } from '../../studio/public/profile-config'
 import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
 import { getHermesBin } from '../services/runtime/path'
 import { execHermesWithBin, spawnHermesWithBin } from '../services/runtime/process'
+import { withCronJobLock } from '../services/cron-jobs/job-lock'
+import { currentAccountProfileRefusal } from '../../studio/public/auth'
 
 const TIMEOUT_MS = 60_000
 
@@ -399,7 +401,7 @@ export async function create(ctx: Context) {
   }
 }
 
-export async function update(ctx: Context) {
+async function updateJob(ctx: Context) {
   const profile = resolveProfile(ctx)
   const body = getBody(ctx)
   if (!findJob(profile, ctx.params.id)) return sendJobNotFound(ctx)
@@ -449,7 +451,7 @@ export async function update(ctx: Context) {
   }
 }
 
-export async function remove(ctx: Context) {
+async function removeJob(ctx: Context) {
   const profile = resolveProfile(ctx)
   if (!findJob(profile, ctx.params.id)) return sendJobNotFound(ctx)
 
@@ -461,7 +463,7 @@ export async function remove(ctx: Context) {
   }
 }
 
-export async function pause(ctx: Context) {
+async function pauseJob(ctx: Context) {
   const profile = resolveProfile(ctx)
   if (!findJob(profile, ctx.params.id)) return sendJobNotFound(ctx)
 
@@ -474,7 +476,7 @@ export async function pause(ctx: Context) {
   }
 }
 
-export async function resume(ctx: Context) {
+async function resumeJob(ctx: Context) {
   const profile = resolveProfile(ctx)
   if (!findJob(profile, ctx.params.id)) return sendJobNotFound(ctx)
 
@@ -500,3 +502,29 @@ export async function run(ctx: Context) {
     sendCommandError(ctx, error)
   }
 }
+
+/**
+ * Studio-managed job mutations of one job never interleave with consent application. Access may
+ * have changed while a request waited for the lock, so the account is authorized again right before
+ * the mutation runs.
+ */
+function lockedJobMutation(handler: (ctx: Context) => Promise<void>) {
+  return (ctx: Context) => {
+    const profile = resolveProfile(ctx)
+    return withCronJobLock(profile, String(ctx.params.id), async () => {
+      const user = ctx.state?.user
+      const refusal = user ? currentAccountProfileRefusal(user.id, profile) : null
+      if (refusal) {
+        ctx.status = 403
+        ctx.body = { error: refusal }
+        return
+      }
+      await handler(ctx)
+    })
+  }
+}
+
+export const update = lockedJobMutation(updateJob)
+export const remove = lockedJobMutation(removeJob)
+export const pause = lockedJobMutation(pauseJob)
+export const resume = lockedJobMutation(resumeJob)

@@ -92,6 +92,8 @@ class BridgeServer:
                 source,
                 reasoning_effort,
                 background_delegation_enabled,
+                **({"studio_cron_capability": str(req["studio_cron_capability"])}
+                   if req.get("studio_cron_capability") else {}),
             )
             if req.get("wait"):
                 timeout = float(req.get("timeout", 0) or 0)
@@ -297,6 +299,10 @@ class BridgeServer:
         if action == "background_poll":
             session_ids = req.get("session_ids")
             return self.pool.poll_background(session_ids if isinstance(session_ids, list) else None)
+
+        if action == "studio_cron_observe":
+            jobs = req.get("jobs")
+            return self.pool.studio_cron_observe(jobs if isinstance(jobs, list) else [], req.get("profile"))
 
         if action == "background_notification_complete":
             delegation_id = str(req.get("delegation_id") or "").strip()

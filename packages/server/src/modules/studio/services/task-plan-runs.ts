@@ -9,7 +9,7 @@ type RunState = { isWorking: boolean; isAborting?: boolean; runId?: string; acti
 function activeTurnId(state: RunState | undefined): string {
   return state?.activeRunMarker || state?.responseRun?.runMarker || state?.runId || ''
 }
-type Binding = { planId: string; sessionId: string; profile: string; resolve: () => RunState | undefined; sessionTasksEnabled: boolean; runId?: string; snapshot?: TaskPlanSnapshot; publish?: (snapshot: TaskPlanSnapshot) => void }
+type Binding = { planId: string; sessionId: string; profile: string; resolve: () => RunState | undefined; sessionTasksEnabled: boolean; runId?: string; snapshot?: TaskPlanSnapshot; publish?: (snapshot: TaskPlanSnapshot) => void; accountId?: number }
 
 export class TaskPlanError extends Error {
   constructor(message: string, public readonly status = 400) { super(message) }
@@ -51,11 +51,12 @@ export class TaskPlanRuns {
     private readonly publish: (sessionId: string, snapshot: TaskPlanSnapshot) => void,
   ) {}
 
-  begin(sessionId: string, profile: string, resolve: Binding['resolve'], publish?: Binding['publish'], sessionTasksEnabled = false): string {
+  /** `accountId`: the authenticated Studio account that started the turn, captured server-side. */
+  begin(sessionId: string, profile: string, resolve: Binding['resolve'], publish?: Binding['publish'], sessionTasksEnabled = false, accountId?: number): string {
     this.finishSession(sessionId, 'interrupted')
     const contextId = randomUUID()
     // Durable plan identity must not expose the per-turn authorization context.
-    this.bindings.set(contextId, { planId: `mcp:${randomUUID()}`, sessionId, profile, resolve, publish, sessionTasksEnabled })
+    this.bindings.set(contextId, { planId: `mcp:${randomUUID()}`, sessionId, profile, resolve, publish, sessionTasksEnabled, accountId })
     this.sessions.set(sessionId, contextId)
     return contextId
   }
@@ -99,6 +100,17 @@ export class TaskPlanRuns {
     if (!binding.sessionTasksEnabled) throw new TaskPlanError('Session goals are unavailable in this context', 409)
     binding.runId = activeTurnId(binding.resolve())
     return binding.sessionId
+  }
+
+  /**
+   * The server-created authority of a live turn context: its session and the account that started
+   * the turn. Requires an active user turn (not a background continuation) with a known account.
+   */
+  authorityForContext(contextId: string, profile: string): { sessionId: string; accountId: number } {
+    const sessionId = this.sessionForContext(contextId, profile)
+    const accountId = this.bindings.get(contextId)?.accountId
+    if (!accountId) throw new TaskPlanError('Turn context has no requesting account', 409)
+    return { sessionId, accountId }
   }
 
   activeSnapshots(): Array<{ profile: string; snapshot: TaskPlanSnapshot }> {

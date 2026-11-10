@@ -43,6 +43,7 @@ export interface AgentBridgeRequestOptions {
 }
 
 export interface AgentBridgeChatOptions {
+  studio_cron_capability?: string
   force_compress?: boolean
   /** Agent-session creation policy. False keeps delegate_task available but
    * makes background=true fall back to synchronous execution. */
@@ -247,6 +248,29 @@ export interface AgentBridgeBackgroundPoll extends AgentBridgeResponse {
   pending_count?: number
   sessions: AgentBridgeBackgroundSession[]
   notifications: AgentBridgeBackgroundNotification[]
+}
+
+export interface AgentBridgeCronObservedExecution {
+  job_id: string
+  job_name?: string | null
+  execution_id: string
+  source?: string | null
+  scheduled_instant?: string | null
+  status: 'completed' | 'failed' | 'unknown'
+  finished_at?: string | null
+  error?: string | null
+  delivery_outcome?: string | null
+  no_agent: boolean
+  receipt: 'exact' | 'unavailable'
+  success?: boolean
+  answer?: string
+  result_error?: string | null
+  silent?: boolean
+}
+
+export interface AgentBridgeCronObservation extends AgentBridgeResponse {
+  executions: AgentBridgeCronObservedExecution[]
+  jobs: Array<{ job_id: string; state: 'present' | 'missing'; name?: string | null; deliver?: string | null; older_before?: string | null }>
 }
 
 export interface AgentBridgeBackgroundRoute {
@@ -513,6 +537,7 @@ export class AgentBridgeClient {
       session_id: sessionId,
       message,
       ...(options.storage_message !== undefined ? { storage_message: options.storage_message } : {}),
+      ...(options.studio_cron_capability ? { studio_cron_capability: options.studio_cron_capability } : {}),
       ...(conversationHistory ? { conversation_history: conversationHistory } : {}),
       ...(instructions ? { instructions } : {}),
       ...(profile ? { profile } : {}),
@@ -650,6 +675,11 @@ export class AgentBridgeClient {
     return last
   }
 
+  /** Start the fixed, model-free current-session Cron admission; poll `getResult` with the returned run id. */
+  studioCronDispatch(profile: string, sessionId: string, capability: string, body: Record<string, unknown>): Promise<AgentBridgeResponse & { run_id: string; status: string }> {
+    return this.request<AgentBridgeResponse & { run_id: string; status: string }>({ action: 'studio_cron_dispatch', profile, session_id: sessionId, capability, body })
+  }
+
   getResult(runId: string, options: AgentBridgeRequestOptions = {}): Promise<AgentBridgeRunResult> {
     return this.request<AgentBridgeRunResult>({ action: 'get_result', run_id: runId }, options)
   }
@@ -762,6 +792,15 @@ export class AgentBridgeClient {
       action: 'background_poll',
       ...(routes?.length ? { routes } : {}),
     }, options)
+  }
+
+  /** Terminal executions of bound native cron jobs with their exact admission result when available. */
+  studioCronObserve(
+    profile: string,
+    jobs: Array<{ job_id: string; since: number; before?: string }>,
+    options: AgentBridgeRequestOptions = {},
+  ): Promise<AgentBridgeCronObservation> {
+    return this.request<AgentBridgeCronObservation>({ action: 'studio_cron_observe', profile, jobs }, options)
   }
 
   completeBackgroundNotification(
