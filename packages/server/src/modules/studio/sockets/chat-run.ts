@@ -105,6 +105,7 @@ import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type Authent
 import { findUserById, userCanAccessProfile } from '../repositories/users-store'
 import { noticeToMessage, withSessionNotices } from '../services/session-notifications/presentation'
 import { isVisibleNoticeDisposition, type SessionNotificationRecord } from '../repositories/session-notification-store'
+import { importScriptReports } from '../services/session-notifications/script-reports'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observePersonPresenceEvent } from '../services/person/presence'
 import { SessionStateSync } from '../services/session-state'
@@ -228,6 +229,8 @@ function isHermesWorkerBackedSession(session?: { source?: string | null; agent?:
   const agent = String(session?.agent || '').trim()
   return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && (agent !== 'antigravity' && !isNativeCodingAgent(agent))) && (agent !== 'opencode' && agent !== 'dsh') && agent !== 'ekko-agent' && !session?.agent_session_id
 }
+
+const SCRIPT_REPORT_IMPORT_INTERVAL_MS = 15_000
 
 function isBridgeRunSource(source?: string): boolean {
   return source === 'cli' || source === 'global_agent' || source === 'workflow' || source === 'group_chat'
@@ -474,6 +477,7 @@ export class ChatRunSocket {
   private readonly pendingMobileCalendar = new Map<string, PendingMobileCalendarRequest>()
   private readonly pendingMobileHealth = new Map<string, PendingMobileHealthRequest>()
   private backgroundPollTimer?: NodeJS.Timeout
+  private scriptReportTimer?: NodeJS.Timeout
   private backgroundPollInFlight = false
   private backgroundRecoveryNeeded = true
   private backgroundBrokerId?: string
@@ -631,6 +635,16 @@ export class ChatRunSocket {
    * account as they exist now, and only while the accepting generation is current. Attention goes
    * through the session-state sync. Never a model turn.
    */
+  /** Import finished script invocation reports and publish new ones. Never runs or retries a script. */
+  private importScriptReports() {
+    if (this.closing) return
+    try {
+      for (const record of importScriptReports().accepted) this.publishSessionNotice(record)
+    } catch (err) {
+      logger.debug(err, '[chat-run-socket] script report import unavailable')
+    }
+  }
+
   publishSessionNotice(record: SessionNotificationRecord) {
     const session = getSession(record.session_id)
     if (!session || (session.profile || 'default') !== record.profile || isPrivatePersonSession(session.id)
@@ -848,6 +862,8 @@ export class ChatRunSocket {
     this.backgroundPollTimer = setInterval(() => void this.pollBackgroundWork(), 500)
     this.backgroundPollTimer.unref?.()
     void this.pollBackgroundWork()
+    this.scriptReportTimer = setInterval(() => this.importScriptReports(), SCRIPT_REPORT_IMPORT_INTERVAL_MS)
+    this.scriptReportTimer.unref?.()
     logger.info('[chat-run-socket] Socket.IO ready at /chat-run')
   }
 
@@ -3779,6 +3795,10 @@ export class ChatRunSocket {
     if (this.backgroundPollTimer) {
       clearInterval(this.backgroundPollTimer)
       this.backgroundPollTimer = undefined
+    }
+    if (this.scriptReportTimer) {
+      clearInterval(this.scriptReportTimer)
+      this.scriptReportTimer = undefined
     }
     for (const requestId of [...this.pendingMobileLocations.keys()]) {
       this.finishMobileLocationRequest(requestId, {

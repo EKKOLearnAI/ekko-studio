@@ -136,6 +136,12 @@ export function getSessionNotificationById(id: number): SessionNotificationRecor
   return row ? rowToRecord(row) : null
 }
 
+export function getSessionNotificationByKey(namespace: string, profile: string, producerKey: string): SessionNotificationRecord | null {
+  const row = database().prepare('SELECT * FROM session_notifications WHERE namespace=? AND profile=? AND producer_key=?')
+    .get(namespace, profile, producerKey) as Record<string, unknown> | undefined
+  return row ? rowToRecord(row) : null
+}
+
 /** Shown notices of the session's current generation, oldest first. */
 export function listVisibleSessionNotifications(sessionId: string): SessionNotificationRecord[] {
   if (!getDb() || isPrivatePersonSession(sessionId)) return []
