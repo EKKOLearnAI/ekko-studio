@@ -13,7 +13,7 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
     })),
   }
   const entry=(id:number,index:number,content:string):PersonFlowMessage => ({id,session_id:sessions[index].id,session_title:sessions[index].title,bot_type:sessions[index].bot_type,stage_id:`stage-${index-1}`,round_number:1,role:'assistant',content,timestamp:Math.floor(Date.now()/1000)-60+id})
-  const state={flow,latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true,snapshotDelay:0}
+  const state={flow,flows:[flow],latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true,snapshotDelay:0}
   page.on('pageerror',error=>errors.push(error.message))
   await page.addInitScript(()=>{localStorage.setItem('hermes_locale','zh')})
   await page.routeWebSocket('**/socket.io/**',()=>{})
@@ -30,7 +30,7 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
       const session=sessions.find(session=>session.id===url.searchParams.get('session_id'))
       json={session:session||null,settings:{model:{profile:'default',provider:'fixture',model:'test-model'},agents:[],workspace:session?.workspace||'',timezone:'Asia/Shanghai',maxSteps:12,maxConcurrentTasks:6,taskTimeoutMinutes:60,compressionThreshold:null},
         revision:0,busy:false,history_revision:0,can_clear:false,inherits_global_model:true,reasoning_efforts:[],compression:{enabled:false,threshold:.8,globalThreshold:.8},contextTokens:16000,
-        tasks:[],active_tasks:[],active_agent_task_count:0,schedules:[],memories:[],interactions:[],flows:[flow],active_flows:flow.state==='active'&&session?.id===flow.creator_session_id?[flow]:[],active_flow_count:flow.state==='active'&&session?.id===flow.creator_session_id?1:0}
+        tasks:[],active_tasks:[],active_agent_task_count:0,schedules:[],memories:[],interactions:[],flows:state.flows,active_flows:flow.state==='active'&&session?.id===flow.creator_session_id?[flow]:[],active_flow_count:flow.state==='active'&&session?.id===flow.creator_session_id?1:0}
     } else if (url.pathname==='/api/studio/person/flows/query') json={flows:[flow]}
     else if (url.pathname==='/api/studio/person/flows/apply') {
       const input=request.postDataJSON()
@@ -250,7 +250,7 @@ test('keeps the latest reply visible when collaboration cards load after cached 
   expect(errors).toEqual([])
 })
 
-test('keeps the final reply visible after card measurement and preserves deliberate history reading',async ({page},testInfo)=>{
+test('keeps the final reply visible while multiple cards settle and preserves deliberate history reading',async ({page},testInfo)=>{
   await page.addInitScript(()=>{
     const Observer=window.ResizeObserver
     // Mobile layout corrections can precede the transcript's resize callback.
@@ -258,7 +258,16 @@ test('keeps the final reply visible after card measurement and preserves deliber
       constructor(callback:ResizeObserverCallback) {
         super((entries,observer)=>{
           if((window as any).delayFlowMeasurement && entries.some(entry=>entry.target.classList.contains('person-flow-graph'))) {
-            setTimeout(()=>callback(entries,observer),450)
+            setTimeout(()=>{
+              callback(entries,observer)
+              if((window as any).restoreReplyDuringMeasurement) {
+                (window as any).restoreReplyDuringMeasurement=false
+                requestAnimationFrame(()=>{
+                  const chat=(window as any).personWorkspaceFixture.chat
+                  chat.activeSession.messages.push({id:'restored-final-reply',role:'assistant',content:'收到，111。',timestamp:2000})
+                })
+              }
+            },450)
           } else if(entries.some(entry=>entry.target.classList.contains('virtual-message-list-content'))) {
             setTimeout(()=>callback(entries,observer),80)
           } else callback(entries,observer)
@@ -268,6 +277,7 @@ test('keeps the final reply visible after card measurement and preserves deliber
   })
   const {state,errors,sessions}=await setup(page)
   state.flow.updated_at=1950
+  state.flows=[...([500,800].map((at,index)=>({...state.flow,id:`earlier-flow-${index}`,title:`早先协作 ${index}`,updated_at:at}))),state.flow]
   await page.evaluate(sessions=>{
     const chat=(window as any).personWorkspaceFixture.chat
     for(const metadata of sessions) {
@@ -283,23 +293,19 @@ test('keeps the final reply visible after card measurement and preserves deliber
     const root=el.closest('.virtual-message-list')
     if(!root || !el.isConnected)return false
     const view=root.getBoundingClientRect(),message=el.getBoundingClientRect()
-    return message.top>=view.top && message.bottom<=view.bottom
+    const inputTop=document.querySelector('.person-compose')!.getBoundingClientRect().top
+    return message.top>=view.top && message.bottom<=Math.min(view.bottom,inputTop)
   })
   await expect(viewport).not.toHaveClass(/vue-recycle-scroller/)
   await expect.poll(()=>viewport.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeLessThanOrEqual(2)
   await page.locator('.person-sidebar .session-item').filter({hasText:'接口 Bot'}).click()
   await expect(page.locator('.person-title')).toHaveText('接口 Bot')
   await page.waitForTimeout(500)
-  await page.evaluate(()=>{(window as any).delayFlowMeasurement=true})
+  await page.evaluate(()=>{(window as any).delayFlowMeasurement=true;(window as any).restoreReplyDuringMeasurement=true})
   await page.locator('.person-sidebar .session-item').filter({hasText:'主发起人'}).click()
   await expect(page.locator('.person-title')).toHaveText('主发起人')
   await expect(card(page)).toBeVisible()
   await page.waitForTimeout(900)
-  await expect.poll(tailIsVisible).toBe(true)
-  await page.evaluate(()=>{
-    const chat=(window as any).personWorkspaceFixture.chat
-    chat.activeSession.messages.push({id:'restored-final-reply',role:'assistant',content:'收到，111。',timestamp:2000})
-  })
   await expect(lastMessage).toContainText('收到，111。')
   await expect.poll(tailIsVisible).toBe(true)
   await page.waitForTimeout(500)
@@ -310,11 +316,54 @@ test('keeps the final reply visible after card measurement and preserves deliber
   await expect.poll(()=>viewport.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeGreaterThan(10)
   await page.waitForTimeout(150)
   const readingTop=await viewport.evaluate(el=>el.scrollTop)
+  const size=page.viewportSize()!
+  await page.setViewportSize({...size,height:size.height+10})
+  await page.waitForTimeout(250)
+  expect(Math.abs(await viewport.evaluate(el=>el.scrollTop)-readingTop)).toBeLessThanOrEqual(1)
   await page.evaluate(()=>{
     const chat=(window as any).personWorkspaceFixture.chat
     chat.activeSession.messages.push({id:'later-reply',role:'assistant',content:'阅读历史时的新回复不能拉动阅读位置。',timestamp:2100})
   })
   await page.waitForTimeout(500)
   expect(Math.abs(await viewport.evaluate(el=>el.scrollTop)-readingTop)).toBeLessThanOrEqual(1)
+
+  const cdp=await page.context().newCDPSession(page)
+  await cdp.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:1})
+  const pan=async (distance:number)=>{
+    const box=(await viewport.boundingBox())!
+    const x=box.x+box.width/2,y=box.y+box.height/2
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]})
+    for(let step=1;step<=5;step++) {
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+distance*step/5}]})
+      await page.waitForTimeout(30)
+    }
+    await page.waitForTimeout(200)
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]})
+    await page.waitForTimeout(300)
+  }
+  await pan(-180)
+  await expect.poll(()=>viewport.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeLessThanOrEqual(2)
+  await pan(80)
+  await expect.poll(()=>viewport.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeGreaterThan(30)
+  const touchReadingTop=await viewport.evaluate(el=>el.scrollTop)
+  await page.evaluate(()=>{
+    const chat=(window as any).personWorkspaceFixture.chat
+    chat.activeSession.messages.push({id:'touch-later-reply',role:'assistant',content:'触控上滑阅读历史后也应保留位置。',timestamp:2200})
+  })
+  await page.waitForTimeout(400)
+  expect(Math.abs(await viewport.evaluate(el=>el.scrollTop)-touchReadingTop)).toBeLessThanOrEqual(1)
+  await pan(-240)
+  await expect.poll(()=>viewport.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeLessThanOrEqual(2)
+  await lastMessage.getByRole('button',{name:'复制消息',exact:true}).focus()
+  await page.keyboard.press('PageUp')
+  await expect.poll(()=>viewport.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeGreaterThan(200)
+  await page.waitForTimeout(250)
+  const keyboardReadingTop=await viewport.evaluate(el=>el.scrollTop)
+  await page.evaluate(()=>{
+    const chat=(window as any).personWorkspaceFixture.chat
+    chat.activeSession.messages.push({id:'keyboard-later-reply',role:'assistant',content:'键盘阅读历史后也应保留位置。',timestamp:2300})
+  })
+  await page.waitForTimeout(400)
+  expect(Math.abs(await viewport.evaluate(el=>el.scrollTop)-keyboardReadingTop)).toBeLessThanOrEqual(1)
   expect(errors).toEqual([])
 })
