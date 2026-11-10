@@ -123,8 +123,8 @@ export function transitionScriptReportBinding(bindingId: string, from: ScriptRep
   return result.changes > 0
 }
 
-export function setScriptReportBindingJob(bindingId: string, jobId: string): void {
-  database().prepare("UPDATE script_report_bindings SET job_id=?, updated_at=? WHERE binding_id=? AND state='enrolling'")
+export function recordScriptReportBindingJob(bindingId: string, jobId: string): void {
+  database().prepare('UPDATE script_report_bindings SET job_id=?, updated_at=? WHERE binding_id=? AND job_id IS NULL')
     .run(jobId, Date.now(), bindingId)
 }
 
