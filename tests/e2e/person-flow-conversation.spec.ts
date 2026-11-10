@@ -14,11 +14,11 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
     })),
   }
   const entry=(id:number,index:number,content:string):PersonFlowMessage => ({id,session_id:sessions[index].id,session_title:sessions[index].title,bot_type:sessions[index].bot_type,stage_id:`stage-${index-1}`,round_number:1,role:'assistant',content,timestamp:Math.floor(Date.now()/1000)-60+id})
-  const state={flow,flows:[flow],latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true,snapshotDelay:0,resumeDelay:0,
+  const state={flow,flows:[flow],timelinePages:new Map<string,PersonResumeFixture>(),timelineReads:[] as string[],latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true,snapshotDelay:0,resumeDelay:0,
     messages:{[sessions[0].id]:[{id:'creator-before',role:'assistant',content:'我来协调这次工作',timestamp:1000},{id:'creator-after',role:'assistant',content:'等待两端返回结果',timestamp:3000}]} as Record<string,PersonResumeFixture['messages']>,historyClearedAt:0}
   page.on('pageerror',error=>errors.push(error.message))
   await page.addInitScript(()=>{localStorage.setItem('hermes_locale','zh')})
-  const resume=await mockPersonResume(page,id=>({messages:state.messages[id] || [],personFlows:{flows:state.flows,
+  const resume=await mockPersonResume(page,id=>state.timelinePages.get(id===flow.creator_session_id?'':'peer') || ({messages:state.messages[id] || [],personFlows:{flows:state.flows,
     active_flows:state.flow.state==='active'&&id===flow.creator_session_id?[flow]:[],active_flow_count:state.flow.state==='active'&&id===flow.creator_session_id?1:0,history_cleared_at:state.historyClearedAt}}),()=>state.resumeDelay)
   await page.route(url=>url.pathname.startsWith('/api/'),async route=>{
     const request=route.request(),url=new URL(request.url())
@@ -47,6 +47,13 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
       json={flow:state.flow,messages:older?state.older:state.latest,has_more:older?false:state.hasMore,next_before_id:older?null:state.hasMore?30:null,history_key:state.historyKey}
     } else if (url.pathname.includes('/messages/paginated')) {
       const id=decodeURIComponent(url.pathname.split('/')[5]),messages=state.messages[id] || []
+      if(id===flow.creator_session_id && state.timelinePages.size && url.searchParams.get('timeline')==='true') {
+        const before=url.searchParams.get('before') || ''
+        state.timelineReads.push(before)
+        const value=state.timelinePages.get(before)!
+        return route.fulfill({json:{session:sessions[0],messages:value.messages.map(message=>({...message,timestamp:message.timestamp/1000})),
+          personFlows:value.personFlows,total:253,offset:0,limit:150,hasMore:value.personFlows.timeline!.has_more}})
+      }
       json={session:sessions.find(session=>session.id===id),messages:messages.map(message=>({...message,timestamp:message.timestamp/1000})),personFlows:{flows:state.flows,active_flows:[],active_flow_count:0,history_cleared_at:state.historyClearedAt},total:messages.length,hasMore:false}
     } else if (url.pathname==='/api/studio/workspace/directories') json={directories:[]}
     await route.fulfill({json})
@@ -74,6 +81,93 @@ test('shows the creator card after completion, failure or stopping, and hides it
     await expect(card(page)).toHaveCount(label?1:0)
     if (label) await expect(card(page)).toContainText(label)
   }
+  expect(errors).toEqual([])
+})
+
+test('pages messages and old collaboration cards together within a bounded window and keeps desktop cards left aligned',async ({page},testInfo)=>{
+  await page.setViewportSize({width:2048,height:1152})
+  const {state,resume,errors}=await setup(page)
+  const cards=Array.from({length:380},(_,index)=>index%3===0?{...state.flow,id:`flow-${index}`,title:`协作 ${index}`,created_at:1,updated_at:(index+1)*1000,timeline_at:(index+1)*1000}:null).filter(Boolean) as PersonFlow[]
+  state.flows=cards.slice(-50)
+  for(const [start,end] of [[230,380],[80,230],[0,80]]) {
+    const ownCards=cards.filter(flow=>flow.timeline_at!>(start*1000) && flow.timeline_at!<=(end*1000))
+    const value:PersonResumeFixture={messages:[],personFlows:{flows:state.flows,active_flows:[],active_flow_count:0,history_cleared_at:0,cards:ownCards,
+      timeline:{items:[],before:start?`window-${start}`:null,has_more:start>0,history_revision:0}}}
+    for(let index=start;index<end;index++) {
+      const timestamp=(index+1)*1000,card=index%3===0
+      value.personFlows.timeline!.items.push({id:card?`flow-${index}`:String(index+1000),kind:card?'flow':'message',timestamp,cursor:`window-${index}`})
+      if(!card) value.messages.push({id:String(index+1000),role:'assistant',content:`历史回复 ${index}`,timestamp})
+    }
+    state.timelinePages.set(end===380?'':`window-${end}`,value)
+  }
+  await page.reload()
+  await expect(page.locator('#message-1379')).toContainText('历史回复 379')
+  const viewport=page.locator('.person-chat-messages .virtual-message-list')
+  const count=()=>page.evaluate(()=>(window as any).personWorkspaceFixture.chat.activeSession.personFlows.timeline.items.length)
+  expect(await count()).toBe(150)
+  for(let index=0;index<2;index++) {
+    await viewport.hover()
+    await page.mouse.wheel(0,-100000)
+    await expect.poll(()=>state.timelineReads.length).toBe(index+1)
+    await expect.poll(count).toBe(300)
+  }
+  await expect(page.getByRole('button',{name:'查看协作对话 · 协作 0',exact:true})).toHaveCount(1)
+  expect(state.timelineReads).toEqual(['window-230','window-80'])
+  expect(await page.evaluate(()=>(window as any).personWorkspaceFixture.chat.activeSession.personFlows.timeline.has_newer)).toBe(true)
+  await page.locator('.person-sidebar .session-item').filter({hasText:'接口 Bot'}).click()
+  await expect(page.locator('.person-title')).toHaveText('接口 Bot')
+  await page.locator('.person-sidebar .session-item').filter({hasText:'主发起人'}).click()
+  await expect(page.locator('.person-view')).not.toHaveAttribute('inert')
+  await expect.poll(count).toBe(300)
+  expect(await page.evaluate(()=>(window as any).personWorkspaceFixture.chat.activeSession.personFlows.timeline.has_newer)).toBe(true)
+  // A recent status snapshot must retain older cards in the loaded window.
+  resume.publish('person-main-creator')
+  await expect(page.getByRole('button',{name:'查看协作对话 · 协作 0',exact:true})).toHaveCount(1)
+  const first=page.locator('.person-flow-conversation-card').first()
+  await first.scrollIntoViewIfNeeded()
+  const geometry=await first.evaluate(el=>{
+    const card=el.getBoundingClientRect(),row=el.closest('.virtual-row')!.getBoundingClientRect()
+    return {left:card.left-row.left,width:card.width,rowWidth:row.width}
+  })
+  expect(Math.abs(geometry.left)).toBeLessThanOrEqual(1)
+  expect(geometry.width).toBeLessThan(geometry.rowWidth-100)
+  await page.screenshot({path:testInfo.outputPath('timeline-desktop-left.png'),animations:'disabled'})
+  await page.evaluate(()=>{
+    const theme=(window as any).personWorkspaceFixture.theme
+    theme.previewThemeSettings({brightness:'dark',appearance:{global:{opacity:.7},regions:{card:{opacity:.4,blur:4,radius:10,backgroundColor:'#627a94'}}}})
+    document.documentElement.classList.add('theme-has-custom-background')
+    document.documentElement.style.setProperty('--app-background-image','linear-gradient(120deg, #607080, #a0a090)')
+  })
+  await expect(first).toBeVisible()
+  await page.screenshot({path:testInfo.outputPath('timeline-dark-wallpaper.png'),animations:'disabled'})
+  await page.evaluate(()=>{
+    (window as any).personWorkspaceFixture.theme.previewThemeSettings({brightness:'light',appearance:{global:{opacity:1},regions:{}}})
+    document.documentElement.classList.remove('theme-has-custom-background')
+    document.documentElement.style.setProperty('--app-background-image','none')
+  })
+  await page.locator('.scroll-bottom-button').click()
+  await expect(page.locator('#message-1379')).toBeVisible()
+  await expect.poll(count).toBe(150)
+  expect(state.timelineReads.at(-1)).toBe('')
+  expect(await page.evaluate(()=>(window as any).personWorkspaceFixture.chat.activeSession.personFlows.timeline.has_newer)).toBe(false)
+  await page.setViewportSize({width:390,height:844})
+  await expect.poll(()=>viewport.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true)
+  await page.screenshot({path:testInfo.outputPath('timeline-mobile.png'),animations:'disabled'})
+  expect(errors).toEqual([])
+})
+
+test('can continue to older history when a timeline page contains only hidden display rows',async ({page})=>{
+  const {state,errors}=await setup(page)
+  state.timelinePages.set('',{messages:[{id:'hidden',role:'assistant',content:'',timestamp:5000}],personFlows:{flows:[],cards:[],active_flows:[],active_flow_count:0,history_cleared_at:0,
+    timeline:{items:[{id:'hidden',kind:'message',timestamp:5000,cursor:'hidden-page'}],before:'hidden-page',has_more:true,history_revision:0}}})
+  state.timelinePages.set('hidden-page',{messages:[{id:'older-visible',role:'assistant',content:'更早的公开回复',timestamp:4000}],personFlows:{flows:[],cards:[],active_flows:[],active_flow_count:0,history_cleared_at:0,
+    timeline:{items:[{id:'older-visible',kind:'message',timestamp:4000,cursor:'end'}],before:null,has_more:false,history_revision:0}}})
+  await page.reload()
+  const more=page.locator('.history-loader button')
+  await expect(more).toBeVisible()
+  await more.click()
+  await expect(page.locator('#message-older-visible')).toContainText('更早的公开回复')
+  expect(state.timelineReads).toEqual(['hidden-page'])
   expect(errors).toEqual([])
 })
 

@@ -338,7 +338,7 @@ const flowSnapshot = computed(() => chatStore.activeSessionId === selectedSessio
 const collaborations = computed(() => {
   const snapshot = flowSnapshot.value
   if (!snapshot) return []
-  return snapshot.flows.filter(flow => ['completed','stopped','failed'].includes(flow.state) && flow.creator_session_id === selectedSessionId.value
+  return (snapshot.cards || snapshot.flows).filter(flow => ['completed','stopped','failed'].includes(flow.state) && flow.creator_session_id === selectedSessionId.value
     && (flow.created_at ?? 0) >= snapshot.history_cleared_at && flow.stages.some(stage => stage.session_id !== selectedSessionId.value))
 })
 watch(selectedSessionId,() => {conversationFlow.value=null})

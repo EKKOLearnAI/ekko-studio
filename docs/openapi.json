@@ -22395,7 +22395,7 @@
           "Sessions"
         ],
         "summary": "Get paginated",
-        "description": "GET /api/studio/sessions/conversations/:id/messages/paginated\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
+        "description": "GET /api/studio/sessions/conversations/:id/messages/paginated\nWith timeline=true, personFlows.cards contains lightweight cards and personFlows.timeline contains ordered item references, per-item cursors, before, has_more, history_revision and reset. Resume supplies the same first page. Replies inside a collaboration remain separately paginated.\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getConversationMessagesPaginated",
         "security": [
           {
@@ -22441,6 +22441,23 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "timeline",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Studio Person chat: page message and collaboration-card references together (at most 150 combined items). Omit to retain raw-message OFFSET pagination."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque personFlows.timeline.before cursor from the preceding page. Used only with timeline=true; a changed history revision resets the page."
           }
         ],
         "x-session-share-permission": "read"

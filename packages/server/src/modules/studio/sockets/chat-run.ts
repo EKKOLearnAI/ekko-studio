@@ -3,7 +3,7 @@ import { personSessionIds } from '../repositories/person-session-store'
 import type { PersonResultDelivery } from '../public/person-runtime'
 import { personResultPrompt } from '../services/person/result-prompt'
 import { personUser } from '../services/person/catalog'
-import { personConversationFlows } from '../services/person/flow-conversation'
+import { personConversationFlows, personConversationTimeline } from '../services/person/flow-conversation'
 import { personBackgroundPendingCount } from '../repositories/person-store'
 import { personDeliveryCurrent, finishPersonDelivery, cancelPersonDelivery } from '../services/person/delivery'
 import { stageDeliveryContext, assertPersonStage } from '../repositories/person-stage-store'
@@ -2390,7 +2390,7 @@ export class ChatRunSocket {
       if (question && !resumeEvents.some(entry => entry.data?.approval_id === question.data.approval_id && entry.data?.clarify_id === question.data.clarify_id)) resumeEvents.push(question)
     }
     const sessionDetail = getSessionMetadata(sid)
-    const messagePage = buildResumeMessagePage(state.messages, {
+    const messagePage = !options && isPersonSession(sid) ? personConversationTimeline(Number(socket.data.user.id),sid) : buildResumeMessagePage(state.messages, {
       limit: state.messagePageLimit,
       messageTotal: state.messageTotal,
       messageStateBaselineCount: state.messageStateBaselineCount,
@@ -2410,7 +2410,6 @@ export class ChatRunSocket {
     socket.emit(options?.event || 'resumed', {
       session_id: sid,
       ...outboundMessagePage,
-      ...(!options && isPersonSession(sid) ? { personFlows: personConversationFlows(Number(socket.data.user.id), sid) } : {}),
       taskPlans,
       parentSessionId: sessionDetail?.parent_session_id || null,
       forkPointMessageId: sessionDetail?.fork_point_message_id || null,
@@ -3440,7 +3439,7 @@ export class ChatRunSocket {
     })
     this.nsp.to(isPrivatePersonSession(sessionId) ? `session:${sessionId}` : ['studio-account', `session:${sessionId}`]).emit('resumed', {
       session_id: sessionId,
-      ...(isPersonSession(sessionId) ? { personFlows: personConversationFlows(Number(getSessionMetadata(sessionId)?.studio_user_id), sessionId) } : {}),
+      ...(isPersonSession(sessionId) ? { personFlows: personConversationTimeline(Number(getSessionMetadata(sessionId)?.studio_user_id), sessionId).personFlows } : {}),
       messages: [],
       messageTotal: 0,
       messageLoadedCount: 0,

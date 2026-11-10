@@ -373,6 +373,12 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
     }
   }
   if (parameters.length) operation.parameters = parameters
+  if (method === 'get' && openapiPath === '/api/studio/sessions/conversations/{id}/messages/paginated') {
+    operation.parameters = [...parameters.filter(parameter => !['timeline','before'].includes(parameter.name)),
+      { name:'timeline',in:'query',schema:{type:'boolean',default:false},description:'Studio Person chat: page message and collaboration-card references together (at most 150 combined items). Omit to retain raw-message OFFSET pagination.' },
+      { name:'before',in:'query',schema:{type:'string'},description:'Opaque personFlows.timeline.before cursor from the preceding page. Used only with timeline=true; a changed history revision resets the page.' }]
+    operation.description += '\nWith timeline=true, personFlows.cards contains lightweight cards and personFlows.timeline contains ordered item references, per-item cursors, before, has_more, history_revision and reset. Resume supplies the same first page. Replies inside a collaboration remain separately paginated.'
+  }
 
   const requestBody = generateRequestBody(method, controllerSource)
   if (requestBody) operation.requestBody = requestBody

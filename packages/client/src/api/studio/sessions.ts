@@ -466,12 +466,17 @@ export async function fetchSessionMessagesPage(
   offset: number,
   limit = 150,
   profile?: string | null,
+  timeline?: { before?: string | null },
 ): Promise<PaginatedSessionMessages | null> {
   try {
     const params = new URLSearchParams()
     params.set('offset', String(offset))
     params.set('limit', String(limit))
     if (profile) params.set('profile', profile)
+    if (timeline) {
+      params.set('timeline', 'true')
+      if (timeline.before) params.set('before', timeline.before)
+    }
     const res = await request<PaginatedSessionMessages>(
       `/api/studio/sessions/conversations/${encodeURIComponent(id)}/messages/paginated?${params}`,
     )

@@ -644,7 +644,7 @@ defineExpose({
       @visible="syncViewport"
     >
       <template #before>
-        <slot v-if="messages.length > 0" name="before" />
+        <slot v-if="messages.length > 0 || !showEmpty" name="before" />
       </template>
       <template #default="{ item, index, active }">
         <!-- Recreate measurement observers when a row is recycled or reactivated,
@@ -679,7 +679,7 @@ defineExpose({
       @keydown="handleKeyDown"
     >
       <div ref="contentRef" class="virtual-message-list-content">
-        <slot v-if="messages.length > 0" name="before" />
+        <slot v-if="messages.length > 0 || !showEmpty" name="before" />
         <div
           v-for="(item, index) in messages"
           :key="messageKey(item)"

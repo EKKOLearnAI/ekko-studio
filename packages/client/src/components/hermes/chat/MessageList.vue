@@ -306,7 +306,7 @@ const {
   supported: supportsMessageSelection, unavailable: selectionUnavailable, rows: selectionRows,
   start: startSelection, cancel: cancelSelection, toggle: toggleSelection, remove: deleteSelectedMessages,
 } = useMessageSelection(displayMessagesWithForkDivider);
-const messageRows = computed(() => personFlowMessageRows(selectionRows.value,props.collaborations || [],!!chatStore.activeSession?.hasMoreBefore));
+const messageRows = computed(() => personFlowMessageRows(selectionRows.value,props.collaborations || [],!chatStore.activeSession?.personFlows?.timeline && !!chatStore.activeSession?.hasMoreBefore));
 const showDeleteConfirmation = ref(false);
 watch(selecting, value => { if (!value) showDeleteConfirmation.value = false; });
 const selectionMenu = ref({ show: false, x: 0, y: 0 });
@@ -459,7 +459,7 @@ const activeSessionScrollKey = computed(() => {
 
 const showHistoryArchiveLink = computed(() => {
   const session = chatStore.activeSession;
-  return !!session?.hasMoreBefore && (session.loadedMessageCount || 0) >= LIVE_CHAT_MAX_LOADED_MESSAGES;
+  return !session?.personFlows?.timeline && !!session?.hasMoreBefore && (session.loadedMessageCount || 0) >= LIVE_CHAT_MAX_LOADED_MESSAGES;
 });
 
 const historyArchiveHref = computed(() => {
@@ -566,14 +566,15 @@ async function scrollToAnchor(messageId: string, anchorId: string) {
 }
 
 function updateScrollBottomButton() {
-  showScrollBottomButton.value = messageRows.value.length > 0 && !(listRef.value?.isNearBottom(1000) ?? true);
+  showScrollBottomButton.value = !!chatStore.activeSession?.personFlows?.timeline?.has_newer || messageRows.value.length > 0 && !(listRef.value?.isNearBottom(1000) ?? true);
 }
 
 function handleListScroll() {
   updateScrollBottomButton();
 }
 
-function handleScrollBottomClick() {
+async function handleScrollBottomClick() {
+  if (chatStore.activeSession?.personFlows?.timeline?.has_newer && !await chatStore.refreshActiveSession({ latest:true })) return;
   scrollToBottom({ frames: 4, keepAliveMs: 600 });
 }
 
@@ -620,11 +621,13 @@ async function handleTopReach() {
   if (chatStore.isLoadingMessages || isSearchLoading.value) return;
   const session = chatStore.activeSession;
   if (!session?.hasMoreBefore || session.isLoadingOlderMessages || showHistoryArchiveLink.value) return;
-  const snapshot = listRef.value?.captureScrollPosition() ?? null;
+  const viewport = session.personFlows?.timeline ? listRef.value?.captureViewportPosition() : null;
+  const snapshot = viewport ? null : listRef.value?.captureScrollPosition() ?? null;
   const loaded = await chatStore.loadOlderMessages(session.id);
   if (!loaded) return;
   await nextTick();
-  listRef.value?.restoreScrollPosition(snapshot);
+  if (viewport) listRef.value?.restoreViewportPosition({ ...viewport,wasNearBottom:false });
+  else listRef.value?.restoreScrollPosition(snapshot);
   updateScrollBottomButton();
 }
 
@@ -829,6 +832,7 @@ defineExpose({
           v-else-if="chatStore.activeSession?.hasMoreBefore || chatStore.activeSession?.isLoadingOlderMessages"
           class="history-loader"
         >
+          <NButton v-if="!messageRows.length && chatStore.activeSession?.personFlows?.timeline && !chatStore.activeSession.isLoadingOlderMessages" quaternary @click="handleTopReach">{{ t('person.older') }}</NButton>
           <span v-if="chatStore.activeSession?.isLoadingOlderMessages" class="history-loader-spinner" role="status" :aria-label="t('common.loading')"></span>
         </div>
       </template>

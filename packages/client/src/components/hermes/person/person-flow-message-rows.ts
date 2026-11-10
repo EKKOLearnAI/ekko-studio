@@ -2,7 +2,7 @@ import type { PersonFlow } from '@/api/person'
 import type { MessageSelectionRow } from '../chat/message-selection'
 
 export type PersonFlowMessageRow = MessageSelectionRow & {flow?:PersonFlow}
-const cardTimestamp = (flow:PersonFlow) => flow.updated_at ?? flow.created_at ?? 0
+const cardTimestamp = (flow:PersonFlow) => flow.timeline_at ?? flow.updated_at ?? flow.created_at ?? 0
 
 /** Cards are display rows; they never enter model context or message deletion groups. */
 export function personFlowMessageRows(rows:MessageSelectionRow[],flows:PersonFlow[],hasMoreBefore:boolean):PersonFlowMessageRow[] {

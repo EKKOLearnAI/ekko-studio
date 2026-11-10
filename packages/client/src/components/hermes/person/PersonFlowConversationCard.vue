@@ -23,7 +23,7 @@ const completed = computed(() => props.flow.stages.filter(stage => stage.state =
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-.person-flow-conversation-card { box-sizing:border-box; display:flex; flex-direction:column; gap:12px; width:100%; max-width:var(--chat-max-width,900px); margin:0 auto; padding:16px 18px; background:$bg-card; color:$text-primary; border:var(--border-width,1px) solid $border-light; border-radius:var(--radius-component,12px); font:inherit; text-align:start; cursor:pointer; }
+.person-flow-conversation-card { box-sizing:border-box; display:flex; flex-direction:column; gap:12px; width:100%; max-width:var(--chat-max-width,900px); margin:0; margin-inline-end:auto; padding:16px 18px; background:$bg-card; color:$text-primary; border:var(--border-width,1px) solid $border-light; border-radius:var(--radius-component,12px); font:inherit; text-align:start; cursor:pointer; }
 .person-flow-conversation-card:hover { border-color:$accent-primary; }
 .person-flow-conversation-card:focus-visible { outline:2px solid $accent-primary; outline-offset:3px; }
 .flow-card-kicker,.flow-card-footer,.flow-card-open { display:flex; align-items:center; gap:8px; }
