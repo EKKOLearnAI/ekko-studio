@@ -46,12 +46,14 @@ const props = withDefaults(defineProps<{
   activityLabel?: string
   approvalPortalToBody?: boolean
   scrollScope?: string
+  restoreSessionScroll?: boolean
   selectionActionsTarget?: HTMLElement | null
   collaborations?: PersonFlow[]
 }>(), {
   approvalPortalToBody: false,
   hideToolCalls: false,
   scrollScope: "chat",
+  restoreSessionScroll: true,
   selectionActionsTarget: null,
 })
 const emit = defineEmits<{openCollaboration:[flow:PersonFlow]}>()
@@ -578,7 +580,7 @@ function handleScrollBottomClick() {
 }
 
 function saveSessionScrollPosition(scrollKey: string | null | undefined) {
-  if (!scrollKey) return;
+  if (!scrollKey || !props.restoreSessionScroll) return;
   const snapshot = listRef.value?.captureViewportPosition() ?? null;
   if (snapshot) rememberMessageScrollPosition(sessionScrollPositions, scrollKey, snapshot);
 }
@@ -587,7 +589,7 @@ function applyInitialSessionScroll(scrollKey: string) {
   if (activeSessionScrollKey.value !== scrollKey) return;
   if (chatStore.focusMessageId) return;
 
-  const snapshot = sessionScrollPositions.get(scrollKey);
+  const snapshot = props.restoreSessionScroll ? sessionScrollPositions.get(scrollKey) : undefined;
   if (snapshot) {
     pendingInitialScrollKey.value = null;
     if (snapshot.wasNearBottom) {

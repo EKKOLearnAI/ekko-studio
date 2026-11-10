@@ -13,7 +13,7 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
     })),
   }
   const entry=(id:number,index:number,content:string):PersonFlowMessage => ({id,session_id:sessions[index].id,session_title:sessions[index].title,bot_type:sessions[index].bot_type,stage_id:`stage-${index-1}`,round_number:1,role:'assistant',content,timestamp:Math.floor(Date.now()/1000)-60+id})
-  const state={flow,latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true}
+  const state={flow,latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true,snapshotDelay:0}
   page.on('pageerror',error=>errors.push(error.message))
   await page.addInitScript(()=>{localStorage.setItem('hermes_locale','zh')})
   await page.routeWebSocket('**/socket.io/**',()=>{})
@@ -26,6 +26,7 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
     else if (url.pathname.includes('/profiles')) json={profiles:[{name:'default',active:true}]}
     else if (url.pathname==='/api/studio/person/conversations') json={sessions,next_offset:null}
     else if (url.pathname==='/api/studio/person') {
+      if (state.snapshotDelay) await new Promise(resolve=>setTimeout(resolve,state.snapshotDelay))
       const session=sessions.find(session=>session.id===url.searchParams.get('session_id'))
       json={session:session||null,settings:{model:{profile:'default',provider:'fixture',model:'test-model'},agents:[],workspace:session?.workspace||'',timezone:'Asia/Shanghai',maxSteps:12,maxConcurrentTasks:6,taskTimeoutMinutes:60,compressionThreshold:null},
         revision:0,busy:false,history_revision:0,can_clear:false,inherits_global_model:true,reasoning_efforts:[],compression:{enabled:false,threshold:.8,globalThreshold:.8},contextTokens:16000,
@@ -51,7 +52,7 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
     chat.activeSession.messages=[{id:'creator-before',role:'assistant',content:'我来协调这次工作',timestamp:1000},{id:'creator-after',role:'assistant',content:'等待两端返回结果',timestamp:3000}]
     chat.activeSession.messagesLoaded=true
   })
-  return {state,errors,mutations,entry}
+  return {state,errors,mutations,entry,sessions}
 }
 
 const card=(page:Page)=>page.getByRole('button',{name:'查看协作对话 · 接口与界面联调',exact:true})
@@ -193,5 +194,48 @@ test('opens the creator card and complete unified conversation on a narrow scree
   await testInfo.attach('unified-collaboration-mobile',{body:await page.screenshot({animations:'disabled'}),contentType:'image/png'})
   await page.keyboard.press('Escape')
   await expect(card(page)).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('keeps the latest row visible after switching Bots with a measured collaboration card',async ({page},testInfo)=>{
+  const {state,errors,sessions}=await setup(page)
+  state.flow.stages=Array.from({length:40},(_,index)=>({...state.flow.stages[index%2],id:`stage-${index}`,position:index,group_position:index}))
+  await page.evaluate(sessions=>{
+    const chat=(window as any).personWorkspaceFixture.chat
+    for (const metadata of sessions) {
+      const session=chat.ensureSessionLoaded(metadata)
+      session.messages=Array.from({length:session.id==='person-main-creator'?160:24},(_,index)=>({id:session.id+'-'+index,role:index%2?'assistant':'user',content:`消息 ${index}\n\n`+'长对话中的历史内容。'.repeat(index%4*20+5),timestamp:index*20+1}))
+      session.messagesLoaded=true
+    }
+  },sessions)
+  const viewport=page.locator('.person-chat-messages .virtual-message-list')
+  const bottomDistance=()=>viewport.evaluate(el=>Math.round(el.scrollHeight-el.scrollTop-el.clientHeight))
+  await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
+  for (let round=0;round<3;round++) {
+    await viewport.hover()
+    await page.mouse.wheel(0,-1600)
+    await expect.poll(bottomDistance).toBeGreaterThan(500)
+    await page.waitForTimeout(250)
+    expect(await bottomDistance()).toBeGreaterThan(500)
+    await page.locator('.person-sidebar .session-item').filter({hasText:'接口 Bot'}).click()
+    await expect(page.locator('.person-title')).toHaveText('接口 Bot')
+    await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
+    await viewport.hover()
+    await page.mouse.wheel(0,-600)
+    await expect.poll(bottomDistance).toBeGreaterThan(100)
+    state.snapshotDelay=1800
+    await page.locator('.person-sidebar .session-item').filter({hasText:'主发起人'}).click()
+    await expect(page.locator('.person-title')).toHaveText('主发起人')
+    await expect(card(page).locator('.bot-sprite')).toHaveCount(40)
+    await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
+    // Check again after the graph width and recycled row heights settle.
+    await page.waitForTimeout(1400)
+    expect(await bottomDistance()).toBeLessThanOrEqual(2)
+  }
+  await page.setViewportSize({width:390,height:844})
+  await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
+  await page.waitForTimeout(1400)
+  expect(await bottomDistance()).toBeLessThanOrEqual(2)
+  await testInfo.attach('switched-bot-at-latest-card',{body:await page.screenshot({animations:'disabled'}),contentType:'image/png'})
   expect(errors).toEqual([])
 })
