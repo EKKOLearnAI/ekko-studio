@@ -19794,6 +19794,61 @@
         }
       }
     },
+    "/api/studio/person/flows/{id}/messages": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get messages",
+        "description": "Read the original visible messages of one account-owned collaboration in a unified conversation. Correlates exact creator/stage run identities across rounds and resume generations; never includes unrelated turns from the same Bot. Older flows use their exact persisted confirmations and result references. Returns flow metadata, chronological messages with source Bot identity, has_more, next_before_id and history_key. Hidden reasoning, tool payloads and system prompts are projected out as in ordinary Bot chat. Cleared/deleted creator history is unavailable. Read-only; does not copy messages, mark participant chats read, send messages or wake any Bot.",
+        "operationId": "flowConversation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Exclusive message ID cursor for earlier entries; omit for the latest page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            }
+          }
+        ]
+      }
+    },
     "/api/studio/person/interactions/{id}/answer": {
       "post": {
         "tags": [

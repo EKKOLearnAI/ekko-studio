@@ -16,7 +16,9 @@ export function stageConfirmation(context: PersonStageContext): StageConfirmatio
 
 /** Only genuine admitted turns replace a candidate. Confirmation calls never enter chat. */
 export function startPersonStageRun(userId: number, context: PersonStageContext, runId: string) {
-  assertPersonStage(userId,context)
+  const { flow, stage } = assertPersonStage(userId,context)
+  personDb().prepare('INSERT OR IGNORE INTO person_flow_runs(flow_id,session_id,run_id,stage_id,round_number) VALUES(?,?,?,?,?)')
+    .run(flow.id,stage.session_id,runId,stage.id,flow.round_number)
   personDb().prepare(`INSERT INTO person_stage_confirmations(stage_id,generation,run_id,updated_at) VALUES(?,?,?,?)
     ON CONFLICT(stage_id,generation) DO UPDATE SET run_id=excluded.run_id,message_id=NULL,source_hash='',state='running',attempts=0,
     claim='',lease_until=0,decision_pending=0,reason='',updated_at=excluded.updated_at WHERE run_id!=excluded.run_id`)

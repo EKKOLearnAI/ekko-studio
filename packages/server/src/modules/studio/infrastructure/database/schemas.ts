@@ -1781,6 +1781,7 @@ export function initAllHermesTables(): void {
     syncTable(MESSAGES_TABLE, MESSAGES_SCHEMA)
     initSessionStateTables(db)
     db.exec(MESSAGES_INDEX)
+    db.exec('CREATE INDEX IF NOT EXISTS idx_messages_session_run ON messages(session_id,run_marker,id)')
     syncTable(SKILL_USAGE_EVENTS_TABLE, SKILL_USAGE_EVENTS_SCHEMA, {
       indexes: SKILL_USAGE_EVENTS_INDEXES,
     })

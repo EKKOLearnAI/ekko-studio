@@ -3,6 +3,7 @@ import type { ProviderApiMode } from './provider-api-mode'
 import { fetchAuthenticatedBlob, saveBlob } from './binary-content'
 
 export interface SessionSummary {
+  history_cleared_at?: number
   id: string
   profile?: string | null
   source: string

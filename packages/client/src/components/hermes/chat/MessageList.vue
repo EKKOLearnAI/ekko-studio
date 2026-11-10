@@ -34,6 +34,9 @@ import { groupCompletedToolsByRun } from "./tool-run-grouping";
 import { useMessageSelection } from './useMessageSelection';
 import type { MessageSelectionRow } from './message-selection';
 import { desktopBridge } from '@/utils/desktop-bridge';
+import type { PersonFlow } from '@/api/person';
+import PersonFlowConversationCard from '../person/PersonFlowConversationCard.vue';
+import { personFlowMessageRows } from '../person/person-flow-message-rows';
 
 const props = withDefaults(defineProps<{
   userLabel?: string
@@ -44,12 +47,14 @@ const props = withDefaults(defineProps<{
   approvalPortalToBody?: boolean
   scrollScope?: string
   selectionActionsTarget?: HTMLElement | null
+  collaborations?: PersonFlow[]
 }>(), {
   approvalPortalToBody: false,
   hideToolCalls: false,
   scrollScope: "chat",
   selectionActionsTarget: null,
 })
+const emit = defineEmits<{openCollaboration:[flow:PersonFlow]}>()
 
 const chatStore = useChatStore();
 const profilesStore = useProfilesStore();
@@ -221,7 +226,7 @@ const showEmptyConversation = computed(() => {
   const session = chatStore.activeSession;
   return !chatStore.isLoadingMessages && !isRunIndicatorActive.value
     && !!session && (session.messagesLoaded === true || session.isLocalOnly === true)
-    && chatStore.messages.length === 0 && (session.messageTotal ?? session.messageCount ?? 0) === 0;
+    && chatStore.messages.length === 0 && !props.collaborations?.length && (session.messageTotal ?? session.messageCount ?? 0) === 0;
 });
 
 function assistantMessageBody(message: Message): string {
@@ -298,9 +303,10 @@ const displayMessagesWithForkDivider = computed<Message[]>(() => {
 
 const {
   selecting, loading: selectionLoading, deleting: deletingMessages, selected: selectedMessages,
-  supported: supportsMessageSelection, unavailable: selectionUnavailable, rows: messageRows,
+  supported: supportsMessageSelection, unavailable: selectionUnavailable, rows: selectionRows,
   start: startSelection, cancel: cancelSelection, toggle: toggleSelection, remove: deleteSelectedMessages,
 } = useMessageSelection(displayMessagesWithForkDivider);
+const messageRows = computed(() => personFlowMessageRows(selectionRows.value,props.collaborations || [],!!chatStore.activeSession?.hasMoreBefore));
 const showDeleteConfirmation = ref(false);
 watch(selecting, value => { if (!value) showDeleteConfirmation.value = false; });
 const selectionMenu = ref({ show: false, x: 0, y: 0 });
@@ -560,7 +566,7 @@ async function scrollToAnchor(messageId: string, anchorId: string) {
 }
 
 function updateScrollBottomButton() {
-  showScrollBottomButton.value = displayMessages.value.length > 0 && !(listRef.value?.isNearBottom(1000) ?? true);
+  showScrollBottomButton.value = messageRows.value.length > 0 && !(listRef.value?.isNearBottom(1000) ?? true);
 }
 
 function handleListScroll() {
@@ -645,7 +651,7 @@ watch(
 );
 
 watch(
-  () => displayMessages.value.length,
+  () => messageRows.value.length,
   () => {
     void nextTick(updateScrollBottomButton);
   },
@@ -827,7 +833,8 @@ defineExpose({
         </div>
       </template>
       <template #item="{ message: row }">
-        <div @contextmenu="openSelectionMenu" @click.capture="handleSelectionRowClick($event, row)" :class="{
+        <PersonFlowConversationCard v-if="row.flow" :flow="row.flow" @open="emit('openCollaboration',$event)" />
+        <div v-else @contextmenu="openSelectionMenu" @click.capture="handleSelectionRowClick($event, row)" :class="{
           'message-selection-row': selecting && row.group,
           'message-selection-user': selecting && row.group?.kind === 'message' && ['user', 'command'].includes(row.messages[0]?.role),
           'is-selected': row.group && selectedMessages.has(row.group.id),

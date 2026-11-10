@@ -65,6 +65,7 @@ export function createPersonFlow(userId: number, input: Record<string, unknown>,
     }
     requirePersonWorkspace(workspace)
     db.prepare('INSERT INTO person_flows(id,owner_user_id,creator_session_id,title,goal,created_at,updated_at,workspace,round_limit) VALUES(?,?,?,?,?,?,?,?,?)').run(id,userId,creator,title,goal,now,now,workspace,Number(rounds))
+    if (origin?.runId) db.prepare('INSERT INTO person_flow_runs(flow_id,session_id,run_id,round_number) VALUES(?,?,?,1)').run(id,creator,origin.runId)
     steps.forEach((step, position) => {
       requirePersonSession(userId,step.session_id)
       db.prepare('INSERT INTO person_stages(id,flow_id,position,group_position,session_id,goal,return_expectation,state) VALUES(?,?,?,?,?,?,?,?)')

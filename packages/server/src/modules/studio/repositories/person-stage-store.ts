@@ -15,7 +15,8 @@ export function personCollaborationPendingCount(userId: number, sessionId: strin
 
 export function getPersonFlow(userId: number, id: string): PersonConversationFlow {
   const db = personDb()
-  const row = db.prepare('SELECT * FROM person_flows WHERE id=? AND owner_user_id=?').get(id, userId)
+  const row = db.prepare(`SELECT f.*,c.title AS creator_session_title,c.bot_type AS creator_bot_type
+    FROM person_flows f LEFT JOIN sessions c ON c.id=f.creator_session_id WHERE f.id=? AND f.owner_user_id=?`).get(id, userId)
   if (!row) throw personError('Flow not found', 404)
   const stages = db.prepare('SELECT s.*,c.title AS session_title,c.bot_type FROM person_stages s LEFT JOIN sessions c ON c.id=s.session_id WHERE flow_id=? ORDER BY position').all(id) as unknown as PersonStage[]
   for (const stage of stages) {

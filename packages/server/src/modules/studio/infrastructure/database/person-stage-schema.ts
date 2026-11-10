@@ -40,6 +40,12 @@ export function initPersonStageTables(db: DatabaseSync) {
       FOREIGN KEY(stage_id) REFERENCES person_stages(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_person_stage_confirmations_pending ON person_stage_confirmations(state,updated_at);
+    CREATE TABLE IF NOT EXISTS person_flow_runs (
+      flow_id TEXT NOT NULL, session_id TEXT NOT NULL, run_id TEXT NOT NULL,
+      stage_id TEXT NOT NULL DEFAULT '', round_number INTEGER NOT NULL,
+      PRIMARY KEY(flow_id,session_id,run_id),
+      FOREIGN KEY(flow_id) REFERENCES person_flows(id) ON DELETE CASCADE
+    );
   `)
   if (!db.prepare('PRAGMA table_info(person_stage_confirmations)').all().some(column => column.name === 'source_hash'))
     db.exec("ALTER TABLE person_stage_confirmations ADD COLUMN source_hash TEXT NOT NULL DEFAULT ''")

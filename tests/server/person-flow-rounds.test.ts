@@ -36,6 +36,23 @@ async function finish(flow: PersonConversationFlow, output: string, position = f
   return {flow:stages.getPersonFlow(1,flow.id),id,...turn}
 }
 
+it('shows active collaboration only to its creator, while participants retain its history', async () => {
+  const flow = create(undefined,[b,c,creator])
+  expect(stages.personFlowActivity(1,creator)).toMatchObject({active_flow_count:1,active_flows:[{id:flow.id}]})
+  for (const sessionId of [b,c,'unrelated']) {
+    expect(stages.personFlowActivity(1,sessionId)).toEqual({active_flow_count:0,active_flows:[]})
+  }
+  expect(stages.personFlowActivity(2,creator)).toEqual({active_flow_count:0,active_flows:[]})
+  const advanced = await finish(flow,'第一阶段的原始结果')
+  expect(stages.personFlowActivity(1,creator)).toMatchObject({active_flow_count:1,active_flows:[{id:flow.id,current_position:1}]})
+  expect(stages.personFlowActivity(1,b)).toEqual({active_flow_count:0,active_flows:[]})
+  await flows.controlPersonFlow(1,{action:'stop',flow_id:flow.id,expected_revision:advanced.flow.revision,idempotency_key:randomUUID()})
+  for (const sessionId of [creator,b,c]) {
+    expect(stages.personFlowActivity(1,sessionId)).toEqual({active_flow_count:0,active_flows:[]})
+    expect(stages.listPersonFlows(1,sessionId)).toMatchObject([{id:flow.id,state:'stopped'}])
+  }
+})
+
 it('defaults to one round; completion creates no unread notice, while real replies remain unread', async () => {
   const { listSessionStateRecords,recordSessionAttention,markSessionRead } = await import('../../packages/server/src/modules/studio/repositories/session-state-store')
   const {SessionStateSync} = await import('../../packages/server/src/modules/studio/services/session-state')

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ name: 'schedule' | 'memory' | 'agents' | 'plus' | 'search' | 'arrow' | 'settings'; size?: number }>(), { size: 20 })
+withDefaults(defineProps<{ name: 'schedule' | 'memory' | 'agents' | 'flows' | 'plus' | 'search' | 'arrow' | 'settings'; size?: number }>(), { size: 20 })
 const paths = {
   schedule: 'M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2m3 10h2m4 0h2m-8 4h2',
   memory: 'M12 5c-3-2-6-2-10-1v15c4-1 7-1 10 1 3-2 6-2 10-1V4c-4-1-7-1-10 1Zm0 0v15M5 8l4 1m-4 3 4 1m6-4 4-1m-4 5 4-1',
   agents: 'M9 3h6v4H9zM5 11h14a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m7-4v4m-5 4h1m8 0h1m-8 3h6',
+  flows: 'M12 6v6M5 17v-5h14v5M9 1h6v5H9zM2 17h6v5H2zM16 17h6v5h-6z',
   plus: 'M12 5v14M5 12h14',
   search: 'M21 21l-5-5M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15Z',
   arrow: 'M5 12h14m-5-5 5 5-5 5',
