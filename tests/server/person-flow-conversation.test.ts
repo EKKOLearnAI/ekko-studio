@@ -58,6 +58,27 @@ it('retains the creator and participant replies after stopping and reopening a c
   expect(f.runtime.deliverStage).not.toHaveBeenCalled()
 })
 
+it('restores owned collaboration history, activity and clear-history boundaries with a conversation',async () => {
+  const flow=create()
+  const active=conversation.personConversationFlows(1,creator)!
+  expect(active).toMatchObject({flows:[{id:flow.id}],active_flows:[{id:flow.id}],active_flow_count:1,history_cleared_at:0})
+  expect(conversation.personConversationFlows(1,peer)).toMatchObject({flows:[{id:flow.id}],active_flows:[],active_flow_count:0})
+  expect(()=>conversation.personConversationFlows(2,creator)).toThrow('Person conversation not found')
+  expect(conversation.personConversationFlows(1,'ordinary-chat')).toBeUndefined()
+  await flows.controlPersonFlow(1,{action:'stop',flow_id:flow.id,expected_revision:flow.revision,idempotency_key:randomUUID()})
+  f.db.prepare('UPDATE sessions SET history_cleared_at=? WHERE id=?').run(flow.created_at+1,creator)
+  expect(conversation.personConversationFlows(1,creator)).toMatchObject({flows:[{id:flow.id,state:'stopped'}],active_flows:[],active_flow_count:0,history_cleared_at:flow.created_at+1})
+})
+
+it('keeps collaboration fields in the default App snapshot and lets Studio omit their duplicate load',async () => {
+  const flow=create()
+  const {personSnapshot}=await import('../../packages/server/src/modules/studio/services/person/service')
+  expect(await personSnapshot(1,creator)).toMatchObject({flows:[{id:flow.id}],active_flows:[{id:flow.id}],active_flow_count:1})
+  const settings=await personSnapshot(1,creator,{includeFlows:false})
+  expect(settings).toMatchObject({session:{id:creator},tasks:[]})
+  for(const key of ['flows','active_flows','active_flow_count']) expect(settings).not.toHaveProperty(key)
+})
+
 it('uses the normal Bot display projection for native blocks and private reasoning',() => {
   const flow=create()
   runs.startPersonStageRun(1,{flowId:flow.id,stageId:flow.stages[0].id,generation:0},'visible-run')

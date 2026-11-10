@@ -32,7 +32,10 @@ async function handle(ctx: Context, work: (id: number, body: Record<string, unkn
       ...(['PERSON_BOT_NAME_EXISTS', 'BOT_WORKSPACE_REQUIRED', 'WORKSPACE_UNAVAILABLE'].includes(String((error as { code?: string }).code)) ? { code: (error as { code: string }).code } : {}) }
   }
 }
-export const snapshot = (ctx: Context) => handle(ctx, id => personSnapshot(id, String(ctx.query.session_id || '')))
+export const snapshot = (ctx: Context) => handle(ctx, id => {
+  if (ctx.query.include_flows !== undefined && !['true', 'false'].includes(String(ctx.query.include_flows))) throw personError('include_flows must be true or false')
+  return personSnapshot(id, String(ctx.query.session_id || ''), { includeFlows: ctx.query.include_flows !== 'false' })
+})
 export const clear = (ctx: Context) => handle(ctx, (id, body) => clearPerson(id, body))
 export const settings = (ctx: Context) => handle(ctx, (id, body) => configurePerson(id, body))
 export const capabilities = (ctx: Context) => handle(ctx, id => ({ agents: personCapabilities(id), native_allowed: personUser(id).role === 'super_admin' }))

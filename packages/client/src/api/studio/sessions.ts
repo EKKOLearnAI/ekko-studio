@@ -106,6 +106,7 @@ export interface SessionContext {
 }
 
 export interface PaginatedSessionMessages {
+  personFlows?: import('../person').PersonFlowSnapshot
   session: SessionSummary
   messages: HermesMessage[]
   taskPlans?: import('@/utils/task-plan').TaskPlanSnapshot[]

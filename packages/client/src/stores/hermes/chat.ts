@@ -6,7 +6,7 @@ import { historySessionSource, isBuiltinEkkoSession } from '@/utils/hermes/sessi
 import { isKnownEkkoSessionCommand } from '@/utils/hermes/bridge-session-commands'
 import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
-import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
+import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
 import { onAuthInvalidated } from '@/api/auth-invalidation'
@@ -450,6 +450,7 @@ export interface QueueInsertionState {
 }
 
 export interface Session {
+  personFlows?: import('@/api/person').PersonFlowSnapshot
   historyRevision?: number
   id: string
   profile?: string
@@ -2021,6 +2022,7 @@ function createChatState(scopedSessionId?: string) {
       const target = sessions.value.find(s => s.id === sid)
       if (!target) return false
       const revision = messageHistoryRevisions.get(sid)
+      const previousPersonFlows = target.personFlows
       const limit = focusMessageId.value
         ? Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE)
         : Math.min(
@@ -2030,6 +2032,7 @@ function createChatState(scopedSessionId?: string) {
       const detail = await fetchSessionMessagesPage(sid, 0, limit, activeSession.value?.profile)
       if (revision !== messageHistoryRevisions.get(sid) || options.canApply?.() === false) return false
       if (!detail) return false
+      if (target.personFlows === previousPersonFlows && detail.personFlows) target.personFlows = detail.personFlows
       const mapped = mapHermesMessages(detail.messages || [], detail.taskPlans, target.messages)
       target.messages = mapped
       target.messagesLoaded = true
@@ -2213,6 +2216,7 @@ function createChatState(scopedSessionId?: string) {
           target.parentLastMessage = (data as any).parentLastMessage || target.parentLastMessage || null
           target.parentLastMessageRole = (data as any).parentLastMessageRole || target.parentLastMessageRole || null
           if (Array.isArray(data.messages)) {
+            if (data.personFlows) target.personFlows = data.personFlows
             target.messages = mapHermesMessages(data.messages as any[], data.taskPlans, target.messages)
             target.messagesLoaded = true
             restorePersistedSubagentStreams(sessionId)
@@ -2349,6 +2353,7 @@ function createChatState(scopedSessionId?: string) {
       : Math.min(LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MAX_LOADED_MESSAGES - budgetCount)
     const loadToken = {}
     const previousMessages = target.messages
+    const previousPersonFlows = target.personFlows
     olderMessageLoads.set(target, loadToken)
     target.isLoadingOlderMessages = true
     try {
@@ -2356,6 +2361,7 @@ function createChatState(scopedSessionId?: string) {
       if (olderMessageLoads.get(target) !== loadToken || target.messages !== previousMessages
         || (searchSelection && !searchSelection())) return false
       if (!page) return false
+      if (target.personFlows === previousPersonFlows && page.personFlows) target.personFlows = page.personFlows
       if (page.messages.length === 0) {
         target.hasMoreBefore = false
         return false
@@ -3056,7 +3062,10 @@ function createChatState(scopedSessionId?: string) {
     }
 
     if (action === 'clear' && command === 'clear') {
-      if (target) target.messages = []
+      if (target) {
+        target.messages = []
+        if (target.personFlows) target.personFlows = { ...target.personFlows, history_cleared_at: Date.now() }
+      }
       queuedUserMessages.value.delete(sid)
       pendingUserMessageIds.delete(sid)
       queueLengths.value.delete(sid)
@@ -4035,6 +4044,7 @@ function createChatState(scopedSessionId?: string) {
         applyResumedSessionSettings(data)
 
         if (Array.isArray(data.messages)) {
+          if (data.personFlows) target.personFlows = data.personFlows
           const previousActiveAssistantMessageId = activeAssistantMessageId
           const previousReasoningAssistantMessageId = reasoningAssistantMessageId
           const replayRunMarker = getReplayRunMarker(data.events) ?? activeRunMarker
@@ -5494,6 +5504,11 @@ function createChatState(scopedSessionId?: string) {
   }
 
   disposeSubscription(onSessionCommand(handleGlobalSessionCommand))
+  disposeSubscription(onPersonUpdated(event => {
+    if (!event.session_id || !event.personFlows) return
+    const target = sessions.value.find(session => session.id === event.session_id)
+    if (target) target.personFlows = event.personFlows
+  }))
 
   disposeSubscription(onSessionTitleUpdated(applyGeneratedSessionTitle))
   disposeSubscription(onSessionWorkspaceUpdated(applySessionWorkspaceUpdate))

@@ -19305,6 +19305,15 @@
               "type": "string"
             },
             "description": "Selected owned conversation; omitted returns shared settings with session=null and creates no conversation."
+          },
+          {
+            "name": "include_flows",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": true
+            },
+            "description": "Include collaboration history and activity. Studio uses false because resume and person.updated deliver personFlows with the conversation."
           }
         ]
       }

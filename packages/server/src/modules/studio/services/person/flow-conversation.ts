@@ -1,6 +1,21 @@
 import { personError } from '../../contracts/person'
 import { readPersonFlowMessages } from '../../repositories/person-flow-messages'
 import { personDisplayMessages } from '../chat-run/person-display'
+import { isPersonSession, ownsPersonSession } from '../../contracts/person-session'
+import { getSessionMetadata } from '../../repositories/session-store'
+import { listPersonFlows, personFlowActivity } from '../../repositories/person-stage-store'
+
+/** Restore collaboration display state in the same packet as its conversation. */
+export function personConversationFlows(userId: number, sessionId: string) {
+  if (!isPersonSession(sessionId)) return undefined
+  const session = getSessionMetadata(sessionId)
+  if (!ownsPersonSession(userId, session)) throw personError('Person conversation not found', 404)
+  return {
+    flows: listPersonFlows(userId, sessionId),
+    ...personFlowActivity(userId, sessionId),
+    history_cleared_at: session!.history_cleared_at || 0,
+  }
+}
 
 export function personFlowConversation(userId: number, flowId: string, query: { before_id?: unknown; limit?: unknown }) {
   const beforeId = query.before_id === undefined ? 0 : Number(query.before_id)

@@ -27,6 +27,12 @@ export interface PersonFlowMessage {
   id: number; session_id: string; session_title: string; bot_type: string | null
   stage_id: string; round_number: number | null; role: 'user' | 'assistant'; content: string; timestamp: number
 }
+export interface PersonFlowSnapshot {
+  flows: PersonFlow[]
+  active_flows: PersonFlow[]
+  active_flow_count: number
+  history_cleared_at: number
+}
 export interface PersonFlowConversation {
   flow: PersonFlow; messages: PersonFlowMessage[]; has_more: boolean; next_before_id: number | null; history_key: string
 }

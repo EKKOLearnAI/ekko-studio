@@ -142,7 +142,7 @@ async function openCreateConversation() {
   showPanel.value = false; taskPanelOpen.value = false; showModelPicker.value = false
   if (isMobile.value) showSessions.value = false
   showNewConversation.value = true
-  try { newConversationDefaults.value = await personRequest<PersonSnapshot>('', undefined, 'GET', lifetime.signal) }
+  try { newConversationDefaults.value = await personRequest<PersonSnapshot>('?include_flows=false', undefined, 'GET', lifetime.signal) }
   catch (e) { if (!disposed) error.value = String(e) }
 }
 function openConversationMenu(event: MouseEvent, id: string) {
@@ -333,19 +333,20 @@ const showPanel = ref(false)
 const flowsPanelRef = ref<InstanceType<typeof PersonFlowsPanel> | null>(null)
 const requestedFlow = ref<{ flow: PersonFlow; request: number } | null>(null)
 const conversationFlow = ref<PersonFlow | null>(null)
+const flowSnapshot = computed(() => chatStore.activeSessionId === selectedSessionId.value && chatStore.activeSession?.id === selectedSessionId.value
+  ? chatStore.activeSession.personFlows : undefined)
 const collaborations = computed(() => {
-  const snapshot = data.value
-  if (!snapshot?.session || snapshot.session.id !== selectedSessionId.value || chatStore.activeSessionId !== selectedSessionId.value) return []
-  return [...new Map([...(snapshot.flows || []),...(snapshot.active_flows || [])].map(flow => [flow.id,flow])).values()]
-    .filter(flow => ['completed','stopped','failed'].includes(flow.state) && flow.creator_session_id === snapshot.session!.id && (flow.created_at ?? 0) >= (snapshot.session!.history_cleared_at || 0)
-      && flow.stages.some(stage => stage.session_id !== snapshot.session!.id))
+  const snapshot = flowSnapshot.value
+  if (!snapshot) return []
+  return snapshot.flows.filter(flow => ['completed','stopped','failed'].includes(flow.state) && flow.creator_session_id === selectedSessionId.value
+    && (flow.created_at ?? 0) >= snapshot.history_cleared_at && flow.stages.some(stage => stage.session_id !== selectedSessionId.value))
 })
 watch(selectedSessionId,() => {conversationFlow.value=null})
 let flowFocusSequence = 0
 const flowFocus = computed(() => {
   const request = requestedFlow.value
   if (!request) return null
-  const candidates = [...(data.value?.active_flows || []),...(data.value?.flows || [])].filter(flow => flow.id === request.flow.id)
+  const candidates = [...(flowSnapshot.value?.active_flows || []),...(flowSnapshot.value?.flows || [])].filter(flow => flow.id === request.flow.id)
   const flow = candidates.reduce((current,next) => next.revision >= current.revision ? next : current,request.flow)
   return { ...request,flow }
 })
@@ -488,7 +489,7 @@ async function refresh() {
   snapshotRequest = request; refreshAgain = false
   const isCurrent = () => !disposed && snapshotRequest === request && sequence === snapshotSequence && sessionId === selectedSessionId.value
   try {
-    const next = await personRequest<PersonSnapshot>(sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '', undefined, 'GET', request.controller.signal)
+    const next = await personRequest<PersonSnapshot>(`?include_flows=false${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ''}`, undefined, 'GET', request.controller.signal)
     if (!isCurrent()) return
     if (taskPanelOpen.value && next.session?.id === sessionId) {
       // A pending/failed/stale read is not evidence that this Bot has no tasks.
@@ -789,8 +790,8 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       <div v-if="!isNewConversation" class="person-chat-layout">
       <div ref="chatSurface" class="person-chat-surface" :inert="isMobile && (taskPanelOpen || toolsOpen) || undefined">
       <div v-if="data.session" class="person-chat-messages">
-      <PersonTaskActivity :key="selectedSessionId" :session-id="data.session.id" :count="sessionStates.backgroundCount(selectedSessionId)" :agent-count="data.active_agent_task_count" :tasks="data.active_tasks || data.tasks" :flows="data.active_flows || data.flows || []" :flow-count="data.active_flow_count"
-        :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :name="data.session.title || undefined" :agents="data.settings.agents"
+      <PersonTaskActivity :key="selectedSessionId" :session-id="selectedSessionId" :count="sessionStates.backgroundCount(selectedSessionId)" :agent-count="data.session.id === selectedSessionId ? data.active_agent_task_count : 0" :tasks="data.session.id === selectedSessionId ? data.active_tasks || data.tasks : []" :flows="flowSnapshot?.active_flows || []" :flow-count="flowSnapshot?.active_flow_count || 0"
+        :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :name="chatStore.activeSession?.title || undefined" :agents="data.settings.agents"
         @refresh="refresh" @open-task="openTask" @open-flow="openActivityFlow" />
       <MessageList v-if="data.session" :user-label="t('person.you')" hide-tool-calls hide-run-usage hide-reasoning :activity-label="t('person.executing')"
         :collaborations="collaborations" @open-collaboration="conversationFlow=$event" />
@@ -841,7 +842,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
               </NTabPane>
               <NTabPane name="flows" :tab-props="{ role: 'tab', 'aria-selected': tab === 'flows' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="flows" :size="17" />{{ t('person.flows') }}</span></template>
-                <PersonFlowsPanel ref="flowsPanelRef" :flows="data.flows || []" :focus="flowFocus" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
+                <PersonFlowsPanel ref="flowsPanelRef" :flows="flowSnapshot?.flows || []" :focus="flowFocus" :saving="pending" @action="flowAction" @open-result="openFlowResult" @open-task="openFlowTask" @open-conversation="openFlowConversation" />
               </NTabPane>
               <NTabPane name="schedules" :tab-props="{ role: 'tab', 'aria-selected': tab === 'schedules' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="schedule" :size="17" />{{ t('person.schedules') }}<span class="workspace-tab-count">{{ data.schedules.length }}</span></span></template>

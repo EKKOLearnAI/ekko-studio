@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import type { PersonFlow } from '../../packages/client/src/api/person'
+import { mockPersonResume } from './fixtures/person-resume'
 
 async function setup(page: Page, state: 'active' | 'completed' | 'empty' = 'completed', creator = false) {
   const active = state === 'active'
@@ -17,7 +18,7 @@ async function setup(page: Page, state: 'active' | 'completed' | 'empty' = 'comp
   }
   page.on('pageerror',error => errors.push(error.message))
   await page.addInitScript(() => { localStorage.setItem('hermes_locale','zh') })
-  await page.routeWebSocket('**/socket.io/**',() => {})
+  await mockPersonResume(page,()=>({messages:[],personFlows:{flows:state==='empty'?[]:[flow],active_flows:active?[flow]:[],active_flow_count:active?1:0,history_cleared_at:0}}))
   await page.route(url => url.pathname.startsWith('/api/'),async route => {
     const url = new URL(route.request().url())
     let json: unknown = {}
@@ -29,17 +30,15 @@ async function setup(page: Page, state: 'active' | 'completed' | 'empty' = 'comp
       session:url.searchParams.has('session_id') ? session : null,
       settings:{model:{profile:'default',provider:'fixture',model:'test-model'},agents:[],workspace:session.workspace,timezone:'Asia/Shanghai',maxSteps:12,maxConcurrentTasks:6,taskTimeoutMinutes:60,compressionThreshold:null},
       revision:0,busy:false,history_revision:0,can_clear:false,inherits_global_model:true,reasoning_efforts:[],compression:{enabled:false,threshold:.8,globalThreshold:.8},contextTokens:16000,
-      tasks:[],active_tasks:[],active_agent_task_count:0,schedules:[],memories:[],interactions:[],flows:state === 'empty' ? [] : [flow],
-      // Older snapshots rely on the client filtering the history list itself.
-      ...(active && !creator ? {} : {active_flows:active ? [flow] : [],active_flow_count:active ? 1 : 0}),
+      tasks:[],active_tasks:[],active_agent_task_count:0,schedules:[],memories:[],interactions:[],
     }
     else if (url.pathname === '/api/studio/person/flows/query') json = {flows:[flow]}
     else if (url.pathname === '/api/studio/workspace/directories') json = {directories:[]}
     await route.fulfill({json})
   })
   const entry = '/@fs/' + resolve('tests/e2e/fixtures/person-conversation-layout.ts').replaceAll('\\','/').replace(/^\//,'')
-  await page.route('**/__flow_visibility__',route => route.fulfill({contentType:'text/html',body:`<!doctype html><html lang="zh"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div><script type="module" src="${entry}"></script></body></html>`}))
-  await page.goto('/__flow_visibility__')
+  await page.route(url=>url.pathname==='/__flow_visibility__',route => route.fulfill({contentType:'text/html',body:`<!doctype html><html lang="zh"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div><script type="module" src="${entry}"></script></body></html>`}))
+  await page.goto('/__flow_visibility__?resume=1')
   await expect(page.locator('.person-title')).toHaveText(session.title)
   return errors
 }

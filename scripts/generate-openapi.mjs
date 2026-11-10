@@ -2043,7 +2043,10 @@ for (const [suffix, schema] of Object.entries(personBodies)) {
   operation.description='Studio user login required. Account isolation is enforced by the server. Mutations use current revisions; task and schedule operations require an idempotency key. Worker question answers are delivered through their original interactive runtime.'
 }
 
-openapi.paths['/api/studio/person'].get.parameters = [{ name: 'session_id', in: 'query', schema: { type: 'string' }, description: 'Selected owned conversation; omitted returns shared settings with session=null and creates no conversation.' }]
+openapi.paths['/api/studio/person'].get.parameters = [
+  { name: 'session_id', in: 'query', schema: { type: 'string' }, description: 'Selected owned conversation; omitted returns shared settings with session=null and creates no conversation.' },
+  { name: 'include_flows', in: 'query', schema: { type: 'boolean', default: true }, description: 'Include collaboration history and activity. Studio uses false because resume and person.updated deliver personFlows with the conversation.' },
+]
 openapi.paths['/api/studio/person/conversations'].get.parameters = [
   { name: 'search', in: 'query', schema: { type: 'string', maxLength: 200 }, description: 'Search owned Person conversation names and message contents only.' },
   { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0 } },

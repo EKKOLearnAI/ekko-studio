@@ -1,4 +1,5 @@
 import { personDisplayMessages, personDisplayPage, personDisplayMetadata, PERSON_DISPLAY_PROJECTION } from '../services/chat-run/person-display'
+import { personConversationFlows } from '../services/person/flow-conversation'
 import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage } from '../public/usage'
@@ -2352,6 +2353,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       output_tokens: session.output_tokens,
     },
     messages: personDisplayMessages(session.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, result.messages))),
+    ...(isPersonSession(session.id) ? { personFlows: personConversationFlows(ctx.state.user.id, session.id) } : {}),
     ...(isPersonSession(session.id) ? { projection: PERSON_DISPLAY_PROJECTION, consumedCount: result.messages.length, nextOffset: result.offset + result.messages.length } : {}),
     taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),

@@ -3,6 +3,7 @@ import { personSessionIds } from '../repositories/person-session-store'
 import type { PersonResultDelivery } from '../public/person-runtime'
 import { personResultPrompt } from '../services/person/result-prompt'
 import { personUser } from '../services/person/catalog'
+import { personConversationFlows } from '../services/person/flow-conversation'
 import { personBackgroundPendingCount } from '../repositories/person-store'
 import { personDeliveryCurrent, finishPersonDelivery, cancelPersonDelivery } from '../services/person/delivery'
 import { stageDeliveryContext, assertPersonStage } from '../repositories/person-stage-store'
@@ -516,7 +517,10 @@ export class ChatRunSocket {
     if (this.closing) return
     this.sessionStateSync.refreshPerson(userId)
     for (const sid of personSessionIds(userId)) {
-      this.nsp.to(`session:${sid}`).emit('person.updated', { session_id: sid })
+      this.nsp.to(`session:${sid}`).emit('person.updated', {
+        session_id: sid,
+        ...(this.nsp.adapter.rooms.get(`session:${sid}`)?.size ? { personFlows: personConversationFlows(userId, sid) } : {}),
+      })
       if (this.isSessionRunning(sid)) continue
       const before = this.personQuestions.get(sid)
       const next = personChatInteraction(userId, sid)
@@ -2406,6 +2410,7 @@ export class ChatRunSocket {
     socket.emit(options?.event || 'resumed', {
       session_id: sid,
       ...outboundMessagePage,
+      ...(!options && isPersonSession(sid) ? { personFlows: personConversationFlows(Number(socket.data.user.id), sid) } : {}),
       taskPlans,
       parentSessionId: sessionDetail?.parent_session_id || null,
       forkPointMessageId: sessionDetail?.fork_point_message_id || null,
@@ -3435,6 +3440,7 @@ export class ChatRunSocket {
     })
     this.nsp.to(isPrivatePersonSession(sessionId) ? `session:${sessionId}` : ['studio-account', `session:${sessionId}`]).emit('resumed', {
       session_id: sessionId,
+      ...(isPersonSession(sessionId) ? { personFlows: personConversationFlows(Number(getSessionMetadata(sessionId)?.studio_user_id), sessionId) } : {}),
       messages: [],
       messageTotal: 0,
       messageLoadedCount: 0,

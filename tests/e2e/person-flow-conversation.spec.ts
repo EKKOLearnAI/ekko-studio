@@ -1,6 +1,7 @@
 import { expect,test,type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import type { PersonFlow,PersonFlowMessage } from '../../packages/client/src/api/person'
+import { mockPersonResume,type PersonResumeFixture } from './fixtures/person-resume'
 
 async function setup(page:Page,initialState:PersonFlow['state']='completed') {
   const errors:string[]=[],mutations:string[]=[]
@@ -13,10 +14,12 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
     })),
   }
   const entry=(id:number,index:number,content:string):PersonFlowMessage => ({id,session_id:sessions[index].id,session_title:sessions[index].title,bot_type:sessions[index].bot_type,stage_id:`stage-${index-1}`,round_number:1,role:'assistant',content,timestamp:Math.floor(Date.now()/1000)-60+id})
-  const state={flow,flows:[flow],latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true,snapshotDelay:0}
+  const state={flow,flows:[flow],latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true,snapshotDelay:0,resumeDelay:0,
+    messages:{[sessions[0].id]:[{id:'creator-before',role:'assistant',content:'我来协调这次工作',timestamp:1000},{id:'creator-after',role:'assistant',content:'等待两端返回结果',timestamp:3000}]} as Record<string,PersonResumeFixture['messages']>,historyClearedAt:0}
   page.on('pageerror',error=>errors.push(error.message))
   await page.addInitScript(()=>{localStorage.setItem('hermes_locale','zh')})
-  await page.routeWebSocket('**/socket.io/**',()=>{})
+  const resume=await mockPersonResume(page,id=>({messages:state.messages[id] || [],personFlows:{flows:state.flows,
+    active_flows:state.flow.state==='active'&&id===flow.creator_session_id?[flow]:[],active_flow_count:state.flow.state==='active'&&id===flow.creator_session_id?1:0,history_cleared_at:state.historyClearedAt}}),()=>state.resumeDelay)
   await page.route(url=>url.pathname.startsWith('/api/'),async route=>{
     const request=route.request(),url=new URL(request.url())
     if (!['GET','HEAD'].includes(request.method())) mutations.push(request.method()+' '+url.pathname)
@@ -30,29 +33,30 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
       const session=sessions.find(session=>session.id===url.searchParams.get('session_id'))
       json={session:session||null,settings:{model:{profile:'default',provider:'fixture',model:'test-model'},agents:[],workspace:session?.workspace||'',timezone:'Asia/Shanghai',maxSteps:12,maxConcurrentTasks:6,taskTimeoutMinutes:60,compressionThreshold:null},
         revision:0,busy:false,history_revision:0,can_clear:false,inherits_global_model:true,reasoning_efforts:[],compression:{enabled:false,threshold:.8,globalThreshold:.8},contextTokens:16000,
-        tasks:[],active_tasks:[],active_agent_task_count:0,schedules:[],memories:[],interactions:[],flows:state.flows,active_flows:flow.state==='active'&&session?.id===flow.creator_session_id?[flow]:[],active_flow_count:flow.state==='active'&&session?.id===flow.creator_session_id?1:0}
+        tasks:[],active_tasks:[],active_agent_task_count:0,schedules:[],memories:[],interactions:[],
+        ...(url.searchParams.get('include_flows')==='false'?{}:{flows:state.flows,active_flows:flow.state==='active'&&session?.id===flow.creator_session_id?[flow]:[],active_flow_count:flow.state==='active'&&session?.id===flow.creator_session_id?1:0})}
     } else if (url.pathname==='/api/studio/person/flows/query') json={flows:[flow]}
     else if (url.pathname==='/api/studio/person/flows/apply') {
       const input=request.postDataJSON()
       if (input.action==='stop') {flow.state='stopped';flow.revision++;flow.updated_at=5000}
+      resume.publish(flow.creator_session_id!)
       json={flow}
     } else if (url.pathname==='/api/studio/person/flows/flow-a/messages') {
       if (state.fail) return route.fulfill({status:state.errorStatus,json:{error:'fixture unavailable'}})
       const older=url.searchParams.has('before_id')
       json={flow:state.flow,messages:older?state.older:state.latest,has_more:older?false:state.hasMore,next_before_id:older?null:state.hasMore?30:null,history_key:state.historyKey}
+    } else if (url.pathname.includes('/messages/paginated')) {
+      const id=decodeURIComponent(url.pathname.split('/')[5]),messages=state.messages[id] || []
+      json={session:sessions.find(session=>session.id===id),messages:messages.map(message=>({...message,timestamp:message.timestamp/1000})),personFlows:{flows:state.flows,active_flows:[],active_flow_count:0,history_cleared_at:state.historyClearedAt},total:messages.length,hasMore:false}
     } else if (url.pathname==='/api/studio/workspace/directories') json={directories:[]}
     await route.fulfill({json})
   })
   const entryPath='/@fs/'+resolve('tests/e2e/fixtures/person-conversation-layout.ts').replaceAll('\\','/').replace(/^\//,'')
-  await page.route('**/__flow_conversation__',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html lang="zh"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div><script type="module" src="${entryPath}"></script></body></html>`}))
-  await page.goto('/__flow_conversation__')
+  await page.route(url=>url.pathname==='/__flow_conversation__',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html lang="zh"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="app"></div><script type="module" src="${entryPath}"></script></body></html>`}))
+  await page.goto('/__flow_conversation__?resume=1')
   await expect(page.locator('.person-title')).toHaveText('主发起人')
-  await page.evaluate(()=>{
-    const chat=(window as any).personWorkspaceFixture.chat
-    chat.activeSession.messages=[{id:'creator-before',role:'assistant',content:'我来协调这次工作',timestamp:1000},{id:'creator-after',role:'assistant',content:'等待两端返回结果',timestamp:3000}]
-    chat.activeSession.messagesLoaded=true
-  })
-  return {state,errors,mutations,entry,sessions}
+  await expect.poll(()=>page.evaluate(()=>(window as any).personWorkspaceFixture.chat.activeSession?.messagesLoaded)).toBe(true)
+  return {state,errors,mutations,entry,sessions,resume}
 }
 
 const card=(page:Page)=>page.getByRole('button',{name:'查看协作对话 · 接口与界面联调',exact:true})
@@ -197,7 +201,7 @@ test('opens the creator card and complete unified conversation on a narrow scree
   expect(errors).toEqual([])
 })
 
-test('keeps the latest reply visible when collaboration cards load after cached messages',async ({page},testInfo)=>{
+test('restores cards with messages before the independent Bot settings snapshot',async ({page},testInfo)=>{
   const {state,errors,sessions}=await setup(page)
   state.flow.updated_at=3150
   state.flow.stages=Array.from({length:40},(_,index)=>({...state.flow.stages[index%2],id:`stage-${index}`,position:index,group_position:index}))
@@ -211,6 +215,7 @@ test('keeps the latest reply visible when collaboration cards load after cached 
       session.loadedMessageCount=session.messages.length
     }
   },sessions)
+  state.messages=await page.evaluate(()=>Object.fromEntries((window as any).personWorkspaceFixture.chat.sessions.map((session:any)=>[session.id,session.messages])))
   const viewport=page.locator('.person-chat-messages .virtual-message-list')
   const bottomDistance=()=>viewport.evaluate(el=>Math.round(el.scrollHeight-el.scrollTop-el.clientHeight))
   const finalReply=page.locator('.person-chat-messages .message[id]').last()
@@ -229,14 +234,15 @@ test('keeps the latest reply visible when collaboration cards load after cached 
     await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
     state.snapshotDelay=1800
     await page.locator('.person-sidebar .session-item').filter({hasText:'主发起人'}).click()
-    // Cached messages render before the independent collaboration snapshot.
+    // Cached messages and cards return together, before the unrelated settings read.
     await expect(finalReply).toContainText('收到，111。')
-    await expect(page.locator('.person-flow-conversation-card')).toHaveCount(0)
+    await expect(page.locator('.person-flow-conversation-card')).toHaveCount(1)
+    await expect(page.locator('.person-view')).toHaveAttribute('inert')
     await expect.poll(finalReplyIsVisible).toBe(true)
     await expect(page.locator('.person-title')).toHaveText('主发起人')
     await expect(card(page).locator('.bot-sprite')).toHaveCount(40)
     await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
-    // Check again after late card insertion and graph measurement settle.
+    // Check again after graph measurement and the unrelated settings read settle.
     await page.waitForTimeout(1400)
     expect(await bottomDistance()).toBeLessThanOrEqual(2)
     expect(await finalReplyIsVisible()).toBe(true)
@@ -247,6 +253,59 @@ test('keeps the latest reply visible when collaboration cards load after cached 
   expect(await bottomDistance()).toBeLessThanOrEqual(2)
   expect(await finalReplyIsVisible()).toBe(true)
   await testInfo.attach('switched-bot-at-latest-card',{body:await page.screenshot({animations:'disabled'}),contentType:'image/png'})
+  expect(errors).toEqual([])
+})
+
+test('renders a cold resumed transcript and collaboration together and applies pushed flow changes',async ({page})=>{
+  const {state,resume,errors,mutations}=await setup(page)
+  const reads:string[]=[]
+  page.on('request',request=>{const url=new URL(request.url());if(url.pathname==='/api/studio/person')reads.push(url.search)})
+  state.flow.updated_at=4500
+  state.messages['person-main-creator']=[{id:'user-111',role:'user',content:'111',timestamp:4400},{id:'reply-111',role:'assistant',content:'收到，111。',timestamp:5000}]
+  await page.locator('.person-sidebar .session-item').filter({hasText:'接口 Bot'}).click()
+  await expect(page.locator('.person-view')).not.toHaveAttribute('inert')
+  await page.evaluate(()=>{
+    const fixture=(window as any).personWorkspaceFixture
+    const creator=fixture.chat.sessions.find((session:any)=>session.id==='person-main-creator')
+    creator.messages=[];creator.messagesLoaded=false;creator.personFlows=undefined
+    fixture.resumePhases=[]
+    fixture.resumeObserver=new MutationObserver(()=>{
+      if(fixture.chat.activeSessionId!=='person-main-creator')return
+      fixture.resumePhases.push({reply:!!document.getElementById('message-reply-111'),card:!!document.querySelector('.person-flow-conversation-card')})
+    })
+    fixture.resumeObserver.observe(document.querySelector('.person-chat-messages'),{childList:true,subtree:true})
+  })
+  state.snapshotDelay=2500;state.resumeDelay=300
+  await page.locator('.person-sidebar .session-item').filter({hasText:'主发起人'}).click()
+  await expect(page.locator('#message-reply-111')).toContainText('收到，111。')
+  await expect(page.locator('.person-flow-conversation-card')).toHaveCount(1)
+  await expect(page.locator('.person-view')).toHaveAttribute('inert')
+  const phases=await page.evaluate(()=>{const fixture=(window as any).personWorkspaceFixture;fixture.resumeObserver.disconnect();return fixture.resumePhases as Array<{reply:boolean;card:boolean}>})
+  expect(phases.some(phase=>phase.reply&&phase.card)).toBe(true)
+  expect(phases.some(phase=>phase.reply!==phase.card)).toBe(false)
+  await expect(page.locator('.person-view')).not.toHaveAttribute('inert')
+  state.snapshotDelay=2500
+  state.flow.state='active';state.flow.revision++
+  state.flow.stages.forEach((stage,index)=>{stage.state=index?'pending':'active'})
+  resume.publish('person-main-creator')
+  await expect(page.locator('.person-flow-conversation-card')).toHaveCount(0)
+  await expect(page.locator('.person-task-island')).toBeVisible()
+  state.flow.state='stopped';state.flow.revision++
+  resume.publish('person-main-creator')
+  await expect(page.locator('.person-flow-conversation-card')).toHaveCount(1)
+  await expect(page.locator('.person-task-island')).toHaveCount(0)
+  state.historyClearedAt=state.flow.created_at!+1
+  resume.publish('person-main-creator')
+  await expect(page.locator('.person-flow-conversation-card')).toHaveCount(0)
+  state.historyClearedAt=0
+  state.messages['person-main-creator'].push({id:'refresh-reply',role:'assistant',content:'刷新时也一并恢复协作记录。',timestamp:6000})
+  expect(await page.evaluate(()=>(window as any).personWorkspaceFixture.chat.refreshActiveSession())).toBe(true)
+  await expect(page.locator('#message-refresh-reply')).toContainText('刷新时也一并恢复协作记录。')
+  await expect(page.locator('.person-flow-conversation-card')).toHaveCount(1)
+  expect(resume.requested).toContain('person-main-creator')
+  expect(reads.length).toBeGreaterThan(0)
+  expect(reads.every(query=>new URLSearchParams(query).get('include_flows')==='false')).toBe(true)
+  expect(mutations).toEqual([])
   expect(errors).toEqual([])
 })
 
@@ -287,6 +346,7 @@ test('keeps the final reply visible while multiple cards settle and preserves de
       session.loadedMessageCount=100
     }
   },sessions)
+  state.messages=await page.evaluate(()=>Object.fromEntries((window as any).personWorkspaceFixture.chat.sessions.map((session:any)=>[session.id,session.messages])))
   const viewport=page.locator('.person-chat-messages .virtual-message-list')
   const lastMessage=page.locator('.person-chat-messages .message[id]').last()
   const tailIsVisible=()=>lastMessage.evaluate(el=>{
