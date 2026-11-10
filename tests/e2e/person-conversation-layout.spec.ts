@@ -51,7 +51,10 @@ async function setup(page: Page, fullShell = false, widths = { agent: 480, tools
   await page.route(url => url.pathname.startsWith('/api/'), async (route: Route) => {
     const request = route.request(), u = new URL(request.url())
     if (u.pathname.includes('/person/tasks') && request.method() !== 'GET') taskMutations.push(request.method() + ' ' + u.pathname)
-    const gate = delayed.get(u.pathname + u.search) || delayed.get(u.pathname)
+    const gate = [...delayed].find(([path]) => {
+      const expected = new URL(path, u.origin)
+      return expected.pathname === u.pathname && [...expected.searchParams].every(([key, value]) => u.searchParams.get(key) === value)
+    })?.[1]
     if (gate) await gate.promise
     let json: any = {}
     if (u.pathname === '/api/auth/me') json = { user: { id: 1, username: 'fixture', role: 'super_admin' } }
@@ -199,7 +202,7 @@ test('does not treat a failed or stale Bot snapshot as confirmation of no tasks'
   const state = await setup(page, true)
   await chooseTask(page, state.tasks[0].title)
   await tools(page)
-  const emptyUrl = '**/api/studio/person?session_id=person-main-empty'
+  const emptyUrl = (url: URL) => url.pathname === '/api/studio/person' && url.searchParams.get('session_id') === 'person-main-empty'
   await page.route(emptyUrl, route => route.fulfill({ status: 503, json: { error: 'fixture unavailable' } }))
   await bot(page, '空 Bot')
   await expect(page.locator('.person-alert')).toContainText('fixture unavailable')

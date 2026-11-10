@@ -12,7 +12,7 @@ vi.mock('@/api/studio/sessions', () => ({
 vi.mock('@/api/studio/chat', () => ({
   startRunViaSocket:api.start,resumeSession:api.resume,registerSessionHandlers:api.register,unregisterSessionHandlers:vi.fn(),
   onUnobservedRunStarted:vi.fn(()=>vi.fn()),getChatRunSocket:vi.fn(()=>({emit:vi.fn()})),
-  respondToolApproval:vi.fn(),respondClarify:vi.fn(),onPeerUserMessage:vi.fn(()=>vi.fn()),onSessionCommand:vi.fn(()=>vi.fn()),
+  respondToolApproval:vi.fn(),respondClarify:vi.fn(),onPeerUserMessage:vi.fn(()=>vi.fn()),onPersonUpdated:vi.fn(()=>vi.fn()),onSessionCommand:vi.fn(()=>vi.fn()),
   onSessionTitleUpdated:vi.fn(()=>vi.fn()),onSessionWorkspaceUpdated:vi.fn(()=>vi.fn()),onSessionSettingsUpdated:vi.fn(()=>vi.fn()),onRunUsageUpdated:vi.fn(()=>vi.fn()),
 }))
 vi.mock('@/api/client',()=>({getActiveProfileName:()=> 'default',hasApiKey:()=>false}))
