@@ -42,6 +42,23 @@ export interface ScriptReportInvocation {
   updated_at: number
 }
 
+/** Import result of one appended (nonterminal) notice of an invocation; keyed by its business event. */
+export interface ScriptReportEvent {
+  binding_id: string
+  binding_revision: number
+  event_id: string
+  invocation_id: string
+  sequence: number
+  event_kind: string | null
+  /** `pending`: the event identity is reserved for its slot; the inbox may or may not have its notice yet. */
+  state: ScriptReportInvocationState | 'pending'
+  notification_id: number | null
+  detail: string | null
+  submitted_sha256: string | null
+  record_sha256: string | null
+  updated_at: number
+}
+
 const initialized = new WeakSet<object>()
 function database() {
   const db = getDb()
@@ -60,6 +77,12 @@ function database() {
       binding_id TEXT NOT NULL, invocation_id TEXT NOT NULL, state TEXT NOT NULL, outcome TEXT,
       notification_id INTEGER, detail TEXT, updated_at INTEGER NOT NULL,
       PRIMARY KEY(binding_id, invocation_id)
+    );
+    CREATE TABLE IF NOT EXISTS script_report_events (
+      binding_id TEXT NOT NULL, binding_revision INTEGER NOT NULL, event_id TEXT NOT NULL, invocation_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL, event_kind TEXT, state TEXT NOT NULL, notification_id INTEGER, detail TEXT,
+      submitted_sha256 TEXT, record_sha256 TEXT, updated_at INTEGER NOT NULL,
+      PRIMARY KEY(binding_id, binding_revision, event_id), UNIQUE(binding_id, invocation_id, sequence)
     );
   `)
   const columns = new Set((db.prepare('PRAGMA table_info(script_report_bindings)').all() as Array<{ name: string }>).map(column => column.name))
@@ -171,4 +194,43 @@ export function countScriptReportInvocations(bindingId: string): Record<ScriptRe
     if (row.state in counts) counts[row.state as ScriptReportInvocationState] = Number(row.n)
   }
   return counts
+}
+
+function toEvent(row: Record<string, unknown>): ScriptReportEvent {
+  const text = (value: unknown) => value == null ? null : String(value)
+  return {
+    binding_id: String(row.binding_id), binding_revision: Number(row.binding_revision), event_id: String(row.event_id),
+    invocation_id: String(row.invocation_id), sequence: Number(row.sequence), event_kind: text(row.event_kind),
+    state: String(row.state) as ScriptReportEvent['state'], notification_id: row.notification_id == null ? null : Number(row.notification_id),
+    detail: text(row.detail), submitted_sha256: text(row.submitted_sha256), record_sha256: text(row.record_sha256), updated_at: Number(row.updated_at),
+  }
+}
+
+export function getScriptReportEvent(bindingId: string, revision: number, eventId: string): ScriptReportEvent | null {
+  const row = database().prepare('SELECT * FROM script_report_events WHERE binding_id=? AND binding_revision=? AND event_id=?')
+    .get(bindingId, revision, eventId) as Record<string, unknown> | undefined
+  return row ? toEvent(row) : null
+}
+
+export function getScriptReportEventAt(bindingId: string, invocationId: string, sequence: number): ScriptReportEvent | null {
+  const row = database().prepare('SELECT * FROM script_report_events WHERE binding_id=? AND invocation_id=? AND sequence=?')
+    .get(bindingId, invocationId, sequence) as Record<string, unknown> | undefined
+  return row ? toEvent(row) : null
+}
+
+/** First disposition wins, per event and per invocation slot; a replay never rewrites it. */
+export function recordScriptReportEvent(entry: Omit<ScriptReportEvent, 'updated_at'>): void {
+  database().prepare(`INSERT INTO script_report_events (binding_id, binding_revision, event_id, invocation_id, sequence, event_kind,
+      state, notification_id, detail, submitted_sha256, record_sha256, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`)
+    .run(entry.binding_id, entry.binding_revision, entry.event_id, entry.invocation_id, entry.sequence, entry.event_kind, entry.state,
+      entry.notification_id, entry.detail, entry.submitted_sha256, entry.record_sha256, Date.now())
+}
+
+/** Settle a reserved (`pending`) slot once; a settled disposition is never rewritten. */
+export function settleScriptReportEvent(bindingId: string, invocationId: string, sequence: number,
+  state: ScriptReportInvocationState, notificationId: number | null, detail: string | null): void {
+  database().prepare(`UPDATE script_report_events SET state=?, notification_id=?, detail=?, updated_at=?
+    WHERE binding_id=? AND invocation_id=? AND sequence=? AND state='pending'`)
+    .run(state, notificationId, detail, Date.now(), bindingId, invocationId, sequence)
 }
