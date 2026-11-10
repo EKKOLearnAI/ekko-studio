@@ -3,23 +3,33 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 // Detached completion on real file storage: the generated wrapper launches a real detached
 // launcher, its setsid worker completes the reserved invocation through the wrapper's helper, and
 // the importer accepts into the passive inbox and writes the producer-readable receipt.
 // Directory fsync faults for the importer only (it imports 'fs'; this file uses 'node:fs').
-const fsFaults = vi.hoisted(() => ({ dirSyncs: 0, failDirSync: null as Error | null }))
+// `failDirPath` fails only the directory opened at that exact path (fd -> path is tracked at open).
+const fsFaults = vi.hoisted(() => ({ dirSyncs: 0, failDirSync: null as Error | null, failDirPath: null as string | null, pathHits: 0, fdPaths: new Map<number, string>() }))
 vi.mock('fs', async importOriginal => {
   const real = await importOriginal<typeof import('fs')>()
+  const openSync = ((path: any, ...rest: any[]) => {
+    const fd = (real.openSync as any)(path, ...rest)
+    fsFaults.fdPaths.set(fd, String(path))
+    return fd
+  }) as typeof real.openSync
   const fsyncSync = (fd: number) => {
     if (real.fstatSync(fd).isDirectory()) {
       fsFaults.dirSyncs++
       if (fsFaults.failDirSync) throw fsFaults.failDirSync
+      if (fsFaults.failDirPath !== null && fsFaults.fdPaths.get(fd) === fsFaults.failDirPath) {
+        fsFaults.pathHits++
+        throw Object.assign(new Error('directory sync failed'), { code: 'EIO' })
+      }
     }
     return real.fsyncSync(fd)
   }
-  return { ...real, default: { ...real, fsyncSync }, fsyncSync }
+  return { ...real, default: { ...real, openSync, fsyncSync }, openSync, fsyncSync }
 })
 const STUDIO = '../../packages/server/src/modules/studio'
 const HERMES = '../../packages/server/src/modules/hermes'
@@ -36,6 +46,8 @@ const jobs: any[] = []
 beforeEach(async () => {
   fsFaults.dirSyncs = 0
   fsFaults.failDirSync = null
+  fsFaults.failDirPath = null
+  fsFaults.pathHits = 0
   vi.resetModules()
   jobs.length = 0
   root = realpathSync(mkdtempSync(join(tmpdir(), 'script-report-detached-')))
@@ -572,6 +584,81 @@ describe('appended script report notices', { timeout: 30_000 }, () => {
     expect(append(binding, invocation, 'a-2', 'start', 'starting up').status).toBe(3)
     m.importer.importScriptReports()
     expect(notices().filter((row: any) => JSON.stringify(row.payload).includes('starting up'))).toHaveLength(1)
+  })
+
+  it('a failed receipts-parent sync holds the appended event on every retry until it succeeds', () => {
+    const binding = bind('launcher.sh')
+    const invocation = reserve(binding)
+    expect(append(binding, invocation, 'p-1', 'start', 'parent body').status).toBe(3)
+    // Appended receipts live in <receipts>/events: its parent is the binding's receipts directory.
+    fsFaults.failDirPath = m.paths.scriptReportReceiptsDir(binding.binding_id)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      fsFaults.pathHits = 0
+      m.importer.importScriptReports()
+      expect(fsFaults.pathHits).toBeGreaterThan(0)
+      expect(eventReceipt(binding, 'p-1')).toBeFalsy()
+    }
+    fsFaults.failDirPath = null
+    m.importer.importScriptReports()
+    expect(eventReceipt(binding, 'p-1')).toBeTruthy()
+    expect(notices().filter((row: any) => JSON.stringify(row.payload).includes('parent body'))).toHaveLength(1)
+  })
+
+  /** Runs `append` in the wrapper with fsync failing only for the directory at `target`; prints FAULT_HIT when reached. */
+  function appendWithDirFault(binding: any, invocation: string, target: string, eventId: string, body: string) {
+    const file = join(root, `body-${eventId}.txt`)
+    writeFileSync(file, body)
+    return spawnSync(PYTHON, ['-c', [
+      'import importlib.util, os, sys',
+      `spec = importlib.util.spec_from_file_location("w", ${JSON.stringify(wrapperOf(binding))})`,
+      'w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)',
+      `target = os.path.realpath(${JSON.stringify(target)})`,
+      'paths = {}',
+      'real_open, real_fsync = os.open, os.fsync',
+      'def tracked_open(path, *args, **kwargs):',
+      '    fd = real_open(path, *args, **kwargs)',
+      '    paths[fd] = os.path.realpath(path) if isinstance(path, str) else None',
+      '    return fd',
+      'def faulty_fsync(fd):',
+      '    if paths.get(fd) == target:',
+      '        sys.stderr.write("FAULT_HIT\\n")',
+      '        raise OSError(5, "EIO")',
+      '    return real_fsync(fd)',
+      'os.open, os.fsync = tracked_open, faulty_fsync',
+      `sys.exit(w.helper(["append", "--event-id", ${JSON.stringify(eventId)}, "--event-kind", "start", "--content-file", ${JSON.stringify(file)}]))`,
+    ].join('\n')], { encoding: 'utf8', env: { ...process.env, EKKO_SCRIPT_REPORT_INVOCATION: invocation } })
+  }
+  const slotsOf = (binding: any, invocation: string) => join(m.paths.scriptReportOutboxDir(binding.binding_id), 'invocations', invocation)
+
+  it('an existing admission directory still has its parent synced on every retry', () => {
+    const binding = bind('launcher.sh')
+    const invocation = reserve(binding)
+    const parent = dirname(slotsOf(binding, invocation))
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const out = appendWithDirFault(binding, invocation, parent, 'd-1', 'durable dir body')
+      expect(out.stderr).toContain('FAULT_HIT')
+      expect(out.stdout).not.toContain('"queued"')
+    }
+    expect(append(binding, invocation, 'd-1', 'start', 'durable dir body').status).toBe(3)
+    m.importer.importScriptReports()
+    expect(notices().filter((row: any) => JSON.stringify(row.payload).includes('durable dir body'))).toHaveLength(1)
+  })
+
+  it('a recovered admission is indexed only after its slot directory is synced', () => {
+    const binding = bind('launcher.sh')
+    const invocation = reserve(binding)
+    const slots = slotsOf(binding, invocation)
+    // First attempt: the slot record is published, then the slot directory sync fails -> intent and slot remain.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const out = appendWithDirFault(binding, invocation, slots, 's-1', 'slot body')
+      expect(out.stderr).toContain('FAULT_HIT')
+      expect(out.stdout).not.toContain('"queued"')
+      expect(readdirSync(slots).filter((name: string) => name.endsWith('.json'))).toHaveLength(1)
+    }
+    expect(append(binding, invocation, 's-1', 'start', 'slot body').status).toBe(3)
+    expect(readdirSync(slots).filter((name: string) => name.endsWith('.json'))).toHaveLength(1)
+    m.importer.importScriptReports()
+    expect(notices().filter((row: any) => JSON.stringify(row.payload).includes('slot body'))).toHaveLength(1)
   })
 
   it('a committed notice is recovered once; a changed replay never acquires another acceptance', () => {
