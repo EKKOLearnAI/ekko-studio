@@ -94,7 +94,8 @@ const attention = () => (m.db.prepare("SELECT COUNT(*) AS n FROM session_attenti
 const spool = (binding: any) => readdirSync(m.paths.scriptReportSpoolDir(binding.binding_id)).filter((name: string) => !name.startsWith('.'))
 const finalOf = (binding: any, id: string) => join(m.paths.scriptReportSpoolDir(binding.binding_id), id, 'final.json')
 
-describe('script report import', () => {
+// Real wrapper processes per test: a loaded parallel runner exceeded the 5 s default (5388 ms; 1987 ms alone).
+describe('script report import', { timeout: 30_000 }, () => {
   beforeEach(() => { jobs.length = 0 })
 
   it('imports a report as a passive notice with attention and no model history', () => {

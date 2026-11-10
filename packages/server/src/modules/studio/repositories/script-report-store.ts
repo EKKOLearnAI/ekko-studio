@@ -7,6 +7,9 @@ import { getDb } from '../infrastructure/database'
  */
 export type ScriptReportBindingState = 'enrolling' | 'active' | 'failed' | 'revoked'
 
+/** `sync`: the wrapper reports its own child. `detached`: the child hands the invocation to a worker that completes it. */
+export type ScriptReportCompletion = 'sync' | 'detached'
+
 /** Import result of one wrapper invocation. `incomplete` is never stored: it is a spool state. */
 export type ScriptReportInvocationState = 'accepted' | 'silent' | 'rejected' | 'quarantined'
 
@@ -22,6 +25,7 @@ export interface ScriptReportBinding {
   job_name: string
   target_script: string
   wrapper_script: string
+  completion: ScriptReportCompletion
   state: ScriptReportBindingState
   error: string | null
   created_at: number
@@ -58,6 +62,8 @@ function database() {
       PRIMARY KEY(binding_id, invocation_id)
     );
   `)
+  const columns = new Set((db.prepare('PRAGMA table_info(script_report_bindings)').all() as Array<{ name: string }>).map(column => column.name))
+  if (!columns.has('completion')) db.exec('ALTER TABLE script_report_bindings ADD COLUMN completion TEXT')
   initialized.add(db)
   return db
 }
@@ -75,6 +81,7 @@ function toBinding(row: Record<string, unknown>): ScriptReportBinding {
     job_name: String(row.job_name),
     target_script: String(row.target_script),
     wrapper_script: String(row.wrapper_script),
+    completion: row.completion === 'detached' ? 'detached' : 'sync',
     state: String(row.state) as ScriptReportBindingState,
     error: row.error == null ? null : String(row.error),
     created_at: Number(row.created_at),
@@ -82,14 +89,15 @@ function toBinding(row: Record<string, unknown>): ScriptReportBinding {
   }
 }
 
-export function insertScriptReportBinding(binding: Omit<ScriptReportBinding, 'created_at' | 'updated_at' | 'state' | 'error' | 'job_id'>): ScriptReportBinding {
+export function insertScriptReportBinding(binding: Omit<ScriptReportBinding, 'created_at' | 'updated_at' | 'state' | 'error' | 'job_id' | 'completion'>
+  & { completion?: ScriptReportCompletion }): ScriptReportBinding {
   const now = Date.now()
   database().prepare(`INSERT INTO script_report_bindings
       (binding_id, revision, namespace, profile, session_id, session_generation, account_id, job_id, job_name,
-       target_script, wrapper_script, state, error, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'enrolling', NULL, ?, ?)`).run(binding.binding_id, binding.revision,
+       target_script, wrapper_script, state, error, created_at, updated_at, completion)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'enrolling', NULL, ?, ?, ?)`).run(binding.binding_id, binding.revision,
     binding.namespace, binding.profile, binding.session_id, binding.session_generation, binding.account_id,
-    binding.job_name, binding.target_script, binding.wrapper_script, now, now)
+    binding.job_name, binding.target_script, binding.wrapper_script, now, now, binding.completion === 'detached' ? 'detached' : null)
   return getScriptReportBinding(binding.binding_id)!
 }
 
