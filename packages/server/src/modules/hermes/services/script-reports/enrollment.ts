@@ -291,15 +291,29 @@ async function enrollLocked(bindingId: string, request: EnrollmentRequest, runne
   return { binding: findScriptReportBinding(bindingId)!, job: readNativeJob(profile, jobId), resumed: true }
 }
 
-/** A failed resume may still have enabled the job: pause it by id and report only what is observed. */
+/**
+ * A failed resume may still have enabled the job: pause it by id and report only what is observed.
+ * Reading the job can fail as well (a missing or unreadable jobs file); that never skips the pause
+ * and never loses the job id or the native state.
+ */
 async function ensurePaused(profile: string, jobId: string, runner: HermesCronRunner): Promise<'paused' | 'unknown'> {
-  if (readNativeJob(profile, jobId)?.enabled === false) return 'paused'
+  let observedPaused = false
+  try {
+    observedPaused = readNativeJob(profile, jobId)?.enabled === false
+  } catch {
+    // Unobservable: still pause below.
+  }
+  if (observedPaused) return 'paused'
   try {
     await runner(profile, ['pause', jobId])
   } catch {
     // Reported as unknown below.
   }
-  return readNativeJob(profile, jobId)?.enabled === false ? 'paused' : 'unknown'
+  try {
+    return readNativeJob(profile, jobId)?.enabled === false ? 'paused' : 'unknown'
+  } catch {
+    return 'unknown'
+  }
 }
 
 /**

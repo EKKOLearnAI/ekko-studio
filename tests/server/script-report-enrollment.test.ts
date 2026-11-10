@@ -20,9 +20,10 @@ let origin: string
 let root: string
 let hermesHome: string
 let m: any
-const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean; resumeCommitsThenFails?: boolean; failPause?: boolean } = { calls: [], jobs: [] }
+const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean; resumeCommitsThenFails?: boolean; failPause?: boolean; corruptOnResume?: boolean; corruptOnPause?: boolean } = { calls: [], jobs: [] }
 const users: Record<string, { id: number; token: string; modelRun: string }> = {}
 
+function corruptJobs() { writeFileSync(join(hermesHome, 'cron', 'jobs.json'), '{ not json') }
 function saveJobs() { mkdirSync(join(hermesHome, 'cron'), { recursive: true }); writeFileSync(join(hermesHome, 'cron', 'jobs.json'), JSON.stringify({ jobs: cli.jobs })) }
 
 beforeEach(async () => {
@@ -36,7 +37,7 @@ beforeEach(async () => {
   vi.stubEnv('HERMES_WEB_UI_HOME', join(root, 'studio'))
   vi.stubEnv('HERMES_HOME', hermesHome)
   vi.stubEnv('HERMES_WEB_UI_TEST_DB_DIR', join(root, 'db'))
-  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false; cli.resumeCommitsThenFails = false; cli.failPause = false
+  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false; cli.resumeCommitsThenFails = false; cli.failPause = false; cli.corruptOnResume = false; cli.corruptOnPause = false
   vi.doMock(`${HERMES}/services/runtime/process`, () => ({
     execHermesWithBin: async (_bin: string, args: string[], options: any) => {
       cli.calls.push(args.slice(1))
@@ -59,10 +60,11 @@ beforeEach(async () => {
         if (cli.failResume) throw new Error('resume refused')
         job.enabled = true
         // Like a CLI that commits the change and then times out.
-        if (cli.resumeCommitsThenFails) { saveJobs(); throw new Error('resume timed out') }
+        if (cli.resumeCommitsThenFails) { saveJobs(); if (cli.corruptOnResume) corruptJobs(); throw new Error('resume timed out') }
       }
       if (command === 'pause') { if (cli.failPause) throw new Error('pause refused'); job.enabled = false }
       saveJobs()
+      if (command === 'pause' && cli.corruptOnPause) corruptJobs()
       return { stdout: '', stderr: '' }
     },
   }))
@@ -225,6 +227,25 @@ describe('script report enrollment', () => {
     const failed = await enroll()
     expect(failed.body).toEqual({ error: 'native_resume_failed', job_id: 'job1', native_state: 'unknown' })
     expect(cli.jobs[0].enabled).toBe(true)
+  })
+
+  it('still pauses after a failed resume when the job cannot be read back first', async () => {
+    cli.resumeCommitsThenFails = true
+    cli.corruptOnResume = true
+    const failed = await enroll()
+    expect(failed.status).toBe(502)
+    expect(failed.body).toEqual({ error: 'native_resume_failed', job_id: 'job1', native_state: 'paused' })
+    expect(commands()).toEqual(['create', 'edit', 'resume', 'pause'])
+    expect(cli.jobs[0].enabled).toBe(false)
+  })
+
+  it('reports an unknown native state with the job id when the pause cannot be read back', async () => {
+    cli.resumeCommitsThenFails = true
+    cli.corruptOnPause = true
+    const failed = await enroll()
+    expect(failed.status).toBe(502)
+    expect(failed.body).toEqual({ error: 'native_resume_failed', job_id: 'job1', native_state: 'unknown' })
+    expect(commands()).toEqual(['create', 'edit', 'resume', 'pause'])
   })
 
   // The destination is authorized before any write, then again after the awaited CLI calls.
