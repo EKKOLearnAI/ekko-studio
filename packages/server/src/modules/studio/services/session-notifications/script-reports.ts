@@ -25,6 +25,8 @@ import {
 } from '../../repositories/script-report-store'
 import { getSession } from '../../repositories/session-store'
 import { findUserById, userCanAccessProfile } from '../../repositories/users-store'
+import { trustedCronPolicyCurrent } from '../../public/trusted-cron'
+import { targetOwnerCurrent } from './cron-observer'
 
 /** Bounds shared with the generated wrapper (assets/script-reports/ekko_script_report_wrapper.py). */
 const TOMBSTONE_PREFIX = '.ack-'
@@ -278,8 +280,11 @@ function ownerVerdict(binding: ScriptReportBinding): string | null {
   if (!user || user.status !== 'active' || (user.role !== 'super_admin' && !userCanAccessProfile(user.id, binding.profile))) {
     return 'account_forbidden'
   }
+  // A policy-created binding imports only under its own, still enabled policy epoch.
+  if (binding.trusted_epoch !== null && !trustedCronPolicyCurrent(binding.account_id, binding.profile, binding.trusted_epoch)) return 'policy_revoked'
   const session = getSession(binding.session_id)
   if (!session || (session.profile || 'default') !== binding.profile || !isScriptReportTarget(session)) return 'owner_missing'
+  if (!targetOwnerCurrent(binding.target_owner, binding.session_id)) return 'owner_missing'
   return null
 }
 
@@ -535,6 +540,9 @@ function settleEvent(namespace: string, binding: ScriptReportBinding, invocation
       started_at: event.created_at, finished_at: event.created_at, content,
       completion: 'detached', phase: 'event', event_id: event.event_id, event_kind: event.event_kind, sequence,
       submitted_sha256: event.submitted_sha256, record_sha256: recordSha,
+      // Same frozen trusted authority as the terminal report, re-fenced again before any live publish.
+      ...(binding.trusted_epoch !== null ? { trusted: { account_id: binding.account_id, epoch: binding.trusted_epoch,
+        ...(binding.target_owner !== null ? { owner: binding.target_owner } : {}) } } : {}),
     },
   })
   if (!('record' in result)) return settle(result.status === 'conflict' ? 'quarantined' : 'rejected', result.status === 'conflict' ? 'notification_conflict' : 'owner_missing', null)
@@ -633,6 +641,8 @@ export function importScriptReports(options: { namespace?: string; limit?: numbe
           started_at: report.started_at,
           finished_at: report.finished_at,
           content: content ?? '',
+          ...(binding.trusted_epoch !== null ? { trusted: { account_id: binding.account_id, epoch: binding.trusted_epoch,
+            ...(binding.target_owner !== null ? { owner: binding.target_owner } : {}) } } : {}),
           ...(binding.completion === 'detached' ? { completion: 'detached', event_id: report.event_id ?? null,
             retry_of: report.retry_of ?? null, submitted_sha256: report.submitted_sha256 ?? null } : {}),
         },

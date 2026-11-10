@@ -7221,6 +7221,166 @@
         ]
       }
     },
+    "/api/hermes/cron/current-session": {
+      "post": {
+        "tags": [
+          "Cron Consent"
+        ],
+        "summary": "Create current-session",
+        "description": "Trusted admission credential only (Studio's managed MCP, never a JWT). Policy on: create, enroll or bind a Cron job with no approval card. Body { profile, kind: \"cron_job\" (name, schedule, prompt) | \"cron_session_binding\" + job_id | \"script_report_enrollment\" + mode \"new\" (name, schedule, script) or \"existing\" + job_id, optional target_session_id (another chat of the same account and profile) }. Default: the current chat. Policy off (403): use consent-requests.",
+        "operationId": "admit",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "interpreter": {
+                    "type": "string"
+                  },
+                  "job_id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "paused": {
+                    "type": "boolean"
+                  },
+                  "profile": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "type": "string"
+                  },
+                  "script": {
+                    "type": "string"
+                  },
+                  "target_session_id": {
+                    "type": "string"
+                  },
+                  "workdir": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "profile"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hermes/cron/current-session/dispatch": {
+      "post": {
+        "tags": [
+          "Cron Consent"
+        ],
+        "summary": "Create dispatch",
+        "description": "Login only. Model-free admission for a session the caller can use: body { profile, session_id, kind, ..., optional target_session_id } as for current-session; runs once through the Studio Bridge and the managed MCP.",
+        "operationId": "dispatch",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "interpreter": {
+                    "type": "string"
+                  },
+                  "job_id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "paused": {
+                    "type": "boolean"
+                  },
+                  "profile": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "string"
+                  },
+                  "schedule": {
+                    "type": "string"
+                  },
+                  "script": {
+                    "type": "string"
+                  },
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "target_session_id": {
+                    "type": "string"
+                  },
+                  "workdir": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "profile",
+                  "session_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/hermes/cron/session-bindings": {
       "post": {
         "tags": [
@@ -7266,6 +7426,92 @@
                 "type": "object",
                 "properties": {},
                 "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hermes/cron/trusted-automation": {
+      "get": {
+        "tags": [
+          "Cron Consent"
+        ],
+        "summary": "Get trusted-automation",
+        "description": "Login only. The caller's trusted current-session Cron automation policy for a profile (default off): query profile.",
+        "operationId": "getPolicy",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Cron Consent"
+        ],
+        "summary": "Update trusted-automation",
+        "description": "Login only. Enable or disable trusted current-session Cron automation: body { profile, enabled, expected_revision }. Every change rotates the policy epoch.",
+        "operationId": "putPolicy",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "expected_revision": {
+                    "type": "number"
+                  },
+                  "profile": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "expected_revision",
+                  "profile"
+                ]
               }
             }
           }

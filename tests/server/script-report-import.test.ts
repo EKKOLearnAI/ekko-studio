@@ -58,7 +58,14 @@ const jobs: any[] = []
 function saveJobs() { mkdirSync(join(hermesHome, 'cron'), { recursive: true }); writeFileSync(join(hermesHome, 'cron', 'jobs.json'), JSON.stringify({ jobs })) }
 
 /** An active binding with its manifest, producer script and native job, as enrollment leaves it. */
-function bind(script: string, body: string) {
+/** Record every observation the registered start/interval callbacks run, so a test can drain them exactly. */
+function drainedObservations(live: any, ChatRunSocket: any): Promise<void>[] {
+  const runs: Promise<void>[] = []
+  live.observeCronSessionResults = function () { const run = ChatRunSocket.prototype.observeCronSessionResults.call(this); runs.push(run); return run }
+  return runs
+}
+
+function bind(script: string, body: string, frozen: Record<string, unknown> = {}) {
   const target = join(hermesHome, 'scripts', 'reports', script)
   writeFileSync(target, body)
   const bindingId = randomUUID()
@@ -75,7 +82,7 @@ function bind(script: string, body: string) {
   writeFileSync(join(hermesHome, 'scripts', wrapperScript), `import runpy, sys\nsys.argv = [sys.argv[0], ${JSON.stringify(manifest)}]\nrunpy.run_path(${JSON.stringify(PRODUCER)}, run_name='__main__')\n`, { mode: 0o700 })
   m.reports.insertScriptReportBinding({ binding_id: bindingId, revision: 1, namespace: m.instance(), profile: 'default',
     session_id: 'chat-1', session_generation: m.store.getSessionGeneration('chat-1'), account_id: member.id,
-    job_name: `Job ${script}`, target_script: `reports/${script}`, wrapper_script: wrapperScript })
+    job_name: `Job ${script}`, target_script: `reports/${script}`, wrapper_script: wrapperScript, ...frozen })
   const jobId = `job-${bindingId.slice(0, 8)}`
   m.reports.transitionScriptReportBinding(bindingId, ['enrolling'], 'active', { job_id: jobId })
   jobs.push({ id: jobId, script: wrapperScript, no_agent: true, deliver: 'local', enabled: true })
@@ -94,8 +101,7 @@ const attention = () => (m.db.prepare("SELECT COUNT(*) AS n FROM session_attenti
 const spool = (binding: any) => readdirSync(m.paths.scriptReportSpoolDir(binding.binding_id)).filter((name: string) => !name.startsWith('.'))
 const finalOf = (binding: any, id: string) => join(m.paths.scriptReportSpoolDir(binding.binding_id), id, 'final.json')
 
-// Real wrapper processes per test: a loaded parallel runner exceeded the 5 s default (5388 ms; 1987 ms alone).
-describe('script report import', { timeout: 30_000 }, () => {
+describe('script report import', () => {
   beforeEach(() => { jobs.length = 0 })
 
   it('imports a report as a passive notice with attention and no model history', () => {
@@ -399,4 +405,207 @@ describe('importer killed at a durability boundary (real process)', () => {
     expect(attention()).toBe(1)
     expect(spool(binding)).toEqual([])
   })
+
+  it('the chat-run observation tick imports finished reports and publishes them live', async () => {
+    const binding = bind('tick.py', 'print("tick report")\n')
+    fire(binding)
+    const { ChatRunSocket } = await import(`${STUDIO}/sockets/chat-run`)
+    const tick = Object.create(ChatRunSocket.prototype)
+    tick.closing = false
+    tick.cronObserveInFlight = false
+    const published: any[] = []
+    tick.publishSessionNotice = (record: any) => published.push(record)
+    await tick.observeCronSessionResults()
+    expect(published.map(record => record.payload.content)).toEqual(['tick report'])
+    expect(spool(binding)).toEqual([])
+    expect(tick.cronObserveInFlight).toBe(false)
+  })
+
+  it('refuses at import a report whose frozen target owner or trusted policy epoch no longer holds', () => {
+    const owned = bind('owned.py', 'print("owned")\n')
+    m.db.prepare('UPDATE script_report_bindings SET target_owner=? WHERE binding_id=?').run(member.id + 1000, owned.binding_id)
+    fire(owned)
+    m.importer.importScriptReports()
+    const trusted = bind('trusted.py', 'print("trusted")\n')
+    m.db.prepare('UPDATE script_report_bindings SET trusted_epoch=? WHERE binding_id=?').run('stale-epoch', trusted.binding_id)
+    fire(trusted)
+    m.importer.importScriptReports()
+    expect(notices()).toEqual([])
+    const details = (m.db.prepare('SELECT detail FROM script_report_invocations ORDER BY rowid').all() as any[]).map(row => row.detail)
+    expect(details).toEqual(['owner_missing', 'policy_revoked'])
+  })
+
+  it('never publishes an accepted trusted notice once its policy epoch no longer holds', async () => {
+    const { ChatRunSocket } = await import(`${STUDIO}/sockets/chat-run`)
+    const late = Object.create(ChatRunSocket.prototype) // no namespace: any live emit attempt would throw
+    expect(() => late.publishSessionNotice({ id: 1, session_id: 'chat-1', profile: 'default', disposition: 'notified',
+      session_generation: m.store.getSessionGeneration('chat-1'), payload: { trusted: { account_id: member.id, epoch: 'revoked-epoch' } } })).not.toThrow()
+    expect(() => late.publishSessionNotice({ id: 2, session_id: 'chat-1', profile: 'default', disposition: 'notified',
+      session_generation: m.store.getSessionGeneration('chat-1'), payload: { trusted: { account_id: member.id, epoch: 'e', owner: member.id + 1000 } } })).not.toThrow()
+  })
+
+
+  it('the server bootstrap registers the native job reader for the importer', () => {
+    // The adapter module is the sole registration; the bootstrap must import it.
+    const bootstrap = readFileSync(join(__dirname, '../../packages/server/src/bootstrap/http.ts'), 'utf8')
+    expect(bootstrap).toMatch(/^import '\.\/script-report-adapter'$/m)
+  })
+
+
+  it('publishes a trusted notice only while its frozen owner still owns the session under a current enabled epoch', async () => {
+    const trusted = await import(`${STUDIO}/public/trusted-cron`)
+    trusted.updateTrustedCronPolicy(member.id, 'default', true, trusted.trustedCronPolicy(member.id, 'default').revision)
+    const epoch = trusted.trustedCronPolicy(member.id, 'default').epoch
+    expect(trusted.trustedCronPolicyCurrent(member.id, 'default', epoch)).toBe(true)
+    m.store.createSession({ id: 'owned-1', profile: 'default', source: 'cli', studio_user_id: member.id })
+    const { ChatRunSocket } = await import(`${STUDIO}/sockets/chat-run`)
+    const late = Object.create(ChatRunSocket.prototype) // no namespace: reaching the live path throws
+    const record = (owner: number) => ({ id: 3, session_id: 'owned-1', profile: 'default', disposition: 'notified',
+      session_generation: m.store.getSessionGeneration('owned-1'), payload: { trusted: { account_id: member.id, epoch, owner } } })
+    // Owner still holds: the guard passes and publication proceeds to the live path.
+    expect(() => late.publishSessionNotice(record(member.id))).toThrow()
+    // The session no longer belongs to the frozen owner: refused before any live emit.
+    expect(() => late.publishSessionNotice(record(member.id + 1000))).not.toThrow()
+  })
+
+
+  it('stops publishing the same frozen trusted notice once the stored session owner changes', async () => {
+    const trusted = await import(`${STUDIO}/public/trusted-cron`)
+    trusted.updateTrustedCronPolicy(member.id, 'default', true, trusted.trustedCronPolicy(member.id, 'default').revision)
+    const epoch = trusted.trustedCronPolicy(member.id, 'default').epoch
+    m.store.createSession({ id: 'owned-2', profile: 'default', source: 'cli', studio_user_id: member.id })
+    const { ChatRunSocket } = await import(`${STUDIO}/sockets/chat-run`)
+    const late = Object.create(ChatRunSocket.prototype) // no namespace: reaching the live path throws
+    const frozen = Object.freeze({ id: 4, session_id: 'owned-2', profile: 'default', disposition: 'notified',
+      session_generation: m.store.getSessionGeneration('owned-2'), payload: { trusted: { account_id: member.id, epoch, owner: member.id } } })
+    expect(trusted.trustedCronPolicyCurrent(member.id, 'default', epoch)).toBe(true)
+    expect(() => late.publishSessionNotice(frozen)).toThrow()
+    // The stored owner changes through the session repository; the frozen payload is unchanged.
+    m.store.updateSession('owned-2', { studio_user_id: String(member.id + 1000) })
+    expect(m.store.getSessionGeneration('owned-2')).toBe(frozen.session_generation)
+    expect(() => late.publishSessionNotice(frozen)).not.toThrow()
+  })
+
+
+  it('the production adapter module registers the native job reader the importer needs', async () => {
+    const binding = bind('adapter.py', 'print("adapter report")\n')
+    fire(binding)
+    m.importer.setScriptReportJobInspector(null)
+    expect(m.importer.importScriptReports().processed).toBe(0)
+    expect(spool(binding)).toHaveLength(1)
+    // Loading the real registration module (as bootstrap/http.ts does) installs the native job reader.
+    await import('../../packages/server/src/bootstrap/script-report-adapter')
+    expect(m.importer.importScriptReports().accepted.map((record: any) => record.payload.content)).toEqual(['adapter report'])
+    expect(spool(binding)).toEqual([])
+  })
+
+
+  it('the observation tick publishes an imported report as session.notice to the target session only', async () => {
+    const binding = bind('live.py', 'print("live report")\n')
+    fire(binding)
+    const outsider = m.users.createUser({ username: 'outsider-live', password: 'password-1', role: 'admin', status: 'active', profiles: ['other'] })
+    const emitted: Record<string, any[]> = { target: [], other: [], outsider: [] }
+    const sock = (name: string, userId: number) => ({ data: { user: { id: userId } }, emit: (event: string, payload: any) => emitted[name].push({ event, payload }) })
+    const { ChatRunSocket } = await import(`${STUDIO}/sockets/chat-run`)
+    const tick = Object.create(ChatRunSocket.prototype)
+    tick.closing = false
+    tick.cronObserveInFlight = false
+    const synced: string[] = []
+    tick.sessionStateSync = { publish: (sessionId: string) => synced.push(sessionId) }
+    tick.nsp = {
+      adapter: { rooms: new Map([['session:chat-1', new Set(['t'])], ['session:other-chat', new Set(['o'])], ['studio-account', new Set(['x'])]]) },
+      sockets: new Map([['t', sock('target', member.id)], ['o', sock('other', member.id)], ['x', sock('outsider', outsider.id)]]),
+    }
+    await tick.observeCronSessionResults()
+    expect(emitted.target.map(entry => entry.event)).toEqual(['session.notice'])
+    expect(emitted.target[0].payload).toMatchObject({ event: 'session.notice', session_id: 'chat-1', profile: 'default' })
+    expect(JSON.stringify(emitted.target[0].payload.message)).toContain('live report')
+    expect(emitted.other).toEqual([])
+    expect(emitted.outsider).toEqual([])
+    expect(synced).toEqual(['chat-1'])
+  })
+
+  it('the registered timer delivers a trusted frozen binding to its target, then refuses it after policy revocation and after an owner change', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const trusted = await import(`${STUDIO}/public/trusted-cron`)
+    const enable = () => { trusted.updateTrustedCronPolicy(member.id, 'default', true, trusted.trustedCronPolicy(member.id, 'default').revision); return trusted.trustedCronPolicy(member.id, 'default').epoch }
+    m.store.updateSession('chat-1', { studio_user_id: String(member.id) })
+    const emitted: any[] = []
+    const { ChatRunSocket } = await import(`${STUDIO}/sockets/chat-run`)
+    const live = Object.create(ChatRunSocket.prototype)
+    try {
+      const policyBound = bind('trusted-1.py', 'print("trusted report")\n', { trusted_epoch: enable(), target_owner: member.id })
+      fire(policyBound)
+      live.pollBackgroundWork = async () => {} // the background-work poller is outside this test
+      live.cronObserveInFlight = false
+      live.sessionStateSync = { publish: () => {} }
+      live.nsp = { use: () => {}, on: () => {}, adapter: { rooms: new Map([['session:chat-1', new Set(['t'])]]) },
+        sockets: new Map([['t', { data: { user: { id: member.id } }, emit: (event: string, payload: any) => emitted.push({ event, payload }) }]]) }
+      const runs = drainedObservations(live, ChatRunSocket)
+      live.init()
+      expect(runs.length).toBe(1)
+      await Promise.all(runs)
+      expect(emitted.map(entry => entry.payload.session_id)).toEqual(['chat-1'])
+      expect(JSON.stringify(emitted[0].payload.message)).toContain('trusted report')
+      // Policy revoked: the same frozen binding's next report is refused on the next registered tick.
+      trusted.updateTrustedCronPolicy(member.id, 'default', false, trusted.trustedCronPolicy(member.id, 'default').revision)
+      fire(policyBound)
+      vi.advanceTimersByTime(15_000)
+      expect(runs.length).toBe(2)
+      await Promise.all(runs)
+      expect(emitted).toHaveLength(1)
+      // A current epoch, then the stored session owner changes: the frozen owner is refused.
+      const ownerBound = bind('trusted-2.py', 'print("owner report")\n', { trusted_epoch: enable(), target_owner: member.id })
+      m.store.updateSession('chat-1', { studio_user_id: String(member.id + 1000) })
+      fire(ownerBound)
+      vi.advanceTimersByTime(15_000)
+      expect(runs.length).toBe(3)
+      await Promise.all(runs)
+      expect(emitted).toHaveLength(1)
+      // Control within the test: with the owner restored the same binding is delivered by the next tick.
+      m.store.updateSession('chat-1', { studio_user_id: String(member.id) })
+      fire(ownerBound)
+      vi.advanceTimersByTime(15_000)
+      await Promise.all(runs)
+      expect(emitted.map(entry => JSON.stringify(entry.payload.message)).slice(1)).toEqual([expect.stringContaining('owner report')])
+    } finally {
+      clearInterval(live.cronObserveTimer); clearInterval(live.backgroundPollTimer)
+      vi.useRealTimers()
+    }
+  })
+
+  it('the observation timer registered by init() publishes at start and on its interval to the target session only', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const emitted: Record<string, any[]> = { target: [], other: [] }
+    const sock = (name: string) => ({ data: { user: { id: member.id } }, emit: (event: string, payload: any) => emitted[name].push({ event, payload }) })
+    const { ChatRunSocket } = await import(`${STUDIO}/sockets/chat-run`)
+    const live = Object.create(ChatRunSocket.prototype)
+    try {
+      const first = bind('timer-1.py', 'print("first timer report")\n')
+      fire(first)
+      live.pollBackgroundWork = async () => {} // the background-work poller is outside this test
+      live.cronObserveInFlight = false
+      live.sessionStateSync = { publish: () => {} }
+      live.nsp = { use: () => {}, on: () => {},
+        adapter: { rooms: new Map([['session:chat-1', new Set(['t'])], ['session:other-chat', new Set(['o'])]]) },
+        sockets: new Map([['t', sock('target')], ['o', sock('other')]]) }
+      const runs = drainedObservations(live, ChatRunSocket)
+      live.init()
+      expect(runs.length).toBe(1)
+      await Promise.all(runs)
+      expect(emitted.target.map(entry => JSON.stringify(entry.payload.message))).toEqual([expect.stringContaining('first timer report')])
+      const second = bind('timer-2.py', 'print("second timer report")\n')
+      fire(second)
+      vi.advanceTimersByTime(15_000)
+      expect(runs.length).toBe(2)
+      await Promise.all(runs)
+      expect(emitted.target).toHaveLength(2)
+      expect(JSON.stringify(emitted.target[1].payload.message)).toContain('second timer report')
+      expect(emitted.other).toEqual([])
+    } finally {
+      clearInterval(live.cronObserveTimer); clearInterval(live.backgroundPollTimer)
+      vi.useRealTimers()
+    }
+  })
+
 })

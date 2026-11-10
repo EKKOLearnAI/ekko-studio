@@ -25,7 +25,7 @@ const deps: ConsentDeps = {
 }
 
 /** Approval surfaces need an interactive login credential: never a runtime, App, share or server one. */
-async function loginUser(ctx: Context): Promise<AuthenticatedUser | null> {
+export async function loginUser(ctx: Context): Promise<AuthenticatedUser | null> {
   const token = /^Bearer\s+(\S+)$/i.exec(ctx.get('authorization'))?.[1]
   if (!token) { ctx.status = 401; ctx.body = { error: 'login_token_required' }; return null }
   const user = ctx.state.sessionShare ? null : await authenticateLoginUserToken(token)
@@ -33,23 +33,23 @@ async function loginUser(ctx: Context): Promise<AuthenticatedUser | null> {
   return user
 }
 
-function body(ctx: Context): Record<string, unknown> {
+export function body(ctx: Context): Record<string, unknown> {
   const value = ctx.request.body
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
 
 /** The explicit profile must match any header or query selector. */
-function requestProfile(ctx: Context, value: unknown): string | null {
+export function requestProfile(ctx: Context, value: unknown): string | null {
   const profile = typeof value === 'string' ? value : ''
   const selectors = [ctx.get('x-hermes-profile'), ctx.query.profile].filter(item => item !== undefined && item !== '')
   if (!profile || selectors.some(item => item !== profile)) { ctx.status = 400; ctx.body = { error: 'profile_mismatch' }; return null }
   return profile
 }
 
-function sendError(ctx: Context, error: unknown): void {
+export function sendError(ctx: Context, error: unknown): void {
   if (error instanceof ConsentError || error instanceof CronBindingError) {
     ctx.status = error.status
-    ctx.body = { error: error.code }
+    ctx.body = { error: error.code, ...(error instanceof CronBindingError && error.jobId ? { job_id: error.jobId } : {}) }
     return
   }
   if (error instanceof EnrollmentError) {

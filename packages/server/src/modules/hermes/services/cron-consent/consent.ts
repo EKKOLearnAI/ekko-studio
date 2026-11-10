@@ -77,7 +77,7 @@ interface PreparedContext {
 }
 
 /** A frozen delivery session other than the origin; it never holds the request. */
-interface ConsentTarget {
+export interface ConsentTarget {
   sessionId: string
   generation: string
 }
@@ -209,7 +209,7 @@ function assertConsentDestination(authority: ConsentAuthority): void {
  * An explicit other target must be a session of the origin's profile attributed to the same account
  * (an unattributed session is not this account's), then pass the ordinary destination policy.
  */
-function targetVerdict(authority: ConsentAuthority, target: ConsentTarget): { status: number; code: string } | null {
+export function targetVerdict(authority: ConsentAuthority, target: ConsentTarget): { status: number; code: string } | null {
   const view = consentSessionView(target.sessionId)
   if (!view || view.profile !== authority.profile) return { status: 404, code: 'target_session_not_found' }
   if (view.ownerAccount === null) return { status: 403, code: 'target_session_unattributed' }
@@ -222,7 +222,7 @@ function pendingVerdict(entry: Pick<PendingConsent, 'authority' | 'target'>): { 
   return consentDestinationVerdict(entry.authority) ?? (entry.target ? targetVerdict(entry.authority, entry.target) : null)
 }
 
-function resolveTarget(authority: ConsentAuthority, value: unknown): ConsentTarget | null {
+export function resolveTarget(authority: ConsentAuthority, value: unknown): ConsentTarget | null {
   if (value === undefined) return null
   const sessionId = text(value, 'target_session', 200)
   // Naming the origin itself keeps the same-session contract.

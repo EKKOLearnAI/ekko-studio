@@ -15,9 +15,20 @@ export interface RunMcpBinding {
   /** Only a locally authenticated requester may delegate account permissions. */
   userId?: number
   isActive: () => boolean
+  /** Automatic current-session Cron admission only (see `issueCronAdmission`). */
+  cron?: CronAdmissionScope
 }
 
-type Credential = RunMcpBinding & { tokenFile: string; digest: string }
+/** The frozen scope of one trusted current-session Cron admission authority. */
+export interface CronAdmissionScope {
+  accountId: number
+  generation: string
+  epoch: string
+  /** A dispatch admits exactly once; a chat turn may admit several jobs while it is live. */
+  singleUse: boolean
+}
+
+type Credential = RunMcpBinding & { tokenFile: string; digest: string; claimed?: boolean }
 const digest = (token: string) => createHash('sha256').update(token).digest('hex')
 
 /** Shared Hermes MCP connections select an interaction-only credential per request. */
@@ -63,6 +74,33 @@ export class RunMcpCredentials {
     }
   }
 
+  /**
+   * Memory-only: the token travels as per-call MCP metadata and is never written to disk, so no
+   * context file can select it. It is revoked with its execution like any other run credential.
+   */
+  issueCronAdmission(binding: RunMcpBinding & { cron: CronAdmissionScope }): string {
+    if (![binding.sessionId, binding.contextId, binding.profile, binding.cron.generation, binding.cron.epoch].every(value => value.trim())) {
+      throw new Error('Cron admission credentials require a complete execution context')
+    }
+    const token = `${TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`
+    const credential: Credential = { ...binding, userId: undefined, tokenFile: '', digest: digest(token) }
+    this.tokens.set(credential.digest, credential)
+    const contexts = this.sessions.get(binding.sessionId) || new Map<string, Credential>()
+    contexts.set(binding.contextId, credential)
+    this.sessions.set(binding.sessionId, contexts)
+    return token
+  }
+
+  /** A single-use admission scope admits once; later requests with it are refused. */
+  claimCronAdmission(token: string): boolean {
+    const credential = this.tokens.get(digest(token))
+    if (!credential?.cron) return false
+    if (!credential.cron.singleUse) return true
+    if (credential.claimed) return false
+    credential.claimed = true
+    return true
+  }
+
   recognizes(token: string): boolean { return token.startsWith(TOKEN_PREFIX) }
 
   authenticate(token: string): RunMcpBinding | undefined {
@@ -77,6 +115,8 @@ export class RunMcpCredentials {
     if (!contexts) return
     for (const [id, credential] of contexts) {
       if (contextId && contextId !== id) continue
+      // A new turn of the session does not end an independent dispatch; only its own execution does.
+      if (!contextId && credential.cron?.singleUse) continue
       contexts.delete(id)
       this.tokens.delete(credential.digest)
       this.removeFile(credential)
@@ -85,6 +125,7 @@ export class RunMcpCredentials {
   }
 
   private removeFile(credential: Credential): void {
+    if (!credential.tokenFile) return
     try { unlinkSync(credential.tokenFile) } catch { /* Revocation takes effect in memory even if cleanup fails. */ }
     try { rmdirSync(dirname(credential.tokenFile)) } catch { /* An in-flight write may still need this directory. */ }
   }

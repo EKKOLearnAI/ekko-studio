@@ -6,6 +6,7 @@ import json
 import os
 import queue
 import sys
+import contextvars
 import threading
 import time
 import traceback
@@ -1792,6 +1793,7 @@ class AgentPool:
         source: str | None = None,
         reasoning_effort: str | None = None,
         background_delegation_enabled: bool | None = None,
+        studio_cron_capability: str | None = None,
     ) -> RunRecord:
         session = self.get_or_create(
             session_id,
@@ -1836,9 +1838,14 @@ class AgentPool:
                 if session_cwd_bound:
                     _clear_session_workspace_cwd()
 
+        # This turn's trusted Cron admission authority, visible to this run's thread and tool calls only.
+        # Always set from this request, None included: a copied context must never inherit the caller's authority.
+        run_context = contextvars.copy_context()
+        from bridge_mcp import CRON_CAPABILITY
+        run_context.run(CRON_CAPABILITY.set, studio_cron_capability or None)
         thread = threading.Thread(
-            target=self._run_chat,
-            args=(session, record, message, storage_message, instructions, conversation_history, profile, force_compress, workspace, source, reasoning_effort),
+            target=run_context.run,
+            args=(self._run_chat, session, record, message, storage_message, instructions, conversation_history, profile, force_compress, workspace, source, reasoning_effort),
             daemon=True,
             name=f"hermes-bridge-run-{run_id[:8]}",
         )

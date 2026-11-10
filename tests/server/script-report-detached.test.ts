@@ -89,7 +89,7 @@ const sleep = (ms: number) => new Promise(done => setTimeout(done, ms))
 function saveJobs() { mkdirSync(join(hermesHome, 'cron'), { recursive: true }); writeFileSync(join(hermesHome, 'cron', 'jobs.json'), JSON.stringify({ jobs })) }
 
 /** An active binding as enrollment leaves it; `completion: detached` adds the outbox and receipts. */
-function bind(script: string, completion: 'sync' | 'detached' = 'detached') {
+function bind(script: string, completion: 'sync' | 'detached' = 'detached', frozen: Record<string, unknown> = {}) {
   const target = join(hermesHome, 'scripts', 'reports', script)
   const bindingId = randomUUID()
   const wrapperScript = `ekko-script-reports/${bindingId}.py`
@@ -105,7 +105,7 @@ function bind(script: string, completion: 'sync' | 'detached' = 'detached') {
   writeFileSync(join(hermesHome, 'scripts', wrapperScript), m.wrapper.renderWrapper(manifest), { mode: 0o700 })
   m.reports.insertScriptReportBinding({ binding_id: bindingId, revision: 1, namespace: m.instance(), profile: 'default',
     session_id: 'chat-1', session_generation: m.store.getSessionGeneration('chat-1'), account_id: member.id,
-    job_name: `Job ${script}`, target_script: `reports/${script}`, wrapper_script: wrapperScript, completion })
+    job_name: `Job ${script}`, target_script: `reports/${script}`, wrapper_script: wrapperScript, completion, ...frozen })
   const jobId = `job-${bindingId.slice(0, 8)}`
   m.reports.transitionScriptReportBinding(bindingId, ['enrolling'], 'active', { job_id: jobId })
   jobs.push({ id: jobId, script: wrapperScript, no_agent: true, deliver: 'local', enabled: true })
@@ -328,6 +328,35 @@ describe('detached script report completion', { timeout: 30_000 }, () => {
     expect(notices()).toHaveLength(0)
   })
 
+  it('a trusted binding completes under its owned current epoch, then is refused after policy revocation and after an owner change', async () => {
+    const trusted = await import(`${STUDIO}/public/trusted-cron`)
+    const enable = () => { trusted.updateTrustedCronPolicy(member.id, 'default', true, trusted.trustedCronPolicy(member.id, 'default').revision); return trusted.trustedCronPolicy(member.id, 'default').epoch }
+    m.store.updateSession('chat-1', { studio_user_id: String(member.id) })
+    const send = (binding: any, event: string) => helper(binding, ['complete', '--event-id', event, '--content-file', '-'], `body ${event}`,
+      { EKKO_SCRIPT_REPORT_INVOCATION: reserve(binding) })
+    const epoch = enable()
+    const policyBound = bind('launcher.sh', 'detached', { trusted_epoch: epoch, target_owner: member.id })
+    send(policyBound, 'trusted-day')
+    m.importer.importScriptReports()
+    expect(helper(policyBound, ['receipt', '--event-id', 'trusted-day']).json).toMatchObject({ status: 'accepted' })
+    expect(notices().map(row => row.payload.trusted)).toEqual([{ account_id: member.id, epoch, owner: member.id }])
+    // The real policy API revokes the epoch; the frozen binding and its retained helper are unchanged.
+    trusted.updateTrustedCronPolicy(member.id, 'default', false, trusted.trustedCronPolicy(member.id, 'default').revision)
+    send(policyBound, 'revoked-policy-day')
+    m.importer.importScriptReports()
+    expect(helper(policyBound, ['receipt', '--event-id', 'revoked-policy-day'])).toMatchObject({ status: 4, json: { status: 'rejected', receipt: { reason: 'policy_revoked', notification_id: null } } })
+    expect(m.reports.getScriptReportBinding(policyBound.binding_id)).toMatchObject({ trusted_epoch: epoch, target_owner: member.id })
+    // A current epoch, then the stored session owner changes through the session repository.
+    const ownerEpoch = enable()
+    const ownerBound = bind('launcher.sh', 'detached', { trusted_epoch: ownerEpoch, target_owner: member.id })
+    m.store.updateSession('chat-1', { studio_user_id: String(member.id + 1000) })
+    send(ownerBound, 'moved-owner-day')
+    m.importer.importScriptReports()
+    expect(helper(ownerBound, ['receipt', '--event-id', 'moved-owner-day'])).toMatchObject({ status: 4, json: { status: 'rejected', receipt: { reason: 'owner_missing', notification_id: null } } })
+    expect(m.reports.getScriptReportBinding(ownerBound.binding_id)).toMatchObject({ trusted_epoch: ownerEpoch, target_owner: member.id })
+    expect(notices()).toHaveLength(1)
+  })
+
   it('an importer crash between the durable disposition and the receipt replays to the same receipt and one notice', async () => {
     const binding = bind('launcher.sh')
     const invocation = reserve(binding)
@@ -479,6 +508,70 @@ describe('appended script report notices', { timeout: 30_000 }, () => {
     expect(receipt(binding, invocation)).toMatchObject({ event_id: 'run-7:final', state: 'silent', invocation_id: invocation })
     expect(m.reports.countScriptReportInvocations(binding.binding_id)).toEqual({ accepted: 0, silent: 1, rejected: 0, quarantined: 0 })
     expect(spool(binding)).toEqual([])
+  })
+
+  it('appended events of a trusted binding are refused after policy revocation and after an owner change', async () => {
+    const trusted = await import(`${STUDIO}/public/trusted-cron`)
+    const enable = () => { trusted.updateTrustedCronPolicy(member.id, 'default', true, trusted.trustedCronPolicy(member.id, 'default').revision); return trusted.trustedCronPolicy(member.id, 'default').epoch }
+    m.store.updateSession('chat-1', { studio_user_id: String(member.id) })
+    const epoch = enable()
+    const policyBound = bind('launcher.sh', 'detached', { trusted_epoch: epoch, target_owner: member.id })
+    const invocation = reserve(policyBound)
+    expect(append(policyBound, invocation, 'trusted:start', 'start', 'Job started')).toMatchObject({ status: 3, json: { status: 'queued' } })
+    m.importer.importScriptReports()
+    expect(shown()).toEqual([['start', 'Job started']])
+    expect(notices()[0]).toMatchObject({ session_id: 'chat-1', payload: { trusted: { account_id: member.id, epoch, owner: member.id } } })
+    // The real policy API revokes the epoch; the same invocation's next appended event is refused.
+    trusted.updateTrustedCronPolicy(member.id, 'default', false, trusted.trustedCronPolicy(member.id, 'default').revision)
+    append(policyBound, invocation, 'trusted:body', 'body', 'after revocation')
+    m.importer.importScriptReports()
+    expect(eventReceipt(policyBound, 'trusted:body')).toMatchObject({ state: 'rejected', reason: 'policy_revoked', notification_id: null })
+    // A current epoch, then the stored session owner changes: appended events of the frozen owner are refused.
+    const ownerBound = bind('launcher.sh', 'detached', { trusted_epoch: enable(), target_owner: member.id })
+    m.store.updateSession('chat-1', { studio_user_id: String(member.id + 1000) })
+    append(ownerBound, reserve(ownerBound), 'moved:start', 'start', 'after owner change')
+    m.importer.importScriptReports()
+    expect(eventReceipt(ownerBound, 'moved:start')).toMatchObject({ state: 'rejected', reason: 'owner_missing', notification_id: null })
+    expect(shown()).toEqual([['start', 'Job started']])
+    expect(m.reports.getScriptReportBinding(ownerBound.binding_id)).toMatchObject({ target_owner: member.id })
+  })
+
+  it('accepted appended trusted notices publish live to the target only, and not after a later policy revocation or owner change', async () => {
+    const trusted = await import(`${STUDIO}/public/trusted-cron`)
+    const enable = () => { trusted.updateTrustedCronPolicy(member.id, 'default', true, trusted.trustedCronPolicy(member.id, 'default').revision); return trusted.trustedCronPolicy(member.id, 'default').epoch }
+    m.store.updateSession('chat-1', { studio_user_id: String(member.id) })
+    const outsider = m.users.createUser({ username: 'append-outsider', password: 'password-1', role: 'admin', status: 'active', profiles: ['other'] })
+    const emitted: Record<string, any[]> = { target: [], outsider: [] }
+    const sock = (name: string, userId: number) => ({ data: { user: { id: userId } }, emit: (event: string, payload: any) => emitted[name].push({ event, payload }) })
+    const { ChatRunSocket } = await import(`${STUDIO}/sockets/chat-run`)
+    const live = Object.create(ChatRunSocket.prototype)
+    live.sessionStateSync = { publish: () => {} }
+    live.nsp = { adapter: { rooms: new Map([['session:chat-1', new Set(['t'])], ['studio-account', new Set(['t', 'x'])]]) },
+      sockets: new Map([['t', sock('target', member.id)], ['x', sock('outsider', outsider.id)]]) }
+    const acceptedNow = (binding: any, eventId: string, body: string) => {
+      append(binding, reserve(binding), eventId, 'start', body)
+      const accepted = m.importer.importScriptReports().accepted
+      expect(accepted).toHaveLength(1)
+      return accepted[0]
+    }
+    const first = bind('launcher.sh', 'detached', { trusted_epoch: enable(), target_owner: member.id })
+    live.publishSessionNotice(acceptedNow(first, 'live:1', 'live report'))
+    expect(emitted.target.map(e => [e.event, e.payload.session_id])).toEqual([['session.notice', 'chat-1']])
+    expect(emitted.outsider).toEqual([])
+    // Accepted while the policy is current, then revoked before publication: nothing is emitted.
+    const late = acceptedNow(first, 'live:2', 'late report')
+    trusted.updateTrustedCronPolicy(member.id, 'default', false, trusted.trustedCronPolicy(member.id, 'default').revision)
+    live.publishSessionNotice(late)
+    // Accepted under a new current epoch, then the stored owner changes before publication.
+    const second = bind('launcher.sh', 'detached', { trusted_epoch: enable(), target_owner: member.id })
+    const moved = acceptedNow(second, 'live:3', 'moved report')
+    const generation = m.store.getSessionGeneration('chat-1')
+    m.store.updateSession('chat-1', { studio_user_id: String(member.id + 1000) })
+    expect(m.store.getSessionGeneration('chat-1')).toBe(generation)
+    live.publishSessionNotice(moved)
+    expect(moved.payload.trusted).toEqual({ account_id: member.id, epoch: second.trusted_epoch, owner: member.id })
+    expect(emitted.target).toHaveLength(1)
+    expect(emitted.outsider).toEqual([])
   })
 
   it('a failure terminal keeps every earlier notice; retries are idempotent and changed bytes conflict', () => {

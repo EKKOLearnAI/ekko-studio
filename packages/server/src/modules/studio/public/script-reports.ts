@@ -14,7 +14,6 @@ import {
 } from '../repositories/script-report-store'
 
 export * from './script-report-paths'
-export type { ScriptReportCompletion } from '../repositories/script-report-store'
 export {
   importScriptReports,
   setScriptReportJobInspector,
@@ -22,6 +21,7 @@ export {
   type ScriptReportJobInspector,
 } from '../services/session-notifications/script-reports'
 export type { ScriptReportBinding }
+export type { ScriptReportCompletion } from '../repositories/script-report-store'
 
 export type DestinationVerdict = 'ok' | 'forbidden' | 'not_found' | 'unsupported' | 'generation_mismatch'
 
@@ -48,6 +48,8 @@ export function beginScriptReportBinding(input: {
   jobName: string
   targetScript: string
   wrapperScript: string
+  trustedEpoch?: string | null
+  targetOwner?: number | null
 }): ScriptReportBinding {
   return insertScriptReportBinding({
     binding_id: input.bindingId,
@@ -60,6 +62,8 @@ export function beginScriptReportBinding(input: {
     job_name: input.jobName,
     target_script: input.targetScript,
     wrapper_script: input.wrapperScript,
+    trusted_epoch: input.trustedEpoch ?? null,
+    target_owner: input.targetOwner ?? null,
   })
 }
 
@@ -89,6 +93,12 @@ export function noteScriptReportBindingError(bindingId: string, error: string | 
 /** Revocation is final: a revoked binding never becomes active again. */
 export function revokeScriptReportBinding(bindingId: string): boolean {
   return transitionScriptReportBinding(bindingId, ['active', 'enrolling', 'failed'], 'revoked')
+}
+
+/** Bindings a trusted-automation policy epoch created for this account and profile. */
+export function listTrustedScriptReportBindings(accountId: number, profile: string, epoch: string): ScriptReportBinding[] {
+  return listScriptReportBindings(studioInstanceId(), profile)
+    .filter(binding => binding.account_id === accountId && binding.trusted_epoch === epoch && (binding.state === 'active' || binding.state === 'enrolling'))
 }
 
 export function findScriptReportBinding(bindingId: string): ScriptReportBinding | null {

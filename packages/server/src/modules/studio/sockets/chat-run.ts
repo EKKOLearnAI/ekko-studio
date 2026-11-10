@@ -1,4 +1,7 @@
 import { personDisplayPage, personDisplayEvents, personDisplayBackgroundTasks, personDisplayEvent } from '../services/chat-run/person-display'
+import { importScriptReports } from '../services/session-notifications/script-reports'
+import { issueTrustedCronCapability, trustedCronPolicyCurrent } from '../public/trusted-cron'
+import { targetOwnerCurrent } from '../services/session-notifications/cron-observer'
 import { personSessionIds } from '../repositories/person-session-store'
 import type { PersonResultDelivery } from '../public/person-runtime'
 import { personResultPrompt } from '../services/person/result-prompt'
@@ -102,7 +105,7 @@ import type {
   QueuedRun,
   SessionState,
 } from '../services/chat-run/types'
-import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
+import { authenticateLoginUserToken, authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
 import { findUserById, userCanAccessProfile } from '../repositories/users-store'
 import { noticeToMessage, withSessionNotices } from '../services/session-notifications/presentation'
 import { observeCronBindings } from '../services/session-notifications/cron-observer'
@@ -110,7 +113,6 @@ import { existsSync } from 'fs'
 import { getDb } from '../infrastructure/database'
 import { cronBindingsDbPath, studioInstanceId } from '../public/session-notifications'
 import { isVisibleNoticeDisposition, type SessionNotificationRecord } from '../repositories/session-notification-store'
-import { importScriptReports } from '../services/session-notifications/script-reports'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observePersonPresenceEvent } from '../services/person/presence'
 import { SessionStateSync } from '../services/session-state'
@@ -235,7 +237,6 @@ function isHermesWorkerBackedSession(session?: { source?: string | null; agent?:
   return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && (agent !== 'antigravity' && !isNativeCodingAgent(agent))) && (agent !== 'opencode' && agent !== 'dsh') && agent !== 'ekko-agent' && !session?.agent_session_id
 }
 
-const SCRIPT_REPORT_IMPORT_INTERVAL_MS = 15_000
 
 function isBridgeRunSource(source?: string): boolean {
   return source === 'cli' || source === 'global_agent' || source === 'workflow' || source === 'group_chat'
@@ -483,7 +484,6 @@ export class ChatRunSocket {
   private readonly pendingMobileCalendar = new Map<string, PendingMobileCalendarRequest>()
   private readonly pendingMobileHealth = new Map<string, PendingMobileHealthRequest>()
   private backgroundPollTimer?: NodeJS.Timeout
-  private scriptReportTimer?: NodeJS.Timeout
   private cronObserveTimer?: NodeJS.Timeout
   private cronObserveInFlight = false
   private backgroundPollInFlight = false
@@ -620,6 +620,32 @@ export class ChatRunSocket {
     return authority
   }
 
+  /**
+   * Model-free trusted Cron admission for a login dispatch: the Bridge runs the fixed native managed
+   * MCP call with the capability as call metadata, never a chat turn; bounded by its own deadline.
+   */
+  async dispatchCurrentSessionCron(input: { profile: string; sessionId: string; capability: string; arguments: { body: Record<string, unknown> } }) {
+    const bridge = createPrimaryAgentBridge({ timeoutMs: 30_000 })
+    const started = await bridge.studioCronDispatch(input.profile, input.sessionId, input.capability, input.arguments.body)
+    for (const deadline = Date.now() + 110_000; ;) {
+      const run = await bridge.getResult(started.run_id)
+      if (run.status === 'complete') {
+        try {
+          // Hermes wraps the MCP tool text, which is the Studio API response envelope.
+          const outer = JSON.parse(String((run.result as { output?: unknown } | null)?.output ?? ''))
+          const envelope = typeof outer?.result === 'string' ? JSON.parse(outer.result) : outer
+          if (Number.isInteger(envelope?.status)) return { status: envelope.status as number, body: envelope.body ?? null }
+        } catch { /* reported below */ }
+      }
+      if (run.status !== 'running') {
+        const detail = run.error || (run.result as { output?: unknown } | null)?.output
+        return { status: 502, body: { error: 'dispatch_failed', ...(detail ? { detail: String(detail).slice(0, 500) } : {}) } }
+      }
+      if (Date.now() > deadline) return { status: 504, body: { error: 'dispatch_timeout' } }
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+  }
+
   /** Content-free hint that the pending cron consents of a session changed; clients refetch. */
   publishCronConsentUpdate(sessionId: string) {
     const session = getSession(sessionId)
@@ -668,23 +694,13 @@ export class ChatRunSocket {
    * account as they exist now, and only while the accepting generation is current. Attention goes
    * through the session-state sync. Never a model turn.
    */
-  /** Import finished script invocation reports and publish new ones. Never runs or retries a script. */
-  private importScriptReports() {
-    if (this.closing) return
-    try {
-      for (const record of importScriptReports().accepted) this.publishSessionNotice(record)
-    } catch (err) {
-      logger.debug(err, '[chat-run-socket] script report import unavailable')
-    }
-  }
-
   /** Results of explicitly bound native cron jobs, observed through the profile's bridge worker. */
   private async observeCronSessionResults() {
-    // Only explicit bindings are observed; without a bindings database there is nothing to ask Hermes.
-    if (this.closing || this.cronObserveInFlight || !getDb() || !existsSync(cronBindingsDbPath())) return
+    if (this.closing || this.cronObserveInFlight) return
     this.cronObserveInFlight = true
     try {
-      await observeCronBindings({
+      // Only explicit bindings are observed; without a bindings database there is nothing to ask Hermes.
+      if (getDb() && existsSync(cronBindingsDbPath())) await observeCronBindings({
         namespace: studioInstanceId(),
         bindingsPath: cronBindingsDbPath(),
         observe: (profile, jobs) => this.backgroundBridge.studioCronObserve(profile, jobs, { timeoutMs: 30_000 }),
@@ -696,12 +712,25 @@ export class ChatRunSocket {
       })
     } catch (err) {
       logger.debug(err, '[chat-run-socket] cron session observation unavailable')
+    }
+    // Same cadence: import finished script invocation reports. This never runs a script.
+    try {
+      for (const record of importScriptReports().accepted) this.publishSessionNotice(record)
+    } catch (err) {
+      logger.debug(err, '[chat-run-socket] script report import unavailable')
     } finally {
       this.cronObserveInFlight = false
     }
   }
 
   publishSessionNotice(record: SessionNotificationRecord) {
+    // A policy-created notice goes live only while its policy epoch and session generation still hold.
+    const trusted = (record.payload as { trusted?: { account_id?: unknown; epoch?: unknown; owner?: unknown } } | undefined)?.trusted
+    if (trusted && !(typeof trusted.account_id === 'number' && typeof trusted.epoch === 'string'
+      && trustedCronPolicyCurrent(trusted.account_id, record.profile, trusted.epoch)
+      && getSessionGeneration(record.session_id) === record.session_generation
+      // A cross-session target must still belong to the owner frozen at admission.
+      && (trusted.owner === undefined || (typeof trusted.owner === 'number' && targetOwnerCurrent(trusted.owner, record.session_id))))) return
     const session = getSession(record.session_id)
     if (!session || (session.profile || 'default') !== record.profile || isPrivatePersonSession(session.id)
       || !isVisibleNoticeDisposition(record.disposition)
@@ -918,10 +947,9 @@ export class ChatRunSocket {
     this.backgroundPollTimer = setInterval(() => void this.pollBackgroundWork(), 500)
     this.backgroundPollTimer.unref?.()
     void this.pollBackgroundWork()
-    this.scriptReportTimer = setInterval(() => this.importScriptReports(), SCRIPT_REPORT_IMPORT_INTERVAL_MS)
-    this.scriptReportTimer.unref?.()
     this.cronObserveTimer = setInterval(() => void this.observeCronSessionResults(), CRON_OBSERVE_INTERVAL_MS)
     this.cronObserveTimer.unref?.()
+    void this.observeCronSessionResults()
     logger.info('[chat-run-socket] Socket.IO ready at /chat-run')
   }
 
@@ -968,6 +996,8 @@ export class ChatRunSocket {
       return next(new Error('Profile access denied'))
     }
     socket.data.user = user
+    // Only an interactive login may carry trusted Cron authority; runtime and legacy JWTs chat as before.
+    socket.data.loginCredential = !!await authenticateLoginUserToken(token || '')
     next()
   }
 
@@ -2076,6 +2106,16 @@ export class ChatRunSocket {
         ? this.beginTaskPlanRun(data.session_id, profile, !data.background_delegation_id, (socket.data?.sessionShare ? undefined : (socket.data?.user as AuthenticatedUser | undefined)?.id))
         : undefined
       if (planContext) data.instructions = [data.instructions, taskPlanRunInstruction()].filter(Boolean).join('\n\n')
+      // Trusted current-session Cron: an admission authority for this live, user-initiated turn of a
+      // login socket whose account enabled the policy. Issued by the run once the session is persisted;
+      // it travels as per-call MCP metadata, never in prompts.
+      const cronAccount = socket.data?.sessionShare ? undefined : (socket.data?.user as AuthenticatedUser | undefined)?.id
+      const cronIssue = planContext && data.session_id && cronAccount !== undefined && socket.data?.loginCredential === true
+        && !data.background_delegation_id && !data.autonomous
+        && ![source, data.session_source].some(value => value === 'group_chat' || value === 'workflow' || value === 'global_agent')
+        ? () => issueTrustedCronCapability({ accountId: cronAccount, profile, sessionId: data.session_id!, contextId: planContext,
+          isActive: () => this.taskPlanRuns.isActive(planContext, profile) }) ?? undefined
+        : undefined
       let fullInstructions = data.instructions
         ? `${getSystemPrompt(undefined, { source, mcpCapabilities })}\n${data.instructions}`
         : getSystemPrompt(undefined, { source, mcpCapabilities })
@@ -2100,7 +2140,7 @@ export class ChatRunSocket {
       }
       try {
         await handleBridgeRun(
-          this.nsp, socket, { ...data, task_plan_context_id: planContext, instructions: fullInstructions, onEvent }, profile,
+          this.nsp, socket, { ...data, task_plan_context_id: planContext, studio_cron_issue: cronIssue, instructions: fullInstructions, onEvent }, profile,
           this.sessionMap, this.bridge,
           skipUserMessage,
           loadSessionStateFromDb,
@@ -3857,10 +3897,6 @@ export class ChatRunSocket {
     if (this.backgroundPollTimer) {
       clearInterval(this.backgroundPollTimer)
       this.backgroundPollTimer = undefined
-    }
-    if (this.scriptReportTimer) {
-      clearInterval(this.scriptReportTimer)
-      this.scriptReportTimer = undefined
     }
     if (this.cronObserveTimer) {
       clearInterval(this.cronObserveTimer)

@@ -92,6 +92,8 @@ class BridgeServer:
                 source,
                 reasoning_effort,
                 background_delegation_enabled,
+                **({"studio_cron_capability": str(req["studio_cron_capability"])}
+                   if req.get("studio_cron_capability") else {}),
             )
             if req.get("wait"):
                 timeout = float(req.get("timeout", 0) or 0)

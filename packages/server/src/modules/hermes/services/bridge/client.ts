@@ -43,6 +43,7 @@ export interface AgentBridgeRequestOptions {
 }
 
 export interface AgentBridgeChatOptions {
+  studio_cron_capability?: string
   force_compress?: boolean
   /** Agent-session creation policy. False keeps delegate_task available but
    * makes background=true fall back to synchronous execution. */
@@ -536,6 +537,7 @@ export class AgentBridgeClient {
       session_id: sessionId,
       message,
       ...(options.storage_message !== undefined ? { storage_message: options.storage_message } : {}),
+      ...(options.studio_cron_capability ? { studio_cron_capability: options.studio_cron_capability } : {}),
       ...(conversationHistory ? { conversation_history: conversationHistory } : {}),
       ...(instructions ? { instructions } : {}),
       ...(profile ? { profile } : {}),
@@ -671,6 +673,11 @@ export class AgentBridgeClient {
     }
     if (!last) throw new Error(`Agent bridge run ${started.run_id} produced no output state`)
     return last
+  }
+
+  /** Start the fixed, model-free current-session Cron admission; poll `getResult` with the returned run id. */
+  studioCronDispatch(profile: string, sessionId: string, capability: string, body: Record<string, unknown>): Promise<AgentBridgeResponse & { run_id: string; status: string }> {
+    return this.request<AgentBridgeResponse & { run_id: string; status: string }>({ action: 'studio_cron_dispatch', profile, session_id: sessionId, capability, body })
   }
 
   getResult(runId: string, options: AgentBridgeRequestOptions = {}): Promise<AgentBridgeRunResult> {

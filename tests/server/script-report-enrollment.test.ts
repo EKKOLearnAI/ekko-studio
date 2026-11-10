@@ -20,7 +20,7 @@ let origin: string
 let root: string
 let hermesHome: string
 let m: any
-const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean; resumeCommitsThenFails?: boolean; failPause?: boolean; corruptOnResume?: boolean; corruptOnPause?: boolean; corruptAfterResume?: boolean; corruptAfterCreate?: boolean; corruptAfterEdit?: boolean } = { calls: [], jobs: [] }
+const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean; resumeCommitsThenFails?: boolean; failPause?: boolean; corruptOnResume?: boolean; corruptOnPause?: boolean; corruptAfterResume?: boolean; corruptAfterCreate?: boolean; corruptAfterEdit?: boolean; resumeNoop?: boolean } = { calls: [], jobs: [] }
 const users: Record<string, { id: number; token: string; modelRun: string }> = {}
 
 function corruptJobs() { writeFileSync(join(hermesHome, 'cron', 'jobs.json'), '{ not json') }
@@ -37,7 +37,7 @@ beforeEach(async () => {
   vi.stubEnv('HERMES_WEB_UI_HOME', join(root, 'studio'))
   vi.stubEnv('HERMES_HOME', hermesHome)
   vi.stubEnv('HERMES_WEB_UI_TEST_DB_DIR', join(root, 'db'))
-  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false; cli.resumeCommitsThenFails = false; cli.failPause = false; cli.corruptOnResume = false; cli.corruptOnPause = false; cli.corruptAfterResume = false; cli.corruptAfterCreate = false; cli.corruptAfterEdit = false
+  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false; cli.resumeCommitsThenFails = false; cli.failPause = false; cli.corruptOnResume = false; cli.corruptOnPause = false; cli.corruptAfterResume = false; cli.corruptAfterCreate = false; cli.corruptAfterEdit = false; cli.resumeNoop = false
   vi.doMock(`${HERMES}/services/runtime/process`, () => ({
     execHermesWithBin: async (_bin: string, args: string[], options: any) => {
       cli.calls.push(args.slice(1))
@@ -59,7 +59,7 @@ beforeEach(async () => {
       if (command === 'edit') { await cli.editGate; job.script = flag('--script') }
       if (command === 'resume') {
         if (cli.failResume) throw new Error('resume refused')
-        job.enabled = true
+        if (!cli.resumeNoop) job.enabled = true
         // Like a CLI that commits the change and then times out.
         if (cli.resumeCommitsThenFails) { saveJobs(); if (cli.corruptOnResume) corruptJobs(); throw new Error('resume timed out') }
       }
@@ -230,6 +230,14 @@ describe('script report enrollment', () => {
     const failed = await enroll()
     expect(failed.body).toEqual({ error: 'native_resume_failed', job_id: 'job1', native_state: 'unknown' })
     expect(cli.jobs[0].enabled).toBe(true)
+  })
+
+  it('reports native_state paused with the job id when an acknowledged resume leaves the job paused', async () => {
+    cli.resumeNoop = true
+    const failed = await enroll()
+    expect(failed.status).toBe(502)
+    expect(failed.body).toEqual({ error: 'native_resume_failed', job_id: 'job1', native_state: 'paused' })
+    expect(cli.jobs[0].enabled).toBe(false)
   })
 
   it('keeps the binding and job id when the created job cannot be read back', async () => {

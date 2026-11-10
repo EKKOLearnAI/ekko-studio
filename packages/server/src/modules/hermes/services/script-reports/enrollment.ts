@@ -157,7 +157,7 @@ export function assertDestination(userId: number, profile: string, sessionId: st
   if (verdict !== 'ok') throw new EnrollmentError(...VERDICT_STATUS[verdict])
 }
 
-function parseCreatedJobId(output: string): string | null {
+export function parseCreatedJobId(output: string): string | null {
   // `hermes cron create` prints the id returned by its own create API; never infer it from a job list diff.
   const plain = output.replace(/\u001b\[[0-9;]*m/g, '')
   const match = /^Created job: (\S+)\s*$/m.exec(plain)
@@ -268,6 +268,10 @@ export interface EnrollmentDestination {
   sessionId: string
   expectedGeneration: string
   recheck?: () => void
+  /** Trusted-automation epoch of a policy-created binding. */
+  trustedEpoch?: string
+  /** Frozen owner of a cross-session target, enforced again at import. */
+  targetOwner?: number
 }
 
 export function prepareNewEnrollment(request: Omit<EnrollmentRequest, 'userId' | 'sessionId' | 'expectedGeneration'>): NewEnrollmentPlan {
@@ -345,7 +349,8 @@ async function executeNewLocked(bindingId: string, plan: NewEnrollmentPlan, dest
   const manifestPath = writePrivateBindingFiles(bindingId, target, plan.workdir || dirname(target.path))
   const binding = beginScriptReportBinding({
     bindingId, userId: destination.userId, profile, sessionId: destination.sessionId, expectedGeneration: destination.expectedGeneration,
-    jobName: plan.name, targetScript: target.relative, wrapperScript: wrapperRelative,
+    jobName: plan.name, targetScript: target.relative, wrapperScript: wrapperRelative, trustedEpoch: destination.trustedEpoch,
+    targetOwner: destination.targetOwner,
   })
   const discard = () => {
     rmSync(wrapperPath, { force: true })
@@ -358,6 +363,8 @@ async function executeNewLocked(bindingId: string, plan: NewEnrollmentPlan, dest
   const create = async (): Promise<string> => {
     let jobId: string | null
     try {
+      // Possibly queued behind another creation: the destination must still authorize before it starts.
+      recheckDestination(destination, profile)
       // Hermes validates the script it is given at creation only: give it the real target first.
       const args = ['create', '--name', plan.name, '--deliver', 'local', '--no-agent', '--script', target.relative,
         '--paused', '--paused-reason', 'Ekko script report enrollment']
@@ -447,8 +454,9 @@ async function executeNewLocked(bindingId: string, plan: NewEnrollmentPlan, dest
 
 /**
  * Resume and verify. The destination, target and approved configuration are checked again once the
- * native resume returns: if anything was invalidated meanwhile the binding fails (reports stop and
- * the wrapper becomes a passthrough) and the job is paused again, verified, with its id reported.
+ * native resume returns: if anything was invalidated meanwhile, or the resume's outcome is uncertain
+ * (no acknowledgment, unreadable job), the binding fails (reports stop and the wrapper becomes a
+ * passthrough) and the job is paused again, verified, with its id reported.
  */
 async function resumeVerified(bindingId: string, profile: string, jobId: string, wrapperRelative: string,
   expected: string, current: () => void, runner: HermesCronRunner): Promise<EnrollmentResult> {
@@ -473,7 +481,12 @@ async function resumeVerified(bindingId: string, profile: string, jobId: string,
     if (!invalid) return { binding: findScriptReportBinding(bindingId)!, job: null, resumed: true, nativeState: 'unknown' }
     resumed = null
   }
-  if (!invalid && resumed && resumed.enabled === true && resumed.script === wrapperRelative && jobFingerprint(resumed) !== expected) {
+  // A resume read back without effect failed; one without readback is uncertain; a job read back
+  // running anything but the approved wrapper configuration changed. All are reconciled below.
+  const stillPaused = resumed?.enabled === false
+  if (!invalid && stillPaused) invalid = new EnrollmentError(502, 'native_resume_failed')
+  if (!invalid && !resumed) invalid = new EnrollmentError(502, 'native_resume_uncertain')
+  if (!invalid && (resumed!.enabled !== true || resumed!.script !== wrapperRelative || jobFingerprint(resumed!) !== expected)) {
     invalid = new EnrollmentError(409, 'job_changed')
   }
   if (invalid) {
@@ -481,19 +494,17 @@ async function resumeVerified(bindingId: string, profile: string, jobId: string,
     const marker = scriptReportRevokedMarker(bindingId)
     privateDir(scriptReportBindingDir(bindingId))
     if (!existsSync(marker)) writeExclusive(marker, `${new Date().toISOString()}\n`, 0o600)
-    let paused = false
-    try {
-      await runner(profile, ['pause', jobId])
-      paused = readNativeJob(profile, jobId)?.enabled === false
-    } catch { /* reported below */ }
+    let paused = stillPaused
+    if (!paused) {
+      try {
+        await runner(profile, ['pause', jobId])
+        paused = readNativeJob(profile, jobId)?.enabled === false
+      } catch { /* reported below */ }
+    }
     if (!paused) noteScriptReportBindingError(bindingId, `${invalid.code};native_pause_failed`)
-    throw new EnrollmentError(invalid.status, invalid.code, paused ? undefined : 'native pause unverified', jobId)
+    throw new EnrollmentError(invalid.status, invalid.code, paused ? undefined : 'native pause unverified', jobId, paused ? 'paused' : 'unknown')
   }
-  if (!resumed || resumed.enabled !== true || resumed.script !== wrapperRelative) {
-    noteScriptReportBindingError(bindingId, 'native_resume_unverified')
-    throw new EnrollmentError(502, 'native_resume_unverified', undefined, jobId)
-  }
-  return { binding: findScriptReportBinding(bindingId)!, job: resumed, resumed: true }
+  return { binding: findScriptReportBinding(bindingId)!, job: resumed!, resumed: true }
 }
 
 /**
@@ -568,6 +579,11 @@ export function prepareAdoption(profileInput: string, jobIdInput: string): Adopt
 
 /** Claimed or running executions of the job in its native ledger; unreadable counts as busy. */
 export type JobBusyProbe = (hermesHome: string, jobId: string) => boolean
+
+/** Whether the profile's native ledger shows the job claimed or running (unreadable counts as busy). */
+export function nativeJobBusy(profile: string, jobId: string, busy: JobBusyProbe = defaultJobBusyProbe): boolean {
+  return busy(profileHome(profile), jobId)
+}
 
 export const defaultJobBusyProbe: JobBusyProbe = (hermesHome, jobId) => {
   const path = join(hermesHome, 'cron', 'executions.db')
@@ -644,7 +660,8 @@ export async function executeAdoption(plan: AdoptionPlan, destination: Enrollmen
     const manifestPath = writePrivateBindingFiles(bindingId, target, plan.workdir || dirname(target.path))
     beginScriptReportBinding({
       bindingId, userId: destination.userId, profile, sessionId: destination.sessionId, expectedGeneration: destination.expectedGeneration,
-      jobName: plan.name, targetScript: target.relative, wrapperScript: wrapperRelative,
+      jobName: plan.name, targetScript: target.relative, wrapperScript: wrapperRelative, trustedEpoch: destination.trustedEpoch,
+      targetOwner: destination.targetOwner,
     })
     recordScriptReportJob(bindingId, jobId)
     const fail = (code: string, status = 502, message?: string): never => {
@@ -671,6 +688,13 @@ export async function executeAdoption(plan: AdoptionPlan, destination: Enrollmen
     const paused = await readBack()
     if (!paused || paused.enabled !== false || jobFingerprint(paused) !== plan.jobFingerprint) fail('job_changed', 409)
     if (busy(home, jobId)) fail('job_busy', 409)
+    // The pause awaited the native CLI: the destination must still authorize before the job is rewritten.
+    try {
+      recheckDestination(destination, profile)
+    } catch (error: any) {
+      if (error instanceof EnrollmentError) fail(error.code, error.status)
+      throw error
+    }
     try {
       privateDir(join(scriptsDir, WRAPPER_DIR))
       writeExclusive(wrapperPath, renderWrapper(manifestPath), 0o700)
@@ -708,13 +732,23 @@ export function revokeScriptReport(binding: ScriptReportBinding, runner: HermesC
   return withBindingLock(binding.binding_id, () => revokeLocked(binding.binding_id, runner))
 }
 
+/** Stop capture and import only: the native job keeps running and the wrapper passes through. */
+function stopCapture(bindingId: string): void {
+  const marker = scriptReportRevokedMarker(bindingId)
+  privateDir(scriptReportBindingDir(bindingId))
+  if (!existsSync(marker)) writeExclusive(marker, `${new Date().toISOString()}\n`, 0o600)
+  revokeScriptReportBinding(bindingId)
+}
+
+/** Policy revocation of policy-created bindings: routing stops, established native jobs are not paused. */
+export function stopScriptReportCapture(bindingId: string): Promise<void> {
+  return withBindingLock(bindingId, async () => stopCapture(bindingId))
+}
+
 async function revokeLocked(bindingId: string, runner: HermesCronRunner): Promise<{ paused: boolean }> {
   // Re-read after any enrollment of this binding finished: it may have recorded the job id.
   const binding = findScriptReportBinding(bindingId)!
-  const marker = scriptReportRevokedMarker(binding.binding_id)
-  privateDir(scriptReportBindingDir(binding.binding_id))
-  if (!existsSync(marker)) writeExclusive(marker, `${new Date().toISOString()}\n`, 0o600)
-  revokeScriptReportBinding(binding.binding_id)
+  stopCapture(binding.binding_id)
   if (!binding.job_id) return { paused: false }
   try {
     await runner(binding.profile, ['pause', binding.job_id])

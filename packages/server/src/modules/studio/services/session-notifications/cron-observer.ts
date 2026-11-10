@@ -10,6 +10,8 @@ import {
 } from '../../repositories/session-notification-store'
 import { readCronSessionBindings, type CronSessionBinding } from '../../public/cron-session-bindings'
 import { findUserById, userCanAccessProfile } from '../../repositories/users-store'
+import { getSession } from '../../repositories/session-store'
+import { studioSessionAccount } from '../../contracts/runs/usage'
 
 /** Exact answers are stored whole up to this bound; longer answers are clipped and flagged. */
 export const CRON_NOTICE_MAX_CHARS = 100_000
@@ -128,6 +130,13 @@ function bindingAccountCurrent(binding: CronSessionBinding): boolean {
   if (binding.account_id === null) return true
   const user = findUserById(binding.account_id)
   return !!user && user.status === 'active' && (user.role === 'super_admin' || userCanAccessProfile(user.id, binding.profile))
+}
+
+/** A target bound to a specific account stays current only while its session still belongs to that account. */
+export function targetOwnerCurrent(targetOwner: number | null, sessionId: string): boolean {
+  if (targetOwner === null) return true
+  const session = getSession(sessionId)
+  return !!session && Number(studioSessionAccount(session as any)) === targetOwner
 }
 
 /** One observation pass over every active binding of this Studio instance. */

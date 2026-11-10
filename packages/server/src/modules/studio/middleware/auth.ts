@@ -439,6 +439,25 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
     }
     const body = ctx.request.body as Record<string, unknown> | undefined
     const profiles = [ctx.get('x-hermes-profile'), ctx.query.profile, body?.profile].filter(value => value !== undefined && value !== '')
+    if (binding.cron) {
+      // Trusted current-session Cron admission: this one endpoint, never account delegation.
+      const user = findUserById(binding.cron.accountId)
+      if (!(ctx.method === 'POST' && ctx.path === '/api/hermes/cron/current-session')
+        || profiles.some(value => typeof value !== 'string' || value.trim() !== binding.profile)
+        || !user || user.status !== 'active' || (user.role !== 'super_admin' && !userCanAccessProfile(user.id, binding.profile))) {
+        ctx.status = 403
+        ctx.body = { error: 'This run credential only permits current-session Cron admission' }
+        return
+      }
+      ctx.state.user = toAuthenticatedUser(user)
+      ctx.state.profile = { name: binding.profile }
+      ctx.state.credentialKind = 'run'
+      ctx.state.cronAdmission = { ...binding.cron, sessionId: binding.sessionId, profile: binding.profile, token,
+        // The issuing turn or dispatch must still hold at every later admission step.
+        isActive: () => runMcpCredentials.authenticate(token) !== undefined }
+      await next()
+      return
+    }
     const interaction = ctx.method === 'POST' && (
       ctx.path === '/api/studio/task-plans/update' || ctx.path === '/api/studio/clarifications/request'
       || ctx.path === '/api/studio/session-tasks/list' || ctx.path === '/api/studio/session-tasks/update'
