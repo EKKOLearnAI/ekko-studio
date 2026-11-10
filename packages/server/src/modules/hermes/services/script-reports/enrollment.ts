@@ -266,7 +266,12 @@ async function enrollLocked(bindingId: string, request: EnrollmentRequest, runne
   } catch (error: any) {
     fail('native_edit_failed', 502, error?.message)
   }
-  const job = readNativeJob(profile, jobId)
+  let job: Record<string, any> | null = null
+  try {
+    job = readNativeJob(profile, jobId)
+  } catch {
+    // An unreadable jobs file verifies nothing: fail below with the job id, never resume.
+  }
   if (!job || job.script !== wrapperRelative || job.no_agent !== true || job.deliver !== 'local' || job.enabled !== false) {
     fail('native_config_mismatch')
   }

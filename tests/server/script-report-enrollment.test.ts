@@ -20,7 +20,7 @@ let origin: string
 let root: string
 let hermesHome: string
 let m: any
-const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean; resumeCommitsThenFails?: boolean; failPause?: boolean; corruptOnResume?: boolean; corruptOnPause?: boolean; corruptAfterResume?: boolean } = { calls: [], jobs: [] }
+const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean; resumeCommitsThenFails?: boolean; failPause?: boolean; corruptOnResume?: boolean; corruptOnPause?: boolean; corruptAfterResume?: boolean; corruptAfterEdit?: boolean } = { calls: [], jobs: [] }
 const users: Record<string, { id: number; token: string; modelRun: string }> = {}
 
 function corruptJobs() { writeFileSync(join(hermesHome, 'cron', 'jobs.json'), '{ not json') }
@@ -37,7 +37,7 @@ beforeEach(async () => {
   vi.stubEnv('HERMES_WEB_UI_HOME', join(root, 'studio'))
   vi.stubEnv('HERMES_HOME', hermesHome)
   vi.stubEnv('HERMES_WEB_UI_TEST_DB_DIR', join(root, 'db'))
-  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false; cli.resumeCommitsThenFails = false; cli.failPause = false; cli.corruptOnResume = false; cli.corruptOnPause = false; cli.corruptAfterResume = false
+  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false; cli.resumeCommitsThenFails = false; cli.failPause = false; cli.corruptOnResume = false; cli.corruptOnPause = false; cli.corruptAfterResume = false; cli.corruptAfterEdit = false
   vi.doMock(`${HERMES}/services/runtime/process`, () => ({
     execHermesWithBin: async (_bin: string, args: string[], options: any) => {
       cli.calls.push(args.slice(1))
@@ -66,6 +66,7 @@ beforeEach(async () => {
       saveJobs()
       if (command === 'pause' && cli.corruptOnPause) corruptJobs()
       if (command === 'resume' && cli.corruptAfterResume) corruptJobs()
+      if (command === 'edit' && cli.corruptAfterEdit) corruptJobs()
       return { stdout: '', stderr: '' }
     },
   }))
@@ -237,6 +238,15 @@ describe('script report enrollment', () => {
     expect(done.body).toMatchObject({ job: null, resumed: true, native_state: 'unknown', binding: { job_id: 'job1', state: 'active' } })
     expect(commands()).toEqual(['create', 'edit', 'resume'])
     expect(cli.jobs[0].enabled).toBe(true)
+  })
+
+  it('fails with the job id and never resumes when the edited job cannot be read back', async () => {
+    cli.corruptAfterEdit = true
+    const failed = await enroll()
+    expect(failed.status).toBe(502)
+    expect(failed.body).toEqual({ error: 'native_config_mismatch', job_id: 'job1' })
+    expect(commands()).toEqual(['create', 'edit'])
+    expect(m.db.prepare('SELECT state, job_id, error FROM script_report_bindings').all()).toEqual([{ state: 'failed', job_id: 'job1', error: 'native_config_mismatch' }])
   })
 
   it('still pauses after a failed resume when the job cannot be read back first', async () => {
