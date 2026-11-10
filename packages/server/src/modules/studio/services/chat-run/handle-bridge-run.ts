@@ -4,6 +4,15 @@ import { requirePersonWorkspace } from '../person/workspace'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { hermesStudioMcpCapabilities } from './studio-mcp'
 import { withTaskPlanTurnContext } from '../task-plan-runs'
+import { buildNoticeProjection } from '../session-notifications/presentation'
+import { resolveRunSource } from './load-state'
+import {
+  consumeDispatchNotifications,
+  releaseDispatchNotifications,
+  reserveSessionNotificationsForDispatch,
+  unresolvedProjectionDispatches,
+} from '../../repositories/session-notification-store'
+import { studioInstanceId } from '../../public/session-notifications'
 /**
  * CLI Bridge run handler — handles runs that use the agent bridge
  * to communicate with Hermes CLI agent.
@@ -11,7 +20,7 @@ import { withTaskPlanTurnContext } from '../task-plan-runs'
 
 import type { Server, Socket } from 'socket.io'
 import { getSystemPrompt } from '../../public/runs/prompt'
-import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
+import { getFirstSessionMessageByRole, getSession, getSessionGeneration, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
 import { recordBridgeModelUsage } from '../usage/bridge-model-usage'
 import type {
@@ -774,7 +783,36 @@ export async function handleBridgeRun(
     const originalBridgeInput = isContentBlockArray(input)
       ? await convertContentBlocksForAgent(input)
       : input
-    const bridgeInput = withTaskPlanTurnContext(originalBridgeInput, data.task_plan_context_id, !data.background_delegation_id && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || ''))
+    // Omitted request source fields fall back to the stored session's surface.
+    const turnSurface = data.session_source || data.source || resolveRunSource(undefined, session_id)
+    const intentionalTurn = !data.autonomous && !data.background_delegation_id
+      && !['group_chat', 'workflow', 'global_agent'].includes(turnSurface)
+    const taskPlanInput = withTaskPlanTurnContext(originalBridgeInput, data.task_plan_context_id, !data.background_delegation_id && !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || ''))
+    // A dispatch whose acknowledgement was lost is resolved first: admitted ones are consumed, others released.
+    const frozenGeneration = getSessionGeneration(session_id)
+    const frozenProfile = getSession(session_id)?.profile || 'default'
+    if (intentionalTurn) await reconcileProjectionDispatches(session_id, bridge, profile)
+    // The reconciliation awaited: this turn must still own the same session incarnation and profile.
+    if (sessionMap.get(session_id) !== state || state.activeRunMarker !== runMarker) return
+    const sameIncarnation = getSessionGeneration(session_id) === frozenGeneration
+      && (getSession(session_id)?.profile || 'default') === frozenProfile
+    // Passive notices reach the model once, on the user's next intentional question.
+    let noticeProjection = intentionalTurn && sameIncarnation ? buildNoticeProjection(session_id) : null
+    // Durable dispatch identity: the bridge admits it at most once, and its notices stay reserved until then.
+    const dispatchId: string | undefined = noticeProjection ? `${studioInstanceId()}:${messageId ?? runMarker}` : undefined
+    if (noticeProjection) {
+      const reserved = reserveSessionNotificationsForDispatch(noticeProjection.ids, dispatchId!)
+      // Only a fully reserved projection is sent; otherwise its notices stay pending for a later question.
+      if (reserved.length !== noticeProjection.ids.length) {
+        releaseDispatchNotifications(dispatchId!)
+        noticeProjection = null
+      }
+    }
+    const bridgeInput = !noticeProjection
+      ? taskPlanInput
+      : Array.isArray(taskPlanInput)
+        ? [{ type: 'text', text: noticeProjection.text }, ...taskPlanInput] as typeof taskPlanInput
+        : `${noticeProjection.text}\n\n${taskPlanInput}`
     const runMetadata: BridgeRunMetadata = {
       autonomous: data.autonomous === true,
       delegationId: data.background_delegation_id,
@@ -796,9 +834,10 @@ export async function handleBridgeRun(
         reasoningEffort,
       },
     }
+    // Native history keeps the user's own question, never the projected untrusted notices.
     const bridgeStorageInput = data.storage_message !== undefined
       ? data.storage_message
-      : data.task_plan_context_id || isContentBlockArray(input)
+      : data.task_plan_context_id || isContentBlockArray(input) || noticeProjection
         ? inputStr
         : undefined
     logger.info('[chat-run-socket] starting CLI bridge run for session %s', session_id)
@@ -810,7 +849,9 @@ export async function handleBridgeRun(
       hasInstructions: Boolean(fullInstructions),
       multimodalInput: isContentBlockArray(input),
     }, '[chat-run-socket] starting CLI bridge run')
-    const started = await bridge.chat(
+    let started: Awaited<ReturnType<typeof bridge.chat>>
+    try {
+      started = await bridge.chat(
       session_id,
       bridgeInput as AgentBridgeMessage,
       bridgeHistory,
@@ -818,6 +859,7 @@ export async function handleBridgeRun(
       profile,
       {
         ...(bridgeStorageInput !== undefined ? { storage_message: bridgeStorageInput } : {}),
+        ...(dispatchId && noticeProjection ? { dispatch_id: dispatchId } : {}),
         ...(resolvedModel ? { model: resolvedModel } : {}),
         ...(resolvedProvider ? { provider: resolvedProvider } : {}),
         ...(workspace ? { workspace } : {}),
@@ -830,6 +872,14 @@ export async function handleBridgeRun(
           : {}),
       },
     )
+    } catch (err) {
+      // Only the worker's explicit refusal or startup failure is definite; any other error (a lost reply, a broker
+      // connection failure) keeps the notices reserved for reconciliation.
+      if (dispatchId && noticeProjection && isDefiniteNonAdmission(err)) releaseDispatchNotifications(dispatchId)
+      throw err
+    }
+    // Admitted: consumed even if this Studio owner turns out to be stale.
+    if (dispatchId && noticeProjection) consumeDispatchNotifications(dispatchId)
     if (sessionMap.get(session_id) !== state || state.activeRunMarker !== runMarker) return
     state.runId = started.run_id
     if (data.background_delegation_id && data.background_claim_id) {
@@ -2112,4 +2162,23 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
       },
     )
   })
+}
+
+async function reconcileProjectionDispatches(sessionId: string, bridge: AgentBridgeClient, profile: string): Promise<void> {
+  for (const dispatchId of unresolvedProjectionDispatches(sessionId)) {
+    try {
+      const resolved = await bridge.resolveDispatch(dispatchId, profile)
+      if (resolved?.state === 'accepted') consumeDispatchNotifications(dispatchId)
+      else if (resolved?.state === 'refused') releaseDispatchNotifications(dispatchId)
+      // `uncertain` (a crash while the bridge was still preparing it): stays reserved, never consumed or replayed.
+    } catch {
+      // Bridge unreachable: stays reserved (neither consumed nor repeated) and is resolved on a later question.
+    }
+  }
+}
+
+function isDefiniteNonAdmission(err: unknown): boolean {
+  const response = (err as { response?: { error_type?: string; error?: string } } | null)?.response
+  return response?.error_type === 'DispatchStartFailed'
+    || (response?.error_type === 'DispatchNotAdmitted' && response.error === 'dispatch_refused')
 }

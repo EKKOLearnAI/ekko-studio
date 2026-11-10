@@ -92,6 +92,7 @@ class BridgeServer:
                 source,
                 reasoning_effort,
                 background_delegation_enabled,
+                str(req.get("dispatch_id") or "") or None,
             )
             if req.get("wait"):
                 timeout = float(req.get("timeout", 0) or 0)
@@ -293,6 +294,12 @@ class BridgeServer:
 
         if action == "status":
             return self.pool.status(str(req.get("session_id") or ""))
+
+        if action == "dispatch_resolve":
+            dispatch_id = str(req.get("dispatch_id") or "").strip()
+            if not dispatch_id:
+                return {"ok": False, "error": "dispatch_id is required"}
+            return self.pool.resolve_dispatch(dispatch_id)
 
         if action == "background_poll":
             session_ids = req.get("session_ids")

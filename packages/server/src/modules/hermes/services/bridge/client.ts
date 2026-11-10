@@ -48,6 +48,8 @@ export interface AgentBridgeChatOptions {
    * makes background=true fall back to synchronous execution. */
   background_delegation_enabled?: boolean
   storage_message?: AgentBridgeMessage
+  /** Studio dispatch identity, admitted durably at most once by the bridge. */
+  dispatch_id?: string
   model?: string
   provider?: string
   workspace?: string
@@ -513,6 +515,7 @@ export class AgentBridgeClient {
       session_id: sessionId,
       message,
       ...(options.storage_message !== undefined ? { storage_message: options.storage_message } : {}),
+      ...(options.dispatch_id ? { dispatch_id: options.dispatch_id } : {}),
       ...(conversationHistory ? { conversation_history: conversationHistory } : {}),
       ...(instructions ? { instructions } : {}),
       ...(profile ? { profile } : {}),
@@ -736,6 +739,11 @@ export class AgentBridgeClient {
       session_id: sessionId,
       ...(profile ? { profile } : {}),
     })
+  }
+
+  /** `accepted` if the bridge admitted the dispatch; otherwise it is claimed as `refused` and never admitted. */
+  resolveDispatch(dispatchId: string, profile?: string): Promise<AgentBridgeResponse & { state?: 'accepted' | 'refused' }> {
+    return this.request({ action: 'dispatch_resolve', dispatch_id: dispatchId, ...(profile ? { profile } : {}) })
   }
 
   status(sessionId: string, profile?: string): Promise<AgentBridgeResponse> {
