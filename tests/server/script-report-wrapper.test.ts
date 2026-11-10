@@ -433,9 +433,9 @@ describe('process and storage failure boundaries', () => {
     for (const boundary of ['rename', 'fsync']) {
       rmSync(spool, { recursive: true, force: true }); mkdirSync(spool, { mode: 0o700 })
       // The real wrapper main() runs and SIGKILLs itself at the boundary: just before the atomic
-      // rename, or just after it (before the directory fsync and exit).
+      // no-replace link, or just after it (before the directory fsync and exit).
       const kill = boundary === 'rename'
-        ? 'real = os.rename\ndef dying(src, dst):\n    if dst.endswith("final.json"): os.kill(os.getpid(), signal.SIGKILL)\n    real(src, dst)\nos.rename = dying'
+        ? 'real = os.link\ndef dying(src, dst):\n    if dst.endswith("final.json"): os.kill(os.getpid(), signal.SIGKILL)\n    real(src, dst)\nos.link = dying'
         : 'real = w._fsync_dir\ncalls = []\ndef dying(path):\n    calls.append(path)\n    if len(calls) == 2: os.kill(os.getpid(), signal.SIGKILL)\n    real(path)\nw._fsync_dir = dying'
       const result = probe(wrapper, `${kill}\nw.main()`, join(scripts, 'ekko-script-reports'))
       expect(result.signal, boundary).toBe('SIGKILL')
