@@ -81,6 +81,22 @@ test('refreshes on the hint for its own session only, and shows a denial and a r
   await expect(refused).toContainText('job_changed')
 })
 
+test('names another chat as the target of a cross-session request, as text', async ({ page }) => {
+  await openCard(page, () => ({ requests: [
+    pending({ id: 'req-x', target: { session_id: 'chat-9', profile: 'default', title: 'Weekly <i>notes</i>' } }),
+    pending({ id: 'req-same', name: 'Same chat', job_id: 'agent5' }),
+  ] }))
+  const cross = page.getByTestId('cron-consent-request').filter({ hasText: '<b>Digest</b>' })
+  const target = cross.getByTestId('cron-consent-target')
+  await expect(target).toContainText('Weekly <i>notes</i> · chat-9 · default')
+  await expect(target).toContainText('Results go to this other chat, not the one showing this request.')
+  await expect(target.locator('i')).toHaveCount(0)
+  await expect(cross).toContainText("Deliver an existing agent cron job's results to the chat named below")
+  const same = page.getByTestId('cron-consent-request').filter({ hasText: 'Same chat' })
+  await expect(same.getByTestId('cron-consent-target')).toHaveCount(0)
+  await expect(same).toContainText('Chat one · default')
+})
+
 test('fits a narrow viewport on the card theme surface', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 })
   await openCard(page, () => ({ requests: [pending({ prompt: 'a long prompt '.repeat(30), name: 'Very long job name '.repeat(6) })] }))
