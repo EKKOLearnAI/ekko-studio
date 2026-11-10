@@ -1335,7 +1335,7 @@ export class ChatRunSocket {
       await this.resumeSession(socket, sid)
     })
 
-    socket.on('app.resume', async (data: { session_id?: string; id?: string }) => {
+    socket.on('app.resume', async (data: { session_id?: string; id?: string; timeline?: boolean }) => {
       if (!data.session_id || typeof data.id !== 'string' || data.id.length > 128) return
       const sid = data.session_id
       try {
@@ -1349,7 +1349,7 @@ export class ChatRunSocket {
         return
       }
       socket.join(`session:${sid}`)
-      await this.resumeSession(socket, sid, { event: 'app.resumed', cachedId: data.id })
+      await this.resumeSession(socket, sid, { event: 'app.resumed', cachedId: data.id, timeline: data.timeline === true })
     })
 
     socket.on('abort', (data: { session_id?: string }) => {
@@ -2367,7 +2367,7 @@ export class ChatRunSocket {
   private async resumeSession(
     socket: Socket,
     sid: string,
-    options?: { event: 'app.resumed'; cachedId: string },
+    options?: { event: 'app.resumed'; cachedId: string; timeline?: boolean },
   ) {
     let state = this.sessionMap.get(sid)
     if (!state) {
@@ -2390,7 +2390,7 @@ export class ChatRunSocket {
       if (question && !resumeEvents.some(entry => entry.data?.approval_id === question.data.approval_id && entry.data?.clarify_id === question.data.clarify_id)) resumeEvents.push(question)
     }
     const sessionDetail = getSessionMetadata(sid)
-    const messagePage = !options && isPersonSession(sid) ? personConversationTimeline(Number(socket.data.user.id),sid) : buildResumeMessagePage(state.messages, {
+    const messagePage = (!options || options.timeline) && isPersonSession(sid) ? personConversationTimeline(Number(socket.data.user.id),sid) : buildResumeMessagePage(state.messages, {
       limit: state.messagePageLimit,
       messageTotal: state.messageTotal,
       messageStateBaselineCount: state.messageStateBaselineCount,
