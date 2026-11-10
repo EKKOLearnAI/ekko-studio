@@ -197,45 +197,124 @@ test('opens the creator card and complete unified conversation on a narrow scree
   expect(errors).toEqual([])
 })
 
-test('keeps the latest row visible after switching Bots with a measured collaboration card',async ({page},testInfo)=>{
+test('keeps the latest reply visible when collaboration cards load after cached messages',async ({page},testInfo)=>{
   const {state,errors,sessions}=await setup(page)
+  state.flow.updated_at=3150
   state.flow.stages=Array.from({length:40},(_,index)=>({...state.flow.stages[index%2],id:`stage-${index}`,position:index,group_position:index}))
   await page.evaluate(sessions=>{
     const chat=(window as any).personWorkspaceFixture.chat
     for (const metadata of sessions) {
       const session=chat.ensureSessionLoaded(metadata)
       session.messages=Array.from({length:session.id==='person-main-creator'?160:24},(_,index)=>({id:session.id+'-'+index,role:index%2?'assistant':'user',content:`消息 ${index}\n\n`+'长对话中的历史内容。'.repeat(index%4*20+5),timestamp:index*20+1}))
+      if(session.id==='person-main-creator') session.messages[159].content='收到，111。'
       session.messagesLoaded=true
+      session.loadedMessageCount=session.messages.length
     }
   },sessions)
   const viewport=page.locator('.person-chat-messages .virtual-message-list')
   const bottomDistance=()=>viewport.evaluate(el=>Math.round(el.scrollHeight-el.scrollTop-el.clientHeight))
+  const finalReply=page.locator('.person-chat-messages .message[id]').last()
+  const finalReplyIsVisible=()=>finalReply.evaluate(el=>{
+    const view=el.closest('.virtual-message-list')!.getBoundingClientRect(),reply=el.getBoundingClientRect()
+    return reply.top>=view.top && reply.bottom<=view.bottom
+  })
+  await expect(viewport).not.toHaveClass(/vue-recycle-scroller/)
   await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
   for (let round=0;round<3;round++) {
-    await viewport.hover()
-    await page.mouse.wheel(0,-1600)
-    await expect.poll(bottomDistance).toBeGreaterThan(500)
-    await page.waitForTimeout(250)
-    expect(await bottomDistance()).toBeGreaterThan(500)
+    const peerSnapshot=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/studio/person' && new URL(response.url()).searchParams.get('session_id')==='person-main-api')
     await page.locator('.person-sidebar .session-item').filter({hasText:'接口 Bot'}).click()
+    await (await peerSnapshot).finished()
     await expect(page.locator('.person-title')).toHaveText('接口 Bot')
+    await expect(page.locator('.person-view')).not.toHaveAttribute('inert')
     await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
-    await viewport.hover()
-    await page.mouse.wheel(0,-600)
-    await expect.poll(bottomDistance).toBeGreaterThan(100)
     state.snapshotDelay=1800
     await page.locator('.person-sidebar .session-item').filter({hasText:'主发起人'}).click()
+    // Cached messages render before the independent collaboration snapshot.
+    await expect(finalReply).toContainText('收到，111。')
+    await expect(page.locator('.person-flow-conversation-card')).toHaveCount(0)
+    await expect.poll(finalReplyIsVisible).toBe(true)
     await expect(page.locator('.person-title')).toHaveText('主发起人')
     await expect(card(page).locator('.bot-sprite')).toHaveCount(40)
     await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
-    // Check again after the graph width and recycled row heights settle.
+    // Check again after late card insertion and graph measurement settle.
     await page.waitForTimeout(1400)
     expect(await bottomDistance()).toBeLessThanOrEqual(2)
+    expect(await finalReplyIsVisible()).toBe(true)
   }
   await page.setViewportSize({width:390,height:844})
   await expect.poll(bottomDistance).toBeLessThanOrEqual(2)
   await page.waitForTimeout(1400)
   expect(await bottomDistance()).toBeLessThanOrEqual(2)
+  expect(await finalReplyIsVisible()).toBe(true)
   await testInfo.attach('switched-bot-at-latest-card',{body:await page.screenshot({animations:'disabled'}),contentType:'image/png'})
+  expect(errors).toEqual([])
+})
+
+test('keeps the final reply visible after card measurement and preserves deliberate history reading',async ({page},testInfo)=>{
+  await page.addInitScript(()=>{
+    const Observer=window.ResizeObserver
+    // Mobile layout corrections can precede the transcript's resize callback.
+    window.ResizeObserver=class extends Observer {
+      constructor(callback:ResizeObserverCallback) {
+        super((entries,observer)=>{
+          if((window as any).delayFlowMeasurement && entries.some(entry=>entry.target.classList.contains('person-flow-graph'))) {
+            setTimeout(()=>callback(entries,observer),450)
+          } else if(entries.some(entry=>entry.target.classList.contains('virtual-message-list-content'))) {
+            setTimeout(()=>callback(entries,observer),80)
+          } else callback(entries,observer)
+        })
+      }
+    }
+  })
+  const {state,errors,sessions}=await setup(page)
+  state.flow.updated_at=1950
+  await page.evaluate(sessions=>{
+    const chat=(window as any).personWorkspaceFixture.chat
+    for(const metadata of sessions) {
+      const session=chat.ensureSessionLoaded(metadata)
+      session.messages=Array.from({length:100},(_,index)=>({id:session.id+'-'+index,role:index===99?'user':index%2?'assistant':'user',content:index===99?'111':`历史正文 ${index}\n\n`+'已有消息。'.repeat(12),timestamp:index*20+1}))
+      session.messagesLoaded=true
+      session.loadedMessageCount=100
+    }
+  },sessions)
+  const viewport=page.locator('.person-chat-messages .virtual-message-list')
+  const lastMessage=page.locator('.person-chat-messages .message[id]').last()
+  const tailIsVisible=()=>lastMessage.evaluate(el=>{
+    const root=el.closest('.virtual-message-list')
+    if(!root || !el.isConnected)return false
+    const view=root.getBoundingClientRect(),message=el.getBoundingClientRect()
+    return message.top>=view.top && message.bottom<=view.bottom
+  })
+  await expect(viewport).not.toHaveClass(/vue-recycle-scroller/)
+  await expect.poll(()=>viewport.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeLessThanOrEqual(2)
+  await page.locator('.person-sidebar .session-item').filter({hasText:'接口 Bot'}).click()
+  await expect(page.locator('.person-title')).toHaveText('接口 Bot')
+  await page.waitForTimeout(500)
+  await page.evaluate(()=>{(window as any).delayFlowMeasurement=true})
+  await page.locator('.person-sidebar .session-item').filter({hasText:'主发起人'}).click()
+  await expect(page.locator('.person-title')).toHaveText('主发起人')
+  await expect(card(page)).toBeVisible()
+  await page.waitForTimeout(900)
+  await expect.poll(tailIsVisible).toBe(true)
+  await page.evaluate(()=>{
+    const chat=(window as any).personWorkspaceFixture.chat
+    chat.activeSession.messages.push({id:'restored-final-reply',role:'assistant',content:'收到，111。',timestamp:2000})
+  })
+  await expect(lastMessage).toContainText('收到，111。')
+  await expect.poll(tailIsVisible).toBe(true)
+  await page.waitForTimeout(500)
+  expect(await tailIsVisible()).toBe(true)
+  await testInfo.attach('final-reply-after-card-measurement',{body:await page.screenshot({animations:'disabled'}),contentType:'image/png'})
+  await viewport.hover()
+  await page.mouse.wheel(0,-20)
+  await expect.poll(()=>viewport.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeGreaterThan(10)
+  await page.waitForTimeout(150)
+  const readingTop=await viewport.evaluate(el=>el.scrollTop)
+  await page.evaluate(()=>{
+    const chat=(window as any).personWorkspaceFixture.chat
+    chat.activeSession.messages.push({id:'later-reply',role:'assistant',content:'阅读历史时的新回复不能拉动阅读位置。',timestamp:2100})
+  })
+  await page.waitForTimeout(500)
+  expect(Math.abs(await viewport.evaluate(el=>el.scrollTop)-readingTop)).toBeLessThanOrEqual(1)
   expect(errors).toEqual([])
 })

@@ -20,7 +20,11 @@ app.use(pinia); app.use(await i18nReady); app.use(router)
 // Only sending/switching the live chat transport is replaced. Form and picker are real.
 const chat = useChatStore(pinia)
 const sent: string[] = []
-chat.switchSession = async id => { chat.activeSessionId = id }
+chat.switchSession = async id => {
+  chat.activeSessionId = id
+  // Restore cached messages immediately, independently of the Person snapshot.
+  chat.activeSession = chat.sessions.find(session => session.id === id) || null
+}
 chat.sendMessage = async text => { sent.push(text) }
 ;(window as any).personWorkspaceFixture = { sent, router, chat, theme, files: useFilesStore(pinia), settings: useSettingsStore(pinia) }
 await router.isReady(); app.mount('#app')

@@ -117,7 +117,9 @@ function handleScroll() {
   const previousScrollTop = scrollTop.value;
   syncViewport();
   const delta = scrollTop.value - previousScrollTop;
-  if (delta < -1) {
+  // A shrinking card can clamp scrollTop backwards while still at the bottom.
+  // That layout correction must not disable following later message rendering.
+  if (delta < -1 && !isNearBottom(2)) {
     userDetachedFromBottom = true;
     cancelBottomScroll();
   } else if (!activeAnchorTarget && !isProgrammaticScroll()) {

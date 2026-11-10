@@ -793,7 +793,6 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
         :avatar="chatSessionAgentAvatar(chatStore.activeSession)" :name="data.session.title || undefined" :agents="data.settings.agents"
         @refresh="refresh" @open-task="openTask" @open-flow="openActivityFlow" />
       <MessageList v-if="data.session" :user-label="t('person.you')" hide-tool-calls hide-run-usage hide-reasoning :activity-label="t('person.executing')"
-        :restore-session-scroll="false"
         :collaborations="collaborations" @open-collaboration="conversationFlow=$event" />
       </div>
       <div v-if="data.session" class="person-compose">
