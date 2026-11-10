@@ -349,8 +349,7 @@ function publishReceipt(dir: string, name: string, receipt: Record<string, unkno
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     // A new receipts directory must survive power loss with the receipt in it.
-    const parentFd = openSync(dirname(dir), constants.O_RDONLY)
-    try { fsyncSync(parentFd) } catch { /* best effort */ } finally { closeSync(parentFd) }
+    syncDirectory(dirname(dir))
   }
   const temp = join(dir, `.${name}.${randomUUID()}.tmp`)
   const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600)
@@ -433,7 +432,9 @@ function acknowledgeEvent(binding: ScriptReportBinding, entry: ScriptReportEvent
     }
     let present = true
     try { lstatSync(path) } catch { present = false }
+    // A receipt linked before a crash still needs its directory synced before acknowledgement.
     if (!present) publishReceipt(dir, eventReceiptName(entry.event_id), expected)
+    else syncDirectory(dir)
     // Whatever file won (ours, an earlier pass's, or another writer's) must be exactly the committed receipt.
     const raw = readPrivateFile(path, 64 * 1024)
     let found: any = null

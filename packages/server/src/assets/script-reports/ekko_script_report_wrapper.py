@@ -796,6 +796,15 @@ def complete(manifest: dict, args) -> dict:
 
 # --- appended notices ----------------------------------------------------------------------------
 
+def _fsync_dir_strict(path: str) -> None:
+    """Directory fsync for an admission's durability promise: any failure propagates (the append fails)."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 def _durable_dir(path: str) -> None:
     """Create missing directories (0700), fsyncing each parent so an acknowledged admission survives power loss."""
     if os.path.isdir(path):
@@ -805,7 +814,7 @@ def _durable_dir(path: str) -> None:
         os.mkdir(path, 0o700)
     except FileExistsError:
         return
-    _fsync_dir(os.path.dirname(path))
+    _fsync_dir_strict(os.path.dirname(path))
 
 
 def _digest(text: str) -> str:
@@ -869,7 +878,7 @@ def _finish_admission(manifest: dict) -> None:
     if record is not None:  # no slot record: the admission never happened and its caller got no answer
         _index(manifest, _valid_append(manifest, record, intent.get("event_id")))
     os.unlink(path)
-    _fsync_dir(manifest["outbox_dir"])
+    _fsync_dir_strict(manifest["outbox_dir"])
 
 
 def _index(manifest: dict, envelope: dict) -> None:
@@ -975,6 +984,8 @@ def append(manifest: dict, args) -> dict:
                 # The admission point: the slot holds the frozen record itself, so a crash after this line
                 # leaves a complete record that closure delivers and the next admission indexes.
                 publish_json(slots, f"{envelope['sequence']:02d}.json", envelope)
+                # publish_json syncs best effort; the admission is only acknowledged once its slot is durable.
+                _fsync_dir_strict(slots)
             _index(manifest, envelope)
             if os.path.lexists(_intent_path(manifest)):
                 os.unlink(_intent_path(manifest))
