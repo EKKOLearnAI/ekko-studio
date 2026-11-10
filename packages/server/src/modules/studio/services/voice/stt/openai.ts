@@ -152,11 +152,11 @@ export async function transcribeOpenAiCompatible(input: SttTranscribeInput): Pro
     throw new Error(`OpenAI-compatible STT returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`)
   }
 
-  const payload = await response.json() as { text?: unknown }
-  const text = typeof payload.text === 'string' ? payload.text.trim() : ''
-  if (!text) {
-    throw new Error('OpenAI-compatible STT response text is empty')
+  const payload = await response.json() as { text?: unknown } | null
+  if (typeof payload?.text !== 'string') {
+    throw new Error('OpenAI-compatible STT response text is missing or invalid')
   }
+  const text = payload.text.trim()
 
   return {
     text,
