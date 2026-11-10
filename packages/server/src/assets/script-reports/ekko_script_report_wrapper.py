@@ -807,13 +807,13 @@ def _fsync_dir_strict(path: str) -> None:
 
 def _durable_dir(path: str) -> None:
     """Create missing directories (0700), fsyncing each parent so an acknowledged admission survives power loss."""
-    if os.path.isdir(path):
-        return
-    _durable_dir(os.path.dirname(path))
-    try:
-        os.mkdir(path, 0o700)
-    except FileExistsError:
-        return
+    # Existence is no proof of an earlier successful parent sync: sync the parent every time.
+    if not os.path.isdir(path):
+        _durable_dir(os.path.dirname(path))
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            pass
     _fsync_dir_strict(os.path.dirname(path))
 
 
@@ -876,6 +876,8 @@ def _finish_admission(manifest: dict) -> None:
     slot = os.path.join(_slots_dir(manifest, intent["invocation_id"]), f"{intent['sequence']:02d}.json")
     record = _read_json(slot, 256 * 1024)
     if record is not None:  # no slot record: the admission never happened and its caller got no answer
+        # The slot record is authoritative: its directory entry must be durable before it is indexed.
+        _fsync_dir_strict(os.path.dirname(slot))
         _index(manifest, _valid_append(manifest, record, intent.get("event_id")))
     os.unlink(path)
     _fsync_dir_strict(manifest["outbox_dir"])
