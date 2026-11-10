@@ -91,3 +91,36 @@ correlates output files by name or time. Manual `run` executions are ignored.
   that disappeared, or whose stored `deliver` was changed out of band, stops being observed until
   it is deliberately bound again.
 - Bindings written by another Studio instance are ignored.
+
+## Consent requests and the chat card
+
+The direct binding and enrollment endpoints accept only an interactive login credential. A model
+turn's runtime credential is refused there (`403 login_token_required`, with
+`hint: "request_user_consent"` and the `consent_path`); it may instead **request** consent, which only
+the same account's login can approve.
+
+```text
+runtime credential -> POST /api/hermes/cron/consent-requests  { profile, context_id, kind, ... }
+                   <- 202 pending                               (nothing created or run)
+chat card (login)  -> POST /api/hermes/cron/consent-requests/:id/approve | deny
+                   <- 200: the frozen plan is executed once, or discarded
+```
+
+- **Setup context.** Ordinary Hermes chats that can receive scheduled results offer "Allow MCP
+  scheduled-result setup" in the session menu. It calls `POST /api/hermes/cron/consent-contexts`
+  (login only) for the current session and profile and shows the returned `context_id` to copy.
+  Opening a new one replaces the account's earlier unused setup context for that session. The
+  destination session, profile, account and generation come from the context, never from the
+  request body.
+- **Card.** `GET /api/hermes/cron/consent-requests?profile=&session_id=` lists the account's
+  pending requests for the open session. Each shows the frozen operation as plain text: destination,
+  job, schedule, script and its SHA-256, working directory, interpreter, prompt, whether the job runs
+  or stays paused after approval, a binding it would move, the requesting credential and the expiry.
+  Approve and Deny send the login credential with the session's profile; one decision wins, and its
+  outcome stays with its own session. The card refetches on the content-free `cron_consent.updated`
+  socket hint for its own session and discards responses for a session the user has left. It does
+  not touch the message composer.
+- **Kinds.** `cron_session_binding` (an agent job with `deliver=local`), and
+  `script_report_enrollment` with `mode: "new"` or `mode: "existing"` (adoption of an existing
+  script-only job). A binding is recorded as described in [Cron session bindings](#cron-session-bindings)
+  with the approving account; enrollment and adoption run the script report enrollment service.
