@@ -39,3 +39,22 @@ rendered as plain text, never Markdown.
 signed-in account sockets, each authorized again at publication: the account as stored now must be
 active with access to the profile (a share viewer only for its shared session), and only while
 the accepting generation is current. Unread attention is synced through the session-state sync.
+
+### Appended notices of a detached invocation
+
+A detached worker may add notices to its reserved invocation before the terminal report with
+`python <wrapper> append --event-id <id> --event-kind start|body|success|failure --content-file <path>`.
+
+- **Bounded admission.** Each admitted notice takes the next gapless slot of the invocation; an
+  invocation admits at most eight. A further append is refused explicitly (`overflow`).
+- **Identity.** The event id names the notice. Repeating it with the same bytes is free and
+  returns the original admission; other bytes under the same id are a conflict.
+- **Durability.** An append is reported `queued` only after its slot record and every directory
+  on its path are synced; a sync failure fails the append, and a retry re-establishes durability
+  (including directories that already exist). An admission interrupted after its slot record is
+  completed by the next append, which syncs the slot directory before indexing it.
+- **Import and receipts.** Studio imports admitted notices in slot order, before the terminal
+  report, and writes one receipt per event under the binding's receipts directory (`events/`).
+  The receipts directory and its parent are synced before the spool entry is acknowledged; while
+  a sync fails, the entry stays and a later pass settles it with the same receipt and one notice.
+- **Terminal ordering.** The terminal report is held until every admitted notice is settled.
