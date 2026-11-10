@@ -59,8 +59,12 @@ interface JwtPayload {
   exp: number
 }
 
+/** How `requireUserJwt` authenticated the request, from verified token data only. */
+export type RequestCredentialKind = 'login' | 'model_run' | 'legacy_access' | 'app' | 'run' | 'server' | 'model_api_key'
+
 declare module 'koa' {
   interface DefaultState {
+    credentialKind?: RequestCredentialKind
     user?: AuthenticatedUser
     profile?: RequestProfile
     serverTokenAuth?: boolean
@@ -408,6 +412,7 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
       const user = findUserById(key.userId)
       if (!user || user.status !== 'active') throw new ModelApiError('The key owner is disabled or no longer exists.', 403)
       ctx.state.user = toAuthenticatedUser(user)
+      ctx.state.credentialKind = 'model_api_key'
       ctx.state.modelApiKey = { id: key.id, models: key.models }
       touchModelApiKey(key.id)
     } catch (error) {
@@ -459,12 +464,14 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
       return
     }
     ctx.state.profile = { name: binding.profile }
+    ctx.state.credentialKind = 'run'
     await next()
     return
   }
   const payload = token ? verifyUserJwt(token, secret) : null
   if (!payload) {
     if (!workerRefs.length && !personRefs.length && await allowServerTokenForAgentEndpoint(ctx, token)) {
+      ctx.state.credentialKind = 'server'
       await next()
       return
     }
@@ -502,6 +509,7 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
   }
   if (personRefs.length) ctx.state.personSession = getSession(personRefs[0])
   ctx.state.user = toAuthenticatedUser(user)
+  ctx.state.credentialKind = payload.type === 'app_access' ? 'app' : payload.purpose ?? 'legacy_access'
   touchUserLogin(user.id)
   await next()
 }
@@ -560,6 +568,17 @@ export async function resolveUserProfile(ctx: Context, next: Next): Promise<void
 
   ctx.state.profile = { name: profileName }
   await next()
+}
+
+/**
+ * The authorization `requireUserJwt` and `resolveUserProfile` granted, evaluated again from the
+ * current account record: for a request that waited (for example behind a job lock) before acting.
+ */
+export function currentAccountProfileRefusal(userId: number, profile: string): string | null {
+  const user = findUserById(userId)
+  if (!user || user.status !== 'active') return 'User is disabled or does not exist'
+  if (user.role !== 'super_admin' && !userCanAccessProfile(user.id, profile)) return `Profile "${profile}" is not available for this user`
+  return null
 }
 
 export async function requireUserProfile(ctx: Context, next: Next): Promise<void> {

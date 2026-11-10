@@ -76,6 +76,11 @@ export function failScriptReportBinding(bindingId: string, error: string): boole
   return transitionScriptReportBinding(bindingId, ['enrolling'], 'failed', { error })
 }
 
+/** An activated binding whose admission was invalidated before it completed stops importing. */
+export function failActivatedScriptReportBinding(bindingId: string, error: string): boolean {
+  return transitionScriptReportBinding(bindingId, ['enrolling', 'active'], 'failed', { error })
+}
+
 export function noteScriptReportBindingError(bindingId: string, error: string | null): void {
   setScriptReportBindingError(bindingId, error)
 }

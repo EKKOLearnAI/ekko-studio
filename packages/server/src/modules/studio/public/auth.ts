@@ -1,6 +1,7 @@
 export {
   authenticateLoginUserToken,
   authenticateUserToken,
+  currentAccountProfileRefusal,
   inspectAppUserToken,
   getUserJwtExpiresSeconds,
   isAuthEnabled,
@@ -11,6 +12,7 @@ export {
   requireSuperAdmin,
   requireUserProfile,
   type AuthenticatedUser,
+  type RequestCredentialKind,
 } from '../middleware/auth'
 
 export { getToken } from '../services/auth/token-auth'

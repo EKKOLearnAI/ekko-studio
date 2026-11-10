@@ -12,7 +12,7 @@ async function loginUser(ctx: Context): Promise<AuthenticatedUser | null> {
   const token = /^Bearer\s+(\S+)$/i.exec(ctx.get('authorization'))?.[1]
   if (!token) { ctx.status = 401; ctx.body = { error: 'login_token_required' }; return null }
   const user = ctx.state.sessionShare ? null : await authenticateLoginUserToken(token)
-  if (!user) { ctx.status = 403; ctx.body = { error: 'login_token_required' }; return null }
+  if (!user) { ctx.status = 403; ctx.body = { error: 'login_token_required', hint: 'request_user_consent', consent_path: '/api/hermes/cron/consent-requests' }; return null }
   return user
 }
 

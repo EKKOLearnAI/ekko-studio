@@ -1,12 +1,15 @@
 import { createHash, randomUUID } from 'crypto'
-import { chmodSync, closeSync, constants, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeSync } from 'fs'
+import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, rmSync, statSync, writeSync } from 'fs'
+import { DatabaseSync } from 'node:sqlite'
 import { dirname, extname, isAbsolute, join, relative, sep } from 'path'
 import {
   activateScriptReportBinding,
   authorizeNoticeDestination,
   beginScriptReportBinding,
+  failActivatedScriptReportBinding,
   failScriptReportBinding,
   findScriptReportBinding,
+  listScriptReportBindingHealth,
   noteScriptReportBindingError,
   recordScriptReportJob,
   revokeScriptReportBinding,
@@ -21,7 +24,9 @@ import {
 import { getHermesBaseDir, getProfileDir } from '../profiles/profile'
 import { getHermesBin } from '../runtime/path'
 import { execHermesWithBin } from '../runtime/process'
+import { jobFingerprint, withCronJobCreation, withCronJobLock } from '../cron-jobs/job-lock'
 import { readNativeJob } from './native-jobs'
+import { defaultNativeLifecycleGuard, type NativeLifecycleGuard } from './native-guard'
 import { renderWrapper, WRAPPER_DIR } from './wrapper'
 
 const CLI_TIMEOUT_MS = 60_000
@@ -179,35 +184,111 @@ export interface EnrollmentResult {
   nativeState?: 'unknown'
 }
 
-/**
- * Opt-in enrollment of a NEW native `no_agent` job that reports each invocation to one session.
- * Order: authorize and freeze the destination, write the private manifest and spool, record the
- * binding, create the native job paused **with the original target** (so Hermes' create-time
- * lifecycle guard checks the real script), record its id, write the generated wrapper and point the
- * job at it with `hermes cron edit`, verify the stored configuration by id, activate the binding,
- * then resume. The destination is authorized again, as it is now, before activation and before
- * resume. A failure after creation leaves the native job paused, or reports that its state is
- * unknown when a pause could not be confirmed. Existing jobs are never
- * converted. Enrollment and revocation of one binding never interleave.
- */
-export async function enrollScriptReport(request: EnrollmentRequest, runner: HermesCronRunner = defaultCronRunner): Promise<EnrollmentResult> {
-  const bindingId = randomUUID()
-  return withBindingLock(bindingId, () => enrollLocked(bindingId, request, runner))
+/** Bytes Studio reads to fingerprint a target; a larger script is refused, not partially hashed. */
+const MAX_TARGET_BYTES = 8 * 1024 * 1024
+
+/** Bounded read of the resolved regular file (no symlink at the final component). */
+function readTargetBytes(path: string): Buffer {
+  let fd: number
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  } catch {
+    throw new EnrollmentError(409, 'target_changed')
+  }
+  try {
+    const info = fstatSync(fd)
+    if (!info.isFile()) throw new EnrollmentError(409, 'target_changed')
+    if (info.size > MAX_TARGET_BYTES) throw new EnrollmentError(413, 'script_too_large')
+    const buffer = Buffer.alloc(info.size)
+    let offset = 0
+    while (offset < info.size) {
+      const read = readSync(fd, buffer, offset, info.size - offset, offset)
+      if (read === 0) break
+      offset += read
+    }
+    if (offset !== info.size) throw new EnrollmentError(409, 'target_changed')
+    return buffer
+  } finally {
+    closeSync(fd)
+  }
 }
 
-async function enrollLocked(bindingId: string, request: EnrollmentRequest, runner: HermesCronRunner): Promise<EnrollmentResult> {
+function sha256(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex')
+}
+
+export interface TargetPlan {
+  path: string
+  relative: string
+  kind: 'bash' | 'python'
+  sha256: string
+}
+
+/** Resolve and fingerprint a target inside the profile's `scripts/`. */
+export function planTarget(scriptsDir: string, script: string): TargetPlan {
+  const target = resolveTargetScript(scriptsDir, script)
+  return { ...target, sha256: sha256(readTargetBytes(target.path)) }
+}
+
+/**
+ * The current file is still the approved one: same resolution, kind and bytes. Never re-hashes new
+ * bytes as approved.
+ */
+export function verifyTargetPlan(scriptsDir: string, plan: TargetPlan): void {
+  let current: ReturnType<typeof resolveTargetScript>
+  try {
+    current = resolveTargetScript(scriptsDir, plan.relative)
+  } catch {
+    throw new EnrollmentError(409, 'target_changed')
+  }
+  if (current.path !== plan.path || current.kind !== plan.kind || current.relative !== plan.relative) {
+    throw new EnrollmentError(409, 'target_changed')
+  }
+  if (sha256(readTargetBytes(current.path)) !== plan.sha256) throw new EnrollmentError(409, 'target_changed')
+}
+
+/** A frozen, executable plan for a NEW reporting job. Approval executes exactly this. */
+export interface NewEnrollmentPlan {
+  mode: 'new'
+  profile: string
+  name: string
+  schedule: string
+  target: TargetPlan
+  workdir: string | null
+  interpreter: string | null
+  paused: boolean
+}
+
+/** Where reports go. `recheck` adds caller policy (e.g. consent account) to the destination fence. */
+export interface EnrollmentDestination {
+  /** Direct login enrollment reports any destination change after the native calls as destination_changed. */
+  reportChangeAs?: 'destination_changed'
+  userId: number
+  profile: string
+  sessionId: string
+  expectedGeneration: string
+  recheck?: () => void
+}
+
+export function prepareNewEnrollment(request: Omit<EnrollmentRequest, 'userId' | 'sessionId' | 'expectedGeneration'>): NewEnrollmentPlan {
   const profile = text(request.profile, 128, 'invalid_profile')
   const name = text(request.name, 200, 'invalid_name')
   const schedule = text(request.schedule, 200, 'invalid_schedule')
   const home = profileHome(profile)
-  const target = resolveTargetScript(join(home, 'scripts'), request.script)
+  const target = planTarget(join(home, 'scripts'), request.script)
   const workdir = optionalAbsolute(request.workdir, 'invalid_workdir', true)
   const interpreter = optionalAbsolute(request.interpreter, 'invalid_interpreter', false)
   if (interpreter && target.kind !== 'python') throw new EnrollmentError(400, 'invalid_interpreter')
-  assertDestination(request.userId, profile, request.sessionId, request.expectedGeneration)
+  return { mode: 'new', profile, name, schedule, target, workdir, interpreter, paused: request.paused === true }
+}
 
-  const wrapperRelative = `${WRAPPER_DIR}/${bindingId}.py`
-  const wrapperPath = join(home, 'scripts', WRAPPER_DIR, `${bindingId}.py`)
+function recheckDestination(destination: EnrollmentDestination, profile: string): void {
+  if (destination.profile !== profile) throw new EnrollmentError(400, 'profile_mismatch')
+  assertDestination(destination.userId, profile, destination.sessionId, destination.expectedGeneration)
+  destination.recheck?.()
+}
+
+function writePrivateBindingFiles(bindingId: string, target: TargetPlan, cwd: string): string {
   const manifestPath = scriptReportManifestPath(bindingId, 1)
   privateDir(scriptReportsRoot())
   privateDir(dirname(scriptReportBindingDir(bindingId)))
@@ -218,15 +299,53 @@ async function enrollLocked(bindingId: string, request: EnrollmentRequest, runne
     schema_version: 1,
     binding_id: bindingId,
     binding_revision: 1,
-    target: { path: target.path, kind: target.kind, cwd: workdir || dirname(target.path) },
-    target_sha256: createHash('sha256').update(readFileSync(target.path)).digest('hex'),
+    target: { path: target.path, kind: target.kind, cwd },
+    // The approved digest, never a fresh hash of whatever the file holds now.
+    target_sha256: target.sha256,
     spool_dir: scriptReportSpoolDir(bindingId),
     revoked_marker: scriptReportRevokedMarker(bindingId),
     max_pending: MAX_PENDING,
   }, null, 2)}\n`, 0o600)
+  return manifestPath
+}
+
+/**
+ * Opt-in enrollment of a NEW native `no_agent` job that reports each invocation to one session.
+ * Order: authorize and freeze the destination, write the private manifest and spool, record the
+ * binding, create the native job paused **with the original target** (so Hermes' create-time
+ * lifecycle guard checks the real script), record its id, write the generated wrapper and point the
+ * job at it with `hermes cron edit`, verify the stored configuration by id, recheck destination and
+ * plan, activate the binding, then resume. A failure after creation leaves the native job paused.
+ * Enrollment and revocation of one binding never interleave.
+ */
+export async function enrollScriptReport(request: EnrollmentRequest, runner: HermesCronRunner = defaultCronRunner): Promise<EnrollmentResult> {
+  const plan = prepareNewEnrollment(request)
+  return executeNewEnrollment(plan, {
+    userId: request.userId, profile: plan.profile, sessionId: request.sessionId, expectedGeneration: request.expectedGeneration,
+    reportChangeAs: 'destination_changed',
+  }, runner)
+}
+
+export async function executeNewEnrollment(plan: NewEnrollmentPlan, destination: EnrollmentDestination,
+  runner: HermesCronRunner = defaultCronRunner): Promise<EnrollmentResult> {
+  const bindingId = randomUUID()
+  return withBindingLock(bindingId, () => executeNewLocked(bindingId, plan, destination, runner))
+}
+
+async function executeNewLocked(bindingId: string, plan: NewEnrollmentPlan, destination: EnrollmentDestination,
+  runner: HermesCronRunner): Promise<EnrollmentResult> {
+  const { profile, target } = plan
+  const home = profileHome(profile)
+  const scriptsDir = join(home, 'scripts')
+  recheckDestination(destination, profile)
+  verifyTargetPlan(scriptsDir, target)
+
+  const wrapperRelative = `${WRAPPER_DIR}/${bindingId}.py`
+  const wrapperPath = join(home, 'scripts', WRAPPER_DIR, `${bindingId}.py`)
+  const manifestPath = writePrivateBindingFiles(bindingId, target, plan.workdir || dirname(target.path))
   const binding = beginScriptReportBinding({
-    bindingId, userId: request.userId, profile, sessionId: request.sessionId, expectedGeneration: request.expectedGeneration,
-    jobName: name, targetScript: target.relative, wrapperScript: wrapperRelative,
+    bindingId, userId: destination.userId, profile, sessionId: destination.sessionId, expectedGeneration: destination.expectedGeneration,
+    jobName: plan.name, targetScript: target.relative, wrapperScript: wrapperRelative,
   })
   const discard = () => {
     rmSync(wrapperPath, { force: true })
@@ -234,82 +353,152 @@ async function enrollLocked(bindingId: string, request: EnrollmentRequest, runne
     rmSync(scriptReportSpoolDir(bindingId), { recursive: true, force: true })
   }
 
-  let jobId: string | null = null
-  try {
-    // Hermes validates the script it is given at creation only: give it the real target first.
-    const args = ['create', '--name', name, '--deliver', 'local', '--no-agent', '--script', target.relative,
-      '--paused', '--paused-reason', 'Ekko script report enrollment']
-    if (workdir) args.push('--workdir', workdir)
-    if (interpreter) args.push('--interpreter', interpreter)
-    args.push(schedule)
-    const created = await runner(profile, args)
-    jobId = parseCreatedJobId(`${created.stdout}\n${created.stderr}`)
-    if (!jobId) throw new EnrollmentError(422, 'native_create_rejected', created.stderr.trim() || created.stdout.trim() || undefined)
-  } catch (error: any) {
-    failScriptReportBinding(bindingId, error?.code || 'native_create_failed')
-    discard()
-    if (error instanceof EnrollmentError) throw error
-    // A refusal by Hermes (lifecycle guard, invalid schedule, …) surfaces as a failed command.
-    throw new EnrollmentError(422, 'native_create_rejected', error?.message)
+  // The job Hermes created from the approved plan, read before any managed mutation can reach it.
+  let created: Record<string, any> | null = null
+  const create = async (): Promise<string> => {
+    let jobId: string | null
+    try {
+      // Hermes validates the script it is given at creation only: give it the real target first.
+      const args = ['create', '--name', plan.name, '--deliver', 'local', '--no-agent', '--script', target.relative,
+        '--paused', '--paused-reason', 'Ekko script report enrollment']
+      if (plan.workdir) args.push('--workdir', plan.workdir)
+      if (plan.interpreter) args.push('--interpreter', plan.interpreter)
+      args.push(plan.schedule)
+      const output = await runner(profile, args)
+      jobId = parseCreatedJobId(`${output.stdout}\n${output.stderr}`)
+      if (!jobId) throw new EnrollmentError(422, 'native_create_rejected', output.stderr.trim() || output.stdout.trim() || undefined)
+    } catch (error: any) {
+      failScriptReportBinding(bindingId, error?.code || 'native_create_failed')
+      discard()
+      if (error instanceof EnrollmentError) throw error
+      // A refusal by Hermes (lifecycle guard, invalid schedule, …) surfaces as a failed command.
+      throw new EnrollmentError(422, 'native_create_rejected', error?.message)
+    }
+    // The native job exists from here on: record its id before anything else can fail, and never
+    // discard the binding that identifies it.
+    recordScriptReportJob(bindingId, jobId)
+    try {
+      created = readNativeJob(profile, jobId)
+    } catch (error: any) {
+      failScriptReportBinding(bindingId, 'native_config_mismatch')
+      throw new EnrollmentError(502, 'native_config_mismatch', error?.message, jobId)
+    }
+    return jobId
   }
-  recordScriptReportJob(bindingId, jobId)
+  void binding
 
-  const fail = (code: string, status = 502, message?: string): never => {
-    // Leave the native job paused; the job id is reported for cleanup.
-    failScriptReportBinding(bindingId, code)
-    throw new EnrollmentError(status, code, message, jobId!)
-  }
-  try {
-    privateDir(join(home, 'scripts', WRAPPER_DIR))
-    writeExclusive(wrapperPath, renderWrapper(manifestPath), 0o700)
-    await runner(profile, ['edit', jobId, '--script', wrapperRelative])
-  } catch (error: any) {
-    fail('native_edit_failed', 502, error?.message)
-  }
-  let job: Record<string, any> | null = null
-  try {
-    job = readNativeJob(profile, jobId)
-  } catch {
-    // An unreadable jobs file verifies nothing: fail below with the job id, never resume.
-  }
-  if (!job || job.script !== wrapperRelative || job.no_agent !== true || job.deliver !== 'local' || job.enabled !== false) {
-    fail('native_config_mismatch')
-  }
-  // The awaited CLI calls can outlast the destination: never activate or resume on stale authority.
-  const reauthorize = () => authorizeNoticeDestination(request.userId, profile, request.sessionId, request.expectedGeneration)
-  const beforeActivation = reauthorize()
-  if (beforeActivation !== 'ok') fail('destination_changed', 409, beforeActivation)
-  if (!activateScriptReportBinding(bindingId)) {
-    // Revoked (or otherwise settled) meanwhile: never resume a job whose reports are refused.
-    throw new EnrollmentError(409, 'binding_revoked', undefined, jobId)
-  }
-  if (request.paused) return { binding: findScriptReportBinding(bindingId)!, job, resumed: false }
-  const beforeResume = reauthorize()
-  if (beforeResume !== 'ok') {
-    noteScriptReportBindingError(bindingId, 'destination_changed')
-    throw new EnrollmentError(409, 'destination_changed', beforeResume, jobId, 'paused')
-  }
+  return withCronJobCreation(profile, create, async createdJobId => {
+    recordScriptReportJob(bindingId, createdJobId)
+    const fail = (code: string, status = 502, message?: string): never => {
+      // Leave the native job paused; the job id is reported for cleanup.
+      failScriptReportBinding(bindingId, code)
+      throw new EnrollmentError(status, code, message, createdJobId)
+    }
+    const current = () => {
+      recheckDestination(destination, profile)
+      verifyTargetPlan(scriptsDir, target)
+    }
+    const recheck = () => {
+      try {
+        current()
+      } catch (error: any) {
+        if (error instanceof EnrollmentError) {
+          if (destination.reportChangeAs) fail(destination.reportChangeAs, 409, error.code)
+          fail(error.code, error.status)
+        }
+        throw error
+      }
+    }
+    const approved = created
+    if (!approved || approved.script !== target.relative || approved.no_agent !== true || approved.deliver !== 'local'
+      || approved.enabled !== false || approved.name !== plan.name || (approved.workdir ?? null) !== plan.workdir
+      || (approved.interpreter ?? null) !== plan.interpreter) {
+      fail('native_config_mismatch')
+    }
+    // Every stored field except run-time bookkeeping, with the wrapper in place of the target.
+    const expected = jobFingerprint(approved!, { script: wrapperRelative })
+    // Authorization or the target may have changed while the native create ran.
+    recheck()
+    try {
+      privateDir(join(home, 'scripts', WRAPPER_DIR))
+      writeExclusive(wrapperPath, renderWrapper(manifestPath), 0o700)
+      await runner(profile, ['edit', createdJobId, '--script', wrapperRelative])
+    } catch (error: any) {
+      fail('native_edit_failed', 502, error?.message)
+    }
+    let job: Record<string, any> | null = null
+    try {
+      job = readNativeJob(profile, createdJobId)
+    } catch {
+      // An unreadable jobs file verifies nothing: fail below with the job id, never resume.
+    }
+    if (!job || job.script !== wrapperRelative || job.enabled !== false || jobFingerprint(job) !== expected) {
+      fail('native_config_mismatch')
+    }
+    recheck()
+    if (!activateScriptReportBinding(bindingId)) {
+      // Revoked (or otherwise settled) meanwhile: never resume a job whose reports are refused.
+      throw new EnrollmentError(409, 'binding_revoked', undefined, createdJobId)
+    }
+    if (plan.paused) return { binding: findScriptReportBinding(bindingId)!, job, resumed: false }
+    return resumeVerified(bindingId, profile, createdJobId, wrapperRelative, expected, current, runner)
+  })
+}
+
+/**
+ * Resume and verify. The destination, target and approved configuration are checked again once the
+ * native resume returns: if anything was invalidated meanwhile the binding fails (reports stop and
+ * the wrapper becomes a passthrough) and the job is paused again, verified, with its id reported.
+ */
+async function resumeVerified(bindingId: string, profile: string, jobId: string, wrapperRelative: string,
+  expected: string, current: () => void, runner: HermesCronRunner): Promise<EnrollmentResult> {
   try {
     await runner(profile, ['resume', jobId])
   } catch (error: any) {
     noteScriptReportBindingError(bindingId, 'native_resume_failed')
     throw new EnrollmentError(502, 'native_resume_failed', error?.message, jobId, await ensurePaused(profile, jobId, runner))
   }
-  // The resume succeeded; only the snapshot can fail to read. Keep the binding (with its job id) and
-  // report the native state as unobserved instead of failing the request.
-  let snapshot: Record<string, any> | null
+  let invalid: EnrollmentError | null = null
   try {
-    snapshot = readNativeJob(profile, jobId)
-  } catch {
-    return { binding: findScriptReportBinding(bindingId)!, job: null, resumed: true, nativeState: 'unknown' }
+    current()
+  } catch (error) {
+    if (!(error instanceof EnrollmentError)) throw error
+    invalid = error
   }
-  return { binding: findScriptReportBinding(bindingId)!, job: snapshot, resumed: true }
+  let resumed: Record<string, any> | null
+  try {
+    resumed = readNativeJob(profile, jobId)
+  } catch {
+    // The resume succeeded; only the snapshot is unreadable: keep the binding and its job id.
+    if (!invalid) return { binding: findScriptReportBinding(bindingId)!, job: null, resumed: true, nativeState: 'unknown' }
+    resumed = null
+  }
+  if (!invalid && resumed && resumed.enabled === true && resumed.script === wrapperRelative && jobFingerprint(resumed) !== expected) {
+    invalid = new EnrollmentError(409, 'job_changed')
+  }
+  if (invalid) {
+    failActivatedScriptReportBinding(bindingId, invalid.code)
+    const marker = scriptReportRevokedMarker(bindingId)
+    privateDir(scriptReportBindingDir(bindingId))
+    if (!existsSync(marker)) writeExclusive(marker, `${new Date().toISOString()}\n`, 0o600)
+    let paused = false
+    try {
+      await runner(profile, ['pause', jobId])
+      paused = readNativeJob(profile, jobId)?.enabled === false
+    } catch { /* reported below */ }
+    if (!paused) noteScriptReportBindingError(bindingId, `${invalid.code};native_pause_failed`)
+    throw new EnrollmentError(invalid.status, invalid.code, paused ? undefined : 'native pause unverified', jobId)
+  }
+  if (!resumed || resumed.enabled !== true || resumed.script !== wrapperRelative) {
+    noteScriptReportBindingError(bindingId, 'native_resume_unverified')
+    throw new EnrollmentError(502, 'native_resume_unverified', undefined, jobId)
+  }
+  return { binding: findScriptReportBinding(bindingId)!, job: resumed, resumed: true }
 }
 
 /**
  * A failed resume may still have enabled the job: pause it by id and report only what is observed.
- * Reading the job can fail as well (a missing or unreadable jobs file); that never skips the pause
- * and never loses the job id or the native state.
+ * Reading the job can fail as well; that never skips the pause and never loses the job id.
  */
 async function ensurePaused(profile: string, jobId: string, runner: HermesCronRunner): Promise<'paused' | 'unknown'> {
   let observedPaused = false
@@ -329,6 +518,176 @@ async function ensurePaused(profile: string, jobId: string, runner: HermesCronRu
   } catch {
     return 'unknown'
   }
+}
+
+/** A frozen plan to start reporting future invocations of an EXISTING `no_agent` job. */
+export interface AdoptionPlan {
+  mode: 'existing'
+  profile: string
+  jobId: string
+  name: string
+  schedule: string
+  target: TargetPlan
+  workdir: string | null
+  interpreter: string | null
+  /** The job's script exactly as configured (may be an in-profile alias of `target`). */
+  configuredScript: string
+  /** Approved configuration of the job (run-time bookkeeping excluded). */
+  jobFingerprint: string
+  /** The approved scheduling intent: enabled at consent time. Resumed only if so, and only if unchanged. */
+  resume: boolean
+}
+
+function activeBindingForJob(profile: string, jobId: string): ScriptReportBinding | undefined {
+  return listScriptReportBindingHealth(profile)
+    .find(binding => binding.job_id === jobId && (binding.state === 'enrolling' || binding.state === 'active'))
+}
+
+export function prepareAdoption(profileInput: string, jobIdInput: string): AdoptionPlan {
+  const profile = text(profileInput, 128, 'invalid_profile')
+  const jobId = text(jobIdInput, 200, 'invalid_job')
+  const home = profileHome(profile)
+  const job = readNativeJob(profile, jobId)
+  if (!job) throw new EnrollmentError(404, 'job_not_found')
+  if (job.no_agent !== true) throw new EnrollmentError(422, 'agent_job_requires_session_binding')
+  if (String(job.deliver || '') !== 'local') throw new EnrollmentError(422, 'explicit_delivery_target')
+  const script = typeof job.script === 'string' ? job.script : ''
+  if (script.split(/[\\/]/)[0] === WRAPPER_DIR || activeBindingForJob(profile, jobId)) {
+    throw new EnrollmentError(409, 'already_enrolled')
+  }
+  const target = planTarget(join(home, 'scripts'), script)
+  const interpreter = typeof job.interpreter === 'string' && job.interpreter ? job.interpreter : null
+  if (interpreter && target.kind !== 'python') throw new EnrollmentError(400, 'invalid_interpreter')
+  return {
+    mode: 'existing', profile, jobId, name: String(job.name || jobId),
+    schedule: String(job.schedule_display || job.schedule?.display || ''),
+    target, workdir: typeof job.workdir === 'string' && job.workdir ? job.workdir : null, interpreter,
+    configuredScript: script, jobFingerprint: jobFingerprint(job), resume: job.enabled !== false,
+  }
+}
+
+/** Claimed or running executions of the job in its native ledger; unreadable counts as busy. */
+export type JobBusyProbe = (hermesHome: string, jobId: string) => boolean
+
+export const defaultJobBusyProbe: JobBusyProbe = (hermesHome, jobId) => {
+  const path = join(hermesHome, 'cron', 'executions.db')
+  if (!existsSync(path)) return false
+  let db: DatabaseSync | null = null
+  try {
+    db = new DatabaseSync(path, { open: true, readOnly: true })
+    db.exec('PRAGMA busy_timeout=2000')
+    const row = db.prepare("SELECT COUNT(*) AS n FROM executions WHERE job_id=? AND status IN ('claimed','running')")
+      .get(jobId) as { n: number } | undefined
+    return Number(row?.n || 0) > 0
+  } catch {
+    return true
+  } finally {
+    db?.close()
+  }
+}
+
+export interface AdoptionDeps {
+  runner?: HermesCronRunner
+  guard?: NativeLifecycleGuard
+  busy?: JobBusyProbe
+}
+
+/**
+ * Prospective adoption of an EXISTING `no_agent` job: future invocations report to the session.
+ * Under the job lock: re-verify the approved configuration and target, run Hermes' own create-time
+ * lifecycle guard on the target (native `update_job` never re-runs it), refuse a busy job, pause it,
+ * point it at a generated wrapper, verify everything else is unchanged, recheck the destination,
+ * activate, and resume only if it was scheduled at consent time. Failures leave the job paused and
+ * the binding identifiable. No duplicate job, no historical backfill.
+ */
+export async function executeAdoption(plan: AdoptionPlan, destination: EnrollmentDestination, deps: AdoptionDeps = {}): Promise<EnrollmentResult> {
+  const runner = deps.runner || defaultCronRunner
+  const guard = deps.guard || defaultNativeLifecycleGuard
+  const busy = deps.busy || defaultJobBusyProbe
+  const { profile, jobId, target } = plan
+  const home = profileHome(profile)
+  const scriptsDir = join(home, 'scripts')
+  const bindingId = randomUUID()
+  // The configured spelling must still resolve to the approved target.
+  const verifyConfiguredScript = () => {
+    let resolved: string
+    try {
+      resolved = resolveTargetScript(scriptsDir, plan.configuredScript).path
+    } catch {
+      throw new EnrollmentError(409, 'target_changed')
+    }
+    if (resolved !== target.path) throw new EnrollmentError(409, 'target_changed')
+  }
+  return withCronJobLock(profile, jobId, () => withBindingLock(bindingId, async () => {
+    const unchanged = () => {
+      recheckDestination(destination, profile)
+      const job = readNativeJob(profile, jobId)
+      // Configuration and the configured paused/scheduled intent are both part of the approval.
+      if (!job || jobFingerprint(job) !== plan.jobFingerprint || (job.enabled !== false) !== plan.resume) {
+        throw new EnrollmentError(409, 'job_changed')
+      }
+      if (activeBindingForJob(profile, jobId)) throw new EnrollmentError(409, 'already_enrolled')
+      verifyTargetPlan(scriptsDir, target)
+      verifyConfiguredScript()
+      return job
+    }
+    unchanged()
+    const verdict = await guard(home, target.relative)
+    if (!verdict.ok) {
+      throw new EnrollmentError(verdict.refused ? 422 : 503, verdict.refused ? 'native_guard_rejected' : 'native_guard_unavailable', verdict.reason)
+    }
+    const before = unchanged()
+    if (busy(home, jobId)) throw new EnrollmentError(409, 'job_busy')
+
+    const wrapperRelative = `${WRAPPER_DIR}/${bindingId}.py`
+    const wrapperPath = join(scriptsDir, WRAPPER_DIR, `${bindingId}.py`)
+    const manifestPath = writePrivateBindingFiles(bindingId, target, plan.workdir || dirname(target.path))
+    beginScriptReportBinding({
+      bindingId, userId: destination.userId, profile, sessionId: destination.sessionId, expectedGeneration: destination.expectedGeneration,
+      jobName: plan.name, targetScript: target.relative, wrapperScript: wrapperRelative,
+    })
+    recordScriptReportJob(bindingId, jobId)
+    const fail = (code: string, status = 502, message?: string): never => {
+      failScriptReportBinding(bindingId, code)
+      throw new EnrollmentError(status, code, message, jobId)
+    }
+    if (before.enabled !== false) {
+      try {
+        await runner(profile, ['pause', jobId])
+      } catch (error: any) {
+        fail('native_pause_failed', 502, error?.message)
+      }
+    }
+    const paused = readNativeJob(profile, jobId)
+    if (!paused || paused.enabled !== false || jobFingerprint(paused) !== plan.jobFingerprint) fail('job_changed', 409)
+    if (busy(home, jobId)) fail('job_busy', 409)
+    try {
+      privateDir(join(scriptsDir, WRAPPER_DIR))
+      writeExclusive(wrapperPath, renderWrapper(manifestPath), 0o700)
+      await runner(profile, ['edit', jobId, '--script', wrapperRelative])
+    } catch (error: any) {
+      fail('native_edit_failed', 502, error?.message)
+    }
+    const edited = readNativeJob(profile, jobId)
+    // Only the script may differ from the approved configuration.
+    if (!edited || edited.script !== wrapperRelative || edited.enabled !== false
+      || jobFingerprint(edited, { script: plan.configuredScript }) !== plan.jobFingerprint) {
+      fail('native_config_mismatch')
+    }
+    const current = () => {
+      recheckDestination(destination, profile)
+      verifyTargetPlan(scriptsDir, target)
+    }
+    try {
+      current()
+    } catch (error: any) {
+      if (error instanceof EnrollmentError) fail(error.code, error.status)
+      throw error
+    }
+    if (!activateScriptReportBinding(bindingId)) throw new EnrollmentError(409, 'binding_revoked', undefined, jobId)
+    if (!plan.resume) return { binding: findScriptReportBinding(bindingId)!, job: edited, resumed: false }
+    return resumeVerified(bindingId, profile, jobId, wrapperRelative, jobFingerprint(edited!), current, runner)
+  }))
 }
 
 /**

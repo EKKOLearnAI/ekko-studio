@@ -603,11 +603,33 @@ export class ChatRunSocket {
     return { contextId, finish: (state: 'ended' | 'interrupted' | 'failed') => this.taskPlanRuns.finish(contextId, state) }
   }
 
-  private beginTaskPlanRun(sessionId: string | undefined, profile: string, sessionTasksEnabled = true) {
+  private beginTaskPlanRun(sessionId: string | undefined, profile: string, sessionTasksEnabled = true, accountId?: number) {
     if (!sessionId) return undefined
     runMcpCredentials.revoke(sessionId)
     this.clarificationRuns.finishSession(sessionId)
-    return this.taskPlanRuns.begin(sessionId, profile, () => this.sessionMap.get(sessionId), undefined, sessionTasksEnabled)
+    return this.taskPlanRuns.begin(sessionId, profile, () => this.sessionMap.get(sessionId), undefined, sessionTasksEnabled, accountId)
+  }
+
+  /**
+   * Authority for a cron consent request made with a live turn context: the turn's session and the
+   * account that started it, with the same eligibility as session goals.
+   */
+  cronConsentTurnAuthority(contextId: string, profile: string): { sessionId: string; accountId: number } {
+    const authority = this.taskPlanRuns.authorityForContext(contextId, profile)
+    this.sessionTasksContext(contextId, profile)
+    return authority
+  }
+
+  /** Content-free hint that the pending cron consents of a session changed; clients refetch. */
+  publishCronConsentUpdate(sessionId: string) {
+    const session = getSession(sessionId)
+    if (!session) return
+    for (const socketId of this.nsp.adapter.rooms.get(`session:${sessionId}`) || []) {
+      const socket = this.nsp.sockets.get(socketId)
+      if (socket && !socket.data?.sessionShare && this.noticeRecipientAllowed(socket, sessionId, session.profile || 'default')) {
+        socket.emit('cron_consent.updated', { event: 'cron_consent.updated', session_id: sessionId })
+      }
+    }
   }
 
   private finishTaskPlanRun(sessionId: string, event: string, payload?: any, contextId?: string) {
@@ -2050,7 +2072,9 @@ export class ChatRunSocket {
         return
       }
 
-      const planContext = mcpCapabilities.interaction ? this.beginTaskPlanRun(data.session_id, profile, !data.background_delegation_id) : undefined
+      const planContext = mcpCapabilities.interaction
+        ? this.beginTaskPlanRun(data.session_id, profile, !data.background_delegation_id, (socket.data?.sessionShare ? undefined : (socket.data?.user as AuthenticatedUser | undefined)?.id))
+        : undefined
       if (planContext) data.instructions = [data.instructions, taskPlanRunInstruction()].filter(Boolean).join('\n\n')
       let fullInstructions = data.instructions
         ? `${getSystemPrompt(undefined, { source, mcpCapabilities })}\n${data.instructions}`
@@ -2129,7 +2153,8 @@ export class ChatRunSocket {
 
     const isCommand = typeof data.input === 'string' && parseCodingAgentSessionCommand(data.input)
     const groupRun = source === 'group_chat' || data.session_source === 'group_chat'
-    const planContext = isCommand || !mcpCapabilities.interaction ? undefined : this.beginTaskPlanRun(data.session_id, profile)
+    const planContext = isCommand || !mcpCapabilities.interaction ? undefined
+      : this.beginTaskPlanRun(data.session_id, profile, true, groupRun ? undefined : (socket.data?.sessionShare ? undefined : (socket.data?.user as AuthenticatedUser | undefined)?.id))
     const credentialContext = planContext || (groupRun && !isCommand ? this.beginTaskPlanRun(data.session_id, profile) : undefined)
     const interactionContext = planContext && source !== 'workflow' && data.session_source !== 'workflow'
       && source !== 'global_agent' && data.session_source !== 'global_agent' ? planContext : undefined

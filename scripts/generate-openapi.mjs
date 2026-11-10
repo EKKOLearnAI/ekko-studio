@@ -53,6 +53,7 @@ const tagMappings = {
   'modules/hermes/routes/plugins.ts': { name: 'Plugins', description: 'Plugin browsing and management' },
   'modules/hermes/routes/memory.ts': { name: 'Memory', description: 'Agent memory files' },
   'modules/hermes/routes/jobs.ts': { name: 'Jobs', description: 'Scheduled job management' },
+  'modules/hermes/routes/cron-consent.ts': { name: 'Cron Consent', description: 'Model-initiated cron result delivery requests that the logged-in user approves in Studio' },
   'modules/hermes/routes/script-reports.ts': { name: 'Script Reports', description: 'Opt-in script invocation reports for no_agent cron jobs' },
   'modules/hermes/routes/cron-history.ts': { name: 'Jobs', description: 'Cron job history' },
   'modules/hermes/routes/cron-session-bindings.ts': { name: 'Jobs', description: 'Explicit cron job to session bindings' },

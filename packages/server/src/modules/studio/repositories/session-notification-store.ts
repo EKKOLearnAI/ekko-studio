@@ -11,7 +11,8 @@ export const isVisibleNoticeDisposition = (disposition: string) => (VISIBLE_DISP
 export type SessionNotificationKind = 'script_report' | 'cron'
 
 /** Only `notified`, `status_only` and `unknown` are shown; `silent` is recorded, never shown. */
-export type SessionNotificationDisposition = 'notified' | 'status_only' | 'unknown' | 'silent'
+/** `owner_missing` is recorded only: a consent binding whose approving account lost access. */
+export type SessionNotificationDisposition = 'notified' | 'status_only' | 'unknown' | 'silent' | 'owner_missing'
 
 /** Durable attention key of an accepted notice in `session_attention_events`. */
 export const NOTICE_ATTENTION_PREFIX = 'session-notice:'

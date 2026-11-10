@@ -20,7 +20,7 @@ let origin: string
 let root: string
 let hermesHome: string
 let m: any
-const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean; resumeCommitsThenFails?: boolean; failPause?: boolean; corruptOnResume?: boolean; corruptOnPause?: boolean; corruptAfterResume?: boolean; corruptAfterEdit?: boolean } = { calls: [], jobs: [] }
+const cli: { calls: string[][]; jobs: any[]; createGate?: Promise<void>; editGate?: Promise<void>; failResume?: boolean; resumeCommitsThenFails?: boolean; failPause?: boolean; corruptOnResume?: boolean; corruptOnPause?: boolean; corruptAfterResume?: boolean; corruptAfterCreate?: boolean; corruptAfterEdit?: boolean } = { calls: [], jobs: [] }
 const users: Record<string, { id: number; token: string; modelRun: string }> = {}
 
 function corruptJobs() { writeFileSync(join(hermesHome, 'cron', 'jobs.json'), '{ not json') }
@@ -37,7 +37,7 @@ beforeEach(async () => {
   vi.stubEnv('HERMES_WEB_UI_HOME', join(root, 'studio'))
   vi.stubEnv('HERMES_HOME', hermesHome)
   vi.stubEnv('HERMES_WEB_UI_TEST_DB_DIR', join(root, 'db'))
-  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false; cli.resumeCommitsThenFails = false; cli.failPause = false; cli.corruptOnResume = false; cli.corruptOnPause = false; cli.corruptAfterResume = false; cli.corruptAfterEdit = false
+  cli.calls = []; cli.jobs = []; cli.createGate = undefined; cli.editGate = undefined; cli.failResume = false; cli.resumeCommitsThenFails = false; cli.failPause = false; cli.corruptOnResume = false; cli.corruptOnPause = false; cli.corruptAfterResume = false; cli.corruptAfterCreate = false; cli.corruptAfterEdit = false
   vi.doMock(`${HERMES}/services/runtime/process`, () => ({
     execHermesWithBin: async (_bin: string, args: string[], options: any) => {
       cli.calls.push(args.slice(1))
@@ -52,6 +52,7 @@ beforeEach(async () => {
         cli.jobs.push({ id, name: flag('--name'), script: flag('--script'), no_agent: rest.includes('--no-agent'), deliver: flag('--deliver'),
           enabled: !rest.includes('--paused') })
         saveJobs()
+        if (cli.corruptAfterCreate) corruptJobs()
         return { stdout: `\u001b[32mCreated job: ${id}\u001b[0m\n`, stderr: '' }
       }
       const job = cli.jobs.find(item => item.id === rest[0])
@@ -231,6 +232,15 @@ describe('script report enrollment', () => {
     expect(cli.jobs[0].enabled).toBe(true)
   })
 
+  it('keeps the binding and job id when the created job cannot be read back', async () => {
+    cli.corruptAfterCreate = true
+    const failed = await enroll()
+    expect(failed.status).toBe(502)
+    expect(failed.body).toEqual({ error: 'native_config_mismatch', job_id: 'job1' })
+    expect(commands()).toEqual(['create'])
+    expect(m.db.prepare('SELECT state, job_id FROM script_report_bindings').all()).toEqual([{ state: 'failed', job_id: 'job1' }])
+  })
+
   it('keeps a successful enrollment and its job id when the resumed job cannot be read back', async () => {
     cli.corruptAfterResume = true
     const done = await enroll()
@@ -288,7 +298,10 @@ describe('script report enrollment', () => {
       const failed = await pending
       expect(failed.status).toBe(409)
       expect(failed.body).toMatchObject({ error: 'destination_changed', job_id: 'job1' })
-      expect(commands()).toEqual(['create', 'edit'])
+      // Accepted adaptation: the integrated executor rechecks the destination right after the native
+      // create, so a change during create is refused before edit (commands: create only); a change
+      // during edit is refused after it. Either way: paused job, failed binding, no activation/resume.
+      expect(commands()).toEqual(gate === 'create' ? ['create'] : ['create', 'edit'])
       expect(cli.jobs[0].enabled).toBe(false)
       expect(m.db.prepare('SELECT state, job_id FROM script_report_bindings').all()).toEqual([{ state: 'failed', job_id: 'job1' }])
     })
