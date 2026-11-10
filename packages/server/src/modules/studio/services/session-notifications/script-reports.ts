@@ -346,11 +346,10 @@ function writeReceipt(binding: ScriptReportBinding, invocation: string, report: 
 /** First receipt wins: exclusive temp file, fsync, no-replace link, directory fsync. */
 function publishReceipt(dir: string, name: string, receipt: Record<string, unknown>): void {
   const path = join(dir, name)
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 })
-    // A new receipts directory must survive power loss with the receipt in it.
-    syncDirectory(dirname(dir))
-  }
+  // Every publish re-syncs the parent: an earlier pass may have created the directory and then failed
+  // its parent sync, so existence is no proof that the directory entry is durable.
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  syncDirectory(dirname(dir))
   const temp = join(dir, `.${name}.${randomUUID()}.tmp`)
   const fd = openSync(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600)
   try {

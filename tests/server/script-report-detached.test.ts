@@ -545,10 +545,12 @@ describe('appended script report notices', { timeout: 30_000 }, () => {
     expect(notices().filter((row: any) => JSON.stringify(row.payload).includes('starting'))).toHaveLength(1)
   })
 
-  it('an append whose admission directory cannot be synced fails instead of reporting queued', () => {
+  it('an append fails while its admission directories cannot be synced, then one retry admits it once', () => {
     const binding = bind('launcher.sh')
     const invocation = reserve(binding)
-    const out = spawnSync(PYTHON, ['-c', [
+    const body = join(root, 'append-body.txt')
+    writeFileSync(body, 'starting up')
+    const faulty = () => spawnSync(PYTHON, ['-c', [
       'import importlib.util, os, stat, sys',
       `spec = importlib.util.spec_from_file_location("w", ${JSON.stringify(wrapperOf(binding))})`,
       'w = importlib.util.module_from_spec(spec); spec.loader.exec_module(w)',
@@ -557,11 +559,19 @@ describe('appended script report notices', { timeout: 30_000 }, () => {
       '    if stat.S_ISDIR(os.fstat(fd).st_mode): raise OSError(5, "EIO")',
       '    return real(fd)',
       'os.fsync = failing',
-      'sys.stdin = open(os.devnull)',
-      'sys.exit(w.helper(["append", "--event-id", "a-2", "--event-kind", "start", "--content-file", "/dev/null"]))',
+      `sys.exit(w.helper(["append", "--event-id", "a-2", "--event-kind", "start", "--content-file", ${JSON.stringify(body)}]))`,
     ].join('\n')], { encoding: 'utf8', env: { ...process.env, EKKO_SCRIPT_REPORT_INVOCATION: invocation } })
-    expect(out.stdout).not.toContain('"queued"')
-    expect(out.status).not.toBe(3)
+    // The fault persists across retries: every attempt fails, none reports queued.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const out = faulty()
+      expect(out.stdout).not.toContain('"queued"')
+      expect(out.status).not.toBe(3)
+    }
+    // Faults cleared: one retry admits the event exactly once.
+    expect(append(binding, invocation, 'a-2', 'start', 'starting up').status).toBe(3)
+    expect(append(binding, invocation, 'a-2', 'start', 'starting up').status).toBe(3)
+    m.importer.importScriptReports()
+    expect(notices().filter((row: any) => JSON.stringify(row.payload).includes('starting up'))).toHaveLength(1)
   })
 
   it('a committed notice is recovered once; a changed replay never acquires another acceptance', () => {
