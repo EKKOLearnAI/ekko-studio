@@ -4,6 +4,14 @@
 
 ## 安装与最小示例
 
+宿主可以在 `AgentToolContext` 提供四个异步扩展回调：
+`transformInput(AgentMessageInput[])` 在准备本轮消息时转换输入；
+`transformContext(AgentMessage[])` 在每次模型请求前转换消息副本；
+`beforeTool(name, input)` 返回新参数，并在之后执行正常工具授权；
+`afterTool(name, input, result)` 转换成功执行的结果。授权拒绝或失败结果不会进入
+`afterTool`，回调抛错会终止相应操作。回调应遵循上下文的 `signal`，不得跨调用保留。
+这些宿主扩展不要求独立运行的 Ekko Agent 安装 Studio。
+
 ```bash
 npm install ekko-agent
 ```
@@ -3783,6 +3791,10 @@ export interface AgentToolAuthorizationDecision {
 export type AgentToolAuthorizer = ( toolName: string, input: Record<string, unknown>, context?: AgentToolContext, ) => Promise<AgentToolAuthorizationDecision>
 
 export interface AgentToolContext {
+  beforeTool?: (name: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>
+  afterTool?: (name: string, input: Record<string, unknown>, result: AgentToolResult) => Promise<AgentToolResult>
+  transformInput?: (messages: import('../model/messages').AgentMessageInput[]) => Promise<import('../model/messages').AgentMessageInput[]>
+  transformContext?: (messages: import('../model/types').AgentMessage[]) => Promise<import('../model/types').AgentMessage[]>
   listSessionTasks?: () => import('./session-tasks').AgentSessionTasksSnapshot | Promise<import('./session-tasks').AgentSessionTasksSnapshot>
   updateSessionTasks?: (update: import('./session-tasks').AgentSessionTasksUpdate) => import('./session-tasks').AgentSessionTasksSnapshot | Promise<import('./session-tasks').AgentSessionTasksSnapshot>
   updatePlan?: (update: import('./plan').AgentPlanUpdate) => import('./plan').AgentTaskPlan

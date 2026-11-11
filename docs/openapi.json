@@ -133,6 +133,10 @@
       "description": "Cross-agent workflow orchestration"
     },
     {
+      "name": "Studio Plugins",
+      "description": "Studio plugin installation, lifecycle, configuration, frontend API bridge, tools, commands, events and automation actions"
+    },
+    {
       "name": "Sessions",
       "description": "Cross-agent chat session management"
     },
@@ -21238,6 +21242,536 @@
                 },
                 "required": [
                   "slug"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/plugins": {
+      "get": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "listStudioPlugins",
+        "summary": "List globally installed plugins and registered tools, commands and actions for every account; no Profile selection required",
+        "parameters": [],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        }
+      }
+    },
+    "/api/studio/plugins/events": {
+      "get": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "pollStudioPluginEvents",
+        "summary": "Poll user/profile-scoped plugin events with generation and cursor",
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Execution context only; installations and enablement are global. Managed run credentials remain bound to their run Profile."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "pluginId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        }
+      }
+    },
+    "/api/studio/plugins/install": {
+      "post": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "installStudioPlugin",
+        "summary": "Install or upgrade a trusted compiled plugin; requires a super administrator login",
+        "parameters": [],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "description": "Absolute local directory, package@exact-version, or github:owner/repo#40-character-commit"
+                  },
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "trusted": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "pluginId": {
+                    "type": "string",
+                    "description": "Existing plugin id when upgrading"
+                  }
+                },
+                "required": [
+                  "source",
+                  "revision",
+                  "trusted"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/plugins/{id}": {
+      "patch": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "updateStudioPlugin",
+        "summary": "Globally enable, disable, configure, reload, roll back or uninstall a plugin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "config": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "reload",
+                      "rollback",
+                      "uninstall"
+                    ]
+                  }
+                },
+                "required": [
+                  "revision"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/plugins/{id}/api": {
+      "post": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "requestStudioPluginApi",
+        "summary": "Call an existing Studio JSON API using the plugin capabilities and current user permissions",
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Execution context only; installations and enablement are global. Managed run credentials remain bound to their run Profile."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "GET",
+                          "POST",
+                          "PUT",
+                          "PATCH",
+                          "DELETE"
+                        ]
+                      },
+                      "query": {
+                        "type": "object",
+                        "additionalProperties": true
+                      },
+                      "body": {}
+                    }
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/plugins/{id}/client": {
+      "get": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "getStudioPluginClient",
+        "summary": "Read the enabled plugin frontend module as JSON {source}",
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Execution context only; installations and enablement are global. Managed run credentials remain bound to their run Profile."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        }
+      }
+    },
+    "/api/studio/plugins/{id}/invoke": {
+      "post": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "invokeStudioPlugin",
+        "summary": "Invoke an enabled plugin RPC, tool, command or automation action",
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Execution context only; installations and enablement are global. Managed run credentials remain bound to their run Profile."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "rpc",
+                      "tool",
+                      "command",
+                      "action"
+                    ]
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "input": {},
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/plugins/{id}/logs": {
+      "get": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "getStudioPluginLogs",
+        "summary": "Read the latest plugin logs; requires a super administrator login",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        }
+      }
+    },
+    "/api/studio/plugins/{id}/storage": {
+      "post": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "accessStudioPluginStorage",
+        "summary": "Access global plugin JSON storage with optional developer namespaces; requires storage.client; missing keys return present=false",
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Execution context only; installations and enablement are global. Managed run credentials remain bound to their run Profile."
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "get",
+                      "set",
+                      "delete",
+                      "keys"
+                    ]
+                  },
+                  "key": {
+                    "type": "string"
+                  },
+                  "value": {},
+                  "namespace": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action"
                 ]
               }
             }

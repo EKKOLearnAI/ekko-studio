@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PluginNotifications from '@/components/plugins/PluginNotifications.vue'
 import { ensureRemoteBrowserRelay, stopRemoteBrowserRelay } from '@/composables/useRemoteBrowserRelay'
 import { deploymentUrl } from '@/utils/deployment-url'
 import {
@@ -152,7 +153,7 @@ provide(mobileNavigationKey, {
   target: computed(() => !isWideViewport.value && hasNavigationRail.value ? mobileSidebarHost.value : null),
 });
 const hasMobileContextSidebar = computed(() =>
-  !['hermes.connections', 'hermes.agentManager', 'hermes.models', 'hermes.usage', 'hermes.apiRelay'].includes(String(route.name)),
+  !['studio.plugins', 'studio.pluginPage', 'hermes.connections', 'hermes.agentManager', 'hermes.models', 'hermes.usage', 'hermes.apiRelay'].includes(String(route.name)),
 );
 watch([hasNavigationRail, isWideViewport], () => { mobileNavigationOpen.value = false; });
 watch(sessionSearchOpen, (open) => { if (open) mobileNavigationOpen.value = false; });
@@ -166,6 +167,8 @@ function handleWideViewportChange(event: MediaQueryListEvent) {
 }
 const usesPageSidebar = computed(() =>
   [
+    "studio.plugins",
+    "studio.pluginPage",
     "hermes.person",
     "hermes.chat",
     "hermes.session",
@@ -320,6 +323,7 @@ useKeyboard();
     :rtl="naiveRtl"
   >
     <NMessageProvider>
+      <PluginNotifications />
       <AuthEventListener />
       <NDialogProvider>
         <NNotificationProvider>

@@ -11,7 +11,7 @@ const PREVIEW_TTL_MS = 5 * 60 * 1000
 const MAX_PENDING_PREVIEWS = 1000
 const CREDENTIAL_KEYS = new Set(['token', 'accesstoken', 'access_token', 'refreshtoken', 'refresh_token', 'apikey', 'api_key', 'password', 'secret', 'clientsecret', 'client_secret', 'privatekey', 'private_key', 'authorization', 'bearer', 'cookie', 'sessionid', 'session_id', 'runid', 'run_id'])
 const NODE_KEYS = ['id', 'type', 'position']
-const NODE_DATA_KEYS = ['title', 'agent', 'agentMode', 'agentPreset', 'input', 'skills', 'approvalRequired', 'orchestration']
+const NODE_DATA_KEYS = ['title', 'agent', 'agentMode', 'agentPreset', 'pluginAction', 'pluginInput', 'input', 'skills', 'approvalRequired', 'orchestration']
 const LEGACY_NODE_RUNTIME_BINDING_KEYS = ['provider', 'model', 'apiMode', 'reasoningEffort']
 const IMPORT_NODE_DATA_KEYS = [...NODE_DATA_KEYS, ...LEGACY_NODE_RUNTIME_BINDING_KEYS, 'executionPolicy']
 const DEFINITION_KEYS = ['name', 'nodes', 'edges', 'viewport']
@@ -51,6 +51,7 @@ function exportNode(raw: any): any {
   const node = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
   const data = node.data && typeof node.data === 'object' && !Array.isArray(node.data) ? node.data : {}
   const exportedData = cloneAllowed(data, NODE_DATA_KEYS)
+  if (typeof exportedData.pluginInput === 'string') assertDepthAndCredentials(JSON.parse(exportedData.pluginInput || '{}'))
   const orchestration = allowedObject(data.orchestration, NODE_ORCHESTRATION_KEYS)
   if (orchestration) exportedData.orchestration = orchestration
   return { ...cloneAllowed(node, NODE_KEYS), data: exportedData }
@@ -102,6 +103,7 @@ function assertDefinitionAllowlist(definition: Record<string, any>): void {
     if (node.data && typeof node.data === 'object' && !Array.isArray(node.data)) {
       // executionPolicy was present in prerelease Workflow exports; accept and discard it.
       assertAllowedKeys(node.data, IMPORT_NODE_DATA_KEYS, 'node data')
+      if (typeof node.data.pluginInput === 'string') assertDepthAndCredentials(JSON.parse(node.data.pluginInput || '{}'))
       if (node.data.orchestration != null) {
         if (typeof node.data.orchestration !== 'object' || Array.isArray(node.data.orchestration)) throw new Error('workflow import node orchestration must be an object')
         assertAllowedKeys(node.data.orchestration, NODE_ORCHESTRATION_KEYS, 'node orchestration')

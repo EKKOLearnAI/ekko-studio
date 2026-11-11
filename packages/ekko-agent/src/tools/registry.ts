@@ -77,6 +77,12 @@ export class AgentToolRegistry {
   }
 
   async execute(name: string, input: Record<string, unknown>, context?: AgentToolContext): Promise<AgentToolResult> {
+    if (context?.beforeTool) input = await context.beforeTool(name, input)
+    const result = await this.executeAuthorized(name, input, context)
+    return result.ok && context?.afterTool ? context.afterTool(name, input, result) : result
+  }
+
+  private async executeAuthorized(name: string, input: Record<string, unknown>, context?: AgentToolContext): Promise<AgentToolResult> {
     const tool = this.tools.get(name)
     if (!tool) {
       return {

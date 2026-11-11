@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PluginSlots from '@/components/plugins/PluginSlots.vue'
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, ref, watch } from "vue";
@@ -128,6 +129,7 @@ onMounted(() => {
             <ModelSettings />
           </NTabPane>
         </NTabs>
+        <PluginSlots slot="settings" />
       </div>
     </div>
   </PageLoading>

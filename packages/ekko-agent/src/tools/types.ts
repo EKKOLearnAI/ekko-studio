@@ -43,6 +43,11 @@ export type AgentToolAuthorizer = (
 ) => Promise<AgentToolAuthorizationDecision>
 
 export interface AgentToolContext {
+  /** Host extensions run before authorization; transformed arguments are authorized normally. */
+  beforeTool?: (name: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>
+  afterTool?: (name: string, input: Record<string, unknown>, result: AgentToolResult) => Promise<AgentToolResult>
+  transformInput?: (messages: import('../model/messages').AgentMessageInput[]) => Promise<import('../model/messages').AgentMessageInput[]>
+  transformContext?: (messages: import('../model/types').AgentMessage[]) => Promise<import('../model/types').AgentMessage[]>
   /** Host-bound reader for durable session goals; distinct from this run's updatePlan callback. */
   listSessionTasks?: () => import('./session-tasks').AgentSessionTasksSnapshot | Promise<import('./session-tasks').AgentSessionTasksSnapshot>
   /** Host-bound writer for the current session's goals, separate from run execution plans. */

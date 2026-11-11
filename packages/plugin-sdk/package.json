@@ -1,0 +1,7 @@
+{
+  "name": "@ekko-studio/plugin-sdk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "exports": { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } }
+}

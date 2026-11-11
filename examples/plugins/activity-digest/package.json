@@ -1,0 +1,9 @@
+{
+  "name": "studio-activity-digest-example", "version": "1.0.0", "type": "module",
+  "studioPlugin": {
+    "id": "activity-digest", "name": "Activity digest", "version": "1.0.0", "apiVersion": 1,
+    "description": "Observe Studio business events and produce a recurring or workflow-triggered digest.",
+    "server": "server.mjs", "capabilities": ["events", "automation", "commands"],
+    "configSchema": { "type": "object", "properties": { "intervalMs": { "type": "integer", "minimum": 10000, "default": 60000 } }, "additionalProperties": false }
+  }
+}

@@ -47,6 +47,7 @@ import {
 } from '../../public/workflow-runtime'
 import { logger } from '../../public/logging'
 import { assertAgentAvailable } from '../agent-availability'
+import { cancelPluginWorkflow, parsePluginAction, runPluginWorkflow } from '../plugins/workflow'
 
 export type { WorkflowCreateInput, WorkflowRecord, WorkflowUpdateInput }
 
@@ -113,6 +114,8 @@ export interface WorkflowNodeSnapshot {
   type: string
   position?: { x: number; y: number }
   data: {
+    pluginAction?: string
+    pluginInput?: string
     title: string
     agent: string
     agentMode: 'scoped' | 'global'
@@ -130,7 +133,7 @@ export interface WorkflowNodeSnapshot {
 }
 
 export function assertWorkflowAgentDependencies(nodes: WorkflowNodeSnapshot[]): void {
-  for (const node of nodes) assertAgentAvailable(node.data.agent)
+  for (const node of nodes) if (!node.data.pluginAction) assertAgentAvailable(node.data.agent)
 }
 
 type WorkflowEdgeRoute = 'success' | 'failure' | 'always'
@@ -317,7 +320,14 @@ export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null
   if (!id) return null
   const type = typeof record.type === 'string' && record.type ? record.type : 'agent'
   if (type !== 'agent') throw new Error(`workflow node ${id} must be an Agent node`)
-  const data = record.data && typeof record.data === 'object' ? record.data as Record<string, any> : {}
+  const data = record.data && typeof record.data === 'object' ? { ...record.data } as Record<string, any> : {}
+  const pluginAction = typeof data.pluginAction === 'string' && data.pluginAction ? data.pluginAction : undefined
+  if (pluginAction) {
+    parsePluginAction(pluginAction)
+    const args = JSON.parse(data.pluginInput || '{}')
+    if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error(`workflow node ${id} requires JSON object arguments`)
+    Object.assign(data, { agent: 'ekko-agent', agentMode: 'scoped', provider: '', model: '', apiMode: '', skills: [], images: [], agentPreset: undefined })
+  }
   let join: 'all' | 'any' = 'all'
   if (Object.prototype.hasOwnProperty.call(data, 'orchestration')) {
     const orchestration = data.orchestration
@@ -369,6 +379,7 @@ export function normalizeWorkflowNode(raw: unknown): WorkflowNodeSnapshot | null
     ...(position ? { position } : {}),
     data: {
       title: typeof data.title === 'string' && data.title.trim() ? data.title.trim() : id,
+      ...(pluginAction ? { pluginAction, pluginInput: data.pluginInput || '{}' } : {}),
       agent,
       agentMode,
       provider,
@@ -1189,6 +1200,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
     if (!run || run.workflow_id !== workflowId) return null
     if (run.status !== 'queued' && run.status !== 'running') return run
     this.canceledRunIds.add(runId)
+    cancelPluginWorkflow(runId)
     cancelWorkflowQualityReviews(runId)
     this.cancelPendingNodeApprovals(runId)
     const finishedAt = Date.now()
@@ -1537,7 +1549,9 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
       nodeStatuses[node.id] = 'running'
       publishRunningStatus()
       try {
-        const runResult = await runWorkflowAndWait({
+        const runResult = node.data.pluginAction ? await runPluginWorkflow(node.data.pluginAction, node.data.pluginInput || '{}', assembledInput, {
+          userId: args.user?.id || 0, profile, sessionId, runId: run.id, workspace: workspace || undefined, surface: 'workflow',
+        }, remainingTimeoutMs) : await runWorkflowAndWait({
           session_id: sessionId, source: 'workflow', session_source: 'workflow', input: assembledInput,
           workflow_id: workflowId, workflow_node_id: node.id,
           profile, workspace: workspace,
@@ -2050,7 +2064,9 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
             started_at: nodeStartedAt,
           })
           nodeSessionRecordIds.set(node.id, nodeSession.id)
-          const runResult = await runWorkflowAndWait({
+          const runResult = node.data.pluginAction ? await runPluginWorkflow(node.data.pluginAction, node.data.pluginInput || '{}', assembledInput, {
+            userId: args.user?.id || 0, profile, sessionId: nodeSessionId, runId: run.id, workspace: workspace || undefined, surface: 'workflow',
+          }, remainingTimeoutMs) : await runWorkflowAndWait({
             session_id: nodeSessionId,
             source: 'workflow',
             session_source: 'workflow',

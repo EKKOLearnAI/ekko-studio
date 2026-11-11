@@ -10,6 +10,7 @@ import { listProfileNamesFromDisk } from '../profiles/profile'
 const LEGACY_SERVER_NAME = 'hermes-studio'
 const MANAGED_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-api', toolset: 'api' },
+  { name: 'ekko-studio-plugins', toolset: 'plugins' },
   { name: 'ekko-studio-browser', toolset: 'browser' },
   { name: 'ekko-studio-use', toolset: 'use' },
   { name: 'ekko-studio-interaction', toolset: 'plan' },

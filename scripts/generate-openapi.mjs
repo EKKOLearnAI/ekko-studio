@@ -76,6 +76,7 @@ const tagMappings = {
   'modules/ekko/routes/mcp.ts': { name: 'Ekko MCP', description: 'Ekko MCP server management' },
   'modules/ekko/routes/config.ts': { name: 'Ekko Config', description: 'Ekko runtime configuration management' },
   'modules/studio/routes/workflows.ts': { name: 'Workflows', description: 'Cross-agent workflow orchestration' },
+  'modules/studio/routes/plugins.ts': { name: 'Studio Plugins', description: 'Studio plugin installation, lifecycle, configuration, frontend API bridge, tools, commands, events and automation actions' },
   'modules/studio/routes/sessions.ts': { name: 'Sessions', description: 'Cross-agent chat session management' },
   'modules/studio/routes/model-api.ts': { name: 'Model API', description: 'OpenAI Responses-compatible inference across configured providers; external usage accounting' },
   'modules/studio/routes/session-shares.ts': { name: 'Session Shares', description: 'App-bound single-session share tokens, first claim, permissions and revocation' },
@@ -2084,6 +2085,32 @@ openapi.paths['/api/studio/person/clear'].post.responses['409'] = { description:
 
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')
+const pluginOperations = [
+  ['get', '', 'listStudioPlugins', 'List globally installed plugins and registered tools, commands and actions for every account; no Profile selection required', null],
+  ['post', '/install', 'installStudioPlugin', 'Install or upgrade a trusted compiled plugin; requires a super administrator login', { source: { type: 'string', description: 'Absolute local directory, package@exact-version, or github:owner/repo#40-character-commit' }, revision: { type: 'integer' }, trusted: { type: 'boolean', enum: [true] }, pluginId: { type: 'string', description: 'Existing plugin id when upgrading' } }],
+  ['patch', '/{id}', 'updateStudioPlugin', 'Globally enable, disable, configure, reload, roll back or uninstall a plugin', { revision: { type: 'integer' }, enabled: { type: 'boolean' }, config: { type: 'object', additionalProperties: true }, action: { type: 'string', enum: ['reload', 'rollback', 'uninstall'] } }],
+  ['get', '/{id}/client', 'getStudioPluginClient', 'Read the enabled plugin frontend module as JSON {source}', null],
+  ['get', '/{id}/logs', 'getStudioPluginLogs', 'Read the latest plugin logs; requires a super administrator login', null],
+  ['get', '/events', 'pollStudioPluginEvents', 'Poll user/profile-scoped plugin events with generation and cursor', null],
+  ['post', '/{id}/invoke', 'invokeStudioPlugin', 'Invoke an enabled plugin RPC, tool, command or automation action', { kind: { type: 'string', enum: ['rpc', 'tool', 'command', 'action'] }, name: { type: 'string' }, input: {}, sessionId: { type: 'string' } }],
+  ['post', '/{id}/api', 'requestStudioPluginApi', 'Call an existing Studio JSON API using the plugin capabilities and current user permissions', { path: { type: 'string' }, options: { type: 'object', properties: { method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] }, query: { type: 'object', additionalProperties: true }, body: {} } }, sessionId: { type: 'string' } }],
+  ['post', '/{id}/storage', 'accessStudioPluginStorage', 'Access global plugin JSON storage with optional developer namespaces; requires storage.client; missing keys return present=false', { action: { type: 'string', enum: ['get', 'set', 'delete', 'keys'] }, key: { type: 'string' }, value: {}, namespace: { type: 'array', maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 256 } }, sessionId: { type: 'string' } }],
+]
+delete openapi.paths['/api/studio/plugins/']
+for (const [method, suffix, operationId, summary, properties] of pluginOperations) {
+  const path = `/api/studio/plugins${suffix}`
+  const globalOperation = ['', '/install', '/{id}', '/{id}/logs'].includes(suffix)
+  const parameters = globalOperation ? [] : [{ name: 'profile', in: 'query', schema: { type: 'string' }, description: 'Execution context only; installations and enablement are global. Managed run credentials remain bound to their run Profile.' }]
+  if (suffix.includes('{id}')) parameters.push({ name: 'id', in: 'path', required: true, schema: { type: 'string' } })
+  if (suffix === '/events') parameters.push(...['cursor', 'pluginId', 'sessionId'].map(name => ({ name, in: 'query', schema: { type: name === 'cursor' ? 'integer' : 'string' } })))
+  openapi.paths[path] ||= {}
+  openapi.paths[path][method] = { tags: ['Studio Plugins'], operationId, summary, parameters, security: [{ BearerAuth: [] }],
+    responses: { 200: { description: 'JSON result' }, 403: { description: 'User, Profile or capability denied' }, 409: { description: 'Plugin unavailable, dependency failure or stale revision' } },
+    ...(properties ? { requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties,
+      required: suffix === '/install' ? ['source', 'revision', 'trusted'] : method === 'patch' ? ['revision'] : suffix.endsWith('/invoke') ? ['kind', 'name'] : suffix.endsWith('/api') ? ['path'] : ['action'],
+    } } } } } : {}),
+  }
+}
 writeFileSync(outputPath, JSON.stringify(openapi, null, 2))
 
 console.log(`✓ Generated OpenAPI spec: ${outputPath}`)
