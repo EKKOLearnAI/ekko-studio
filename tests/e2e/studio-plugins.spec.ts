@@ -58,7 +58,7 @@ test('manages a plugin and runs an isolated frontend through authenticated API a
   await page.getByRole('button', { name: '启用', exact: true }).click()
   await expect(page.locator('.plugin-card')).toHaveCount(1)
   await expect(page.locator('iframe')).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'Notebook', exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Notebook', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '打开', exact: true }).click()
   const frame = page.frameLocator('iframe')
   await expect(frame.locator('#root')).toContainText('sessions=1 isolated=true profile=default storage=from browser keys=note missing=true')

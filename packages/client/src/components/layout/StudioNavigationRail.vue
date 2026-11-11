@@ -11,10 +11,11 @@ import RelayCampaignBadge from '@/components/hermes/RelayCampaignBadge.vue'
 import { useMobileNavigation } from '@/composables/usePageSidebar'
 import { pluginPages, pluginNavigation, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
+import { PLUGIN_NAVIGATION_VISIBLE } from '@/plugins/navigation'
 
 const route = useRoute()
 const { t } = useI18n()
-const { snapshot } = usePluginCatalog()
+const { snapshot } = usePluginCatalog(computed(() => PLUGIN_NAVIGATION_VISIBLE))
 const pluginEntries = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginNavigation(plugin).map(view => ({ plugin, view }))))
 function pluginActive(id: string, view: { id: string; slot: string }) {
   if (route.name !== 'studio.pluginPage' || route.params.pluginId !== id) return false
@@ -24,7 +25,7 @@ function pluginActive(id: string, view: { id: string; slot: string }) {
 }
 const canManageAgents = computed(() => isStoredSuperAdmin())
 const entries = computed(() => [
-  { key: 'studioPlugins', route: 'studio.plugins', label: 'studioPlugins.title', path: 'M9 3h6v5h5v7h-5v6H9v-6H3V8h6z' },
+  ...(PLUGIN_NAVIGATION_VISIBLE ? [{ key: 'studioPlugins', route: 'studio.plugins', label: 'studioPlugins.title', path: 'M9 3h6v5h5v7h-5v6H9v-6H3V8h6z' }] : []),
   { key: 'person', route: 'hermes.person', label: 'person.subtitle', avatar: deploymentUrl('/person/idle.gif') },
   { key: 'chat', route: 'hermes.chat', label: 'sidebar.singleChat', path: 'M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
   { key: 'group', route: 'hermes.groupChat', label: 'sidebar.groupChat', path: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' },

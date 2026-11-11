@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { resolve } from 'node:path'
 
-test('opens main, settings and workspace entries with metadata, dynamic sidebar and deep links', async ({ page }, testInfo) => {
+test('hides public plugin navigation while direct pages, settings and workspaces remain usable', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   let active = true
   const icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aUioAAAAASUVORK5CYII='
@@ -34,11 +34,14 @@ test('opens main, settings and workspace entries with metadata, dynamic sidebar 
   await expect(page.locator('.detail-identity img')).toHaveAttribute('src', icon)
   await page.keyboard.press('Escape')
   const rail = page.locator('.studio-navigation-rail')
+  await expect(rail.getByRole('link', { name: '插件', exact: true })).toHaveCount(0)
+  await expect(rail.locator('.studio-navigation-rail__plugins')).toHaveCount(0)
   await expect(rail.getByRole('link', { name: 'Room settings' })).toHaveCount(0)
-  await rail.getByRole('link', { name: 'Dashboard', exact: true }).click()
+  await page.getByRole('button', { name: '详情', exact: true }).click()
+  await page.getByRole('link', { name: 'Dashboard', exact: true }).click()
   await expect(page.locator('.plugin-config-sidebar')).toHaveCount(0)
   await expect(page.frameLocator('.plugin-workspace iframe').locator('#root')).toContainText('page:dashboard:none')
-  await rail.getByRole('link', { name: 'Team rooms', exact: true }).click()
+  await page.evaluate(() => (window as any).pluginFixture.navigate('/studio/plugins/rooms/rooms'))
   const sidebar = page.locator('.plugin-config-sidebar')
   await expect(sidebar.locator('nav > a')).toHaveText(['Rooms', 'History'])
   await sidebar.getByRole('link', { name: 'History', exact: true }).click()
@@ -63,8 +66,9 @@ test('opens main, settings and workspace entries with metadata, dynamic sidebar 
   await page.evaluate(() => { (window as any).pluginFixture.appearance({ brightness: 'light', appearance: { global: {}, regions: {} } }); (window as any).pluginFixture.wallpaper(false) })
   await expect.poll(() => sidebar.evaluate(element => getComputedStyle(element).color)).toBe(lightColor)
   await rail.getByRole('link', { name: '设置', exact: true }).click()
-  await page.locator('.sidebar').getByRole('link', { name: 'Room settings', exact: true }).click()
-  await expect(page.locator('.sidebar .nav-item.active')).toContainText('Room settings')
+  await expect(page.locator('.sidebar')).toBeVisible()
+  await expect(page.locator('.sidebar').getByRole('link', { name: 'Room settings', exact: true })).toHaveCount(0)
+  await page.evaluate(() => (window as any).pluginFixture.navigate('/studio/plugin-settings/rooms/preferences'))
   await expect(page.frameLocator('.plugin-workspace iframe').locator('#root')).toContainText('settings:preferences:none')
   await page.reload()
   await expect(page.frameLocator('.plugin-workspace iframe').locator('#root')).toContainText('settings:preferences:none')
@@ -72,6 +76,8 @@ test('opens main, settings and workspace entries with metadata, dynamic sidebar 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.getByRole('button', { name: 'Menu', exact: true }).click()
   await expect(page.locator('.studio-mobile-navigation .plugin-config-sidebar')).toBeVisible()
+  await expect(page.locator('.studio-mobile-navigation a[href*="/studio/plugin-settings/"]')).toHaveCount(0)
+  await expect(page.locator('.studio-mobile-navigation .studio-navigation-rail a[href*="/studio/plugins"]')).toHaveCount(0)
   await page.locator('.studio-mobile-navigation').getByRole('link', { name: 'History', exact: true }).click()
   await expect(page.frameLocator('.plugin-workspace iframe').locator('#root')).toContainText('workspace:history:none')
   await expect(page.locator('.studio-mobile-navigation')).not.toBeVisible()
