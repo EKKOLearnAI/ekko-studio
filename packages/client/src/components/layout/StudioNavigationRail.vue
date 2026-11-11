@@ -9,11 +9,23 @@ import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import PageSidebarFooter from './PageSidebarFooter.vue'
 import RelayCampaignBadge from '@/components/hermes/RelayCampaignBadge.vue'
 import { useMobileNavigation } from '@/composables/usePageSidebar'
+import { pluginPages, pluginNavigation, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
+import PluginIcon from '@/components/plugins/PluginIcon.vue'
+import { PLUGIN_NAVIGATION_VISIBLE } from '@/plugins/navigation'
 
 const route = useRoute()
 const { t } = useI18n()
+const { snapshot } = usePluginCatalog(computed(() => PLUGIN_NAVIGATION_VISIBLE))
+const pluginEntries = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginNavigation(plugin).map(view => ({ plugin, view }))))
+function pluginActive(id: string, view: { id: string; slot: string }) {
+  if (route.name !== 'studio.pluginPage' || route.params.pluginId !== id) return false
+  const plugin = snapshot.value.plugins.find(plugin => plugin.manifest.id === id)
+  const current = plugin && pluginPages(plugin).find(item => item.id === (route.params.viewId || pluginNavigation(plugin)[0]?.id))
+  return current?.slot === 'workspace' ? view.slot === 'workspace' : current?.id === view.id
+}
 const canManageAgents = computed(() => isStoredSuperAdmin())
 const entries = computed(() => [
+  ...(PLUGIN_NAVIGATION_VISIBLE ? [{ key: 'studioPlugins', route: 'studio.plugins', label: 'studioPlugins.title', path: 'M9 3h6v5h5v7h-5v6H9v-6H3V8h6z' }] : []),
   { key: 'person', route: 'hermes.person', label: 'person.subtitle', avatar: deploymentUrl('/person/idle.gif') },
   { key: 'chat', route: 'hermes.chat', label: 'sidebar.singleChat', path: 'M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
   { key: 'group', route: 'hermes.groupChat', label: 'sidebar.groupChat', path: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' },
@@ -31,11 +43,12 @@ const activeKey = computed(() => {
   if (name.startsWith('hermes.groupChat')) return 'group'
   if (name.startsWith('hermes.history')) return 'history'
   if (name === 'hermes.apiRelay') return 'apiRelay'
+  if (name === 'studio.pluginPage') return 'plugin:' + String(route.params.pluginId)
   return entries.value.find(entry => entry.route === name)?.key || 'settings'
 })
 const mobileNavigation = useMobileNavigation()
 function handleNavigate(key: string) {
-  if (mobileNavigation && ['connections', 'agents', 'models', 'usage', 'apiRelay'].includes(key)) {
+  if (mobileNavigation && (key.startsWith('plugin:') || ['studioPlugins', 'connections', 'agents', 'models', 'usage', 'apiRelay'].includes(key))) {
     mobileNavigation.open.value = false
   }
 }
@@ -45,7 +58,8 @@ function handleNavigate(key: string) {
   <aside class="studio-navigation-rail">
     <PageSidebarFooter rail collapsed />
     <nav class="studio-navigation-rail__nav">
-      <NTooltip v-for="entry in entries" :key="entry.key" placement="right" trigger="hover">
+      <template v-for="entry in entries" :key="entry.key">
+      <NTooltip placement="right" trigger="hover">
         <template #trigger>
           <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: entry.route }" :active="activeKey === entry.key" :aria-label="t(entry.label)" @click="handleNavigate(entry.key)">
             <img v-if="entry.avatar" class="studio-navigation-rail__avatar" :src="entry.avatar" width="32" height="32" alt="" aria-hidden="true" />
@@ -54,6 +68,13 @@ function handleNavigate(key: string) {
         </template>
         {{ t(entry.label) }}
       </NTooltip>
+      <div v-if="entry.key === 'studioPlugins' && pluginEntries.length" class="studio-navigation-rail__plugins" role="group" :aria-label="t('studioPlugins.workspace')">
+        <NTooltip v-for="{ plugin, view } in pluginEntries" :key="plugin.manifest.id + ':' + view.id" placement="right" trigger="hover">
+          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin, view.id)" :active="pluginActive(plugin.manifest.id, view)" :aria-label="view.slot === 'workspace' ? plugin.manifest.name : view.title" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginIcon :plugin="plugin" :icon="view.icon" compact /></RouteLinkItem></template>
+          {{ view.slot === 'workspace' ? plugin.manifest.name : view.title }}
+        </NTooltip>
+      </div>
+      </template>
       <NTooltip placement="right" trigger="hover">
         <template #trigger>
           <RouteLinkItem class="studio-navigation-rail__item studio-navigation-rail__item--relay" :to="{ name: 'hermes.apiRelay' }" :active="activeKey === 'apiRelay'" :aria-label="t('sidebar.apiRelay')" :aria-description="t('apiRelay.campaignLabel')" @click="handleNavigate('apiRelay')">
@@ -107,6 +128,7 @@ function handleNavigate(key: string) {
   scrollbar-width: none;
 }
 .studio-navigation-rail__bottom { display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); padding-top: 12px; }
+.studio-navigation-rail__plugins { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid $border-color; }
 .api-relay-logo { border-radius: var(--radius-component, 4px); }
 .studio-navigation-rail__item--relay {
   position: relative;

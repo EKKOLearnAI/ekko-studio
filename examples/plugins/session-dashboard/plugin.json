@@ -1,0 +1,25 @@
+{
+  "id": "session-dashboard",
+  "name": "会话看板",
+  "version": "1.1.0",
+  "apiVersion": 1,
+  "description": "查看当前 Profile 的真实会话，按 Agent 筛选、搜索标题，一键回到对话。",
+  "client": "client.mjs",
+  "capabilities": [
+    "ui",
+    "api.read"
+  ],
+  "views": [
+    {
+      "id": "sessions",
+      "title": "会话总览",
+      "slot": "page"
+    }
+  ],
+  "author": {
+    "name": "Ekko Studio",
+    "url": "https://github.com/EKKOLearnAI"
+  },
+  "repository": "https://github.com/EKKOLearnAI/ekko-studio",
+  "documentation": "https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md"
+}

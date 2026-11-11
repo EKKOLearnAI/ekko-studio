@@ -1,5 +1,6 @@
 import Router from '@koa/router'
 import * as ctrl from '../controllers/group-chat'
+import * as control from '../controllers/group-chat-control'
 import * as inviteCtrl from '../controllers/group-chat-invite'
 import * as workspaceCtrl from '../controllers/group-chat-workspace'
 import * as agentLinkCtrl from '../controllers/group-chat-agent-link'
@@ -61,6 +62,9 @@ groupChatRoutes.delete('/api/studio/group-chat/rooms/:roomId/attachment-uploads/
 groupChatRoutes.get('/api/studio/group-chat/rooms/:roomId/attachments/:file', ctrl.readRoomAttachment)
 groupChatPublicRoutes.get('/api/studio/group-chat/rooms/join/:code', inviteCtrl.resolveInvite)
 groupChatRoutes.post('/api/studio/group-chat/rooms', ctrl.createRoom)
+groupChatRoutes.get('/api/studio/group-chat/rooms/:roomId/messages', control.messages)
+groupChatRoutes.post('/api/studio/group-chat/rooms/:roomId/messages', control.send)
+groupChatRoutes.post('/api/studio/group-chat/rooms/:roomId/stop', control.stop)
 groupChatRoutes.post('/api/studio/group-chat/rooms/:roomId/clone', ctrl.cloneRoom)
 groupChatRoutes.get('/api/studio/group-chat/rooms/:roomId', ctrl.getRoom)
 groupChatRoutes.get('/api/studio/group-chat/rooms/:roomId/workspace-files/list', workspaceCtrl.listWorkspaceFiles)

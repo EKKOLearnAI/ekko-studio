@@ -1,4 +1,5 @@
 import { registerDesktopBrowserRelay } from '../modules/studio/sockets/desktop-browser'
+import { startPluginHost, stopPluginHost } from '../modules/studio/services/plugins/host'
 import { setupMobileTerminal } from '../modules/hermes/sockets/mobile-terminal'
 import { getSessionMetadata as getTerminalSessionMetadata } from '../modules/studio/public/sessions'
 import Koa from 'koa'
@@ -599,7 +600,6 @@ export async function bootstrap() {
     name: 'Group agent outbound relay',
     close: () => groupAgentOutboundRelayManager.shutdown(),
   })
-  void groupAgentOutboundRelayManager.restore()
 
   // A process restart loses in-memory scheduler, approval, and runner ownership.
   // Persist a fail-closed terminal state before exposing workflow sockets, then abort
@@ -610,6 +610,10 @@ export async function bootstrap() {
     logger.warn('Recovered %d orphaned workflow runs and aborted %d sessions', recoveredWorkflows.runs, recoveredWorkflows.sessions)
   }
   const { getWorkflowScheduleService } = await import('../modules/studio/services/workflow/schedule')
+  // Restore plugin actions before schedulers or restored agents can invoke them.
+  await startPluginHost(loopbackBaseUrl)
+  additionalShutdownSteps.push({ name: 'Studio plugins', close: stopPluginHost })
+  void groupAgentOutboundRelayManager.restore()
   const workflowScheduleService = getWorkflowScheduleService()
   workflowScheduleService.start()
   const { startPersonWork, stopPersonWork } = await import('../modules/studio/services/person/runner')

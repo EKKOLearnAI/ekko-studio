@@ -89,6 +89,7 @@ const CODEX_TOOL_SEARCH_ALWAYS_DEFER_REMOVED_VERSION = '0.142.0'
 const CODEX_VERSION_CACHE_TTL_MS = 5 * 60 * 1000
 const HERMES_MCP_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-api', toolset: 'api' },
+  { name: 'ekko-studio-plugins', toolset: 'plugins' },
   { name: 'ekko-studio-browser', toolset: 'browser' },
   { name: 'ekko-studio-use', toolset: 'use' },
   { name: 'ekko-studio-interaction', toolset: 'plan' },
@@ -1597,7 +1598,7 @@ function piMcpConfig(profile: string, runTokenFile: string | undefined, ...exter
     .filter(item => !disabledManaged.has(item.name))
     .map((item) => {
     const server = managedHermesMcpServerConfig('pi', profile, item.name, item.toolset, runTokenFile)
-    const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
+    const requestTimeoutMs = (item.toolset === 'api' || item.toolset === 'plugins') ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
     // plan and use are always-on direct tools. The use toolset collapses all
     // Studio operations (including session_get / session_messages) into a
     // single toolset meta-tool, so registering it directly costs one tool, not
@@ -1636,7 +1637,7 @@ export function getCodingAgentManagedMcpServerConfigs(
   return Object.fromEntries(HERMES_MCP_SERVERS.map((item) => {
     const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset, runTokenFile)
     if (id === 'pi') {
-      const requestTimeoutMs = item.toolset === 'api' ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
+      const requestTimeoutMs = (item.toolset === 'api' || item.toolset === 'plugins') ? 120_000 : item.toolset === 'use' ? 360_000 : 1_860_000
       // plan and use are always-on direct tools (use collapses all Studio
       // operations into one toolset meta-tool, so direct registration costs a
       // single tool). See piMcpConfig for the session-readability rationale.
@@ -1674,7 +1675,7 @@ function piManagedServerToolset(name: string, server: Record<string, unknown>): 
   const env = (server.env && typeof server.env === 'object' ? server.env : {}) as Record<string, unknown>
   if (typeof env.HERMES_MCP_TOOLSET === 'string' && env.HERMES_MCP_TOOLSET) return env.HERMES_MCP_TOOLSET
   const bare = String(name).replace(/^mcp__/, '')
-  const suffix = /-(api|browser|devices|use|interaction|plan)$/.exec(bare)?.[1]
+  const suffix = /-(api|plugins|browser|devices|use|interaction|plan)$/.exec(bare)?.[1]
   if (suffix) return suffix === 'interaction' ? 'plan' : suffix
   return ''
 }

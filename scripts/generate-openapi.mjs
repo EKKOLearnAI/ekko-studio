@@ -76,6 +76,7 @@ const tagMappings = {
   'modules/ekko/routes/mcp.ts': { name: 'Ekko MCP', description: 'Ekko MCP server management' },
   'modules/ekko/routes/config.ts': { name: 'Ekko Config', description: 'Ekko runtime configuration management' },
   'modules/studio/routes/workflows.ts': { name: 'Workflows', description: 'Cross-agent workflow orchestration' },
+  'modules/studio/routes/plugins.ts': { name: 'Studio Plugins', description: 'Studio plugin installation, lifecycle, configuration, frontend API bridge, tools, commands, events and automation actions' },
   'modules/studio/routes/sessions.ts': { name: 'Sessions', description: 'Cross-agent chat session management' },
   'modules/studio/routes/model-api.ts': { name: 'Model API', description: 'OpenAI Responses-compatible inference across configured providers; external usage accounting' },
   'modules/studio/routes/session-shares.ts': { name: 'Session Shares', description: 'App-bound single-session share tokens, first claim, permissions and revocation' },
@@ -1108,8 +1109,8 @@ openapi.paths['/api/studio/clarifications/request'] = {
 openapi.paths['/api/studio/chat-run/runs'] = {
   post: {
     tags: ['Chat Run'],
-    summary: 'Run chat and wait for completion',
-    description: 'Starts a Ekko Studio chat run through the chat-run transport and waits for a terminal result. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.',
+    summary: 'Start or queue a chat run, optionally waiting for completion',
+    description: 'Starts an Ekko Studio chat run through the authenticated chat-run transport. By default waits for a terminal result; wait=false returns HTTP 202 once started or queued. Existing sessions must belong to the selected Profile. Existing agent and model settings are used when omitted. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.',
     operationId: 'runChatOnce',
     security: [{ BearerAuth: [] }],
     requestBody: {
@@ -1219,6 +1220,7 @@ openapi.paths['/api/studio/chat-run/runs'] = {
                 default: 300000,
                 description: 'Maximum time to wait for run.completed or run.failed.',
               },
+              wait: { type: 'boolean', default: true, description: 'Set false to return when the run starts or queues. Response includes session_id, run_id when started, and queue_id when available. Observe events or history for later results.' },
               include_events: {
                 type: 'boolean',
                 default: false,
@@ -2084,6 +2086,49 @@ openapi.paths['/api/studio/person/clear'].post.responses['409'] = { description:
 
 // Write output
 const outputPath = join(rootDir, 'docs/openapi.json')
+const controlOperations = [
+  ['post', '/api/studio/sessions', 'Sessions', 'createEmptyStudioSession', 'Create an empty session without starting a model run', { title: { type: 'string', maxLength: 500 }, agent: { type: 'string', default: 'ekko-agent' }, mode: { type: 'string', enum: ['scoped', 'global'] } }, []],
+  ['post', '/api/studio/sessions/{id}/stop', 'Sessions', 'stopStudioSession', 'Stop the current run without deleting the session; returns ok, session_id and stopped. Uses the same queue behavior as the chat UI. Workflow/group runs must use their own stop operations.', {}, []],
+  ['get', '/api/studio/group-chat/rooms/{roomId}/messages', 'Group Chat', 'listGroupChatMessages', 'Read persisted group messages with room readership authorization', null, []],
+  ['post', '/api/studio/group-chat/rooms/{roomId}/messages', 'Group Chat', 'sendGroupChatMessage', 'Send a message as the authenticated human member; mention routing uses the normal group transport and permissions', { content: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'object', additionalProperties: true } }] }, mentions: { type: 'array', items: { type: 'object', additionalProperties: true } } }, ['content']],
+  ['post', '/api/studio/group-chat/rooms/{roomId}/stop', 'Group Chat', 'stopGroupChatAgent', 'Interrupt one named Agent using the same ownership checks as the group chat UI', { agentName: { type: 'string', minLength: 1 } }, ['agentName']],
+]
+for (const [method, path, tag, operationId, summary, properties, required] of controlOperations) {
+  const parameters = [...path.matchAll(/\{(\w+)\}/g)].map(([, name]) => ({ name, in: 'path', required: true, schema: { type: 'string' } }))
+  parameters.push({ name: 'profile', in: 'query', schema: { type: 'string' } })
+  if (method === 'get') parameters.push(...['limit', 'offset', 'before'].map(name => ({ name, in: 'query', schema: { type: name === 'before' ? 'string' : 'integer' } })))
+  openapi.paths[path] ||= {}
+  openapi.paths[path][method] = { tags: [tag], operationId, summary, parameters, security: [{ BearerAuth: [] }],
+    responses: { [operationId === 'createEmptyStudioSession' ? 201 : 200]: { description: 'JSON result' }, 400: { description: 'Invalid request' }, 401: { description: 'Studio login required' }, 403: { description: 'Profile, room or operation access denied' }, 404: { description: 'Session or room not found' }, 409: { description: 'Use the owning workflow or group operation' }, 503: { description: 'Runtime unavailable' } },
+    ...(properties ? { requestBody: { required: required.length > 0, content: { 'application/json': { schema: { type: 'object', properties, required } } } } } : {}) }
+}
+openapi.paths['/api/studio/chat-run/runs'].post.responses['202'] = { description: 'Run accepted or queued; JSON includes status, session_id and available run_id/queue_id' }
+const pluginOperations = [
+  ['get', '', 'listStudioPlugins', 'List globally installed plugins and registered tools, commands and actions for every account; no Profile selection required', null],
+  ['post', '/install', 'installStudioPlugin', 'Install or upgrade a trusted compiled plugin; requires a super administrator login', { source: { type: 'string', description: 'Absolute local directory, package@exact-version, or github:owner/repo#40-character-commit' }, revision: { type: 'integer' }, trusted: { type: 'boolean', enum: [true] }, pluginId: { type: 'string', description: 'Existing plugin id when upgrading' } }],
+  ['patch', '/{id}', 'updateStudioPlugin', 'Globally enable, disable, configure, reload, roll back or uninstall a plugin', { revision: { type: 'integer' }, enabled: { type: 'boolean' }, config: { type: 'object', additionalProperties: true }, action: { type: 'string', enum: ['reload', 'rollback', 'uninstall'] } }],
+  ['get', '/{id}/client', 'getStudioPluginClient', 'Read the enabled plugin frontend module as JSON {source}', null],
+  ['get', '/{id}/logs', 'getStudioPluginLogs', 'Read the latest plugin logs; requires a super administrator login', null],
+  ['get', '/events', 'pollStudioPluginEvents', 'Poll user/profile-scoped plugin events with generation and cursor', null],
+  ['post', '/{id}/invoke', 'invokeStudioPlugin', 'Invoke an enabled plugin RPC, tool, command or automation action', { kind: { type: 'string', enum: ['rpc', 'tool', 'command', 'action'] }, name: { type: 'string' }, input: {}, sessionId: { type: 'string' } }],
+  ['post', '/{id}/api', 'requestStudioPluginApi', 'Call an existing Studio JSON API using the plugin capabilities and current user permissions', { path: { type: 'string' }, options: { type: 'object', properties: { method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] }, query: { type: 'object', additionalProperties: true }, body: {} } }, sessionId: { type: 'string' } }],
+  ['post', '/{id}/storage', 'accessStudioPluginStorage', 'Access global plugin JSON storage with optional developer namespaces; requires storage.client; missing keys return present=false', { action: { type: 'string', enum: ['get', 'set', 'delete', 'keys'] }, key: { type: 'string' }, value: {}, namespace: { type: 'array', maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 256 } }, sessionId: { type: 'string' } }],
+]
+delete openapi.paths['/api/studio/plugins/']
+for (const [method, suffix, operationId, summary, properties] of pluginOperations) {
+  const path = `/api/studio/plugins${suffix}`
+  const globalOperation = ['', '/install', '/{id}', '/{id}/logs'].includes(suffix)
+  const parameters = globalOperation ? [] : [{ name: 'profile', in: 'query', schema: { type: 'string' }, description: 'Execution context only; installations and enablement are global. Managed run credentials remain bound to their run Profile.' }]
+  if (suffix.includes('{id}')) parameters.push({ name: 'id', in: 'path', required: true, schema: { type: 'string' } })
+  if (suffix === '/events') parameters.push(...['cursor', 'pluginId', 'sessionId'].map(name => ({ name, in: 'query', schema: { type: name === 'cursor' ? 'integer' : 'string' } })))
+  openapi.paths[path] ||= {}
+  openapi.paths[path][method] = { tags: ['Studio Plugins'], operationId, summary, parameters, security: [{ BearerAuth: [] }],
+    responses: { 200: { description: 'JSON result' }, 403: { description: 'User, Profile or capability denied' }, 409: { description: 'Plugin unavailable, dependency failure or stale revision' } },
+    ...(properties ? { requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties,
+      required: suffix === '/install' ? ['source', 'revision', 'trusted'] : method === 'patch' ? ['revision'] : suffix.endsWith('/invoke') ? ['kind', 'name'] : suffix.endsWith('/api') ? ['path'] : ['action'],
+    } } } } } : {}),
+  }
+}
 writeFileSync(outputPath, JSON.stringify(openapi, null, 2))
 
 console.log(`✓ Generated OpenAPI spec: ${outputPath}`)

@@ -1109,6 +1109,13 @@ export class ChatRunSocket {
           const state = getOrCreateSession(this.sessionMap, data.session_id)
           const source = resolveRunSource(data.source, data.session_id)
           const storedSession = getSession(data.session_id)
+          if (!shared && socketUser && await handlePluginCommand(data.input, {
+            userId: socketUser.id, profile: runProfile, sessionId: data.session_id,
+            workspace: storedSession?.workspace || undefined, surface: 'chat',
+          }, state, payload => this.emitToSession(socket, data.session_id!, 'session.command', { ...payload, queue_id: data.queue_id }))) {
+            if (!state.isWorking) this.dequeueNextQueuedRun(socket, data.session_id, runProfile)
+            return
+          }
           const ekkoExecution = isEkkoAgentExecution(data)
           if (ekkoExecution) {
             data.agent_id = 'ekko-agent'
@@ -3811,3 +3818,4 @@ export class ChatRunSocket {
     }
   }
 }
+import { handlePluginCommand } from '../services/plugins/command'

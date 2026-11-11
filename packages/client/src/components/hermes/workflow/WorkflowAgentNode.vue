@@ -4,6 +4,7 @@ import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodin
 import { isGlobalOnlyCodingAgent } from "@/utils/agent-catalog"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
 import { computed, ref, watch } from 'vue'
+import { usePluginCatalog } from '@/composables/usePluginCatalog'
 import { Handle, Position, type NodeProps } from '@vue-flow/core'
 import { NodeResizer } from '@vue-flow/node-resizer'
 import { NInput, NSelect, NSwitch, NTooltip, useMessage } from 'naive-ui'
@@ -21,6 +22,8 @@ import '@vue-flow/node-resizer/dist/style.css'
 const props = defineProps<NodeProps<WorkflowAgentNodeData>>()
 const { t } = useI18n()
 const message = useMessage()
+const { snapshot: pluginSnapshot } = usePluginCatalog()
+const pluginActions = computed(() => pluginSnapshot.value.plugins.filter(p => p.status === 'active').flatMap(p => p.actions.map(a => ({ label: `${p.manifest.name}: ${a.name}`, value: `${p.manifest.id}/${a.name}` }))))
 const attachmentInputRef = ref<HTMLInputElement | null>(null)
 const uploadingAttachments = ref(false)
 const previewPath = ref('')
@@ -35,7 +38,7 @@ const statusTip = computed(() => (
 ))
 const isCodingAgent = computed(() => props.data.agent !== 'hermes')
 const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(props.data.agent))
-const usesScopedModel = computed(() => !isGlobalOnlyCodingAgent(props.data.agent) && (!supportsGlobalMode.value || props.data.agentMode !== 'global'))
+const usesScopedModel = computed(() => !props.data.pluginAction && !isGlobalOnlyCodingAgent(props.data.agent) && (!supportsGlobalMode.value || props.data.agentMode !== 'global'))
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.modelScope'), value: 'scoped' },
   { label: t('codingAgents.launchModeGlobalShort'), value: 'global' },
@@ -195,6 +198,9 @@ async function uploadImages(files: File[]) {
         :placeholder="t('workflow.node.title')"
         @update:value="value => updateField('title', value)"
       />
+      <NSelect v-if="pluginActions.length || data.pluginAction" :value="data.pluginAction || null" :options="pluginActions" :placeholder="t('studioPlugins.action')" :aria-label="t('studioPlugins.action')" data-testid="workflow-plugin-action" :disabled="data.readonly" clearable size="small" @update:value="updateField('pluginAction', $event || undefined)" />
+      <NInput v-if="data.pluginAction" :value="data.pluginInput || '{}'" type="textarea" :placeholder="t('studioPlugins.arguments')" :disabled="data.readonly" @update:value="updateField('pluginInput', $event)" />
+      <template v-if="!data.pluginAction">
       <NSelect
         :value="data.agent"
         :options="data.agentOptions"
@@ -250,6 +256,7 @@ async function uploadImages(files: File[]) {
           field="reasoning-effort" :model="data.model" :reasoning-effort="data.reasoningEffort === 'default' ? '' : data.reasoningEffort"
           :disabled="data.readonly" @change="selection => data.onUpdate(id, { ...selection, reasoningEffort: selection.reasoningEffort || 'default' })" />
       </div>
+      </template>
       <div class="node-field-row">
         <span class="node-field-label-row">
           <span>{{ t('workflow.node.join') }}</span>
@@ -276,6 +283,7 @@ async function uploadImages(files: File[]) {
         />
       </label>
       <NSelect
+        v-if="!data.pluginAction"
         :value="data.skills"
         :options="data.skillOptions"
         :loading="data.skillsLoading"
@@ -298,7 +306,7 @@ async function uploadImages(files: File[]) {
         :placeholder="t('workflow.node.promptPlaceholder')"
         @update:value="value => updateField('input', value)"
       />
-      <div class="node-images">
+      <div v-if="!data.pluginAction" class="node-images">
         <input
           ref="attachmentInputRef"
           class="image-upload-input"

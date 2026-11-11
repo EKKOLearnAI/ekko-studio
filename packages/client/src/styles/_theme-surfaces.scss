@@ -7,7 +7,7 @@ $markdown-card-tables: '.markdown-body table:not(:where(.message-bubble, .msg-co
 $table-surfaces: '.n-data-table-wrapper, .n-table, .plugins-table-wrap, .relay-usage-card, .daily-trend, .runtime-section, .usage-panel, #{$markdown-card-tables}';
 $regions: (
   chrome: '.studio-frame-surface, .desktop-titlebar:not(.desktop-titlebar--flush)',
-  sidebar: '.sidebar, .hermes-config-sidebar, .ekko-config-sidebar, .coding-agent-config-sidebar, .session-list, .room-sidebar, .agent-avatar-rail, .workflow-sidebar',
+  sidebar: '.sidebar, .hermes-config-sidebar, .ekko-config-sidebar, .coding-agent-config-sidebar, .plugin-config-sidebar, .session-list, .room-sidebar, .agent-avatar-rail, .workflow-sidebar',
   content: '.app-main--card, .chat-main-content, .group-chat-surface, .workflow-main, .person-view, .connections-panel, .agent-manager-panel, .models-view, .voice-stage',
   card: '#{$table-surfaces}, [data-theme-surface="card"], .theme-card, .settings-card, .provider-card, .profile-card, .model-card, .run-card:not(.group-run-bubble), .run-usage-card, .job-card, .mcp-card, .kanban-task-card, .platform-card, .stat-card, .task-plan-card, .workflow-agent-node, .n-card:not(.n-modal), .n-descriptions-table-wrapper, .theme-appearance-editor',
   input: '[data-theme-surface="input"], .input-wrapper, .context-usage-row, .n-input, .n-base-selection, .search-input, .profile-display, .model-trigger',

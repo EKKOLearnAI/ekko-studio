@@ -158,6 +158,7 @@ export function studioMcpUsageGuidelines(capabilities?: StudioMcpCapabilities): 
   if (!capabilities) return ''
   const rules: string[] = []
   if (capabilities.api) rules.push(...HERMES_MCP_USAGE_GUIDELINES.slice(0, 3))
+  if (capabilities.plugins) rules.push('Studio plugin tools are provided by the ekko-studio-plugins MCP server. Discover tools from that server and follow their descriptions and input schemas; names identify the plugin and operation, for example notebook__append.')
   if (capabilities.browser) rules.push(HERMES_MCP_USAGE_GUIDELINES[3])
   if (Object.values(capabilities).some(Boolean)) rules.push(HERMES_MCP_USAGE_GUIDELINES[4])
   if (capabilities.api || capabilities.use) rules.push(HERMES_MCP_USAGE_GUIDELINES[5])
