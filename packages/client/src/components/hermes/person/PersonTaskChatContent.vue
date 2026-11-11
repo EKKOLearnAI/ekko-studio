@@ -50,7 +50,12 @@ const reads = createRefreshQueue({
     executions.value = result.executions; selectedExecutionId.value = result.execution?.id || ''
     ready.value = true; loading.value = false; loadError.value = false; refreshing.value = false
   },
-  failed: () => { loading.value = false; loadError.value = true; refreshing.value = false },
+  failed: error => {
+    if ([401,403,404].includes(Number((error as {status?:number})?.status))) {
+      ready.value=false;task.value=null;session.value=null;pending.value=[];executions.value=[];queueState.value={}
+    }
+    loading.value = false; loadError.value = true; refreshing.value = false
+  },
 })
 function refresh(executionId = selectedExecutionId.value) {
   if (!ready.value) loading.value = true
@@ -58,7 +63,7 @@ function refresh(executionId = selectedExecutionId.value) {
   return reads.refresh(executionId)
 }
 const stopUpdates = onPersonUpdated(event => {
-  if ((!event.session_id || event.session_id === props.mainSessionId) && !sending.value && !stopping.value && !requestingInsertion.value && !requestingRemoval.value) void refresh()
+    if ((!event.session_id || event.session_id === props.mainSessionId || event.session_id === task.value?.session_id) && !sending.value && !stopping.value && !requestingInsertion.value && !requestingRemoval.value) void refresh()
 })
 onMounted(() => { void refresh() })
 async function send(text: string, attachments?: Attachment[]) {

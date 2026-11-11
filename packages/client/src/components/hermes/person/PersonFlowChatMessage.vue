@@ -1,16 +1,14 @@
 <script setup lang="ts">
 import { computed,provide } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { PersonFlowMessage } from '@/api/person'
 import type { Message } from '@/stores/hermes/chat'
 import MessageItem from '../chat/MessageItem.vue'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 import { personWorkspacePreviewContext } from './task-navigation'
-const props = defineProps<{entry:PersonFlowMessage}>()
+const props = defineProps<{message:Message;session:{id:string;title?:string | null;bot_type?:string | null}}>()
 const {t} = useI18n()
-provide(personWorkspacePreviewContext,computed(() => ({sessionId:props.entry.session_id})))
-const message = computed<Message>(() => ({id:`flow-chat:${props.entry.session_id}:${props.entry.id}`,role:props.entry.role,content:props.entry.content,timestamp:props.entry.timestamp*1000}))
-const avatar = computed(() => chatSessionAgentAvatar({id:props.entry.session_id,title:props.entry.session_title,bot_type:props.entry.bot_type || undefined}))
+provide(personWorkspacePreviewContext,computed(() => ({sessionId:props.session.id})))
+const avatar = computed(() => chatSessionAgentAvatar({...props.session,bot_type:props.session.bot_type || undefined}))
 </script>
 
 <template>

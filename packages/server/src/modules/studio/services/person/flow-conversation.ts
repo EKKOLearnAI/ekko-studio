@@ -6,6 +6,7 @@ import { getSessionMetadata } from '../../repositories/session-store'
 import { listPersonFlows, personFlowActivity } from '../../repositories/person-stage-store'
 import { readPersonTimeline, personTimelineFlowItem, PERSON_TIMELINE_PAGE_LIMIT } from '../../repositories/person-timeline'
 import type { SessionMessage } from '../../contracts/runs/session'
+import { withPersonTaskReturns } from '../../repositories/person-return-store'
 
 /** Restore collaboration display state in the same packet as its conversation. */
 export function personConversationFlows(userId: number, sessionId: string) {
@@ -38,11 +39,19 @@ export function personFlowConversation(userId: number, flowId: string, query: { 
   if (!Number.isSafeInteger(beforeId) || beforeId < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200)
     throw personError('Invalid conversation cursor or limit')
   const result = readPersonFlowMessages(userId,flowId,beforeId,limit)
+  const bySession = new Map<string, typeof result.rows>()
+  for (const row of result.rows) {
+    const rows = bySession.get(row.session_id) || []
+    rows.push(row);bySession.set(row.session_id,rows)
+  }
+  const receipts = new Map([...bySession].flatMap(([sessionId,rows]) => withPersonTaskReturns(sessionId,rows))
+    .map(row => [row.id,row.person_task_return]))
   const messages = result.rows.flatMap(row => {
-    const display = personDisplayMessages(row.session_id,[row])[0]
-    return display.content.trim() ? [{ id:row.id,session_id:row.session_id,session_title:row.session_title,bot_type:row.bot_type,
-      stage_id:row.stage_id,round_number:row.round_number,role:display.role,content:display.content,timestamp:row.timestamp }] : []
+    const display = personDisplayMessages(row.session_id,[{...row,person_task_return:receipts.get(row.id)}])[0]
+    return display.content.trim() || display.person_task_return ? [{ id:row.id,session_id:row.session_id,session_title:row.session_title,bot_type:row.bot_type,
+      stage_id:row.stage_id,round_number:row.round_number,role:display.role,content:display.content,timestamp:row.timestamp,
+      run_marker:row.run_marker,person_task_return:display.person_task_return }] : []
   })
-  return { flow:result.flow,messages,has_more:result.hasMore,
+  return { flow:result.flow,messages,taskPlans:result.taskPlans,oldest_message_id:result.rows[0]?.id ?? null,has_more:result.hasMore,
     next_before_id:result.hasMore ? result.rows[0]?.id ?? null : null,history_key:result.historyKey }
 }
