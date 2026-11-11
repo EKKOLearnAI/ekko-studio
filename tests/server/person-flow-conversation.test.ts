@@ -131,3 +131,64 @@ it.each([{limit:0},{limit:201},{before_id:-1},{before_id:1.5},{limit:'invalid'}]
   const flow=create()
   expect(()=>read(flow.id,query)).toThrow('Invalid conversation cursor or limit')
 })
+
+it.each(['completed','stopped','failed'] as const)('restores only linked plans and receipts for a %s collaboration',async state => {
+  const flow=create()
+  const context={flowId:flow.id,stageId:flow.stages[0].id,generation:0}
+  runs.startPersonStageRun(1,context,'linked-worker-run')
+  const {task,execution}=await f.create({session_id:peer,title:'阶段任务',goal:'验证关联'})
+  const {linkPersonStageTask}=await import('../../packages/server/src/modules/studio/repositories/person-stage-store')
+  linkPersonStageTask(1,task.id,context,peer)
+  f.db.prepare("UPDATE person_executions SET state='finished' WHERE id=?").run(execution.id)
+  const receiptId=reply('linked-worker-run','')
+  const {savePersonTaskReturn}=await import('../../packages/server/src/modules/studio/repositories/person-return-store')
+  expect(savePersonTaskReturn(1,execution.id,peer,receiptId)).toBeTruthy()
+  reply('unrelated-run','不属于这次协作')
+  const {saveTaskPlan}=await import('../../packages/server/src/modules/studio/repositories/task-plan-store')
+  const plan={session_id:peer,run_id:'linked-worker-run',plan_id:'linked-plan',revision:1,execution_state:'ended' as const,
+    created_at:1000,updated_at:2000,plan:[{id:'work',step:'执行阶段任务',status:'completed' as const}]}
+  saveTaskPlan(plan)
+  saveTaskPlan({...plan,plan_id:'unrelated-plan',run_id:'unrelated-run'})
+  // A run ID alone must never join a plan from another Bot or account.
+  saveTaskPlan({...plan,session_id:'person-main-2',plan_id:'other-owner'})
+  f.db.prepare('UPDATE person_flows SET state=? WHERE id=?').run(state,flow.id)
+  await f.reopen()
+  const result=read(flow.id)
+  expect(result.flow.state).toBe(state)
+  expect(result.flow.stages[0].tasks).toMatchObject([{id:task.id}])
+  expect(result.messages).toMatchObject([{id:receiptId,content:'',run_marker:'linked-worker-run',person_task_return:{taskId:task.id,executionId:execution.id}}])
+  expect(result.taskPlans).toEqual([plan])
+  expect(()=>conversation.personFlowConversation(2,flow.id,{})).toThrow('Flow not found')
+  f.db.prepare('UPDATE sessions SET history_cleared_at=? WHERE id=?').run(flow.created_at+1,creator)
+  expect(()=>read(flow.id)).toThrow('Flow history was cleared')
+  expect(f.runtime.execute).not.toHaveBeenCalled()
+  expect(f.runtime.deliverStage).not.toHaveBeenCalled()
+})
+
+it('keeps plans without public replies and restores legacy result run identities without latest-Bot fallbacks',async () => {
+  const flow=create()
+  const {saveTaskPlan}=await import('../../packages/server/src/modules/studio/repositories/task-plan-store')
+  const plan={session_id:creator,run_id:'creator-run',plan_id:'creator-plan',revision:1,execution_state:'running' as const,
+    created_at:1000,updated_at:1000,plan:[{id:'check',step:'核对协作',status:'in_progress' as const}]}
+  saveTaskPlan(plan)
+  expect(read(flow.id)).toMatchObject({messages:[],taskPlans:[plan]})
+  const id=reply('legacy-run','历史阶段成果')
+  f.db.prepare('INSERT INTO person_stage_results(stage_id,round_number,result_message_id) VALUES(?,?,?)').run(flow.stages[0].id,1,id)
+  const legacy={...plan,session_id:peer,run_id:'legacy-run',plan_id:'legacy-plan'}
+  saveTaskPlan(legacy)
+  saveTaskPlan({...legacy,plan_id:'latest-other-topic',run_id:'other-topic',created_at:9000})
+  expect(read(flow.id).taskPlans).toEqual([plan,legacy])
+  f.db.prepare('DELETE FROM task_plans WHERE session_id=? AND plan_id=?').run(peer,'legacy-plan')
+  expect(read(flow.id).taskPlans).toEqual([plan])
+})
+
+it('returns no cards without associated data and retains raw pagination bounds for hidden replies',async () => {
+  const flow=create()
+  expect(read(flow.id)).toMatchObject({messages:[],taskPlans:[],flow:{stages:[{tasks:[]}]}})
+  runs.startPersonStageRun(1,{flowId:flow.id,stageId:flow.stages[0].id,generation:0},'paging')
+  const hidden=reply('paging','<think>private only</think>')
+  expect(read(flow.id)).toMatchObject({messages:[],oldest_message_id:hidden})
+  const first=reply('paging','第一条'),second=reply('paging','第二条')
+  expect(read(flow.id,{limit:1})).toMatchObject({messages:[{id:second}],next_before_id:second,has_more:true})
+  expect(read(flow.id,{limit:1,before_id:second})).toMatchObject({messages:[{id:first}],next_before_id:first,has_more:true})
+})

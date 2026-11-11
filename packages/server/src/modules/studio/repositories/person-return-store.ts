@@ -50,7 +50,7 @@ export function savePersonTaskReturn(userId: number, executionId: string, sessio
   return readTaskReturns(userId, sessionId, [String(messageId)])[0]
 }
 
-export function withPersonTaskReturns<T extends { id?: unknown; role?: unknown; display_role?: unknown }>(sessionId: string, messages: T[]): T[] {
+export function withPersonTaskReturns<T extends { id?: unknown; role?: unknown; display_role?: unknown }>(sessionId: string, messages: T[]): Array<T & { person_task_return?: TaskReturn }> {
   if (!isPersonSession(sessionId)) return messages
   const session = getSession(sessionId)
   const userId = Number(session?.studio_user_id)

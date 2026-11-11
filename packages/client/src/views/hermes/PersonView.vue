@@ -358,7 +358,7 @@ const workspaceValue = ref<string | null>('')
 const workspaceDirectories = useDefaultWorkspace()
 const { defaultWorkspaces, recentWorkspaces } = workspaceDirectories
 const taskPanelOpen = ref(false)
-const taskSelections = ref<Record<string, { taskId: string | null; executionId?: string }>>({})
+const taskSelections = ref<Record<string, { taskId: string | null; executionId?: string; flowId?: string }>>({})
 function taskWithExecution(tasks: PersonTask[] | undefined): PersonTask | undefined {
   return tasks?.find(task => !!task.execution_id)
 }
@@ -402,10 +402,18 @@ function selectTask(taskId: string, executionId?: string) {
     const task = tasks.find(task => task.id === taskId)
     if (!taskWithExecution(tasks) || (task && !task.execution_id && !executionId)) return
   }
-  if (!canChangeContext()) return
+  showTaskChat(taskId,executionId)
+}
+function showTaskChat(taskId:string,executionId?:string,flowId?:string) {
+  if (!taskId || switchingConversation.value || !canChangeContext()) return false
   showPanel.value = false
-  taskSelections.value[selectedSessionId.value] = { taskId, executionId }
+  taskSelections.value[selectedSessionId.value] = { taskId, executionId, flowId }
   taskPanelOpen.value = true
+  return true
+}
+function openCollaborationTask(taskId:string,executionId?:string) {
+  // Related worker tasks may belong to a participating Bot. Task APIs still enforce ownership.
+  if (conversationFlow.value && showTaskChat(taskId,executionId,conversationFlow.value.id)) conversationFlow.value=null
 }
 function openTask(task: PersonTask) { selectTask(task.id) }
 async function closeTaskChat(restoreFocus: boolean) {
@@ -491,7 +499,7 @@ async function refresh() {
   try {
     const next = await personRequest<PersonSnapshot>(`?include_flows=false${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ''}`, undefined, 'GET', request.controller.signal)
     if (!isCurrent()) return
-    if (taskPanelOpen.value && next.session?.id === sessionId) {
+    if (taskPanelOpen.value && next.session?.id === sessionId && !taskSelections.value[sessionId]?.flowId) {
       // A pending/failed/stale read is not evidence that this Bot has no tasks.
       // Only a successful snapshot for the selected Bot can close the UI panel.
       const tasks = [...(next.active_tasks || []), ...next.tasks].filter(task => task.session_id === sessionId)
@@ -856,7 +864,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
           </div>
         </NDrawerContent>
       </NDrawer>
-      <PersonFlowConversation v-if="conversationFlow" :key="`${selectedSessionId}:${conversationFlow.id}`" :flow="conversationFlow" @close="conversationFlow=null" />
+      <PersonFlowConversation v-if="conversationFlow" :key="`${selectedSessionId}:${conversationFlow.id}`" :flow="conversationFlow" @close="conversationFlow=null" @open-task="openCollaborationTask" />
     </template>
   </PageLoading>
     <NDropdown trigger="manual" placement="bottom-start" :show="showConversationMenu" :x="conversationMenuX" :y="conversationMenuY" :options="conversationMenuOptions"

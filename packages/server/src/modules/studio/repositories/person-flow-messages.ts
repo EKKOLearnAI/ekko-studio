@@ -3,6 +3,7 @@ import { personDb } from './person-store'
 import { getPersonFlow } from './person-stage-store'
 import { requirePersonSession } from './person-session-store'
 import type { HermesMessageRow } from './session-store'
+import type { TaskPlanSnapshot } from '../contracts/task-plan'
 
 export interface PersonFlowMessageRow extends HermesMessageRow {
   session_title: string
@@ -11,15 +12,9 @@ export interface PersonFlowMessageRow extends HermesMessageRow {
   round_number: number | null
 }
 
-/** Correlate original turns, never the entire history of a participating Bot. */
-export function readPersonFlowMessages(userId: number, flowId: string, beforeId: number, limit: number) {
-  const flow = getPersonFlow(userId,flowId)
-  const creator = requirePersonSession(userId,flow.creator_session_id)
-  if ((creator.history_cleared_at || 0) > flow.created_at) throw personError('Flow history was cleared',404)
-  const db = personDb()
-  // Older flows retain exact run identities in confirmations and saved results.
-  // A missing identity is never reconstructed from a time window or Bot name.
-  const rows = db.prepare(`WITH known_runs AS (
+// Older flows retain exact run identities in confirmations and saved results.
+// Share these identities between replies and plans; never use a Bot's latest plan.
+const flowRunsSql = `WITH known_runs AS (
     SELECT session_id,run_id,stage_id,round_number FROM person_flow_runs WHERE flow_id=?
     UNION ALL
     SELECT s.session_id,c.run_id,s.id,NULL FROM person_stage_confirmations c
@@ -35,7 +30,15 @@ export function readPersonFlowMessages(userId: number, flowId: string, beforeId:
   ), runs AS (
     SELECT session_id,run_id,MAX(stage_id) AS stage_id,MAX(round_number) AS round_number
       FROM known_runs WHERE run_id!='' GROUP BY session_id,run_id
-  ), linked_messages AS (
+  )`
+
+/** Correlate original turns, never the entire history of a participating Bot. */
+export function readPersonFlowMessages(userId: number, flowId: string, beforeId: number, limit: number) {
+  const flow = getPersonFlow(userId,flowId)
+  const creator = requirePersonSession(userId,flow.creator_session_id)
+  if ((creator.history_cleared_at || 0) > flow.created_at) throw personError('Flow history was cleared',404)
+  const db = personDb()
+  const rows = db.prepare(`${flowRunsSql}, linked_messages AS (
     SELECT m.id,r.stage_id,r.round_number FROM runs r JOIN messages m ON m.session_id=r.session_id AND m.run_marker=r.run_id
     UNION ALL
     SELECT m.id,s.id,r.round_number FROM person_stage_results r JOIN person_stages s ON s.id=r.stage_id
@@ -51,5 +54,11 @@ export function readPersonFlowMessages(userId: number, flowId: string, beforeId:
     ORDER BY m.id DESC LIMIT ?`).all(flowId,flowId,flowId,flowId,flowId,flowId,String(userId),beforeId,beforeId,limit+1) as unknown as PersonFlowMessageRow[]
   const revisions = db.prepare(`SELECT id,history_revision FROM sessions WHERE id=? OR id IN
     (SELECT session_id FROM person_stages WHERE flow_id=?) ORDER BY id`).all(flow.creator_session_id,flowId)
-  return { flow, rows:rows.slice(0,limit).reverse(), hasMore:rows.length>limit, historyKey:JSON.stringify(revisions) }
+  // A full authoritative plan snapshot also includes linked runs with no public reply.
+  const taskPlans = db.prepare(`${flowRunsSql} SELECT p.snapshot FROM task_plans p
+    JOIN runs r ON r.session_id=p.session_id AND r.run_id=p.run_id
+    JOIN sessions c ON c.id=p.session_id AND CAST(c.studio_user_id AS TEXT)=?
+    ORDER BY p.created_at,p.session_id,p.plan_id`).all(flowId,flowId,flowId,flowId,String(userId)) as Array<{snapshot:string}>
+  return { flow, rows:rows.slice(0,limit).reverse(), taskPlans:taskPlans.map(row => JSON.parse(row.snapshot) as TaskPlanSnapshot),
+    hasMore:rows.length>limit, historyKey:JSON.stringify(revisions) }
 }

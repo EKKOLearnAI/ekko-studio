@@ -1,5 +1,6 @@
 export const personMessages = {
   "en": {
+    "flowRelatedTasks": "Related tasks",
     "flowChatLoadFailed": "Could not load collaboration messages.",
     "flowViewChat": "View collaboration chat",
     "flowChat": "Collaboration chat",
@@ -182,6 +183,7 @@ export const personMessages = {
     "compressionDisabled": "Automatic compression is disabled in global settings. Model context limits still apply.",
   },
   "zh": {
+    "flowRelatedTasks": "相关任务",
     "flowChatLoadFailed": "协作消息加载失败，请重试。",
     "flowViewChat": "查看协作对话",
     "flowChat": "协作对话",
@@ -364,6 +366,7 @@ export const personMessages = {
     "compressionDisabled": "全局设置已关闭自动压缩，仍受模型上下文上限约束。",
   },
   "zh-TW": {
+    "flowRelatedTasks": "相關任務",
     "flowChatLoadFailed": "協作訊息載入失敗，請重試。",
     "flowViewChat": "查看協作對話",
     "flowChat": "協作對話",
@@ -546,6 +549,7 @@ export const personMessages = {
     "compressionDisabled": "全域設定已關閉自動壓縮，仍受模型上下文上限限制。",
   },
   "ja": {
+    "flowRelatedTasks": "関連タスク",
     "flowChatLoadFailed": "連携メッセージを読み込めませんでした。",
     "flowViewChat": "連携チャットを表示",
     "flowChat": "連携チャット",
@@ -728,6 +732,7 @@ export const personMessages = {
     "compressionDisabled": "全体設定で自動圧縮が無効です。モデルのコンテキスト上限は適用されます。",
   },
   "ko": {
+    "flowRelatedTasks": "관련 작업",
     "flowChatLoadFailed": "협업 메시지를 불러오지 못했습니다.",
     "flowViewChat": "협업 대화 보기",
     "flowChat": "협업 대화",
@@ -910,6 +915,7 @@ export const personMessages = {
     "compressionDisabled": "전역 설정에서 자동 압축이 꺼져 있습니다. 모델 컨텍스트 한도는 계속 적용됩니다.",
   },
   "fr": {
+    "flowRelatedTasks": "Tâches associées",
     "flowChatLoadFailed": "Impossible de charger les messages de collaboration.",
     "flowViewChat": "Voir la conversation",
     "flowChat": "Conversation de collaboration",
@@ -1092,6 +1098,7 @@ export const personMessages = {
     "compressionDisabled": "La compression automatique est désactivée dans les paramètres globaux. Les limites du modèle restent applicables.",
   },
   "es": {
+    "flowRelatedTasks": "Tareas relacionadas",
     "flowChatLoadFailed": "No se pudieron cargar los mensajes de colaboración.",
     "flowViewChat": "Ver conversación",
     "flowChat": "Conversación de colaboración",
@@ -1274,6 +1281,7 @@ export const personMessages = {
     "compressionDisabled": "La compresión automática está desactivada en los ajustes globales. Se mantienen los límites del modelo.",
   },
   "de": {
+    "flowRelatedTasks": "Zugehörige Aufgaben",
     "flowChatLoadFailed": "Die gemeinsamen Nachrichten konnten nicht geladen werden.",
     "flowViewChat": "Zusammenarbeit ansehen",
     "flowChat": "Gemeinsamer Chat",
@@ -1456,6 +1464,7 @@ export const personMessages = {
     "compressionDisabled": "Automatische Komprimierung ist global deaktiviert. Die Kontextgrenzen des Modells gelten weiterhin.",
   },
   "pt": {
+    "flowRelatedTasks": "Tarefas relacionadas",
     "flowChatLoadFailed": "Não foi possível carregar as mensagens de colaboração.",
     "flowViewChat": "Ver conversa",
     "flowChat": "Conversa de colaboração",
@@ -1638,6 +1647,7 @@ export const personMessages = {
     "compressionDisabled": "A compressão automática está desativada nos ajustes globais. Os limites do modelo continuam valendo.",
   },
   "ru": {
+    "flowRelatedTasks": "Связанные задачи",
     "flowChatLoadFailed": "Не удалось загрузить сообщения общего чата.",
     "flowViewChat": "Открыть общий чат",
     "flowChat": "Общий чат",
@@ -1820,6 +1830,7 @@ export const personMessages = {
     "compressionDisabled": "Автоматическое сжатие отключено в общих настройках. Ограничения контекста модели сохраняются.",
   },
   "ar": {
+    "flowRelatedTasks": "المهام المرتبطة",
     "flowChatLoadFailed": "تعذر تحميل رسائل التعاون.",
     "flowViewChat": "عرض محادثة التعاون",
     "flowChat": "محادثة التعاون",
@@ -2002,6 +2013,7 @@ export const personMessages = {
     "compressionDisabled": "الضغط التلقائي معطل في الإعدادات العامة. تظل حدود سياق النموذج سارية.",
   },
   "tr": {
+    "flowRelatedTasks": "İlgili görevler",
     "flowChatLoadFailed": "Ortak sohbet mesajları yüklenemedi.",
     "flowViewChat": "Ortak sohbeti görüntüle",
     "flowChat": "Ortak sohbet",

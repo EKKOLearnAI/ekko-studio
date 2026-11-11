@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NProgress } from 'naive-ui'
 import type { PersonFlow } from '@/api/person'
 import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue'
+import PersonFlowStageTasks from './PersonFlowStageTasks.vue'
 import { chatSessionAgentAvatar, personAvatarStyle } from '@/utils/chat-agent-avatar'
 import { personFlowDependencies, personFlowGroups, personFlowStageStatus, personFlowState, personFlowStatusKey, type PersonFlowStage, type PersonFlowStatus } from '@/utils/person-flow'
 
@@ -87,15 +88,7 @@ function dependencyLabel(stage: PersonFlowStage) {
               </p>
               <p v-if="stage.confirmation?.reason && !stage.delivery_error" class="flow-dependency">{{ stage.confirmation.reason }}</p>
               <p v-if="stage.confirmation?.state === 'blocked'" class="flow-dependency">{{ t('person.flowConfirmationResume') }}</p>
-              <details v-if="stage.tasks.length" class="flow-worker-details">
-                <summary><SessionTaskIcon :size="14" /><span>{{ t('person.flowWorkerTasks',{ count:stage.tasks.length }) }}</span><SessionTaskIcon name="chevron-down" :size="12" /></summary>
-                <ul><li v-for="task in stage.tasks" :key="task.id">
-                  <button type="button" class="flow-worker" @click="emit('openTask',task.id)">
-                    <img :src="chatSessionAgentAvatar({ agent:task.agent || 'ekko-agent' }).src" alt="" width="22" height="22" />
-                    <span>{{ task.title }}<small>{{ t(`person.states.${task.execution_state || task.status}`) }}</small></span><SessionTaskIcon name="open" :size="12" />
-                  </button>
-                </li></ul>
-              </details>
+              <PersonFlowStageTasks :tasks="stage.tasks" @open-task="emit('openTask',$event)" />
               <div v-if="stage.result_message_id" class="flow-role-footer">
                 <NButton text size="small" type="primary" @click="emit('openResult',stage.session_id,stage.result_message_id)">{{ t('person.viewResult') }}<template #icon><SessionTaskIcon name="open" :size="14" /></template></NButton>
               </div>
@@ -159,7 +152,7 @@ function dependencyLabel(stage: PersonFlowStage) {
 .flow-role-identity { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
 .flow-role-name { padding: 0; border: 0; background: transparent; color: $text-primary; font: inherit; font-size: 14px; line-height: 1.5; font-weight: 600; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
 .flow-role-name:hover { text-decoration: underline; text-underline-offset: 3px; }
-.flow-role-name:focus-visible, .flow-worker:focus-visible, summary:focus-visible { outline: 2px solid $accent-primary; outline-offset: 4px; border-radius: var(--radius-component, 4px); }
+.flow-role-name:focus-visible { outline: 2px solid $accent-primary; outline-offset: 4px; border-radius: var(--radius-component, 4px); }
 .flow-role-goal { margin: 0; font-size: 13px; line-height: 1.75; color: $text-secondary; white-space: pre-wrap; overflow-wrap: anywhere; }
 .flow-status { @include task-status.badge; padding: 2px 7px; font-size: 10px; }
 .flow-status--completed { @include task-status.completed; }
@@ -171,16 +164,6 @@ function dependencyLabel(stage: PersonFlowStage) {
 .flow-dependency svg { flex-shrink: 0; margin-top: 3px; }
 .flow-dependency--error { color: $error; }
 .flow-role-footer { margin-top: auto; }
-.flow-worker-details { margin-top: auto; padding-top: 10px; border-top: 1px solid $border-light; }
-summary { display: flex; align-items: center; gap: 7px; list-style: none; font-size: 11px; line-height: 1.7; color: $text-muted; cursor: pointer; }
-summary::-webkit-details-marker { display: none; }
-summary span { flex: 1; }
-details[open] summary > svg:last-child { transform: rotate(180deg); }
-.flow-worker-details ul { padding: 0; margin: 10px 0 0; list-style: none; }
-.flow-worker { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 0; border: 0; background: transparent; font: inherit; color: $text-secondary; text-align: start; cursor: pointer; }
-.flow-worker > img, .flow-worker > svg { flex-shrink: 0; object-fit: contain; }
-.flow-worker > span { flex: 1; min-width: 0; font-size: 11px; overflow-wrap: anywhere; }
-.flow-worker small { display: block; margin-top: 3px; font-size: 10px; color: $text-muted; }
 .flow-handoff { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 0 22px; font-size: 11px; color: $text-secondary; }
 .flow-handoff > svg { color: $text-muted; }
 .flow-handoff small { font-size: 10px; color: $text-muted; }

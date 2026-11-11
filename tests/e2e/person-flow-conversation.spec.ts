@@ -1,6 +1,7 @@
 import { expect,test,type Page } from '@playwright/test'
 import { resolve } from 'node:path'
-import type { PersonFlow,PersonFlowMessage } from '../../packages/client/src/api/person'
+import type { PersonFlow,PersonFlowMessage,PersonTask } from '../../packages/client/src/api/person'
+import type { TaskPlanSnapshot } from '../../packages/client/src/utils/task-plan'
 import { mockPersonResume,type PersonResumeFixture } from './fixtures/person-resume'
 
 async function setup(page:Page,initialState:PersonFlow['state']='completed') {
@@ -14,7 +15,7 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
     })),
   }
   const entry=(id:number,index:number,content:string):PersonFlowMessage => ({id,session_id:sessions[index].id,session_title:sessions[index].title,bot_type:sessions[index].bot_type,stage_id:`stage-${index-1}`,round_number:1,role:'assistant',content,timestamp:Math.floor(Date.now()/1000)-60+id})
-  const state={flow,flows:[flow],timelinePages:new Map<string,PersonResumeFixture>(),timelineReads:[] as string[],latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true,snapshotDelay:0,resumeDelay:0,
+  const state={flow,flows:[flow],taskPlans:[] as TaskPlanSnapshot[],tasks:[] as PersonTask[],taskErrorStatus:0,oldestMessageId:undefined as number | undefined,taskReads:[] as Array<{taskId:string;executionId:string | null}>,timelinePages:new Map<string,PersonResumeFixture>(),timelineReads:[] as string[],latest:[entry(30,1,'接口已完成'),entry(40,2,'界面已完成')],older:[entry(10,0,'已安排协作'),entry(20,1,'正在检查接口')],historyKey:'revision-1',fail:false,errorStatus:503,hasMore:true,snapshotDelay:0,resumeDelay:0,
     messages:{[sessions[0].id]:[{id:'creator-before',role:'assistant',content:'我来协调这次工作',timestamp:1000},{id:'creator-after',role:'assistant',content:'等待两端返回结果',timestamp:3000}]} as Record<string,PersonResumeFixture['messages']>,historyClearedAt:0}
   page.on('pageerror',error=>errors.push(error.message))
   await page.addInitScript(()=>{localStorage.setItem('hermes_locale','zh')})
@@ -44,7 +45,14 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
     } else if (url.pathname==='/api/studio/person/flows/flow-a/messages') {
       if (state.fail) return route.fulfill({status:state.errorStatus,json:{error:'fixture unavailable'}})
       const older=url.searchParams.has('before_id')
-      json={flow:state.flow,messages:older?state.older:state.latest,has_more:older?false:state.hasMore,next_before_id:older?null:state.hasMore?30:null,history_key:state.historyKey}
+      json={flow:state.flow,messages:older?state.older:state.latest,taskPlans:state.taskPlans,oldest_message_id:state.oldestMessageId,has_more:older?false:state.hasMore,next_before_id:older?null:state.hasMore?30:null,history_key:state.historyKey}
+    } else if (/\/person\/tasks\/[^/]+\/chat$/.test(url.pathname)) {
+      const taskId=decodeURIComponent(url.pathname.split('/').at(-2)!),task=state.tasks.find(task=>task.id===taskId)!
+      state.taskReads.push({taskId,executionId:url.searchParams.get('execution_id')})
+      if (state.taskErrorStatus) return route.fulfill({status:state.taskErrorStatus,json:{error:'Task permission revoked'}})
+      const session={...sessions[1],id:`person-task-${task.id}`,title:task.title,source:'coding_agent',agent:'codex'}
+      const execution={id:url.searchParams.get('execution_id') || task.execution_id,session_id:session.id,state:task.execution_state,created_at:1}
+      json={task,session,execution,executions:[execution],pending:[],canInsert:false,canRemove:false}
     } else if (url.pathname.includes('/messages/paginated')) {
       const id=decodeURIComponent(url.pathname.split('/')[5]),messages=state.messages[id] || []
       if(id===flow.creator_session_id && state.timelinePages.size && url.searchParams.get('timeline')==='true') {
@@ -69,6 +77,205 @@ async function setup(page:Page,initialState:PersonFlow['state']='completed') {
 const card=(page:Page)=>page.getByRole('button',{name:'查看协作对话 · 接口与界面联调',exact:true})
 const transcript=(page:Page)=>page.getByRole('log',{name:'协作对话',exact:true})
 const refreshTranscript=(page:Page)=>page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')))
+const relatedTrigger=(page:Page)=>page.locator('.person-flow-conversation .flow-related-tasks-trigger')
+const relatedPanel=(page:Page)=>page.getByRole('dialog',{name:'相关任务',exact:true})
+async function openRelated(page:Page) {
+  await relatedTrigger(page).click()
+  await expect(relatedPanel(page)).toBeVisible()
+  return relatedPanel(page)
+}
+
+function addTaskCards(state:Awaited<ReturnType<typeof setup>>['state']) {
+  const task:PersonTask={id:'linked-task',session_id:'person-main-api',title:'接口阶段任务',summary:'已完成接口检查',status:'completed',revision:1,
+    execution_id:'current-execution',execution_state:'finished',running:false,completion_evidence:'已验证',selection_json:JSON.stringify({runtime:'codex'}),updated_at:1}
+  state.tasks=[task]
+  state.messages[`person-task-${task.id}`]=[{id:'worker-reply',role:'assistant',content:'任务执行内容',timestamp:1}]
+  state.flow.stages[0].tasks=[{id:task.id,title:task.title,status:task.status,execution_state:task.execution_state,agent:'codex'}]
+  if (!state.latest.length) state.latest=[{...state.older[1],id:30,content:'接口已完成'}]
+  state.latest[0].run_marker='linked-run'
+  state.latest[0].person_task_return={taskId:task.id,executionId:'original-execution',assistantMessageId:'30',title:task.title,summary:task.summary,agent:'codex',state:'finished'}
+  state.taskPlans=[{session_id:task.session_id,run_id:'linked-run',plan_id:'linked-plan',revision:1,execution_state:'ended',
+    created_at:state.latest[0].timestamp*1000,updated_at:state.latest[0].timestamp*1000,plan:[{id:'check',step:'检查关联接口',status:'completed'}]}]
+}
+
+test('restores linked task cards, pages without duplicates and opens a participant task or its original execution',async ({page},testInfo)=>{
+  const {state,errors,mutations,resume}=await setup(page)
+  addTaskCards(state)
+  await card(page).click()
+  await expect(transcript(page).getByTestId('task-plan-card')).toHaveCount(1)
+  await expect(transcript(page).locator('.person-task-return-card')).toHaveCount(1)
+  await expect(transcript(page).locator('.flow-worker-details')).toHaveCount(0)
+  await expect(relatedTrigger(page)).toHaveCount(1)
+  await expect(relatedPanel(page)).toHaveCount(0)
+  await transcript(page).getByRole('button',{name:'更早的消息',exact:true}).click()
+  await expect(transcript(page).locator('.message-author-name')).toHaveText(['主发起人','接口 Bot','接口 Bot','界面 Bot'])
+  await expect(transcript(page).getByTestId('task-plan-card')).toHaveCount(1)
+  state.taskPlans[0]={...state.taskPlans[0],revision:2,plan:[{id:'check',step:'已复核关联接口',status:'completed'}]}
+  await refreshTranscript(page)
+  await expect(transcript(page).getByTestId('task-plan-card')).toContainText('已复核关联接口')
+  await transcript(page).locator('.plan-header').click()
+  await expect(transcript(page).locator('.plan-body')).toHaveCount(0)
+  await transcript(page).locator('.plan-header').click()
+  await expect(transcript(page).locator('.plan-body')).toBeVisible()
+  await openRelated(page)
+  await relatedPanel(page).locator('.flow-worker-details > summary').click()
+  await expect(relatedPanel(page).locator('.flow-worker')).toContainText('接口阶段任务')
+  await testInfo.attach('collaboration-task-cards',{body:await page.screenshot({path:testInfo.outputPath('collaboration-task-cards.png'),animations:'disabled'}),contentType:'image/png'})
+  await page.keyboard.press('Escape')
+  await expect(relatedPanel(page)).toHaveCount(0)
+  await expect(relatedTrigger(page)).toBeFocused()
+  await transcript(page).locator('.person-task-return-card').getByRole('button').click()
+  await expect(transcript(page)).toHaveCount(0)
+  await expect(page.locator('.task-chat-heading .task-identity-title')).toHaveText('接口阶段任务')
+  await expect(page.locator('.person-task-chat')).toContainText('任务执行内容')
+  expect(state.taskReads.at(-1)).toEqual({taskId:'linked-task',executionId:'original-execution'})
+  const reads=state.taskReads.length
+  resume.publish('person-main-api')
+  await expect.poll(()=>state.taskReads.length).toBeGreaterThan(reads)
+  await page.locator('.task-chat-heading').getByRole('button',{name:'关闭',exact:true}).click()
+  await expect(page.locator('.person-task-chat')).toHaveCount(0)
+  await card(page).click()
+  await openRelated(page)
+  await relatedPanel(page).locator('.flow-worker-details > summary').click()
+  await relatedPanel(page).locator('.flow-worker').click()
+  await expect(page.locator('.task-chat-heading .task-identity-title')).toHaveText('接口阶段任务')
+  expect(state.taskReads.at(-1)).toEqual({taskId:'linked-task',executionId:null})
+  await expect(page.locator('.person-task-chat')).toContainText('任务执行内容')
+  state.taskErrorStatus=403
+  resume.publish('person-main-api')
+  await expect(page.locator('.person-task-chat .task-chat-alert')).toContainText('任务加载失败')
+  await expect(page.locator('.person-task-chat')).not.toContainText('任务执行内容')
+  expect(mutations).toEqual([])
+  expect(errors).toEqual([])
+})
+
+test('shows plan-only and stage-only content, removes stale cards and clears all task data after access is revoked',async ({page})=>{
+  const {state,errors}=await setup(page)
+  addTaskCards(state);state.latest=[];state.hasMore=false
+  await card(page).click()
+  await expect(transcript(page).getByTestId('task-plan-card')).toHaveCount(1)
+  await expect(transcript(page)).not.toContainText('暂无协作消息')
+  state.taskPlans=[]
+  await refreshTranscript(page)
+  await expect(transcript(page).getByTestId('task-plan-card')).toHaveCount(0)
+  await expect(relatedTrigger(page)).toHaveCount(1)
+  await expect(transcript(page)).toContainText('暂无协作消息')
+  state.latest=[{...state.older[0],content:'',person_task_return:{taskId:'linked-task',executionId:'original-execution',assistantMessageId:'10',title:'接口阶段任务',summary:'',agent:'codex',state:'finished'}}]
+  await refreshTranscript(page)
+  await expect(transcript(page).locator('.person-task-return-card')).toHaveCount(1)
+  state.latest=[];state.flow.stages[0].tasks=[]
+  await refreshTranscript(page)
+  await expect(transcript(page).locator('.person-task-return-card')).toHaveCount(0)
+  await expect(transcript(page)).toContainText('暂无协作消息')
+  addTaskCards(state)
+  state.taskPlans[0].session_id='person-main-api'
+  await refreshTranscript(page)
+  await expect(transcript(page).getByTestId('task-plan-card')).toHaveCount(1)
+  await openRelated(page)
+  state.fail=true;state.errorStatus=403
+  await refreshTranscript(page)
+  await expect(page.locator('.flow-conversation-error')).toBeVisible()
+  await expect(transcript(page).locator('.message, .flow-worker-details')).toHaveCount(0)
+  await expect(relatedTrigger(page)).toHaveCount(0)
+  await expect(relatedPanel(page)).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('keeps linked cards usable through theme overrides and reset',async ({page},testInfo)=>{
+  const {state,errors}=await setup(page)
+  addTaskCards(state)
+  await card(page).click()
+  await openRelated(page)
+  await relatedPanel(page).locator('.flow-worker-details > summary').click()
+  const capture=async (name:string)=>{
+    await expect(transcript(page).getByTestId('task-plan-card')).toBeVisible()
+    await expect(transcript(page).locator('.person-task-return-card')).toBeVisible()
+    await expect(relatedPanel(page).locator('.flow-worker')).toBeVisible()
+    await testInfo.attach(name,{body:await page.screenshot({path:testInfo.outputPath(`${name}.png`),animations:'disabled'}),contentType:'image/png'})
+  }
+  await capture('cards-light')
+  await page.evaluate(()=>{
+    (window as any).personWorkspaceFixture.theme.previewThemeSettings({brightness:'dark',appearance:{global:{opacity:1},regions:{}}})
+  })
+  await capture('cards-dark')
+  await page.evaluate(()=>{
+    const theme=(window as any).personWorkspaceFixture.theme
+    theme.previewThemeSettings({brightness:'dark',appearance:{global:{opacity:.7},regions:{card:{opacity:0,blur:4,radius:16,backgroundColor:'#627a94'}}}})
+    document.documentElement.classList.add('theme-has-custom-background')
+    document.documentElement.style.setProperty('--app-background-image','linear-gradient(120deg, #607080, #a0a090)')
+  })
+  await capture('cards-dark-wallpaper-zero-card-opacity')
+  await page.evaluate(()=>{
+    (window as any).personWorkspaceFixture.theme.previewThemeSettings({brightness:'light',appearance:{global:{opacity:.8},regions:{card:{opacity:.4,blur:2,radius:10}}}})
+  })
+  await capture('cards-light-wallpaper')
+  await page.evaluate(()=>{
+    (window as any).personWorkspaceFixture.theme.previewThemeSettings({brightness:'light',appearance:{global:{opacity:1},regions:{}}})
+    document.documentElement.classList.remove('theme-has-custom-background')
+    document.documentElement.style.setProperty('--app-background-image','none')
+  })
+  await relatedPanel(page).locator('.flow-worker').focus()
+  await expect(relatedPanel(page).locator('.flow-worker')).toBeFocused()
+  await capture('cards-reset')
+  expect(errors).toEqual([])
+})
+
+test('removes hidden recent card messages while retaining already loaded older replies',async ({page})=>{
+  const {state,errors}=await setup(page)
+  addTaskCards(state)
+  await card(page).click()
+  await transcript(page).getByRole('button',{name:'更早的消息',exact:true}).click()
+  await expect(transcript(page).locator('.person-task-return-card')).toHaveCount(1)
+  state.latest=[];state.oldestMessageId=30;state.taskPlans=[]
+  await refreshTranscript(page)
+  await expect(transcript(page).locator('.message-author-name')).toHaveText(['主发起人','接口 Bot'])
+  await expect(transcript(page)).toContainText('已安排协作')
+  await expect(transcript(page)).toContainText('正在检查接口')
+  await expect(transcript(page).locator('.person-task-return-card, [data-testid="task-plan-card"]')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+for (const status of ['completed','stopped','failed'] as const) test(`conditionally renders task cards for a ${status} collaboration`,async ({page})=>{
+  const {state,errors}=await setup(page,status)
+  await card(page).click()
+  await expect(transcript(page)).toContainText('接口已完成')
+  await expect(transcript(page).locator('[data-testid="task-plan-card"], .person-task-return-card, .flow-worker-details')).toHaveCount(0)
+  await expect(relatedTrigger(page)).toHaveCount(0)
+  addTaskCards(state)
+  await refreshTranscript(page)
+  await expect(transcript(page).getByTestId('task-plan-card')).toHaveCount(1)
+  await expect(transcript(page).locator('.person-task-return-card')).toHaveCount(1)
+  await expect(relatedTrigger(page)).toHaveCount(1)
+  await expect(transcript(page).locator('.flow-worker-details')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('opens an unreturned stage task from the header without adding a summary to the conversation',async ({page},testInfo)=>{
+  const {state,errors,mutations}=await setup(page,'stopped')
+  addTaskCards(state)
+  delete state.latest[0].person_task_return
+  state.taskPlans=[]
+  await card(page).click()
+  await expect(transcript(page)).toContainText('接口已完成')
+  await expect(transcript(page).locator('.person-task-return-card, .flow-worker-details, .flow-conversation-tasks')).toHaveCount(0)
+  await expect(relatedTrigger(page)).toHaveText('相关任务')
+  await expect(relatedTrigger(page)).toHaveAttribute('aria-expanded','false')
+  await relatedTrigger(page).focus()
+  await page.keyboard.press('Enter')
+  const summary=relatedPanel(page).locator('summary')
+  await expect(summary).toBeFocused()
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Tab')
+  await expect(relatedPanel(page).locator('.flow-worker')).toBeFocused()
+  await testInfo.attach('unreturned-related-task',{body:await page.screenshot({path:testInfo.outputPath('unreturned-related-task.png'),animations:'disabled'}),contentType:'image/png'})
+  await page.keyboard.press('Enter')
+  await expect(transcript(page)).toHaveCount(0)
+  await expect(relatedPanel(page)).toHaveCount(0)
+  await expect(page.locator('.task-chat-heading .task-identity-title')).toHaveText('接口阶段任务')
+  expect(state.taskReads.at(-1)).toEqual({taskId:'linked-task',executionId:null})
+  expect(mutations).toEqual([])
+  expect(errors).toEqual([])
+})
 
 test('shows the creator card after completion, failure or stopping, and hides it again on resume',async ({page})=>{
   const {state,errors}=await setup(page,'active')
@@ -269,6 +476,7 @@ test('opens the creator card and complete unified conversation on a narrow scree
   await page.setViewportSize({width:390,height:844})
   const {state,errors}=await setup(page)
   state.flow.stages=Array.from({length:8},(_,index)=>({...state.flow.stages[index%2],id:`stage-${index}`,position:index,group_position:index<3?0:index-2}))
+  addTaskCards(state)
   await page.reload()
   const graph=card(page).locator('.person-flow-graph')
   await expect(graph.locator('.bot-sprite')).toHaveCount(8)
@@ -287,9 +495,22 @@ test('opens the creator card and complete unified conversation on a narrow scree
   await card(page).focus()
   await page.keyboard.press('Enter')
   await expect(transcript(page)).toContainText('界面已完成')
+  await expect(transcript(page).getByTestId('task-plan-card')).toBeVisible()
+  await expect(transcript(page).locator('.person-task-return-card')).toBeVisible()
   await expect.poll(()=>page.locator('.person-flow-conversation').evaluate(element=>Math.round(element.getBoundingClientRect().left))).toBe(0)
   expect(await transcript(page).evaluate(element=>element.scrollWidth>element.clientWidth)).toBe(false)
-  await testInfo.attach('unified-collaboration-mobile',{body:await page.screenshot({animations:'disabled'}),contentType:'image/png'})
+  await testInfo.attach('unified-collaboration-mobile',{body:await page.screenshot({path:testInfo.outputPath('unified-collaboration-mobile.png'),animations:'disabled'}),contentType:'image/png'})
+  await openRelated(page)
+  await relatedPanel(page).locator('summary').click()
+  await expect(relatedPanel(page).locator('.flow-worker')).toBeVisible()
+  expect(await relatedPanel(page).evaluate(element=>{
+    const bounds=element.closest('.n-popover')!.getBoundingClientRect()
+    return bounds.left>=0 && bounds.right<=innerWidth
+  })).toBe(true)
+  await testInfo.attach('related-tasks-mobile',{body:await page.screenshot({path:testInfo.outputPath('related-tasks-mobile.png'),animations:'disabled'}),contentType:'image/png'})
+  await page.keyboard.press('Escape')
+  await expect(relatedPanel(page)).toHaveCount(0)
+  await expect(transcript(page)).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(card(page)).toBeVisible()
   expect(errors).toEqual([])

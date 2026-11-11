@@ -3,6 +3,7 @@ import { request } from './client'
 import type { AvailableModelGroup } from './hermes/system'
 import type { ProviderApiMode } from './studio/provider-api-mode'
 import { clientUuid } from '../utils/secure-uuid'
+import type { TaskPlanSnapshot } from '../utils/task-plan'
 export interface PersonModel { profile: string; provider: string; model: string; apiMode?: ProviderApiMode }
 export interface PersonModelGroup extends Pick<AvailableModelGroup, 'provider' | 'label' | 'models' | 'model_meta' | 'api_mode' | 'api_mode_by_model'> { profile: string }
 export interface PersonAgentPreset { id: string; name: string; description: string; selection: PersonModel & { runtime: string; mode: 'scoped' | 'global'; reasoningEffort: string } }
@@ -27,6 +28,7 @@ export interface PersonFlow {
 export interface PersonFlowMessage {
   id: number; session_id: string; session_title: string; bot_type: string | null
   stage_id: string; round_number: number | null; role: 'user' | 'assistant'; content: string; timestamp: number
+  run_marker?: string | null; person_task_return?: PersonTaskReturn
 }
 export interface PersonFlowSnapshot {
   cards?: PersonFlow[]
@@ -48,6 +50,8 @@ export interface PersonTimeline {
 }
 export interface PersonFlowConversation {
   flow: PersonFlow; messages: PersonFlowMessage[]; has_more: boolean; next_before_id: number | null; history_key: string
+  taskPlans?: TaskPlanSnapshot[]
+  oldest_message_id?: number | null
 }
 export function fetchPersonFlowConversation(flowId: string, beforeId?: number, signal?: AbortSignal) {
   return personRequest<PersonFlowConversation>(`/flows/${encodeURIComponent(flowId)}/messages${beforeId ? `?before_id=${beforeId}` : ''}`,undefined,'GET',signal)
