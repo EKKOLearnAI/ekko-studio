@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { cp, lstat, mkdir, readFile, realpath, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { PluginManifest } from '../../contracts/plugins'
 import { manifest } from './schema'
@@ -17,12 +17,11 @@ export async function pluginFile(directory: string, entry: string): Promise<stri
 export async function readManifest(directory: string): Promise<PluginManifest> {
   const path = await pluginFile(directory, 'package.json')
   const pkg = JSON.parse(await readFile(path, 'utf8'))
-  const standalone = await lstat(join(directory, 'plugin.json')).then(() => true, error => {
-    if (error.code === 'ENOENT') return false
+  const manifestPath = await pluginFile(directory, 'plugin.json').catch(error => {
+    if (error.code === 'ENOENT') throw new PluginError('Plugin package must include plugin.json')
     throw error
   })
-  if (standalone && pkg.studioPlugin !== undefined) throw new PluginError('Declare the plugin in plugin.json or package.json.studioPlugin, not both')
-  const result = manifest(standalone ? JSON.parse(await readFile(await pluginFile(directory, 'plugin.json'), 'utf8')) : pkg.studioPlugin)
+  const result = manifest(JSON.parse(await readFile(manifestPath, 'utf8')))
   if (pkg.version !== undefined && pkg.version !== result.version) throw new PluginError('Package and plugin versions must match')
   for (const entry of [result.server, result.client].filter(Boolean)) await pluginFile(directory, entry!)
   async function icon(value: string | undefined): Promise<string | undefined> {

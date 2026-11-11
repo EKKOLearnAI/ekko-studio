@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PluginManager } from '../../packages/server/src/modules/studio/services/plugins/manager'
 import { PluginRuntime, type PluginPorts } from '../../packages/server/src/modules/studio/services/plugins/runtime'
-import { PluginStore, scopeKey, writeJson } from '../../packages/server/src/modules/studio/services/plugins/store'
+import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
 import { PluginEffects } from '../../packages/server/src/modules/studio/services/plugins/effects'
 import { configuration, manifest } from '../../packages/server/src/modules/studio/services/plugins/schema'
 import type { PluginContext, PluginIdentity, PluginManifest } from '../../packages/plugin-sdk/src'
@@ -27,7 +26,8 @@ const server = `export function apply(ctx) {
 }`
 async function source(dir: string, version = '1.0.0', code = server) {
   const directory = join(dir, `source-${version}`); await mkdir(directory, { recursive: true })
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'studio-notes-test', type: 'module', studioPlugin: { ...definition, version } }))
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'studio-notes-test', type: 'module', version }))
+  await writeFile(join(directory, 'plugin.json'), JSON.stringify({ ...definition, version }))
   await writeFile(join(directory, 'server.mjs'), code); await writeFile(join(directory, 'client.mjs'), 'export function mount(element) { element.textContent = "Notes" }')
   return directory
 }
@@ -227,25 +227,6 @@ describe('Studio plugin host', () => {
       expect((await manager.callTool(caller, 'notebook/list', {})).data).toMatchObject([{ text: 'shared note' }, { text: 'other account note' }])
       expect(manager.poll(caller, 0, 'notebook').events.filter(event => event.type === 'notebook.updated')).toHaveLength(2)
     }
-  })
-  it('migrates old installations once, resolves duplicate ids deterministically and retains scoped data', async () => {
-    const dir = await home(), root = join(dir, 'host'), other = { userId: 2, profile: 'two' }
-    const oldDirectory = await source(dir), newDirectory = await source(dir, '2.0.0')
-    const record = (directory: string, version: string, installedAt: number) => ({ manifest: { ...definition, version }, directory, source: directory, installedAt, enabled: true, config: {} })
-    writeJson(join(root, scopeKey(who), 'state.json'), { ...who, revision: 2, records: { notes: record(oldDirectory, '1.0.0', 10) } })
-    writeJson(join(root, scopeKey(other), 'state.json'), { ...other, revision: 7, records: { notes: record(newDirectory, '2.0.0', 20) } })
-    const oldData = join(root, scopeKey(who), 'data', createHash('sha256').update(JSON.stringify(['notes', '', ''])).digest('hex') + '.json')
-    writeJson(oldData, { count: 9 })
-    const manager = new PluginManager(root, ports()); managers.push(manager); await manager.restore()
-    expect(manager.snapshot(who)).toMatchObject({ revision: 8, plugins: [{ manifest: { version: '2.0.0' }, status: 'active' }] })
-    expect(await manager.callTool(who, 'notes/read', { key: 'note' })).toMatchObject({ data: { count: 1 } })
-    const migration = JSON.parse(await readFile(join(root, 'global', 'migration.json'), 'utf8'))
-    expect(migration.duplicates).toEqual([{ id: 'notes', retainedScope: scopeKey(other), skippedScope: scopeKey(who) }])
-    expect(JSON.parse(await readFile(join(root, scopeKey(who), 'state.json'), 'utf8')).records.notes.manifest.version).toBe('1.0.0')
-    await manager.update(other, 'notes', 8, { action: 'uninstall' }); await manager.close()
-    const restored = new PluginManager(root, ports()); managers.push(restored); await restored.restore()
-    expect(restored.snapshot(who).plugins).toEqual([])
-    expect(JSON.parse(await readFile(oldData, 'utf8'))).toEqual({ count: 9 })
   })
   it('starts one recurring scheduler for a globally enabled plugin and stops it for all callers', async () => {
     const dir = await home(), access = ports(), manager = new PluginManager(dir, access); managers.push(manager)

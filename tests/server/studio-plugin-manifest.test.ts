@@ -32,13 +32,16 @@ it('installs standalone metadata and bundled icons without modifying the source 
   await installed.dispose()
 })
 
-it('rejects ambiguous metadata and mismatched package versions, retaining legacy manifests', async () => {
+it('requires plugin.json even when package.json contains plugin metadata', async () => {
   const { source } = await fixture()
   await writeFile(join(source, 'package.json'), JSON.stringify({ studioPlugin: definition }))
-  await expect(readManifest(source)).rejects.toThrow(/not both/)
   await rm(join(source, 'plugin.json'))
-  expect((await readManifest(source)).id).toBe('workspace')
-  await writeFile(join(source, 'package.json'), JSON.stringify({ version: '2.0.0', studioPlugin: definition }))
+  await expect(readManifest(source)).rejects.toThrow('Plugin package must include plugin.json')
+})
+
+it('rejects mismatched package and plugin versions', async () => {
+  const { source } = await fixture()
+  await writeFile(join(source, 'package.json'), JSON.stringify({ version: '2.0.0' }))
   await expect(readManifest(source)).rejects.toThrow(/versions must match/)
 })
 

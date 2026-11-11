@@ -13,6 +13,10 @@ test('global catalog and navigation stay available across accounts and Profiles 
   })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const url = new URL(route.request().url()), profile = url.searchParams.get('profile') || 'default'
+    if (url.pathname === '/api/auth/me') {
+      const account = await page.evaluate(() => JSON.parse(localStorage.getItem('plugin_fixture_account') || '{"sub":"1","role":"super_admin"}'))
+      return route.fulfill({ json: { user: { id: Number(account.sub), username: 'Tester', role: account.role } } })
+    }
     if (url.pathname.endsWith('/events')) return route.fulfill({ json: { cursor: change, generation: 'global', events: Number(url.searchParams.get('cursor')) < change ? [{ id: String(change), type: 'plugin.changed', pluginId: 'alpha', timestamp: Date.now(), identity: { userId: 1, profile: 'default' }, data: null }] : [] } })
     if (url.pathname.endsWith('/client')) {
       clients.push(profile)
@@ -38,7 +42,7 @@ test('global catalog and navigation stay available across accounts and Profiles 
   await expect(page.locator('.plugin-card')).toHaveCount(3)
   await expect(page.locator('iframe')).toHaveCount(0)
   expect(clients).toHaveLength(0)
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(1)
+  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
   await page.getByRole('textbox', { name: '搜索插件名称、描述…' }).fill('没有结果')
   await expect(page.getByText('没有匹配的插件')).toBeVisible()
   await page.getByRole('textbox', { name: '搜索插件名称、描述…' }).fill('Beta')
@@ -51,9 +55,9 @@ test('global catalog and navigation stay available across accounts and Profiles 
   await page.screenshot({ path: testInfo.outputPath('center-light.png') })
   await page.getByRole('button', { name: 'Alpha 工作台', exact: true }).click()
   await page.locator('.n-tabs-tab').getByText('配置', { exact: true }).click()
-  await expect(page.frameLocator('iframe').locator('#root')).toHaveText('1/default:settings')
-  await page.locator('.n-tabs-tab').getByText('概览', { exact: true }).click()
   await expect(page.locator('iframe')).toHaveCount(0)
+  await page.getByRole('link', { name: '设置 ↗', exact: true }).click()
+  await expect(page.frameLocator('iframe').locator('#root')).toHaveText('1/default:settings')
   await page.getByRole('link', { name: '报告', exact: true }).click()
   const frame = page.frameLocator('iframe')
   await expect(frame.locator('#root')).toHaveText('1/default:report')
@@ -76,9 +80,9 @@ test('global catalog and navigation stay available across accounts and Profiles 
   await expect(frame.locator('#root')).toHaveText('1/default:home')
   await page.evaluate(() => (window as any).pluginFixture.profile('slow'))
   await expect(frame.locator('#root')).toBeEmpty()
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(1)
+  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
   await page.evaluate(() => (window as any).pluginFixture.profile('other'))
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveAttribute('aria-label', 'Alpha 工作台')
+  await expect(page.locator('.studio-navigation-rail__plugins').getByRole('link', { name: '主页', exact: true })).toBeVisible()
   await expect(frame.locator('#root')).toHaveText('1/other:home')
   releaseSlowProfile!()
   await expect(frame.locator('#root')).toHaveText('1/other:home')
@@ -90,7 +94,7 @@ test('global catalog and navigation stay available across accounts and Profiles 
   await expect(page.getByText('全局插件 · 所有账号与 Profile 可用')).toBeVisible()
   await expect(page.getByRole('button', { name: '安装插件', exact: true })).toHaveCount(0)
   await page.keyboard.press('Escape')
-  await page.getByRole('link', { name: 'Alpha 工作台', exact: true }).click()
+  await page.getByRole('link', { name: '主页', exact: true }).click()
   await expect(frame.locator('#root')).toHaveText('2/other:home')
   installed = false; change++
   await expect(page.getByText('此页面不可用，请检查插件状态或页面地址。')).toBeVisible()

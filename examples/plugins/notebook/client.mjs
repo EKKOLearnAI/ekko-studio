@@ -66,7 +66,7 @@ export async function mount(root, ctx) {
   $('[data-profile]').textContent = '全局共享 · 所有账号与 Profile · 页面与 Agent 同步'
   let notes = [], filter = 'all', busy = false, disposed = false, sequence = 0
   filter = await ctx.rpc('get-preferences')
-  const origins = { ui:'页面记录', tool:'Agent 工具', command:'聊天命令', workflow:'工作流', legacy:'历史便签' }
+  const origins = { ui:'页面记录', tool:'Agent 工具', command:'聊天命令', workflow:'工作流' }
   function controls() { save.disabled = busy || !input.value.trim(); input.disabled = busy; refresh.disabled = busy; for (const button of list.querySelectorAll('button')) button.disabled = busy }
   function render() {
     $('[data-total]').textContent = String(notes.length); $('[data-done]').textContent = String(notes.filter(n => n.done).length); $('[data-open]').textContent = String(notes.filter(n => !n.done).length)

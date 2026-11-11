@@ -1,7 +1,6 @@
 import type { InstalledPlugin } from '@/api/studio/plugins'
 
 export const pluginPages = (plugin: InstalledPlugin) => (plugin.manifest.views || [])
-  .filter(view => ['page', 'workspace', 'settings'].includes(view.slot))
   .slice().sort((a, b) => (a.order || 0) - (b.order || 0))
 
 export const pluginPageLocation = (plugin: InstalledPlugin, viewId = pluginPages(plugin)[0]?.id) => ({
@@ -23,7 +22,7 @@ export function pluginLinks(plugin: InstalledPlugin) {
 }
 export function safePluginLink(value: unknown): string | undefined {
   if (typeof value !== 'string') return
-  try { const url = new URL(value); if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) return url.href } catch { /* Ignore invalid metadata in older catalogs. */ }
+  try { const url = new URL(value); if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) return url.href } catch { /* Do not render invalid links. */ }
 }
 export function pluginIcon(value: unknown): string | undefined {
   return typeof value === 'string' && /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(value) ? value : undefined

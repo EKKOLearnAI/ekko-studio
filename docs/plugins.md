@@ -51,22 +51,20 @@ Studio 插件用于定制工作台页面、设置页面、独立工作区、Agen
 插件在这里通过 RPC 获取群列表、项目列表等内容。`ctx.location.path/query` 提供当前插件路由，
 `ctx.ui.navigate()` 可切换页面或查询参数；路由变化会重新挂载视图，持久化状态应存于后端。
 
-单聊 Session 列表、聊天侧边挂件和消息下方不再挂载插件 UI。旧清单的 `sidebar/message` 需要迁移为以上三类；新安装会明确拒绝旧槽位，已安装记录里的旧槽位不再显示。
+插件 UI 仅支持以上三类入口，不挂载到单聊 Session 列表、聊天侧边或消息下方。
 
 例如 `/#/studio/plugins/session-dashboard/sessions` 和 `/#/studio/plugins/notebook/notes`。独立页面使用完整内容区。切换 Profile 后插件列表与导航入口不变，页面重新绑定当前调用上下文。全局禁用或卸载会移除各账号的入口与挂载实例；不存在的页面显示返回中心的提示。`ctx.ui.navigate('/studio/plugins/notebook/notes')` 可跳到其他已声明页面，实际访问仍受目标插件状态约束。
 
 ### 全局安装与调用上下文
 
-全局注册表位于 Web UI 状态目录的 `plugins/global/state.json`。一个插件只激活一个后端实例，依赖检查、配置、版本并发控制和启停均为全局；定时器不会因切换账号或 Profile 重复启动。插件自身定时任务使用最近激活它的管理员默认 Profile；迁移的旧任务保留原激活身份。该身份失去权限时相应后台 API 调用会被拒绝，不影响其他合法账号调用插件。
+全局注册表位于 Web UI 状态目录的 `plugins/global/state.json`。一个插件只激活一个后端实例，依赖检查、配置、版本并发控制和启停均为全局；定时器不会因切换账号或 Profile 重复启动。插件自身定时任务使用最近激活它的管理员默认 Profile。该身份失去权限时相应后台 API 调用会被拒绝，不影响其他合法账号调用插件。
 
 RPC、工具、聊天命令、钩子、业务事件和工作流始终使用实际调用者的账号、Profile、会话和任务上下文。宿主通过异步调用上下文绑定根 `ctx.identity / api / models / signal`，并发请求不会复用安装者权限。业务数据的共享与分区由插件开发者决定；宿主不按账号、Profile、会话或工作区自动划分插件存储。现有 Studio API 仍按实际调用者校验访问权限。
 
-首次启动会自动合并旧的账号/Profile 注册表。同 ID 多份安装按最近安装时间选择，时间相同按原作用域路径稳定排序；选定版本的启用状态和配置一起保留，冲突来源记录在 `plugins/global/migration.json`。旧包、注册表与业务数据目录保留，不覆盖或混合不同账号的数据；迁移只执行一次，卸载后不会因重启再次导入。
-
 ## 包格式
 
-以包根目录的 `plugin.json` 为插件清单。`package.json` 保留 npm 包信息和 npm 依赖，
-插件版本必须与其中声明的包版本一致。兼容旧的 `package.json.studioPlugin`，但两处不能同时声明。
+每个插件必须在包根目录提供 `plugin.json`，它是唯一的插件清单来源。`package.json` 保留 npm 包信息和 npm 依赖，
+插件版本必须与其中声明的包版本一致。缺少 `plugin.json` 时安装失败。
 
 示例 `plugin.json`：
 
@@ -191,7 +189,7 @@ run.ui.emit('notebook.updated', { id: note.id }, { audience: 'plugin' })
 
 `audience: 'plugin'` 让所有账号/Profile/会话中的本插件页面收到事件，数据及事件中的调用身份都会对它们可见。`run.ui.notify` 仍是调用者提示；已有 Studio 业务事件按宿主原有权限分发。
 
-工作便签示例选择全局共享；Activity Digest 示例自行按账号和 Profile 分区。旧版本存储原样保留在原目录，不会自动混入全局共享数据；插件作者应根据业务规则选择迁移哪些旧分区。新版数据位于 `plugins/global/data`，由插件 ID 和命名空间数组确定文件名。
+工作便签示例选择全局共享；Activity Digest 示例自行按账号和 Profile 分区。数据位于 `plugins/global/data`，由插件 ID 和命名空间数组确定文件名。
 
 ## 前端 ctx 与现有后端 API
 
