@@ -3573,6 +3573,12 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_8_21_1: "Nach Abschluss, manuellem Stopp oder Fehlschlag einer BOT-Zusammenarbeit bleiben Verlaufskarten im auslösenden Chat erhalten. Eine Karte zeigt die ursprünglichen sichtbaren Antworten jedes BOTs; die Darstellung ist am Desktop linksbündig und auf Mobilgeräten anpassbar (#3746)",
+    new_0_8_21_2: "Nachrichten und Zusammenarbeitskarten gemeinsam mit einheitlicher Seitennavigation wiederherstellen, auch für ältere Zusammenarbeiten. Details folgen den tatsächlichen Ausführungsrunden und beachten Konto, auslösende Sitzung sowie geleerten oder gelöschten Verlauf (#3746)",
+    new_0_8_21_3: "Beim Lesen älterer Einträge bleibt das Lesefenster bei BOT-Wechsel, erneuter Verbindung und Hintergrundaktualisierung erhalten. Neue Antworten und Kartenänderungen werden zusammengeführt; am Ende wird der neueste Inhalt geladen und der Verlaufscache begrenzt (#3746)",
+    new_0_8_21_4: "Die Aufgabenliste in den Reiter Aufgaben der Einstellungen verschieben. Aufgabenaktionen und der Reiter Zusammenarbeit bleiben erhalten; die entsprechenden Einträge im Chatkopf entfallen (#3746)",
+    new_0_8_21_5: "Für neuere Apps eine optionale gemeinsame Zeitleiste mit passendem Cache-Protokoll anbieten. Ohne Aktivierung bleibt die bisherige Nachrichtennavigation bestehen; das zugehörige App-Update erscheint separat (#3746)",
+    new_0_8_21_6: "Erfolgreiche leere oder nur aus Leerraum bestehende OpenAI-kompatible Sprachtranskripte werden als leere Ergebnisse statt als fehlerhafte 502 zurückgegeben. Fehlender oder ungültiger Text, vorgelagerte HTTP-Fehler und Verbindungsfehler bleiben Fehler (#3753)",
     new_0_8_20_1: "Ausstehende Person-Zustellungen nach Ursprungssitzung indizieren, um vollständige Tabellenscans bei großen Datenmengen zu reduzieren. Fehlerhaftes altes JSON bleibt erhalten und blockiert die Abfrage nicht (#3723)",
     new_0_8_20_2: "Systemanweisungen in Ekkos OpenAI-Chat-Anfragen in ursprünglicher Reihenfolge zu einer führenden system-Nachricht zusammenführen. Das verbessert die Kompatibilität mit strikten Chatvorlagen und erhält normale Nachrichten, Werkzeuge, Bilder und Reasoning (#3728)",
     new_0_8_20_3: "Exakte DSH-Versionen in getrennten Verzeichnissen installieren und Laufzeitkomposition, Abhängigkeiten sowie ACP-Initialisierung vor der Aktivierung prüfen. Fehlgeschlagene Updates erhalten Installation und Versionsbindung; eine funktionierende vorhandene CLI kann als Wiederherstellungsziel bleiben (#3730)",

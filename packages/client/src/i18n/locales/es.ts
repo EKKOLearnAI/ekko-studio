@@ -3573,6 +3573,12 @@ jobTriggered: 'Job ejecutado',
   },
 
   changelog: {
+    new_0_8_21_1: "Conservar tarjetas de historial en el chat de origen cuando la colaboración entre BOT termina, se detiene manualmente o falla. Cada tarjeta permite leer las respuestas originales visibles de los BOT, con alineación izquierda en escritorio y diseño adaptable en móvil (#3746)",
+    new_0_8_21_2: "Restaurar mensajes y tarjetas de colaboración juntos con paginación unificada, incluidas colaboraciones antiguas. Los detalles siguen las rondas reales de ejecución y respetan el acceso de la cuenta y sesión de origen, así como el historial vaciado o eliminado (#3746)",
+    new_0_8_21_3: "Conservar la ventana de lectura del historial antiguo al cambiar de BOT, reconectar o actualizar en segundo plano. Combinar nuevas respuestas y cambios de tarjetas, recargar lo más reciente al volver al final y limitar el tamaño de la caché de historial (#3746)",
+    new_0_8_21_4: "Mover la lista de tareas a la pestaña Tareas de ajustes, conservando las acciones de tareas y la pestaña Colaboración y retirando las entradas correspondientes de la cabecera del chat (#3746)",
+    new_0_8_21_5: "Ofrecer una cronología unificada opcional y su protocolo de caché para Apps nuevas. Los clientes que no la activen mantienen la paginación anterior; la actualización complementaria de la App se publica por separado (#3746)",
+    new_0_8_21_6: "Aceptar transcripciones de voz compatibles con OpenAI que terminan correctamente con texto vacío o solo espacios, en lugar de devolver un 502 incorrecto. El texto ausente o inválido, los errores HTTP del proveedor y los fallos de conexión siguen siendo errores (#3753)",
     new_0_8_20_1: "Indexar los recuentos de entregas pendientes de Person por sesión de origen para reducir recorridos completos en grandes conjuntos de datos; admitir JSON antiguo malformado sin reescribir el historial (#3723)",
     new_0_8_20_2: "Unificar las instrucciones del sistema de Ekko OpenAI Chat en un único mensaje system inicial, en su orden original, para plantillas estrictas, conservando mensajes normales, herramientas, imágenes y razonamiento (#3728)",
     new_0_8_20_3: "Instalar versiones exactas de DSH en directorios separados y comprobar la composición del entorno, las dependencias y la inicialización ACP antes de activarlas. Un fallo conserva la instalación y la versión fijada; una CLI existente que funcione puede mantenerse para recuperación (#3730)",
