@@ -41,7 +41,7 @@ const routeProfile = computed(() => {
   return typeof value === 'string' && value.trim() ? value : null
 })
 
-const effectiveHistoryProfile = computed(() => profilesStore.activeProfileName || routeProfile.value || null)
+const effectiveHistoryProfile = computed(() => routeProfile.value || profilesStore.activeProfileName || null)
 
 // Hermes history sessions grouped by source, including Web UI/API Server.
 const hermesSessions = ref<SessionSummary[]>([])
@@ -441,6 +441,7 @@ watch(
 watch(() => profilesStore.activeProfileName, async () => {
   if (!hermesSessionsLoaded.value) return
   if (profilesStore.switching) return
+  if (routeProfile.value) return
   historySessionId.value = null
   historySession.value = null
   await loadHermesSessions()
