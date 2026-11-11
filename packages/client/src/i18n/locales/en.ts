@@ -3990,6 +3990,12 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_21_1: "Keep collaboration cards in the initiating chat after BOT collaboration completes, is stopped manually, or fails. Open a card to read each BOT’s original visible replies; cards align with desktop chat and adapt to mobile screens (#3746)",
+    new_0_8_21_2: "Restore messages and collaboration cards together with unified pagination, including older collaborations. Details follow actual execution rounds, respect account and initiating-session access, and honor cleared or deleted history (#3746)",
+    new_0_8_21_3: "Preserve the older reading window when switching BOTs, reconnecting, or refreshing in the background. Merge new replies and card updates, reload the latest content when returning to the bottom, and bound the history cache (#3746)",
+    new_0_8_21_4: "Move the task list to the Tasks tab in settings, retaining task actions and the Collaboration tab while removing the corresponding chat-header entries (#3746)",
+    new_0_8_21_5: "Offer an optional unified timeline and matching cache protocol for newer Apps. Clients that do not enable it retain existing message pagination; the companion App update ships separately (#3746)",
+    new_0_8_21_6: "Accept successful empty or whitespace-only OpenAI-compatible speech transcripts instead of returning an incorrect 502. Missing or invalid text, upstream HTTP errors, and connection failures remain errors (#3753)",
     new_0_8_20_1: "Index pending Person delivery counts by origin session to reduce full table scans on large datasets; tolerate malformed legacy JSON without rewriting history (#3723)",
     new_0_8_20_2: "Combine Ekko OpenAI Chat system instructions into one leading system message in their original order for strict chat templates, preserving regular messages, tools, images and reasoning (#3728)",
     new_0_8_20_3: "Stage exact DSH releases in separate directories and check runtime composition, dependencies and ACP initialization before activation. Failed upgrades preserve the current installation and pin; a working existing CLI can be retained for recovery (#3730)",

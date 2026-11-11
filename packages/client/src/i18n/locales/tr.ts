@@ -169,6 +169,12 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_21_1: "BOT iş birliği tamamlandığında, elle durdurulduğunda veya başarısız olduğunda başlatan sohbette geçmiş kartlarını korur. Karttan her BOT’un özgün görünür yanıtları okunabilir; kartlar masaüstünde sola hizalanır ve mobil ekrana uyum sağlar (#3746)",
+    new_0_8_21_2: "Mesajları ve iş birliği kartlarını eski iş birlikleri dahil ortak sayfalama ile birlikte geri yükler. Ayrıntılar gerçek yürütme turlarını, hesap ve başlatan oturumun erişim yetkilerini, temizlenen veya silinen geçmiş sınırlarını gözetir (#3746)",
+    new_0_8_21_3: "Eski geçmiş okunurken BOT değiştirme, yeniden bağlanma ve arka planda yenileme okuma penceresini korur. Yeni yanıtlar ve kart güncellemeleri birleştirilir, en alta dönüldüğünde güncel içerik yeniden yüklenir ve geçmiş önbelleği sınırlandırılır (#3746)",
+    new_0_8_21_4: "Görev listesini ayarların Görevler sekmesine taşır; görev işlemleri ve İş birliği sekmesi korunur, sohbet başlığındaki ilgili girişler kaldırılır (#3746)",
+    new_0_8_21_5: "Yeni App sürümleri için isteğe bağlı ortak zaman çizelgesi ve uyumlu önbellek protokolü sunar. Etkinleştirmeyen istemciler mevcut mesaj sayfalamasını sürdürür; eşlik eden App güncellemesi ayrı yayımlanır (#3746)",
+    new_0_8_21_6: "OpenAI uyumlu ses dökümü boş veya yalnızca boşluk içeren metinle başarıyla sonuçlandığında hatalı 502 yerine boş sonuç döndürür. Eksik ya da geçersiz metin, üst servis HTTP hataları ve bağlantı hataları hata olarak kalır (#3753)",
     new_0_8_20_1: "Büyük veri kümelerinde tam tablo taramalarını azaltmak için bekleyen Person teslimat sayıları kaynak oturuma göre indekslenir. Hatalı eski JSON kabul edilir ve geçmiş yeniden yazılmaz (#3723)",
     new_0_8_20_2: "Ekko OpenAI Chat sistem talimatları, katı sohbet şablonları için özgün sıralarıyla tek bir başlangıç system mesajında birleştirilir. Normal mesajlar, araçlar, görüntüler ve akıl yürütme korunur (#3728)",
     new_0_8_20_3: "Kesin DSH sürümleri ayrı dizinlere kurulur; etkinleştirmeden önce çalışma zamanı bileşimi, bağımlılıklar ve ACP başlatması denetlenir. Başarısızlıkta mevcut kurulum ve sürüm sabitlemesi korunur; çalışan mevcut CLI kurtarma hedefi olarak tutulabilir (#3730)",
