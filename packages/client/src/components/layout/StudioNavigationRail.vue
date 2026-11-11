@@ -9,13 +9,19 @@ import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import PageSidebarFooter from './PageSidebarFooter.vue'
 import RelayCampaignBadge from '@/components/hermes/RelayCampaignBadge.vue'
 import { useMobileNavigation } from '@/composables/usePageSidebar'
-import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
+import { pluginPages, pluginNavigation, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
 
 const route = useRoute()
 const { t } = useI18n()
 const { snapshot } = usePluginCatalog()
-const pluginEntries = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active' && pluginPages(plugin).length))
+const pluginEntries = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginNavigation(plugin).map(view => ({ plugin, view }))))
+function pluginActive(id: string, view: { id: string; slot: string }) {
+  if (route.name !== 'studio.pluginPage' || route.params.pluginId !== id) return false
+  const plugin = snapshot.value.plugins.find(plugin => plugin.manifest.id === id)
+  const current = plugin && pluginPages(plugin).find(item => item.id === (route.params.viewId || pluginNavigation(plugin)[0]?.id))
+  return current?.slot === 'workspace' ? view.slot === 'workspace' : current?.id === view.id
+}
 const canManageAgents = computed(() => isStoredSuperAdmin())
 const entries = computed(() => [
   { key: 'studioPlugins', route: 'studio.plugins', label: 'studioPlugins.title', path: 'M9 3h6v5h5v7h-5v6H9v-6H3V8h6z' },
@@ -62,9 +68,9 @@ function handleNavigate(key: string) {
         {{ t(entry.label) }}
       </NTooltip>
       <div v-if="entry.key === 'studioPlugins' && pluginEntries.length" class="studio-navigation-rail__plugins" role="group" :aria-label="t('studioPlugins.workspace')">
-        <NTooltip v-for="plugin in pluginEntries" :key="plugin.manifest.id" placement="right" trigger="hover">
-          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin)" :active="activeKey === 'plugin:' + plugin.manifest.id" :aria-label="plugin.manifest.name" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginIcon :plugin="plugin" compact /></RouteLinkItem></template>
-          {{ plugin.manifest.name }}
+        <NTooltip v-for="{ plugin, view } in pluginEntries" :key="plugin.manifest.id + ':' + view.id" placement="right" trigger="hover">
+          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin, view.id)" :active="pluginActive(plugin.manifest.id, view)" :aria-label="view.slot === 'workspace' ? plugin.manifest.name : view.title" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginIcon :plugin="plugin" :icon="view.icon" compact /></RouteLinkItem></template>
+          {{ view.slot === 'workspace' ? plugin.manifest.name : view.title }}
         </NTooltip>
       </div>
       </template>

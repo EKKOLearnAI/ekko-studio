@@ -1,4 +1,32 @@
 export async function mount(root, ctx) {
+  if (ctx.slot === 'workspace-sidebar') {
+    const title = document.createElement('p'); title.textContent = '最近的便签'; root.append(title)
+    const list = document.createElement('div'); root.append(list)
+    let alive = true
+    async function refresh() {
+      const notes = await ctx.rpc('list'); if (!alive) return
+      list.replaceChildren(...notes.slice(-10).reverse().map(note => {
+        const button = document.createElement('button'); button.style.display = 'block'; button.style.width = '100%'; button.textContent = note.text.slice(0, 24)
+        button.onclick = () => ctx.ui.navigate(`/studio/plugins/${ctx.plugin.id}/notes?note=${encodeURIComponent(note.id)}`)
+        return button
+      }))
+    }
+    const unsubscribe = ctx.events.on('notebook.updated', () => { void refresh().catch(() => {}) })
+    ctx.onDispose(() => { alive = false; unsubscribe() })
+    await refresh(); return
+  }
+  if (ctx.view === 'usage') {
+    root.textContent = `页面、Agent 工具、/${ctx.plugin.id}:note 命令和工作流共享便签数据。侧栏可打开最近便签，设置侧栏可调整个人偏好。`
+    return
+  }
+  if (ctx.slot === 'settings') {
+    const label = document.createElement('label'); label.textContent = '默认筛选：'
+    const select = document.createElement('select')
+    for (const [value, text] of [['all', '全部'], ['open', '待完成'], ['done', '已完成']]) { const option = document.createElement('option'); option.value = value; option.textContent = text; select.append(option) }
+    select.value = await ctx.rpc('get-preferences')
+    select.onchange = async () => { await ctx.rpc('set-preferences', { filter: select.value }); ctx.ui.notify('已保存', 'success') }
+    label.append(select); root.append(label); return
+  }
   root.innerHTML = `
     <style>
       .notebook { display:grid; gap:18px; padding:8px; color:var(--text-primary); }
@@ -37,11 +65,13 @@ export async function mount(root, ctx) {
   $('h2').textContent = ctx.config.title || '工作便签'
   $('[data-profile]').textContent = '全局共享 · 所有账号与 Profile · 页面与 Agent 同步'
   let notes = [], filter = 'all', busy = false, disposed = false, sequence = 0
+  filter = await ctx.rpc('get-preferences')
   const origins = { ui:'页面记录', tool:'Agent 工具', command:'聊天命令', workflow:'工作流', legacy:'历史便签' }
   function controls() { save.disabled = busy || !input.value.trim(); input.disabled = busy; refresh.disabled = busy; for (const button of list.querySelectorAll('button')) button.disabled = busy }
   function render() {
     $('[data-total]').textContent = String(notes.length); $('[data-done]').textContent = String(notes.filter(n => n.done).length); $('[data-open]').textContent = String(notes.filter(n => !n.done).length)
-    const visible = notes.filter(n => filter === 'all' || (filter === 'done' ? n.done : !n.done)).slice().reverse()
+    for (const button of root.querySelectorAll('[data-filter]')) button.setAttribute('aria-pressed', String(button.dataset.filter === filter))
+    const visible = notes.filter(n => ctx.location.query.note ? n.id === ctx.location.query.note : filter === 'all' || (filter === 'done' ? n.done : !n.done)).slice().reverse()
     list.replaceChildren(...visible.map(note => {
       const row = document.createElement('article'); row.className = `note${note.done ? ' done' : ''}`
       const check = document.createElement('button'); check.type = 'button'; check.className = 'check'; check.textContent = note.done ? '✓' : '○'; check.setAttribute('aria-label', note.done ? '恢复待完成' : '标记完成'); check.setAttribute('aria-pressed', String(note.done))

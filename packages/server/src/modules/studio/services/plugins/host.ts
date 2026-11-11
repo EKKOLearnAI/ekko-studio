@@ -7,7 +7,7 @@ import { findUserById, getDefaultProfileForUser, listUsers, userCanAccessProfile
 import { getSession } from '../../repositories/session-store'
 import { isPrivatePersonSession, ownsPersonSession } from '../../contracts/person-session'
 import { businessEvents } from '../webhooks/business-events'
-import { appEventEnvelope, canReceiveAppEvent } from '../webhooks/app-events'
+import { canReceivePluginEvent, pluginEventData } from './events'
 import { PluginManager } from './manager'
 import { PluginError } from './errors'
 import { json } from './schema'
@@ -60,14 +60,27 @@ export async function startPluginHost(loopbackBaseUrl: string): Promise<void> {
   const manager = getPluginManager()
   await manager.restore()
   unsubscribe = businessEvents.subscribe('studio-plugins', async event => {
+    const envelope = pluginEventData(event)
+    if (!envelope) return
     for (const user of listUsers()) {
-      if (user.status !== 'active' || !canReceiveAppEvent(user, event)) continue
-      const identity = { userId: user.id, profile: event.profile }
-      try { authorizePluginIdentity(identity) } catch { continue }
-      const envelope = appEventEnvelope(event)
-      if (!envelope) continue
-      await manager.dispatch({ id: event.id, type: event.type, timestamp: Date.parse(event.occurred_at),
-        identity: { ...identity, sessionId: event.subject.session_id, runId: event.subject.run_id, surface: event.source }, data: json(envelope) })
+      if (user.status !== 'active' || !canReceivePluginEvent(user, event)) continue
+      // Room membership is independent of the room's summary model Profile.
+      // Publish into the recipient's authorized contexts so room members can
+      // observe their rooms without gaining access to that model Profile.
+      const profiles = event.source === 'group_chat'
+        ? [...new Set([...user.profiles, ...(user.role === 'super_admin' ? [event.profile] : [])])]
+        : [event.profile]
+      for (const profile of profiles) {
+        const identity = { userId: user.id, profile }
+        try { authorizePluginIdentity(identity) } catch { continue }
+        // Removed sessions no longer authorize a session-scoped context; retain
+        // their id in the subject. Group runtime sessions may use another Profile.
+        const sessionId = event.type === 'chat.session.removed' || event.source === 'group_chat' ? undefined : event.subject.session_id
+        try {
+          await manager.dispatch({ id: event.id, type: event.type, timestamp: Date.parse(event.occurred_at),
+            identity: { ...identity, sessionId, runId: event.subject.run_id, surface: event.source }, data: envelope })
+        } catch { logger.warn({ type: event.type, userId: user.id }, 'Plugin event delivery failed') }
+      }
     }
   })
 }

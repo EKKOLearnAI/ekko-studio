@@ -6,11 +6,11 @@ export function pluginApiPath(path: string, identity: PluginIdentity, options: A
   if (typeof path !== 'string' || !path.startsWith('/api/') || path.includes('\\') || /%2f|%5c|%2e/i.test(path)) throw new PluginError('Use a relative Studio API path')
   const url = new URL(path, 'http://plugin.local')
   if (url.origin !== 'http://plugin.local' || !url.pathname.startsWith('/api/') || /\/\.\.?\//.test(path)) throw new PluginError('Invalid Studio API path')
-  if (/^\/api\/(?:studio\/(?:plugins|auth|models\/(?:api-keys|cloud-link))|auth)(?:\/|$)/.test(url.pathname)) throw new PluginError('Account and plugin administration is unavailable through plugin API', 'PLUGIN_FORBIDDEN', 403)
+  if (/^\/api\/(?:studio\/(?:plugins|auth|models\/(?:api-keys|cloud-link))|auth)(?:\/|$)/i.test(url.pathname)) throw new PluginError('Account and plugin administration is unavailable through plugin API', 'PLUGIN_FORBIDDEN', 403)
   for (const [key, value] of Object.entries(options.query || {})) if (value !== undefined) url.searchParams.set(key, String(value))
   const body = options.body && typeof options.body === 'object' && !Array.isArray(options.body) ? options.body : {}
   if (url.searchParams.has('profile') && url.searchParams.get('profile') !== identity.profile || body.profile !== undefined && body.profile !== identity.profile) throw new PluginError('Plugin API cannot change its bound profile', 'PLUGIN_SCOPE', 403)
-  const profileRoute = /^\/api\/hermes\/profiles\/([^/]+)/.exec(url.pathname)
+  const profileRoute = /^\/api\/hermes\/profiles\/([^/]+)/i.exec(url.pathname)
   if (profileRoute && decodeURIComponent(profileRoute[1]) !== identity.profile) throw new PluginError('Plugin API cannot change its bound profile', 'PLUGIN_SCOPE', 403)
   url.searchParams.set('profile', identity.profile)
   return url

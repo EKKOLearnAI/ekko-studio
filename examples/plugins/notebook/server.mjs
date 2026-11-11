@@ -38,6 +38,12 @@ export function apply(ctx) {
     })
   }
   ctx.rpc.register('list', () => serial(read))
+  ctx.rpc.register('get-preferences', async (_, run) => await run.storage.namespace('preferences', String(run.identity.userId)).get('filter') || 'all')
+  ctx.rpc.register('set-preferences', async (input, run) => {
+    if (!['all', 'open', 'done'].includes(input?.filter)) throw new Error('无效的筛选选项')
+    await run.storage.namespace('preferences', String(run.identity.userId)).set('filter', input.filter)
+    return { ok: true }
+  })
   ctx.rpc.register('append', (input, run) => append(input?.text, run, 'ui'))
   ctx.rpc.register('update', (input, run) => change(input, run))
   ctx.rpc.register('remove', (input, run) => change(input, run, true))

@@ -1,6 +1,6 @@
 # Studio 插件与 ctx SDK
 
-Studio 插件用于定制工作台页面、聊天扩展、Agent 工具、命令和自动化动作。
+Studio 插件用于定制工作台页面、设置页面、独立工作区、Agent 工具、命令和自动化动作。
 入口是导航栏的 **插件中心**，对应 `/studio/plugins`。它与 Hermes、DSH
 各自的原生插件管理分开。插件安装、启用、配置和运行实例属于整个 Studio，所有账号、Profile 和任务均可使用，无需重复安装。
 
@@ -9,7 +9,7 @@ Studio 插件用于定制工作台页面、聊天扩展、Agent 工具、命令�
 仓库提供四个不需要构建的示例：
 
 - `examples/plugins/session-dashboard`（会话看板）：纯前端页面，读取已有会话接口，展示统计、按 Agent 筛选、搜索已加载会话、分页和跳转。
-- `examples/plugins/notebook`（工作便签）：页面、侧栏、Agent 工具、聊天命令、工作流共享持久化便签；支持完成状态和删除，显示记录来源。
+- `examples/plugins/notebook`（工作便签）：独立工作区、动态便签侧栏、个人偏好设置页、Agent 工具、聊天命令、工作流共享持久化便签；支持完成状态和删除，显示记录来源。
 - `examples/plugins/activity-digest`：订阅业务事件，定期生成摘要，也可以由命令或工作流触发。
 - `examples/plugins/tool-demo`（工具注入演示）：仅注册一个只读 `hello` 工具。启用后，在 MCP 管理页的 `ekko-studio-plugins` 工具列表中查找 `tool-demo__hello`（描述为 `[工具注入演示/hello]`），参数为 `{"name":"Ekko"}`；工具返回问候语和实际调用的 Profile。
 
@@ -27,6 +27,7 @@ Studio 插件用于定制工作台页面、聊天扩展、Agent 工具、命令�
 3. 在任意 Profile 的空闲聊天中发送 `/notebook:note 这是从聊天保存的便签`，回到插件页面即可看到来源为“聊天命令”的记录。
 4. “详情 → 开发与维护”中选择 `append` 工具，输入 `{"text":"这是工具写入的便签"}` 并执行；结果会同步出现在插件独立页面。Agent 同样可以调用 `notebook/append`、`notebook/list`、`notebook/complete`。
 5. 工作流节点选择插件动作 `notebook/capture`，将上游输出保存成便签；已有的工具列表可能需要刷新或新开一轮运行才能看到新插件。
+6. 工作区侧栏显示最近便签，点击后通过 URL 查询参数定位；刷新仍可恢复。打开 Studio 设置侧栏的“便签偏好”，选择当前账号的默认筛选。
 
 这里的会话来自真实后端；便签从空白开始，不会自动创建示例数据或发起模型请求。
 
@@ -38,12 +39,19 @@ Studio 插件用于定制工作台页面、聊天扩展、Agent 工具、命令�
 
 ## 插件中心与使用入口
 
-插件中心使用卡片、名称/描述搜索、能力分类和状态筛选管理全局已安装插件，不是公共社区目录。安装与维护操作收进弹窗和详情抽屉；进入中心不会加载所有插件业务页面。
+插件中心使用卡片、名称/描述/作者/标签搜索、能力分类和状态筛选管理全局已安装插件，不是公共社区目录。详情展示作者、许可证、仓库、主页、文档、问题反馈和更新记录。安装与维护操作收进弹窗和详情抽屉；进入中心不会加载所有插件业务页面。
 
-- `page`：独立路由 `/studio/plugins/:pluginId/:viewId`，可直接收藏、刷新。省略 `viewId` 打开第一个页面，多页面插件通过页内标签切换；启用后自动出现在导航栏。
-- `sidebar`：聊天侧栏，保留当前会话上下文。
-- `message`：助手消息下方，可访问当前消息数据。
-- `settings`：插件详情的“配置”页签和 Studio 设置里的扩展区。
+- `page`：主侧栏入口，打开独立路由 `/studio/plugins/:pluginId/:viewId`。每个页面有自己的导航项。
+- `settings`：设置侧栏入口，打开 `/studio/plugin-settings/:pluginId/:viewId`。插件中心的“配置”页保留宿主管理的 `configSchema` 表单，并链接到这些自定义页面。
+- `workspace`：插件独立侧栏里的页面，路由同 `page`。主侧栏为一个插件展示一个工作区入口；进入后显示类似 Agent 配置区的专属侧栏，统一处理折叠、选中、拖宽、主题和移动端抽屉。
+
+`views[].title/icon/order` 定义标题、图标和插件内排序（默认 `0`，同序保留声明顺序）。
+`workspace.sidebar` 可指定一个不与页面 ID 重复的动态侧栏视图；宿主仍使用同一个客户端入口调用
+`mount(root, ctx)`，其中 `ctx.slot === 'workspace-sidebar'`，`ctx.view` 为该 ID。
+插件在这里通过 RPC 获取群列表、项目列表等内容。`ctx.location.path/query` 提供当前插件路由，
+`ctx.ui.navigate()` 可切换页面或查询参数；路由变化会重新挂载视图，持久化状态应存于后端。
+
+单聊 Session 列表、聊天侧边挂件和消息下方不再挂载插件 UI。旧清单的 `sidebar/message` 需要迁移为以上三类；新安装会明确拒绝旧槽位，已安装记录里的旧槽位不再显示。
 
 例如 `/#/studio/plugins/session-dashboard/sessions` 和 `/#/studio/plugins/notebook/notes`。独立页面使用完整内容区。切换 Profile 后插件列表与导航入口不变，页面重新绑定当前调用上下文。全局禁用或卸载会移除各账号的入口与挂载实例；不存在的页面显示返回中心的提示。`ctx.ui.navigate('/studio/plugins/notebook/notes')` 可跳到其他已声明页面，实际访问仍受目标插件状态约束。
 
@@ -57,23 +65,37 @@ RPC、工具、聊天命令、钩子、业务事件和工作流始终使用实�
 
 ## 包格式
 
-`package.json` 中声明 `studioPlugin`：
+以包根目录的 `plugin.json` 为插件清单。`package.json` 保留 npm 包信息和 npm 依赖，
+插件版本必须与其中声明的包版本一致。兼容旧的 `package.json.studioPlugin`，但两处不能同时声明。
+
+示例 `plugin.json`：
 
 ```json
 {
-  "name": "my-studio-plugin",
+  "id": "my-plugin",
+  "name": "My plugin",
   "version": "1.0.0",
-  "type": "module",
-  "studioPlugin": {
-    "id": "my-plugin",
-    "name": "My plugin",
-    "version": "1.0.0",
-    "apiVersion": 1,
-    "server": "server.mjs",
-    "client": "client.mjs",
-    "capabilities": ["api.read", "api.write", "tools", "commands", "events", "hooks", "automation", "ui"],
-    "views": [{ "id": "home", "title": "My page", "slot": "page" }]
-  }
+  "apiVersion": 1,
+  "description": "A plugin with its own workspace",
+  "author": { "name": "Example team", "url": "https://example.com" },
+  "repository": "https://github.com/example/my-plugin",
+  "homepage": "https://example.com",
+  "documentation": "https://example.com/docs",
+  "issues": "https://github.com/example/my-plugin/issues",
+  "changelog": "https://github.com/example/my-plugin/releases",
+  "license": "MIT",
+  "keywords": ["collaboration"],
+  "icon": "assets/icon.png",
+  "server": "dist/server.mjs",
+  "client": "dist/client.mjs",
+  "capabilities": ["api.read", "api.write", "ui"],
+  "views": [
+    { "id": "overview", "title": "Overview", "slot": "page" },
+    { "id": "rooms", "title": "Rooms", "slot": "workspace", "order": 1 },
+    { "id": "history", "title": "History", "slot": "workspace", "order": 2 },
+    { "id": "preferences", "title": "Preferences", "slot": "settings" }
+  ],
+  "workspace": { "sidebar": "room-list" }
 }
 ```
 
@@ -82,6 +104,15 @@ RPC、工具、聊天命令、钩子、业务事件和工作流始终使用实�
 React/Vue 等框架可一并打包。配置 JSON Schema 支持对象、数组、基础类型、必填、枚举、
 默认值、数值和长度范围，以及 `secret`。不支持的关键字会报错，不会被静默忽略。
 `secret` 字段不会传给客户端；空白配置输入保留已保存的密钥，后端仍可读取完整配置。
+
+作者和项目链接仅允许不含账号密码的 HTTP(S) 地址。图标允许包内相对路径的 PNG/JPEG/WebP/GIF
+（每个文件不超过 256 KB）或相应的 base64 data URL；安装器读取并内联，拒绝越界路径和符号链接。
+项目信息均可选。`apiVersion` 声明 SDK 兼容版本，当前只接受 `1`。
+
+发布前由作者构建前后端，发布包需包含 `plugin.json`、`package.json` 和所有入口/资源。
+npm/GitHub 安装在独立版本目录安装生产依赖，禁止安装脚本；本地目录安装只复制成品。
+清单的 `dependencies` 表示其他 Studio 插件，`package.json.dependencies` 表示普通 npm 库。
+原生依赖和系统工具需自行满足运行平台要求；宿主不会在安装时构建 Vue/React/TypeScript 源码。
 
 TypeScript 契约位于 `packages/plugin-sdk/src/index.ts`；可将
 `packages/plugin-sdk` 作为本地开发依赖安装。类型导入应使用 `import type`，
@@ -106,13 +137,13 @@ export function apply(ctx) {
 | --- | --- |
 | `ctx.plugin / identity / config / signal` | 全局包信息与配置、当前调用者身份与生命周期；启动时使用激活身份 |
 | `ctx.api.request(path, options)` | 当前用户权限下调用现有 JSON 后端接口 |
-| `ctx.api.studio.sessions / workflows / files` | 常用接口的便捷入口 |
+| `ctx.api.studio.sessions / groupChats / workflows / files` | 单聊、群聊、工作流和文件操作 |
 | `ctx.models.list / respond` | 已配置模型及 Responses API；返回完整响应，使用现有用量统计 |
 | `ctx.storage` | 插件级全局 JSON 存储；`namespace(...)` 显式分区 |
 | `ctx.tools.register` | 注册跨 Agent 工具；返回 `{ok, content, data?, error?}` |
 | `ctx.commands.register` | 注册 `/插件id:命令 参数` 聊天命令 |
 | `ctx.rpc.register` | 为前端注册后端函数 |
-| `ctx.on(type, handler)` | 订阅现有 Studio 业务事件，`*` 订阅全部可见事件 |
+| `ctx.on(type, handler)` | 订阅 Studio 业务事件，支持精确名称、`chat.*`、`chat.run.*` 等前缀及 `*` |
 | `ctx.hooks.register` | 注册 Ekko 输入、上下文与工具拦截钩子 |
 | `ctx.automation.register / every` | 工作流可用动作、非重叠定时执行 |
 | `ctx.effect / onDispose` | 追踪异步资源获取与清理 |
@@ -187,9 +218,86 @@ await ctx.rpc('append', { text: 'A note' })
 `api.read` 授予 GET，`api.write` 授予写操作。SDK 不把原始数据库、路由器、密钥仓库注入前端。
 模型 `respond` 使用非流式响应；底层二进制下载和 SSE 不属于此 JSON API 入口。
 
+### 会话、群聊与工作流操作
+
+前后端使用同一份 `ctx.api.studio` SDK；写操作需要 `api.write`，读操作需要 `api.read`。
+返回值保留对应 HTTP 接口的 JSON 结构，不自动解包。
+
+| 命名空间 | 方法 |
+| --- | --- |
+| `sessions` | `list(query?)`、`get(id)`、`create({title?,agent?,mode?})`、`run(id,input,options?)`、`stop(id)`、`remove(id)`、`rename(id,title)`、`archive(id,archived?)`、`setModel(id,model)`、`setWorkspace(id,path)`、`messages(id,query?)` |
+| `groupChats` | `list()`、`get(id)`、`create({name,inviteCode,...})`、`update(id,config)`、`remove(id)`、`send(id,content,mentions?)`、`stop(id,agentName)`、`messages(id,query?)` |
+| `groupChats.agents` | `list(roomId)`、`add(roomId,config)`、`update(roomId,agentId,config)`、`remove(roomId,agentId)` |
+| `workflows` | `list()`、`get(id)`、`create({name,nodes?,edges?,...})`、`update(id,definition)`、`remove(id)`、`run(id,input?)`、`stop(id,runId)`、`runs(id)`、`getRun(id,runId)` |
+| `workflows.schedules` | `list(workflowId)`、`create(workflowId,config)`、`update(workflowId,scheduleId,config)`、`remove(workflowId,scheduleId)` |
+
+```js
+// 创建空会话不会发起模型调用；默认 Agent 为 ekko-agent。
+const { session } = await ctx.api.studio.sessions.create({ title: '每日摘要' })
+const accepted = await ctx.api.studio.sessions.run(session.id, '整理今日进展', {
+  provider: 'custom:my-provider', model: 'my-model', apiMode: 'chat_completions'
+})
+// accepted.status 为 running 或 queued；后续通过事件或会话历史获取结果。
+await ctx.api.studio.sessions.stop(session.id)
+
+const { room } = await ctx.api.studio.groupChats.create({ name: '写作组', inviteCode: 'writing-team' })
+await ctx.api.studio.groupChats.send(room.id, '请开始整理')
+// 按群内 Agent 名称中断，沿用群聊界面的中断权限。
+await ctx.api.studio.groupChats.stop(room.id, 'Writer')
+
+const { workflow } = await ctx.api.studio.workflows.create({ name: '每日整理', nodes: [], edges: [] })
+// 配好节点与边后调用 run；运行记录可用 runs/getRun 查询，stop 需要该次 runId。
+```
+
+`sessions.run` 默认在启动或入队后返回；传 `wait:true` 可等待终态，仍受插件调用的 120 秒生命周期约束。
+Ekko/Coding Agent 首次运行需提供完整的 `provider/model/apiMode`；后续可沿用会话保存的模型配置。
+`sessions.stop` 返回 `{ok,session_id,stopped}`，只中断当前运行，保留会话和历史，队列行为与聊天界面的停止一致。
+群聊消息接口复用认证后的 Socket 操作，不接受伪造的发送者；停止指定 Agent 不删除房间。
+群聊历史支持 `limit/offset` 或 `before` 消息游标。配置及工作流节点、定时字段沿用 OpenAPI 定义。
+
+### 可订阅事件
+
+后端使用 `ctx.on(pattern, (event, run) => ...)`，前端使用 `ctx.events.on(pattern, event => ...)`。
+两者均支持 `*` 和以 `.*` 结尾的前缀匹配；同一函数匹配多个订阅时只执行一次。
+全部内置事件名导出为 SDK 的 `PLUGIN_EVENT_TYPES`，也可继续订阅插件自定义的前端事件。
+
+| 范围 | 事件 |
+| --- | --- |
+| 单聊 | `chat.session.created/removed`、`chat.message.created/delta`、`chat.reasoning.delta` |
+| 单聊运行 | `chat.run.queued/started/updated/completed/failed/stopped` |
+| 工具与任务 | `chat.tool.started/completed/failed`、`chat.task.created/completed`、`chat.plan.updated` |
+| 群聊 | `group.message.created/started/delta/completed`、`group.reasoning.delta`、`group.run.updated/failed/stopped`、`group.plan.updated` |
+| 工作流 | `workflow.run.started/updated/completed/failed/stopped`、`workflow.plan.updated`；节点共享运行事件仍使用 `chat.*`，通过 `source` 和 `subject.workflow_id` 区分 |
+| 审批与澄清 | `chat.approval.requested/resolved`、`chat.clarification.requested/resolved`，群聊对应 `group.*` |
+| Person | 保留原有 `person.run.completed/failed/updated` 和审批、澄清事件；不公开私有工作会话、工具细节和文本流 |
+
+```js
+ctx.on('chat.run.*', async (event, run) => {
+  const { subject, summary, state } = event.data
+  run.ui.emit('dashboard.run', { type: event.type, subject, summary: summary ?? null, state: state ?? null })
+})
+ctx.on('group.message.delta', event => {
+  ctx.log.info(`${event.data.subject.room_id}: ${event.data.delta}`)
+})
+```
+
+事件有 `id/type/timestamp/identity/data`；`data.subject` 保存会话、运行、群聊、工作流等标识。
+文本增量位于 `data.delta`，生命周期摘要位于 `data.summary`，运行快照位于 `data.state`；字段随事件类型变化。
+消息/完成文本使用规范化且可能截断的 `data.content`，需要完整记录时读取历史。
+`chat.session.created` 当前指通过空会话创建接口创建的会话；群聊 `message.completed` 指流片段结束，最终持久化消息另发 `message.created`。
+
+插件事件不再受 App 通知展示条件过滤。普通会话按 Profile 访问权限分发，群聊还校验成员或房间访问权限；
+审批、Person 和工作流保留原有所有者限制。事件身份来自当前接收用户，不借用安装者权限。
+群聊向接收者有权使用的 Profile 上下文分发，不要求成员拥有群摘要模型的 Profile；
+`data.profile` 仍标识事件来源。同一业务事件可能按多个用户/Profile 分发，跨上下文自动化应按事件 ID 去重。
+事件是内存中的实时观察，前端轮询仅保留最近 500 条，不保证离线补发、严格顺序或恰好一次；
+高频流可覆盖较早事件，插件应按事件 ID 去重并用历史接口恢复状态。观察回调不阻塞原始运行；
+需要拦截时使用 `ctx.hooks`。自定义 `ui.emit` 发给前端，不重新进入后端 `ctx.on`。
+
 前端还可使用 `ctx.storage`、`ctx.models`、`ctx.ui.notify/confirm/prompt/navigate`、
-`ctx.events.on` 和 `ctx.onDispose`。视图类型有 `page`、`sidebar`、`message`、`settings`；
-消息视图的 `ctx.data` 包含消息 ID、角色及文本，`ctx.identity.sessionId` 绑定当前会话。
+`ctx.events.on` 和 `ctx.onDispose`。入口类型为 `page`、`settings`、`workspace`；
+动态工作区侧栏挂载时的 `ctx.slot` 为 `workspace-sidebar`。这些页面不绑定当前单聊会话，
+需要访问会话时由插件通过 SDK 显式指定 ID，宿主照常检查当前调用者权限。
 页面挂在独立 iframe 中，复用宿主主题变量，通过消息桥调用功能。iframe 不共享 DOM、
 localStorage 或登录凭证；HTTP 请求统一通过 `ctx.api`。
 
@@ -218,5 +326,5 @@ localStorage 或登录凭证；HTTP 请求统一通过 `ctx.api`。
 约束 SDK 使用，不是 Node.js 沙箱。只安装可信包。前端 iframe 有独立的浏览器隔离。
 宿主状态保存在 Studio 应用目录下的 `plugins/`，不写入 Hermes Agent 状态目录。
 
-验证命令：`npm test -- tests/server/studio-plugins.test.ts tests/server/studio-plugin-policy.test.ts tests/server/studio-plugin-mcp.test.ts`；
-浏览器旅程：`npm run test:e2e -- tests/e2e/studio-plugins.spec.ts`。
+验证命令：`npx vitest run tests/server/studio-plugins.test.ts tests/server/studio-plugin-*.test.ts tests/ekko-agent/plugin-hooks.test.ts`；
+浏览器旅程：`npm run test:e2e -- tests/e2e/studio-plugins.spec.ts tests/e2e/studio-plugin-navigation.spec.ts`。

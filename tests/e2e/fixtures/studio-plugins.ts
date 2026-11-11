@@ -1,4 +1,4 @@
-import { createApp, h } from 'vue'
+import { computed, createApp, h, onBeforeUnmount, provide, ref, shallowRef } from 'vue'
 import { createPinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import { NConfigProvider, NDialogProvider, NMessageProvider, darkTheme } from 'naive-ui'
@@ -7,6 +7,12 @@ import PluginPageView from '../../../packages/client/src/views/PluginPageView.vu
 import StudioNavigationRail from '../../../packages/client/src/components/layout/StudioNavigationRail.vue'
 import { useProfilesStore } from '../../../packages/client/src/stores/hermes/profiles'
 import PluginNotifications from '../../../packages/client/src/components/plugins/PluginNotifications.vue'
+import PluginWorkspaceSidebar from '../../../packages/client/src/components/layout/PluginWorkspaceSidebar.vue'
+import AppSidebar from '../../../packages/client/src/components/layout/AppSidebar.vue'
+import MobileNavigationDrawer from '../../../packages/client/src/components/layout/MobileNavigationDrawer.vue'
+import { mobileNavigationKey } from '../../../packages/client/src/composables/usePageSidebar'
+import { usePluginCatalog, pluginPages } from '../../../packages/client/src/composables/usePluginCatalog'
+import { useAppStore } from '../../../packages/client/src/stores/hermes/app'
 import { createRouter, createWebHashHistory, RouterView } from 'vue-router'
 import zh from '../../../packages/client/src/i18n/locales/zh'
 import { useTheme } from '../../../packages/client/src/composables/useTheme'
@@ -19,9 +25,10 @@ const placeholder = { render: () => h('div', 'Session destination') }
 const router = createRouter({ history: createWebHashHistory(), routes: [
   { path: '/', redirect: '/studio/plugins' },
   { path: '/studio/plugins', name: 'studio.plugins', component: StudioPluginsView },
+  { path: '/studio/plugin-settings/:pluginId/:viewId', name: 'studio.pluginSettings', component: PluginPageView },
   { path: '/studio/plugins/:pluginId/:viewId?', name: 'studio.pluginPage', component: PluginPageView },
   { path: '/hermes/session/:id', component: placeholder },
-  ...['person', 'chat', 'groupChat', 'workflow', 'history', 'connections', 'agentManager', 'models', 'usage', 'apiRelay', 'settings'].map(name => ({ path: '/hermes/' + name, name: 'hermes.' + name, component: placeholder })),
+  ...['person', 'chat', 'groupChat', 'workflow', 'history', 'connections', 'agentManager', 'models', 'usage', 'apiRelay', 'settings', 'logs', 'performance', 'skillsUsage', 'theme', 'petdex', 'profiles'].map(name => ({ path: '/hermes/' + name, name: 'hermes.' + name, component: placeholder })),
 ] })
 const pinia = createPinia()
 await theme.setBrightness('light')
@@ -36,7 +43,30 @@ await theme.setBrightness('light')
     else document.documentElement.style.removeProperty('--app-background-image')
   },
   async theme(dark: boolean) { await theme.setBrightness(dark ? 'dark' : 'light'); theme.previewThemeSettings({ brightness: dark ? 'dark' : 'light', appearance: { global: { opacity: 0.7, gradientColor: '#4267a8' }, regions: {} } }) } }
+const Layout = { setup() {
+  const { snapshot, profile } = usePluginCatalog(), app = useAppStore()
+  const narrow = ref(innerWidth <= 768), open = ref(false), target = shallowRef<HTMLElement | null>(null)
+  const resize = () => { narrow.value = innerWidth <= 768 }
+  window.addEventListener('resize', resize); onBeforeUnmount(() => window.removeEventListener('resize', resize))
+  provide(mobileNavigationKey, { open, target: computed(() => narrow.value ? target.value : null) })
+  return () => {
+    const route = router.currentRoute.value
+    const plugin = snapshot.value.plugins.find(plugin => plugin.manifest.id === route.params.pluginId && plugin.status === 'active')
+    const view = plugin && pluginPages(plugin).find(view => view.id === route.params.viewId)
+    const workspace = route.name === 'studio.pluginPage' && view?.slot === 'workspace'
+    const settings = route.name === 'studio.pluginSettings' || route.name === 'hermes.settings'
+    return h('div', { style: 'display:flex;height:100vh;min-width:0;background-image:var(--app-background-image,none);background-size:cover' }, [
+      narrow.value ? h('button', { onClick: () => { open.value = true }, style: 'align-self:flex-start' }, 'Menu') : h(StudioNavigationRail),
+      narrow.value && h(MobileNavigationDrawer, { show: open.value, hasSidebar: Boolean(workspace || settings), 'onUpdate:show': (value: boolean) => { open.value = value }, onTarget: (value: HTMLElement | null) => { target.value = value } }),
+      workspace && plugin ? h(PluginWorkspaceSidebar, { plugin, profile: profile.value }) : settings ? h(AppSidebar) : null,
+      h('div', { style: 'display:flex;flex-direction:column;flex:1;min-width:0;overflow:auto' }, [
+        workspace && !narrow.value ? h('button', { onClick: () => app.toggleSidebarCollapsed(), style: 'align-self:flex-start' }, 'Toggle sidebar') : null,
+        h(RouterView),
+      ]),
+    ])
+  }
+} }
 createApp({ setup: () => () => h(NConfigProvider, { theme: theme.isDark.value ? darkTheme : null,
   themeOverrides: getThemeOverrides(theme.isDark.value, theme.isComic.value, theme.customization.value, theme.hasCustomBackground.value) },
-  () => h(NDialogProvider, null, () => h(NMessageProvider, null, () => [h(PluginNotifications), h('div', { style: 'display:flex;height:100vh;min-width:0;background-image:var(--app-background-image,none);background-size:cover' }, [h(StudioNavigationRail), h(RouterView)])]))) })
+  () => h(NDialogProvider, null, () => h(NMessageProvider, null, () => [h(PluginNotifications), h(Layout)]))) })
   .use(pinia).use(router).use(createI18n({ legacy: false, locale: 'zh', messages: { zh } })).mount('#app')

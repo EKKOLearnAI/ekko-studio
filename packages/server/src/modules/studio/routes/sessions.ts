@@ -2,6 +2,7 @@ import Router from '@koa/router'
 import * as shares from '../controllers/session-shares'
 import * as directories from '../controllers/workspace-directories'
 import * as ctrl from '../controllers/sessions'
+import * as control from '../controllers/session-control'
 
 export const sessionRoutes = new Router()
 
@@ -13,6 +14,8 @@ sessionRoutes.delete('/api/studio/session-categories/:id', ctrl.removeCategory)
 sessionRoutes.get('/api/studio/sessions/conversations/:id/messages', ctrl.getConversationMessages)
 sessionRoutes.get('/api/studio/sessions/conversations/:id/messages/paginated', ctrl.getConversationMessagesPaginated)
 sessionRoutes.get('/api/studio/sessions', ctrl.list)
+sessionRoutes.post('/api/studio/sessions', control.create)
+sessionRoutes.post('/api/studio/sessions/:id/stop', control.stop)
 sessionRoutes.get('/api/studio/session-tasks', ctrl.listTasks)
 sessionRoutes.get('/api/studio/sessions/count', ctrl.count)
 sessionRoutes.get('/api/studio/sessions/hermes', ctrl.listHermesSessions)

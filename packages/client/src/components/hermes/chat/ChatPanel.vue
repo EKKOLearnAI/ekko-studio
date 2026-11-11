@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import PluginSlots from '@/components/plugins/PluginSlots.vue'
 import { agentMetadata, isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import SessionListSidebar from "./SessionListSidebar.vue"
 import SessionSelectionToolbar from "./SessionSelectionToolbar.vue"
@@ -2722,7 +2721,6 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
             />
           </template>
         </template>
-      <PluginSlots slot="sidebar" :session-id="activePreviewSessionId || undefined" :profile="chatStore.activeSession?.profile || undefined" />
       </template>
     </SessionListSidebar>
 

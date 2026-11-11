@@ -5,6 +5,7 @@ import { io, type Socket } from 'socket.io-client'
 import { config } from '../public/config'
 import { getChatRunServer } from '../public/chat-run'
 import { resolveModelExecutionIdentity } from '../contracts/runs/model-execution-identity'
+import { prepareSessionRun } from '../services/sessions/control'
 
 type ChatRunPayload = Record<string, unknown> & {
   input?: unknown
@@ -18,6 +19,7 @@ type ChatRunEvent = Record<string, unknown> & {
   event?: string
   session_id?: string
   run_id?: string
+  queue_id?: string
   delta?: string
   text?: string
   output?: string | null
@@ -190,7 +192,7 @@ function profileFrom(ctx: Context, body: ChatRunPayload): string {
 }
 
 function userBody(body: ChatRunPayload): Record<string, unknown> {
-  const { timeout_ms: _timeoutMs, include_events: _includeEvents, ...payload } = body
+  const { timeout_ms: _timeoutMs, include_events: _includeEvents, wait: _wait, ...payload } = body
   return payload
 }
 
@@ -220,6 +222,11 @@ export async function runOnce(ctx: Context) {
   const includeEvents = body.include_events === true
   const token = bearerToken(ctx)
   const profile = profileFrom(ctx, body)
+  if (body.wait !== undefined && typeof body.wait !== 'boolean') { ctx.status = 400; ctx.body = { error: 'wait must be boolean' }; return }
+  if (!ctx.state.sessionShare) {
+    try { body = prepareSessionRun(ctx.state.user, profile, body) }
+    catch (error: any) { ctx.status = error.status || 403; ctx.body = { error: error.message }; return }
+  }
   const payload: Record<string, unknown> = { ...userBody(body), profile }
   const isCodingAgentRun = body.source === 'builtin_agent' || body.source === 'coding_agent' || body.coding_agent_id != null || body.agent_id != null
   if (isCodingAgentRun) {
@@ -315,6 +322,11 @@ export async function runOnce(ctx: Context) {
         const tagged = { ...event, event: event.event || eventName }
         record(tagged)
         if (typeof tagged.run_id === 'string' && tagged.run_id) runId = tagged.run_id
+        if (body.wait === false && (eventName === 'run.started' || eventName === 'run.queued')) {
+          finish(202, { ok: true, status: eventName === 'run.started' ? 'running' : 'queued', event: eventName,
+            ...(typeof tagged.queue_id === 'string' ? { queue_id: tagged.queue_id } : {}) })
+          return
+        }
         if (eventName === 'message.delta' && typeof tagged.delta === 'string') output += tagged.delta
         if ((eventName === 'reasoning.delta' || eventName === 'thinking.delta') && typeof tagged.delta === 'string') reasoning += tagged.delta
         if (eventName === 'run.completed') {

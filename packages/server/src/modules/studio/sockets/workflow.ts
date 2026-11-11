@@ -1,6 +1,7 @@
 import { registerAppEventState, publishAppState, stateEvent } from '../services/webhooks/app-event-state'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { publishDomainEvent } from '../services/webhooks/domain-events'
+import { publishPluginObservation } from '../services/plugins/event-source'
 import type { Server, Socket } from 'socket.io'
 import { authenticateUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
 import { listUserProfiles } from '../repositories/users-store'
@@ -66,6 +67,7 @@ export class WorkflowSocketServer {
   private readonly removeStatusListener: () => void
   private readonly removeAppState: () => void
   private readonly notifiedRuns = new Set<string>()
+  private readonly observedRunTransitions = new Set<string>()
 
   constructor(io: Server, manager: WorkflowManager = getWorkflowManager()) {
     this.manager = manager
@@ -217,6 +219,16 @@ export class WorkflowSocketServer {
     try {
       const snapshot = this.statusWithEvidence(status)
       publishAppState(this.appState(snapshot))
+      if (status.runId && snapshot.run?.status === status.status && ['running', 'canceled'].includes(status.status)) {
+        const key = `${status.runId}:${status.status}`
+        if (!this.observedRunTransitions.has(key)) {
+          this.observedRunTransitions.add(key)
+          if (this.observedRunTransitions.size > 2000) this.observedRunTransitions.delete(this.observedRunTransitions.values().next().value!)
+          const event = this.appState(snapshot)
+          publishPluginObservation(status.status === 'running' ? 'workflow.run.started' : 'workflow.run.stopped',
+            event.profile, 'workflow', event.subject, event.payload)
+        }
+      }
       this.nsp.to(this.workflowRoom(status.workflowId)).emit('workflow.status.updated', snapshot)
       if (!status.runId || !snapshot.run || !['completed', 'failed'].includes(status.status)
         || snapshot.run.status !== status.status || this.notifiedRuns.has(status.runId)) return

@@ -107,6 +107,7 @@ const { t } = useI18n()
   :deep(.collapse-btn),
   :deep(.hermes-config-collapse),
   :deep(.ekko-config-collapse),
-  :deep(.coding-agent-config-collapse) { display: none; }
+  :deep(.coding-agent-config-collapse),
+  :deep(.plugin-config-collapse) { display: none; }
 }
 </style>

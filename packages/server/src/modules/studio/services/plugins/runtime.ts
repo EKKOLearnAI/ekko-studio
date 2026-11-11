@@ -158,7 +158,9 @@ export class PluginRuntime {
     })
   }
   async observe(event: PluginEvent): Promise<void> {
-    for (const listener of [...(this.listeners.get(event.type) || []), ...(this.listeners.get('*') || [])]) {
+    const matches = (pattern: string) => pattern === event.type || pattern === '*' || pattern.endsWith('.*') && event.type.startsWith(pattern.slice(0, -1))
+    const listeners = new Set([...this.listeners].filter(([pattern]) => matches(pattern)).flatMap(([, entries]) => [...entries]))
+    for (const listener of listeners) {
       try { await this.run(event.identity, undefined, async ctx => { await listener(structuredClone(event), ctx); return null }) }
       catch (error) { this.log('error', `Event ${event.type}: ${message(error)}`, undefined, event.identity) }
     }

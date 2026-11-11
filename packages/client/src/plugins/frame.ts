@@ -27,7 +27,8 @@ function bootstrap(apiFactory: typeof createStudioApi, loadModule: (url: string)
         const request = pending.get(message.id); pending.delete(message.id)
         if (message.error) request?.reject(new Error(message.error)); else request?.resolve(message.value)
       } else if (message.type === 'event') {
-        for (const listener of [...(listeners.get(message.event.type) || []), ...(listeners.get('*') || [])]) {
+        const matches = (pattern: string) => pattern === message.event.type || pattern === '*' || pattern.endsWith('.*') && message.event.type.startsWith(pattern.slice(0, -1))
+        for (const listener of new Set([...listeners].filter(([pattern]) => matches(pattern)).flatMap(([, entries]) => [...entries]))) {
           try { listener(message.event) } catch (error) { send({ type: 'error', message: String(error) }) }
         }
       } else if (message.type === 'theme') {

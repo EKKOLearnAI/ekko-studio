@@ -12583,8 +12583,8 @@
         "tags": [
           "Chat Run"
         ],
-        "summary": "Run chat and wait for completion",
-        "description": "Starts a Ekko Studio chat run through the chat-run transport and waits for a terminal result. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.\nApp session sharing: requires the claimed recipient identity and input permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
+        "summary": "Start or queue a chat run, optionally waiting for completion",
+        "description": "Starts an Ekko Studio chat run through the authenticated chat-run transport. By default waits for a terminal result; wait=false returns HTTP 202 once started or queued. Existing sessions must belong to the selected Profile. Existing agent and model settings are used when omitted. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.\nApp session sharing: requires the claimed recipient identity and input permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "runChatOnce",
         "security": [
           {
@@ -12748,6 +12748,11 @@
                     "default": 300000,
                     "description": "Maximum time to wait for run.completed or run.failed."
                   },
+                  "wait": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Set false to return when the run starts or queues. Response includes session_id, run_id when started, and queue_id when available. Observe events or history for later results."
+                  },
                   "include_events": {
                     "type": "boolean",
                     "default": false,
@@ -12798,6 +12803,9 @@
                 }
               }
             }
+          },
+          "202": {
+            "description": "Run accepted or queued; JSON includes status, session_id and available run_id/queue_id"
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
@@ -15601,6 +15609,169 @@
         ]
       }
     },
+    "/api/studio/group-chat/rooms/{roomId}/messages": {
+      "get": {
+        "tags": [
+          "Group Chat"
+        ],
+        "operationId": "listGroupChatMessages",
+        "summary": "Read persisted group messages with room readership authorization",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "403": {
+            "description": "Profile, room or operation access denied"
+          },
+          "404": {
+            "description": "Session or room not found"
+          },
+          "409": {
+            "description": "Use the owning workflow or group operation"
+          },
+          "503": {
+            "description": "Runtime unavailable"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Group Chat"
+        ],
+        "operationId": "sendGroupChatMessage",
+        "summary": "Send a message as the authenticated human member; mention routing uses the normal group transport and permissions",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "403": {
+            "description": "Profile, room or operation access denied"
+          },
+          "404": {
+            "description": "Session or room not found"
+          },
+          "409": {
+            "description": "Use the owning workflow or group operation"
+          },
+          "503": {
+            "description": "Runtime unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    ]
+                  },
+                  "mentions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                "required": [
+                  "content"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/group-chat/rooms/{roomId}/messages/delete": {
       "post": {
         "tags": [
@@ -15699,6 +15870,79 @@
                     "pattern": "^[a-f0-9]{64}$"
                   }
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/group-chat/rooms/{roomId}/stop": {
+      "post": {
+        "tags": [
+          "Group Chat"
+        ],
+        "operationId": "stopGroupChatAgent",
+        "summary": "Interrupt one named Agent using the same ownership checks as the group chat UI",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "403": {
+            "description": "Profile, room or operation access denied"
+          },
+          "404": {
+            "description": "Session or room not found"
+          },
+          "409": {
+            "description": "Use the owning workflow or group operation"
+          },
+          "503": {
+            "description": "Runtime unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agentName": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "agentName"
+                ]
               }
             }
           }
@@ -22714,6 +22958,78 @@
             }
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "operationId": "createEmptyStudioSession",
+        "summary": "Create an empty session without starting a model run",
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "JSON result"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "403": {
+            "description": "Profile, room or operation access denied"
+          },
+          "404": {
+            "description": "Session or room not found"
+          },
+          "409": {
+            "description": "Use the owning workflow or group operation"
+          },
+          "503": {
+            "description": "Runtime unavailable"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "agent": {
+                    "type": "string",
+                    "default": "ekko-agent"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "scoped",
+                      "global"
+                    ]
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        }
       }
     },
     "/api/studio/sessions/batch-delete": {
@@ -24500,6 +24816,72 @@
           }
         ],
         "x-session-share-permission": "switchWorkspace"
+      }
+    },
+    "/api/studio/sessions/{id}/stop": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "operationId": "stopStudioSession",
+        "summary": "Stop the current run without deleting the session; returns ok, session_id and stopped. Uses the same queue behavior as the chat UI. Workflow/group runs must use their own stop operations.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Studio login required"
+          },
+          "403": {
+            "description": "Profile, room or operation access denied"
+          },
+          "404": {
+            "description": "Session or room not found"
+          },
+          "409": {
+            "description": "Use the owning workflow or group operation"
+          },
+          "503": {
+            "description": "Runtime unavailable"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+              }
+            }
+          }
+        }
       }
     },
     "/api/studio/sessions/{id}/tasks": {

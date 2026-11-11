@@ -1,11 +1,5 @@
 {
-  "name": "studio-notebook-example", "version": "1.2.0", "type": "module",
-  "studioPlugin": {
-    "id": "notebook", "name": "工作便签", "version": "1.2.0", "apiVersion": 1,
-    "description": "跨账号与 Profile 共享便签；页面、聊天侧栏、Agent 工具和工作流实时同步。",
-    "server": "server.mjs", "client": "client.mjs",
-    "capabilities": ["ui", "tools", "commands", "automation"],
-    "configSchema": { "type": "object", "properties": { "title": { "type": "string", "title": "便签标题", "default": "工作便签", "maxLength": 100 } }, "additionalProperties": false },
-    "views": [{ "id": "notes", "title": "共享便签", "slot": "page" }, { "id": "quick-note", "title": "随手记", "slot": "sidebar" }]
-  }
+  "name": "studio-notebook-example",
+  "version": "1.2.0",
+  "type": "module"
 }

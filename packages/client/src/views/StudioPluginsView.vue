@@ -8,9 +8,9 @@ import { pluginRequest, pluginInvoke, type InstalledPlugin, type Json } from '@/
 import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
-import PluginFrame from '@/components/plugins/PluginFrame.vue'
 import PluginConfigFields from '@/components/plugins/PluginConfigFields.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
+import { pluginLinks, safePluginLink } from '@/plugins/navigation'
 
 const { t } = useI18n(), dialog = useDialog(), message = useMessage(), router = useRouter(), route = useRoute()
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
@@ -27,7 +27,7 @@ const activeCount = computed(() => snapshot.value.plugins.filter(plugin => plugi
 const categories = ['all', 'pages', 'chat', 'tools', 'automation'] as const
 function matchesCategory(plugin: InstalledPlugin, value: string) {
   if (value === 'pages') return pluginPages(plugin).length > 0
-  if (value === 'chat') return plugin.commands.length > 0 || plugin.manifest.views?.some(view => ['sidebar', 'message'].includes(view.slot))
+  if (value === 'chat') return plugin.commands.length > 0
   if (value === 'tools') return plugin.tools.length > 0 || plugin.manifest.capabilities.includes('tools')
   if (value === 'automation') return plugin.actions.length > 0 || plugin.manifest.capabilities.includes('automation')
   return true
@@ -35,7 +35,7 @@ function matchesCategory(plugin: InstalledPlugin, value: string) {
 const filtered = computed(() => snapshot.value.plugins.filter(plugin => {
   const query = search.value.trim().toLocaleLowerCase()
   return matchesCategory(plugin, category.value) && (state.value === 'all' || plugin.status === state.value)
-    && (!query || [plugin.manifest.name, plugin.manifest.id, plugin.manifest.description || ''].some(value => value.toLocaleLowerCase().includes(query)))
+    && (!query || [plugin.manifest.name, plugin.manifest.id, plugin.manifest.description || '', plugin.manifest.author?.name || '', ...(plugin.manifest.keywords || [])].some(value => value.toLocaleLowerCase().includes(query)))
 }))
 const stateOptions = computed(() => ['all', 'active', 'disabled', 'failed'].map(value => ({ value, label: t('studioPlugins.' + (value === 'all' ? 'allStates' : value)) })))
 function syncDrafts() {
@@ -180,12 +180,18 @@ async function logs(id: string) {
           <NTabs v-model:value="detailTab" type="line" animated>
             <NTabPane name="overview" :tab="t('studioPlugins.overview')">
               <div class="detail-stack">
+                <div class="project-metadata">
+                  <p v-if="selected.manifest.author"><strong>{{ t('studioPlugins.author') }}:</strong> <a v-if="safePluginLink(selected.manifest.author.url)" :href="safePluginLink(selected.manifest.author.url)" target="_blank" rel="noopener noreferrer">{{ selected.manifest.author.name }}</a><span v-else>{{ selected.manifest.author.name }}</span></p>
+                  <p v-if="selected.manifest.license"><strong>{{ t('studioPlugins.license') }}:</strong> {{ selected.manifest.license }}</p>
+                  <div class="actions"><a v-for="link in pluginLinks(selected)" :key="link.key" :href="link.url" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.' + link.key) }} ↗</a></div>
+                  <div class="capability-list"><NTag v-for="keyword in selected.manifest.keywords || []" :key="keyword" size="small" :bordered="false">{{ keyword }}</NTag></div>
+                </div>
                 <h4>{{ t('studioPlugins.availableIn') }}</h4>
                 <div v-if="pluginPages(selected).length" class="view-list">
                   <RouteLinkItem v-for="view in pluginPages(selected)" :key="view.id" :to="pluginPageLocation(selected, view.id)" class="view-link"><span>{{ view.title }}</span><span aria-hidden="true">↗</span></RouteLinkItem>
                 </div>
                 <p v-else>{{ t('studioPlugins.noPage') }}</p>
-                <div class="capability-list"><NTag v-for="slot in [...new Set((selected.manifest.views || []).filter(view => view.slot !== 'page').map(view => view.slot))]" :key="slot" size="small">{{ t('studioPlugins.slot_' + slot) }}</NTag></div>
+                <div class="capability-list"><NTag v-for="slot in [...new Set(pluginPages(selected).map(view => view.slot))]" :key="slot" size="small">{{ t('studioPlugins.slot_' + slot) }}</NTag></div>
                 <h4>{{ t('studioPlugins.capabilities') }}</h4>
                 <div class="capability-list"><NTag v-for="capability in selected.manifest.capabilities" :key="capability" size="small" :bordered="false">{{ capability }}</NTag></div>
                 <div class="operation-list"><p v-for="operation in [...selected.tools, ...selected.commands, ...selected.actions]" :key="operation.name"><strong>{{ operation.name }}</strong><span>{{ operation.description }}</span></p></div>
@@ -199,7 +205,7 @@ async function logs(id: string) {
                   <NButton :disabled="busy || configValid[selected.manifest.id] === false" @click="update(selected, { config: configs[selected.manifest.id] })">{{ t('common.save') }}</NButton>
                 </template>
                 <NEmpty v-else-if="!(selected.manifest.views || []).some(view => view.slot === 'settings')" :description="t('studioPlugins.noConfiguration')" />
-                <template v-if="selected.status === 'active'"><PluginFrame v-for="view in (selected.manifest.views || []).filter(view => view.slot === 'settings')" :key="view.id" :plugin="selected" :profile="profile" :view="view.id" slot="settings" /></template>
+                <template v-if="selected.status === 'active'"><RouteLinkItem v-for="view in pluginPages(selected).filter(view => view.slot === 'settings')" :key="view.id" :to="pluginPageLocation(selected, view.id)" class="view-link">{{ view.title }} ↗</RouteLinkItem></template>
               </div>
             </NTabPane>
             <NTabPane name="developer" :tab="t('studioPlugins.developer')" display-directive="if">
@@ -272,6 +278,8 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .detail-identity { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
 .identity-copy { flex: 1; min-width: 120px; }
 .detail-description { white-space: pre-line; }
+.project-metadata { display: flex; flex-direction: column; gap: 12px; overflow-wrap: anywhere; }
+.project-metadata a { color: $accent-primary; }
 .view-list { display: flex; flex-direction: column; gap: 8px; }
 .view-link { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid $border-color; text-decoration: none; color: $text-primary; }
 .operation-list { display: flex; flex-direction: column; gap: 12px; }

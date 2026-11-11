@@ -89,6 +89,10 @@ describe('Studio plugin host', () => {
     }
     expect(manager.snapshot(who).plugins.every(plugin => plugin.status === 'active')).toBe(true)
     const notebook = manager.runtime(who, 'notebook')
+    await notebook.invoke('rpc', 'set-preferences', { filter: 'done' }, who)
+    expect(await notebook.invoke('rpc', 'get-preferences', null, who)).toBe('done')
+    expect(await notebook.invoke('rpc', 'get-preferences', null, { userId: 2, profile: 'one' })).toBe('all')
+    await expect(notebook.invoke('rpc', 'set-preferences', { filter: 'invalid' }, who)).rejects.toThrow()
     await notebook.invoke('rpc', 'append', { text: 'from UI' }, who)
     await manager.callTool({ ...who, sessionId: 'agent-session' }, 'notebook/append', { text: 'from Agent' })
     const notes = await notebook.invoke('rpc', 'list', null, who) as any[]
@@ -114,6 +118,7 @@ describe('Studio plugin host', () => {
     const persisted = await manager.runtime(who, 'notebook').invoke('rpc', 'list', null, who) as any[]
     expect(persisted.map(note => note.text)).toEqual(['from UI', 'from command', 'from workflow'])
     expect(persisted[0].done).toBe(true)
+    expect(await manager.runtime(who, 'notebook').invoke('rpc', 'get-preferences', null, who)).toBe('done')
   })
   it('installs disabled, registers all capabilities on enable, preserves global data and removes registrations on disable', async () => {
     const dir = await home(), manager = new PluginManager(join(dir, 'host'), ports()); managers.push(manager)
@@ -297,6 +302,19 @@ describe('Plugin context lifetime', () => {
     const closing = effects.close()
     release(async () => { await new Promise(resolve => setTimeout(resolve, 5)); closed = true })
     await closing; expect(closed).toBe(true); await rejected
+  })
+  it('matches namespace events, deduplicates listeners and disposes subscriptions', async () => {
+    const host = await runtime(), seen: any[] = []; let unsubscribe!: () => void
+    const handler = (event: any, run: any) => { seen.push({ type: event.type, user: run.identity.userId }) }
+    await host.load({ apply(ctx) {
+      ctx.on('*', handler); unsubscribe = ctx.on('chat.*', handler); ctx.on('chat.run.*', handler)
+      ctx.on('group.*', () => { throw new Error('unrelated namespace must not run') })
+    } })
+    await host.observe({ id: 'e', type: 'chat.run.started', identity: { ...who, userId: 2 }, timestamp: Date.now(), data: null })
+    expect(seen).toEqual([{ type: 'chat.run.started', user: 2 }])
+    unsubscribe(); await host.close()
+    await host.observe({ id: 'e2', type: 'chat.run.started', identity: who, timestamp: Date.now(), data: null })
+    expect(seen).toHaveLength(1)
   })
   it('enforces API capabilities and serializes recurring work', async () => {
     const host = await runtime(); let ctx!: PluginContext, running = 0, max = 0
