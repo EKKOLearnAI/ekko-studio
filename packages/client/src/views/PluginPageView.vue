@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NEmpty, NSpin } from 'naive-ui'
-import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
+import { pluginPages, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginFrame from '@/components/plugins/PluginFrame.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
@@ -11,7 +11,7 @@ import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 const route = useRoute(), router = useRouter(), { t } = useI18n()
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
 const plugin = computed(() => snapshot.value.plugins.find(item => item.manifest.id === route.params.pluginId))
-const pages = computed(() => plugin.value ? pluginPages(plugin.value) : [])
+const pages = computed(() => plugin.value ? pluginPages(plugin.value).filter(view => route.name === 'studio.pluginSettings' ? view.slot === 'settings' : view.slot !== 'settings') : [])
 const view = computed(() => route.params.viewId ? pages.value.find(item => item.id === route.params.viewId) : pages.value[0])
 const available = computed(() => plugin.value?.status === 'active' && Boolean(view.value))
 </script>
@@ -28,10 +28,7 @@ const available = computed(() => plugin.value?.status === 'active' && Boolean(vi
       </div>
     </PageHeader>
     <NAlert v-if="error" type="error">{{ error }} <NButton text @click="refresh(true)">{{ t('mcp.refresh') }}</NButton></NAlert>
-    <nav v-if="available && pages.length > 1" class="workspace-tabs" :aria-label="t('studioPlugins.pages')">
-      <RouteLinkItem v-for="item in pages" :key="item.id" :to="pluginPageLocation(plugin!, item.id)" :active="view?.id === item.id">{{ item.title }}</RouteLinkItem>
-    </nav>
-    <PluginFrame v-if="available && plugin && view" :key="`${profile}/${plugin.manifest.id}/${view.id}`" :plugin="plugin" :profile="profile" :view="view.id" slot="page" expanded />
+    <PluginFrame v-if="available && plugin && view" :key="`${profile}/${plugin.manifest.id}/${view.id}`" :plugin="plugin" :profile="profile" :view="view.id" :slot="view.slot" expanded />
     <div v-else class="workspace-empty">
       <NSpin v-if="loading" />
       <NEmpty v-else :description="t(plugin?.status === 'disabled' ? 'studioPlugins.pageDisabled' : 'studioPlugins.pageUnavailable')">
@@ -49,9 +46,6 @@ const available = computed(() => plugin.value?.status === 'active' && Boolean(vi
 .workspace-heading h2 { font-size: 16px; color: $text-primary; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; }
 .back-link { color: $text-secondary; text-decoration: none; white-space: nowrap; }
 .back-link:hover { color: $text-primary; }
-.workspace-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
-.workspace-tabs a { padding: 6px 12px; color: $text-secondary; text-decoration: none; border-radius: $radius-sm; }
-.workspace-tabs .active { color: $text-primary; background: rgba(var(--accent-primary-rgb), .1); }
 .workspace-empty { flex: 1; display: grid; place-items: center; }
 @media (max-width: 600px) { .plugin-workspace { padding: 12px; gap: 12px; } .workspace-heading { gap: 8px; } }
 </style>

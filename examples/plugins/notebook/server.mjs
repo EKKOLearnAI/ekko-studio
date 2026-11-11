@@ -7,10 +7,8 @@ export function apply(ctx) {
   let tail = Promise.resolve()
   function serial(work) { const next = tail.catch(() => {}).then(work); tail = next; return next }
   async function read() {
-    const stored = await ctx.storage.get('notes') || []
-    if (!Array.isArray(stored)) throw new Error('便签数据格式不正确')
-    const notes = stored.map(note => ({ ...note, id:note.id || randomUUID(), done:note.done === true, origin:note.origin || 'legacy' }))
-    if (stored.some(note => !note.id)) await ctx.storage.set('notes', notes)
+    const notes = await ctx.storage.get('notes') || []
+    if (!Array.isArray(notes)) throw new Error('便签数据格式不正确')
     return notes
   }
   function append(text, run, origin) {
@@ -38,6 +36,12 @@ export function apply(ctx) {
     })
   }
   ctx.rpc.register('list', () => serial(read))
+  ctx.rpc.register('get-preferences', async (_, run) => await run.storage.namespace('preferences', String(run.identity.userId)).get('filter') || 'all')
+  ctx.rpc.register('set-preferences', async (input, run) => {
+    if (!['all', 'open', 'done'].includes(input?.filter)) throw new Error('无效的筛选选项')
+    await run.storage.namespace('preferences', String(run.identity.userId)).set('filter', input.filter)
+    return { ok: true }
+  })
   ctx.rpc.register('append', (input, run) => append(input?.text, run, 'ui'))
   ctx.rpc.register('update', (input, run) => change(input, run))
   ctx.rpc.register('remove', (input, run) => change(input, run, true))

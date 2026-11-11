@@ -1,9 +1,9 @@
 import { beforeEach, it, expect, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), addMessage: vi.fn(() => 'message-id'), getSession: vi.fn(() => ({})), createSession: vi.fn(), updateSessionStats: vi.fn() }))
-vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ getPluginManager: () => ({ runtime: () => ({ invoke: mocks.invoke }) }) }))
+const mocks = vi.hoisted(() => ({ authorize: vi.fn(), invoke: vi.fn(), addMessage: vi.fn(() => 'message-id'), getSession: vi.fn(() => ({})), createSession: vi.fn(), updateSessionStats: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ authorizePluginIdentity: mocks.authorize, getPluginManager: () => ({ runtime: () => ({ invoke: mocks.invoke }) }) }))
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => mocks)
 import { handlePluginCommand } from '../../packages/server/src/modules/studio/services/plugins/command'
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => { vi.clearAllMocks(); mocks.authorize.mockReset() })
 it('runs namespaced chat commands and persists the command and response', async () => {
   const identity = { userId: 1, profile: 'work', sessionId: 'session' }, state: any = { messages: [], isWorking: false }, emit = vi.fn()
   mocks.invoke.mockResolvedValue('saved')
@@ -21,4 +21,12 @@ it('stops a running command through the session abort signal and leaves the sess
   expect(state.isWorking).toBe(true); state.abortController.abort()
   await result; expect(state.isWorking).toBe(false)
   expect(emit).toHaveBeenLastCalledWith(expect.objectContaining({ terminal: true, ok: false, message: 'Canceled' }))
+})
+it('rejects inaccessible sessions before command lookup, history writes or run state mutation', async () => {
+  mocks.authorize.mockImplementation(() => { throw new Error('Session unavailable') })
+  const state: any = { messages: [], isWorking: false }, emit = vi.fn()
+  await handlePluginCommand('/missing:command input', { userId: 1, profile: 'work', sessionId: 'private' }, state, emit)
+  expect(mocks.invoke).not.toHaveBeenCalled(); expect(mocks.addMessage).not.toHaveBeenCalled(); expect(mocks.createSession).not.toHaveBeenCalled()
+  expect(state).toEqual({ messages: [], isWorking: false })
+  expect(emit).toHaveBeenCalledWith(expect.objectContaining({ ok: false, terminal: true }))
 })

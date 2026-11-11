@@ -4,7 +4,9 @@ import { cancelPersonDelivery } from '../person/delivery'
  */
 
 import type { Server, Socket } from 'socket.io'
-import { updateSession, updateSessionStats } from '../../repositories/session-store'
+import { getSession, updateSession, updateSessionStats } from '../../repositories/session-store'
+import { isPrivatePersonSession } from '../../contracts/person-session'
+import { publishPluginObservation } from '../plugins/event-source'
 import { logger } from '../../public/logging'
 import { chatCodingAgentRunManager as codingAgentRunManager } from '../../public/chat-agent-runtime'
 import {
@@ -362,6 +364,11 @@ export async function markAbortCompleted(
 
 function emitToSession(nsp: ReturnType<Server['of']>, socket: Socket, sessionId: string, event: string, payload: any) {
   const tagged = { ...payload, session_id: sessionId }
+  if (event === 'abort.completed' && !payload.ignored && !isPrivatePersonSession(sessionId)) {
+    const session = getSession(sessionId)
+    if (session) publishPluginObservation('chat.run.stopped', session.profile || 'default', session.source || 'chat',
+      { session_id: sessionId, run_id: payload.run_id || undefined }, { status: 'stopped' })
+  }
   nsp.to(`session:${sessionId}`).emit(event, tagged)
   if (!nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
     socket.emit(event, tagged)

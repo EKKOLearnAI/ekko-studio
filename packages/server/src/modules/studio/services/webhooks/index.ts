@@ -1,5 +1,6 @@
 import { isPersonSession, isPrivatePersonSession } from '../../contracts/person-session'
 import { personDisplayEvent } from '../chat-run/person-display'
+import { publishPluginObservation } from '../plugins/event-source'
 import { randomUUID } from 'crypto'
 import { businessEvents } from './business-events'
 import { ensureBusinessConsumers } from './business-consumers'
@@ -100,6 +101,12 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
     'run.completed', 'run.failed', 'approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved',
   ].includes(input.event))) return false
   const payload = person ? personDisplayEvent(input.sessionId, input.event, input.payload) || {} : input.payload || {}
+  const observation = ({ 'message.delta': 'chat.message.delta', 'reasoning.delta': 'chat.reasoning.delta', 'thinking.delta': 'chat.reasoning.delta' } as Record<string, string>)[input.event]
+  if (observation && input.sessionId && !isPrivatePersonSession(input.sessionId)) {
+    publishPluginObservation(observation, input.profile || 'default', normalizeSource(input.source),
+      { session_id: input.sessionId, run_id: identifierValue(payload.run_id) || undefined, room_id: input.roomId, workflow_id: input.workflowId },
+      { ...(typeof payload.delta === 'string' ? { delta: payload.delta } : {}) })
+  }
   const sessionId = stringValue(input.sessionId)
   const plan = input.event === 'plan.updated' ? taskPlanWebhookSnapshot(payload, sessionId) : null
   // Group cards publish only after their message snapshot has been persisted.

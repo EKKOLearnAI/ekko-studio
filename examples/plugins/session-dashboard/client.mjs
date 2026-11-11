@@ -53,7 +53,7 @@ export async function mount(root, ctx) {
       meta.append(badge, document.createTextNode(`${Number(session.message_count) || 0} 条消息 · ${date ? new Date(date).toLocaleString('zh-CN', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '暂无时间'}`))
       const arrow = document.createElement('span'); arrow.className = 'arrow'; arrow.textContent = '↗'; arrow.setAttribute('aria-hidden', 'true')
       main.append(title, meta); row.append(main, arrow)
-      row.onclick = () => { void ctx.ui.navigate(`/hermes/session/${encodeURIComponent(session.id)}`).catch(error => ctx.ui.notify(error.message, 'error')) }
+      row.onclick = () => ctx.ui.navigate(`/hermes/session/${encodeURIComponent(session.id)}`)
       return row
     }))
     if (!visible.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = sessions.length ? '没有匹配的会话，试试其他关键词。' : '还没有会话。开始一段对话后，在这里刷新即可看到。'; rows.append(empty) }

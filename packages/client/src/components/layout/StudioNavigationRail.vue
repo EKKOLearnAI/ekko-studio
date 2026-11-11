@@ -9,16 +9,23 @@ import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import PageSidebarFooter from './PageSidebarFooter.vue'
 import RelayCampaignBadge from '@/components/hermes/RelayCampaignBadge.vue'
 import { useMobileNavigation } from '@/composables/usePageSidebar'
-import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
+import { pluginPages, pluginNavigation, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
+import { PLUGIN_NAVIGATION_VISIBLE } from '@/plugins/navigation'
 
 const route = useRoute()
 const { t } = useI18n()
-const { snapshot } = usePluginCatalog()
-const pluginEntries = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active' && pluginPages(plugin).length))
+const { snapshot } = usePluginCatalog(computed(() => PLUGIN_NAVIGATION_VISIBLE))
+const pluginEntries = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginNavigation(plugin).map(view => ({ plugin, view }))))
+function pluginActive(id: string, view: { id: string; slot: string }) {
+  if (route.name !== 'studio.pluginPage' || route.params.pluginId !== id) return false
+  const plugin = snapshot.value.plugins.find(plugin => plugin.manifest.id === id)
+  const current = plugin && pluginPages(plugin).find(item => item.id === (route.params.viewId || pluginNavigation(plugin)[0]?.id))
+  return current?.slot === 'workspace' ? view.slot === 'workspace' : current?.id === view.id
+}
 const canManageAgents = computed(() => isStoredSuperAdmin())
 const entries = computed(() => [
-  { key: 'studioPlugins', route: 'studio.plugins', label: 'studioPlugins.title', path: 'M9 3h6v5h5v7h-5v6H9v-6H3V8h6z' },
+  ...(PLUGIN_NAVIGATION_VISIBLE ? [{ key: 'studioPlugins', route: 'studio.plugins', label: 'studioPlugins.title', path: 'M9 3h6v5h5v7h-5v6H9v-6H3V8h6z' }] : []),
   { key: 'person', route: 'hermes.person', label: 'person.subtitle', avatar: deploymentUrl('/person/idle.gif') },
   { key: 'chat', route: 'hermes.chat', label: 'sidebar.singleChat', path: 'M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
   { key: 'group', route: 'hermes.groupChat', label: 'sidebar.groupChat', path: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' },
@@ -62,9 +69,9 @@ function handleNavigate(key: string) {
         {{ t(entry.label) }}
       </NTooltip>
       <div v-if="entry.key === 'studioPlugins' && pluginEntries.length" class="studio-navigation-rail__plugins" role="group" :aria-label="t('studioPlugins.workspace')">
-        <NTooltip v-for="plugin in pluginEntries" :key="plugin.manifest.id" placement="right" trigger="hover">
-          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin)" :active="activeKey === 'plugin:' + plugin.manifest.id" :aria-label="plugin.manifest.name" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginIcon :plugin="plugin" compact /></RouteLinkItem></template>
-          {{ plugin.manifest.name }}
+        <NTooltip v-for="{ plugin, view } in pluginEntries" :key="plugin.manifest.id + ':' + view.id" placement="right" trigger="hover">
+          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin, view.id)" :active="pluginActive(plugin.manifest.id, view)" :aria-label="view.slot === 'workspace' ? plugin.manifest.name : view.title" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginIcon :plugin="plugin" :icon="view.icon" compact /></RouteLinkItem></template>
+          {{ view.slot === 'workspace' ? plugin.manifest.name : view.title }}
         </NTooltip>
       </div>
       </template>

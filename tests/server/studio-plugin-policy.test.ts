@@ -8,6 +8,7 @@ describe('Plugin API and configuration boundaries', () => {
     for (const path of ['https://evil.test/api/studio/sessions', '//evil.test/api/x', '/api/../auth', '/api/%2e%2e/auth', '/api/studio/plugins/install', '/api/auth/login', '/api/studio/sessions?profile=other', '/api/hermes/profiles/other/config']) expect(() => pluginApiPath(path, identity, {})).toThrow()
     expect(() => pluginApiPath('/api/studio/sessions', identity, { method: 'POST', body: { profile: 'other' } })).toThrow(/profile/)
     expect(() => pluginApiPath('/api/studio/sessions', identity, { method: 'CONNECT' as any })).toThrow(/options/)
+    for (const path of ['/api/studio/Plugins/install', '/api/studio/AUTH/users', '/api/studio/models/API-KEYS', '/api/hermes/Profiles/other/config']) expect(() => pluginApiPath(path, identity, {})).toThrow()
   })
   it('redacts nested secrets and preserves omitted values without retaining explicitly replaced values', () => {
     const schema: Schema = { type: 'object', properties: { nested: { type: 'object', properties: { token: { type: 'string', secret: true }, name: { type: 'string' } } }, list: { type: 'array', items: { type: 'object', properties: { password: { type: 'string', secret: true } } } } } }

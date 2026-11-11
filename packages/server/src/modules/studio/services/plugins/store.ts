@@ -1,12 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { Json, PluginIdentity, PluginRecord, PluginStorage } from '../../contracts/plugins'
 import { json } from './schema'
 import { PluginError } from './errors'
 
 export interface PluginState { revision: number; scope: 'global'; records: Record<string, PluginRecord> }
-interface LegacyPluginState { revision: number; userId: number; profile: string; records: Record<string, PluginRecord> }
 export const scopeKey = (identity: Pick<PluginIdentity, 'userId' | 'profile'>) => createHash('sha256').update(JSON.stringify([identity.userId, identity.profile])).digest('hex')
 export function readJson<T>(file: string, fallback: () => T): T {
   try { return JSON.parse(readFileSync(file, 'utf8')) as T }
@@ -21,37 +20,9 @@ export function writeJson(file: string, value: unknown): void {
 export class PluginStore {
   constructor(readonly home: string) {}
   directory(): string { return join(this.home, 'global') }
-  read(_identity?: Pick<PluginIdentity, 'userId' | 'profile'>): PluginState {
+  read(): PluginState {
     const file = join(this.directory(), 'state.json')
-    if (!existsSync(file)) this.migrate()
     return readJson(file, () => ({ revision: 0, scope: 'global', records: {} }))
-  }
-  private migrate(): void {
-    const state: PluginState = { revision: 0, scope: 'global', records: {} }
-    const sources: Array<{ scope: string; state: LegacyPluginState }> = []
-    const skipped: string[] = [], duplicates: Array<{ id: string; retainedScope: string; skippedScope: string }> = []
-    for (const scope of (existsSync(this.home) ? readdirSync(this.home) : []).filter(name => /^[a-f0-9]{64}$/.test(name)).sort()) {
-      try {
-        const value = readJson<LegacyPluginState | null>(join(this.home, scope, 'state.json'), () => null)
-        if (!value) continue
-        if (!Number.isSafeInteger(value.userId) || value.userId <= 0 || typeof value.profile !== 'string' || !value.records || !Number.isSafeInteger(value.revision)) throw new Error('Invalid legacy registry')
-        sources.push({ scope, state: value })
-        state.revision = Math.max(state.revision, value.revision + 1)
-      } catch { skipped.push(scope) }
-    }
-    const candidates = sources.flatMap(source => Object.entries(source.state.records).map(([id, record]) => ({ ...source, id, record })))
-      .sort((a, b) => b.record.installedAt - a.record.installedAt || a.scope.localeCompare(b.scope))
-    const selected = new Map<string, string>()
-    for (const candidate of candidates) {
-      const { id, record, scope } = candidate
-      if (selected.has(id)) { duplicates.push({ id, retainedScope: selected.get(id)!, skippedScope: scope }); continue }
-      selected.set(id, scope)
-      state.records[id] = { ...record, runtimeIdentity: { userId: candidate.state.userId, profile: candidate.state.profile } }
-    }
-    // Keep all original package directories and scoped data. A restart must never
-    // resurrect an uninstalled plugin by importing the legacy registries again.
-    writeJson(join(this.directory(), 'migration.json'), { migratedAt: Date.now(), sources: sources.map(source => source.scope), duplicates, skipped })
-    writeJson(join(this.directory(), 'state.json'), state)
   }
   write(state: PluginState, expectedRevision: number): void {
     if (this.read().revision !== expectedRevision) throw new PluginError('Plugin settings changed; reload before saving', 'PLUGIN_REVISION', 409)

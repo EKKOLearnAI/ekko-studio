@@ -8,6 +8,7 @@ const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/studio/plugins', name: 'studio.plugins', component: () => import('@/views/StudioPluginsView.vue') },
+    { path: '/studio/plugin-settings/:pluginId/:viewId', name: 'studio.pluginSettings', component: () => import('@/views/PluginPageView.vue') },
     { path: '/studio/plugins/:pluginId/:viewId?', name: 'studio.pluginPage', component: () => import('@/views/PluginPageView.vue') },
     { path: '/person', name: 'hermes.person', component: () => import('@/views/hermes/PersonView.vue') },
     {

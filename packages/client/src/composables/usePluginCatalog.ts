@@ -1,20 +1,18 @@
-import { computed, onBeforeUnmount, ref, shallowRef } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { pluginCatalog, pluginList, type InstalledPlugin, type PluginSnapshot } from '@/api/studio/plugins'
+import { pluginCatalog, pluginList, type PluginSnapshot } from '@/api/studio/plugins'
 
-export const pluginPages = (plugin: InstalledPlugin) => (plugin.manifest.views || []).filter(view => view.slot === 'page')
-export const pluginPageLocation = (plugin: InstalledPlugin, viewId = pluginPages(plugin)[0]?.id) => ({
-  name: 'studio.pluginPage', params: { pluginId: plugin.manifest.id, viewId },
-})
+export { pluginPages, pluginPageLocation, pluginNavigation } from '@/plugins/navigation'
 
 /** Installations are global. Only mounted views carry the current execution profile. */
-export function usePluginCatalog() {
+export function usePluginCatalog(enabled: Readonly<Ref<boolean>> = ref(true)) {
   const profiles = useProfilesStore()
   const profile = computed(() => profiles.activeProfileName || 'default')
   const snapshot = shallowRef<PluginSnapshot>({ revision: 0, plugins: [] })
   const loading = ref(true), error = ref('')
   let sequence = 0, alive = true
   async function refresh(force = false) {
+    if (!enabled.value) return
     const current = ++sequence
     loading.value = true
     try {
@@ -34,7 +32,10 @@ export function usePluginCatalog() {
       if (alive && current === sequence) error.value = cause instanceof Error ? cause.message : String(cause)
     } finally { if (alive && current === sequence) loading.value = false }
   }
-  void refresh()
+  watch(enabled, active => {
+    if (active) void refresh()
+    else { sequence++; snapshot.value = { revision: 0, plugins: [] }; loading.value = false; error.value = '' }
+  }, { immediate: true })
   const changed = () => { void refresh() }
   const focused = () => { void refresh(true) }
   window.addEventListener('studio.plugins.changed', changed)

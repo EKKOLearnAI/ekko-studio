@@ -1,5 +1,6 @@
 import type { Json, PluginManifest, Schema } from '../../contracts/plugins'
 import { PluginError } from './errors'
+import { validateDetails, validateIcon } from './manifest-details'
 
 export function identifier(value: unknown, label = 'identifier'): string {
   if (typeof value !== 'string' || !/^[a-z][a-z0-9._-]{0,79}$/.test(value) || value.includes('..') || ['constructor', 'prototype', '__proto__'].includes(value)) throw new PluginError(`Invalid ${label}`)
@@ -57,11 +58,13 @@ export function validate(schema: Schema, value: unknown, path = 'input', depth =
   }
 }
 export function manifest(value: unknown): PluginManifest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new PluginError('Plugin manifest must be an object')
   const m = json(value) as unknown as PluginManifest
   identifier(m.id, 'plugin id')
   if (typeof m.name !== 'string' || !m.name.trim() || m.name.length > 160) throw new PluginError('Plugin name is required')
   if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(m.version || '')) throw new PluginError('Plugin requires an exact semantic version')
   if (m.apiVersion !== 1) throw new PluginError('Unsupported plugin API version', 'PLUGIN_INCOMPATIBLE', 422)
+  validateDetails(m)
   if (!m.server && !m.client) throw new PluginError('Plugin requires a server or client entry')
   for (const entry of [m.server, m.client].filter(Boolean)) {
     if (typeof entry !== 'string' || !/^[\w./-]+\.(?:mjs|js)$/.test(entry) || entry.startsWith('/') || entry.split('/').some(part => part === '..')) throw new PluginError('Plugin entries must be relative, compiled JavaScript files')
@@ -70,11 +73,20 @@ export function manifest(value: unknown): PluginManifest {
   if (!Array.isArray(m.capabilities) || m.capabilities.some(item => !capabilities.includes(item))) throw new PluginError('Invalid plugin capabilities')
   if (m.configSchema) validateSchema(m.configSchema)
   const ids = new Set<string>()
+  if (m.views !== undefined && (!Array.isArray(m.views) || m.views.length > 50)) throw new PluginError('Invalid plugin views')
   for (const view of m.views || []) {
+    if (!view || typeof view !== 'object') throw new PluginError('Invalid plugin view')
     identifier(view.id, 'view id')
-    if (ids.has(view.id) || !view.title || !['page', 'sidebar', 'settings', 'message'].includes(view.slot)) throw new PluginError('Invalid or duplicate plugin view')
+    if (ids.has(view.id) || typeof view.title !== 'string' || !view.title.trim() || view.title.length > 160 || !['page', 'workspace', 'settings'].includes(view.slot)) throw new PluginError('Invalid or duplicate plugin view; use page, settings or workspace')
+    if (view.order !== undefined && (!Number.isSafeInteger(view.order) || Math.abs(view.order) > 10000)) throw new PluginError('Invalid plugin view order')
+    if (view.icon !== undefined) validateIcon(view.icon)
     ids.add(view.id)
     if (!m.client || !m.capabilities.includes('ui')) throw new PluginError('Views require a client entry and ui capability')
+  }
+  if (m.workspace !== undefined) {
+    if (!m.workspace || typeof m.workspace !== 'object' || Array.isArray(m.workspace)) throw new PluginError('Invalid plugin workspace')
+    identifier(m.workspace.sidebar, 'workspace sidebar view')
+    if (ids.has(m.workspace.sidebar) || !m.views?.some(view => view.slot === 'workspace')) throw new PluginError('Workspace sidebar requires workspace pages and a distinct view id')
   }
   for (const [name, version] of Object.entries(m.dependencies || {})) {
     identifier(name)

@@ -51,7 +51,7 @@ export const update = (ctx: Context) => respond(ctx, async () => {
   if (input.action !== undefined && !['reload', 'rollback', 'uninstall'].includes(input.action)) throw new PluginError('Unknown plugin operation')
   const id = identifier(ctx.params.id)
   if (input.config !== undefined) {
-    const record = getPluginManager().store.read(who).records[id]
+    const record = getPluginManager().store.read().records[id]
     if (!record) throw new PluginError('Plugin not found', 'PLUGIN_NOT_FOUND', 404)
     input.config = mergeSecrets(json(input.config), record.config, record.manifest.configSchema)
   }

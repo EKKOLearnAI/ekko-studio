@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { PluginManager } from '../../packages/server/src/modules/studio/services/plugins/manager'
 import { PluginRuntime, type PluginPorts } from '../../packages/server/src/modules/studio/services/plugins/runtime'
-import { PluginStore, scopeKey, writeJson } from '../../packages/server/src/modules/studio/services/plugins/store'
+import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
 import { PluginEffects } from '../../packages/server/src/modules/studio/services/plugins/effects'
 import { configuration, manifest } from '../../packages/server/src/modules/studio/services/plugins/schema'
 import type { PluginContext, PluginIdentity, PluginManifest } from '../../packages/plugin-sdk/src'
@@ -27,7 +26,8 @@ const server = `export function apply(ctx) {
 }`
 async function source(dir: string, version = '1.0.0', code = server) {
   const directory = join(dir, `source-${version}`); await mkdir(directory, { recursive: true })
-  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'studio-notes-test', type: 'module', studioPlugin: { ...definition, version } }))
+  await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'studio-notes-test', type: 'module', version }))
+  await writeFile(join(directory, 'plugin.json'), JSON.stringify({ ...definition, version }))
   await writeFile(join(directory, 'server.mjs'), code); await writeFile(join(directory, 'client.mjs'), 'export function mount(element) { element.textContent = "Notes" }')
   return directory
 }
@@ -89,6 +89,10 @@ describe('Studio plugin host', () => {
     }
     expect(manager.snapshot(who).plugins.every(plugin => plugin.status === 'active')).toBe(true)
     const notebook = manager.runtime(who, 'notebook')
+    await notebook.invoke('rpc', 'set-preferences', { filter: 'done' }, who)
+    expect(await notebook.invoke('rpc', 'get-preferences', null, who)).toBe('done')
+    expect(await notebook.invoke('rpc', 'get-preferences', null, { userId: 2, profile: 'one' })).toBe('all')
+    await expect(notebook.invoke('rpc', 'set-preferences', { filter: 'invalid' }, who)).rejects.toThrow()
     await notebook.invoke('rpc', 'append', { text: 'from UI' }, who)
     await manager.callTool({ ...who, sessionId: 'agent-session' }, 'notebook/append', { text: 'from Agent' })
     const notes = await notebook.invoke('rpc', 'list', null, who) as any[]
@@ -114,6 +118,7 @@ describe('Studio plugin host', () => {
     const persisted = await manager.runtime(who, 'notebook').invoke('rpc', 'list', null, who) as any[]
     expect(persisted.map(note => note.text)).toEqual(['from UI', 'from command', 'from workflow'])
     expect(persisted[0].done).toBe(true)
+    expect(await manager.runtime(who, 'notebook').invoke('rpc', 'get-preferences', null, who)).toBe('done')
   })
   it('installs disabled, registers all capabilities on enable, preserves global data and removes registrations on disable', async () => {
     const dir = await home(), manager = new PluginManager(join(dir, 'host'), ports()); managers.push(manager)
@@ -223,25 +228,6 @@ describe('Studio plugin host', () => {
       expect(manager.poll(caller, 0, 'notebook').events.filter(event => event.type === 'notebook.updated')).toHaveLength(2)
     }
   })
-  it('migrates old installations once, resolves duplicate ids deterministically and retains scoped data', async () => {
-    const dir = await home(), root = join(dir, 'host'), other = { userId: 2, profile: 'two' }
-    const oldDirectory = await source(dir), newDirectory = await source(dir, '2.0.0')
-    const record = (directory: string, version: string, installedAt: number) => ({ manifest: { ...definition, version }, directory, source: directory, installedAt, enabled: true, config: {} })
-    writeJson(join(root, scopeKey(who), 'state.json'), { ...who, revision: 2, records: { notes: record(oldDirectory, '1.0.0', 10) } })
-    writeJson(join(root, scopeKey(other), 'state.json'), { ...other, revision: 7, records: { notes: record(newDirectory, '2.0.0', 20) } })
-    const oldData = join(root, scopeKey(who), 'data', createHash('sha256').update(JSON.stringify(['notes', '', ''])).digest('hex') + '.json')
-    writeJson(oldData, { count: 9 })
-    const manager = new PluginManager(root, ports()); managers.push(manager); await manager.restore()
-    expect(manager.snapshot(who)).toMatchObject({ revision: 8, plugins: [{ manifest: { version: '2.0.0' }, status: 'active' }] })
-    expect(await manager.callTool(who, 'notes/read', { key: 'note' })).toMatchObject({ data: { count: 1 } })
-    const migration = JSON.parse(await readFile(join(root, 'global', 'migration.json'), 'utf8'))
-    expect(migration.duplicates).toEqual([{ id: 'notes', retainedScope: scopeKey(other), skippedScope: scopeKey(who) }])
-    expect(JSON.parse(await readFile(join(root, scopeKey(who), 'state.json'), 'utf8')).records.notes.manifest.version).toBe('1.0.0')
-    await manager.update(other, 'notes', 8, { action: 'uninstall' }); await manager.close()
-    const restored = new PluginManager(root, ports()); managers.push(restored); await restored.restore()
-    expect(restored.snapshot(who).plugins).toEqual([])
-    expect(JSON.parse(await readFile(oldData, 'utf8'))).toEqual({ count: 9 })
-  })
   it('starts one recurring scheduler for a globally enabled plugin and stops it for all callers', async () => {
     const dir = await home(), access = ports(), manager = new PluginManager(dir, access); managers.push(manager)
     await manager.install(who, await source(dir, '1.0.0', `export function apply(ctx) {
@@ -297,6 +283,19 @@ describe('Plugin context lifetime', () => {
     const closing = effects.close()
     release(async () => { await new Promise(resolve => setTimeout(resolve, 5)); closed = true })
     await closing; expect(closed).toBe(true); await rejected
+  })
+  it('matches namespace events, deduplicates listeners and disposes subscriptions', async () => {
+    const host = await runtime(), seen: any[] = []; let unsubscribe!: () => void
+    const handler = (event: any, run: any) => { seen.push({ type: event.type, user: run.identity.userId }) }
+    await host.load({ apply(ctx) {
+      ctx.on('*', handler); unsubscribe = ctx.on('chat.*', handler); ctx.on('chat.run.*', handler)
+      ctx.on('group.*', () => { throw new Error('unrelated namespace must not run') })
+    } })
+    await host.observe({ id: 'e', type: 'chat.run.started', identity: { ...who, userId: 2 }, timestamp: Date.now(), data: null })
+    expect(seen).toEqual([{ type: 'chat.run.started', user: 2 }])
+    unsubscribe(); await host.close()
+    await host.observe({ id: 'e2', type: 'chat.run.started', identity: who, timestamp: Date.now(), data: null })
+    expect(seen).toHaveLength(1)
   })
   it('enforces API capabilities and serializes recurring work', async () => {
     const host = await runtime(); let ctx!: PluginContext, running = 0, max = 0

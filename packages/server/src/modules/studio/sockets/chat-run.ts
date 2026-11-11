@@ -1113,7 +1113,7 @@ export class ChatRunSocket {
             userId: socketUser.id, profile: runProfile, sessionId: data.session_id,
             workspace: storedSession?.workspace || undefined, surface: 'chat',
           }, state, payload => this.emitToSession(socket, data.session_id!, 'session.command', { ...payload, queue_id: data.queue_id }))) {
-            this.dequeueNextQueuedRun(socket, data.session_id, runProfile)
+            if (!state.isWorking) this.dequeueNextQueuedRun(socket, data.session_id, runProfile)
             return
           }
           const ekkoExecution = isEkkoAgentExecution(data)

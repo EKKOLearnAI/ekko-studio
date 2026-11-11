@@ -1,0 +1,60 @@
+{
+  "id": "notebook",
+  "name": "工作便签",
+  "version": "1.2.0",
+  "apiVersion": 1,
+  "description": "跨账号与 Profile 共享便签；独立工作区、Agent 工具和工作流实时同步。",
+  "server": "server.mjs",
+  "client": "client.mjs",
+  "capabilities": [
+    "ui",
+    "tools",
+    "commands",
+    "automation"
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "title": "便签标题",
+        "default": "工作便签",
+        "maxLength": 100
+      }
+    },
+    "additionalProperties": false
+  },
+  "views": [
+    {
+      "id": "notes",
+      "title": "共享便签",
+      "slot": "workspace",
+      "order": 0
+    },
+    {
+      "id": "usage",
+      "title": "使用说明",
+      "slot": "workspace",
+      "order": 1
+    },
+    {
+      "id": "preferences",
+      "title": "便签偏好",
+      "slot": "settings",
+      "order": 2
+    }
+  ],
+  "author": {
+    "name": "Ekko Studio",
+    "url": "https://github.com/EKKOLearnAI"
+  },
+  "repository": "https://github.com/EKKOLearnAI/ekko-studio",
+  "documentation": "https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md",
+  "workspace": {
+    "sidebar": "note-list"
+  },
+  "keywords": [
+    "notes",
+    "workspace"
+  ]
+}

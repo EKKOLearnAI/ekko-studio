@@ -11,7 +11,11 @@ await mkdir(target, { recursive: false })
 try {
   await cp(fileURLToPath(new URL('../examples/plugins/notebook/', import.meta.url)), target, { recursive: true, force: false })
   const file = join(target, 'package.json'), pkg = JSON.parse(await readFile(file, 'utf8'))
-  pkg.name = `studio-plugin-${id}`; pkg.studioPlugin.id = id; pkg.studioPlugin.name = id
+  pkg.name = `studio-plugin-${id}`
   await writeFile(file, JSON.stringify(pkg, null, 2) + '\n')
+  const manifestFile = join(target, 'plugin.json'), manifest = JSON.parse(await readFile(manifestFile, 'utf8'))
+  manifest.id = id; manifest.name = id
+  delete manifest.repository; delete manifest.documentation; delete manifest.author
+  await writeFile(manifestFile, JSON.stringify(manifest, null, 2) + '\n')
   console.log(`Plugin created at ${target}. Install this directory from Studio plugins.`)
 } catch (error) { await rm(target, { recursive: true, force: true }); throw error }

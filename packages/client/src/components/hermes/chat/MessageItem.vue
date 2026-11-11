@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import PluginSlots from '@/components/plugins/PluginSlots.vue'
 import RunUsageCard from "./RunUsageCard.vue";
 import PersonTaskReturnCard from '../person/PersonTaskReturnCard.vue';
 import {
@@ -67,7 +66,6 @@ const { t } = useI18n();
 const toast = useMessage();
 
 const isSystem = computed(() => props.message.role === "system");
-const pluginMessageData = computed(() => ({ id: props.message.id, role: props.message.role, content: props.message.content }));
 const isAgentError = computed(() => props.message.role === "assistant" && props.message.systemType === "error");
 
 const effectiveHeadingIdPrefix = computed(() => props.headingIdPrefix || `msg-${props.message.id}`);
@@ -1309,7 +1307,6 @@ onBeforeUnmount(() => {
       </div>
     </template>
   </div>
-  <PluginSlots v-if="!readOnly && !message.isStreaming && message.role === 'assistant' && chatStore.activeSessionId" slot="message" :session-id="chatStore.activeSessionId" :profile="chatStore.activeSession?.profile || undefined" :data="pluginMessageData" />
   <ImagePreviewOverlay
     v-if="previewUrl"
     :src="previewUrl"

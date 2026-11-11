@@ -8,6 +8,7 @@ import { parseGroupRunUsage } from '../services/group-chat/run-usage'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { registerGroupEventAccess } from '../services/webhooks/app-events'
 import { publishGroupMessage, publishGroupInteraction } from '../services/webhooks/domain-events'
+import { publishPluginObservation } from '../services/plugins/event-source'
 import { Server, Socket, Namespace } from 'socket.io'
 import type { Server as HttpServer } from 'http'
 import { mkdirSync } from 'fs'
@@ -5095,6 +5096,12 @@ export class GroupChatServer {
         }
     }
 
+    private publishPluginStream(type: string, roomId: string, messageId: string, agentName: string, delta?: string, runId?: string): void {
+        publishPluginObservation(type, this.storage.getRoom(roomId)?.summaryProfile || 'default', 'group_chat',
+            { room_id: roomId, message_id: messageId || undefined, run_id: runId || undefined },
+            { agent_name: agentName, ...(delta === undefined ? {} : { delta }) })
+    }
+
     private handleMessageStreamStart(socket: Socket, data: { roomId?: string; id?: string; senderId?: string; senderName?: string; timestamp?: number; run_id?: string; agentSessionId?: string }): void {
         const roomId = data.roomId || 'general'
         const member = this.getCurrentAgentEventMember(socket, roomId, '', data.agentSessionId)
@@ -5117,6 +5124,7 @@ export class GroupChatServer {
         }
         this.streamSnapshots.start(message, String(data.agentSessionId).trim())
         this.nsp.to(roomId).emit('message_stream_start', message)
+        this.publishPluginStream('group.message.started', roomId, id, member.name, undefined, message.run_id || undefined)
     }
 
     private handleMessageStreamDelta(socket: Socket, data: { roomId?: string; id?: string; delta?: string; agentSessionId?: string }): void {
@@ -5126,6 +5134,7 @@ export class GroupChatServer {
         const id = this.normalizeClientMessageId(data.id)
         if (!id || !data.delta) return
         this.streamSnapshots.append(roomId, id, member.userId, String(data.agentSessionId).trim(), 'content', String(data.delta))
+        this.publishPluginStream('group.message.delta', roomId, id, member.name, String(data.delta))
         this.nsp.to(roomId).emit('message_stream_delta', {
             roomId,
             id,
@@ -5140,6 +5149,7 @@ export class GroupChatServer {
         const id = this.normalizeClientMessageId(data.id)
         if (!id || !data.delta) return
         this.streamSnapshots.append(roomId, id, member.userId, String(data.agentSessionId).trim(), 'reasoning', String(data.delta))
+        this.publishPluginStream('group.reasoning.delta', roomId, id, member.name, String(data.delta))
         this.nsp.to(roomId).emit('message_reasoning_delta', {
             roomId,
             id,
@@ -5155,6 +5165,7 @@ export class GroupChatServer {
         if (!id) return
         this.streamSnapshots.finish(roomId, id, member.userId)
         this.nsp.to(roomId).emit('message_stream_end', { roomId, id })
+        this.publishPluginStream('group.message.completed', roomId, id, member.name)
     }
 
     private handleTyping(socket: Socket, data: { roomId?: string }): void {
@@ -5300,6 +5311,7 @@ export class GroupChatServer {
                 : null
             if (agent) this.clearRoomAgentActivities(roomId, agent.id)
             this.nsp.to(roomId).emit('context_status', { roomId, agentName, status: 'ready' })
+            this.publishPluginStream('group.run.stopped', roomId, '', agentName, undefined, activeGeneration?.runId)
             ack?.({ ok: true })
         } catch (err: any) {
             await Promise.all([
