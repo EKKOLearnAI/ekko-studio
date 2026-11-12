@@ -47,7 +47,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "cross-env HERMES_WEB_UI_BACKEND_PORT=8647 vite --host --port 8649 --strictPort",
     "dev:server": "nodemon",
-    "build": "npm run openapi:generate && vue-tsc -b && vite build && tsc --noEmit -p packages/server/tsconfig.json && node scripts/build-server.mjs",
+    "build": "node packages/plugin-sdk/harness/sdk.mjs check && npm run openapi:generate && vue-tsc -b && vite build && tsc --noEmit -p packages/server/tsconfig.json && node scripts/build-server.mjs",
     "harness:check": "node scripts/harness-check.mjs && npm --prefix packages/ekko-agent run api:docs:check",
     "artifacts:check": "node scripts/task-artifacts-cli.mjs check",
     "artifacts:dir": "node scripts/task-artifacts-cli.mjs dir",
@@ -76,7 +76,8 @@
     "openapi:generate": "node scripts/generate-openapi.mjs",
     "claude": "claude --dangerously-skip-permissions",
     "pack:npm": "node scripts/pack-npm-releases.mjs",
-    "publish:npm": "node scripts/publish-npm-releases.mjs"
+    "publish:npm": "node scripts/publish-npm-releases.mjs",
+    "plugin-sdk:docs:update": "node packages/plugin-sdk/harness/sdk.mjs update"
   },
   "files": [
     "bin/",

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { PluginDevelopment } from '../../packages/server/src/modules/studio/services/plugins/development'
 import { PluginManager } from '../../packages/server/src/modules/studio/services/plugins/manager'
+import { updateProject } from '../../packages/plugin-sdk/harness/project.mjs'
 import { registerPlugin, scaffoldPlugin } from '../../bin/plugin-development.mjs'
 
 const who = { userId: 1, profile: 'default' }, cleanups: Array<() => Promise<void>> = []
@@ -99,6 +100,7 @@ it('runs optional builds, preserves the runtime on build failure and ignores out
   await mkdir(join(source, 'dist'))
   const manifest = JSON.parse(await readFile(join(source, 'plugin.json'), 'utf8')); manifest.server = 'dist/server.mjs'
   await writeFile(join(source, 'plugin.json'), JSON.stringify(manifest))
+  await updateProject(source, { summary: 'Move compiled server entry into dist.', compatibility: 'Same RPC contract and stored settings; no migration needed.' })
   await writeFile(join(source, 'compile.mjs'), `import { writeFileSync } from 'node:fs'; writeFileSync('dist/server.mjs', ${JSON.stringify(code('built'))})`)
   await development.tick(); await development.tick()
   expect(await value()).toBe('built')

@@ -251,3 +251,16 @@ For new shared Coding Agent skill permissions, add focused tests for read-only
 shared aliases, rejected deletion without Hermes fallback and writable DSH-private
 skills. Register native skill formats from bootstrap; agent modules must not
 import another agent's implementation.
+
+## Standalone plugin contracts
+
+`npm run harness:check` and `npm run build` also check the Plugin SDK source
+reference and its change/compatibility history. After changing SDK structures,
+update the guides under `packages/plugin-sdk/docs` and run
+`npm run plugin-sdk:docs:update -- --summary "..." --compatibility "..."`.
+
+The plugin scaffold ships independent documentation, declared JSON contracts,
+runtime boundary validation, Node tests and a no-dependency harness. Run
+`npm test -- tests/server/studio-plugin-harness.test.ts tests/server/studio-plugin-development.test.ts tests/server/studio-plugin-manifest.test.ts`
+when changing this flow. Verify the packed CLI can still create a standalone
+project with docs, SDK, harness and working tests from a node_modules layout.

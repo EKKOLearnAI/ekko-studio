@@ -29,8 +29,16 @@ async function fingerprint(directory: string): Promise<string> {
 }
 async function build(directory: string, signal: AbortSignal): Promise<void> {
   const pkg = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
-  if (!pkg.scripts?.build) return
-  const args = ['run', 'build'], npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  const hasHarness = await stat(join(directory, 'plugin.harness.json')).then(() => true).catch(error => { if (error.code === 'ENOENT') return false; throw error })
+  if (hasHarness && pkg.scripts?.['harness:check'] !== 'node scripts/plugin-harness.mjs check') throw new PluginError('Development harness:check command is missing or changed', 'PLUGIN_BUILD', 422)
+  if (pkg.scripts?.['harness:check']) await runBuildScript(directory, 'harness:check', signal)
+  if (pkg.scripts?.build) {
+    await runBuildScript(directory, 'build', signal)
+    if (pkg.scripts?.['harness:check']) await runBuildScript(directory, 'harness:check', signal)
+  }
+}
+async function runBuildScript(directory: string, script: string, signal: AbortSignal): Promise<void> {
+  const args = ['run', script], npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const command = process.platform === 'win32' ? windowsCmdShimExecution(npm, args) : { command: npm, args }
   signal.throwIfAborted()
   await new Promise<void>((resolve, reject) => {

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "description": "独立插件设置示例：前端通过 RPC 读写当前用户与 Profile 的设置。",
+  "models": {
+    "empty": { "type": "null", "description": "无参数请求；前端省略 RPC input 时宿主传入 null。" },
+    "settings": {
+      "type": "object", "description": "当前用户和 Profile 的显示设置。",
+      "properties": {
+        "greeting": { "type": "string", "description": "页面显示的问候语，默认 Hello。", "maxLength": 1000 },
+        "compact": { "type": "boolean", "description": "是否使用紧凑布局，默认 false。" }
+      },
+      "required": ["greeting", "compact"], "additionalProperties": false
+    },
+    "saved": {
+      "type": "object", "description": "设置持久化成功的确认。",
+      "properties": { "ok": { "type": "boolean", "description": "仅持久化完成后返回 true；失败抛出错误。", "enum": [true] } },
+      "required": ["ok"], "additionalProperties": false
+    }
+  },
+  "rpc": {
+    "get-settings": { "description": "读取当前调用者的设置，缺失记录返回完整默认值。", "input": "empty", "output": "settings" },
+    "save-settings": { "description": "校验并替换当前调用者的设置。", "input": "settings", "output": "saved" }
+  },
+  "storage": { "settings": { "description": "用户/Profile 命名空间下的 settings 记录。", "model": "settings", "version": 1, "scope": "namespace(String(run.identity.userId), run.identity.profile)" } },
+  "tools": {}, "commands": {}, "actions": {}, "events": {}, "checkpoints": {}
+}

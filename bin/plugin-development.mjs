@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile, realpath, readdir, rm, cp, link, unlink } from 'node:fs/promises'
 import { resolve, join, dirname } from 'node:path'
 import { homedir } from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 
 export const pluginHome = () => resolve(process.env.HERMES_WEB_UI_HOME?.trim() || process.env.HERMES_WEBUI_STATE_DIR?.trim() || join(homedir(), '.hermes-web-ui'))
@@ -21,19 +21,19 @@ export async function scaffoldPlugin(destination, id) {
   try {
     await writeFile(join(target, 'package.json'), JSON.stringify({ name: `studio-plugin-${id}`, version: '0.1.0', type: 'module', private: true }, null, 2) + '\n')
     await writeFile(join(target, 'plugin.json'), JSON.stringify({ id, name: id, version: '0.1.0', apiVersion: 1, server: 'server.mjs', client: 'client.mjs', capabilities: ['ui'], views: [{ id: 'settings', title: id, slot: 'settings' }] }, null, 2) + '\n')
-    await writeFile(join(target, 'server.mjs'), `/** @param {import('@ekko-studio/plugin-sdk').PluginContext} ctx */\nexport function apply(ctx) {\n  ctx.rpc.register('get-settings', async (_input, run) => await ctx.storage.namespace(String(run.identity.userId), run.identity.profile).get('settings') ?? {})\n  ctx.rpc.register('save-settings', async (input, run) => {\n    await ctx.storage.namespace(String(run.identity.userId), run.identity.profile).set('settings', input)\n    return { ok: true }\n  })\n}\n`)
-    await writeFile(join(target, 'client.mjs'), `/** @param {HTMLElement} root @param {import('@ekko-studio/plugin-sdk').ClientContext} ctx */\nexport async function mount(root, ctx) {\n  const editor = document.createElement('textarea')\n  editor.rows = 12; editor.style.width = '100%'\n  editor.value = JSON.stringify(await ctx.rpc('get-settings'), null, 2)\n  const save = document.createElement('button')\n  save.textContent = 'Save settings'\n  save.onclick = async () => {\n    try { await ctx.rpc('save-settings', JSON.parse(editor.value)); ctx.ui.notify('Saved', 'success') }\n    catch (error) { ctx.ui.notify(error.message, 'error') }\n  }\n  root.append(editor, save)\n}\n`)
     const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
     const sdk = await realpath(join(root, 'packages/plugin-sdk')).catch(() => realpath(join(root, 'dist/plugin-sdk')))
     await mkdir(join(target, 'sdk'))
     await cp(join(sdk, 'package.json'), join(target, 'sdk/package.json'))
-    await cp(join(sdk, 'src'), join(target, 'sdk/src'), { recursive: true })
+    for (const part of ['src', 'docs', 'harness', 'template']) await cp(join(sdk, part), join(target, 'sdk', part), { recursive: true })
+    await cp(join(sdk, 'template'), target, { recursive: true })
     const pkg = JSON.parse(await readFile(join(target, 'package.json'), 'utf8'))
-    pkg.scripts = { dev: 'ekko-studio plugins dev .' }
+    pkg.scripts = { dev: 'ekko-studio plugins dev .', 'harness:check': 'node scripts/plugin-harness.mjs check', 'docs:update': 'node scripts/plugin-harness.mjs update', test: 'node --test tests/*.test.mjs', prepack: 'npm run harness:check && npm test && npm run build --if-present && npm run harness:check' }
     pkg.devDependencies = { '@ekko-studio/plugin-sdk': 'file:./sdk' }
     await writeFile(join(target, 'package.json'), JSON.stringify(pkg, null, 2) + '\n')
     await writeFile(join(target, '.gitignore'), 'node_modules/\ndist/\n.env\n.env.*\n')
-    await writeFile(join(target, 'README.md'), '# ' + id + '\n\nRun npm install for local SDK types, then ekko-studio plugins dev .\nOpen Studio → Plugins → Development plugins → Start debugging.\nStudio watches source files and runs npm run build if a build script exists.\nThis JavaScript template needs no build step. Build failures retain the working version.\nUse Stop debugging to retain the installed snapshot without watching.\n\nFor TypeScript or a UI framework, add a build script and point plugin.json to\ndist/server.mjs and dist/client.mjs. Bundle runtime dependencies and browser assets.\nStore runtime data with ctx.storage or ctx.paths.dataDir.\n')
+    const { updateProject } = await import(pathToFileURL(join(sdk, 'harness/project.mjs')).href)
+    await updateProject(target, { summary: '初始化设置 RPC、输入输出模型和存储契约。', compatibility: '首个契约版本，缺失设置使用 greeting=Hello、compact=false，无历史数据迁移。' })
     return target
   } catch (error) { await rm(target, { recursive: true, force: true }); throw error }
 }
