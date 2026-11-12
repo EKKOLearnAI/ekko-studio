@@ -122,12 +122,23 @@ function uninstall(plugin: CatalogPlugin) {
     }
   } })
 }
-function startDevelopment(plugin: CatalogPlugin) {
-  dialog.warning({ title: t('studioPlugins.devStart'), content: t('studioPlugins.devTrust', { path: plugin.development!.directory }), positiveText: t('studioPlugins.devStart'), negativeText: t('common.cancel'), onPositiveClick: () => perform(async () => {
+function activateLinkedPlugin(plugin: CatalogPlugin, label: 'common.enable' | 'studioPlugins.reload') {
+  const activate = () => perform(async () => {
     const { revision } = await pluginList()
     await pluginRequest(undefined, '/' + encodeURIComponent(plugin.manifest.id) + '/development', { revision, trusted: true })
-  }) })
+  })
+  if (plugin.developmentDirectory === plugin.development!.directory) { void activate(); return }
+  dialog.warning({ title: t(label), content: t('studioPlugins.devTrust', { path: plugin.development!.directory }), positiveText: t(label), negativeText: t('common.cancel'), onPositiveClick: activate })
 }
+function enablePlugin(plugin: CatalogPlugin) {
+  if (plugin.development && plugin.development.status !== 'missing') activateLinkedPlugin(plugin, 'common.enable')
+  else void update(plugin, { enabled: true })
+}
+function reloadPlugin(plugin: CatalogPlugin) {
+  if (plugin.development && plugin.development.status !== 'missing') activateLinkedPlugin(plugin, 'studioPlugins.reload')
+  else void update(plugin, { action: 'reload' })
+}
+function activationBusy(plugin: CatalogPlugin) { return busy.value || plugin.development?.status === 'building' || (!plugin.installed && plugin.development?.status === 'missing') }
 function operations(plugin: InstalledPlugin) {
   return [ ...plugin.tools.map(x => ({ label: t('studioPlugins.tool') + ': ' + x.name, value: 'tool/' + x.name })),
     ...plugin.commands.map(x => ({ label: '/' + plugin.manifest.id + ':' + x.name, value: 'command/' + x.name })),
@@ -187,7 +198,7 @@ async function logs(id: string) {
       <div v-else-if="!filtered.length" class="catalog-empty"><NEmpty :description="t(catalog.length ? 'studioPlugins.noResults' : 'studioPlugins.empty')" /></div>
       <div v-else class="plugin-grid">
         <article v-for="plugin in filtered" :key="plugin.manifest.id" class="plugin-card" data-theme-surface="card" :data-testid="`plugin-card-${plugin.manifest.id}`">
-          <div class="card-top"><PluginIcon :plugin="plugin" /><div class="actions"><NTag v-if="plugin.development" size="small" :bordered="false">{{ t('studioPlugins.devLabel') }}</NTag><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + (plugin.development ? 'devState_' + plugin.development.status : plugin.status)) }}</span></div></div>
+          <div class="card-top"><PluginIcon :plugin="plugin" /><div class="actions"><NTag v-if="plugin.development" size="small" :bordered="false">{{ t('studioPlugins.devLabel') }}</NTag><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + plugin.status) }}</span></div></div>
           <div class="card-copy">
             <button type="button" class="card-title" @click="details(plugin)">{{ plugin.manifest.name }}</button>
             <p>{{ plugin.manifest.description || plugin.manifest.id }}</p>
@@ -198,8 +209,7 @@ async function logs(id: string) {
             <div class="actions">
               <NButton size="small" quaternary @click="details(plugin)">{{ t('studioPlugins.details') }}</NButton>
               <NButton v-if="plugin.status === 'active' && pluginPages(plugin).length" size="small" secondary @click="router.push(pluginPageLocation(plugin))">{{ t('studioPlugins.open') }} <span aria-hidden="true">&nbsp;↗</span></NButton>
-              <NButton v-else-if="canManage && plugin.development" size="small" secondary :disabled="busy || ['building', 'missing'].includes(plugin.development.status)" @click="startDevelopment(plugin)">{{ t('studioPlugins.devStart') }}</NButton>
-              <NButton v-else-if="canManage && !plugin.enabled" size="small" secondary :disabled="busy" @click="update(plugin, { enabled: true })">{{ t('common.enable') }}</NButton>
+              <NButton v-else-if="canManage && !plugin.enabled" size="small" secondary :disabled="activationBusy(plugin)" @click="enablePlugin(plugin)">{{ t('common.enable') }}</NButton>
               <NButton v-if="canManage && plugin.development" size="small" quaternary type="error" :aria-label="t('studioPlugins.devUnlink')" :title="t('studioPlugins.devUnlink')" :disabled="busy" @click="uninstall(plugin)">{{ t('common.delete') }}</NButton>
             </div>
           </footer>
@@ -226,7 +236,7 @@ async function logs(id: string) {
           <p class="detail-description">{{ selected.manifest.description }}</p>
           <div class="actions">
             <NButton v-if="selected.status === 'active' && pluginPages(selected).length" type="primary" @click="router.push(pluginPageLocation(selected))">{{ t('studioPlugins.open') }}</NButton>
-            <NButton v-if="canManage && selected.installed" :disabled="busy" @click="update(selected, { enabled: !selected.enabled })">{{ t(selected.enabled ? 'common.disable' : 'common.enable') }}</NButton>
+            <NButton v-if="canManage" :disabled="selected.enabled ? busy : activationBusy(selected)" @click="selected.enabled ? update(selected, { enabled: false }) : enablePlugin(selected)">{{ t(selected.enabled ? 'common.disable' : 'common.enable') }}</NButton>
           </div>
           <NAlert v-if="selected.error || selected.development?.error || actionError" type="error">{{ actionError || selected.development?.error || selected.error }}</NAlert>
           <NTabs v-model:value="detailTab" type="line" animated>
@@ -264,15 +274,9 @@ async function logs(id: string) {
               <div class="detail-stack">
                 <template v-if="canManage">
                   <h4>{{ t('studioPlugins.maintenance') }}</h4>
-                  <template v-if="selected.development">
-                    <p class="development-path">{{ selected.development.directory }}</p>
-                    <div class="actions">
-                      <NButton :disabled="busy || ['building', 'missing'].includes(selected.development.status)" @click="startDevelopment(selected)">{{ t(selected.development.watching ? 'studioPlugins.devRebuild' : 'studioPlugins.devStart') }}</NButton>
-                      <NButton v-if="selected.development.watching" :disabled="busy" @click="update(selected, { action: 'stop-development' })">{{ t('studioPlugins.devStop') }}</NButton>
-                    </div>
-                  </template>
+                  <p v-if="selected.development" class="development-path">{{ selected.development.directory }}</p>
                   <div v-if="selected.installed" class="actions">
-                    <NButton :disabled="busy || !selected.enabled" @click="update(selected, { action: 'reload' })">{{ t('studioPlugins.reload') }}</NButton>
+                    <NButton :disabled="activationBusy(selected) || !selected.enabled" @click="reloadPlugin(selected)">{{ t('studioPlugins.reload') }}</NButton>
                     <NButton :disabled="busy || !selected.previousVersion" @click="update(selected, { action: 'rollback' })">{{ t('studioPlugins.rollback') }} {{ selected.previousVersion }}</NButton>
                     <NButton :disabled="busy" @click="logs(selected.manifest.id)">{{ t('studioPlugins.logs') }}</NButton>
                   </div>

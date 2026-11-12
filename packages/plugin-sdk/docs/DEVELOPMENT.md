@@ -42,7 +42,7 @@ npm run harness:check
 npm test
 ```
 
-Studio 开始调试及源码重载时自动运行插件 harness；有 build 时在其前后检查，失败保留上一个成功版本。
+Studio 启用开发链接及源码重载时自动运行插件 harness；有 build 时在其前后检查，失败保留上一个成功版本。
 生成项目的 prepack 和 CI 同样执行检查和测试。检查缺失字段描述、未知模型、缺失文件和版本不一致；
 不会因为手动编辑了 Markdown 而拒绝加载。旧插件未声明 harness 时保持原有加载行为。
 

@@ -3,12 +3,12 @@ import { resolve } from 'node:path'
 
 const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugins.ts').replaceAll('\\', '/').replace(/^\//, '')
 
-test('shows development projects as regular cards, debugs them and unlinks while retaining installed plugins', async ({ page }, testInfo) => {
+test('shows development projects as regular cards, enables them and unlinks while retaining installed plugins', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
-  let revision = 0, watching = false, installed = false, linked = true, starts = 0, unlinks = 0, error = '', content = 'first build'
+  let revision = 0, watching = false, installed = false, enabled = false, linked = true, starts = 0, unlinks = 0, error = '', content = 'first build'
   const directory = '/projects/independent-notes'
   const manifest = { id: 'notes', name: 'Dev Notes', description: 'Notes for the project', version: '0.1.0', apiVersion: 1, client: 'client.mjs', capabilities: ['ui'], configSchema: { type: 'object', properties: { prefix: { type: 'string', title: 'Prefix' } } }, views: [{ id: 'home', title: 'Dev Notes', slot: 'page' }] }
-  const plugin = () => ({ manifest, source: directory, installedAt: revision, enabled: true, status: 'active', developmentDirectory: watching ? directory : undefined, config: { prefix: 'saved prefix' }, tools: [], commands: [], actions: [] })
+  const plugin = () => ({ manifest, source: directory, installedAt: revision, enabled, status: enabled ? 'active' : 'disabled', developmentDirectory: installed && linked ? directory : undefined, config: { prefix: 'saved prefix' }, tools: [], commands: [], actions: [] })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const request = route.request(), url = new URL(request.url())
     const body = request.postData() ? request.postDataJSON() : {}
@@ -18,14 +18,14 @@ test('shows development projects as regular cards, debugs them and unlinks while
       if (request.method() === 'DELETE') {
         expect(url.searchParams.get('revision')).toBe(String(revision)); unlinks++; linked = watching = false; revision++
       } else {
-        expect(body).toEqual({ revision, trusted: true }); starts++; installed = watching = true; revision++
+        expect(body).toEqual({ revision, trusted: true }); starts++; installed = watching = enabled = true; error = ''; revision++
       }
       return route.fulfill({ json: { ok: true } })
     }
     if (url.pathname.endsWith('/client')) return route.fulfill({ json: { source: `export function mount(root) { root.textContent = ${JSON.stringify(content)} }` } })
     if (url.pathname.endsWith('/events')) return route.fulfill({ json: { cursor: revision, generation: 'dev-host', events: Number(url.searchParams.get('cursor')) < revision ? [{ id: String(revision), type: 'plugin.changed', pluginId: 'notes', timestamp: Date.now(), identity: { userId: 1, profile: 'default' }, data: null }] : [] } })
     if (url.pathname === '/api/studio/plugins/notes' && request.method() === 'PATCH') {
-      expect(body).toEqual({ revision, action: 'stop-development' }); watching = false; revision++
+      expect(body).toEqual({ revision, enabled: !enabled }); enabled = watching = !enabled; revision++
       return route.fulfill({ json: { ok: true } })
     }
     if (url.pathname === '/api/studio/plugins') return route.fulfill({ json: { revision, plugins: installed ? [plugin()] : [] } })
@@ -37,12 +37,13 @@ test('shows development projects as regular cards, debugs them and unlinks while
   await expect(card.getByRole('button', { name: 'Dev Notes', exact: true })).toBeVisible()
   await expect(card).toContainText('v0.1.0')
   await expect(page.locator('.development-panel')).toHaveCount(0)
-  await card.getByRole('button', { name: '开始调试' }).click()
+  await expect(page.getByRole('button', { name: /开始调试|停止调试|重新构建/ })).toHaveCount(0)
+  await card.getByRole('button', { name: '启用', exact: true }).click()
   await page.locator('.n-dialog').getByRole('button', { name: '取消' }).click()
   expect(starts).toBe(0)
-  await card.getByRole('button', { name: '开始调试' }).click()
-  await page.locator('.n-dialog').getByRole('button', { name: '开始调试' }).click()
-  await expect(card.getByText('监听中', { exact: true })).toBeVisible()
+  await card.getByRole('button', { name: '启用', exact: true }).click()
+  await page.locator('.n-dialog').getByRole('button', { name: '启用', exact: true }).click()
+  await expect(card.getByText('运行中', { exact: true })).toBeVisible()
   await expect(page.locator('.plugin-card')).toHaveCount(1)
   await card.getByRole('button', { name: '打开', exact: true }).click()
   await expect(page.frameLocator('iframe').locator('#root')).toHaveText('first build')
@@ -58,9 +59,14 @@ test('shows development projects as regular cards, debugs them and unlinks while
   await page.screenshot({ path: testInfo.outputPath('development-light.png'), animations: 'disabled' })
   await page.evaluate(() => (window as any).pluginFixture.theme(true))
   await page.screenshot({ path: testInfo.outputPath('development-dark.png'), animations: 'disabled' })
-  await drawer.getByRole('button', { name: '停止调试' }).click()
-  await expect.poll(() => watching).toBe(false)
-  await expect(drawer.getByRole('button', { name: '开始调试' })).toBeVisible()
+  await expect(drawer.getByRole('button', { name: /开始调试|停止调试|重新构建/ })).toHaveCount(0)
+  await drawer.getByRole('button', { name: '重载', exact: true }).click()
+  await expect.poll(() => starts).toBe(2)
+  await drawer.getByRole('button', { name: '禁用', exact: true }).click()
+  await expect.poll(() => enabled).toBe(false)
+  await drawer.getByRole('button', { name: '启用', exact: true }).click()
+  await expect.poll(() => starts).toBe(3)
+  await expect(drawer.getByRole('button', { name: '禁用', exact: true })).toBeVisible()
   await drawer.getByRole('button', { name: '删除开发链接', exact: true }).click()
   await expect(page.locator('.n-dialog')).toContainText('源码、已安装副本和插件数据会保留')
   await page.locator('.n-dialog').getByRole('button', { name: '取消' }).click()

@@ -68,7 +68,7 @@ export async function runPluginCommand(args, { home = pluginHome(), output = con
   const [action = 'help', first, second, ...extra] = args
   if (extra.length || second && action !== 'create' || first && ['list', 'help', '--help', '-h'].includes(action)) throw new Error('Unexpected plugin command arguments')
   if (['help', '--help', '-h'].includes(action)) {
-    output(`Usage: ekko-studio plugins <command>\n\n  create <id> [directory]  Create and register a standalone project\n  link <directory>        Register an existing project\n  list                    List registered project directories\n  dev [id|directory]      Select a project for debugging in Studio\n  unlink <id>             Unregister; retain source, installed snapshot and data\n\nDefault projects: ${join(home, 'plugin-projects')}\nRegistry: ${registry(home)}\nUse the same HERMES_WEB_UI_HOME as the running Studio server.\nStart debugging in the plugin center after administrator activation.`)
+    output(`Usage: ekko-studio plugins <command>\n\n  create <id> [directory]  Create and register a standalone project\n  link <directory>        Register an existing project\n  list                    List registered project directories\n  dev [id|directory]      Select a linked project in Studio\n  unlink <id>             Unregister; retain source, installed snapshot and data\n\nDefault projects: ${join(home, 'plugin-projects')}\nRegistry: ${registry(home)}\nUse the same HERMES_WEB_UI_HOME as the running Studio server.\nEnable linked projects in the plugin center after trusting their source.`)
     return
   }
   if (action === 'list') {
@@ -89,5 +89,5 @@ export async function runPluginCommand(args, { home = pluginHome(), output = con
     project = action === 'dev' && first ? (await listProjects(home)).find(project => project.id === first) : undefined
     project ||= await registerPlugin(first || process.cwd(), home)
   } else throw new Error(`Unknown plugin command: ${action}`)
-  output(`Registered ${project.id}: ${project.directory}\nOpen Studio → Plugins → Development plugins → Start debugging.\nStudio builds and watches this directory until you stop debugging.\nRegistry: ${registry(home)}`)
+  output(`Registered ${project.id}: ${project.directory}\nOpen Studio → Plugins → Enable.\nStudio builds and watches this directory while the plugin is enabled.\nRegistry: ${registry(home)}`)
 }
