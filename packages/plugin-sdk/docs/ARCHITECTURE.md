@@ -1,6 +1,6 @@
 # Studio 插件架构
 
-本文是与项目内 SDK 一起分发的宿主架构说明。精确类型见 `../sdk/docs/SDK_REFERENCE.md`；
+本文是与项目内 SDK 一起分发的宿主架构说明。精确类型见 项目根目录下的 `sdk/src/index.ts`、`sdk/src/agents.ts`；
 插件自己的结构见 `CONTRACTS.md`，业务设计补充在单独的项目文档中。
 
 ## 包与加载

@@ -119,35 +119,23 @@ Studio 不自动安装项目的构建依赖；先在独立项目运行相应的�
 断点附加到 Studio 的 Node 进程。Agent 插件启用后出现在 Agent 管理及已有会话入口中。
 远程部署时，登记目录必须位于 Studio 服务端所在机器；这组命令不会把本机源码上传到远端。
 
-### 随项目提供的文档与契约 harness
+### 随项目提供的文档与开发 harness
 
-新建项目包含 AGENTS.md、README.md、架构、ctx 能力、回传协议和开发规范说明；
-`docs/CONTRACTS.md` 描述本插件的数据结构，`sdk/docs/SDK_REFERENCE.md` 保留宿主 SDK 的完整类型。
-文档、检查器、示例测试和 GitHub Actions 都随 npm 包分发，不依赖 Studio 源码路径。
+新项目附带 AGENTS.md、README.md、架构、ctx 能力、回传协议和开发规范。
+宿主指南在 Studio 的 `packages/plugin-sdk/docs` 直接维护：修改接口及数据结构时，
+同步编辑对应 Markdown 并一起提交。创建项目自动复制当前版本的指南及 SDK，无需文档生成命令。
+精确字段和签名直接查看 `sdk/src/index.ts`、`sdk/src/agents.ts`。
 
-跨边界和持久化结构统一在 `contracts/plugin.json` 中声明，分为 models、rpc、tools、commands、
-actions、events、storage、checkpoints。每个结构/字段/操作需要描述；示例 RPC 实际校验输入输出，
-存储读写也使用同一模型。内部临时变量不属于公开契约，禁止在实现中另造未登记的对外结构。
+本插件的跨边界和持久化结构统一声明在 `contracts/plugin.json`；每个模型、字段及操作都有描述。
+示例 RPC 和存储实际使用这些声明校验数据。`docs/CONTRACTS.md` 是可直接编辑的行为与兼容说明，
+修改插件结构时同步修改相关段落及测试。文档、检查器、测试和 GitHub Actions 均随 npm 包分发。
 
-```bash
-npm run harness:check
-npm test
-npm run docs:update -- --summary "新增设置字段及默认值" --compatibility "新增可选字段，旧记录缺失时使用默认值，无需重写历史"
-```
+Studio 的 harness/build 检查 SDK 变化是否同时修改了架构、ctx 或回传说明；
+本地检查未提交变更，Build CI 检查整个 PR/push。检查只能确认文档随代码更新，语义准确性由审查负责。
 
-结构、清单或 SDK 变化后，旧文档及变更记录会使检查失败；更新说明时必须写明变更和兼容/迁移方式。
-`docs:update` 追加 `contracts/changes.json` 并重新生成说明。SDK 指南由宿主维护，插件专属设计另写文档。
-这些检查覆盖声明的结构及文档一致性；无法推断任意 JS 的隐藏语义，边界测试和代码审查仍需保证实现与声明相符。
-
-开发宿主在可选 build 前后执行 harness；缺失新项目的检查命令也会失败，保留当前运行版本。
-旧项目没有声明 harness 时保持现有行为。生成项目的 prepack 和 CI 同样执行检查与测试。
-维护 Studio SDK 时运行：
-
-```bash
-npm run plugin-sdk:docs:update -- --summary "描述 SDK 结构变化" --compatibility "说明对已有插件及宿主的兼容要求"
-```
-
-仓库的 harness:check 和 build 校验 SDK 类型、变更说明与参考文档是否一致；更新源码时必须一起提交说明。
+开发宿主在可选 build 前后运行插件 harness，检查字段说明、模型引用和文件完整性，失败保留当前运行版本。
+手动编辑 Markdown 不会导致拒绝加载。生成项目的 prepack 和 CI 同样运行检查与测试；旧插件保持原有行为。
+已创建项目保留创建时的 SDK 和文档，升级时一起更新。
 
 ## 插件中心与使用入口
 

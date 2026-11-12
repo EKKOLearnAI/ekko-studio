@@ -1,6 +1,6 @@
 # Studio ctx 能力与使用规则
 
-精确方法签名、字段可选性、类型枚举见 `../sdk/docs/SDK_REFERENCE.md`。
+精确方法签名、字段可选性、类型枚举见 项目根目录下的 `sdk/src/index.ts`、`sdk/src/agents.ts`。
 本文解释各上下文的用途。返回要求见 `STUDIO_RETURNS.md`。
 
 ## 后端 PluginContext：apply(ctx)

@@ -35,7 +35,7 @@ return { ok: false, content: '无法保存', error: '目标记录不存在' }
 | management.settings | `{ viewId, query? }`；必须是本插件声明的 settings 视图。 |
 | management.checkUpdate | `{ currentVersion, latestVersion, updateAvailable, message? }` |
 | management.upgrade | `{ installedVersion, message? }`；输入含 version/expectedVersion，插件自行处理引擎恢复。 |
-| modes.global.listModels | `{ status, source, scope, models, message? }`；状态和模型字段见 SDK_REFERENCE。 |
+| modes.global.listModels | `{ status, source, scope, models, message? }`；状态和模型字段见 sdk/src/agents.ts。 |
 | runtime.createSession | `{ run, dispose, checkpoint? }`；声明 resume=true 时必须实现 checkpoint。 |
 | checkpoint | `{ schemaVersion: 正整数, data: Json }`，变更格式需要兼容或迁移说明。 |
 | session.dispose | void/Promise<void>，释放引擎进程、监听、连接和缓存句柄。 |

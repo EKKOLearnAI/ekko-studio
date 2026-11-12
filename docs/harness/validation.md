@@ -252,15 +252,26 @@ shared aliases, rejected deletion without Hermes fallback and writable DSH-priva
 skills. Register native skill formats from bootstrap; agent modules must not
 import another agent's implementation.
 
-## Standalone plugin contracts
+## Plugin development documentation
 
-`npm run harness:check` and `npm run build` also check the Plugin SDK source
-reference and its change/compatibility history. After changing SDK structures,
-update the guides under `packages/plugin-sdk/docs` and run
-`npm run plugin-sdk:docs:update -- --summary "..." --compatibility "..."`.
+When Studio changes plugin structures, context capabilities or return contracts,
+directly edit the relevant Markdown under `packages/plugin-sdk/docs` in the same
+change. Explain compatibility or defaults in the affected section. The scaffolder
+copies these guides and SDK types into each new project; there is no documentation
+generation command, digest or change-record bookkeeping.
 
-The plugin scaffold ships independent documentation, declared JSON contracts,
-runtime boundary validation, Node tests and a no-dependency harness. Run
+`npm run harness:check` and `npm run build` require the guides/types and inspect
+Git changes: SDK edits must include architecture, context or return documentation.
+Local checks inspect staged/unstaged/untracked work; Build CI uses the PR base or
+push-before commit with full checkout history. Source archives without Git can
+only check file presence. This detects missing companion documentation, not its
+semantic correctness; reviewers and boundary tests must assess that.
+
+The generated project harness checks declared fields, model references and required
+files. Markdown remains directly editable. Run the focused tests when changing
+this flow:
+
 `npm test -- tests/server/studio-plugin-harness.test.ts tests/server/studio-plugin-development.test.ts tests/server/studio-plugin-manifest.test.ts`
-when changing this flow. Verify the packed CLI can still create a standalone
-project with docs, SDK, harness and working tests from a node_modules layout.
+
+Verify the packed CLI creates a standalone project with docs, SDK, harness and
+working tests from a node_modules layout.

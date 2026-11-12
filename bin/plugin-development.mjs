@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile, realpath, readdir, rm, cp, link, unlink } from 'node:fs/promises'
 import { resolve, join, dirname } from 'node:path'
 import { homedir } from 'node:os'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
 
 export const pluginHome = () => resolve(process.env.HERMES_WEB_UI_HOME?.trim() || process.env.HERMES_WEBUI_STATE_DIR?.trim() || join(homedir(), '.hermes-web-ui'))
@@ -28,12 +28,11 @@ export async function scaffoldPlugin(destination, id) {
     for (const part of ['src', 'docs', 'harness', 'template']) await cp(join(sdk, part), join(target, 'sdk', part), { recursive: true })
     await cp(join(sdk, 'template'), target, { recursive: true })
     const pkg = JSON.parse(await readFile(join(target, 'package.json'), 'utf8'))
-    pkg.scripts = { dev: 'ekko-studio plugins dev .', 'harness:check': 'node scripts/plugin-harness.mjs check', 'docs:update': 'node scripts/plugin-harness.mjs update', test: 'node --test tests/*.test.mjs', prepack: 'npm run harness:check && npm test && npm run build --if-present && npm run harness:check' }
+    pkg.scripts = { dev: 'ekko-studio plugins dev .', 'harness:check': 'node scripts/plugin-harness.mjs check', test: 'node --test tests/*.test.mjs', prepack: 'npm run harness:check && npm test && npm run build --if-present && npm run harness:check' }
     pkg.devDependencies = { '@ekko-studio/plugin-sdk': 'file:./sdk' }
     await writeFile(join(target, 'package.json'), JSON.stringify(pkg, null, 2) + '\n')
     await writeFile(join(target, '.gitignore'), 'node_modules/\ndist/\n.env\n.env.*\n')
-    const { updateProject } = await import(pathToFileURL(join(sdk, 'harness/project.mjs')).href)
-    await updateProject(target, { summary: '初始化设置 RPC、输入输出模型和存储契约。', compatibility: '首个契约版本，缺失设置使用 greeting=Hello、compact=false，无历史数据迁移。' })
+    await cp(join(sdk, 'docs'), join(target, 'docs'), { recursive: true })
     return target
   } catch (error) { await rm(target, { recursive: true, force: true }); throw error }
 }

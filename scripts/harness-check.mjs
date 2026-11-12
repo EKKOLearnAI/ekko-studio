@@ -8,12 +8,12 @@ import { checkDshModuleBoundaries } from './dsh-module-harness.mjs'
 import { checkCodingAgentModuleBoundaries } from './coding-agent-module-harness.mjs'
 import { checkJevIntegrations } from './jev-harness.mjs'
 import { checkUiTheme } from './ui-theme-harness.mjs'
-import { checkSdk } from '../packages/plugin-sdk/harness/sdk.mjs'
+import { checkPluginDocs } from './plugin-docs-harness.mjs'
 import { checkTaskArtifacts } from './task-artifacts.mjs'
 
 const root = process.cwd()
 const failures = []
-try { await checkSdk(path.join(root, 'packages/plugin-sdk')) } catch (error) { failures.push(error.message) }
+try { await checkPluginDocs(root) } catch (error) { failures.push(error.message) }
 failures.push(...await checkTaskArtifacts(root))
 failures.push(...await checkDshModuleBoundaries(root))
 failures.push(...await checkCodingAgentModuleBoundaries(root))
