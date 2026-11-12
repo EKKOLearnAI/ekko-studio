@@ -164,6 +164,15 @@ describe('Studio plugin host', () => {
     await manager.update(who, 'notes', 3, { enabled: true })
     expect(await manager.callTool(scope, 'notes/read', { key: 'note' })).toMatchObject({ content: 'another account' })
   })
+  it('verifies the expected published version before replacing an installation', async () => {
+    const dir = await home(), manager = new PluginManager(join(dir, 'host'), ports()); managers.push(manager)
+    await manager.install(who, await source(dir), 0)
+    const next = await source(dir, '2.0.0')
+    await expect(manager.install(who, next, 1, 'notes', { expectedVersion: '3.0.0' })).rejects.toThrow('version does not match')
+    expect(manager.snapshot()).toMatchObject({ revision: 1, plugins: [{ manifest: { version: '1.0.0' }, enabled: false }] })
+    await manager.install(who, next, 1, 'notes', { expectedVersion: '2.0.0' })
+    expect(manager.snapshot()).toMatchObject({ revision: 2, plugins: [{ manifest: { version: '2.0.0' }, previousVersion: '1.0.0', enabled: false }] })
+  })
   it('restores enabled plugins, upgrades and rolls back; a failed activation preserves the previous version', async () => {
     const dir = await home(), root = join(dir, 'host'), manager = new PluginManager(root, ports()); managers.push(manager)
     await manager.install(who, await source(dir), 0); await manager.update(who, 'notes', 1, { enabled: true })

@@ -21608,7 +21608,7 @@
                 "properties": {
                   "source": {
                     "type": "string",
-                    "description": "Absolute local directory, package@exact-version, or github:owner/repo#40-character-commit"
+                    "description": "Absolute local directory, package@exact-version, github:owner/repo#40-character-commit, or git+https GitLab.com/Gitee repository pinned to a full commit"
                   },
                   "revision": {
                     "type": "integer"
@@ -21622,6 +21622,11 @@
                   "pluginId": {
                     "type": "string",
                     "description": "Existing plugin id when upgrading"
+                  },
+                  "expectedVersion": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "description": "Optional exact manifest version; a mismatch leaves the existing installation unchanged"
                   }
                 },
                 "required": [
