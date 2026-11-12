@@ -30,11 +30,17 @@ it('uses registered identity for new-chat cards, restored conversations, groups 
 })
 it('updates reactive identities after discovery and never labels an unavailable plugin as Claude or Hermes', () => {
   const avatar = computed(() => chatSessionAgentAvatar({ source: 'coding_agent', agent: id }))
-  expect(avatar.value).toEqual({ label: id, src: '/logo.png' })
+  const fallback = avatar.value.src
+  expect(avatar.value.label).toBe(id)
+  expect(fallback).toMatch(/^data:image\/svg\+xml/)
+  expect(decodeURIComponent(fallback.split(',').slice(1).join(','))).toContain('>P</text>')
   register()
   expect(avatar.value).toEqual({ label: 'Oh My Pi', src: icon })
   syncPluginAgentOptions([])
-  expect(avatar.value.label).toBe(id)
+  expect(avatar.value).toEqual({ label: id, src: fallback })
+  expect(defaultGroupAgentAvatar(id)).toEqual({ type: 'image', dataUrl: fallback })
+  expect(personTaskIdentity({ selection_json: JSON.stringify({ runtime: id }) }).avatar?.src).toBe(fallback)
+  expect(chatSessionAgentAvatar({ agent: 'plugin:other/worker' }).src).not.toBe(fallback)
 })
 it('preserves a saved plugin and its native model while the registry is still loading', () => {
   vi.stubGlobal('localStorage', { getItem: () => JSON.stringify({ agent: id, mode: 'global', nativeModels: { [id]: { model: 'custom/example', reasoningEffort: 'high' } } }), setItem() {} })
