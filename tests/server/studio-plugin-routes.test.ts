@@ -102,7 +102,7 @@ it('exposes the same catalog without selecting a Profile and keeps ordinary acco
     const first = await fetch(`${base}/api/studio/plugins`).then(response => response.json())
     const install = () => fetch(`${base}/api/studio/plugins/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: '/tmp/plugin', revision: 0, trusted: true }) })
     expect((await install()).status).toBe(200)
-    expect(mocks.install).toHaveBeenCalledWith({ userId: 1, profile: 'default' }, '/tmp/plugin', 0, undefined)
+    expect(mocks.install).toHaveBeenCalledWith({ userId: 1, profile: 'default' }, '/tmp/plugin', 0, undefined, { expectedVersion: undefined })
     mocks.user = { id: 2, role: 'admin' }
     expect(await fetch(`${base}/api/studio/plugins`).then(response => response.json())).toEqual(first)
     expect((await install()).status).toBe(403)

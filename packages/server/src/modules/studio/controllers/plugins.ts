@@ -44,7 +44,8 @@ export const list = (ctx: Context) => respond(ctx, async () => {
 export const install = (ctx: Context) => respond(ctx, async () => {
   const who = management(ctx), input = body(ctx)
   if (input.trusted !== true) throw new PluginError('Confirm that this executable plugin is trusted')
-  await getPluginManager().install(who, input.source, input.revision, input.pluginId)
+  if (input.expectedVersion !== undefined && (typeof input.expectedVersion !== 'string' || input.expectedVersion.length > 128 || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(input.expectedVersion))) throw new PluginError('Invalid expected plugin version')
+  await getPluginManager().install(who, input.source, input.revision, input.pluginId, { expectedVersion: input.expectedVersion })
   await synchronizePluginMcpServers()
   return { ok: true }
 })

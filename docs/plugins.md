@@ -640,3 +640,11 @@ Node.js 插件仍是可信代码；取消信号无法强行中断同进程的无
 插件 Agent 使用同一管理和模式约定，接入现有单聊、群聊、工作流的运行、停止、历史和事件通道。
 名称与头像来自注册信息，新建单聊、会话恢复、群聊历史、Bot 执行任务、通知和用量页均保留插件 Agent ID。尚未加载或已卸载的插件使用保存的完整 Agent ID 首字母与纯色底头像；颜色由 ID 稳定生成，同一 ID 在消息和任务等页面一致。例如 `plugin:omp/omp` 显示 `P`。不保存额外头像快照。
 Bot 的执行预设也从注册目录读取支持单聊的插件，并按实际账号、资源 Profile、安装状态和模式校验。Bot 自身的外观与执行 Agent 独立。插件原生模型目录及其缓存按账号、Profile 和 Agent 分区；原有 CLI 的原生目录仍共享。
+
+## Published directory and installed-plugin updates
+
+The independent cloud server reads root `plugin.json` when a submission is approved. It stores manifest metadata, a full snapshot, and an immutable source commit. Its periodic worker automatically publishes higher versions from the repository default branch.
+
+The plugin center checks the public cloud directory when opened, refreshed, focused after five minutes, and every five minutes while mounted. Requests include only the normalized repository URL, with no local token, cookie, Profile, or referrer. Local lists remain usable when the cloud is unavailable. A matching repository, manifest ID and API version plus a higher semantic version produces an update badge. Development installations are excluded.
+
+Only interactive super administrators can install an update, after confirming trust in the executable code. The selected immutable source and expected manifest version are sent to the existing installer, which verifies the ID and version before replacing the installation and preserves its configuration, enabled state, and rollback version. In addition to `github:owner/repo#<40-character-commit>`, published GitLab.com and Gitee packages use `git+https://<host>/<repository>.git#<40-character-commit>`; moving branch or tag references are rejected.

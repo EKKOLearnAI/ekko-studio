@@ -12,9 +12,11 @@ import PluginConfigFields from '@/components/plugins/PluginConfigFields.vue'
 import PluginSubmissionDialog from '@/components/plugins/PluginSubmissionDialog.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import { pluginLinks, safePluginLink } from '@/plugins/navigation'
+import { usePluginUpdates } from '@/composables/usePluginUpdates'
 
 const { t } = useI18n(), dialog = useDialog(), message = useMessage(), router = useRouter(), route = useRoute()
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
+const { updates: availableUpdates, failed: updateCheckFailed, checking: checkingUpdates, refresh: refreshUpdates } = usePluginUpdates(computed(() => snapshot.value.plugins))
 const busy = ref(false), actionError = ref(''), source = ref(''), trusted = ref(false), showInstall = ref(false)
 const search = ref(''), category = ref('all'), state = ref('all')
 const showSubmission = ref(false)
@@ -78,7 +80,7 @@ function syncDrafts() {
   }
 }
 watch(snapshot, syncDrafts)
-async function reloadCatalog() { await Promise.all([refresh(true), refreshDevelopment()]); configDirty.value = {}; actionError.value = ''; syncDrafts() }
+async function reloadCatalog() { await Promise.all([refresh(true), refreshDevelopment(), refreshUpdates(true)]); configDirty.value = {}; actionError.value = ''; syncDrafts() }
 watch(profile, () => {
   outputs.value = {}; argumentsText.value = {}; actionError.value = ''
 })
@@ -103,6 +105,21 @@ async function perform(work: (boundProfile: string) => Promise<unknown>) {
 async function install(id?: string) {
   const success = await perform(() => pluginRequest(undefined, '/install', { source: id ? sources.value[id] : source.value, pluginId: id, revision: snapshot.value.revision, trusted: trusted.value }))
   if (success && !id) { showInstall.value = false; source.value = ''; trusted.value = false }
+}
+function upgrade(plugin: InstalledPlugin) {
+  const release = availableUpdates.value[plugin.manifest.id]
+  if (!release) return
+  dialog.warning({
+    title: t('studioPlugins.updateAvailable'),
+    content: t('studioPlugins.updateConfirm', { name: plugin.manifest.name, current: plugin.manifest.version, version: release.version, repository: release.repository }),
+    positiveText: t('studioPlugins.updateTo', { version: release.version }), negativeText: t('common.cancel'),
+    onPositiveClick: () => perform(async () => {
+      await pluginRequest(undefined, '/install', { source: release.installSource, pluginId: plugin.manifest.id,
+        expectedVersion: release.version, revision: snapshot.value.revision, trusted: true })
+      sources.value[plugin.manifest.id] = release.installSource
+      message.success(t('studioPlugins.updateSucceeded', { version: release.version }))
+    }),
+  })
 }
 async function update(plugin: InstalledPlugin, input: object) {
   const revision = 'config' in input ? configRevisions.value[plugin.manifest.id] : snapshot.value.revision
@@ -180,6 +197,7 @@ async function logs(id: string) {
       </header>
       <NAlert v-if="error || actionError" type="error" closable @close="error = ''; actionError = ''">{{ actionError || error }}</NAlert>
       <NAlert v-if="developmentError" type="error" closable @close="developmentError = ''">{{ developmentError }}</NAlert>
+      <NAlert v-if="updateCheckFailed" type="warning">{{ t('studioPlugins.updateCheckFailed') }} <NButton text :loading="checkingUpdates" @click="refreshUpdates(true)">{{ t('common.retry') }}</NButton></NAlert>
       <div class="search-row">
         <NInput v-model:value="search" clearable size="large" :placeholder="t('studioPlugins.search')" :aria-label="t('studioPlugins.search')">
           <template #prefix><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg></template>
@@ -205,8 +223,9 @@ async function logs(id: string) {
           </div>
           <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesCategory(plugin, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
           <footer class="card-footer">
-            <span class="version">{{ plugin.manifest.version ? 'v' + plugin.manifest.version : '' }}</span>
+            <div class="version"><span>{{ plugin.manifest.version ? 'v' + plugin.manifest.version : '' }}</span><NTag v-if="availableUpdates[plugin.manifest.id]" size="small" type="warning" :bordered="false">{{ t('studioPlugins.updateAvailable') }}</NTag></div>
             <div class="actions">
+              <NButton v-if="canManage && availableUpdates[plugin.manifest.id]" size="small" type="primary" secondary :disabled="busy" @click="upgrade(plugin)">{{ t('studioPlugins.updateTo', { version: availableUpdates[plugin.manifest.id]!.version }) }}</NButton>
               <NButton size="small" quaternary @click="details(plugin)">{{ t('studioPlugins.details') }}</NButton>
               <NButton v-if="plugin.status === 'active' && pluginPages(plugin).length" size="small" secondary @click="router.push(pluginPageLocation(plugin))">{{ t('studioPlugins.open') }} <span aria-hidden="true">&nbsp;↗</span></NButton>
               <NButton v-else-if="canManage && !plugin.enabled" size="small" secondary :disabled="activationBusy(plugin)" @click="enablePlugin(plugin)">{{ t('common.enable') }}</NButton>
@@ -234,6 +253,10 @@ async function logs(id: string) {
         <div class="detail-stack">
           <div class="detail-identity"><PluginIcon :plugin="selected" /><div class="identity-copy"><h3>{{ selected.manifest.name }}</h3><span class="eyebrow">{{ selected.manifest.id }} · v{{ selected.manifest.version }}</span></div><NTag size="small" :bordered="false">{{ t('studioPlugins.' + selected.status) }}</NTag></div>
           <p class="detail-description">{{ selected.manifest.description }}</p>
+          <NAlert v-if="availableUpdates[selected.manifest.id]" type="info">
+            {{ t('studioPlugins.newVersion', { current: selected.manifest.version, version: availableUpdates[selected.manifest.id]!.version }) }}
+            <NButton v-if="canManage" text :disabled="busy" @click="upgrade(selected)">{{ t('studioPlugins.updateTo', { version: availableUpdates[selected.manifest.id]!.version }) }}</NButton>
+          </NAlert>
           <div class="actions">
             <NButton v-if="selected.status === 'active' && pluginPages(selected).length" type="primary" @click="router.push(pluginPageLocation(selected))">{{ t('studioPlugins.open') }}</NButton>
             <NButton v-if="canManage" :disabled="selected.enabled ? busy : activationBusy(selected)" @click="selected.enabled ? update(selected, { enabled: false }) : enablePlugin(selected)">{{ t(selected.enabled ? 'common.disable' : 'common.enable') }}</NButton>
@@ -336,7 +359,7 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .card-copy p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 48px; font-size: 13px; }
 .card-features { display: flex; flex-wrap: wrap; gap: 12px; color: $text-muted; font-size: 12px; min-height: 18px; }
 .card-footer { border-top: 1px solid $border-color; padding-top: 16px; }
-.version { color: $text-muted; font-size: 12px; }
+.version { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: $text-muted; font-size: 12px; }
 .actions, .capability-list { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .catalog-empty { display: grid; place-items: center; min-height: 280px; }
 .detail-stack { display: flex; flex-direction: column; gap: 20px; }
