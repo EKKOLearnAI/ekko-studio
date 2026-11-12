@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NTag } from 'naive-ui'
+import ExternalLinkIcon from '@/components/common/ExternalLinkIcon.vue'
 import { normalizePluginRepository, repositoryStars as validStars } from '@/api/studio/plugin-releases'
 import type { PluginUpdateState } from '@/plugins/updates'
 
@@ -36,7 +37,7 @@ const updateKeys: Record<PluginUpdateState, string> = {
     <div class="metadata-byline">
       <div class="metadata-line author"><span class="metadata-label">{{ t('studioPlugins.author') }}</span><span class="metadata-value">{{ author?.trim() || t('studioPlugins.authorUnknown') }}</span></div>
       <div class="metadata-line repository">
-        <a v-if="repositoryUrl" :href="repositoryUrl" target="_blank" rel="noopener noreferrer" :aria-label="t('studioPlugins.repository') + ' · ' + repositoryName">{{ repositoryName }} <span aria-hidden="true">↗</span></a>
+        <a v-if="repositoryUrl" :href="repositoryUrl" target="_blank" rel="noopener noreferrer" :aria-label="t('studioPlugins.repository') + ' · ' + repositoryName">{{ repositoryName }}<ExternalLinkIcon /></a>
         <span v-else class="metadata-label">{{ t('studioPlugins.repositoryUnknown') }}</span>
         <span v-if="repositoryUrl && repositoryName === 'GitHub'" class="repository-stars" :aria-label="'GitHub Stars: ' + stars" :title="stars === '—' ? t('studioPlugins.starsUnknown') : 'GitHub Stars'">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" /></svg>{{ stars }}
@@ -70,7 +71,7 @@ const updateKeys: Record<PluginUpdateState, string> = {
 .author .metadata-label { flex-shrink: 0; }
 .metadata-value { overflow-wrap: anywhere; }
 .repository { gap: 14px; align-items: center; }
-.repository a { color: $text-secondary; text-decoration: none; }
+.repository a { display: inline-flex; align-items: center; gap: 4px; color: $text-secondary; text-decoration: none; }
 .repository a:hover { color: $accent-primary; text-decoration: underline; text-underline-offset: 3px; }
 .repository-stars { display: inline-flex; align-items: center; gap: 5px; }
 .versions { font-variant-numeric: tabular-nums; }

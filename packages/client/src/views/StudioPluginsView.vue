@@ -13,6 +13,8 @@ import PluginInstallFeedback from '@/components/plugins/PluginInstallFeedback.vu
 import PluginConfigFields from '@/components/plugins/PluginConfigFields.vue'
 import PluginSubmissionDialog from '@/components/plugins/PluginSubmissionDialog.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
+import ExternalLinkIcon from '@/components/common/ExternalLinkIcon.vue'
+import ChevronRightIcon from '@/components/common/ChevronRightIcon.vue'
 import { pluginLinks, safePluginLink } from '@/plugins/navigation'
 import { usePluginUpdates } from '@/composables/usePluginUpdates'
 import { usePluginMarket } from '@/composables/usePluginMarket'
@@ -282,8 +284,8 @@ async function logs(id: string) {
         <svg class="developer-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 7-5 5 5 5m10-10 5 5-5 5M14 4l-4 16" /></svg>
         <div class="developer-copy"><h1>{{ t('studioPlugins.developTitle') }}</h1><p>{{ t('studioPlugins.developDescription') }}</p></div>
         <nav class="developer-links" :aria-label="t('studioPlugins.developResources')">
-          <a href="https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.developGuide') }} <span aria-hidden="true">↗</span></a>
-          <a href="https://github.com/EKKOLearnAI/ekko-studio/tree/main/packages/plugin-sdk/template" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.developTemplate') }} <span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.developGuide') }}<ExternalLinkIcon /></a>
+          <a href="https://github.com/EKKOLearnAI/ekko-studio/tree/main/packages/plugin-sdk/template" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.developTemplate') }}<ExternalLinkIcon /></a>
           <NButton text @click="showSubmission = true">{{ t('studioPluginSubmission.title') }}</NButton>
         </nav>
       </aside>
@@ -363,7 +365,7 @@ async function logs(id: string) {
           <footer class="card-footer">
             <div class="actions">
               <NButton v-if="canManage && localAction(plugin)" size="small" type="primary" :disabled="busy" @click="upgrade(plugin)">{{ actionLabel(localAction(plugin), localRelease(plugin)?.version) }}</NButton>
-              <NButton v-if="plugin.status === 'active' && pluginPages(plugin).length" size="small" secondary @click="router.push(pluginPageLocation(plugin))">{{ t('studioPlugins.open') }} <span aria-hidden="true">&nbsp;↗</span></NButton>
+              <NButton v-if="plugin.status === 'active' && pluginPages(plugin).length" size="small" secondary @click="router.push(pluginPageLocation(plugin))">{{ t('studioPlugins.open') }}</NButton>
               <NButton v-else-if="canManage && !plugin.enabled" size="small" secondary :loading="installing && installingId === plugin.manifest.id" :disabled="activationBusy(plugin)" @click="enablePlugin(plugin)">{{ t('common.enable') }}</NButton>
             </div>
             <div class="actions secondary-actions">
@@ -435,12 +437,12 @@ async function logs(id: string) {
                 <div class="project-metadata">
                   <p v-if="selected.manifest.author"><strong>{{ t('studioPlugins.author') }}:</strong> <a v-if="safePluginLink(selected.manifest.author.url)" :href="safePluginLink(selected.manifest.author.url)" target="_blank" rel="noopener noreferrer">{{ selected.manifest.author.name }}</a><span v-else>{{ selected.manifest.author.name }}</span></p>
                   <p v-if="selected.manifest.license"><strong>{{ t('studioPlugins.license') }}:</strong> {{ selected.manifest.license }}</p>
-                  <div class="actions"><a v-for="link in pluginLinks(selected)" :key="link.key" :href="link.url" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.' + link.key) }} ↗</a></div>
+                  <div class="actions"><a v-for="link in pluginLinks(selected)" :key="link.key" :href="link.url" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.' + link.key) }}<ExternalLinkIcon /></a></div>
                   <div class="capability-list"><NTag v-for="keyword in selected.manifest.keywords || []" :key="keyword" size="small" :bordered="false">{{ keyword }}</NTag></div>
                 </div>
                 <h4>{{ t('studioPlugins.availableIn') }}</h4>
                 <div v-if="pluginPages(selected).length" class="view-list">
-                  <RouteLinkItem v-for="view in pluginPages(selected)" :key="view.id" :to="pluginPageLocation(selected, view.id)" class="view-link"><span>{{ view.title }}</span><span aria-hidden="true">↗</span></RouteLinkItem>
+                  <RouteLinkItem v-for="view in pluginPages(selected)" :key="view.id" :to="pluginPageLocation(selected, view.id)" class="view-link"><span>{{ view.title }}</span><ChevronRightIcon /></RouteLinkItem>
                 </div>
                 <p v-else>{{ t('studioPlugins.noPage') }}</p>
                 <div class="capability-list"><NTag v-for="slot in [...new Set(pluginPages(selected).map(view => view.slot))]" :key="slot" size="small">{{ t('studioPlugins.slot_' + slot) }}</NTag></div>
@@ -457,7 +459,7 @@ async function logs(id: string) {
                   <NButton :disabled="busy || configValid[selected.manifest.id] === false" @click="update(selected, { config: configs[selected.manifest.id] })">{{ t('common.save') }}</NButton>
                 </template>
                 <NEmpty v-else-if="!(selected.manifest.views || []).some(view => view.slot === 'settings')" :description="t('studioPlugins.noConfiguration')" />
-                <template v-if="selected.status === 'active'"><RouteLinkItem v-for="view in pluginPages(selected).filter(view => view.slot === 'settings')" :key="view.id" :to="pluginPageLocation(selected, view.id)" class="view-link">{{ view.title }} ↗</RouteLinkItem></template>
+                <template v-if="selected.status === 'active'"><RouteLinkItem v-for="view in pluginPages(selected).filter(view => view.slot === 'settings')" :key="view.id" :to="pluginPageLocation(selected, view.id)" class="view-link"><span>{{ view.title }}</span><ChevronRightIcon /></RouteLinkItem></template>
               </div>
             </NTabPane>
             <NTabPane name="developer" :tab="t('studioPlugins.developer')" display-directive="if">
@@ -506,7 +508,7 @@ async function logs(id: string) {
 .developer-copy h1 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
 .developer-copy p { font-size: 12px; }
 .developer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; font-size: 12px; }
-.developer-links a { color: $text-secondary; text-decoration: none; }
+.developer-links a { display: inline-flex; align-items: center; gap: 4px; color: $text-secondary; text-decoration: none; }
 .developer-links a:hover { color: $accent-primary; text-decoration: underline; text-underline-offset: 3px; }
 .developer-links :deep(.n-button) { font-size: inherit; }
 .catalog-heading { display: flex; align-items: center; gap: 24px; }
@@ -550,9 +552,10 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .detail-description { white-space: pre-line; }
 .project-metadata { display: flex; flex-direction: column; gap: 12px; overflow-wrap: anywhere; }
 .project-metadata a { color: $accent-primary; }
+.project-metadata .actions a { display: inline-flex; align-items: center; gap: 4px; }
 .development-path { overflow-wrap: anywhere; }
 .view-list { display: flex; flex-direction: column; gap: 8px; }
-.view-link { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid $border-color; text-decoration: none; color: $text-primary; }
+.view-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid $border-color; text-decoration: none; color: $text-primary; }
 .operation-list { display: flex; flex-direction: column; gap: 12px; }
 .operation-list strong { display: block; color: $text-primary; font-weight: 500; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: 12px; }
