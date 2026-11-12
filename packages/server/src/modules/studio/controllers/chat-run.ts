@@ -1,3 +1,4 @@
+import { isPluginAgentId, pluginAgentIsGlobalOnly } from '../services/agents/registry'
 import { prepareSessionShareRun } from '../services/session-shares/access'
 import type { Context } from 'koa'
 import { randomUUID } from 'crypto'
@@ -227,9 +228,11 @@ export async function runOnce(ctx: Context) {
     try { body = prepareSessionRun(ctx.state.user, profile, body) }
     catch (error: any) { ctx.status = error.status || 403; ctx.body = { error: error.message }; return }
   }
+  if (!body.mode && pluginAgentIsGlobalOnly(body.agent_id || body.coding_agent_id)) body = { ...body, mode: 'global' }
   const payload: Record<string, unknown> = { ...userBody(body), profile }
+  if (isPluginAgentId(body.agent_id || body.coding_agent_id)) payload.source = 'api'
   const isCodingAgentRun = body.source === 'builtin_agent' || body.source === 'coding_agent' || body.coding_agent_id != null || body.agent_id != null
-  if (isCodingAgentRun) {
+  if (isCodingAgentRun && body.mode !== 'global') {
     try {
       const identity = await resolveModelExecutionIdentity({
         profile,

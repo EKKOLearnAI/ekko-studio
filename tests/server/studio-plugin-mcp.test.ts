@@ -38,7 +38,7 @@ it('publishes the shipped greeting tool schema and executes it with the actual c
   const manager = new PluginManager(dir, { authorize() {}, log() {}, emit() {}, api: async () => null })
   const owner = { userId: 1, profile: 'default' }, caller = { userId: 2, profile: 'demo-profile', sessionId: 'demo-session' }
   try {
-    await manager.install(owner, resolve('examples/plugins/tool-demo'), 0)
+    await manager.install(owner, resolve('tests/fixtures/plugins/tool-demo'), 0)
     await manager.update(owner, 'tool-demo', 1, { enabled: true })
     const adapter = createPluginTools(async (path: string, options: any) => {
       if (path === '/api/studio/plugins') return manager.snapshot()

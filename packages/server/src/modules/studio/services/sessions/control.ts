@@ -7,6 +7,7 @@ import { isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-ag
 import { resolveAgentStatusId } from '../agent-availability'
 import { getChatRunServer } from '../../public/chat-run'
 import { businessEvents } from '../webhooks/business-events'
+import { pluginAgentIsGlobalOnly } from '../agents/registry'
 
 function failure(message: string, status: number): never { throw Object.assign(new Error(message), { status }) }
 export function authorizeSessionProfile(user: AuthenticatedUser | undefined, profile: string): asserts user is AuthenticatedUser {
@@ -36,7 +37,7 @@ export function createEmptySession(user: AuthenticatedUser | undefined, profile:
   if (input.mode !== undefined && input.mode !== 'scoped' && input.mode !== 'global') failure('Invalid agent mode', 400)
   const session = createSession({ id: randomUUID(), profile, user_id: user.id, agent,
     source: agent === 'hermes' ? 'cli' : agent === 'ekko-agent' ? 'builtin_agent' : 'coding_agent',
-    agent_mode: agent === 'hermes' ? '' : isGlobalOnlyCodingAgent(agent) ? 'global' : String(input.mode || 'scoped'), title: String(input.title || '') })
+    agent_mode: agent === 'hermes' ? '' : isGlobalOnlyCodingAgent(agent) || pluginAgentIsGlobalOnly(agent) ? 'global' : String(input.mode || 'scoped'), title: String(input.title || '') })
   businessEvents.publish({ schema_version: 1, id: randomUUID(), type: 'chat.session.created', occurred_at: new Date().toISOString(),
     profile, source: 'chat', subject: { session_id: session.id }, payload: { owner_user_id: user.id, session: { id: session.id, title: session.title, agent: session.agent } } })
   return { session }

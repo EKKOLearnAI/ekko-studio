@@ -5,7 +5,7 @@ import type { Json, PluginIdentity, PluginRecord, PluginStorage } from '../../co
 import { json } from './schema'
 import { PluginError } from './errors'
 
-export interface PluginState { revision: number; scope: 'global'; records: Record<string, PluginRecord> }
+export interface PluginState { revision: number; scope: 'global'; records: Record<string, PluginRecord>; builtinVersions?: Record<string, string> }
 export const scopeKey = (identity: Pick<PluginIdentity, 'userId' | 'profile'>) => createHash('sha256').update(JSON.stringify([identity.userId, identity.profile])).digest('hex')
 export function readJson<T>(file: string, fallback: () => T): T {
   try { return JSON.parse(readFileSync(file, 'utf8')) as T }

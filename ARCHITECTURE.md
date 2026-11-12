@@ -50,6 +50,9 @@ ownership decisions, allowed dependency matrix, and migration rules.
 - Module `services/` own reusable IO, domain behavior, processes, and integrations.
 - Studio `repositories/` and `infrastructure/` own application persistence.
 - Studio `middleware/legacy-app-api.ts` is the only released App and MCU firmware URL compatibility map.
+- Plugin Agent IDs use `plugin:<plugin-id>/<agent-id>` and retain that identity in chat, group chat, workflow and usage records. Studio owns registration, per-user/Profile run contexts and transport; plugins own their engine and settings UI. Bootstrap adapts existing Coding Agent management and model proxies into the shared Studio registry, preserving native runtime dispatch and released APIs. See `docs/plugins.md` for the runtime contract.
+- Independent plugin projects are registered by `ekko-studio plugins` under the Web UI home in `plugins/development`. Registration does not execute code. Administrator activation starts host-owned source watching, optional builds and snapshot replacement through the ordinary PluginManager; project sources stay outside the Studio checkout. See `docs/plugins.md`.
+- Product plugins live in `plugins/builtin/<id>` and ship in `dist/plugins/builtin`. Startup reconciles their versions through the normal PluginManager, respecting disabled state and explicit uninstalls. Demo packages live only in `tests/fixtures/plugins`. Stable `ctx.paths.dataDir` holds plugin-owned engine files independently of package versions. The OMP plugin owns its executable, settings, native RPC adaptation and per-turn configuration; Studio supplies scoped model proxies through the existing Agent contract.
 
 Architecture rules:
 

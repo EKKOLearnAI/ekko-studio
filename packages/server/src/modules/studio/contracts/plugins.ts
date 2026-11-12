@@ -3,6 +3,7 @@ export interface PluginRecord {
   manifest: import('../../../../../plugin-sdk/src').PluginManifest
   directory: string
   source: string
+  developmentDirectory?: string
   installedAt: number
   enabled: boolean
   config: Record<string, import('../../../../../plugin-sdk/src').Json>

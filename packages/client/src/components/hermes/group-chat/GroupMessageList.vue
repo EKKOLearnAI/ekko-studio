@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { agentSupportsSurface } from '@/utils/agent-catalog'
 import { AGENT_OPTIONS } from '@/utils/agent-options'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 import { computed, onMounted, onBeforeUnmount, ref, watch, nextTick } from 'vue'
@@ -34,11 +35,11 @@ const { t } = useI18n()
 const { toolTraceVisible } = useToolTraceVisibility()
 const listRef = ref<InstanceType<typeof VirtualMessageList> | null>(null)
 const showScrollBottomButton = ref(false)
-const emptyStateAgents = AGENT_OPTIONS.map(option => ({
+const emptyStateAgents = computed(() => AGENT_OPTIONS.filter(option => agentSupportsSurface(option.value, 'group-chat')).map(option => ({
     id: option.value,
     name: option.label,
     src: chatSessionAgentAvatar({ agent: option.value }).src,
-}))
+})))
 const displayMessages = computed(() => groupAgentRunMessages(store.sortedMessages.filter(msg =>
     msg.role !== 'tool' ||
     toolTraceVisible.value ||

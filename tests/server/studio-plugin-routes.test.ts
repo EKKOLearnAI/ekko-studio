@@ -7,16 +7,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PluginRuntime } from '../../packages/server/src/modules/studio/services/plugins/runtime'
 import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
-const mocks = vi.hoisted(() => ({ install: vi.fn(), update: vi.fn(), request: vi.fn(), runtime: vi.fn(), user: { id: 1, role: 'super_admin' }, profile: 'work' as string | undefined, bound: false, shared: false }))
+const mocks = vi.hoisted(() => ({ developmentList: vi.fn(async () => ({ projects: [] })), developmentStart: vi.fn(), developmentUnlink: vi.fn(), agentRemove: vi.fn(async () => ({ removed: true })), policyGet: vi.fn(async () => ({ autoUpdate: false, autoUpdateSupported: true })), policySet: vi.fn(async () => ({ autoUpdate: true, autoUpdateSupported: true })), install: vi.fn(), update: vi.fn(), request: vi.fn(), runtime: vi.fn(), user: { id: 1, role: 'super_admin' }, profile: 'work' as string | undefined, bound: false, shared: false }))
 vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({ logger: { warn: vi.fn() } }))
 vi.mock('../../packages/server/src/modules/studio/services/auth/run-mcp-credentials', () => ({ runMcpCredentials: {
   authenticate: () => mocks.bound ? { profile: 'work', sessionId: 'bound-session', contextId: 'run', agentId: 'codex' } : undefined,
   recognizes: () => mocks.bound,
 } }))
-vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ resolvePluginIdentity: (identity: any) => identity, pluginAdministrationIdentity: (userId: number) => ({ userId, profile: 'default' }), getPluginManager: () => ({
+vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ getPluginDevelopment: () => ({ list: mocks.developmentList, start: mocks.developmentStart, unlink: mocks.developmentUnlink }), ensureBuiltinPlugins: async () => {}, resolvePluginIdentity: (identity: any) => identity, pluginAdministrationIdentity: (userId: number) => ({ userId, profile: 'default' }), getPluginManager: () => ({
   snapshot: () => ({ revision: 2, plugins: [{ manifest: { id: 'notes', configSchema: { type: 'object', properties: { secret: { type: 'string', secret: true } } } }, config: { public: 'visible', secret: 'hidden' } }] }),
   install: mocks.install, update: mocks.update, request: mocks.request, runtime: mocks.runtime,
 }) }))
+vi.mock('../../packages/server/src/modules/studio/services/agents/plugin-update-policy', () => ({ getPluginAgentUpdates: () => ({ remove: mocks.agentRemove, snapshot: mocks.policyGet, set: mocks.policySet }) }))
+import { studioAgentRoutes } from '../../packages/server/src/modules/studio/routes/agents'
 import { studioPluginRoutes } from '../../packages/server/src/modules/studio/routes/plugins'
 import { configurePluginMcpSync } from '../../packages/server/src/modules/studio/public/plugin-mcp'
 beforeEach(() => { vi.clearAllMocks(); mocks.user = { id: 1, role: 'super_admin' }; mocks.profile = 'work'; mocks.bound = false; mocks.shared = false })
@@ -25,6 +27,7 @@ async function server(test: (base: string) => Promise<void>) {
   app.use(bodyParser())
   app.use(async (ctx, next) => { ctx.state.user = mocks.user as any; ctx.state.profile = mocks.profile ? { name: mocks.profile } : undefined; ctx.state.sessionShare = mocks.shared; await next() })
   app.use(studioPluginRoutes.routes())
+  app.use(studioAgentRoutes.routes())
   const http = app.listen(0, '127.0.0.1'); await once(http, 'listening')
   try { await test(`http://127.0.0.1:${(http.address() as any).port}`) }
   finally { http.closeAllConnections(); await new Promise<void>(done => http.close(() => done())) }
@@ -105,5 +108,56 @@ it('exposes the same catalog without selecting a Profile and keeps ordinary acco
     expect((await install()).status).toBe(403)
     mocks.bound = true
     expect(await fetch(`${base}/api/studio/plugins`).then(response => response.json())).toEqual(first)
+  })
+})
+
+it('restricts development discovery and execution to interactive administrators with explicit trust', async () => {
+  await server(async base => {
+    const start = (trusted: boolean) => fetch(`${base}/api/studio/plugins/notes/development`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trusted, revision: 2 }) })
+    expect((await fetch(`${base}/api/studio/plugins/development`)).status).toBe(200)
+    expect((await start(false)).status).toBe(400)
+    expect((await start(true)).status).toBe(200)
+    expect(mocks.developmentStart).toHaveBeenCalledWith({ userId: 1, profile: 'default' }, 'notes', 2)
+    mocks.bound = true
+    expect((await start(true)).status).toBe(403)
+    expect((await fetch(`${base}/api/studio/plugins/development`)).status).toBe(403)
+    mocks.bound = false; mocks.user.role = 'admin'
+    expect((await start(true)).status).toBe(403)
+    expect((await fetch(`${base}/api/studio/plugins/development`)).status).toBe(403)
+    expect(mocks.developmentStart).toHaveBeenCalledTimes(1)
+  })
+})
+
+it('unlinks development projects only for administrator logins', async () => {
+  await server(async base => {
+    const unlink = () => fetch(`${base}/api/studio/plugins/notes/development?revision=7`, { method: 'DELETE' })
+    expect((await unlink()).status).toBe(200)
+    expect(mocks.developmentUnlink).toHaveBeenCalledWith({ userId: 1, profile: 'default' }, 'notes', 7)
+    mocks.bound = true; expect((await unlink()).status).toBe(403)
+    mocks.bound = false; mocks.user.role = 'admin'; expect((await unlink()).status).toBe(403)
+    mocks.user.role = 'super_admin'; mocks.shared = true; expect((await unlink()).status).toBe(403)
+    expect(mocks.developmentUnlink).toHaveBeenCalledTimes(1)
+  })
+})
+
+it('exposes Agent engine removal and policy APIs only to interactive super administrators', async () => {
+  await server(async base => {
+    const path = `${base}/api/studio/agents/${encodeURIComponent('plugin:demo/worker')}`
+    const remove = () => fetch(path + '/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedVersion: '1.0.0' }) })
+    const set = (autoUpdate: unknown) => fetch(path + '/update-policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoUpdate }) })
+    expect(await remove().then(response => response.json())).toEqual({ removed: true })
+    expect(mocks.agentRemove).toHaveBeenCalledWith('plugin:demo/worker', expect.objectContaining({ userId: 1, profile: 'work' }), { expectedVersion: '1.0.0' })
+    expect(await fetch(path + '/update-policy').then(response => response.json())).toMatchObject({ autoUpdateSupported: true })
+    expect(await set(true).then(response => response.json())).toMatchObject({ autoUpdate: true })
+    expect((await set('yes')).status).toBe(400)
+    mocks.agentRemove.mockRejectedValueOnce(Object.assign(new Error('Agent is busy'), { status: 409, code: 'AGENT_BUSY' }))
+    expect((await remove()).status).toBe(409)
+    for (const state of ['run', 'admin', 'shared']) {
+      mocks.bound = state === 'run'; mocks.user.role = state === 'admin' ? 'admin' : 'super_admin'; mocks.shared = state === 'shared'
+      expect((await remove()).status).toBe(403)
+      expect((await fetch(path + '/update-policy')).status).toBe(403)
+      expect((await set(true)).status).toBe(403)
+    }
+    expect(mocks.policySet).toHaveBeenCalledTimes(1)
   })
 })

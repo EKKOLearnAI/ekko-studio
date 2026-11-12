@@ -1,3 +1,4 @@
+import { respondAgentInteraction } from '../services/agents/interactions'
 import { personDisplayPage, personDisplayEvents, personDisplayBackgroundTasks, personDisplayEvent } from '../services/chat-run/person-display'
 import { personSessionIds } from '../repositories/person-session-store'
 import type { PersonResultDelivery } from '../public/person-runtime'
@@ -78,6 +79,8 @@ import {
 } from '../public/chat-agent-runtime'
 import { handleBridgeRun, resumeBridgeRun } from '../services/chat-run/handle-bridge-run'
 import { handleCodingAgentRun } from '../services/chat-run/handle-coding-agent-run'
+import { handlePluginAgentRun } from '../services/chat-run/handle-plugin-agent-run'
+import { isPluginAgentId, closePluginAgentSession } from '../services/agents/registry'
 import { handleEkkoAgentRun, type EkkoAgentRunSocketData } from '../services/chat-run/handle-ekko-agent-run'
 import { handleEkkoSessionCommand, parseEkkoRunCommand } from '../services/chat-run/ekko-session-command'
 import { handleAbort } from '../services/chat-run/abort'
@@ -215,6 +218,7 @@ function isBridgeStatusLookupTimeout(error: unknown): boolean {
 }
 
 function isHermesWorkerBackedSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null }): boolean {
+  if (isPluginAgentId(session?.agent)) return false
   const source = session?.source || undefined
   // "api_server" is a legacy/default source value; Hermes sessions still use worker-backed runtime.
   // coding_agent runs have a separate lifecycle.
@@ -314,6 +318,7 @@ function isEkkoAgentExecution(data?: { coding_agent_id?: string; agent_id?: stri
 
 function webhookAgentForRun(data?: { coding_agent_id?: string; agent_id?: string }): ChatRunWebhookAgent {
   const agent = data?.coding_agent_id || data?.agent_id
+  if (isPluginAgentId(agent)) return agent
   if (agent === 'ekko-agent') return 'ekko'
   if (agent === 'codex') return 'codex'
   if (agent === 'pi') return 'pi'
@@ -1154,7 +1159,7 @@ export class ChatRunSocket {
             }
             return
           }
-          if (!ekkoExecution && isProviderAgentExecution(source, data)) {
+          if (!ekkoExecution && !isPluginAgentId(data.coding_agent_id || data.agent_id) && isProviderAgentExecution(source, data)) {
             if (typeof data.input === 'string') {
               const codingAgentCommand = parseCodingAgentSessionCommand(data.input)
               if (codingAgentCommand) {
@@ -1415,6 +1420,7 @@ export class ChatRunSocket {
         }
         return
       }
+      if (respondAgentInteraction(data.session_id, data.approval_id, 'approval', data.choice || 'deny').handled) return
       const ekkoResult = respondToEkkoToolApproval(
         data.session_id,
         data.approval_id,
@@ -1501,6 +1507,7 @@ export class ChatRunSocket {
         }
         return
       }
+      if (respondAgentInteraction(data.session_id, data.clarify_id, 'clarify', data.response || '').handled) return
       const mcpResult = this.clarificationRuns.respond(data.session_id, data.clarify_id, data.response)
       if (mcpResult.handled) {
         if (!mcpResult.resolved) socket.emit('clarify.resolved', {
@@ -1702,10 +1709,13 @@ export class ChatRunSocket {
   }
 
   respondCodingAgentApproval(sessionId: string, approvalId: string, choice: string): boolean {
-    return codingAgentRunManager.resolveApproval(sessionId, approvalId, choice).resolved
+    const plugin = respondAgentInteraction(sessionId, approvalId, 'approval', choice)
+    return plugin.handled ? plugin.resolved : codingAgentRunManager.resolveApproval(sessionId, approvalId, choice).resolved
   }
 
   respondCodingAgentClarification(sessionId: string, clarifyId: string, response: string): boolean {
+    const plugin = respondAgentInteraction(sessionId, clarifyId, 'clarify', response)
+    if (plugin.handled) return plugin.resolved
     const result = this.clarificationRuns.respond(sessionId, clarifyId, response)
     if (result.handled) return result.resolved
     return codingAgentRunManager.resolveClarification(sessionId, clarifyId, response).resolved
@@ -1717,6 +1727,8 @@ export class ChatRunSocket {
     const eventName = approval ? 'approval.requested' : 'clarify.requested'
     const pending = isPersonSession(sessionId) ? pendingChatEkkoInteractions(sessionId) : state?.events || []
     if (!state || !pending.some(entry => entry.event === eventName && (entry.data?.approval_id === id || entry.data?.clarify_id === id))) return false
+    const plugin = respondAgentInteraction(sessionId, id, approval ? 'approval' : 'clarify', response)
+    if (plugin.handled) return plugin.resolved // The plugin broker emits its own resolution.
     let resolved = false
     if (approval) {
       if (!['once', 'session', 'deny'].includes(response)) return false
@@ -1863,6 +1875,20 @@ export class ChatRunSocket {
     }
     normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
     const source = resolveRunSource(data.source, data.session_id)
+    const pluginRuntime = data.coding_agent_id || data.agent_id || (data.session_id ? getSession(data.session_id)?.agent : '')
+    if (isPluginAgentId(pluginRuntime)) {
+      const planContext = this.beginTaskPlanRun(data.session_id, profile)
+      if (planContext && data.session_id) this.clarificationRuns.begin(planContext, data.session_id, profile, () => this.sessionMap.get(data.session_id!))
+      const onEvent = (event: string, payload: any) => {
+        if (data.session_id) this.finishTaskPlanRun(data.session_id, event, payload, planContext)
+        observeChatRunWebhookEvent({ pushTargetId, event, sessionId: String(data.session_id || ''), profile, source,
+          agent: pluginRuntime, payload, roomId: data.group_room_id, workflowId: data.workflow_id, workflowNodeId: data.workflow_node_id })
+        data.onEvent?.(event, payload)
+        this.emitPendingInteraction(profile, event, payload)
+      }
+      try { return await handlePluginAgentRun(this.nsp, socket, { ...data, onEvent, task_plan_context_id: planContext, agent_id: pluginRuntime }, profile, this.sessionMap, this.dequeueNextQueuedRun.bind(this)) }
+      finally { if (data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, planContext) }
+    }
     const surface = data.session_source || source
     if (data.session_id) getOrCreateSession(this.sessionMap, data.session_id).pushTargetId = pushTargetId
     if (data.session_id) {
@@ -2463,7 +2489,7 @@ export class ChatRunSocket {
   private async reattachBridgeRun(socket: Socket, sid: string, state: SessionState) {
     const session = getSession(sid)
     const source = state.source || session?.source
-    if (!isHermesWorkerBackedSession({ source, agent: session?.agent, agent_session_id: session?.agent_session_id })) return
+    if (!isHermesWorkerBackedSession({ source, agent: state.pluginAgent?.id || session?.agent, agent_session_id: session?.agent_session_id })) return
     const profile = session?.profile || currentProfileFromSocket(socket)
     const previousRunId = state.runId
     const previousRunMarker = state.activeRunMarker
@@ -3094,6 +3120,11 @@ export class ChatRunSocket {
           if (automaticApprovals.has(approvalId)) return
           automaticApprovals.add(approvalId)
           if (!choices.includes(choice)) throw new Error(`approval choice "${choice}" is not available`)
+          const pluginResult = respondAgentInteraction(sessionId, approvalId, 'approval', choice)
+          if (pluginResult.handled) {
+            if (!pluginResult.resolved) throw new Error('Automatic tool approval could not be applied')
+            return // The plugin broker publishes its own resolved event.
+          }
           const ekkoResult = respondToEkkoToolApproval(sessionId, approvalId, choice)
           const codingAgentResult = ekkoResult.handled ? ekkoResult : codingAgentRunManager.resolveApproval(sessionId, approvalId, choice)
           const result = codingAgentResult.handled
@@ -3293,6 +3324,7 @@ export class ChatRunSocket {
     const state = this.sessionMap.get(sid)
     this.finishTaskPlanRun(sid, 'abort.completed')
     state?.abortController?.abort()
+    await closePluginAgentSession(sid)
     this.sessionMap.delete(sid)
     this.runWaiters.delete(sid)
     deleteSession(sid)

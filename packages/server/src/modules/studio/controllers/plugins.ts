@@ -1,7 +1,7 @@
 import type { Context } from 'koa'
 import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
 import type { ApiRequest, PluginIdentity } from '../contracts/plugins'
-import { resolvePluginIdentity, pluginAdministrationIdentity, getPluginManager } from '../services/plugins/host'
+import { resolvePluginIdentity, pluginAdministrationIdentity, getPluginManager, getPluginDevelopment, ensureBuiltinPlugins } from '../services/plugins/host'
 import { PluginError } from '../services/plugins/errors'
 import { identifier, json } from '../services/plugins/schema'
 import { mergeSecrets, publicConfig } from '../services/plugins/policy'
@@ -35,8 +35,9 @@ async function respond(ctx: Context, work: () => unknown | Promise<unknown>) {
 function clientConfig(record: ReturnType<ReturnType<typeof getPluginManager>['snapshot']>['plugins'][number]) {
   return publicConfig(record.config, record.manifest.configSchema)
 }
-export const list = (ctx: Context) => respond(ctx, () => {
+export const list = (ctx: Context) => respond(ctx, async () => {
   login(ctx)
+  await ensureBuiltinPlugins()
   const snapshot = getPluginManager().snapshot()
   return { ...snapshot, plugins: snapshot.plugins.map(record => ({ ...record, config: clientConfig(record) })) }
 })
@@ -51,7 +52,7 @@ export const install = (ctx: Context) => respond(ctx, async () => {
 export const update = (ctx: Context) => respond(ctx, async () => {
   const who = management(ctx), input = body(ctx)
   if (input.enabled !== undefined && typeof input.enabled !== 'boolean') throw new PluginError('enabled must be boolean')
-  if (input.action !== undefined && !['reload', 'rollback', 'uninstall'].includes(input.action)) throw new PluginError('Unknown plugin operation')
+  if (input.action !== undefined && !['reload', 'rollback', 'uninstall', 'stop-development'].includes(input.action)) throw new PluginError('Unknown plugin operation')
   const id = identifier(ctx.params.id)
   if (input.config !== undefined) {
     const record = getPluginManager().store.read().records[id]
@@ -94,4 +95,19 @@ export const storage = (ctx: Context) => respond(ctx, async () => {
     case 'keys': return { keys: await store.keys() }
     default: throw new PluginError('Unknown storage operation')
   }
+})
+
+export const developmentList = (ctx: Context) => respond(ctx, async () => {
+  management(ctx)
+  return getPluginDevelopment().list()
+})
+export const developmentStart = (ctx: Context) => respond(ctx, async () => {
+  const who = management(ctx), input = body(ctx)
+  if (input.trusted !== true) throw new PluginError('Confirm that this development project and its build scripts are trusted')
+  await getPluginDevelopment().start(who, identifier(ctx.params.id), input.revision)
+  return { ok: true }
+})
+export const developmentUnlink = (ctx: Context) => respond(ctx, async () => {
+  await getPluginDevelopment().unlink(management(ctx), identifier(ctx.params.id), Number(ctx.query.revision))
+  return { ok: true }
 })

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
@@ -34,6 +34,23 @@ async function source(dir: string, version = '1.0.0', code = server) {
 afterEach(async () => { for (const manager of managers.splice(0)) await manager.close(); for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }); vi.useRealTimers() })
 
 describe('Studio plugin host', () => {
+  it('reports a deleted package as unavailable and allows uninstalling the stale record', async () => {
+    const dir = await home(), manager = new PluginManager(dir, ports()); managers.push(manager)
+    const project = await source(dir)
+    await manager.install(who, project, 0)
+    await manager.update(who, 'notes', 1, { enabled: true })
+    await manager.runtime(who, 'notes').context().storage.set('saved', 'keep')
+    await rm(manager.store.read().records.notes.directory, { recursive: true })
+    expect(manager.snapshot().plugins[0]).toMatchObject({ status: 'failed', tools: [], commands: [], actions: [], error: expect.stringContaining('Plugin package is missing') })
+    expect(() => manager.runtime(who, 'notes')).toThrow('Plugin package is missing')
+    await expect(manager.client(who, 'notes')).rejects.toMatchObject({ code: 'PLUGIN_PACKAGE_MISSING' })
+    const restored = new PluginManager(dir, ports()); managers.push(restored)
+    await restored.restore()
+    expect(restored.snapshot().plugins[0].error).not.toContain('ENOENT')
+    await restored.update(who, 'notes', 2, { action: 'uninstall' })
+    expect(restored.snapshot().plugins).toEqual([])
+    expect(await readFile(join(project, 'server.mjs'), 'utf8')).toBe(server)
+  })
   it('reserves dedicated MCP names across installed plugins and checks upgrades and rollback before replacing a runtime', async () => {
     const dir = await home(), manager = new PluginManager(dir, ports()); managers.push(manager)
     const first = await source(dir)
@@ -87,7 +104,7 @@ describe('Studio plugin host', () => {
       });
       (async () => {
         try {
-          await manager.install(identity, require('node:path').resolve('examples/plugins/notebook'), 0);
+          await manager.install(identity, require('node:path').resolve('tests/fixtures/plugins/notebook'), 0);
           await manager.update(identity, 'notebook', 1, { enabled: true });
           await manager.callTool(identity, 'notebook/append', { text: 'development loader' });
           await manager.update(identity, 'notebook', 2, { action: 'reload' });
@@ -106,7 +123,7 @@ describe('Studio plugin host', () => {
   it('runs the shipped frontend, full-stack and automation examples through the actual installer', async () => {
     const dir = await home(), manager = new PluginManager(dir, ports()); managers.push(manager)
     for (const id of ['session-dashboard', 'notebook', 'activity-digest']) {
-      await manager.install(who, resolve('examples/plugins', id), manager.snapshot(who).revision)
+      await manager.install(who, resolve('tests/fixtures/plugins', id), manager.snapshot(who).revision)
       await manager.update(who, id, manager.snapshot(who).revision, { enabled: true })
     }
     expect(manager.snapshot(who).plugins.every(plugin => plugin.status === 'active')).toBe(true)
@@ -250,7 +267,7 @@ describe('Studio plugin host', () => {
   })
   it('shares notebook data and update events across accounts, Profiles and sessions as the plugin chooses', async () => {
     const dir = await home(), manager = new PluginManager(dir, ports()); managers.push(manager)
-    await manager.install(who, resolve('examples/plugins/notebook'), 0)
+    await manager.install(who, resolve('tests/fixtures/plugins/notebook'), 0)
     await manager.update(who, 'notebook', 1, { enabled: true })
     const otherAccount = { userId: 2, profile: who.profile }, otherProfile = { ...who, profile: 'other' }
     await Promise.all([manager.callTool(who, 'notebook/append', { text: 'shared note' }), manager.callTool(otherAccount, 'notebook/append', { text: 'other account note' })])

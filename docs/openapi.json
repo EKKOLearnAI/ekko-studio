@@ -137,6 +137,10 @@
       "description": "Studio plugin installation, lifecycle, configuration, frontend API bridge, tools, commands, events and automation actions"
     },
     {
+      "name": "Studio Agents",
+      "description": "Native and plugin Agent availability, settings, engine installation, removal and automatic update policy"
+    },
+    {
       "name": "Sessions",
       "description": "Cross-agent chat session management"
     },
@@ -12314,6 +12318,489 @@
         }
       }
     },
+    "/api/studio/agents": {
+      "get": {
+        "tags": [
+          "Studio Agents"
+        ],
+        "summary": "List agents",
+        "description": "GET /api/studio/agents",
+        "operationId": "list",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/studio/agents/{id}/check-update": {
+      "post": {
+        "tags": [
+          "Studio Agents"
+        ],
+        "summary": "Create check-update",
+        "description": "POST /api/studio/agents/:id/check-update",
+        "operationId": "checkUpdate",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/agents/{id}/models": {
+      "get": {
+        "tags": [
+          "Studio Agents"
+        ],
+        "summary": "Get models",
+        "description": "GET /api/studio/agents/:id/models",
+        "operationId": "models",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/agents/{id}/remove": {
+      "post": {
+        "tags": [
+          "Studio Agents"
+        ],
+        "summary": "Remove an Agent engine",
+        "description": "Interactive super administrator only. Remove the managed Agent engine, retaining the plugin, configuration and conversation data. Active runs, concurrent maintenance and stale versions are rejected.",
+        "operationId": "remove",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent engine removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "removed"
+                  ],
+                  "properties": {
+                    "removed": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Removal is unsupported or the request is invalid."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Interactive super administrator login required."
+          },
+          "409": {
+            "description": "Agent is busy or its installed version changed."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expectedVersion"
+                ],
+                "properties": {
+                  "expectedVersion": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/agents/{id}/settings": {
+      "post": {
+        "tags": [
+          "Studio Agents"
+        ],
+        "summary": "Create settings",
+        "description": "POST /api/studio/agents/:id/settings",
+        "operationId": "settings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/agents/{id}/status": {
+      "get": {
+        "tags": [
+          "Studio Agents"
+        ],
+        "summary": "Get status",
+        "description": "GET /api/studio/agents/:id/status",
+        "operationId": "status",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/agents/{id}/update-policy": {
+      "get": {
+        "tags": [
+          "Studio Agents"
+        ],
+        "summary": "Read Agent automatic update capability and preference",
+        "description": "Interactive super administrator only. Returns autoUpdate, autoUpdateSupported, status, currentVersion, latestVersion, checkedAt and optional error. Unsupported installations cannot enable automatic updates. Policy is host-wide; scheduled updates use the plugin activation identity and wait for a full idle grace period.",
+        "operationId": "updatePolicy",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current Agent update policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "autoUpdate",
+                    "autoUpdateSupported",
+                    "status",
+                    "currentVersion",
+                    "latestVersion",
+                    "checkedAt"
+                  ],
+                  "properties": {
+                    "autoUpdate": {
+                      "type": "boolean"
+                    },
+                    "autoUpdateSupported": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "unknown",
+                        "checking",
+                        "current",
+                        "available",
+                        "waiting",
+                        "updating",
+                        "failed"
+                      ]
+                    },
+                    "currentVersion": {
+                      "type": "string"
+                    },
+                    "latestVersion": {
+                      "type": "string"
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preference or automatic updates are unsupported."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Interactive super administrator login required."
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Agent plugin is disabled or unavailable."
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Studio Agents"
+        ],
+        "summary": "Set Agent automatic update preference",
+        "description": "Interactive super administrator only. Returns autoUpdate, autoUpdateSupported, status, currentVersion, latestVersion, checkedAt and optional error. Unsupported installations cannot enable automatic updates. Policy is host-wide; scheduled updates use the plugin activation identity and wait for a full idle grace period.",
+        "operationId": "setUpdatePolicy",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current Agent update policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "autoUpdate",
+                    "autoUpdateSupported",
+                    "status",
+                    "currentVersion",
+                    "latestVersion",
+                    "checkedAt"
+                  ],
+                  "properties": {
+                    "autoUpdate": {
+                      "type": "boolean"
+                    },
+                    "autoUpdateSupported": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "unknown",
+                        "checking",
+                        "current",
+                        "available",
+                        "waiting",
+                        "updating",
+                        "failed"
+                      ]
+                    },
+                    "currentVersion": {
+                      "type": "string"
+                    },
+                    "latestVersion": {
+                      "type": "string"
+                    },
+                    "checkedAt": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preference or automatic updates are unsupported."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Interactive super administrator login required."
+          },
+          "409": {
+            "description": "Agent plugin is disabled or unavailable."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "autoUpdate"
+                ],
+                "properties": {
+                  "autoUpdate": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/agents/{id}/upgrade": {
+      "post": {
+        "tags": [
+          "Studio Agents"
+        ],
+        "summary": "Create upgrade",
+        "description": "POST /api/studio/agents/:id/upgrade",
+        "operationId": "upgrade",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/studio/announcements": {
       "get": {
         "tags": [
@@ -21519,6 +22006,32 @@
         }
       }
     },
+    "/api/studio/plugins/development": {
+      "get": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "listStudioDevelopmentPlugins",
+        "summary": "List locally registered development projects and build status; super administrator login required",
+        "parameters": [],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        }
+      }
+    },
     "/api/studio/plugins/events": {
       "get": {
         "tags": [
@@ -21695,7 +22208,8 @@
                     "enum": [
                       "reload",
                       "rollback",
-                      "uninstall"
+                      "uninstall",
+                      "stop-development"
                     ]
                   }
                 },
@@ -21833,6 +22347,113 @@
             "description": "Plugin unavailable, dependency failure or stale revision"
           }
         }
+      }
+    },
+    "/api/studio/plugins/{id}/development": {
+      "post": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "startStudioPluginDevelopment",
+        "summary": "Trust, build, enable and watch a registered project; existing configuration and data are preserved",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "trusted": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  }
+                },
+                "required": [
+                  "revision",
+                  "trusted"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "summary": "Unlink development plugin",
+        "description": "Super administrator only. Remove the development registration and stop watching source changes. Source files, the installed snapshot and plugin data are retained.",
+        "operationId": "developmentUnlink",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Interactive super administrator login required."
+          },
+          "409": {
+            "description": "Catalog revision changed; refresh before retrying."
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Current global plugin catalog revision."
+          }
+        ]
       }
     },
     "/api/studio/plugins/{id}/invoke": {

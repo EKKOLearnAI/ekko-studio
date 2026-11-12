@@ -76,9 +76,13 @@ it('rejects icon and manifest symlinks escaping the plugin package', async () =>
   await expect(readManifest(source)).rejects.toThrow(/escapes/)
 })
 
-it('generates an installable plugin with a single manifest and its own workspace', async () => {
+it('generates an installable minimal settings plugin with a single manifest', async () => {
   const { root } = await fixture(); const target = join(root, 'generated')
   await promisify(execFile)(process.execPath, [resolve('scripts/create-plugin.mjs'), target, 'my-plugin'])
-  expect((await readManifest(target))).toMatchObject({ id: 'my-plugin', workspace: { sidebar: 'note-list' }, views: expect.arrayContaining([expect.objectContaining({ slot: 'settings' })]) })
+  const installed = await installPackage(join(root, 'host'), target)
+  try {
+    expect(installed.manifest).toMatchObject({ id: 'my-plugin', capabilities: ['ui'], views: [{ id: 'settings', title: 'my-plugin', slot: 'settings' }] })
+    expect(installed.manifest.workspace).toBeUndefined()
+  } finally { await installed.dispose() }
   expect(JSON.parse(await readFile(join(target, 'package.json'), 'utf8')).studioPlugin).toBeUndefined()
 })

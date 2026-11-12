@@ -3,13 +3,17 @@ import { deploymentUrl } from '@/utils/deployment-url'
 import { agentMetadata } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
+import PluginAgentsPanel from '@/components/plugins/PluginAgentsPanel.vue'
+import AgentManagerCard from '@/components/coding-agents/AgentManagerCard.vue'
+import AgentAutoUpdateControl from '@/components/coding-agents/AgentAutoUpdateControl.vue'
+import { studioAgentAction, type AgentUpdate } from '@/api/studio/agents'
+import type { RouteLocationRaw } from 'vue-router'
 import { getAgentUpdatePolicies, setAgentAutoUpdate, type AgentUpdatePolicyState } from '@/api/coding-agents'
 import { computed, defineAsyncComponent, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NTag, useDialog, useMessage } from 'naive-ui'
 import {
-  checkCodingAgentUpdate,
   deleteCodingAgent,
   fetchCodingAgentsStatus,
   installCodingAgent,
@@ -424,6 +428,16 @@ async function handleInstall(id: CodingAgentId, options: { version?: string; rol
     if ((id === 'cursor' || id === 'antigravity' || agentMetadata(id)?.installation.method === 'manual') && typeof window !== 'undefined') {
       window.open(agentMetadata(id)?.installation.docsUrl || (id === 'antigravity' ? 'https://antigravity.google/docs/cli/install' : 'https://cursor.com/install'), '_blank', 'noopener,noreferrer')
     }
+    const installed = toolStatus(id)
+    const target = options.version || availableUpdateVersion(id)
+    if (installed?.installed && target && !options.rollback) {
+      await studioAgentAction(id, 'upgrade', { version: target, expectedVersion: installed.version })
+      tools.value = (await fetchCodingAgentsStatus()).tools
+      updateInfo.value[id] = null
+      await refreshPolicies()
+      message.success(t('codingAgents.installSuccess'))
+      return
+    }
     const result = await installCodingAgent(id, options)
     tools.value = result.tools
     if (result.updateState) updatePolicies.value[id] = result.updateState
@@ -457,10 +471,16 @@ async function handleDelete(id: CodingAgentId) {
   }
 }
 
+async function openAgentSettings(id: CodingAgentId) {
+  try { await router.push(await studioAgentAction<RouteLocationRaw>(id, 'settings')) }
+  catch (error) { message.error(errorMessage(error)) }
+}
+
 async function handleCheckUpdate(id: CodingAgentId) {
   checkingUpdate.value[id] = true
   try {
-    const result = await checkCodingAgentUpdate(id)
+    const checked = await studioAgentAction<AgentUpdate>(id, 'check-update')
+    const result: CodingAgentUpdateResult = { success: true, tool: toolStatus(id)!, ...checked }
     if (!result.success) throw new Error(result.message || t('codingAgents.checkUpdateFailed'))
     replaceTool(result.tool)
     updateInfo.value[id] = result
@@ -524,20 +544,9 @@ onUnmounted(() => {
           </NAlert>
 
           <div class="coding-agent-grid">
-            <section class="agent-card coding-agent-card" data-testid="agent-card-ekko">
-              <header class="agent-card-header compact">
-                <div class="agent-identity">
-                  <img :src="deploymentUrl('/coding-agents/ekko-agent.png')" alt="" class="agent-logo" />
-                  <div>
-                    <div class="agent-name-row">
-                      <h3>Ekko</h3>
-                      <NTag type="success" size="small" :bordered="false">{{ t('agentManager.builtIn') }}</NTag>
-                    </div>
-                    <p class="agent-version">Studio {{ formatVersion(appStore.serverVersion) }}</p>
-                  </div>
-                </div>
-              </header>
-              <div class="agent-actions">
+            <AgentManagerCard name="Ekko" :logo="deploymentUrl('/coding-agents/ekko-agent.png')" :version="`Studio ${formatVersion(appStore.serverVersion)}`" data-testid="agent-card-ekko">
+              <template #badges><NTag type="success" size="small" :bordered="false">{{ t('agentManager.builtIn') }}</NTag></template>
+              <template #actions>
                 <NButton
                   secondary
                   size="small"
@@ -545,105 +554,83 @@ onUnmounted(() => {
                 >
                   {{ t('sidebar.settings') }}
                 </NButton>
-              </div>
-            </section>
+              </template>
+            </AgentManagerCard>
 
-          <section class="agent-card coding-agent-card hermes-card" data-testid="agent-card-hermes">
-            <header class="agent-card-header compact">
-              <div class="agent-identity">
-                <img :src="deploymentUrl('/coding-agents/hermes.png')" alt="" class="agent-logo" />
-                <div>
-                  <div class="agent-name-row">
-                    <h3>Hermes</h3>
-                    <NTag
-                      v-if="hermesDetected && hermesType"
-                      data-testid="hermes-source-type"
-                      type="info"
-                      size="small"
-                      :bordered="false"
-                    >
-                      {{ hermesType }}
-                    </NTag>
-                    <NTag :type="hermesDetected ? 'success' : 'warning'" size="small" :bordered="false">
-                      {{ hermesDetected ? t('codingAgents.installed') : t('codingAgents.notInstalled') }}
-                    </NTag>
-                  </div>
-                  <p v-if="hermesDetected" class="agent-version">{{ hermesVersion }}</p>
-                  <p v-else>{{ t('agentManager.hermesDescription') }}</p>
-                </div>
-              </div>
-            </header>
+            <AgentManagerCard name="Hermes" :logo="deploymentUrl('/coding-agents/hermes.png')" :version="hermesDetected ? hermesVersion : undefined" :description="t('agentManager.hermesDescription')" data-testid="agent-card-hermes">
+              <template #badges>
+                <NTag
+                  v-if="hermesDetected && hermesType"
+                  data-testid="hermes-source-type"
+                  type="info"
+                  size="small"
+                  :bordered="false"
+                >
+                  {{ hermesType }}
+                </NTag>
+                <NTag :type="hermesDetected ? 'success' : 'warning'" size="small" :bordered="false">
+                  {{ hermesDetected ? t('codingAgents.installed') : t('codingAgents.notInstalled') }}
+                </NTag>
+              </template>
 
-            <div class="agent-actions">
-              <NButton
-                v-if="hermesDetected"
-                secondary
-                size="small"
-                @click="router.push({ name: 'hermes.configSettings' })"
-              >
-                {{ t('sidebar.settings') }}
-              </NButton>
-              <NButton
-                v-if="hermesDetected && hermesType === 'CLI'"
-                data-testid="view-hermes-cli-details"
-                secondary
-                size="small"
-                :loading="hermesCliDetailsLoading"
-                @click="openHermesCliDetails"
-              >
-                {{ t('runtimeVersions.viewCliDetails') }}
-              </NButton>
-              <NButton
-                v-if="!hermesDetected || hermesType === 'Runtime'"
-                type="primary"
-                secondary
-                size="small"
-                @click="runtimeManagerVisible = true"
-              >
-                {{ hermesDetected ? t('agentManager.manageRuntime') : t('codingAgents.installNow') }}
-              </NButton>
-            </div>
-          </section>
+              <template #actions>
+                <NButton
+                  v-if="hermesDetected"
+                  secondary
+                  size="small"
+                  @click="router.push({ name: 'hermes.configSettings' })"
+                >
+                  {{ t('sidebar.settings') }}
+                </NButton>
+                <NButton
+                  v-if="hermesDetected && hermesType === 'CLI'"
+                  data-testid="view-hermes-cli-details"
+                  secondary
+                  size="small"
+                  :loading="hermesCliDetailsLoading"
+                  @click="openHermesCliDetails"
+                >
+                  {{ t('runtimeVersions.viewCliDetails') }}
+                </NButton>
+                <NButton
+                  v-if="!hermesDetected || hermesType === 'Runtime'"
+                  type="primary"
+                  secondary
+                  size="small"
+                  @click="runtimeManagerVisible = true"
+                >
+                  {{ hermesDetected ? t('agentManager.manageRuntime') : t('codingAgents.installNow') }}
+                </NButton>
+              </template>
+            </AgentManagerCard>
 
-            <section
+            <AgentManagerCard
               v-for="agent in codingAgents"
               :key="agent.id"
-              class="agent-card coding-agent-card"
+              :name="agent.name"
+              :logo="agent.logo"
+              :version="toolStatus(agent.id)?.installed ? installedVersion(agent.id) : undefined"
+              :description="agent.id === 'antigravity' ? t('agentManager.antigravityDescription') : agent.id === 'cursor' ? t('agentManager.cursorDescription') : t('agentManager.codingAgentDescription')"
               :data-testid="`agent-card-${agent.id}`"
             >
-              <header class="agent-card-header compact">
-                <div class="agent-identity">
-                  <img :src="agent.logo" alt="" class="agent-logo" />
-                  <div>
-                    <div class="agent-name-row">
-                      <h3>{{ agent.name }}</h3>
-                      <NTag size="small" :bordered="false">{{ agent.provider }}</NTag>
-                      <NTag
-                        :type="toolStatus(agent.id)?.installed ? 'success' : 'warning'"
-                        size="small"
-                        :bordered="false"
-                      >
-                        {{ toolStatus(agent.id)?.installed ? t('codingAgents.installed') : t('codingAgents.notInstalled') }}
-                      </NTag>
-                    </div>
-                    <p v-if="toolStatus(agent.id)?.installed" class="agent-version">
-                      {{ installedVersion(agent.id) }}
-                    </p>
-                    <p v-else>{{ agent.id === 'antigravity' ? t('agentManager.antigravityDescription') : agent.id === 'cursor' ? t('agentManager.cursorDescription') : t('agentManager.codingAgentDescription') }}</p>
-                  </div>
-                </div>
-              </header>
+              <template #badges>
+                <NTag size="small" :bordered="false">{{ agent.provider }}</NTag>
+                <NTag
+                  :type="toolStatus(agent.id)?.installed ? 'success' : 'warning'"
+                  size="small"
+                  :bordered="false"
+                >
+                  {{ toolStatus(agent.id)?.installed ? t('codingAgents.installed') : t('codingAgents.notInstalled') }}
+                </NTag>
+              </template>
 
-              <div class="agent-actions">
+              <template #actions>
                 <NButton
                   secondary
                   size="small"
                   v-if="agentMetadata(agent.id)?.config.mcp || agentMetadata(agent.id)?.config.settings"
                   :data-testid="`agent-settings-${agent.id}`"
-                  @click="router.push({
-                    name: 'codingAgent.config',
-                    params: { agentId: agent.id, section: agentMetadata(agent.id)?.config.settings || agentMetadata(agent.id)?.config.memory ? 'settings' : 'mcp' },
-                  })"
+                  @click="openAgentSettings(agent.id)"
                 >
                   {{ t('sidebar.settings') }}
                 </NButton>
@@ -695,14 +682,11 @@ onUnmounted(() => {
                   </template>
                   {{ t('agentManager.deleteConfirm', { name: agent.name }) }}
                 </NPopconfirm>
-              </div>
+              </template>
               <DshVersions v-if="agent.id === 'dsh'" :info="toolStatus(agent.id)?.compatibility" :busy="installing.dsh || deleting.dsh" @install="handleInstall('dsh', $event)" />
-              <div v-if="toolStatus(agent.id)?.installed && updatePolicies[agent.id]" class="agent-update-policy">
-                <div class="agent-update-policy-row"><span>{{ t('agentAutoUpdate.label') }}</span><NSwitch class="agent-update-switch" size="small" :theme-overrides="{ railHeightSmall: '16px', railWidthSmall: '28px', buttonHeightSmall: '12px', buttonWidthSmall: '12px' }" :disabled="!updatePolicies[agent.id]?.autoUpdateSupported" :value="updatePolicies[agent.id]?.autoUpdate" @update:value="toggleAutoUpdate(agent.id, $event)" /></div>
-
-                <small v-if="updatePolicies[agent.id]?.autoUpdateSupported && updatePolicies[agent.id]?.error" class="agent-update-error">{{ t('codingAgents.checkUpdateFailed') }}</small>
-              </div>
-            </section>
+              <AgentAutoUpdateControl v-if="toolStatus(agent.id)?.installed && updatePolicies[agent.id]" :state="updatePolicies[agent.id]!" @change="toggleAutoUpdate(agent.id, $event)" />
+            </AgentManagerCard>
+            <PluginAgentsPanel />
           </div>
         </div>
       </div>
@@ -841,10 +825,7 @@ onUnmounted(() => {
 }
 
 .agent-manager-header-left,
-.agent-manager-header-actions,
-.agent-identity,
-.agent-name-row,
-.agent-actions {
+.agent-manager-header-actions {
   display: flex;
   align-items: center;
 }
@@ -880,67 +861,6 @@ onUnmounted(() => {
   padding: calc(24px * var(--spacing-scale, 1));
 }
 
-.agent-card {
-  padding: calc(18px * var(--spacing-scale, 1));
-  border: var(--border-width, 1px) solid $border-color;
-  border-radius: var(--radius-component, 14px);
-  background: var(--theme-card-bg, $bg-card);
-  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.05);
-}
-
-.agent-card-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: calc(18px * var(--spacing-scale, 1));
-
-  &.compact {
-    align-items: center;
-  }
-}
-
-.agent-identity {
-  min-width: 0;
-  align-items: flex-start;
-  gap: calc(12px * var(--spacing-scale, 1));
-
-  h3 {
-    margin: 0;
-    font-size: calc(var(--font-size-base, 14px) * 17 / 14);
-  }
-
-  p {
-    max-width: 720px;
-    margin: 5px 0 0;
-    color: $text-secondary;
-    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
-    line-height: var(--line-height, 1.55);
-
-    &.agent-version {
-      color: $text-primary;
-      font-size: calc(var(--font-size-base, 14px) * 13 / 14);
-      font-weight: 650;
-      letter-spacing: 0.01em;
-    }
-  }
-}
-
-.agent-name-row {
-  flex-wrap: wrap;
-  gap: calc(8px * var(--spacing-scale, 1));
-}
-
-.agent-logo {
-  width: 42px;
-  height: 42px;
-  flex: 0 0 auto;
-  padding: calc(4px * var(--spacing-scale, 1));
-  border: var(--border-width, 1px) solid $border-color;
-  border-radius: var(--radius-component, 11px);
-  background: rgba(255, 255, 255, 0.92);
-  object-fit: contain;
-}
-
 .coding-agent-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -961,19 +881,6 @@ onUnmounted(() => {
   }
 }
 
-.coding-agent-card {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: calc(15px * var(--spacing-scale, 1));
-}
-
-.agent-actions {
-  flex-wrap: wrap;
-  gap: calc(8px * var(--spacing-scale, 1));
-  margin-top: auto;
-}
-
 @media (max-width: $breakpoint-mobile) {
   .agent-manager-content {
     padding: calc(16px * var(--spacing-scale, 1));
@@ -983,22 +890,5 @@ onUnmounted(() => {
     grid-template-columns: 1fr;
   }
 
-  .agent-card-header,
-  .agent-card-header.compact {
-    align-items: stretch;
-  }
-
-  .agent-card-header,
-  .agent-card-header.compact {
-    flex-direction: column;
-  }
-
 }
-</style>
-
-<style scoped>
-.agent-update-policy { min-width: 0; width: 100%; box-sizing: border-box; padding-top: calc(10px * var(--spacing-scale, 1)); border-top: var(--border-width, 1px) solid var(--border-color, #eee); }
-.agent-update-policy-row { display: flex; justify-content: space-between; align-items: center; gap: calc(12px * var(--spacing-scale, 1)); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
-.agent-update-policy small { display: block; margin-top: 6px; overflow-wrap: anywhere; }
-.agent-update-error { color: #c44; }
 </style>

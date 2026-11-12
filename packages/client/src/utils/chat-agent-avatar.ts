@@ -1,3 +1,4 @@
+import { agentMetadata } from './agent-catalog'
 import { deploymentUrl } from './deployment-url'
 import { personBotLabel } from './person-bot-label'
 import { DEFAULT_PERSON_BOT_TYPE, PERSON_BOTS, personBot } from '../../../shared/person-bots'
@@ -60,6 +61,15 @@ const AGENT_AVATARS = {
   antigravity: { label: 'Antigravity', src: deploymentUrl('/coding-agents/antigravity.png') },
 } as const satisfies Record<string, ChatAgentAvatar>
 
+function agentIdAvatar(id: string): string {
+  let hash = 0
+  for (const character of id) hash = (Math.imul(hash, 31) + character.codePointAt(0)!) >>> 0
+  const initial = Array.from(id)[0].toUpperCase().replace(/[&<>"']/g, value => `&#${value.charCodeAt(0)};`)
+  // Identity artwork keeps its ID-derived solid color across themes and reloads.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" fill="hsl(${hash % 360},50%,30%)"/><text x="32" y="32" dy=".35em" text-anchor="middle" font-family="system-ui,sans-serif" font-size="32" font-weight="600" fill="white">${initial}</text></svg>`
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
 export function personTaskAgentAvatar(task: { selection_json: string }): ChatAgentAvatar {
   try {
     const selection = JSON.parse(task.selection_json || '{}')
@@ -76,6 +86,10 @@ export function chatSessionAgentAvatar(session?: ChatAgentSessionIdentity | null
     return { label: customName || personBotLabel(bot), src: deploymentUrl(bot.avatar) }
   }
   const runtime = String(session?.codingAgentId || session?.agent || '').trim().toLowerCase()
+  if (runtime.startsWith('plugin:')) {
+    const metadata = agentMetadata(runtime)
+    return { label: metadata?.name || runtime, src: metadata?.icon ? deploymentUrl(metadata.icon) : agentIdAvatar(runtime) }
+  }
   if (runtime === 'hermes') return AGENT_AVATARS.hermes
   if (runtime === 'ekko-agent' || runtime === 'ekko_agent' || runtime === 'ekko') return AGENT_AVATARS['ekko-agent']
   if (runtime === 'claude' || runtime === 'claude-code') return AGENT_AVATARS['claude-code']

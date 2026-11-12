@@ -40,7 +40,7 @@ export function sessionAgentFields(summary: SessionSummary): Pick<Session, 'agen
     agent: summary.agent || undefined,
     agentSessionId: summary.agent_session_id || undefined,
     agentNativeSessionId: summary.agent_native_session_id || undefined,
-    codingAgentId: builtin ? 'ekko-agent' : ids[summary.agent || ''],
+    codingAgentId: builtin ? 'ekko-agent' : summary.agent?.startsWith('plugin:') ? summary.agent as `plugin:${string}/${string}` : ids[summary.agent || ''],
     codingAgentMode: builtin ? 'scoped' : providerAgent
       ? (summary.agent_mode === 'global' || summary.agent_mode === 'scoped'
           ? summary.agent_mode : summary.provider === 'global' ? 'global' : 'scoped')
@@ -50,6 +50,6 @@ export function sessionAgentFields(summary: SessionSummary): Pick<Session, 'agen
 
 export function isExternalCodingAgentSession(session?: SessionAgentIdentity | null): boolean {
   if (!session || isBuiltinEkkoSession(session)) return false
-  return session.source === 'coding_agent' || Boolean(session.codingAgentId)
+  return session.source === 'coding_agent' || Boolean(session.codingAgentId) || !!session.agent?.startsWith('plugin:')
     || ['claude', 'claude-code', 'claude_code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(session.agent || '')
 }

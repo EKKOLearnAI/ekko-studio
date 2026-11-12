@@ -4,6 +4,7 @@ export type { Json, PluginEvent, PluginManifest, Schema }
 export interface InstalledPlugin {
   manifest: PluginManifest
   source: string
+  developmentDirectory?: string
   installedAt: number
   enabled: boolean
   status: 'active' | 'disabled' | 'failed'
@@ -15,6 +16,15 @@ export interface InstalledPlugin {
   actions: Array<{ name: string; description: string; inputSchema: Schema }>
 }
 export interface PluginSnapshot { revision: number; plugins: InstalledPlugin[] }
+export interface PluginDevelopmentProject {
+  id: string
+  directory: string
+  manifest?: PluginManifest
+  createdAt?: number
+  watching: boolean
+  status: 'registered' | 'watching' | 'building' | 'error' | 'missing'
+  error?: string
+}
 export function pluginRequest<T>(profile: string | undefined, path = '', body?: unknown, method = body === undefined ? 'GET' : 'POST', signal?: AbortSignal): Promise<T> {
   const context = profile ? `${path.includes('?') ? '&' : '?'}profile=${encodeURIComponent(profile)}` : ''
   return request(`/api/studio/plugins${path}${context}`, {

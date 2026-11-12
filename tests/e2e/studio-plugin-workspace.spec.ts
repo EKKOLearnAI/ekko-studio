@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { resolve } from 'node:path'
 
-test('direct plugin pages stay available across accounts and Profiles while public navigation stays hidden', async ({ page }, testInfo) => {
+test('plugin pages and visible navigation follow enabled state across accounts and Profiles', async ({ page }, testInfo) => {
   let active = true, installed = true
   let releaseSlowProfile: (() => void) | undefined
   const slowProfile = new Promise<void>(resolve => { releaseSlowProfile = resolve })
@@ -42,7 +42,7 @@ test('direct plugin pages stay available across accounts and Profiles while publ
   await expect(page.locator('.plugin-card')).toHaveCount(3)
   await expect(page.locator('iframe')).toHaveCount(0)
   expect(clients).toHaveLength(0)
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(0)
+  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
   await page.getByRole('textbox', { name: '搜索插件名称、描述…' }).fill('没有结果')
   await expect(page.getByText('没有匹配的插件')).toBeVisible()
   await page.getByRole('textbox', { name: '搜索插件名称、描述…' }).fill('Beta')
@@ -63,7 +63,7 @@ test('direct plugin pages stay available across accounts and Profiles while publ
   await expect(frame.locator('#root')).toHaveText('1/default:report')
   await page.reload()
   await expect(frame.locator('#root')).toHaveText('1/default:report')
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(0)
+  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
   await expect(page.locator('iframe')).toHaveCount(1)
   await page.evaluate(() => (window as any).pluginFixture.navigate('/studio/plugins/alpha/home'))
   await expect(frame.locator('#root')).toHaveText('1/default:home')
@@ -80,9 +80,9 @@ test('direct plugin pages stay available across accounts and Profiles while publ
   await expect(frame.locator('#root')).toHaveText('1/default:home')
   await page.evaluate(() => (window as any).pluginFixture.profile('slow'))
   await expect(frame.locator('#root')).toBeEmpty()
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(0)
+  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
   await page.evaluate(() => (window as any).pluginFixture.profile('other'))
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(0)
+  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
   await expect(frame.locator('#root')).toHaveText('1/other:home')
   releaseSlowProfile!()
   await expect(frame.locator('#root')).toHaveText('1/other:home')

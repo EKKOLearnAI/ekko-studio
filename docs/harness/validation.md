@@ -251,3 +251,27 @@ For new shared Coding Agent skill permissions, add focused tests for read-only
 shared aliases, rejected deletion without Hermes fallback and writable DSH-private
 skills. Register native skill formats from bootstrap; agent modules must not
 import another agent's implementation.
+
+## Plugin development documentation
+
+When Studio changes plugin structures, context capabilities or return contracts,
+directly edit the relevant Markdown under `packages/plugin-sdk/docs` in the same
+change. Explain compatibility or defaults in the affected section. The scaffolder
+copies these guides and SDK types into each new project; there is no documentation
+generation command, digest or change-record bookkeeping.
+
+`npm run harness:check` and `npm run build` require the guides/types and inspect
+Git changes: SDK edits must include architecture, context or return documentation.
+Local checks inspect staged/unstaged/untracked work; Build CI uses the PR base or
+push-before commit with full checkout history. Source archives without Git can
+only check file presence. This detects missing companion documentation, not its
+semantic correctness; reviewers and boundary tests must assess that.
+
+The generated project harness checks declared fields, model references and required
+files. Markdown remains directly editable. Run the focused tests when changing
+this flow:
+
+`npm test -- tests/server/studio-plugin-harness.test.ts tests/server/studio-plugin-development.test.ts tests/server/studio-plugin-manifest.test.ts`
+
+Verify the packed CLI creates a standalone project with docs, SDK, harness and
+working tests from a node_modules layout.

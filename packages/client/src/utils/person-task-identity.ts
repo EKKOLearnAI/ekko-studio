@@ -7,7 +7,7 @@ export function personTaskIdentity(task: Pick<PersonTask, 'selection_json' | 'ex
   let selection: Record<string, unknown> = {}
   try { selection = JSON.parse(task.execution_selection_json || task.selection_json || '{}') || {} } catch { /* Historical selections may be unavailable. */ }
   const runtime = typeof selection.runtime === 'string' ? selection.runtime.trim() : ''
-  const avatar = knownRuntimes.has(runtime.toLowerCase()) ? chatSessionAgentAvatar({ agent: runtime }) : null
+  const avatar = (knownRuntimes.has(runtime.toLowerCase()) || runtime.startsWith('plugin:')) ? chatSessionAgentAvatar({ agent: runtime }) : null
   const snapshotName = typeof selection.agentName === 'string' ? selection.agentName.trim() : ''
   // Old tasks have no preset identity. Only a unique complete match is safe.
   const keys = ['runtime', 'mode', 'profile', 'provider', 'model', 'apiMode', 'reasoningEffort'] as const

@@ -77,6 +77,7 @@ const tagMappings = {
   'modules/ekko/routes/config.ts': { name: 'Ekko Config', description: 'Ekko runtime configuration management' },
   'modules/studio/routes/workflows.ts': { name: 'Workflows', description: 'Cross-agent workflow orchestration' },
   'modules/studio/routes/plugins.ts': { name: 'Studio Plugins', description: 'Studio plugin installation, lifecycle, configuration, frontend API bridge, tools, commands, events and automation actions' },
+  'modules/studio/routes/agents.ts': { name: 'Studio Agents', description: 'Native and plugin Agent availability, settings, engine installation, removal and automatic update policy' },
   'modules/studio/routes/sessions.ts': { name: 'Sessions', description: 'Cross-agent chat session management' },
   'modules/studio/routes/model-api.ts': { name: 'Model API', description: 'OpenAI Responses-compatible inference across configured providers; external usage accounting' },
   'modules/studio/routes/session-shares.ts': { name: 'Session Shares', description: 'App-bound single-session share tokens, first claim, permissions and revocation' },
@@ -324,6 +325,34 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
   }
 
   const parameters = generateParameters(openapiPath, controllerSource)
+  if (openapiPath === '/api/studio/agents/{id}/remove' && method === 'post') {
+    operation.summary = 'Remove an Agent engine'
+    operation.description = 'Interactive super administrator only. Remove the managed Agent engine, retaining the plugin, configuration and conversation data. Active runs, concurrent maintenance and stale versions are rejected.'
+    operation.requestBody = { required: true, content: { 'application/json': { schema: { type: 'object', required: ['expectedVersion'], properties: { expectedVersion: { type: 'string' } }, additionalProperties: false } } } }
+    operation.responses['200'] = { description: 'Agent engine removed', content: { 'application/json': { schema: { type: 'object', required: ['removed'], properties: { removed: { type: 'boolean', enum: [true] } } } } } }
+    operation.responses['400'] = { description: 'Removal is unsupported or the request is invalid.' }
+    operation.responses['403'] = { description: 'Interactive super administrator login required.' }
+    operation.responses['409'] = { description: 'Agent is busy or its installed version changed.' }
+  }
+  if (openapiPath === '/api/studio/agents/{id}/update-policy') {
+    operation.summary = method === 'put' ? 'Set Agent automatic update preference' : 'Read Agent automatic update capability and preference'
+    operation.description = 'Interactive super administrator only. Returns autoUpdate, autoUpdateSupported, status, currentVersion, latestVersion, checkedAt and optional error. Unsupported installations cannot enable automatic updates. Policy is host-wide; scheduled updates use the plugin activation identity and wait for a full idle grace period.'
+    operation.responses['200'] = { description: 'Current Agent update policy', content: { 'application/json': { schema: { type: 'object', required: ['autoUpdate', 'autoUpdateSupported', 'status', 'currentVersion', 'latestVersion', 'checkedAt'], properties: {
+      autoUpdate: { type: 'boolean' }, autoUpdateSupported: { type: 'boolean' }, status: { type: 'string', enum: ['unknown', 'checking', 'current', 'available', 'waiting', 'updating', 'failed'] },
+      currentVersion: { type: 'string' }, latestVersion: { type: 'string' }, checkedAt: { type: 'string' }, error: { type: 'string' },
+    } } } } }
+    if (method === 'put') operation.requestBody = { required: true, content: { 'application/json': { schema: { type: 'object', required: ['autoUpdate'], properties: { autoUpdate: { type: 'boolean' } }, additionalProperties: false } } } }
+    operation.responses['400'] = { description: 'Invalid preference or automatic updates are unsupported.' }
+    operation.responses['403'] = { description: 'Interactive super administrator login required.' }
+    operation.responses['409'] = { description: 'Agent plugin is disabled or unavailable.' }
+  }
+  if (openapiPath === '/api/studio/plugins/{id}/development' && method === 'delete') {
+    operation.summary = 'Unlink development plugin'
+    operation.description = 'Super administrator only. Remove the development registration and stop watching source changes. Source files, the installed snapshot and plugin data are retained.'
+    parameters.push({ name: 'revision', in: 'query', required: true, schema: { type: 'integer', minimum: 0 }, description: 'Current global plugin catalog revision.' })
+    operation.responses['403'] = { description: 'Interactive super administrator login required.' }
+    operation.responses['409'] = { description: 'Catalog revision changed; refresh before retrying.' }
+  }
   if (openapiPath === '/api/studio/sessions' && method === 'get') {
     operation.responses['200'] = {
       description: 'Session list. Supplying offset also returns pagination metadata and the total matching the same visibility, category, and include/exclude filters before pagination.',
@@ -382,7 +411,7 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
   }
 
   const requestBody = generateRequestBody(method, controllerSource)
-  if (requestBody) operation.requestBody = requestBody
+  if (requestBody && !operation.requestBody) operation.requestBody = requestBody
 
   paths[openapiPath][method] = operation
 }
@@ -2104,9 +2133,11 @@ for (const [method, path, tag, operationId, summary, properties, required] of co
 }
 openapi.paths['/api/studio/chat-run/runs'].post.responses['202'] = { description: 'Run accepted or queued; JSON includes status, session_id and available run_id/queue_id' }
 const pluginOperations = [
+  ['get', '/development', 'listStudioDevelopmentPlugins', 'List locally registered development projects and build status; super administrator login required', null],
+  ['post', '/{id}/development', 'startStudioPluginDevelopment', 'Trust, build, enable and watch a registered project; existing configuration and data are preserved', { revision: { type: 'integer' }, trusted: { type: 'boolean', enum: [true] } }],
   ['get', '', 'listStudioPlugins', 'List globally installed plugins and registered tools, commands and actions for every account; no Profile selection required', null],
   ['post', '/install', 'installStudioPlugin', 'Install or upgrade a trusted compiled plugin; requires a super administrator login', { source: { type: 'string', description: 'Absolute local directory, package@exact-version, github:owner/repo#40-character-commit, or git+https GitLab.com/Gitee repository pinned to a full commit' }, revision: { type: 'integer' }, trusted: { type: 'boolean', enum: [true] }, pluginId: { type: 'string', description: 'Existing plugin id when upgrading' }, expectedVersion: { type: 'string', maxLength: 128, description: 'Optional exact manifest version; a mismatch leaves the existing installation unchanged' } }],
-  ['patch', '/{id}', 'updateStudioPlugin', 'Globally enable, disable, configure, reload, roll back or uninstall a plugin', { revision: { type: 'integer' }, enabled: { type: 'boolean' }, config: { type: 'object', additionalProperties: true }, action: { type: 'string', enum: ['reload', 'rollback', 'uninstall'] } }],
+  ['patch', '/{id}', 'updateStudioPlugin', 'Globally enable, disable, configure, reload, roll back or uninstall a plugin', { revision: { type: 'integer' }, enabled: { type: 'boolean' }, config: { type: 'object', additionalProperties: true }, action: { type: 'string', enum: ['reload', 'rollback', 'uninstall', 'stop-development'] } }],
   ['get', '/{id}/client', 'getStudioPluginClient', 'Read the enabled plugin frontend module as JSON {source}', null],
   ['get', '/{id}/logs', 'getStudioPluginLogs', 'Read the latest plugin logs; requires a super administrator login', null],
   ['get', '/events', 'pollStudioPluginEvents', 'Poll user/profile-scoped plugin events with generation and cursor', null],
@@ -2117,7 +2148,7 @@ const pluginOperations = [
 delete openapi.paths['/api/studio/plugins/']
 for (const [method, suffix, operationId, summary, properties] of pluginOperations) {
   const path = `/api/studio/plugins${suffix}`
-  const globalOperation = ['', '/install', '/{id}', '/{id}/logs'].includes(suffix)
+  const globalOperation = ['', '/install', '/{id}', '/{id}/logs', '/development', '/{id}/development'].includes(suffix)
   const parameters = globalOperation ? [] : [{ name: 'profile', in: 'query', schema: { type: 'string' }, description: 'Execution context only; installations and enablement are global. Managed run credentials remain bound to their run Profile.' }]
   if (suffix.includes('{id}')) parameters.push({ name: 'id', in: 'path', required: true, schema: { type: 'string' } })
   if (suffix === '/events') parameters.push(...['cursor', 'pluginId', 'sessionId'].map(name => ({ name, in: 'query', schema: { type: name === 'cursor' ? 'integer' : 'string' } })))
@@ -2125,7 +2156,7 @@ for (const [method, suffix, operationId, summary, properties] of pluginOperation
   openapi.paths[path][method] = { tags: ['Studio Plugins'], operationId, summary, parameters, security: [{ BearerAuth: [] }],
     responses: { 200: { description: 'JSON result' }, 403: { description: 'User, Profile or capability denied' }, 409: { description: 'Plugin unavailable, dependency failure or stale revision' } },
     ...(properties ? { requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties,
-      required: suffix === '/install' ? ['source', 'revision', 'trusted'] : method === 'patch' ? ['revision'] : suffix.endsWith('/invoke') ? ['kind', 'name'] : suffix.endsWith('/api') ? ['path'] : ['action'],
+      required: suffix === '/{id}/development' ? ['revision', 'trusted'] : suffix === '/install' ? ['source', 'revision', 'trusted'] : method === 'patch' ? ['revision'] : suffix.endsWith('/invoke') ? ['kind', 'name'] : suffix.endsWith('/api') ? ['path'] : ['action'],
     } } } } } : {}),
   }
 }

@@ -10,6 +10,8 @@ export function packNpmReleases(rootDir, outputDir, npmCli = process.env.npm_exe
   const pkg = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf8'))
   if (pkg.name !== 'ekko-studio' || pkg.private) throw new Error('Expected the public ekko-studio source package')
   const required = ['package.json', 'LICENSE', 'dist/client/index.html', 'dist/server/index.js',
+    'bin/plugin-development.mjs', 'dist/plugin-sdk/package.json', 'dist/plugin-sdk/src/index.ts',
+    'dist/plugin-sdk/docs/STUDIO_CTX.md', 'dist/plugin-sdk/harness/project.mjs', 'dist/plugin-sdk/template/AGENTS.md',
     ...Object.values(pkg.bin).map(path => path.replace(/^\.\//, ''))]
   for (const file of required) {
     if (!existsSync(join(rootDir, file))) throw new Error(`Build the package first; missing ${file}`)

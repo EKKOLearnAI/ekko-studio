@@ -1,6 +1,6 @@
 import type { DshInstallOptions } from './dsh/managed-install'
 import { config } from '../../studio/public/config'
-import { AgentUpdatePolicy } from './update-policy'
+import { AgentUpdatePolicy } from '../../studio/public/agent-update-policy'
 import { getCodingAgentDefinitions, checkUpdateAgent, installCodingAgent } from './index'
 import { codingAgentRunManager } from './runtime/run-manager'
 import { lockAgentUpdate, agentPreparing, agentActivityRevision } from './update-lock'

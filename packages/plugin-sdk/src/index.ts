@@ -18,7 +18,8 @@ export interface Schema {
   maxItems?: number
   secret?: boolean
 }
-export type Capability = 'api.read' | 'api.write' | 'tools' | 'commands' | 'events' | 'hooks' | 'automation' | 'ui' | 'storage.client'
+export type * from './agents'
+export type Capability = 'api.read' | 'api.write' | 'tools' | 'commands' | 'events' | 'hooks' | 'automation' | 'ui' | 'storage.client' | 'agents'
 export interface PluginView {
   id: string
   title: string
@@ -180,6 +181,9 @@ export interface PluginAction {
 export type PluginHook = 'input.transform' | 'context.transform' | 'tool.before' | 'tool.after'
 export interface HookResult { value?: Json; deny?: string }
 export interface PluginContext {
+  /** Stable host-owned directories, retained across plugin package upgrades. */
+  readonly paths: { readonly dataDir: string }
+  agents: { register(definition: import('./agents').AgentDefinition): import('./agents').AgentRegistration }
   readonly plugin: Readonly<PluginManifest>
   /** Current caller inside a handler; activation identity during startup/scheduled work. */
   readonly identity: PluginIdentity
@@ -205,6 +209,7 @@ export interface PluginContext {
 }
 export interface PluginModule { apply(ctx: PluginContext): void | Dispose | Promise<void | Dispose> }
 export interface ClientContext {
+  readonly locale?: string
   readonly plugin: Readonly<PluginManifest>
   readonly identity: PluginIdentity
   readonly view: string

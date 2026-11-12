@@ -2,7 +2,7 @@ import type { AgentFamily } from './family'
 
 export const AGENT_RUNTIMES = ['hermes', 'ekko', 'claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'] as const
 
-export type AgentRuntime = typeof AGENT_RUNTIMES[number]
+export type AgentRuntime = typeof AGENT_RUNTIMES[number] | `plugin:${string}/${string}`
 export type CodingAgentRuntime = Extract<AgentRuntime, 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'>
 
 const AGENT_RUNTIME_SET = new Set<string>(AGENT_RUNTIMES)
@@ -28,9 +28,9 @@ const RUNTIME_FAMILIES: Record<AgentRuntime, AgentFamily> = {
 }
 
 export function isAgentRuntime(value: unknown): value is AgentRuntime {
-  return typeof value === 'string' && AGENT_RUNTIME_SET.has(value)
+  return typeof value === 'string' && (AGENT_RUNTIME_SET.has(value) || /^plugin:[a-z][a-z0-9._-]*\/[a-z][a-z0-9._-]*$/.test(value))
 }
 
 export function agentFamilyForRuntime(runtime: AgentRuntime): AgentFamily {
-  return RUNTIME_FAMILIES[runtime]
+  return runtime.startsWith('plugin:') ? 'coding' : RUNTIME_FAMILIES[runtime]
 }

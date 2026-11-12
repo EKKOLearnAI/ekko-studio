@@ -69,7 +69,7 @@ export function manifest(value: unknown): PluginManifest {
   for (const entry of [m.server, m.client].filter(Boolean)) {
     if (typeof entry !== 'string' || !/^[\w./-]+\.(?:mjs|js)$/.test(entry) || entry.startsWith('/') || entry.split('/').some(part => part === '..')) throw new PluginError('Plugin entries must be relative, compiled JavaScript files')
   }
-  const capabilities = ['api.read', 'api.write', 'tools', 'commands', 'events', 'hooks', 'automation', 'ui', 'storage.client']
+  const capabilities = ['api.read', 'api.write', 'tools', 'commands', 'events', 'hooks', 'automation', 'ui', 'storage.client', 'agents']
   if (!Array.isArray(m.capabilities) || m.capabilities.some(item => !capabilities.includes(item))) throw new PluginError('Invalid plugin capabilities')
   if (m.mcp !== undefined) {
     if (!m.mcp || typeof m.mcp !== 'object' || Array.isArray(m.mcp) || Object.keys(m.mcp).some(key => key !== 'name')

@@ -1,36 +1,55 @@
 # Studio 插件与 ctx SDK
 
-Studio 插件用于定制工作台页面、设置页面、独立工作区、Agent 工具、命令和自动化动作。
-插件功能尚未开放，暂时隐藏导航栏的 **插件中心**、主侧栏插件页面及设置侧栏插件入口。
-内部调试可直接访问 `/#/studio/plugins`，插件页面与工作区的直达路由仍保留。插件中心与 Hermes、DSH
-各自的原生插件管理分开。插件安装、启用、配置和运行实例属于整个 Studio，所有账号、Profile 和任务均可使用，无需重复安装。
+Studio 插件用于定制工作台页面、设置页面、独立工作区、Agent 运行时、工具、命令和自动化动作。
+插件中心在主导航中开放，位于自定义插件业务入口之前、API Key 之前。插件页面与其他 Studio 页面复用固定页头。
+插件中心与 Hermes、DSH 各自的原生插件管理分开。插件安装、启用、配置和运行实例属于整个 Studio，所有账号、Profile 和任务均可使用，无需重复安装。
 
-## 运行示例
+## 内置插件与 OMP
 
-仓库提供四个不需要构建的示例：
+内置插件使用与第三方插件相同的 `plugin.json`、SDK、管理和运行通道。
+OMP 源码在独立仓库 [ekko-studio-plugin-omp](https://github.com/EKKOLearnAI/ekko-studio-plugin-omp) 维护，
+Studio 通过 `package.json` / `package-lock.json` 固定提交的包依赖引用；映射在 `plugins/builtin/packages.json`。
+源码开发从已安装依赖读取，构建复制到 `dist/plugins/builtin/<id>`，随 npm 包和桌面端分发，运行时无需联网获取插件。
+升级内置 OMP 时同步更新依赖及锁文件；调试独立仓库使用 `ekko-studio plugins link /absolute/path/ekko-studio-plugin-omp`。
+Studio 启动后以有效超级管理员身份安装缺失的内置插件，首次安装默认启用。后续随 Studio 更新插件版本，保留禁用状态和数据；用户主动卸载后不自动装回，可在插件中心使用 `builtin:omp` 重新安装。无有效管理员时等待首次登录，再在读取插件或 Agent 列表时初始化。
 
-- `examples/plugins/session-dashboard`（会话看板）：纯前端页面，读取已有会话接口，展示统计、按 Agent 筛选、搜索已加载会话、分页和跳转。
-- `examples/plugins/notebook`（工作便签）：独立工作区、动态便签侧栏、个人偏好设置页、Agent 工具、聊天命令、工作流共享持久化便签；支持完成状态和删除，显示记录来源。
-- `examples/plugins/activity-digest`：订阅业务事件，定期生成摘要，也可以由命令或工作流触发。
-- `examples/plugins/tool-demo`（工具注入演示）：仅注册一个只读 `hello` 工具。启用后，在 MCP 管理页的 `ekko-studio-plugins` 工具列表中查找 `tool-demo__hello`（描述为 `[工具注入演示/hello]`），参数为 `{"name":"Ekko"}`；工具返回问候语和实际调用的 Profile。
+当前内置 **Oh My Pi（OMP）**，Agent ID 为 `plugin:omp/omp`：
 
-在插件中心点击“安装插件”，输入示例目录的绝对路径，确认信任、安装，再启用。配置位于“详情 → 配置”。
-本地安装会复制目录；编辑源文件后使用“升级”重新安装。重载重新执行已安装的版本。
-也可运行 `node scripts/create-plugin.mjs /absolute/path/my-plugin my-plugin` 创建完整示例。
+1. 进入 Agent 管理，OMP 引擎未安装时直接点击“安装”；宿主查询可用版本并调用插件的安装维护方法。完成后显示版本和“检查更新”，发现新版本后可升级。
+2. 安装从 OMP 官方 GitHub Release 下载当前系统架构的独立可执行文件，校验 SHA-256 和实际版本，保存到本插件数据目录。不会修改系统 Bun、全局 CLI 或用户已有 OMP 目录。网络失败会保留原来的引擎选择。
+3. 点击“设置”打开插件自己的前端与 RPC 后端。也可填写已有 OMP 可执行文件的绝对路径；这种情况下引擎由用户维护，Studio 不替换该文件。
+4. scoped 模式直接使用 Studio 当前选择的模型和本轮代理凭证，无需在插件内重复填写模型密钥。
+5. 删除只清理受管引擎及其选择记录，保留插件、设置和会话；受管安装可以开启自动更新，自定义可执行文件不支持删除或自动更新。
+6. 全局模式在 OMP 设置页填写原生 `models.yml` 的 JSON 等价结构。配置按真实调用账号与 Profile 分区，密钥只返回遮蔽值；保留遮蔽值后保存会保持原密钥。
 
-### 两个可操作示例
+例如“模型与凭证（JSON）”：
 
-开发环境打开 `http://localhost:8649/#/studio/plugins`，任意账号与 Profile 均可看到全局插件列表。安装与维护仍由超级管理员执行。
-启用后，点击卡片的“打开”进入独立页面：
+```json
+{
+  "providers": {
+    "custom": {
+      "api": "openai-completions",
+      "baseUrl": "https://your-provider.example/v1",
+      "apiKey": "YOUR_API_KEY",
+      "models": [{ "id": "your-model", "name": "Your model", "input": ["text", "image"] }]
+    }
+  }
+}
+```
 
-1. **会话看板**：搜索标题、选择 Agent；点击会话返回原对话。总会话数来自接口，消息数和最近七天活跃数仅统计已加载会话。
-2. **工作便签**：添加一条内容，勾选完成，再刷新页面验证仍然存在。删除会先弹确认框；数据跨账号和 Profile 共享，最多保留最近 100 条。
-3. 在任意 Profile 的空闲聊天中发送 `/notebook:note 这是从聊天保存的便签`，回到插件页面即可看到来源为“聊天命令”的记录。
-4. “详情 → 开发与维护”中选择 `append` 工具，输入 `{"text":"这是工具写入的便签"}` 并执行；结果会同步出现在插件独立页面。Agent 同样可以调用 `notebook/append`、`notebook/list`、`notebook/complete`。
-5. 工作流节点选择插件动作 `notebook/capture`，将上游输出保存成便签；已有的工具列表可能需要刷新或新开一轮运行才能看到新插件。
-6. 工作区侧栏显示最近便签，点击后通过 URL 查询参数定位；刷新仍可恢复。通过插件详情的“配置”进入“便签偏好”，选择当前账号的默认筛选。
+默认模型可填 `custom/your-model`，也可留空后从 OMP 返回给 Studio 的模型目录选择。
+“OMP 运行设置（JSON）”使用原生 `config.yml` 结构。scoped 模式由插件将宿主注入的 `apiMode/baseUrl/token/model` 写成临时原生模型配置；默认及辅助模型角色均绑定本轮 Studio 模型。每轮结束删除临时配置，原生会话文件保留供续接。
 
-这里的会话来自真实后端；便签从空白开始，不会自动创建示例数据或发起模型请求。
+OMP 使用官方 stdio RPC：文本和推理流、原生工具事件、图片、文件路径读取、会话检查点、用量、取消、受管 MCP 和交互请求通过 SDK 接入。引擎实例及会话按宿主的用户、Profile、模式与会话隔离；私密输入不通过普通问答收集。
+实现以 OMP 18.19.0 的协议验证，自动升级下载时仍会检查目标版本与平台资源。
+
+### 开发测试夹具
+
+原来的五个演示包已移入 `tests/fixtures/plugins`，只用于开发回归，不随正式插件目录发布：`session-dashboard`、`notebook`、`activity-digest`、`tool-demo`、`custom-agent`。
+启动迁移仅卸载从当前仓库旧 `examples/plugins/<id>` 路径安装的这些演示包，保留历史数据与包文件。显式从其他目录安装的同名插件不受影响。
+
+开发新插件使用 `node scripts/create-plugin.mjs /absolute/path/my-plugin my-plugin`，生成最小设置页面与 RPC 模板，不再复制演示业务。
+测试时可在插件中心安装夹具的绝对路径，再启用；本地安装复制目录，源码改动后需要重新安装，重载只执行已安装版本。
 
 插件安装支持本地目录、`package@1.2.3` 或 `github:owner/repository#完整40位提交`。
 远程安装禁止生命周期脚本，必须提供编译后的入口。版本必须是精确版本。
@@ -38,11 +57,106 @@ Studio 插件用于定制工作台页面、设置页面、独立工作区、Agen
 依赖使用 manifest 中的精确版本，启用前必须先启用依赖；禁用依赖前要禁用使用它的插件。
 卸载释放运行资源，但保留数据与历史包目录，方便恢复；它不是清除磁盘数据操作。
 
+## 独立项目开发与调试
+
+安装包含此功能的 Studio 版本后，使用 `ekko-studio plugins`；`ekko-studio-web plugins` 与
+`hermes-web-ui plugins` 也支持同一组命令。源码开发时可以用 `node bin/hermes-web-ui.mjs plugins ...`。
+
+```bash
+# 创建独立项目并登记到当前 Studio
+ekko-studio plugins create my-plugin
+
+# 指定源码目录，或登记已有项目
+ekko-studio plugins create another-plugin /absolute/path/another-plugin
+ekko-studio plugins link /absolute/path/existing-plugin
+
+# 查看所有已登记项目（含目录缺失的记录）
+ekko-studio plugins list
+
+# 按 ID 或目录选择项目，显示 Studio 中的启用入口
+ekko-studio plugins dev my-plugin
+ekko-studio plugins dev /absolute/path/existing-plugin
+
+# 只移除登记；不删除源码、已安装副本或数据
+ekko-studio plugins unlink my-plugin
+```
+
+命令与 Studio 服务端必须使用相同的 `HERMES_WEB_UI_HOME`（兼容 `HERMES_WEBUI_STATE_DIR`）。
+默认数据目录是 `~/.hermes-web-ui`，其中：
+
+- `plugin-projects/<id>/`：未指定目标路径时的默认源码目录；可以单独初始化 Git 仓库。
+- `plugins/development/<id>.json`：所有通过 CLI 创建或登记的项目索引，保存真实绝对路径。
+- `plugins/global/`：宿主管理的已安装运行副本、配置和数据；无需手动修改。
+
+已安装列表读取 `plugins/global/state.json`，开发链接读取 `plugins/development/<id>.json`；
+列表不是通过扫描源码文件夹生成。每次安装或重建复制到 `plugins/global/versions/<UUID>/package`，
+以隔离 ESM 缓存并支持回滚。删除目录不会自动卸载插件，应使用插件中心的卸载操作清理安装记录；
+副本缺失时宿主将其标记为不可用，并停止提供该副本的 Agent、工具和页面入口。
+
+源码可放在任意独立仓库。CLI 不修改 Studio 的源码、依赖列表或内置插件目录。
+不同项目不能登记相同 ID；移动项目后先 `unlink`，再从新位置 `link`。
+CLI 的 `create/link/dev` 只登记项目，不执行插件，不读取登录 token。
+
+进入 **插件中心**，超级管理员可以在统一卡片列表中看到所有开发链接，以“开发”标记区分。
+尚未构建的项目也显示清单中的名称、图标与版本；已有同 ID 安装时合并为一张卡片。
+卡片和详情使用普通的 **启用**、**禁用** 与 **重载** 操作，源码目录位于详情中。
+首次启用开发链接时需要信任项目及其构建脚本，随后 Studio 构建、安装并启用插件；
+如果存在同 ID 的安装，会替换该安装并保留配置与数据。已信任同一目录后，启用和重载直接执行。
+开发链接启用后自动监听源码变化；普通本地目录安装后不会自动同步源码。
+
+开发链接启用期间宿主每秒检查源文件，稳定两次后执行可选的 `npm run build`，再复制到新的运行目录。
+没有 build 脚本的 JavaScript 模板直接加载；同版本的源码修改也会生效，无需反复提高版本号。
+后端旧实例被释放，前端通过已有插件事件重新挂载；这是整个插件的重载，不保留页面内存状态。
+嵌套模块也从新的运行目录加载，不会继续使用旧 ESM 缓存。每个开发项目保留当前和上一个运行副本。
+
+构建或加载失败时，开发列表显示错误，已运行的成功版本继续服务。
+修复源码后自动重试，也可以点 **重载**；**禁用** 保留最后安装版本及数据并停止监听。
+禁用或卸载会停止同步；回滚同时退出调试，以免源码立即覆盖回滚结果。
+退出 Studio 会停止监听，重启后恢复仍启用的开发项目。取消登记后不再同步，已安装副本仍可使用。
+源码缺失、登记路径改变或激活管理员失去权限时不会继续执行构建。
+
+卡片或详情中的 **删除开发链接** 等同于 `unlink`：移除登记并停止源码监听，
+保留源码目录、已安装副本与插件数据。如果已安装副本仍存在，它会继续作为普通插件显示；
+仅有开发链接的项目会从列表消失。取消确认或操作失败不会移除登记。
+
+生成的项目包含与宿主匹配的本地 `sdk/`，`npm install` 后可通过
+`import type { PluginContext, ClientContext } from '@ekko-studio/plugin-sdk'` 使用类型，
+不需要克隆 Studio 源码或依赖尚未发布的 npm SDK。运行时辅助代码应由插件自己的构建打包。
+模板本身为可直接执行的 `.mjs`，无需先安装依赖才能在宿主中运行。
+
+使用 TypeScript、Vue 或 React 时，在项目内配置 build 脚本，并将清单入口指向
+`dist/server.mjs`、`dist/client.mjs` 等产物。将生成文件放在 `dist/` 或 `build/`；
+监听忽略这些目录、`node_modules`、`.git`、`coverage` 和 `.cache`，不跟随符号链接。
+开发源目录最多检查 20000 个条目；运行数据应保存在 `ctx.storage` 或 `ctx.paths.dataDir`。
+Studio 不自动安装项目的构建依赖；先在独立项目运行相应的依赖安装命令。
+
+前端可在浏览器 DevTools 的插件 iframe 中调试；后端使用 `ctx.log` 和插件详情的日志入口，
+断点附加到 Studio 的 Node 进程。Agent 插件启用后出现在 Agent 管理及已有会话入口中。
+远程部署时，登记目录必须位于 Studio 服务端所在机器；这组命令不会把本机源码上传到远端。
+
+### 随项目提供的文档与开发 harness
+
+新项目附带 AGENTS.md、README.md、架构、ctx 能力、回传协议和开发规范。
+宿主指南在 Studio 的 `packages/plugin-sdk/docs` 直接维护：修改接口及数据结构时，
+同步编辑对应 Markdown 并一起提交。创建项目自动复制当前版本的指南及 SDK，无需文档生成命令。
+精确字段和签名直接查看 `sdk/src/index.ts`、`sdk/src/agents.ts`。
+
+本插件的跨边界和持久化结构统一声明在 `contracts/plugin.json`；每个模型、字段及操作都有描述。
+示例 RPC 和存储实际使用这些声明校验数据。`docs/CONTRACTS.md` 是可直接编辑的行为与兼容说明，
+修改插件结构时同步修改相关段落及测试。文档、检查器、测试和 GitHub Actions 均随 npm 包分发。
+
+Studio 的 harness/build 检查 SDK 变化是否同时修改了架构、ctx 或回传说明；
+本地检查未提交变更，Build CI 检查整个 PR/push。检查只能确认文档随代码更新，语义准确性由审查负责。
+
+开发宿主在可选 build 前后运行插件 harness，检查字段说明、模型引用和文件完整性，失败保留当前运行版本。
+手动编辑 Markdown 不会导致拒绝加载。生成项目的 prepack 和 CI 同样运行检查与测试；旧插件保持原有行为。
+已创建项目保留创建时的 SDK 和文档，升级时一起更新。
+
 ## 插件中心与使用入口
 
 插件中心使用卡片、名称/描述/作者/标签搜索、能力分类和状态筛选管理全局已安装插件，不是公共社区目录。详情展示作者、许可证、仓库、主页、文档、问题反馈和更新记录。安装与维护操作收进弹窗和详情抽屉；进入中心不会加载所有插件业务页面。
 
-以下为三类入口的声明规则。当前统一关闭对外导航显示，后续开放时通过 `PLUGIN_NAVIGATION_VISIBLE` 恢复；直接打开插件页面后，工作区自身的侧栏仍可使用。
+插件中心入口在主导航显示。已启用插件按以下声明提供业务导航，禁用或卸载后移除对应入口；移动端在导航抽屉中提供相同入口。插件中心和业务页复用宿主固定页头，内容区独立滚动。
 
 - `page`：主侧栏入口，打开独立路由 `/studio/plugins/:pluginId/:viewId`。每个页面有自己的导航项。
 - `settings`：设置侧栏入口，打开 `/studio/plugin-settings/:pluginId/:viewId`。插件中心的“配置”页保留宿主管理的 `configSchema` 表单，并链接到这些自定义页面。
@@ -57,6 +171,19 @@ Studio 插件用于定制工作台页面、设置页面、独立工作区、Agen
 插件 UI 仅支持以上三类入口，不挂载到单聊 Session 列表、聊天侧边或消息下方。
 
 例如 `/#/studio/plugins/session-dashboard/sessions` 和 `/#/studio/plugins/notebook/notes`。独立页面使用完整内容区。切换 Profile 后插件列表与导航入口不变，页面重新绑定当前调用上下文。全局禁用或卸载会移除各账号的入口与挂载实例；不存在的页面显示返回中心的提示。`ctx.ui.navigate('/studio/plugins/notebook/notes')` 可跳到其他已声明页面，实际访问仍受目标插件状态约束。
+
+### 提交插件审核
+
+插件中心提供“提交插件”入口，填写仓库地址、名称、描述后发送给云端管理员审核。
+所有能进入插件中心的账号均可提交；成功提示等待审核，不改变本机已安装列表。
+
+客户端直接向 `https://api.ekkostudio.xyz/api/studio/plugins/submissions` 发送普通 JSON，
+仅包含 repository/name/description，不携带本机 Authorization、cookie 或 Profile。
+名称最多 160 字符，描述最多 4000 字符；仓库地址最多 2048 字符，使用 HTTP(S)，
+不含账号密码、查询参数或锚点。提交时校验字段并禁止重复点击，失败保留输入。
+网络中断或超时无法证明服务端没有收到，因此提示结果未确认且不自动重试。
+
+本次只接提交。云端列表、仓库数据抓取和安装来源解析在后台流程确定后接入。
 
 ### 全局安装与调用上下文
 
@@ -142,6 +269,7 @@ export function apply(ctx) {
 | `ctx.models.list / respond` | 已配置模型及 Responses API；返回完整响应，使用现有用量统计 |
 | `ctx.storage` | 插件级全局 JSON 存储；`namespace(...)` 显式分区 |
 | `ctx.tools.register` | 注册跨 Agent 工具；返回 `{ok, content, data?, error?}` |
+| `ctx.agents.register` | 注册可在 Agent 管理、新建会话、群聊和工作流使用的 Agent 运行时 |
 | `ctx.commands.register` | 注册 `/插件id:命令 参数` 聊天命令 |
 | `ctx.rpc.register` | 为前端注册后端函数 |
 | `ctx.on(type, handler)` | 订阅 Studio 业务事件，支持精确名称、`chat.*`、`chat.run.*` 等前缀及 `*` |
@@ -159,7 +287,8 @@ export function apply(ctx) {
 `ctx.storage` 与 `run.storage` 访问同一份插件级存储。根上下文的身份与 API 在每次调用中自动绑定实际调用者，异步代码也保持此绑定。
 `run.session.get()` 读取当前会话；`run.workspace.read/write()` 使用会话工作区接口；
 `run.tools.call('插件id/工具名', args)` 调用插件工具；`run.ui.notify/emit` 向页面发事件。
-共享记录的 read-modify-write 需要插件串行处理，Notebook 示例展示了这一点。
+共享记录的 read-modify-write 需要插件串行处理，Notebook 测试夹具展示了这一点。
+`ctx.paths.dataDir` 是本插件稳定的私有文件目录，升级与重载后不变，供原生引擎、配置和缓存使用；卸载保留它。优先使用 `ctx.storage` 保存普通结构化数据。
 
 ### 数据范围由插件决定
 
@@ -194,7 +323,9 @@ run.ui.emit('notebook.updated', { id: note.id }, { audience: 'plugin' })
 
 工作便签示例选择全局共享；Activity Digest 示例自行按账号和 Profile 分区。数据位于 `plugins/global/data`，由插件 ID 和命名空间数组确定文件名。
 
-## 前端 ctx 与现有后端 API
+## 前端 ctx
+
+`ctx.locale` 是 Studio 当前界面语言，插件可据此渲染自己的文案；切换语言会重新挂载页面。前端通过受限桥接访问现有后端 API。
 
 ```js
 export async function mount(element, ctx) {
@@ -365,6 +496,150 @@ Studio 会将插件变更通知所有已启动的 Hermes Worker，包括群聊�
 
 验证命令：`npx vitest run tests/server/studio-plugins.test.ts tests/server/studio-plugin-*.test.ts tests/ekko-agent/plugin-hooks.test.ts`；
 浏览器旅程：`npm run test:e2e -- tests/e2e/studio-plugins.spec.ts tests/e2e/studio-plugin-navigation.spec.ts`。
+
+## 注册 Agent 运行时
+
+插件清单声明 `agents` 能力，后端在 `apply(ctx)` 中调用 `ctx.agents.register(definition)`。
+注册 ID 是插件内部 ID；Studio 生成完整 ID `plugin:<pluginId>/<agentId>`，与内置 Agent ID 分开。
+`vendor` 表示管理卡片上的开发方；模型配置中的 `provider` 仍表示模型提供商。
+文本、图片、文件都是必需输入，不提供 `images/files/supportsImages` 等开关。
+类型契约在 `packages/plugin-sdk/src/agents.ts`。
+
+```js
+export function apply(ctx) {
+  const registration = ctx.agents.register({
+    id: 'assistant', name: 'My Agent', vendor: 'My Team', agentApiVersion: 1,
+    getStatus: async () => ({ installed: true, version: '1.0.0' }),
+    management: {
+      settings: () => ({ viewId: 'agent-settings' }),
+      checkUpdate: async () => ({ currentVersion: '1.0.0', latestVersion: '1.0.0', updateAvailable: false }),
+      // upgrade: async ({ version, expectedVersion }, management) => ...,
+    },
+    modes: {
+      global: { listModels: async () => ({ status: 'ready', source: 'sdk', scope: 'builtin', models: [{ id: 'native', name: 'Native', isDefault: true }] }) },
+    },
+    capabilities: { surfaces: ['chat', 'group-chat', 'workflow', 'api'], streaming: true, resume: false },
+    runtime: {
+      createSession(session) {
+        return {
+          async run(input, run) {
+            // Replace this local example with the plugin's own engine/SDK/CLI.
+            const parts = []
+            for (const part of input.input) {
+              if (part.type === 'text') parts.push(part.text)
+              else parts.push(`${part.name}: ${(await run.attachments.read(part.assetId)).byteLength} bytes`)
+            }
+            const text = parts.join('\n')
+            await run.events.emit({ type: 'text.delta', text })
+            return { content: [{ type: 'text', text }], finishReason: 'stop' }
+          },
+          dispose() {},
+        }
+      },
+    },
+  })
+  return () => registration.dispose()
+}
+```
+
+该片段展示全局本地运行时。包含 scoped 模型代理调用的完整示例见
+`tests/fixtures/plugins/custom-agent/server.mjs`。实际 scoped 引擎必须把模型请求发送到宿主注入的代理。
+
+### 管理与设置
+
+`getStatus` 返回 `{installed, version, source?, path?, error?}`。普通目录不暴露安装路径。
+管理页的操作绑定 `management.settings/checkUpdate/upgrade/remove`；未提供的操作不显示。
+同时提供 `checkUpdate/upgrade` 的插件 Agent，在 `installed:false` 时显示“安装”。点击后宿主先调用 `checkUpdate` 获取准确版本，再调用 `upgrade` 完成首次安装；安装期间禁用重复操作，成功后刷新状态。已安装时显示“检查更新”及可用的版本升级操作。
+设置回调返回本插件清单中 `slot: 'settings'` 的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。
+页面继续通过 `client.mjs` 的 `mount(root, ctx)` 和服务端 `ctx.rpc.register` 实现。
+生产安全策略允许视图加载 Blob 模块；iframe 保持不透明来源，自己的 CSP 禁止直接网络请求，业务调用仍经认证桥接。
+插件负责配置持久化、校验、文件格式、环境变量和启动参数，不要求宿主生成设置表单。
+私有设置应以 RPC 的实际 `run.identity` 分区；URL 查询参数不构成身份或权限依据。
+
+`checkUpdate` 只检查 Agent 引擎，返回 `currentVersion/latestVersion/updateAvailable`。
+`upgrade({version, expectedVersion}, ctx)` 更新引擎，返回 `installedVersion`。
+`remove(ctx)` 删除插件自己管理的 Agent 引擎，成功后不返回业务数据；保留插件源码、配置、账号凭证和会话数据。
+宿主要求删除请求带 `expectedVersion`，版本改变、正在运行或正在维护时拒绝操作，完成后重新确认 `installed:false`。
+未提供删除回调的旧插件继续正常运行，管理页不显示删除按钮。
+
+`supportsAutoUpdate(ctx)` 返回当前安装是否支持无人值守更新，缺省为 false；必须同时提供 `checkUpdate/upgrade`。
+使用自定义可执行文件、外部包管理器或必须交互登录时返回 false，能力查询和开关由宿主提供：
+`GET/PUT /api/studio/agents/{id}/update-policy`，写入体为 `{autoUpdate:boolean}`，读回包含 `autoUpdateSupported`。
+删除引擎使用 `POST /api/studio/agents/{id}/remove`，请求体 `{expectedVersion:string}`。
+这些维护接口只允许超级管理员的交互登录，运行凭证和共享链接不能调用。
+开关属于整个宿主，独立持久化在 `plugin-agent-update-policy.json`；插件禁用时保留偏好，删除引擎会关闭自动更新。
+定时更新使用插件激活身份，和普通 Coding Agent 共用检查、互斥及连续空闲至少一分钟后再更新的策略；
+每次更新前重新确认能力和版本并阻止新运行，插件禁用或移除后不继续更新。
+成功检查的常规间隔为六小时，失败后五分钟重试。手动检查成功会刷新共享策略并清除旧错误，
+页面立即读回状态；插件重载会作废旧运行实例的检查结果，保留自动更新偏好。
+手动检查使用真实调用身份；调用者与激活账号/Profile 不同时，其结果仅返回该调用者，
+宿主另以激活身份刷新自动更新策略，防止其他账号的安装信息成为全局更新目标。
+它们与 Studio 插件包的版本和升级操作独立。安装维护沿用超级管理员权限，运行凭证不能调用管理操作。
+宿主在升级前重新检查当前版本和可用版本，拒绝在途运行，清理空闲实例，升级后重新探测实际版本。
+失败不意味着外部二进制已经回滚，插件应自行实现其引擎的恢复策略。
+
+管理上下文含当前 `identity`（账号、Profile、Agent ID）、`signal`、`log`、`resources.add` 和
+`progress({message, percent?})`。管理操作不绑定会话，其普通调用上限为 120 秒。
+
+### global 与 scoped
+
+- `global`：插件通过 `modes.global.listModels(ctx)` 提供原生模型目录，Studio 展示并回传模型 ID 和推理参数。
+  目录可返回 `ready/empty/not_installed/auth_required/unsupported/timeout/error`。
+  宿主不注入 scoped 代理地址，不替插件改写原生全局配置。
+- `scoped`：Studio 按实际用户的 Profile 解析选定模型，提供 `provider/model/apiMode/baseUrl/token`、
+  `reasoningEffort` 和 `contextWindow/outputLimit`。其中 token 是 Studio 代理凭证，上游 API key 保留在 Studio。
+  `apiMode` 是引擎到 Studio 的协议，与上游提供商协议独立；插件在 `protocols` 声明其支持的请求协议。
+  宿主负责代理的协议转换、用量记录和凭证撤销，插件负责如何写配置并使引擎请求该代理。
+
+两种模式都不增加账号、Profile 或工作区权限。模式或绑定改变时，插件根据本轮上下文重配或重建原生引擎。
+
+### 实例、输入与运行上下文
+
+`createSession(session)` 收到可信的 `identity`、`mode`、`paths.runtimeDir/workspaceDir`、实例生命周期 `signal`、
+`log`、`resources.add` 及可选 `resumeState`，返回 `run`、`dispose` 和可选 `checkpoint`。
+实例按插件运行版本、Agent、用户、Profile、会话、模式隔离，同实例串行执行。
+运行资源在 `run.resources` 追踪，长期资源在 `session.resources` 追踪。
+声明 `resume: true` 时必须实现 `checkpoint()`；检查点需包含正整数 `schemaVersion` 和 JSON `data`。
+升级后检查点格式的兼容处理由插件的 `createSession` 负责；恢复不等于重放尚未确定结果的操作。
+
+`run(input, run)` 的输入包含本轮 `input`、不含本轮输入的历史 `history`、宿主 `instructions` 和 `options`。
+内容块为文本 `{type:'text',text}` 或附件 `{type:'image'|'file',assetId,name,mediaType}`。
+宿主统一处理上传与权限，插件用 `run.attachments.resolve(assetId)` 获取元信息和本地路径，
+或用 `read(assetId)` 读取二进制。插件必须把图片和文件传给其引擎或工具处理，不得丢弃或仅用占位文本冒充处理。
+格式、文件大小和模型侧限制应明确报告为运行错误。
+
+本轮上下文还包含：
+
+| 字段 | 语义 |
+| --- | --- |
+| `identity` | 当前实际用户、Profile、会话、运行、Agent 和来源；不借用安装者权限 |
+| `mode / model` | 按模式区分的原生模型选择或 Studio 代理绑定 |
+| `signal / deadlineAt` | 当前取消和超时；Agent 运行独立于普通 RPC 的 120 秒上限，单次运行上限为一小时，父任务可更早停止 |
+| `api / models / tools / workspace` | 现有插件 SDK 的当前用户能力，继续受 manifest 和原业务接口权限约束 |
+| `storage` | 当前 Agent、账号、Profile、会话及模式的分区存储；插件全局共享存储仍使用根 `ctx.storage` |
+| `mcpServers` | 由 Studio 生成的本轮受管 MCP 配置，带短期运行凭证文件；引擎配置格式由插件适配 |
+| `interactions.approve` | 请求审批并返回 `approved/denied/cancelled/timeout`；只有显式 approved 才能继续相应操作 |
+| `interactions.clarify` | 返回 `answered` 和文本，或 `dismissed/cancelled/timeout` |
+| `events.emit / log / resources` | 过程事件、运行日志与本轮资源清理 |
+
+模型代理和 MCP 凭证在运行结束或取消时失效，不得记录到日志、前端或聊天历史。
+异步回调中的根 `ctx.identity/api/models/signal` 也绑定当前调用者。运行结束后保存下来的上下文不可继续使用。
+Node.js 插件仍是可信代码；取消信号无法强行中断同进程的无限循环，插件必须正确释放其进程和连接。
+
+标准事件为 `text.delta`、`reasoning.summary.delta`、`status`、`tool.started/completed/failed`。
+宿主生成运行 ID、校验事件，并以 Promise 提供背压。最终返回 `{content,finishReason,usage?,checkpoint?}`，
+其中 `content` 是完整回复，增量只作预览，宿主只保存一份最终回复。
+成功、失败、取消与持久化均由宿主控制；结束后的迟到事件不能写回。停止会保留已生成的部分内容。
+
+### 既有 Coding Agent 兼容
+
+统一管理入口为 `/api/studio/agents`，设置、检查更新和升级由宿主按注册来源分发。
+内置适配器映射既有状态检测、更新协调器、原生模型发现器及设置路由。
+原 `/api/coding-agents/*`、稳定 Agent ID、别名、会话和工作流引用继续保留；模型 `provider` 不改名。
+内置 CLI/SDK/ACP、配置生成、安装删除、自动更新、回滚及运行管理器继续使用原实现。
+插件 Agent 使用同一管理和模式约定，接入现有单聊、群聊、工作流的运行、停止、历史和事件通道。
+名称与头像来自注册信息，新建单聊、会话恢复、群聊历史、Bot 执行任务、通知和用量页均保留插件 Agent ID。尚未加载或已卸载的插件使用保存的完整 Agent ID 首字母与纯色底头像；颜色由 ID 稳定生成，同一 ID 在消息和任务等页面一致。例如 `plugin:omp/omp` 显示 `P`。不保存额外头像快照。
+Bot 的执行预设也从注册目录读取支持单聊的插件，并按实际账号、资源 Profile、安装状态和模式校验。Bot 自身的外观与执行 Agent 独立。插件原生模型目录及其缓存按账号、Profile 和 Agent 分区；原有 CLI 的原生目录仍共享。
 
 ## Published directory and installed-plugin updates
 

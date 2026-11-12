@@ -10,11 +10,11 @@ import PageSidebarFooter from './PageSidebarFooter.vue'
 import { useMobileNavigation } from '@/composables/usePageSidebar'
 import { pluginPages, pluginNavigation, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
-import { PLUGIN_NAVIGATION_VISIBLE } from '@/plugins/navigation'
+import PluginSymbol from '@/components/common/PluginIcon.vue'
 
 const route = useRoute()
 const { t } = useI18n()
-const { snapshot } = usePluginCatalog(computed(() => PLUGIN_NAVIGATION_VISIBLE))
+const { snapshot } = usePluginCatalog()
 const pluginEntries = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginNavigation(plugin).map(view => ({ plugin, view }))))
 function pluginActive(id: string, view: { id: string; slot: string }) {
   if (route.name !== 'studio.pluginPage' || route.params.pluginId !== id) return false
@@ -24,7 +24,6 @@ function pluginActive(id: string, view: { id: string; slot: string }) {
 }
 const canManageAgents = computed(() => isStoredSuperAdmin())
 const entries = computed(() => [
-  ...(PLUGIN_NAVIGATION_VISIBLE ? [{ key: 'studioPlugins', route: 'studio.plugins', label: 'studioPlugins.title', path: 'M9 3h6v5h5v7h-5v6H9v-6H3V8h6z' }] : []),
   { key: 'person', route: 'hermes.person', label: 'person.subtitle', avatar: deploymentUrl('/person/idle.gif') },
   { key: 'chat', route: 'hermes.chat', label: 'sidebar.singleChat', path: 'M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
   { key: 'group', route: 'hermes.groupChat', label: 'sidebar.groupChat', path: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' },
@@ -34,6 +33,7 @@ const entries = computed(() => [
   ...(canManageAgents.value ? [{ key: 'agents', route: 'hermes.agentManager', label: 'sidebar.agentManager', path: 'M12 8V4H8M7 8h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-6a3 3 0 0 1 3-3M2 14h2M20 14h2M9 13v2M15 13v2' }] : []),
   { key: 'models', route: 'hermes.models', label: 'sidebar.models', path: 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1' },
   { key: 'usage', route: 'hermes.usage', label: 'sidebar.usage', path: 'M3 12h4v9H3zM10 7h4v14h-4zM17 3h4v18h-4z' },
+  { key: 'studioPlugins', route: 'studio.plugins', label: 'studioPlugins.title' },
 ])
 const activeKey = computed(() => {
   const name = String(route.name || '')
@@ -61,7 +61,8 @@ function handleNavigate(key: string) {
       <NTooltip placement="right" trigger="hover">
         <template #trigger>
           <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: entry.route }" :active="activeKey === entry.key" :aria-label="t(entry.label)" @click="handleNavigate(entry.key)">
-            <img v-if="entry.avatar" class="studio-navigation-rail__avatar" :src="entry.avatar" width="32" height="32" alt="" aria-hidden="true" />
+            <PluginSymbol v-if="entry.key === 'studioPlugins'" :size="22" />
+            <img v-else-if="entry.avatar" class="studio-navigation-rail__avatar" :src="entry.avatar" width="32" height="32" alt="" aria-hidden="true" />
             <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="entry.path" /></svg>
           </RouteLinkItem>
         </template>

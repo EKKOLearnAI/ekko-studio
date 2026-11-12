@@ -1628,6 +1628,14 @@ function piMcpConfig(profile: string, runTokenFile: string | undefined, ...exter
   }, null, 2)}\n`
 }
 
+/** Runtime-neutral managed transport; custom runtimes adapt its configuration themselves. */
+export function getPluginAgentManagedMcpServerConfigs(profile: string, runTokenFile: string): Record<string, Record<string, unknown>> {
+  return Object.fromEntries(managedMcpServers().map(item => {
+    const server = hermesMcpServerConfig(profile, item.name, item.toolset)
+    return [item.name, { ...server, env: { ...server.env, HERMES_WEB_UI_RUN_TOKEN_FILE: runTokenFile } }]
+  }))
+}
+
 export function getCodingAgentManagedMcpServerConfigs(
   id: CodingAgentId,
   profile = 'default',

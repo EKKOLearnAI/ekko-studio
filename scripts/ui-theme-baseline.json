@@ -1102,11 +1102,7 @@
     },
     "packages/client/src/views/hermes/AgentManagerView.vue": {
       "literal-color | :global(.agent-ai-help-error) | background: rgba(127, 127, 127, 0.1)": 1,
-      "unowned-background | :global(.agent-ai-help-error) | background: rgba(127, 127, 127, 0.1)": 1,
-      "literal-color | .agent-card | box-shadow: 0 5px 18px rgba(0, 0, 0, 0.05)": 1,
-      "literal-color | .agent-logo | background: rgba(255, 255, 255, 0.92)": 1,
-      "unowned-background | .agent-logo | background: rgba(255, 255, 255, 0.92)": 1,
-      "literal-color | .agent-update-error | color: #c44": 1
+      "unowned-background | :global(.agent-ai-help-error) | background: rgba(127, 127, 127, 0.1)": 1
     },
     "packages/client/src/views/hermes/GroupChatLinkView.vue": {
       "unowned-background | .group-chat-link-view | background: $bg-primary": 1,

@@ -15,7 +15,7 @@ export async function validatePersonAgents(userId: number, value: unknown): Prom
     if (ids.has(id) || id === 'default') throw personError('Duplicate or reserved agent ID')
     ids.add(id)
     const input = raw.selection
-    const selection: PersonSelection = { runtime: personText(input.runtime, 'runtime', 40), mode: input.mode,
+    const selection: PersonSelection = { runtime: personText(input.runtime, 'runtime', 136), mode: input.mode,
       profile: personText(input.profile, 'profile', 100), provider: String(input.provider || ''),
       model: input.mode === 'global' && input.model === '' ? '' : personText(input.model, 'model', 300), reasoningEffort: String(input.reasoningEffort || '') }
     if (isGlobalOnlyCodingAgent(selection.runtime) && selection.mode !== 'global') throw personError('This agent requires native mode')

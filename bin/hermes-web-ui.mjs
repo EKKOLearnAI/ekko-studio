@@ -671,6 +671,7 @@ Commands:
   stop               Stop the server
   restart [port]     Restart the server
   status             Show server status
+  plugins            Create, register and debug standalone plugins
   clear-login-locks  Delete the login IP lock file
   reset-default-login Create or reset the default login (${DEFAULT_USERNAME} / ${DEFAULT_PASSWORD})
   update             Update to latest version and restart
@@ -688,6 +689,9 @@ Options:
   }
 
   switch (command) {
+    case 'plugins':
+      await (await import('./plugin-development.mjs')).runPluginCommand(process.argv.slice(3))
+      break
     case 'start':
       startDaemon(getPort())
       break

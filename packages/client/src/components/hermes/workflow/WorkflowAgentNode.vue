@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { agentReasoningEffortOptions, agentReasoningEffortValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
-import { isGlobalOnlyCodingAgent } from "@/utils/agent-catalog"
+import { isGlobalOnlyCodingAgent, agentMetadata } from "@/utils/agent-catalog"
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
 import { computed, ref, watch } from 'vue'
 import { usePluginCatalog } from '@/composables/usePluginCatalog'
@@ -37,7 +37,7 @@ const statusTip = computed(() => (
     : ''
 ))
 const isCodingAgent = computed(() => props.data.agent !== 'hermes')
-const supportsGlobalMode = computed(() => ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(props.data.agent))
+const supportsGlobalMode = computed(() => Boolean(agentMetadata(props.data.agent)?.modes.includes('global')))
 const usesScopedModel = computed(() => !props.data.pluginAction && !isGlobalOnlyCodingAgent(props.data.agent) && (!supportsGlobalMode.value || props.data.agentMode !== 'global'))
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.modelScope'), value: 'scoped' },
@@ -228,7 +228,7 @@ async function uploadImages(files: File[]) {
         :disabled="data.readonly"
         @select="handleModelSelect"
       />
-      <NativeCodingAgentModelFields v-else :key="data.agent" :agent="data.agent as CodingAgentId"
+      <NativeCodingAgentModelFields v-else :key="data.agent" :agent="data.agent as CodingAgentId" :profile="data.profile"
         :model="data.model" :reasoning-effort="data.reasoningEffort === 'default' ? '' : data.reasoningEffort"
         :disabled="data.readonly" @change="selection => data.onUpdate(id, { ...selection, reasoningEffort: selection.reasoningEffort || 'default' })" />
       <NSelect
@@ -252,7 +252,7 @@ async function uploadImages(files: File[]) {
           :placeholder="t('chat.reasoningEffort.tooltip')"
           @update:value="value => updateField('reasoningEffort', value as string)"
         />
-        <NativeCodingAgentModelFields v-else :key="data.agent" :agent="data.agent as CodingAgentId"
+        <NativeCodingAgentModelFields v-else :key="data.agent" :agent="data.agent as CodingAgentId" :profile="data.profile"
           field="reasoning-effort" :model="data.model" :reasoning-effort="data.reasoningEffort === 'default' ? '' : data.reasoningEffort"
           :disabled="data.readonly" @change="selection => data.onUpdate(id, { ...selection, reasoningEffort: selection.reasoningEffort || 'default' })" />
       </div>

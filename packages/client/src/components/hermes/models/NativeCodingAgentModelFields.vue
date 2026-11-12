@@ -8,10 +8,10 @@ import { useCodingAgentModels } from '@/composables/useCodingAgentModels'
 import { nativeCatalogModel, nativeModelLabel, nativeModelEffortChoices, nativeModelFamilies, nativeModelPickerId, selectNativeModelEffort } from '@/utils/native-model-families'
 import ModelCascader from './ModelCascader.vue'
 
-const props = defineProps<{ agent: CodingAgentId; model: string; reasoningEffort: string; disabled?: boolean; field?: 'model' | 'reasoning-effort' }>()
+const props = defineProps<{ agent: CodingAgentId; model: string; reasoningEffort: string; disabled?: boolean; profile?: string; field?: 'model' | 'reasoning-effort' }>()
 const emit = defineEmits<{ change: [selection: { model: string; reasoningEffort: string }] }>()
 const { t, te } = useI18n()
-const { catalog, loading, refreshFailed, reload } = useCodingAgentModels(() => props.agent, () => true)
+const { catalog, loading, refreshFailed, reload } = useCodingAgentModels(() => props.agent, () => true, () => props.profile)
 const models = computed(() => catalog.value?.models || [])
 const selected = computed(() => nativeCatalogModel(models.value, props.model))
 const choices = computed(() => nativeModelEffortChoices(models.value, props.model))

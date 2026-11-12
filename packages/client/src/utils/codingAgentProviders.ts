@@ -31,12 +31,12 @@ export function canScopedCodingAgentUseProvider(
   provider?: string,
 ): boolean {
   return String(provider || '').trim().toLowerCase() !== 'moa'
-    && (agentId === 'ekko-agent' || !isAuthModelProvider(provider))
+    && (agentId === 'ekko-agent' || agentId.startsWith('plugin:') || !isAuthModelProvider(provider))
 }
 
 export function usesServerManagedProviderAuth(
   agentId: ChatCodingAgentId,
   provider?: string,
 ): boolean {
-  return agentId === 'ekko-agent' && isAuthModelProvider(provider)
+  return agentId.startsWith('plugin:') || agentId === 'ekko-agent' && isAuthModelProvider(provider)
 }

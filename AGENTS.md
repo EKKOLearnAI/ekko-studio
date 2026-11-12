@@ -56,6 +56,7 @@ Empty suites are allowed during the reset; this does not waive new-feature tests
 - Add user-facing strings to every locale file.
 - Register every JEV business integration with its own switch and frontend configuration entry; explicitly register any enabled Studio default, keep standalone defaults off, and run `npm run harness:check`.
 - Do not mix unrelated refactors into a bug fix.
+- When changing plugin SDK/context/return structures, directly update the relevant Markdown in `packages/plugin-sdk/docs` in the same change. These guides ship with new plugins; see `docs/harness/validation.md`.
 - Keep one-off reports, temporary probes and test evidence outside all checkouts; use `npm run artifacts:new -- <task>` and `npm run artifacts:check`.
 - New UI must follow the theme surface contract in `docs/harness/frontend-ui.md`; do not expand the legacy style baseline to bypass checks.
 

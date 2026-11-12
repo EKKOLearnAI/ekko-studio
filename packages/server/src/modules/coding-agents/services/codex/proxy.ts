@@ -40,6 +40,11 @@ export interface CodexProxyTargetInput extends AgentTargetInput {
 
 type CodexProxyTarget = RegisteredAgentTarget<CodexProxyTargetInput>
 
+function recordTargetUsage(target: CodexProxyTarget, event: CanonicalResponsesEvent, apiDuration?: number, baseUrl?: string) {
+  if (target.onUsageEvent) target.onUsageEvent(event, apiDuration, baseUrl)
+  else codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event, apiDuration, baseUrl)
+}
+
 const targetRegistry = new AgentTargetRegistry<CodexProxyTargetInput>(
   input => [input.profile.trim(), input.provider, input.model, input.apiMode, input.baseUrl, input.agentSessionId || '', input.chatSessionId || ''],
 )
@@ -56,6 +61,8 @@ export function registerCodexProxyTarget(input: CodexProxyTargetInput): { baseUr
 
   return { baseUrl: localProxyBaseUrl(target.routeKey), token: target.token, routeKey: target.routeKey }
 }
+
+export function revokeCodexProxyTarget(routeKey: string): number { return targetRegistry.removeWhere(target => target.routeKey === routeKey) }
 
 export function restoreCodexProxyTarget(
   input: CodexProxyTargetInput,
@@ -164,7 +171,7 @@ async function callOpenAiChat(target: CodexProxyTarget, body: any, signal?: Abor
     body: chatBody,
     signal,
   })
-  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
+  recordTargetUsage(target, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
   return response
 }
 
@@ -188,7 +195,7 @@ async function callAnthropicMessages(target: CodexProxyTarget, body: any, signal
     body: anthropicBody,
     signal,
   })
-  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
+  recordTargetUsage(target, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
   return response
 }
 
@@ -208,7 +215,7 @@ async function callOpenAiResponses(target: CodexProxyTarget, body: any, signal?:
     body: responsesBody,
     signal,
   })
-  codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
+  recordTargetUsage(target, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
   return response
 }
 
@@ -279,7 +286,7 @@ function responseEventForCodexClient(target: CodexProxyTarget, event: CanonicalR
 function observableResponsesEvents(target: CodexProxyTarget, events: AsyncIterable<CanonicalResponsesEvent>, startedAt: number): AsyncIterable<CanonicalResponsesEvent> {
 async function* observe() {
     for await (const event of normalizeResponsesSseEvents(events)) {
-      codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event, (performance.now() - startedAt) / 1000, target.baseUrl)
+      recordTargetUsage(target, event, (performance.now() - startedAt) / 1000, target.baseUrl)
       const clientEvent = responseEventForCodexClient(target, event)
       // Grok, OpenCode and DSH report the same model activity through their native
       // stdout streams. The proxy remains responsible for transport and usage
