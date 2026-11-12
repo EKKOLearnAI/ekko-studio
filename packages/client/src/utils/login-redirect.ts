@@ -1,4 +1,4 @@
-const DEFAULT_LOGIN_REDIRECT = '/hermes/chat'
+const DEFAULT_LOGIN_REDIRECT = '/person'
 
 export function resolveLoginRedirect(value: unknown): string {
   const redirect = typeof value === 'string' ? value : ''
