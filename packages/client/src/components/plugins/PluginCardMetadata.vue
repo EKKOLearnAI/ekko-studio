@@ -37,10 +37,10 @@ const updateKeys: Record<PluginUpdateState, string> = {
     <div class="metadata-byline">
       <div class="metadata-line author"><span class="metadata-label">{{ t('studioPlugins.author') }}</span><span class="metadata-value">{{ author?.trim() || t('studioPlugins.authorUnknown') }}</span></div>
       <div class="metadata-line repository">
-        <a v-if="repositoryUrl" :href="repositoryUrl" target="_blank" rel="noopener noreferrer" :aria-label="t('studioPlugins.repository') + ' · ' + repositoryName">{{ repositoryName }}<ExternalLinkIcon /></a>
+        <a v-if="repositoryUrl" :href="repositoryUrl" target="_blank" rel="noopener noreferrer" :aria-label="t('studioPlugins.repository') + ' · ' + repositoryName"><span>{{ repositoryName }}</span><ExternalLinkIcon /></a>
         <span v-else class="metadata-label">{{ t('studioPlugins.repositoryUnknown') }}</span>
         <span v-if="repositoryUrl && repositoryName === 'GitHub'" class="repository-stars" :aria-label="'GitHub Stars: ' + stars" :title="stars === '—' ? t('studioPlugins.starsUnknown') : 'GitHub Stars'">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" /></svg>{{ stars }}
+          <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z" /></svg><span>{{ stars }}</span>
         </span>
       </div>
     </div>
@@ -60,12 +60,12 @@ const updateKeys: Record<PluginUpdateState, string> = {
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-.plugin-metadata { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: $text-secondary; min-width: 0; }
+.plugin-metadata { display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 20px; color: $text-secondary; min-width: 0; }
 .metadata-byline, .metadata-details { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .compact .metadata-byline, .compact .metadata-details { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 16px; }
 .compact .metadata-byline { color: $text-secondary; }
 .compact .metadata-details { font-size: 11px; color: $text-muted; }
-.metadata-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
+.metadata-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
 .metadata-label { color: $text-muted; }
 .author { flex-wrap: nowrap; }
 .author .metadata-label { flex-shrink: 0; }
@@ -74,6 +74,7 @@ const updateKeys: Record<PluginUpdateState, string> = {
 .repository a { display: inline-flex; align-items: center; gap: 4px; color: $text-secondary; text-decoration: none; }
 .repository a:hover { color: $accent-primary; text-decoration: underline; text-underline-offset: 3px; }
 .repository-stars { display: inline-flex; align-items: center; gap: 5px; }
+.repository-stars svg { display: block; flex: none; }
 .versions { font-variant-numeric: tabular-nums; }
 .update-state { display: flex; align-items: center; color: $text-muted; }
 </style>

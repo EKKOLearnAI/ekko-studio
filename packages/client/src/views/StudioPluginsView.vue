@@ -284,8 +284,8 @@ async function logs(id: string) {
         <svg class="developer-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 7-5 5 5 5m10-10 5 5-5 5M14 4l-4 16" /></svg>
         <div class="developer-copy"><h1>{{ t('studioPlugins.developTitle') }}</h1><p>{{ t('studioPlugins.developDescription') }}</p></div>
         <nav class="developer-links" :aria-label="t('studioPlugins.developResources')">
-          <a href="https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.developGuide') }}<ExternalLinkIcon /></a>
-          <a href="https://github.com/EKKOLearnAI/ekko-studio/tree/main/packages/plugin-sdk/template" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.developTemplate') }}<ExternalLinkIcon /></a>
+          <a href="https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md" target="_blank" rel="noopener noreferrer"><span>{{ t('studioPlugins.developGuide') }}</span><ExternalLinkIcon /></a>
+          <a href="https://github.com/EKKOLearnAI/ekko-studio/tree/main/packages/plugin-sdk/template" target="_blank" rel="noopener noreferrer"><span>{{ t('studioPlugins.developTemplate') }}</span><ExternalLinkIcon /></a>
           <NButton text @click="showSubmission = true">{{ t('studioPluginSubmission.title') }}</NButton>
         </nav>
       </aside>
@@ -437,7 +437,7 @@ async function logs(id: string) {
                 <div class="project-metadata">
                   <p v-if="selected.manifest.author"><strong>{{ t('studioPlugins.author') }}:</strong> <a v-if="safePluginLink(selected.manifest.author.url)" :href="safePluginLink(selected.manifest.author.url)" target="_blank" rel="noopener noreferrer">{{ selected.manifest.author.name }}</a><span v-else>{{ selected.manifest.author.name }}</span></p>
                   <p v-if="selected.manifest.license"><strong>{{ t('studioPlugins.license') }}:</strong> {{ selected.manifest.license }}</p>
-                  <div class="actions"><a v-for="link in pluginLinks(selected)" :key="link.key" :href="link.url" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.' + link.key) }}<ExternalLinkIcon /></a></div>
+                  <div class="actions"><a v-for="link in pluginLinks(selected)" :key="link.key" :href="link.url" target="_blank" rel="noopener noreferrer"><span>{{ t('studioPlugins.' + link.key) }}</span><ExternalLinkIcon /></a></div>
                   <div class="capability-list"><NTag v-for="keyword in selected.manifest.keywords || []" :key="keyword" size="small" :bordered="false">{{ keyword }}</NTag></div>
                 </div>
                 <h4>{{ t('studioPlugins.availableIn') }}</h4>
@@ -507,10 +507,11 @@ async function logs(id: string) {
 .developer-copy { flex: 1; min-width: 0; }
 .developer-copy h1 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
 .developer-copy p { font-size: 12px; }
-.developer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; font-size: 12px; }
-.developer-links a { display: inline-flex; align-items: center; gap: 4px; color: $text-secondary; text-decoration: none; }
+.developer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; font-size: 12px; line-height: 20px; }
+.developer-links a { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; color: $text-secondary; text-decoration: none; }
 .developer-links a:hover { color: $accent-primary; text-decoration: underline; text-underline-offset: 3px; }
-.developer-links :deep(.n-button) { font-size: inherit; }
+.developer-links :deep(.n-button) { min-height: 24px; font-size: inherit; line-height: inherit; }
+.developer-links :deep(.n-button__content) { line-height: inherit; }
 .catalog-heading { display: flex; align-items: center; gap: 24px; }
 .catalog-scopes { flex: 1; min-width: 0; }
 .eyebrow { color: $text-muted; font-size: 12px; }
@@ -528,9 +529,9 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .catalog-count { white-space: nowrap; }
 .plugin-grid { display: flex; flex-direction: column; gap: 10px; }
 .plugin-card { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: start; gap: 20px; min-width: 0; padding: 20px; background: $bg-card; border: 1px solid $border-light; border-radius: $radius-lg; }
-.card-icon { width: 48px; height: 48px; }
+.card-icon { width: 48px; height: 48px; align-self: center; }
 .card-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
-.status { display: inline-flex; align-items: center; gap: 6px; color: $text-muted; font-size: 12px; }
+.status { display: inline-flex; align-items: center; gap: 6px; color: $text-muted; font-size: 12px; line-height: 20px; }
 .status i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status.running { color: $text-secondary; }
 .card-copy { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -552,10 +553,10 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .detail-description { white-space: pre-line; }
 .project-metadata { display: flex; flex-direction: column; gap: 12px; overflow-wrap: anywhere; }
 .project-metadata a { color: $accent-primary; }
-.project-metadata .actions a { display: inline-flex; align-items: center; gap: 4px; }
+.project-metadata .actions a { display: inline-flex; align-items: center; gap: 4px; line-height: 1.5; }
 .development-path { overflow-wrap: anywhere; }
 .view-list { display: flex; flex-direction: column; gap: 8px; }
-.view-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid $border-color; text-decoration: none; color: $text-primary; }
+.view-link { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; line-height: 1.5; border-bottom: 1px solid $border-color; text-decoration: none; color: $text-primary; }
 .operation-list { display: flex; flex-direction: column; gap: 12px; }
 .operation-list strong { display: block; color: $text-primary; font-weight: 500; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: 12px; }
