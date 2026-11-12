@@ -12,7 +12,7 @@ Studio 启动后以有效超级管理员身份安装缺失的内置插件，首�
 
 当前内置 **Oh My Pi（OMP）**，Agent ID 为 `plugin:omp/omp`：
 
-1. 进入 Agent 管理，点击 OMP 的“检查更新”，再选择版本升级，首次操作会安装引擎。
+1. 进入 Agent 管理，OMP 引擎未安装时直接点击“安装”；宿主查询可用版本并调用插件的安装维护方法。完成后显示版本和“检查更新”，发现新版本后可升级。
 2. 安装从 OMP 官方 GitHub Release 下载当前系统架构的独立可执行文件，校验 SHA-256 和实际版本，保存到本插件数据目录。不会修改系统 Bun、全局 CLI 或用户已有 OMP 目录。网络失败会保留原来的引擎选择。
 3. 点击“设置”打开插件自己的前端与 RPC 后端。也可填写已有 OMP 可执行文件的绝对路径；这种情况下引擎由用户维护，Studio 不替换该文件。
 4. scoped 模式直接使用 Studio 当前选择的模型和本轮代理凭证，无需在插件内重复填写模型密钥。
@@ -437,6 +437,7 @@ export function apply(ctx) {
 
 `getStatus` 返回 `{installed, version, source?, path?, error?}`。普通目录不暴露安装路径。
 管理页的三个操作绑定 `management.settings/checkUpdate/upgrade`；未提供的操作不显示。
+同时提供 `checkUpdate/upgrade` 的插件 Agent，在 `installed:false` 时显示“安装”。点击后宿主先调用 `checkUpdate` 获取准确版本，再调用 `upgrade` 完成首次安装；安装期间禁用重复操作，成功后刷新状态。已安装时显示“检查更新”及可用的版本升级操作。
 设置回调返回本插件清单中 `slot: 'settings'` 的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。
 页面继续通过 `client.mjs` 的 `mount(root, ctx)` 和服务端 `ctx.rpc.register` 实现。
 生产安全策略允许视图加载 Blob 模块；iframe 保持不透明来源，自己的 CSP 禁止直接网络请求，业务调用仍经认证桥接。

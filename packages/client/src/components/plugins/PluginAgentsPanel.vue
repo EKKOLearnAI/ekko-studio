@@ -10,6 +10,7 @@ import { syncPluginAgentOptions } from '@/utils/agent-options'
 
 const router = useRouter(), { t } = useI18n(), message = useMessage()
 const agents = ref<StudioAgent[]>([]), error = ref(''), busy = ref('')
+const busyAction = ref('')
 const updates = ref<Record<string, AgentUpdate>>({})
 let alive = true, sequence = 0
 async function refresh() {
@@ -22,22 +23,25 @@ async function refresh() {
     error.value = ''
   } catch (cause) { if (alive && current === sequence) error.value = String(cause) }
 }
-async function action(agent: StudioAgent, kind: 'settings' | 'check-update' | 'upgrade') {
+async function action(agent: StudioAgent, kind: 'settings' | 'check-update' | 'upgrade' | 'install') {
   if (busy.value) return
-  busy.value = agent.id; error.value = ''
+  busy.value = agent.id; busyAction.value = kind; error.value = ''
   try {
     if (kind === 'settings') await router.push(await studioAgentAction<RouteLocationRaw>(agent.id, kind))
     else if (kind === 'check-update') updates.value[agent.id] = await studioAgentAction<AgentUpdate>(agent.id, kind)
     else {
-      const update = updates.value[agent.id]
-      if (!update?.updateAvailable) return
-      await studioAgentAction(agent.id, kind, { version: update.latestVersion, expectedVersion: update.currentVersion })
+      const update = kind === 'install' ? await studioAgentAction<AgentUpdate>(agent.id, 'check-update') : updates.value[agent.id]
+      if (!update?.updateAvailable || !update.latestVersion) {
+        if (kind === 'install') throw new Error(update?.message || t('codingAgents.installFailed'))
+        return
+      }
+      await studioAgentAction(agent.id, 'upgrade', { version: update.latestVersion, expectedVersion: update.currentVersion })
       delete updates.value[agent.id]
       await refresh()
       message.success(t('codingAgents.installSuccess'))
     }
   } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) }
-  finally { busy.value = '' }
+  finally { busy.value = ''; busyAction.value = '' }
 }
 onMounted(() => { void refresh(); window.addEventListener('studio.plugins.changed', refresh) })
 onBeforeUnmount(() => { alive = false; sequence++; window.removeEventListener('studio.plugins.changed', refresh) })
@@ -55,9 +59,10 @@ onBeforeUnmount(() => { alive = false; sequence++; window.removeEventListener('s
       <p v-if="agent.description">{{ agent.description }}</p>
       <NAlert v-if="agent.status.error" type="error">{{ agent.status.error }}</NAlert>
       <div class="plugin-agent-actions">
-        <NButton v-if="agent.actions.settings" size="small" secondary :loading="busy === agent.id" @click="action(agent, 'settings')">{{ t('sidebar.settings') }}</NButton>
-        <NButton v-if="agent.actions.checkUpdate && isStoredSuperAdmin()" size="small" secondary :disabled="Boolean(busy)" @click="action(agent, 'check-update')">{{ t('codingAgents.checkUpdate') }}</NButton>
-        <NButton v-if="agent.actions.upgrade && updates[agent.id]?.updateAvailable && isStoredSuperAdmin()" size="small" type="primary" :loading="busy === agent.id" :disabled="Boolean(busy)" @click="action(agent, 'upgrade')">{{ t('agentManager.updateToVersion', { version: updates[agent.id]?.latestVersion }) }}</NButton>
+        <NButton v-if="agent.actions.settings" size="small" secondary :loading="busy === agent.id && busyAction === 'settings'" :disabled="Boolean(busy)" @click="action(agent, 'settings')">{{ t('sidebar.settings') }}</NButton>
+        <NButton v-if="!agent.status.installed && agent.actions.upgrade && agent.actions.checkUpdate && isStoredSuperAdmin()" size="small" type="primary" :loading="busy === agent.id && busyAction === 'install'" :disabled="Boolean(busy)" @click="action(agent, 'install')">{{ t(busy === agent.id && busyAction === 'install' ? 'codingAgents.installing' : 'codingAgents.kinds.install') }}</NButton>
+        <NButton v-if="agent.actions.checkUpdate && (agent.status.installed || !agent.actions.upgrade) && isStoredSuperAdmin()" size="small" secondary :loading="busy === agent.id && busyAction === 'check-update'" :disabled="Boolean(busy)" @click="action(agent, 'check-update')">{{ t('codingAgents.checkUpdate') }}</NButton>
+        <NButton v-if="agent.status.installed && agent.actions.upgrade && updates[agent.id]?.updateAvailable && isStoredSuperAdmin()" size="small" type="primary" :loading="busy === agent.id && busyAction === 'upgrade'" :disabled="Boolean(busy)" @click="action(agent, 'upgrade')">{{ t('agentManager.updateToVersion', { version: updates[agent.id]?.latestVersion }) }}</NButton>
       </div>
     </article>
   </section>

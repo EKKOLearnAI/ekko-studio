@@ -1,7 +1,7 @@
 const text = {
   zh: {
     title: 'OMP 设置', intro: '全局模式使用本页的 OMP 模型与凭证；scoped 模式使用 Studio 选择的模型。配置按当前账号与 Profile 保存。',
-    engine: '运行环境', status: '引擎状态', installed: '已安装', missing: '未安装', management: '打开 Agent 管理', install: '首次安装或升级：在 Agent 管理中点击 OMP 的“检查更新”，再选择升级版本。',
+    engine: '运行环境', status: '引擎状态', installed: '已安装', missing: '未安装', management: '打开 Agent 管理', install: '首次使用：在 Agent 管理中点击 OMP 的“安装”。已安装后可检查更新并升级。',
     executable: 'OMP 可执行文件（可选）', executableHelp: '留空使用 Studio 管理的 OMP；也可以填写已安装 OMP 的绝对路径。',
     native: '全局模型', model: '默认模型', modelHelp: '填写 provider/model；也可以留空，在聊天时选择 OMP 提供的原生模型。',
     models: '模型与凭证（JSON）', modelsHelp: '使用 OMP models.yml 的 providers 结构。已有密钥会遮蔽显示，保留遮蔽值即可保持原密钥。',
@@ -10,7 +10,7 @@ const text = {
   },
   en: {
     title: 'OMP settings', intro: 'Global mode uses OMP models and credentials from this page. Scoped mode uses the model selected in Studio. Settings belong to the current account and Profile.',
-    engine: 'Runtime', status: 'Engine status', installed: 'Installed', missing: 'Not installed', management: 'Open Agent management', install: 'To install or upgrade, check for OMP updates in Agent management, then select the target version.',
+    engine: 'Runtime', status: 'Engine status', installed: 'Installed', missing: 'Not installed', management: 'Open Agent management', install: 'To get started, click Install for OMP in Agent management. Once installed, you can check for updates and upgrade.',
     executable: 'OMP executable (optional)', executableHelp: 'Leave empty for the Studio-managed engine, or enter an absolute path to an existing OMP executable.',
     native: 'Global models', model: 'Default model', modelHelp: 'Use provider/model, or leave empty and choose an OMP native model in chat.',
     models: 'Models and credentials (JSON)', modelsHelp: 'Use the OMP models.yml providers structure. Saved secrets are masked; leave the masked value to retain a secret.',
