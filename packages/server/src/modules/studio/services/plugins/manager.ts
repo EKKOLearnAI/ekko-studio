@@ -82,12 +82,13 @@ export class PluginManager {
     this.operations.set(key, current)
     try { return await current } finally { if (this.operations.get(key) === current) this.operations.delete(key) }
   }
-  async install(identity: PluginIdentity, source: string, revision: number, expectedId?: string): Promise<PluginSnapshot> {
+  async install(identity: PluginIdentity, source: string, revision: number, expectedId?: string, options?: { expectedVersion?: string }): Promise<PluginSnapshot> {
     return this.transaction(identity, revision, async state => {
       const pkg = await installPackage(this.store.directory(), source)
       try {
         const id = pkg.manifest.id
         if (expectedId && id !== expectedId) throw new PluginError('Update package has a different plugin id')
+        if (options?.expectedVersion && pkg.manifest.version !== options.expectedVersion) throw new PluginError('Update package version does not match the published release')
         const old = state.records[id]
         if (old && !expectedId) throw new PluginError('Plugin already installed; use Update', 'PLUGIN_EXISTS', 409)
         const next: PluginRecord = { manifest: pkg.manifest, directory: pkg.directory, source, installedAt: Date.now(), enabled: old?.enabled || false,

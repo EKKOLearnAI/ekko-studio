@@ -365,3 +365,11 @@ Studio 会将插件变更通知所有已启动的 Hermes Worker，包括群聊�
 
 验证命令：`npx vitest run tests/server/studio-plugins.test.ts tests/server/studio-plugin-*.test.ts tests/ekko-agent/plugin-hooks.test.ts`；
 浏览器旅程：`npm run test:e2e -- tests/e2e/studio-plugins.spec.ts tests/e2e/studio-plugin-navigation.spec.ts`。
+
+## Published directory and installed-plugin updates
+
+The independent cloud server reads root `plugin.json` when a submission is approved. It stores manifest metadata, a full snapshot, and an immutable source commit. Its periodic worker automatically publishes higher versions from the repository default branch.
+
+The plugin center checks the public cloud directory when opened, refreshed, focused after five minutes, and every five minutes while mounted. Requests include only the normalized repository URL, with no local token, cookie, Profile, or referrer. Local lists remain usable when the cloud is unavailable. A matching repository, manifest ID and API version plus a higher semantic version produces an update badge. Development installations are excluded.
+
+Only interactive super administrators can install an update, after confirming trust in the executable code. The selected immutable source and expected manifest version are sent to the existing installer, which verifies the ID and version before replacing the installation and preserves its configuration, enabled state, and rollback version. In addition to `github:owner/repo#<40-character-commit>`, published GitLab.com and Gitee packages use `git+https://<host>/<repository>.git#<40-character-commit>`; moving branch or tag references are rejected.

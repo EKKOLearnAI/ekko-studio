@@ -51,7 +51,8 @@ export async function installPackage(root: string, source: string): Promise<{ ma
       await cp(real, directory, { recursive: true, dereference: false, filter: path => !/^(?:\.git|\.env(?:\..*)?)$/.test(path.split(sep).at(-1) || '') })
     } else {
       if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+@\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(source)
-        && !/^github:[\w.-]+\/[\w.-]+#[a-f0-9]{40}$/.test(source)) throw new PluginError('Use an absolute directory, package@exact-version or github:owner/repo#full-commit')
+        && !/^github:[\w.-]+\/[\w.-]+#[a-f0-9]{40}$/.test(source)
+        && !/^git\+https:\/\/(?:gitlab\.com|gitee\.com)\/[\w.-]+(?:\/[\w.-]+)+\.git#[a-f0-9]{40}$/.test(source)) throw new PluginError('Use an absolute directory, package@exact-version or a supported repository pinned to a full commit')
       const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
       const args = ['install', '--prefix', stage, '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', '--package-lock=true', '--', source]
       const execution = process.platform === 'win32' ? windowsCmdShimExecution(npm, args) : { command: npm, args }
