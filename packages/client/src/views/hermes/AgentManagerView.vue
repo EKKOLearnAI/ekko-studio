@@ -5,13 +5,14 @@ import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginAgentsPanel from '@/components/plugins/PluginAgentsPanel.vue'
 import AgentManagerCard from '@/components/coding-agents/AgentManagerCard.vue'
+import AgentAutoUpdateControl from '@/components/coding-agents/AgentAutoUpdateControl.vue'
 import { studioAgentAction, type AgentUpdate } from '@/api/studio/agents'
 import type { RouteLocationRaw } from 'vue-router'
 import { getAgentUpdatePolicies, setAgentAutoUpdate, type AgentUpdatePolicyState } from '@/api/coding-agents'
 import { computed, defineAsyncComponent, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NTag, useDialog, useMessage } from 'naive-ui'
 import {
   deleteCodingAgent,
   fetchCodingAgentsStatus,
@@ -683,11 +684,7 @@ onUnmounted(() => {
                 </NPopconfirm>
               </template>
               <DshVersions v-if="agent.id === 'dsh'" :info="toolStatus(agent.id)?.compatibility" :busy="installing.dsh || deleting.dsh" @install="handleInstall('dsh', $event)" />
-              <div v-if="toolStatus(agent.id)?.installed && updatePolicies[agent.id]" class="agent-update-policy">
-                <div class="agent-update-policy-row"><span>{{ t('agentAutoUpdate.label') }}</span><NSwitch class="agent-update-switch" size="small" :theme-overrides="{ railHeightSmall: '16px', railWidthSmall: '28px', buttonHeightSmall: '12px', buttonWidthSmall: '12px' }" :disabled="!updatePolicies[agent.id]?.autoUpdateSupported" :value="updatePolicies[agent.id]?.autoUpdate" @update:value="toggleAutoUpdate(agent.id, $event)" /></div>
-
-                <small v-if="updatePolicies[agent.id]?.autoUpdateSupported && updatePolicies[agent.id]?.error" class="agent-update-error">{{ t('codingAgents.checkUpdateFailed') }}</small>
-              </div>
+              <AgentAutoUpdateControl v-if="toolStatus(agent.id)?.installed && updatePolicies[agent.id]" :state="updatePolicies[agent.id]!" @change="toggleAutoUpdate(agent.id, $event)" />
             </AgentManagerCard>
             <PluginAgentsPanel />
           </div>
@@ -894,11 +891,4 @@ onUnmounted(() => {
   }
 
 }
-</style>
-
-<style scoped>
-.agent-update-policy { min-width: 0; width: 100%; box-sizing: border-box; padding-top: calc(10px * var(--spacing-scale, 1)); border-top: var(--border-width, 1px) solid var(--border-color, #eee); }
-.agent-update-policy-row { display: flex; justify-content: space-between; align-items: center; gap: calc(12px * var(--spacing-scale, 1)); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }
-.agent-update-policy small { display: block; margin-top: 6px; overflow-wrap: anywhere; }
-.agent-update-error { color: #c44; }
 </style>

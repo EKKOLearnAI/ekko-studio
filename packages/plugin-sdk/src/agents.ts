@@ -103,6 +103,10 @@ export interface AgentDefinition {
     settings?(ctx: AgentManagementContext): AgentSettingsTarget | Promise<AgentSettingsTarget>
     checkUpdate?(ctx: AgentManagementContext): Promise<AgentUpdateInfo>
     upgrade?(input: AgentUpgradeRequest, ctx: AgentManagementContext): Promise<{ installedVersion: string; message?: string }>
+    /** Remove only the managed engine; retain plugin settings and conversation data. */
+    remove?(ctx: AgentManagementContext): Promise<void>
+    /** Whether this installation can be updated without external setup or user interaction. Defaults to false. */
+    supportsAutoUpdate?(ctx: AgentManagementContext): boolean | Promise<boolean>
   }
   modes: {
     global?: { listModels(ctx: AgentManagementContext & { refresh: boolean }): Promise<AgentModelCatalog> }

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, rm, mkdir, cp, chmod, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, mkdir, cp, chmod, readFile, writeFile, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { PluginManager } from '../../packages/server/src/modules/studio/services/plugins/manager'
@@ -37,6 +37,27 @@ it('keeps model credentials private and settings isolated by actual user/Profile
   const paths = f.runtime.context().paths
   expect(paths.dataDir).toContain(f.home)
   expect(JSON.stringify(visible)).not.toContain('private-key')
+})
+it('exposes managed engine removal and automatic update support without deleting external binaries or settings', async () => {
+  const f = await setup()
+  expect(f.agent.descriptor().actions).toMatchObject({ remove: true, autoUpdate: true })
+  expect(await f.agent.supportsAutoUpdate(who)).toBe(false)
+  await expect(f.agent.remove(who, { expectedVersion: (await f.agent.status(who)).version })).rejects.toThrow('managed outside Studio')
+  await access(f.settings.executable!)
+  const dataDir = f.runtime.context().paths.dataDir, managed = join(dataDir, 'engines', '18.19.0')
+  await mkdir(managed, { recursive: true })
+  await cp(f.settings.executable!, join(managed, 'fixture-omp')); await chmod(join(managed, 'fixture-omp'), 0o700)
+  await writeFile(join(dataDir, 'engine.json'), JSON.stringify({ version: '18.19.0', asset: 'fixture-omp' }))
+  await f.runtime.invoke('rpc', 'save-settings', { ...f.settings, executable: '' }, who)
+  expect(await f.agent.supportsAutoUpdate(who)).toBe(true)
+  expect(await f.agent.status(who)).toMatchObject({ installed: true, source: 'managed' })
+  await f.agent.remove(who, { expectedVersion: '18.19.0' })
+  expect(await f.agent.status(who)).toMatchObject({ installed: false })
+  await expect(access(managed)).rejects.toMatchObject({ code: 'ENOENT' })
+  await access(f.settings.executable!)
+  const settings: any = await f.runtime.invoke('rpc', 'get-settings', null, who)
+  expect(settings.defaultModel).toBe(f.settings.defaultModel)
+  expect(settings.models.providers.custom.apiKey).toBe('••••••••')
 })
 it('executes a native model through RPC, resumes its engine session, and bounds large UI tool output', async () => {
   const f = await setup()

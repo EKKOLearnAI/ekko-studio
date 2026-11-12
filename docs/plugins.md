@@ -19,7 +19,8 @@ Studio 启动后以有效超级管理员身份安装缺失的内置插件，首�
 2. 安装从 OMP 官方 GitHub Release 下载当前系统架构的独立可执行文件，校验 SHA-256 和实际版本，保存到本插件数据目录。不会修改系统 Bun、全局 CLI 或用户已有 OMP 目录。网络失败会保留原来的引擎选择。
 3. 点击“设置”打开插件自己的前端与 RPC 后端。也可填写已有 OMP 可执行文件的绝对路径；这种情况下引擎由用户维护，Studio 不替换该文件。
 4. scoped 模式直接使用 Studio 当前选择的模型和本轮代理凭证，无需在插件内重复填写模型密钥。
-5. 全局模式在 OMP 设置页填写原生 `models.yml` 的 JSON 等价结构。配置按真实调用账号与 Profile 分区，密钥只返回遮蔽值；保留遮蔽值后保存会保持原密钥。
+5. 删除只清理受管引擎及其选择记录，保留插件、设置和会话；受管安装可以开启自动更新，自定义可执行文件不支持删除或自动更新。
+6. 全局模式在 OMP 设置页填写原生 `models.yml` 的 JSON 等价结构。配置按真实调用账号与 Profile 分区，密钥只返回遮蔽值；保留遮蔽值后保存会保持原密钥。
 
 例如“模型与凭证（JSON）”：
 
@@ -547,7 +548,7 @@ export function apply(ctx) {
 ### 管理与设置
 
 `getStatus` 返回 `{installed, version, source?, path?, error?}`。普通目录不暴露安装路径。
-管理页的三个操作绑定 `management.settings/checkUpdate/upgrade`；未提供的操作不显示。
+管理页的操作绑定 `management.settings/checkUpdate/upgrade/remove`；未提供的操作不显示。
 同时提供 `checkUpdate/upgrade` 的插件 Agent，在 `installed:false` 时显示“安装”。点击后宿主先调用 `checkUpdate` 获取准确版本，再调用 `upgrade` 完成首次安装；安装期间禁用重复操作，成功后刷新状态。已安装时显示“检查更新”及可用的版本升级操作。
 设置回调返回本插件清单中 `slot: 'settings'` 的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。
 页面继续通过 `client.mjs` 的 `mount(root, ctx)` 和服务端 `ctx.rpc.register` 实现。
@@ -557,6 +558,18 @@ export function apply(ctx) {
 
 `checkUpdate` 只检查 Agent 引擎，返回 `currentVersion/latestVersion/updateAvailable`。
 `upgrade({version, expectedVersion}, ctx)` 更新引擎，返回 `installedVersion`。
+`remove(ctx)` 删除插件自己管理的 Agent 引擎，成功后不返回业务数据；保留插件源码、配置、账号凭证和会话数据。
+宿主要求删除请求带 `expectedVersion`，版本改变、正在运行或正在维护时拒绝操作，完成后重新确认 `installed:false`。
+未提供删除回调的旧插件继续正常运行，管理页不显示删除按钮。
+
+`supportsAutoUpdate(ctx)` 返回当前安装是否支持无人值守更新，缺省为 false；必须同时提供 `checkUpdate/upgrade`。
+使用自定义可执行文件、外部包管理器或必须交互登录时返回 false，能力查询和开关由宿主提供：
+`GET/PUT /api/studio/agents/{id}/update-policy`，写入体为 `{autoUpdate:boolean}`，读回包含 `autoUpdateSupported`。
+删除引擎使用 `POST /api/studio/agents/{id}/remove`，请求体 `{expectedVersion:string}`。
+这些维护接口只允许超级管理员的交互登录，运行凭证和共享链接不能调用。
+开关属于整个宿主，独立持久化在 `plugin-agent-update-policy.json`；插件禁用时保留偏好，删除引擎会关闭自动更新。
+定时更新使用插件激活身份，和普通 Coding Agent 共用检查、互斥及连续空闲至少一分钟后再更新的策略；
+每次更新前重新确认能力和版本并阻止新运行，插件禁用或移除后不继续更新。
 它们与 Studio 插件包的版本和升级操作独立。安装维护沿用超级管理员权限，运行凭证不能调用管理操作。
 宿主在升级前重新检查当前版本和可用版本，拒绝在途运行，清理空闲实例，升级后重新探测实际版本。
 失败不意味着外部二进制已经回滚，插件应自行实现其引擎的恢复策略。

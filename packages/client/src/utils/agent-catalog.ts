@@ -10,7 +10,7 @@ export function setPluginAgentMetadata(agents: StudioAgent[]) {
   const base = catalog.agents.find(agent => agent.kind === 'coding-agent')!
   pluginMetadata.value = agents.map(agent => ({ ...base, id: agent.id, sessionId: agent.id, groupId: agent.id,
     name: agent.name, aliases: [], icon: agent.icon || '/logo.png', modes: agent.modes,
-    installation: { ...base.installation, method: 'plugin', updates: agent.actions.checkUpdate, remove: false },
+    installation: { ...base.installation, method: 'plugin', updates: agent.actions.checkUpdate, remove: Boolean(agent.actions.remove) },
     config: { ...base.config, mcp: false, settings: agent.actions.settings ? 'settings' : '', memory: '', skillsTarget: '', skillsWritable: false },
     capabilities: { ...base.capabilities, compact: false, serverManagedAuth: true } } as typeof catalog.agents[number]))
 }

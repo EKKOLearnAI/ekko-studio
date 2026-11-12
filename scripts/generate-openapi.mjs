@@ -77,6 +77,7 @@ const tagMappings = {
   'modules/ekko/routes/config.ts': { name: 'Ekko Config', description: 'Ekko runtime configuration management' },
   'modules/studio/routes/workflows.ts': { name: 'Workflows', description: 'Cross-agent workflow orchestration' },
   'modules/studio/routes/plugins.ts': { name: 'Studio Plugins', description: 'Studio plugin installation, lifecycle, configuration, frontend API bridge, tools, commands, events and automation actions' },
+  'modules/studio/routes/agents.ts': { name: 'Studio Agents', description: 'Native and plugin Agent availability, settings, engine installation, removal and automatic update policy' },
   'modules/studio/routes/sessions.ts': { name: 'Sessions', description: 'Cross-agent chat session management' },
   'modules/studio/routes/model-api.ts': { name: 'Model API', description: 'OpenAI Responses-compatible inference across configured providers; external usage accounting' },
   'modules/studio/routes/session-shares.ts': { name: 'Session Shares', description: 'App-bound single-session share tokens, first claim, permissions and revocation' },
@@ -324,6 +325,27 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
   }
 
   const parameters = generateParameters(openapiPath, controllerSource)
+  if (openapiPath === '/api/studio/agents/{id}/remove' && method === 'post') {
+    operation.summary = 'Remove an Agent engine'
+    operation.description = 'Interactive super administrator only. Remove the managed Agent engine, retaining the plugin, configuration and conversation data. Active runs, concurrent maintenance and stale versions are rejected.'
+    operation.requestBody = { required: true, content: { 'application/json': { schema: { type: 'object', required: ['expectedVersion'], properties: { expectedVersion: { type: 'string' } }, additionalProperties: false } } } }
+    operation.responses['200'] = { description: 'Agent engine removed', content: { 'application/json': { schema: { type: 'object', required: ['removed'], properties: { removed: { type: 'boolean', enum: [true] } } } } } }
+    operation.responses['400'] = { description: 'Removal is unsupported or the request is invalid.' }
+    operation.responses['403'] = { description: 'Interactive super administrator login required.' }
+    operation.responses['409'] = { description: 'Agent is busy or its installed version changed.' }
+  }
+  if (openapiPath === '/api/studio/agents/{id}/update-policy') {
+    operation.summary = method === 'put' ? 'Set Agent automatic update preference' : 'Read Agent automatic update capability and preference'
+    operation.description = 'Interactive super administrator only. Returns autoUpdate, autoUpdateSupported, status, currentVersion, latestVersion, checkedAt and optional error. Unsupported installations cannot enable automatic updates. Policy is host-wide; scheduled updates use the plugin activation identity and wait for a full idle grace period.'
+    operation.responses['200'] = { description: 'Current Agent update policy', content: { 'application/json': { schema: { type: 'object', required: ['autoUpdate', 'autoUpdateSupported', 'status', 'currentVersion', 'latestVersion', 'checkedAt'], properties: {
+      autoUpdate: { type: 'boolean' }, autoUpdateSupported: { type: 'boolean' }, status: { type: 'string', enum: ['unknown', 'checking', 'current', 'available', 'waiting', 'updating', 'failed'] },
+      currentVersion: { type: 'string' }, latestVersion: { type: 'string' }, checkedAt: { type: 'string' }, error: { type: 'string' },
+    } } } } }
+    if (method === 'put') operation.requestBody = { required: true, content: { 'application/json': { schema: { type: 'object', required: ['autoUpdate'], properties: { autoUpdate: { type: 'boolean' } }, additionalProperties: false } } } }
+    operation.responses['400'] = { description: 'Invalid preference or automatic updates are unsupported.' }
+    operation.responses['403'] = { description: 'Interactive super administrator login required.' }
+    operation.responses['409'] = { description: 'Agent plugin is disabled or unavailable.' }
+  }
   if (openapiPath === '/api/studio/plugins/{id}/development' && method === 'delete') {
     operation.summary = 'Unlink development plugin'
     operation.description = 'Super administrator only. Remove the development registration and stop watching source changes. Source files, the installed snapshot and plugin data are retained.'
@@ -389,7 +411,7 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
   }
 
   const requestBody = generateRequestBody(method, controllerSource)
-  if (requestBody) operation.requestBody = requestBody
+  if (requestBody && !operation.requestBody) operation.requestBody = requestBody
 
   paths[openapiPath][method] = operation
 }

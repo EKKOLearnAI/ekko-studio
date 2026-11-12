@@ -1102,8 +1102,7 @@
     },
     "packages/client/src/views/hermes/AgentManagerView.vue": {
       "literal-color | :global(.agent-ai-help-error) | background: rgba(127, 127, 127, 0.1)": 1,
-      "unowned-background | :global(.agent-ai-help-error) | background: rgba(127, 127, 127, 0.1)": 1,
-      "literal-color | .agent-update-error | color: #c44": 1
+      "unowned-background | :global(.agent-ai-help-error) | background: rgba(127, 127, 127, 0.1)": 1
     },
     "packages/client/src/views/hermes/GroupChatLinkView.vue": {
       "unowned-background | .group-chat-link-view | background: $bg-primary": 1,

@@ -1,3 +1,4 @@
+import { getPluginAgentUpdates } from '../agents/plugin-update-policy'
 import { join } from 'node:path'
 import type { ApiRequest, Json, PluginIdentity } from '../../contracts/plugins'
 import { config } from '../../public/config'
@@ -93,6 +94,7 @@ export async function startPluginHost(loopbackBaseUrl: string): Promise<void> {
   getPluginDevelopment().watch()
   try { await ensureBuiltinPlugins() }
   catch (error) { logger.warn({ error }, 'Unable to reconcile bundled Studio plugins') }
+  getPluginAgentUpdates().start()
   unsubscribe = businessEvents.subscribe('studio-plugins', async event => {
     const envelope = pluginEventData(event)
     if (!envelope) return
@@ -118,4 +120,4 @@ export async function startPluginHost(loopbackBaseUrl: string): Promise<void> {
     }
   })
 }
-export async function stopPluginHost(): Promise<void> { await development?.close(); development = undefined; unsubscribe?.(); unsubscribe = undefined; await instance?.close(); instance = undefined; baseUrl = ''; builtinInitialization = undefined }
+export async function stopPluginHost(): Promise<void> { getPluginAgentUpdates().stop(); await development?.close(); development = undefined; unsubscribe?.(); unsubscribe = undefined; await instance?.close(); instance = undefined; baseUrl = ''; builtinInitialization = undefined }

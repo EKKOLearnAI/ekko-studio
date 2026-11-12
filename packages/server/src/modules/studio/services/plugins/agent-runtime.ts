@@ -16,8 +16,9 @@ export function validateAgent(definition: AgentDefinition): void {
   for (const key of ['name', 'vendor'] as const) if (typeof definition[key] !== 'string' || !definition[key].trim() || definition[key].length > 160) throw new PluginError(`Agent ${key} is required`)
   if (definition.agentApiVersion !== 1 || typeof definition.getStatus !== 'function' || typeof definition.runtime?.createSession !== 'function') throw new PluginError('Agent requires API v1, getStatus and runtime.createSession')
   if (!definition.management || typeof definition.management !== 'object') throw new PluginError('Agent management is required')
-  for (const key of ['settings', 'checkUpdate', 'upgrade'] as const) if (definition.management[key] !== undefined && typeof definition.management[key] !== 'function') throw new PluginError(`Invalid Agent ${key} handler`)
+  for (const key of ['settings', 'checkUpdate', 'upgrade', 'remove', 'supportsAutoUpdate'] as const) if (definition.management[key] !== undefined && typeof definition.management[key] !== 'function') throw new PluginError(`Invalid Agent ${key} handler`)
   if (definition.management.upgrade && !definition.management.checkUpdate) throw new PluginError('Agent upgrade requires checkUpdate')
+  if (definition.management.supportsAutoUpdate && !definition.management.upgrade) throw new PluginError('Agent automatic updates require upgrade and checkUpdate')
   const modes = definition.modes
   if (!modes || !modes.global && !modes.scoped || Object.keys(modes).some(key => !['global', 'scoped'].includes(key))) throw new PluginError('Agent must declare scoped or global mode')
   if (modes.global && typeof modes.global.listModels !== 'function') throw new PluginError('Global Agent requires listModels')
@@ -28,6 +29,7 @@ export function validateAgent(definition: AgentDefinition): void {
 }
 
 type Entry = { effects: PluginEffects; engine: Promise<AgentSession>; busy: boolean }
+let activitySequence = 0
 async function closeEffects(effects: PluginEffects): Promise<void> {
   const closing = effects.close()
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -38,6 +40,9 @@ export class PluginAgentRuntime {
   readonly id: `plugin:${string}/${string}`
   private sessions = new Map<string, Entry>()
   private updating = false
+  private activity = ++activitySequence
+  isBusyForUpdate() { return this.updating || [...this.sessions.values()].some(entry => entry.busy) }
+  activityRevision() { return this.activity }
   constructor(readonly owner: PluginRuntime, readonly definition: AgentDefinition) {
     validateAgent(definition)
     this.id = pluginAgentId(owner.record.manifest.id, definition.id)
@@ -47,7 +52,7 @@ export class PluginAgentRuntime {
     return { id: this.id, pluginId: this.owner.record.manifest.id, name: d.name, vendor: d.vendor, description: d.description || '',
       icon: d.icon || this.owner.record.manifest.icon || '', origin: 'plugin' as const,
       modes: Object.keys(d.modes) as AgentMode[], surfaces: d.capabilities.surfaces,
-      actions: { settings: !!d.management.settings, checkUpdate: !!d.management.checkUpdate, upgrade: !!d.management.upgrade } }
+      actions: { settings: !!d.management.settings, checkUpdate: !!d.management.checkUpdate, upgrade: !!d.management.upgrade, remove: !!d.management.remove, autoUpdate: !!d.management.supportsAutoUpdate } }
   }
   async manage<T>(identity: PluginIdentity, signal: AbortSignal | undefined, work: (ctx: AgentManagementContext) => Promise<T> | T): Promise<T> {
     const effects = new PluginEffects()
@@ -90,13 +95,14 @@ export class PluginAgentRuntime {
       return value
     })
   }
-  async upgrade(identity: PluginIdentity, input: { version: string; expectedVersion: string }) {
-    if (this.updating || [...this.sessions.values()].some(entry => entry.busy)) throw new PluginError('Agent is busy; retry after its runs finish', 'AGENT_BUSY', 409)
+  async upgrade(identity: PluginIdentity, input: { version: string; expectedVersion: string }, options: { automatic?: boolean } = {}) {
+    if (this.isBusyForUpdate()) throw new PluginError('Agent is busy; retry after its runs finish', 'AGENT_BUSY', 409)
     if (!input || typeof input.version !== 'string' || !input.version.trim() || typeof input.expectedVersion !== 'string') throw new PluginError('Exact target and expected versions are required')
     this.updating = true
     try {
       return await this.manage(identity, undefined, async ctx => {
         if (!this.definition.management.upgrade) throw new PluginError('Agent cannot upgrade')
+        if (options.automatic && (!this.definition.management.supportsAutoUpdate || await this.definition.management.supportsAutoUpdate(ctx) !== true)) throw new PluginError('Automatic updates are no longer supported', 'AGENT_UNSUPPORTED', 400)
         const status = await this.definition.getStatus(ctx)
         if (status.version !== input.expectedVersion) throw new PluginError('Agent version changed; check updates again', 'AGENT_VERSION', 409)
         const update = await this.definition.management.checkUpdate!(ctx)
@@ -106,6 +112,31 @@ export class PluginAgentRuntime {
         const actual = await this.definition.getStatus(ctx)
         if (!actual.installed || actual.version !== result.installedVersion || actual.version !== input.version) throw new PluginError('Agent upgrade did not install the requested version')
         return json(result)
+      })
+    } finally { this.updating = false }
+  }
+  async supportsAutoUpdate(identity: PluginIdentity): Promise<boolean> {
+    if (!this.definition.management.supportsAutoUpdate) return false
+    return this.manage(identity, undefined, async ctx => {
+      const supported = await this.definition.management.supportsAutoUpdate!(ctx)
+      if (typeof supported !== 'boolean') throw new PluginError('Invalid Agent automatic update capability')
+      return supported
+    })
+  }
+  async remove(identity: PluginIdentity, input: { expectedVersion: string }) {
+    if (this.isBusyForUpdate()) throw new PluginError('Agent is busy; retry after its runs finish', 'AGENT_BUSY', 409)
+    if (!input || typeof input.expectedVersion !== 'string') throw new PluginError('Expected version is required')
+    this.updating = true
+    try {
+      return await this.manage(identity, undefined, async ctx => {
+        if (!this.definition.management.remove) throw new PluginError('Agent cannot remove its engine', 'AGENT_UNSUPPORTED', 400)
+        const before = await this.definition.getStatus(ctx)
+        if (before.version !== input.expectedVersion) throw new PluginError('Agent version changed; refresh before removing', 'AGENT_VERSION', 409)
+        await this.closeSessions()
+        await this.definition.management.remove(ctx)
+        const after = await this.definition.getStatus(ctx)
+        if (after.installed) throw new PluginError('Agent engine is still installed')
+        return { removed: true }
       })
     } finally { this.updating = false }
   }
@@ -141,6 +172,7 @@ export class PluginAgentRuntime {
     }
     if (entry.busy) throw new PluginError('Agent session is already running', 'AGENT_BUSY', 409)
     entry.busy = true
+    this.activity = ++activitySequence
     const current = entry
     const runEffects = new PluginEffects()
     try {
@@ -180,7 +212,7 @@ export class PluginAgentRuntime {
       this.sessions.delete(key)
       await closeEffects(current.effects)
       throw error
-    } finally { current.busy = false; await closeEffects(runEffects) }
+    } finally { current.busy = false; this.activity = ++activitySequence; await closeEffects(runEffects) }
   }
   async closeSessions() {
     const entries = [...this.sessions.values()]; this.sessions.clear()

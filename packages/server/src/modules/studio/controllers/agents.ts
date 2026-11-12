@@ -1,5 +1,6 @@
 import type { Context } from 'koa'
-import { agentCheckUpdate, agentDescriptors, agentModels, agentSettings, agentStatus, agentUpgrade } from '../services/agents/registry'
+import { agentCheckUpdate, agentDescriptors, agentModels, agentSettings, agentStatus, agentUpgrade, agentRemove, builtinAgentUpdatePolicy, isPluginAgentId } from '../services/agents/registry'
+import { getPluginAgentUpdates } from '../services/agents/plugin-update-policy'
 import { resolvePluginIdentity, ensureBuiltinPlugins } from '../services/plugins/host'
 import { PluginError } from '../services/plugins/errors'
 import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
@@ -29,5 +30,24 @@ export const checkUpdate = (ctx: Context) => respond(ctx, () => {
 })
 export const upgrade = (ctx: Context) => respond(ctx, () => {
   if (runMcpCredentials.recognizes(ctx.get('authorization').replace(/^Bearer\s+/i, ''))) throw new PluginError('Agent management requires an interactive login', 'AGENT_FORBIDDEN', 403)
-  return agentUpgrade(ctx.params.id, identity(ctx), ctx.request.body as { version: string; expectedVersion: string })
+  const who = identity(ctx), input = ctx.request.body as { version: string; expectedVersion: string }
+  return isPluginAgentId(ctx.params.id) ? getPluginAgentUpdates().upgrade(ctx.params.id, who, input) : agentUpgrade(ctx.params.id, who, input)
+})
+function managementIdentity(ctx: Context) {
+  if (runMcpCredentials.recognizes(ctx.get('authorization').replace(/^Bearer\s+/i, ''))) throw new PluginError('Agent management requires an interactive login', 'AGENT_FORBIDDEN', 403)
+  return identity(ctx)
+}
+export const remove = (ctx: Context) => respond(ctx, () => {
+  const who = managementIdentity(ctx), input = ctx.request.body as { expectedVersion: string }
+  return isPluginAgentId(ctx.params.id) ? getPluginAgentUpdates().remove(ctx.params.id, who, input) : agentRemove(ctx.params.id, who, input)
+})
+export const updatePolicy = (ctx: Context) => respond(ctx, () => {
+  const who = managementIdentity(ctx)
+  return isPluginAgentId(ctx.params.id) ? getPluginAgentUpdates().snapshot(ctx.params.id, who) : builtinAgentUpdatePolicy(ctx.params.id)
+})
+export const setUpdatePolicy = (ctx: Context) => respond(ctx, () => {
+  const who = managementIdentity(ctx)
+  const enabled = (ctx.request.body as { autoUpdate?: unknown })?.autoUpdate
+  if (typeof enabled !== 'boolean') throw new PluginError('autoUpdate must be boolean', 'AGENT_UPDATE_POLICY', 400)
+  return isPluginAgentId(ctx.params.id) ? getPluginAgentUpdates().set(ctx.params.id, enabled, who) : builtinAgentUpdatePolicy(ctx.params.id, enabled, true)
 })
