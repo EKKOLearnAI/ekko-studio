@@ -176,3 +176,58 @@ test('distinguishes no upgrade from a failed check and preserves the last known 
   await expect(card.getByText('无可用升级', { exact: true })).toHaveCount(0)
   await expect(card.locator('.repository-stars')).toHaveText('42')
 })
+
+test('opens developer resources and submission from the compact catalog across themes and narrow layouts', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 960 })
+  await setup(page, { entries: [
+    published(1, { name: 'File Search', description: '查找工作区文件，让 Agent 随时获取项目上下文。', version: '3.0.0', author: { name: 'Studio Community' }, capabilities: ['tools'] }),
+    published(2, { name: 'Terminal Agent', description: '在 Studio 中运行终端 Agent，管理模型、工具和任务。', author: { name: 'Ekko Studio' }, capabilities: ['agents', 'ui'] }),
+    published(3, { name: 'Project Board', description: '把项目任务带入工作区，与团队一起查看进展。', author: { name: 'Community Labs' }, capabilities: ['ui', 'commands'], repositoryStars: 42 }),
+  ] })
+  const banner = page.getByRole('complementary', { name: '开发你的插件' })
+  await expect(banner).toBeVisible()
+  const docsUrl = 'https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md'
+  await expect(banner.getByRole('link', { name: '开发文档' })).toHaveAttribute('href', docsUrl)
+  await expect(banner.getByRole('link', { name: '插件模板' })).toHaveAttribute('href', 'https://github.com/EKKOLearnAI/ekko-studio/tree/main/packages/plugin-sdk/template')
+  await page.context().route(docsUrl, route => route.fulfill({ contentType: 'text/html', body: '<h1>Plugin development documentation</h1>' }))
+  const popup = page.waitForEvent('popup')
+  await banner.getByRole('link', { name: '开发文档' }).click()
+  const docs = await popup
+  await expect(docs).toHaveURL(docsUrl); await docs.close()
+  await banner.getByRole('button', { name: '提交插件', exact: true }).click()
+  await expect(page.locator('.plugin-submission-modal').getByRole('textbox', { name: '仓库地址', exact: true })).toBeVisible()
+  await page.locator('.plugin-submission-modal').getByRole('button', { name: '取消', exact: true }).click()
+  await expect(page.locator('.plugin-submission-modal')).toHaveCount(0)
+  await page.getByRole('tab', { name: /^全部/ }).click()
+  const card = page.getByTestId('market-plugin-plugin-1')
+  await expect(card.getByRole('button', { name: '更新到 v3.0.0' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('catalog-light.png'), animations: 'disabled' })
+  await page.evaluate(async () => { await (window as any).pluginFixture.theme(true); (window as any).pluginFixture.appearance({ brightness: 'dark', appearance: { global: {}, regions: {} } }) })
+  await page.screenshot({ path: testInfo.outputPath('catalog-dark.png'), animations: 'disabled' })
+  await page.evaluate(() => {
+    const fixture = (window as any).pluginFixture
+    fixture.wallpaper(true)
+    fixture.appearance({ brightness: 'light', appearance: { global: { opacity: .65 }, regions: { card: { opacity: .4, radius: 16, blur: 4, backgroundColor: '#627a94' } } } })
+  })
+  await page.screenshot({ path: testInfo.outputPath('catalog-light-wallpaper.png'), animations: 'disabled' })
+  await page.evaluate(async () => {
+    const fixture = (window as any).pluginFixture
+    await fixture.theme(true)
+    fixture.appearance({ brightness: 'dark', appearance: { global: { opacity: .65 }, regions: { card: { opacity: 0, radius: 16, blur: 4 }, overlay: { opacity: .8, radius: 16, blur: 8 } } } })
+  })
+  await expect(card).toHaveCSS('border-radius', '16px')
+  await expect(card).toHaveCSS('background-color', /rgba\(.*?, 0\)/)
+  await card.getByRole('button', { name: '详情', exact: true }).focus()
+  await expect(card.getByRole('button', { name: '详情', exact: true })).toBeFocused()
+  await page.screenshot({ path: testInfo.outputPath('catalog-dark-transparent.png'), animations: 'disabled' })
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.screenshot({ path: testInfo.outputPath('catalog-mobile-dark.png'), animations: 'disabled' })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await banner.getByRole('button', { name: '提交插件', exact: true }).click()
+  await expect(page.locator('.plugin-submission-modal')).toBeInViewport({ ratio: .95 })
+  await page.keyboard.press('Escape'); await expect(page.locator('.plugin-submission-modal')).toHaveCount(0)
+  await page.evaluate(() => { (window as any).pluginFixture.appearance({ brightness: 'light', appearance: { global: {}, regions: {} } }); (window as any).pluginFixture.wallpaper(false) })
+  await page.screenshot({ path: testInfo.outputPath('catalog-mobile-reset.png'), animations: 'disabled' })
+  await page.getByRole('button', { name: '安装插件', exact: true }).click()
+  await expect(page.locator('.plugin-install-modal').getByRole('textbox')).toBeVisible()
+})

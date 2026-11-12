@@ -688,7 +688,13 @@ and waiting text, disables duplicate submission/cancellation and cannot be dismi
 by Escape or the mask. Errors remain in the dialog with retry available. Manual
 source installs also lock their inputs and show progress until the request finishes.
 
-Cards in both lists show the declared author, a direct repository link, cached
+The catalog uses compact rows: the icon, name, source/runtime state and short
+description form the main identity; author, repository and version metadata stay
+together, with primary actions separated from details and uninstall. Rows wrap
+on narrow screens without hiding management actions. The header links directly
+to development documentation and the plugin template, alongside plugin submission.
+
+Entries in both lists show the declared author, a direct repository link, cached
 GitHub stars and version information. Stars come from the cloud directory's
 `repositoryStars`, not from plugin-authored manifest fields or browser calls to
 the GitHub REST API. Zero remains zero; missing/invalid counts display an em dash,

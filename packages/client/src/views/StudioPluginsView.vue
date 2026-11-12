@@ -278,26 +278,27 @@ async function logs(id: string) {
     <PageHeader><header class="page-header center-header"><h2 class="header-title">{{ t('studioPlugins.title') }}</h2><NButton quaternary size="small" :loading="loading || (scope === 'all' && marketLoading)" @click="reloadCatalog">{{ t('mcp.refresh') }}</NButton></header></PageHeader>
     <div class="center-scroll">
     <div class="center-content">
-      <header class="center-intro">
-        <div>
-          <span class="eyebrow">{{ t('studioPlugins.globalScope') }}</span>
-          <h1>{{ t('studioPlugins.hero') }}</h1>
-          <p>{{ t('studioPlugins.description') }}</p>
-        </div>
-        <div class="actions">
-          <NButton size="large" @click="showSubmission = true">{{ t('studioPluginSubmission.title') }}</NButton>
-          <NButton v-if="canManage" type="primary" size="large" :disabled="busy" @click="showInstall = true">{{ t('studioPlugins.installTitle') }}</NButton>
-        </div>
-      </header>
+      <aside class="developer-banner" data-theme-surface="card" :aria-label="t('studioPlugins.developTitle')">
+        <svg class="developer-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 7-5 5 5 5m10-10 5 5-5 5M14 4l-4 16" /></svg>
+        <div class="developer-copy"><h1>{{ t('studioPlugins.developTitle') }}</h1><p>{{ t('studioPlugins.developDescription') }}</p></div>
+        <nav class="developer-links" :aria-label="t('studioPlugins.developResources')">
+          <a href="https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.developGuide') }} <span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/EKKOLearnAI/ekko-studio/tree/main/packages/plugin-sdk/template" target="_blank" rel="noopener noreferrer">{{ t('studioPlugins.developTemplate') }} <span aria-hidden="true">↗</span></a>
+          <NButton text @click="showSubmission = true">{{ t('studioPluginSubmission.title') }}</NButton>
+        </nav>
+      </aside>
       <PluginInstallFeedback v-if="installing && !installConfirmationOpen && !showInstall && !selected" loading />
       <NAlert v-if="error || actionError" type="error" closable @close="error = ''; actionError = ''">{{ actionError || error }}</NAlert>
       <NAlert v-if="developmentError" type="error" closable @close="developmentError = ''">{{ developmentError }}</NAlert>
       <NAlert v-if="updateCheckFailed" type="warning">{{ t('studioPlugins.updateCheckFailed') }} <NButton text :loading="checkingUpdates" @click="refreshUpdates(true)">{{ t('common.retry') }}</NButton></NAlert>
-      <NTabs v-model:value="scope" type="line" class="catalog-scopes" role="tablist" :aria-label="t('studioPlugins.title')" @keydown="scopeKeydown">
-        <NTab name="installed" id="plugins-tab-installed" role="tab" :aria-selected="scope === 'installed'" :tabindex="scope === 'installed' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.installed') }} <span class="scope-count">{{ snapshot.plugins.length }}</span></NTab>
-        <NTab name="all" id="plugins-tab-all" role="tab" :aria-selected="scope === 'all'" :tabindex="scope === 'all' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.all') }} <span v-if="marketLoaded" class="scope-count">{{ marketEntries.length }}</span></NTab>
-        <NTab v-if="canManage && projects.length" name="development" id="plugins-tab-development" role="tab" :aria-selected="scope === 'development'" :tabindex="scope === 'development' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.devProjects') }} <span class="scope-count">{{ projects.length }}</span></NTab>
-      </NTabs>
+      <div class="catalog-heading">
+        <NTabs v-model:value="scope" type="line" class="catalog-scopes" role="tablist" :aria-label="t('studioPlugins.title')" @keydown="scopeKeydown">
+          <NTab name="installed" id="plugins-tab-installed" role="tab" :aria-selected="scope === 'installed'" :tabindex="scope === 'installed' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.installed') }} <span class="scope-count">{{ snapshot.plugins.length }}</span></NTab>
+          <NTab name="all" id="plugins-tab-all" role="tab" :aria-selected="scope === 'all'" :tabindex="scope === 'all' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.all') }} <span v-if="marketLoaded" class="scope-count">{{ marketEntries.length }}</span></NTab>
+          <NTab v-if="canManage && projects.length" name="development" id="plugins-tab-development" role="tab" :aria-selected="scope === 'development'" :tabindex="scope === 'development' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.devProjects') }} <span class="scope-count">{{ projects.length }}</span></NTab>
+        </NTabs>
+        <NButton v-if="canManage" type="primary" :disabled="busy" @click="showInstall = true">{{ t('studioPlugins.installTitle') }}</NButton>
+      </div>
       <section id="plugin-catalog-panel" class="catalog-panel" role="tabpanel" :aria-labelledby="'plugins-tab-' + scope">
       <NAlert v-if="scope === 'all' && marketFailed" type="warning">{{ t('studioPlugins.marketUnavailable') }} <NButton text :loading="marketLoading" @click="refreshMarket(true)">{{ t('common.retry') }}</NButton></NAlert>
       <div class="search-row">
@@ -319,19 +320,25 @@ async function logs(id: string) {
         <div v-else-if="!filteredMarket.length && !marketFailed" class="catalog-empty"><NEmpty :description="t(marketEntries.length ? 'studioPlugins.noResults' : 'studioPlugins.marketEmpty')" /></div>
         <div v-else class="plugin-grid" :aria-busy="marketLoading">
           <article v-for="plugin in filteredMarket" :key="plugin.id" class="plugin-card" data-theme-surface="card" :data-testid="`market-plugin-${plugin.manifestId || plugin.id}`">
-            <div class="card-top"><PluginIcon :plugin="{ manifest: { name: plugin.name } }" :icon-url="plugin.iconUrl" /><NTag v-if="marketInstalled(plugin)" size="small" :bordered="false">{{ installationLabel(marketInstalled(plugin)!) }}</NTag></div>
-            <div class="card-copy"><button type="button" class="card-title" @click="selectedMarket = plugin">{{ plugin.name }}</button><p>{{ plugin.description }}</p></div>
-            <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
-            <PluginCardMetadata :author="plugin.author?.name" :repository="plugin.repository" :stars="plugin.repositoryStars"
-              :version="marketInstalled(plugin)?.manifest.version || plugin.version" :installed="Boolean(marketInstalled(plugin))"
-              :published-version="plugin.version" :update-state="marketUpdateState(plugin)" />
+            <PluginIcon class="card-icon" :plugin="{ manifest: { name: plugin.name } }" :icon-url="plugin.iconUrl" />
+            <div class="card-copy">
+              <div class="card-heading"><button type="button" class="card-title" @click="selectedMarket = plugin">{{ plugin.name }}</button><NTag v-if="marketInstalled(plugin)" size="small" :bordered="false">{{ installationLabel(marketInstalled(plugin)!) }}</NTag></div>
+              <p class="card-description">{{ plugin.description }}</p>
+              <PluginCardMetadata compact :author="plugin.author?.name" :repository="plugin.repository" :stars="plugin.repositoryStars"
+                :version="marketInstalled(plugin)?.manifest.version || plugin.version" :installed="Boolean(marketInstalled(plugin))"
+                :published-version="plugin.version" :update-state="marketUpdateState(plugin)">
+                <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+              </PluginCardMetadata>
+            </div>
             <footer class="card-footer">
               <div class="actions">
-                <NButton size="small" quaternary @click="selectedMarket = plugin">{{ t('studioPlugins.details') }}</NButton>
+                <NButton v-if="canManage && marketAction(plugin)" size="small" type="primary" :disabled="busy" @click="installMarket(plugin)">{{ actionLabel(marketAction(plugin), plugin.version) }}</NButton>
+                <NButton v-else-if="canManage && !marketInstalled(plugin)" size="small" type="primary" :disabled="busy || !plugin.release || marketConflict(plugin)" @click="installMarket(plugin)">{{ t(marketConflict(plugin) ? 'studioPlugins.marketConflict' : plugin.release ? 'studioPlugins.install' : 'studioPlugins.marketNotInstallable') }}</NButton>
                 <NButton v-if="marketInstalled(plugin)" size="small" secondary @click="manageMarket(plugin)">{{ t('studioPlugins.manage') }}</NButton>
-                <NButton v-if="canManage && marketAction(plugin)" size="small" type="primary" secondary :disabled="busy" @click="installMarket(plugin)">{{ actionLabel(marketAction(plugin), plugin.version) }}</NButton>
-                <NButton v-else-if="canManage && !marketInstalled(plugin)" size="small" type="primary" secondary :disabled="busy || !plugin.release || marketConflict(plugin)" @click="installMarket(plugin)">{{ t(marketConflict(plugin) ? 'studioPlugins.marketConflict' : plugin.release ? 'studioPlugins.install' : 'studioPlugins.marketNotInstallable') }}</NButton>
-                <NButton v-if="canManage && marketInstalled(plugin)" size="small" quaternary type="error" :disabled="busy" @click="uninstall(marketInstalled(plugin)!)">{{ t('studioPlugins.uninstall') }}</NButton>
+              </div>
+              <div class="actions secondary-actions">
+                <NButton size="tiny" quaternary @click="selectedMarket = plugin">{{ t('studioPlugins.details') }}</NButton>
+                <NButton v-if="canManage && marketInstalled(plugin)" size="tiny" quaternary :disabled="busy" @click="uninstall(marketInstalled(plugin)!)">{{ t('studioPlugins.uninstall') }}</NButton>
               </div>
             </footer>
           </article>
@@ -341,22 +348,28 @@ async function logs(id: string) {
       <div v-else-if="!filtered.length" class="catalog-empty"><NEmpty :description="t(localEntries.length || search || category !== 'all' || state !== 'all' ? 'studioPlugins.noResults' : 'studioPlugins.empty')" /></div>
       <div v-else class="plugin-grid">
         <article v-for="plugin in filtered" :key="plugin.manifest.id" class="plugin-card" data-theme-surface="card" :data-testid="`plugin-card-${plugin.manifest.id}`">
-          <div class="card-top"><PluginIcon :plugin="plugin" /><div class="actions"><NTag v-if="plugin.developmentEntry || pluginInstallationKind(plugin) !== 'package'" size="small" :bordered="false">{{ plugin.developmentEntry || plugin.developmentDirectory ? t('studioPlugins.devLabel') : t('studioPlugins.localVersion') }}</NTag><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + plugin.status) }}</span></div></div>
+          <PluginIcon class="card-icon" :plugin="plugin" />
           <div class="card-copy">
-            <button type="button" class="card-title" @click="details(plugin)">{{ plugin.manifest.name }}</button>
-            <p>{{ plugin.manifest.description || plugin.manifest.id }}</p>
+            <div class="card-heading">
+              <button type="button" class="card-title" @click="details(plugin)">{{ plugin.manifest.name }}</button>
+              <NTag v-if="plugin.developmentEntry || pluginInstallationKind(plugin) !== 'package'" size="small" :bordered="false">{{ plugin.developmentEntry || plugin.developmentDirectory ? t('studioPlugins.devLabel') : t('studioPlugins.localVersion') }}</NTag><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + plugin.status) }}</span>
+            </div>
+            <p class="card-description">{{ plugin.manifest.description || plugin.manifest.id }}</p>
+            <PluginCardMetadata compact :author="plugin.manifest.author?.name" :repository="pluginRepository(plugin)" :stars="localRelease(plugin)?.repositoryStars"
+              :version="plugin.manifest.version" :installed="plugin.installed" :published-version="localPublishedVersion(plugin)" :update-state="localUpdateState(plugin)">
+              <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.manifest.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+            </PluginCardMetadata>
           </div>
-          <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.manifest.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
-          <PluginCardMetadata :author="plugin.manifest.author?.name" :repository="pluginRepository(plugin)" :stars="localRelease(plugin)?.repositoryStars"
-            :version="plugin.manifest.version" :installed="plugin.installed" :published-version="localPublishedVersion(plugin)" :update-state="localUpdateState(plugin)" />
           <footer class="card-footer">
             <div class="actions">
-              <NButton v-if="canManage && localAction(plugin)" size="small" type="primary" secondary :disabled="busy" @click="upgrade(plugin)">{{ actionLabel(localAction(plugin), localRelease(plugin)?.version) }}</NButton>
-              <NButton size="small" quaternary @click="details(plugin)">{{ t('studioPlugins.details') }}</NButton>
+              <NButton v-if="canManage && localAction(plugin)" size="small" type="primary" :disabled="busy" @click="upgrade(plugin)">{{ actionLabel(localAction(plugin), localRelease(plugin)?.version) }}</NButton>
               <NButton v-if="plugin.status === 'active' && pluginPages(plugin).length" size="small" secondary @click="router.push(pluginPageLocation(plugin))">{{ t('studioPlugins.open') }} <span aria-hidden="true">&nbsp;↗</span></NButton>
               <NButton v-else-if="canManage && !plugin.enabled" size="small" secondary :loading="installing && installingId === plugin.manifest.id" :disabled="activationBusy(plugin)" @click="enablePlugin(plugin)">{{ t('common.enable') }}</NButton>
-              <NButton v-if="canManage && plugin.installed" size="small" quaternary type="error" :disabled="busy" @click="uninstall(plugin)">{{ t('studioPlugins.uninstall') }}</NButton>
-              <NButton v-if="canManage && plugin.development" size="small" quaternary :disabled="busy" @click="unlinkDevelopment(plugin)">{{ t('studioPlugins.devUnlink') }}</NButton>
+            </div>
+            <div class="actions secondary-actions">
+              <NButton size="tiny" quaternary @click="details(plugin)">{{ t('studioPlugins.details') }}</NButton>
+              <NButton v-if="canManage && plugin.installed" size="tiny" quaternary :disabled="busy" @click="uninstall(plugin)">{{ t('studioPlugins.uninstall') }}</NButton>
+              <NButton v-if="canManage && plugin.development" size="tiny" quaternary :disabled="busy" @click="unlinkDevelopment(plugin)">{{ t('studioPlugins.devUnlink') }}</NButton>
             </div>
           </footer>
         </article>
@@ -486,35 +499,48 @@ async function logs(id: string) {
 .center-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; }
 .center-header h2 { margin: 0; font-size: 16px; }
 .center-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px; }
-.center-content { width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; padding: 28px 8px; }
-.center-intro { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 12px; }
-.center-intro h1 { margin: 10px 0; font-size: clamp(24px, 3vw, 32px); font-weight: 650; letter-spacing: -.5px; line-height: 1.35; }
+.center-content { width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; padding: 24px 8px; }
+.developer-banner { display: flex; align-items: center; gap: 16px; padding: 18px 20px; background: $bg-card; border: 1px solid $border-light; border-radius: $radius-lg; }
+.developer-icon { flex-shrink: 0; color: $text-secondary; }
+.developer-copy { flex: 1; min-width: 0; }
+.developer-copy h1 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.developer-copy p { font-size: 12px; }
+.developer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; font-size: 12px; }
+.developer-links a { color: $text-secondary; text-decoration: none; }
+.developer-links a:hover { color: $accent-primary; text-decoration: underline; text-underline-offset: 3px; }
+.developer-links :deep(.n-button) { font-size: inherit; }
+.catalog-heading { display: flex; align-items: center; gap: 24px; }
+.catalog-scopes { flex: 1; min-width: 0; }
 .eyebrow { color: $text-muted; font-size: 12px; }
 p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .search-row { display: flex; gap: 12px; align-items: center; }
 .state-filter { flex: 0 0 140px; }
-.catalog-panel { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.catalog-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .scope-count { margin-inline-start: 8px; color: $text-muted; font-size: 12px; }
 .catalog-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .category-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.category-tabs button { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 0; background: transparent; border-radius: $radius-sm; color: $text-secondary; cursor: pointer; font: inherit; }
+.category-tabs button { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 0; background: transparent; border-radius: $radius-sm; color: $text-secondary; cursor: pointer; font: inherit; font-size: 12px; }
 .category-tabs button.selected { color: $text-primary; background: rgba(var(--accent-primary-rgb), .1); font-weight: 600; }
 .category-tabs button:hover { background: rgba(var(--accent-primary-rgb), .06); }
 .category-tabs span, .catalog-count { color: $text-muted; font-size: 12px; }
 .catalog-count { white-space: nowrap; }
-.plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
-.plugin-card { display: flex; flex-direction: column; gap: 18px; min-width: 0; padding: 24px; background: $bg-card; border: 1px solid $border-light; border-radius: $radius-lg; transition: transform .15s; }
-.plugin-card:hover { transform: translateY(-2px); }
-.card-top, .card-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.plugin-grid { display: flex; flex-direction: column; gap: 10px; }
+.plugin-card { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: start; gap: 20px; min-width: 0; padding: 20px; background: $bg-card; border: 1px solid $border-light; border-radius: $radius-lg; }
+.card-icon { width: 48px; height: 48px; }
+.card-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
 .status { display: inline-flex; align-items: center; gap: 6px; color: $text-muted; font-size: 12px; }
 .status i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status.running { color: $text-secondary; }
-.card-copy { flex: 1; }
-.card-title { padding: 0; margin: 0 0 8px; border: 0; background: transparent; color: $text-primary; text-align: start; font: inherit; font-size: 17px; font-weight: 600; cursor: pointer; }
+.card-copy { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.card-title { padding: 0; margin: 0; border: 0; background: transparent; color: $text-primary; text-align: start; font: inherit; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; cursor: pointer; }
 .card-title:hover { text-decoration: underline; text-underline-offset: 4px; }
-.card-copy p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 48px; font-size: 13px; }
-.card-features { display: flex; flex-wrap: wrap; gap: 12px; color: $text-muted; font-size: 12px; min-height: 18px; }
-.card-footer { border-top: 1px solid $border-color; padding-top: 16px; }
+.card-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 13px; }
+.card-features { display: flex; flex-wrap: wrap; gap: 8px; color: $text-muted; font-size: 11px; }
+.card-features span + span::before { content: '·'; margin-inline-end: 8px; }
+.card-footer { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; align-self: stretch; gap: 8px; max-width: 240px; }
+.card-footer > .actions { justify-content: flex-end; }
+.card-footer > .actions:empty { display: none; }
+.secondary-actions { gap: 2px; }
 .actions, .capability-list { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .catalog-empty { display: grid; place-items: center; min-height: 280px; }
 .detail-stack { display: flex; flex-direction: column; gap: 20px; }
@@ -530,12 +556,24 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .operation-list { display: flex; flex-direction: column; gap: 12px; }
 .operation-list strong { display: block; color: $text-primary; font-weight: 500; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: 12px; }
+@media (max-width: 900px) {
+  .developer-banner { flex-wrap: wrap; }
+  .developer-links { flex-basis: 100%; margin-inline-start: 40px; }
+  .plugin-card { grid-template-columns: 44px minmax(0, 1fr); gap: 12px 16px; }
+  .card-icon { width: 44px; height: 44px; }
+  .card-footer { grid-column: 2; flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; max-width: none; }
+  .card-footer > .actions { justify-content: flex-start; }
+}
 @media (max-width: 600px) {
   .center-scroll { padding: 0 16px; }
-  .center-content { padding: 20px 0; gap: 20px; }
-  .center-intro { align-items: flex-start; flex-direction: column; gap: 16px; }
-  .plugin-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .plugin-card { padding: 20px; }
+  .center-content { padding: 16px 0; gap: 16px; }
+  .developer-banner { padding: 16px; gap: 12px; }
+  .developer-links { margin-inline-start: 0; gap: 10px 16px; }
+  .developer-copy h1 { font-size: 14px; }
+  .catalog-heading { gap: 12px; flex-wrap: wrap; }
+  .catalog-scopes { flex-basis: 220px; }
+  .plugin-card { padding: 16px; }
+  .card-footer { grid-column: 1 / -1; }
   .catalog-toolbar { align-items: flex-start; flex-direction: column; }
   .category-tabs { gap: 2px; }
   .category-tabs button { padding: 6px 8px; }
