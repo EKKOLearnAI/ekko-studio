@@ -7,13 +7,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PluginRuntime } from '../../packages/server/src/modules/studio/services/plugins/runtime'
 import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
-const mocks = vi.hoisted(() => ({ developmentList: vi.fn(async () => ({ projects: [] })), developmentStart: vi.fn(), install: vi.fn(), update: vi.fn(), request: vi.fn(), runtime: vi.fn(), user: { id: 1, role: 'super_admin' }, profile: 'work' as string | undefined, bound: false, shared: false }))
+const mocks = vi.hoisted(() => ({ developmentList: vi.fn(async () => ({ projects: [] })), developmentStart: vi.fn(), developmentUnlink: vi.fn(), install: vi.fn(), update: vi.fn(), request: vi.fn(), runtime: vi.fn(), user: { id: 1, role: 'super_admin' }, profile: 'work' as string | undefined, bound: false, shared: false }))
 vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({ logger: { warn: vi.fn() } }))
 vi.mock('../../packages/server/src/modules/studio/services/auth/run-mcp-credentials', () => ({ runMcpCredentials: {
   authenticate: () => mocks.bound ? { profile: 'work', sessionId: 'bound-session', contextId: 'run', agentId: 'codex' } : undefined,
   recognizes: () => mocks.bound,
 } }))
-vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ getPluginDevelopment: () => ({ list: mocks.developmentList, start: mocks.developmentStart }), ensureBuiltinPlugins: async () => {}, resolvePluginIdentity: (identity: any) => identity, pluginAdministrationIdentity: (userId: number) => ({ userId, profile: 'default' }), getPluginManager: () => ({
+vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ getPluginDevelopment: () => ({ list: mocks.developmentList, start: mocks.developmentStart, unlink: mocks.developmentUnlink }), ensureBuiltinPlugins: async () => {}, resolvePluginIdentity: (identity: any) => identity, pluginAdministrationIdentity: (userId: number) => ({ userId, profile: 'default' }), getPluginManager: () => ({
   snapshot: () => ({ revision: 2, plugins: [{ manifest: { id: 'notes', configSchema: { type: 'object', properties: { secret: { type: 'string', secret: true } } } }, config: { public: 'visible', secret: 'hidden' } }] }),
   install: mocks.install, update: mocks.update, request: mocks.request, runtime: mocks.runtime,
 }) }))
@@ -122,5 +122,17 @@ it('restricts development discovery and execution to interactive administrators 
     expect((await start(true)).status).toBe(403)
     expect((await fetch(`${base}/api/studio/plugins/development`)).status).toBe(403)
     expect(mocks.developmentStart).toHaveBeenCalledTimes(1)
+  })
+})
+
+it('unlinks development projects only for administrator logins', async () => {
+  await server(async base => {
+    const unlink = () => fetch(`${base}/api/studio/plugins/notes/development?revision=7`, { method: 'DELETE' })
+    expect((await unlink()).status).toBe(200)
+    expect(mocks.developmentUnlink).toHaveBeenCalledWith({ userId: 1, profile: 'default' }, 'notes', 7)
+    mocks.bound = true; expect((await unlink()).status).toBe(403)
+    mocks.bound = false; mocks.user.role = 'admin'; expect((await unlink()).status).toBe(403)
+    mocks.user.role = 'super_admin'; mocks.shared = true; expect((await unlink()).status).toBe(403)
+    expect(mocks.developmentUnlink).toHaveBeenCalledTimes(1)
   })
 })

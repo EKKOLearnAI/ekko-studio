@@ -132,6 +132,47 @@ it('runs optional builds, preserves the runtime on build failure and ignores out
   await development.tick(); await development.tick(); expect(manager.snapshot().revision).toBe(revision)
 })
 
+it('lists unbuilt project metadata without executing its source', async () => {
+  const { source, manager, development } = await fixture()
+  const definition = JSON.parse(await readFile(join(source, 'plugin.json'), 'utf8'))
+  await writeFile(join(source, 'plugin.json'), JSON.stringify({ ...definition, name: 'Unbuilt Notes', server: 'dist/server.mjs' }))
+  const projects = (await development.list()).projects
+  expect(projects[0]).toMatchObject({ id: 'notes', status: 'registered', manifest: { name: 'Unbuilt Notes', version: definition.version } })
+  expect(manager.snapshot().plugins).toEqual([])
+})
+
+it('unlinks an active project without deleting source, installed files, storage or restarting the runtime', async () => {
+  const { source, manager, development, put, value } = await fixture()
+  await put(code('installed')); await development.start(who, 'notes', 0)
+  const runtime = manager.runtime(who, 'notes'), installed = manager.store.read().records.notes.directory
+  await runtime.context().storage.set('saved', 'keep')
+  await expect(development.unlink(who, 'notes', 0)).rejects.toMatchObject({ code: 'PLUGIN_REVISION' })
+  expect((await development.list()).projects).toHaveLength(1)
+  await development.unlink(who, 'notes', manager.snapshot().revision)
+  expect((await development.list()).projects).toEqual([])
+  expect(manager.snapshot().plugins[0]).toMatchObject({ status: 'active' })
+  expect(manager.snapshot().plugins[0].developmentDirectory).toBeUndefined()
+  expect(manager.runtime(who, 'notes')).toBe(runtime)
+  expect(await runtime.context().storage.get('saved')).toBe('keep')
+  await access(join(source, 'server.mjs')); await access(join(installed, 'server.mjs'))
+  await put(code('unlinked change')); await development.tick(); await development.tick()
+  expect(await value()).toBe('installed')
+})
+
+it('unlinks a project with missing files and rejects unauthorized requests before changing registration', async () => {
+  const { home, source, manager, development, authorize } = await fixture()
+  authorize.mockImplementationOnce(() => { throw new Error('administrator required') })
+  await expect(development.unlink(who, 'notes', 0)).rejects.toThrow('administrator required')
+  await access(join(home, 'plugins/development/notes.json'))
+  await development.start(who, 'notes', 0)
+  await rm(manager.store.read().records.notes.directory, { recursive: true })
+  await rm(source, { recursive: true })
+  expect((await development.list()).projects[0].status).toBe('missing')
+  await development.unlink(who, 'notes', manager.snapshot().revision)
+  expect((await development.list()).projects).toEqual([])
+  expect(manager.store.read().records.notes.developmentDirectory).toBeUndefined()
+})
+
 it('does not reactivate after a concurrent disable, unregister, stale revision or loss of administrator access', async () => {
   const { home, source, manager, development, put, authorize, value } = await fixture()
   await put(code('stable')); await development.start(who, 'notes', 0)

@@ -1,12 +1,13 @@
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readdir, readFile, realpath, stat } from 'node:fs/promises'
+import { readdir, readFile, realpath, stat, unlink } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import type { PluginIdentity } from '../../contracts/plugins'
 import { windowsCmdShimExecution } from '../../public/windows-command'
 import { PluginManager } from './manager'
 import { PluginError, message } from './errors'
 import { identifier, manifest } from './schema'
+import { readManifest } from './installer'
 
 interface Project { schema: 1; id: string; directory: string; createdAt: number }
 interface Progress { fingerprint?: string; pending?: string; building?: boolean; error?: string; updatedAt?: number }
@@ -100,13 +101,25 @@ export class PluginDevelopment {
       try {
         const project = await this.project(id), record = records[id]
         const watching = !!record?.enabled && record.developmentDirectory === project.directory
-        return { ...project, watching, status: progress?.building ? 'building' : progress?.error ? 'error' : watching ? 'watching' : 'registered', error: progress?.error, updatedAt: progress?.updatedAt }
+        return { ...project, manifest: await readManifest(project.directory, { validateEntries: false }), watching, status: progress?.building ? 'building' : progress?.error ? 'error' : watching ? 'watching' : 'registered', error: progress?.error, updatedAt: progress?.updatedAt }
       } catch (error) {
         const registered = await readFile(join(this.directory, name), 'utf8').then(text => JSON.parse(text)).catch(() => ({}))
-        return { id, directory: typeof registered.directory === 'string' ? registered.directory : '', watching: false, status: 'missing', error: message(error) }
+        return { id, directory: typeof registered.directory === 'string' ? registered.directory : '', manifest: records[id]?.manifest, watching: false, status: 'missing', error: message(error) }
       }
     }))
     return { directory: this.directory, projects }
+  }
+  async unlink(identity: PluginIdentity, id: string, revision: number): Promise<void> {
+    await this.authorize(identity)
+    identifier(id)
+    const file = join(this.directory, `${id}.json`)
+    await stat(file)
+    const state = this.manager.store.read()
+    if (!Number.isSafeInteger(revision) || state.revision !== revision) throw new PluginError('Plugin settings changed; reload before saving', 'PLUGIN_REVISION', 409)
+    if (state.records[id]?.developmentDirectory) await this.manager.update(identity, id, revision, { action: 'stop-development' })
+    await unlink(file)
+    this.progress.delete(id)
+    await this.changed()
   }
   async start(identity: PluginIdentity, id: string, revision: number): Promise<void> {
     await this.authorize(identity)

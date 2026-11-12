@@ -324,6 +324,13 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
   }
 
   const parameters = generateParameters(openapiPath, controllerSource)
+  if (openapiPath === '/api/studio/plugins/{id}/development' && method === 'delete') {
+    operation.summary = 'Unlink development plugin'
+    operation.description = 'Super administrator only. Remove the development registration and stop watching source changes. Source files, the installed snapshot and plugin data are retained.'
+    parameters.push({ name: 'revision', in: 'query', required: true, schema: { type: 'integer', minimum: 0 }, description: 'Current global plugin catalog revision.' })
+    operation.responses['403'] = { description: 'Interactive super administrator login required.' }
+    operation.responses['409'] = { description: 'Catalog revision changed; refresh before retrying.' }
+  }
   if (openapiPath === '/api/studio/sessions' && method === 'get') {
     operation.responses['200'] = {
       description: 'Session list. Supplying offset also returns pagination metadata and the total matching the same visibility, category, and include/exclude filters before pagination.',

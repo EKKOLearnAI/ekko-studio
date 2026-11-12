@@ -106,3 +106,7 @@ export const developmentStart = (ctx: Context) => respond(ctx, async () => {
   await getPluginDevelopment().start(who, identifier(ctx.params.id), input.revision)
   return { ok: true }
 })
+export const developmentUnlink = (ctx: Context) => respond(ctx, async () => {
+  await getPluginDevelopment().unlink(management(ctx), identifier(ctx.params.id), Number(ctx.query.revision))
+  return { ok: true }
+})

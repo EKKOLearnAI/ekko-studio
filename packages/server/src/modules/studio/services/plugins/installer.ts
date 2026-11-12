@@ -15,7 +15,7 @@ export async function pluginFile(directory: string, entry: string): Promise<stri
   if (!offset || offset.startsWith(`..${sep}`) || offset === '..' || isAbsolute(offset) || !(await stat(file)).isFile()) throw new PluginError('Plugin entry escapes its package')
   return file
 }
-export async function readManifest(directory: string): Promise<PluginManifest> {
+export async function readManifest(directory: string, options: { validateEntries?: boolean } = {}): Promise<PluginManifest> {
   const path = await pluginFile(directory, 'package.json')
   const pkg = JSON.parse(await readFile(path, 'utf8'))
   const manifestPath = await pluginFile(directory, 'plugin.json').catch(error => {
@@ -24,7 +24,7 @@ export async function readManifest(directory: string): Promise<PluginManifest> {
   })
   const result = manifest(JSON.parse(await readFile(manifestPath, 'utf8')))
   if (pkg.version !== undefined && pkg.version !== result.version) throw new PluginError('Package and plugin versions must match')
-  for (const entry of [result.server, result.client].filter(Boolean)) await pluginFile(directory, entry!)
+  if (options.validateEntries !== false) for (const entry of [result.server, result.client].filter(Boolean)) await pluginFile(directory, entry!)
   async function icon(value: string | undefined): Promise<string | undefined> {
     if (!value || value.startsWith('data:')) return value
     const file = await pluginFile(directory, value)

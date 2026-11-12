@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
 import { join, relative, sep, dirname } from 'node:path'
 import type { ApiRequest, HookResult, Json, PluginEvent, PluginHook, PluginIdentity, PluginRecord, PluginSnapshot, ToolResult } from '../../contracts/plugins'
@@ -12,6 +13,8 @@ function previousVersion(record: PluginRecord): Omit<PluginRecord, 'previous'> {
   const { previous: _previous, ...version } = record
   return version
 }
+function packagePresent(record: PluginRecord): boolean { return existsSync(join(record.directory, 'plugin.json')) }
+const missingPackage = () => new PluginError('Plugin package is missing; reinstall or uninstall this plugin', 'PLUGIN_PACKAGE_MISSING', 404)
 
 export class PluginManager {
   readonly store: PluginStore
@@ -23,7 +26,7 @@ export class PluginManager {
   private sequence = 0
   private closing = false
   private ports: PluginPorts
-  registeredAgents() { return [...this.runtimes.values()].flatMap(runtime => [...runtime.agents.values()]) }
+  registeredAgents() { return [...this.runtimes.values()].filter(runtime => packagePresent(runtime.record)).flatMap(runtime => [...runtime.agents.values()]) }
   constructor(home: string, ports: PluginPorts) {
     this.store = new PluginStore(home)
     this.ports = { ...ports, emit: (id, event) => { this.publish(id, event, event.audience === 'plugin'); ports.emit(id, event) },
@@ -50,6 +53,7 @@ export class PluginManager {
     }
   }
   private async mount(identity: PluginIdentity, record: PluginRecord): Promise<PluginRuntime> {
+    if (!packagePresent(record)) throw missingPackage()
     this.dependencies(record)
     const runtime = new PluginRuntime(record, { userId: identity.userId, profile: identity.profile }, this.store, this.ports)
     try { await runtime.load(); runtime.activate() } catch (e) { await runtime.close().catch(() => {}); throw e }
@@ -61,9 +65,10 @@ export class PluginManager {
     const state = this.store.read()
     return { revision: state.revision, plugins: Object.values(state.records).map(record => {
       const { directory: _directory, runtimeIdentity: _runtimeIdentity, previous, ...rest } = record
-      const runtime = this.runtimes.get(record.manifest.id)
-      return { ...rest, status: runtime ? 'active' : record.enabled ? 'failed' : 'disabled',
-        previousVersion: previous?.manifest.version, error: this.errors.get(record.manifest.id),
+      const present = packagePresent(record)
+      const runtime = present ? this.runtimes.get(record.manifest.id) : undefined
+      return { ...rest, status: !present ? 'failed' : runtime ? 'active' : record.enabled ? 'failed' : 'disabled',
+        previousVersion: previous?.manifest.version, error: present ? this.errors.get(record.manifest.id) : missingPackage().message,
         tools: [...(runtime?.tools.values() || [])].map(({ name, description, inputSchema, readOnly }) => ({ name, description, inputSchema, readOnly })),
         commands: [...(runtime?.commands.values() || [])].map(({ name, description }) => ({ name, description })),
         actions: [...(runtime?.actions.values() || [])].map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
@@ -144,12 +149,18 @@ export class PluginManager {
         if (input.config !== undefined) next.config = configuration(next.manifest.configSchema, input.config)
       }
       if (next?.enabled) next.config = configuration(next.manifest.configSchema, next.config)
-      await this.replace(identity, state, id, next)
+      if (input.action === 'stop-development' && input.enabled === undefined && input.config === undefined) {
+        state.records[id] = next!
+        this.store.write(state, state.revision)
+        this.publish(id, { id: randomUUID(), type: 'plugin.changed', timestamp: Date.now(), identity, data: null }, true)
+      } else await this.replace(identity, state, id, next)
       return this.snapshot(identity)
     })
   }
   runtime(_identity: PluginIdentity, id: string): PluginRuntime {
     const value = this.runtimes.get(id)
+    const record = this.store.read().records[id]
+    if (record && !packagePresent(record)) throw missingPackage()
     if (!value) throw new PluginError('Plugin is disabled or unavailable', 'PLUGIN_UNAVAILABLE', 409)
     return value
   }

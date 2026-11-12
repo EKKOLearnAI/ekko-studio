@@ -21915,6 +21915,53 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "summary": "Unlink development plugin",
+        "description": "Super administrator only. Remove the development registration and stop watching source changes. Source files, the installed snapshot and plugin data are retained.",
+        "operationId": "developmentUnlink",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Interactive super administrator login required."
+          },
+          "409": {
+            "description": "Catalog revision changed; refresh before retrying."
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Current global plugin catalog revision."
+          }
+        ]
       }
     },
     "/api/studio/plugins/{id}/invoke": {

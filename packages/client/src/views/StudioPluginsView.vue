@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NCheckbox, NEmpty, NInput, NSelect, NTag, NDrawer, NDrawerContent, NModal, NTabs, NTabPane, NSpin, useDialog, useMessage } from 'naive-ui'
 import { isStoredSuperAdmin } from '@/api/client'
-import { pluginRequest, pluginInvoke, type InstalledPlugin, type Json } from '@/api/studio/plugins'
+import { pluginList, pluginRequest, pluginInvoke, type InstalledPlugin, type PluginDevelopmentProject, type Json } from '@/api/studio/plugins'
 import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
 import PluginConfigFields from '@/components/plugins/PluginConfigFields.vue'
-import PluginDevelopmentPanel from '@/components/plugins/PluginDevelopmentPanel.vue'
 import PluginSubmissionDialog from '@/components/plugins/PluginSubmissionDialog.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import { pluginLinks, safePluginLink } from '@/plugins/navigation'
@@ -25,7 +24,35 @@ const configValid = ref<Record<string, boolean>>({})
 const configDirty = ref<Record<string, boolean>>({}), configRevisions = ref<Record<string, number>>({})
 const selections = ref<Record<string, string>>({}), argumentsText = ref<Record<string, string>>({}), outputs = ref<Record<string, string>>({})
 const canManage = computed(isStoredSuperAdmin)
-const selected = computed(() => snapshot.value.plugins.find(plugin => plugin.manifest.id === selectedId.value))
+const projects = shallowRef<PluginDevelopmentProject[]>([]), developmentError = ref('')
+const controller = new AbortController()
+let developmentTimer: ReturnType<typeof setTimeout> | undefined, developmentSequence = 0
+async function refreshDevelopment() {
+  if (!canManage.value) return
+  const current = ++developmentSequence
+  try {
+    const result = await pluginRequest<{ projects: PluginDevelopmentProject[] }>(undefined, '/development', undefined, 'GET', controller.signal)
+    if (!controller.signal.aborted && current === developmentSequence) { projects.value = result.projects || []; developmentError.value = '' }
+  } catch (cause) { if (!controller.signal.aborted && current === developmentSequence) developmentError.value = String(cause) }
+}
+async function pollDevelopment() { await refreshDevelopment(); if (!controller.signal.aborted && canManage.value) developmentTimer = setTimeout(pollDevelopment, 2000) }
+watch(canManage, enabled => { if (developmentTimer) clearTimeout(developmentTimer); if (enabled) void pollDevelopment(); else { developmentSequence++; projects.value = [] } }, { immediate: true })
+onBeforeUnmount(() => { controller.abort(); if (developmentTimer) clearTimeout(developmentTimer) })
+type CatalogPlugin = InstalledPlugin & { installed: boolean; development?: PluginDevelopmentProject }
+const catalog = computed<CatalogPlugin[]>(() => {
+  const entries = new Map(snapshot.value.plugins.map(plugin => [plugin.manifest.id, { ...plugin, installed: true } as CatalogPlugin]))
+  for (const project of projects.value) {
+    const installed = entries.get(project.id)
+    entries.set(project.id, installed ? { ...installed, development: project } : {
+      manifest: project.manifest || { id: project.id, name: project.id, version: '', apiVersion: 1, capabilities: [] },
+      source: project.directory, installedAt: project.createdAt || 0, installed: false, enabled: false,
+      status: ['missing', 'error'].includes(project.status) ? 'failed' : 'disabled', error: project.error,
+      config: {}, tools: [], commands: [], actions: [], development: project,
+    })
+  }
+  return [...entries.values()]
+})
+const selected = computed(() => catalog.value.find(plugin => plugin.manifest.id === selectedId.value))
 const activeCount = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').length)
 const categories = ['all', 'pages', 'chat', 'tools', 'automation'] as const
 function matchesCategory(plugin: InstalledPlugin, value: string) {
@@ -35,7 +62,7 @@ function matchesCategory(plugin: InstalledPlugin, value: string) {
   if (value === 'automation') return plugin.actions.length > 0 || plugin.manifest.capabilities.includes('automation')
   return true
 }
-const filtered = computed(() => snapshot.value.plugins.filter(plugin => {
+const filtered = computed(() => catalog.value.filter(plugin => {
   const query = search.value.trim().toLocaleLowerCase()
   return matchesCategory(plugin, category.value) && (state.value === 'all' || plugin.status === state.value)
     && (!query || [plugin.manifest.name, plugin.manifest.id, plugin.manifest.description || '', plugin.manifest.author?.name || '', ...(plugin.manifest.keywords || [])].some(value => value.toLocaleLowerCase().includes(query)))
@@ -51,7 +78,7 @@ function syncDrafts() {
   }
 }
 watch(snapshot, syncDrafts)
-async function reloadCatalog() { await refresh(true); configDirty.value = {}; actionError.value = ''; syncDrafts() }
+async function reloadCatalog() { await Promise.all([refresh(true), refreshDevelopment()]); configDirty.value = {}; actionError.value = ''; syncDrafts() }
 watch(profile, () => {
   outputs.value = {}; argumentsText.value = {}; actionError.value = ''
 })
@@ -65,11 +92,11 @@ async function perform(work: (boundProfile: string) => Promise<unknown>) {
   try {
     await work(bound)
     window.dispatchEvent(new Event('studio.plugins.changed'))
-    await refresh(true)
+    await Promise.all([refresh(true), refreshDevelopment()])
     return true
   } catch (cause) {
     if (bound === profile.value) actionError.value = cause instanceof Error ? cause.message : String(cause)
-    await refresh(true)
+    await Promise.all([refresh(true), refreshDevelopment()])
     return false
   } finally { busy.value = false }
 }
@@ -83,10 +110,23 @@ async function update(plugin: InstalledPlugin, input: object) {
   if (success) { configDirty.value[plugin.manifest.id] = false; syncDrafts() }
   return success
 }
-function uninstall(plugin: InstalledPlugin) {
-  dialog.warning({ title: t('studioPlugins.uninstall'), content: t('studioPlugins.uninstallConfirm', { name: plugin.manifest.name }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    if (await update(plugin, { action: 'uninstall' })) { delete configs.value[plugin.manifest.id]; delete sources.value[plugin.manifest.id]; closeDetails() }
+function uninstall(plugin: CatalogPlugin) {
+  const linked = Boolean(plugin.development)
+  dialog.warning({ title: t(linked ? 'studioPlugins.devUnlink' : 'studioPlugins.uninstall'), content: t(linked ? 'studioPlugins.devUnlinkConfirm' : 'studioPlugins.uninstallConfirm', { name: plugin.manifest.name }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
+    const success = linked
+      ? await perform(async () => { const { revision } = await pluginList(); await pluginRequest(undefined, '/' + encodeURIComponent(plugin.manifest.id) + '/development?revision=' + revision, undefined, 'DELETE') })
+      : await update(plugin, { action: 'uninstall' })
+    if (success) {
+      if (!linked) { delete configs.value[plugin.manifest.id]; delete sources.value[plugin.manifest.id] }
+      closeDetails()
+    }
   } })
+}
+function startDevelopment(plugin: CatalogPlugin) {
+  dialog.warning({ title: t('studioPlugins.devStart'), content: t('studioPlugins.devTrust', { path: plugin.development!.directory }), positiveText: t('studioPlugins.devStart'), negativeText: t('common.cancel'), onPositiveClick: () => perform(async () => {
+    const { revision } = await pluginList()
+    await pluginRequest(undefined, '/' + encodeURIComponent(plugin.manifest.id) + '/development', { revision, trusted: true })
+  }) })
 }
 function operations(plugin: InstalledPlugin) {
   return [ ...plugin.tools.map(x => ({ label: t('studioPlugins.tool') + ': ' + x.name, value: 'tool/' + x.name })),
@@ -128,7 +168,7 @@ async function logs(id: string) {
         </div>
       </header>
       <NAlert v-if="error || actionError" type="error" closable @close="error = ''; actionError = ''">{{ actionError || error }}</NAlert>
-      <PluginDevelopmentPanel v-if="canManage" @changed="refresh(true)" />
+      <NAlert v-if="developmentError" type="error" closable @close="developmentError = ''">{{ developmentError }}</NAlert>
       <div class="search-row">
         <NInput v-model:value="search" clearable size="large" :placeholder="t('studioPlugins.search')" :aria-label="t('studioPlugins.search')">
           <template #prefix><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg></template>
@@ -138,27 +178,29 @@ async function logs(id: string) {
       <div class="catalog-toolbar">
         <nav class="category-tabs" :aria-label="t('studioPlugins.categories')">
           <button v-for="item in categories" :key="item" type="button" :class="{ selected: category === item }" :aria-pressed="category === item" @click="category = item">
-            {{ t('studioPlugins.' + item) }}<span>{{ snapshot.plugins.filter(plugin => matchesCategory(plugin, item)).length }}</span>
+            {{ t('studioPlugins.' + item) }}<span>{{ catalog.filter(plugin => matchesCategory(plugin, item)).length }}</span>
           </button>
         </nav>
         <span class="catalog-count">{{ t('studioPlugins.activeCount', { count: activeCount }) }}</span>
       </div>
-      <div v-if="loading && !snapshot.plugins.length" class="catalog-empty"><NSpin /></div>
-      <div v-else-if="!filtered.length" class="catalog-empty"><NEmpty :description="t(snapshot.plugins.length ? 'studioPlugins.noResults' : 'studioPlugins.empty')" /></div>
+      <div v-if="loading && !catalog.length" class="catalog-empty"><NSpin /></div>
+      <div v-else-if="!filtered.length" class="catalog-empty"><NEmpty :description="t(catalog.length ? 'studioPlugins.noResults' : 'studioPlugins.empty')" /></div>
       <div v-else class="plugin-grid">
-        <article v-for="plugin in filtered" :key="plugin.manifest.id" class="plugin-card" data-theme-surface="card">
-          <div class="card-top"><PluginIcon :plugin="plugin" /><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + plugin.status) }}</span></div>
+        <article v-for="plugin in filtered" :key="plugin.manifest.id" class="plugin-card" data-theme-surface="card" :data-testid="`plugin-card-${plugin.manifest.id}`">
+          <div class="card-top"><PluginIcon :plugin="plugin" /><div class="actions"><NTag v-if="plugin.development" size="small" :bordered="false">{{ t('studioPlugins.devLabel') }}</NTag><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + (plugin.development ? 'devState_' + plugin.development.status : plugin.status)) }}</span></div></div>
           <div class="card-copy">
             <button type="button" class="card-title" @click="details(plugin)">{{ plugin.manifest.name }}</button>
             <p>{{ plugin.manifest.description || plugin.manifest.id }}</p>
           </div>
           <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesCategory(plugin, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
           <footer class="card-footer">
-            <span class="version">v{{ plugin.manifest.version }}</span>
+            <span class="version">{{ plugin.manifest.version ? 'v' + plugin.manifest.version : '' }}</span>
             <div class="actions">
               <NButton size="small" quaternary @click="details(plugin)">{{ t('studioPlugins.details') }}</NButton>
               <NButton v-if="plugin.status === 'active' && pluginPages(plugin).length" size="small" secondary @click="router.push(pluginPageLocation(plugin))">{{ t('studioPlugins.open') }} <span aria-hidden="true">&nbsp;↗</span></NButton>
+              <NButton v-else-if="canManage && plugin.development" size="small" secondary :disabled="busy || ['building', 'missing'].includes(plugin.development.status)" @click="startDevelopment(plugin)">{{ t('studioPlugins.devStart') }}</NButton>
               <NButton v-else-if="canManage && !plugin.enabled" size="small" secondary :disabled="busy" @click="update(plugin, { enabled: true })">{{ t('common.enable') }}</NButton>
+              <NButton v-if="canManage && plugin.development" size="small" quaternary type="error" :aria-label="t('studioPlugins.devUnlink')" :title="t('studioPlugins.devUnlink')" :disabled="busy" @click="uninstall(plugin)">{{ t('common.delete') }}</NButton>
             </div>
           </footer>
         </article>
@@ -184,9 +226,9 @@ async function logs(id: string) {
           <p class="detail-description">{{ selected.manifest.description }}</p>
           <div class="actions">
             <NButton v-if="selected.status === 'active' && pluginPages(selected).length" type="primary" @click="router.push(pluginPageLocation(selected))">{{ t('studioPlugins.open') }}</NButton>
-            <NButton v-if="canManage" :disabled="busy" @click="update(selected, { enabled: !selected.enabled })">{{ t(selected.enabled ? 'common.disable' : 'common.enable') }}</NButton>
+            <NButton v-if="canManage && selected.installed" :disabled="busy" @click="update(selected, { enabled: !selected.enabled })">{{ t(selected.enabled ? 'common.disable' : 'common.enable') }}</NButton>
           </div>
-          <NAlert v-if="selected.error || actionError" type="error">{{ actionError || selected.error }}</NAlert>
+          <NAlert v-if="selected.error || selected.development?.error || actionError" type="error">{{ actionError || selected.development?.error || selected.error }}</NAlert>
           <NTabs v-model:value="detailTab" type="line" animated>
             <NTabPane name="overview" :tab="t('studioPlugins.overview')">
               <div class="detail-stack">
@@ -209,7 +251,7 @@ async function logs(id: string) {
             </NTabPane>
             <NTabPane name="settings" :tab="t('studioPlugins.configuration')" display-directive="if">
               <div class="detail-stack">
-                <template v-if="canManage && selected.manifest.configSchema">
+                <template v-if="canManage && selected.installed && selected.manifest.configSchema">
                   <PluginConfigFields :key="selected.manifest.id + ':' + configRevisions[selected.manifest.id]" v-model="configs[selected.manifest.id]!" :schema="selected.manifest.configSchema" @update:model-value="configDirty[selected.manifest.id] = true" @valid="configValid[selected.manifest.id] = $event" />
                   <p>{{ t('studioPlugins.secretHint') }}</p>
                   <NButton :disabled="busy || configValid[selected.manifest.id] === false" @click="update(selected, { config: configs[selected.manifest.id] })">{{ t('common.save') }}</NButton>
@@ -222,14 +264,23 @@ async function logs(id: string) {
               <div class="detail-stack">
                 <template v-if="canManage">
                   <h4>{{ t('studioPlugins.maintenance') }}</h4>
-                  <div class="actions">
+                  <template v-if="selected.development">
+                    <p class="development-path">{{ selected.development.directory }}</p>
+                    <div class="actions">
+                      <NButton :disabled="busy || ['building', 'missing'].includes(selected.development.status)" @click="startDevelopment(selected)">{{ t(selected.development.watching ? 'studioPlugins.devRebuild' : 'studioPlugins.devStart') }}</NButton>
+                      <NButton v-if="selected.development.watching" :disabled="busy" @click="update(selected, { action: 'stop-development' })">{{ t('studioPlugins.devStop') }}</NButton>
+                    </div>
+                  </template>
+                  <div v-if="selected.installed" class="actions">
                     <NButton :disabled="busy || !selected.enabled" @click="update(selected, { action: 'reload' })">{{ t('studioPlugins.reload') }}</NButton>
                     <NButton :disabled="busy || !selected.previousVersion" @click="update(selected, { action: 'rollback' })">{{ t('studioPlugins.rollback') }} {{ selected.previousVersion }}</NButton>
                     <NButton :disabled="busy" @click="logs(selected.manifest.id)">{{ t('studioPlugins.logs') }}</NButton>
                   </div>
-                  <NInput v-model:value="sources[selected.manifest.id]" :placeholder="t('studioPlugins.source')" :aria-label="t('studioPlugins.source')" />
-                  <NCheckbox v-model:checked="trusted">{{ t('studioPlugins.trust') }}</NCheckbox>
-                  <NButton :disabled="!trusted || busy" @click="install(selected.manifest.id)">{{ t('studioPlugins.upgrade') }}</NButton>
+                  <template v-if="selected.installed && !selected.development">
+                    <NInput v-model:value="sources[selected.manifest.id]" :placeholder="t('studioPlugins.source')" :aria-label="t('studioPlugins.source')" />
+                    <NCheckbox v-model:checked="trusted">{{ t('studioPlugins.trust') }}</NCheckbox>
+                    <NButton :disabled="!trusted || busy" @click="install(selected.manifest.id)">{{ t('studioPlugins.upgrade') }}</NButton>
+                  </template>
                 </template>
                 <template v-if="selected.status === 'active' && operations(selected).length">
                   <h4>{{ t('studioPlugins.invoke') }}</h4>
@@ -238,7 +289,7 @@ async function logs(id: string) {
                   <NButton :disabled="busy || !selections[selected.manifest.id]" @click="invoke(selected)">{{ t('studioPlugins.invoke') }}</NButton>
                 </template>
                 <pre v-if="outputs[selected.manifest.id]">{{ outputs[selected.manifest.id] }}</pre>
-                <NButton v-if="canManage" :disabled="busy" type="error" secondary @click="uninstall(selected)">{{ t('studioPlugins.uninstall') }}</NButton>
+                <NButton v-if="canManage" :disabled="busy" type="error" secondary @click="uninstall(selected)">{{ t(selected.development ? 'studioPlugins.devUnlink' : 'studioPlugins.uninstall') }}</NButton>
               </div>
             </NTabPane>
           </NTabs>
@@ -291,6 +342,7 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .detail-description { white-space: pre-line; }
 .project-metadata { display: flex; flex-direction: column; gap: 12px; overflow-wrap: anywhere; }
 .project-metadata a { color: $accent-primary; }
+.development-path { overflow-wrap: anywhere; }
 .view-list { display: flex; flex-direction: column; gap: 8px; }
 .view-link { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid $border-color; text-decoration: none; color: $text-primary; }
 .operation-list { display: flex; flex-direction: column; gap: 12px; }
