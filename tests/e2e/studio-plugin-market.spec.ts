@@ -98,7 +98,7 @@ test('rechecks local identity after confirmation instead of replacing a newly in
   state.plugins.push({ ...state.plugins[0], manifest: { ...state.plugins[0].manifest, id: 'plugin-2', repository: 'https://github.com/another/source' } })
   state.revision++
   await page.locator('.n-dialog').getByRole('button', { name: '安装', exact: true }).click()
-  await expect(page.locator('.n-message').getByText('插件状态已改变，请刷新后重试。')).toBeVisible()
+  await expect(page.locator('.n-dialog').getByRole('alert').getByText('插件状态已改变，请刷新后重试。')).toBeVisible()
   expect(installs).toHaveLength(0)
 })
 

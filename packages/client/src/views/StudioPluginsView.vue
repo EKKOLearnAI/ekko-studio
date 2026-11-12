@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, shallowRef, computed, watch, onBeforeUnmount, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NCheckbox, NEmpty, NInput, NSelect, NTag, NDrawer, NDrawerContent, NModal, NTabs, NTab, NTabPane, NSpin, useDialog, useMessage } from 'naive-ui'
@@ -9,6 +9,7 @@ import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables
 import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
 import PluginCardMetadata from '@/components/plugins/PluginCardMetadata.vue'
+import PluginInstallFeedback from '@/components/plugins/PluginInstallFeedback.vue'
 import PluginConfigFields from '@/components/plugins/PluginConfigFields.vue'
 import PluginSubmissionDialog from '@/components/plugins/PluginSubmissionDialog.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
@@ -24,6 +25,8 @@ const { t } = useI18n(), dialog = useDialog(), message = useMessage(), router = 
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
 const { updates: availableUpdates, releases: publishedReleases, unavailable: unavailableRepositories, failed: updateCheckFailed, checking: checkingUpdates, refresh: refreshUpdates } = usePluginUpdates(computed(() => snapshot.value.plugins))
 const busy = ref(false), actionError = ref(''), source = ref(''), trusted = ref(false), showInstall = ref(false)
+const installing = ref(false), installingId = ref(''), installConfirmationOpen = ref(false)
+let installConfirmationSequence = 0
 const scope = ref<'installed' | 'all' | 'development'>('installed')
 function scopeKeydown(event: KeyboardEvent) {
   const tabs = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="tab"]')]
@@ -109,23 +112,52 @@ function installMarket(plugin: MarketPlugin) {
 function installPublished(release: PluginRelease, name: string, installed?: InstalledPlugin) {
   const action = publishedPluginAction(installed, release)
   if (!canManage.value || !action) return
-  dialog.warning({
+  confirmInstallation({
     title: actionLabel(action, release.version),
     content: t('studioPlugins.' + (action === 'switch' ? 'switchMarketConfirm' : action === 'upgrade' ? 'updateConfirm' : 'marketInstallConfirm'),
       { name, current: installed?.manifest.version, version: release.version, repository: release.repository }),
-    positiveText: actionLabel(action, release.version), negativeText: t('common.cancel'),
+    positiveText: actionLabel(action, release.version),
+  }, () => performInstallation(release.manifestId, async () => {
+    const latest = await pluginList(), current = latest.plugins.find(local => local.manifest.id === release.manifestId)
+    if (!samePluginInstallation(installed, current) || publishedPluginAction(current, release) !== action) throw new Error(t('studioPlugins.marketChanged'))
+    // Verify the package identity for both new installs and upgrades.
+    await pluginRequest(undefined, '/install', { source: release.installSource, pluginId: release.manifestId,
+      expectedVersion: release.version, revision: latest.revision, trusted: true })
+    sources.value[release.manifestId] = release.installSource
+    message.success(t('common.ok'))
+  }))
+}
+function confirmInstallation(options: { title: string; content: string; positiveText: string }, work: () => Promise<boolean>) {
+  if (busy.value || installConfirmationOpen.value) return
+  const pending = ref(false), failure = ref('')
+  const sequence = ++installConfirmationSequence
+  const closed = () => { if (sequence === installConfirmationSequence) installConfirmationOpen.value = false }
+  installConfirmationOpen.value = true
+  const confirmation = dialog.create({
+    title: options.title, type: 'default', showIcon: false,
+    content: () => h(PluginInstallFeedback, { description: options.content, loading: pending.value, error: failure.value }),
+    positiveText: options.positiveText, positiveButtonProps: { type: 'primary' }, negativeText: t('common.cancel'),
+    onAfterLeave: closed,
+    onNegativeClick: () => { if (pending.value) return false; closed() },
+    onClose: () => { if (pending.value) return false; closed() },
+    onMaskClick: () => { if (!pending.value) closed() },
+    onEsc: () => { if (!pending.value) closed() },
     onPositiveClick: async () => {
-      const success = await perform(async () => {
-        const latest = await pluginList(), current = latest.plugins.find(local => local.manifest.id === release.manifestId)
-        if (!samePluginInstallation(installed, current) || publishedPluginAction(current, release) !== action) throw new Error(t('studioPlugins.marketChanged'))
-        // Verify the package identity for both new installs and upgrades.
-        await pluginRequest(undefined, '/install', { source: release.installSource, pluginId: release.manifestId,
-          expectedVersion: release.version, revision: latest.revision, trusted: true })
-        sources.value[release.manifestId] = release.installSource
-        message.success(t('common.ok'))
-      })
-      if (!success) message.error(actionError.value)
-      return success
+      if (pending.value || busy.value) return false
+      pending.value = true; failure.value = ''
+      confirmation.loading = true; confirmation.positiveText = t('studioPlugins.installing')
+      confirmation.negativeButtonProps = { disabled: true }
+      confirmation.closable = false; confirmation.maskClosable = false; confirmation.closeOnEsc = false
+      try {
+        const success = await work()
+        if (!success) { failure.value = actionError.value; actionError.value = '' }
+        return success
+      } catch (cause) { failure.value = cause instanceof Error ? cause.message : String(cause); return false }
+      finally {
+        pending.value = false; confirmation.loading = false; confirmation.positiveText = options.positiveText
+        confirmation.negativeButtonProps = { disabled: false }
+        confirmation.closable = true; confirmation.maskClosable = true; confirmation.closeOnEsc = true
+      }
     },
   })
 }
@@ -163,8 +195,14 @@ async function perform(work: (boundProfile: string) => Promise<unknown>) {
   } finally { busy.value = false }
 }
 async function install(id?: string) {
-  const success = await perform(() => pluginRequest(undefined, '/install', { source: id ? sources.value[id] : source.value, pluginId: id, revision: snapshot.value.revision, trusted: trusted.value }))
+  const success = await performInstallation(id || '', () => pluginRequest(undefined, '/install', { source: id ? sources.value[id] : source.value, pluginId: id, revision: snapshot.value.revision, trusted: trusted.value }))
   if (success && !id) { showInstall.value = false; source.value = ''; trusted.value = false }
+}
+async function performInstallation(id: string, work: () => Promise<unknown>) {
+  if (busy.value) return false
+  installing.value = true; installingId.value = id
+  try { return await perform(work) }
+  finally { installing.value = false; installingId.value = '' }
 }
 function upgrade(plugin: InstalledPlugin) {
   const release = localRelease(plugin)
@@ -196,12 +234,12 @@ function unlinkDevelopment(plugin: CatalogPlugin) {
   } })
 }
 function activateLinkedPlugin(plugin: CatalogPlugin, label: 'common.enable' | 'studioPlugins.reload') {
-  const activate = () => perform(async () => {
+  const activate = () => performInstallation(plugin.manifest.id, async () => {
     const { revision } = await pluginList()
     await pluginRequest(undefined, '/' + encodeURIComponent(plugin.manifest.id) + '/development', { revision, trusted: true })
   })
   if (plugin.developmentDirectory === plugin.development!.directory) { void activate(); return }
-  dialog.warning({ title: t(label), content: t('studioPlugins.devTrust', { path: plugin.development!.directory }), positiveText: t(label), negativeText: t('common.cancel'), onPositiveClick: activate })
+  confirmInstallation({ title: t(label), content: t('studioPlugins.devTrust', { path: plugin.development!.directory }), positiveText: t(label) }, activate)
 }
 function enablePlugin(plugin: CatalogPlugin) {
   if (plugin.development && plugin.development.status !== 'missing') activateLinkedPlugin(plugin, 'common.enable')
@@ -248,9 +286,10 @@ async function logs(id: string) {
         </div>
         <div class="actions">
           <NButton size="large" @click="showSubmission = true">{{ t('studioPluginSubmission.title') }}</NButton>
-          <NButton v-if="canManage" type="primary" size="large" @click="showInstall = true">{{ t('studioPlugins.installTitle') }}</NButton>
+          <NButton v-if="canManage" type="primary" size="large" :disabled="busy" @click="showInstall = true">{{ t('studioPlugins.installTitle') }}</NButton>
         </div>
       </header>
+      <PluginInstallFeedback v-if="installing && !installConfirmationOpen && !showInstall && !selected" loading />
       <NAlert v-if="error || actionError" type="error" closable @close="error = ''; actionError = ''">{{ actionError || error }}</NAlert>
       <NAlert v-if="developmentError" type="error" closable @close="developmentError = ''">{{ developmentError }}</NAlert>
       <NAlert v-if="updateCheckFailed" type="warning">{{ t('studioPlugins.updateCheckFailed') }} <NButton text :loading="checkingUpdates" @click="refreshUpdates(true)">{{ t('common.retry') }}</NButton></NAlert>
@@ -315,7 +354,7 @@ async function logs(id: string) {
               <NButton v-if="canManage && localAction(plugin)" size="small" type="primary" secondary :disabled="busy" @click="upgrade(plugin)">{{ actionLabel(localAction(plugin), localRelease(plugin)?.version) }}</NButton>
               <NButton size="small" quaternary @click="details(plugin)">{{ t('studioPlugins.details') }}</NButton>
               <NButton v-if="plugin.status === 'active' && pluginPages(plugin).length" size="small" secondary @click="router.push(pluginPageLocation(plugin))">{{ t('studioPlugins.open') }} <span aria-hidden="true">&nbsp;↗</span></NButton>
-              <NButton v-else-if="canManage && !plugin.enabled" size="small" secondary :disabled="activationBusy(plugin)" @click="enablePlugin(plugin)">{{ t('common.enable') }}</NButton>
+              <NButton v-else-if="canManage && !plugin.enabled" size="small" secondary :loading="installing && installingId === plugin.manifest.id" :disabled="activationBusy(plugin)" @click="enablePlugin(plugin)">{{ t('common.enable') }}</NButton>
               <NButton v-if="canManage && plugin.installed" size="small" quaternary type="error" :disabled="busy" @click="uninstall(plugin)">{{ t('studioPlugins.uninstall') }}</NButton>
               <NButton v-if="canManage && plugin.development" size="small" quaternary :disabled="busy" @click="unlinkDevelopment(plugin)">{{ t('studioPlugins.devUnlink') }}</NButton>
             </div>
@@ -327,13 +366,14 @@ async function logs(id: string) {
     </div>
 
     <PluginSubmissionDialog v-model:show="showSubmission" />
-    <NModal v-model:show="showInstall" preset="card" :title="t('studioPlugins.installTitle')" class="plugin-install-modal" style="width: min(540px, calc(100vw - 32px))">
+    <NModal v-model:show="showInstall" preset="card" :title="t('studioPlugins.installTitle')" :closable="!installing" :mask-closable="!installing" :close-on-esc="!installing" class="plugin-install-modal" style="width: min(540px, calc(100vw - 32px))">
       <div class="detail-stack">
         <p>{{ t('studioPlugins.installHint') }}</p>
-        <NInput v-model:value="source" :placeholder="t('studioPlugins.source')" :aria-label="t('studioPlugins.source')" />
-        <NCheckbox v-model:checked="trusted">{{ t('studioPlugins.trust') }}</NCheckbox>
+        <NInput v-model:value="source" :disabled="installing" :placeholder="t('studioPlugins.source')" :aria-label="t('studioPlugins.source')" />
+        <NCheckbox v-model:checked="trusted" :disabled="installing" :aria-disabled="installing">{{ t('studioPlugins.trust') }}</NCheckbox>
+        <PluginInstallFeedback v-if="installing" loading />
         <NAlert v-if="actionError" type="error">{{ actionError }}</NAlert>
-        <NButton type="primary" :disabled="!trusted || !source.trim() || busy" :loading="busy" @click="install()">{{ t('studioPlugins.install') }}</NButton>
+        <NButton type="primary" :disabled="!trusted || !source.trim() || busy" :loading="installing" @click="install()">{{ t(installing ? 'studioPlugins.installing' : 'studioPlugins.install') }}</NButton>
       </div>
     </NModal>
 
@@ -360,11 +400,12 @@ async function logs(id: string) {
       </NDrawerContent>
     </NDrawer>
 
-    <NDrawer :show="Boolean(selected)" :width="'min(560px, 100vw)'" @update:show="value => { if (!value) closeDetails() }">
-      <NDrawerContent v-if="selected" :title="selected.manifest.name" closable>
+    <NDrawer :show="Boolean(selected)" :width="'min(560px, 100vw)'" :mask-closable="!installing" :close-on-esc="!installing" @update:show="value => { if (!value) closeDetails() }">
+      <NDrawerContent v-if="selected" :title="selected.manifest.name" :closable="!installing">
         <div class="detail-stack">
           <div class="detail-identity"><PluginIcon :plugin="selected" /><div class="identity-copy"><h3>{{ selected.manifest.name }}</h3><span class="eyebrow">{{ selected.manifest.id }} · v{{ selected.manifest.version }}</span></div><NTag size="small" :bordered="false">{{ t('studioPlugins.' + selected.status) }}</NTag></div>
           <p class="detail-description">{{ selected.manifest.description }}</p>
+          <PluginInstallFeedback v-if="installing && installingId === selected.manifest.id && !installConfirmationOpen" loading />
           <NAlert v-if="selected.installed && !selected.developmentEntry && availableUpdates[selected.manifest.id]" type="info">
             {{ t('studioPlugins.newVersion', { current: selected.manifest.version, version: availableUpdates[selected.manifest.id]!.version }) }}
             <NButton v-if="canManage" text :disabled="busy" @click="upgrade(selected)">{{ t('studioPlugins.updateTo', { version: availableUpdates[selected.manifest.id]!.version }) }}</NButton>
@@ -412,14 +453,14 @@ async function logs(id: string) {
                   <h4>{{ t('studioPlugins.maintenance') }}</h4>
                   <p v-if="selected.development" class="development-path">{{ selected.development.directory }}</p>
                   <div v-if="selected.installed" class="actions">
-                    <NButton :disabled="activationBusy(selected) || !selected.enabled" @click="reloadPlugin(selected)">{{ t('studioPlugins.reload') }}</NButton>
+                    <NButton :loading="installing && installingId === selected.manifest.id" :disabled="activationBusy(selected) || !selected.enabled" @click="reloadPlugin(selected)">{{ t('studioPlugins.reload') }}</NButton>
                     <NButton :disabled="busy || !selected.previousVersion" @click="update(selected, { action: 'rollback' })">{{ t('studioPlugins.rollback') }} {{ selected.previousVersion }}</NButton>
                     <NButton :disabled="busy" @click="logs(selected.manifest.id)">{{ t('studioPlugins.logs') }}</NButton>
                   </div>
                   <template v-if="selected.installed && !selected.development">
-                    <NInput v-model:value="sources[selected.manifest.id]" :placeholder="t('studioPlugins.source')" :aria-label="t('studioPlugins.source')" />
-                    <NCheckbox v-model:checked="trusted">{{ t('studioPlugins.trust') }}</NCheckbox>
-                    <NButton :disabled="!trusted || busy" @click="install(selected.manifest.id)">{{ t('studioPlugins.upgrade') }}</NButton>
+                    <NInput v-model:value="sources[selected.manifest.id]" :disabled="installing" :placeholder="t('studioPlugins.source')" :aria-label="t('studioPlugins.source')" />
+                    <NCheckbox v-model:checked="trusted" :disabled="installing" :aria-disabled="installing">{{ t('studioPlugins.trust') }}</NCheckbox>
+                    <NButton type="primary" :loading="installing && installingId === selected.manifest.id" :disabled="!trusted || busy" @click="install(selected.manifest.id)">{{ t('studioPlugins.upgrade') }}</NButton>
                   </template>
                 </template>
                 <template v-if="selected.status === 'active' && operations(selected).length">

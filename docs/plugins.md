@@ -682,6 +682,12 @@ Install, switch, upgrade and uninstall recheck the selected installation identit
 revision for the transaction. Install requests pass the immutable commit, expected
 plugin ID and exact version. Failed operations retain the current installed state.
 
+Installation confirmations use the normal themed primary action. While an install,
+upgrade, switch or development build is pending, the confirmation shows a spinner
+and waiting text, disables duplicate submission/cancellation and cannot be dismissed
+by Escape or the mask. Errors remain in the dialog with retry available. Manual
+source installs also lock their inputs and show progress until the request finishes.
+
 Cards in both lists show the declared author, a direct repository link, cached
 GitHub stars and version information. Stars come from the cloud directory's
 `repositoryStars`, not from plugin-authored manifest fields or browser calls to

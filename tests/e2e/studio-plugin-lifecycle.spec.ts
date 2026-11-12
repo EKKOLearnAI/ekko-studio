@@ -3,20 +3,21 @@ import { resolve } from 'node:path'
 
 const repository = 'https://github.com/example/notes', directory = '/projects/notes'
 const releaseSource = 'github:example/notes#' + 'b'.repeat(40)
-async function setup(page: Page, options: { development?: boolean; packaged?: boolean; failed?: boolean; version?: string } = {}) {
+async function setup(page: Page, options: { development?: boolean; packaged?: boolean; failed?: boolean; version?: string; empty?: boolean } = {}) {
   const manifest = { id: 'notes', name: 'Lifecycle Notes', description: 'Plugin lifecycle fixture', apiVersion: 1, version: options.version || '0.1.6', repository, capabilities: ['tools'] }
   const original = { manifest, source: options.packaged ? releaseSource : directory, installedAt: 1, enabled: true,
     status: options.failed ? 'failed' : 'active', developmentDirectory: options.development ? directory : undefined,
     config: { prefix: 'saved setting' }, tools: [], commands: [], actions: [] }
-  const state = { revision: 1, installed: structuredClone(original) as typeof original | undefined, linked: !!options.development,
-    published: '0.1.4', failInstall: false, failUninstall: false, starts: 0, unlinks: 0 }
+  const state = { revision: 1, installed: options.empty ? undefined : structuredClone(original) as typeof original | undefined, linked: !!options.development,
+    published: '0.1.4', failInstall: false, failUninstall: false, starts: 0, unlinks: 0,
+    installGate: undefined as Promise<void> | undefined, developmentGate: undefined as Promise<void> | undefined }
   const installs: any[] = [], patches: any[] = []
   await page.route(url => url.hostname === 'api.ekkostudio.xyz', route => route.fulfill({ json: { ok: true, data: {
     list: [{ id: 'a'.repeat(64), name: manifest.name, description: manifest.description, repository, manifestId: 'notes',
       apiVersion: 1, version: state.published, sourceCommit: 'b'.repeat(40), installSource: releaseSource, capabilities: ['tools'], repositoryStars: 42 }],
     total: 1, page: 1, pageSize: 100,
   } } }))
-  await page.route(url => url.hostname === '127.0.0.1' && url.pathname.startsWith('/api/'), route => {
+  await page.route(url => url.hostname === '127.0.0.1' && url.pathname.startsWith('/api/'), async route => {
     const request = route.request(), url = new URL(request.url()), body = request.postData() ? request.postDataJSON() : {}
     if (url.pathname === '/api/studio/plugins') return route.fulfill({ json: { revision: state.revision, plugins: state.installed ? [state.installed] : [] } })
     if (url.pathname === '/api/studio/plugins/development') return route.fulfill({ json: { projects: state.linked ? [{ id: 'notes', directory, manifest,
@@ -27,15 +28,19 @@ async function setup(page: Page, options: { development?: boolean; packaged?: bo
         if (state.installed) state.installed.developmentDirectory = undefined
       } else {
         expect(body).toEqual({ revision: state.revision, trusted: true }); state.starts++
+        await state.developmentGate
         state.installed = { ...structuredClone(original), developmentDirectory: directory, installedAt: state.revision + 1 }
       }
       state.revision++; return route.fulfill({ json: { ok: true } })
     }
     if (url.pathname === '/api/studio/plugins/install') {
       installs.push(body)
-      expect(body).toEqual({ source: releaseSource, pluginId: 'notes', expectedVersion: state.published, revision: state.revision, trusted: true })
+      expect(body).toEqual(body.source === releaseSource
+        ? { source: releaseSource, pluginId: 'notes', expectedVersion: state.published, revision: state.revision, trusted: true }
+        : { source: directory, revision: state.revision, trusted: true })
+      await state.installGate
       if (state.failInstall) return route.fulfill({ status: 422, json: { error: 'Release activation failed' } })
-      state.installed = { ...original, manifest: { ...manifest, version: state.published }, source: releaseSource,
+      state.installed = { ...original, manifest: { ...manifest, version: state.published }, source: body.source,
         developmentDirectory: undefined, enabled: state.installed?.enabled || false, status: state.installed?.enabled ? 'active' : 'disabled', installedAt: ++state.revision }
       return route.fulfill({ json: { ok: true } })
     }
@@ -148,4 +153,90 @@ test('retains installed state after failed uninstall and offers same-version rep
   await local.getByRole('button', { name: '卸载', exact: true }).click(); await confirm(page, '确定')
   await expect(page.getByRole('alert')).toContainText('Dependent plugin is running')
   await expect(local).toBeVisible(); expect(state.installed).toBeDefined()
+})
+
+function heldRequest() {
+  let release!: () => void
+  const promise = new Promise<void>(resolve => { release = resolve })
+  return { promise, release }
+}
+
+test('uses a primary confirmation and shows pending installation until failure or success, without duplicate submits or dismissal', async ({ page }, testInfo) => {
+  const { state, installs } = await setup(page, { empty: true })
+  const first = heldRequest(); state.installGate = first.promise; state.failInstall = true
+  await all(page)
+  const market = page.getByTestId('market-plugin-notes'), dialog = page.locator('.n-dialog')
+  await market.getByRole('button', { name: '安装', exact: true }).click()
+  await expect(dialog.getByRole('button', { name: '安装', exact: true })).toHaveClass(/n-button--primary-type/)
+  await expect(dialog.locator('.n-dialog__icon')).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('install-confirm-light.png'), animations: 'disabled' })
+  await confirm(page, '安装')
+  const waiting = dialog.getByRole('button', { name: /正在安装…$/ })
+  await expect(waiting).toBeDisabled()
+  await expect(waiting.locator('.n-base-loading')).toBeVisible()
+  await expect(dialog.getByRole('status')).toContainText('安装可能需要一些时间，请稍候。')
+  await expect(dialog.getByRole('status').locator('.n-spin')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '取消', exact: true })).toBeDisabled()
+  await expect(dialog.locator('.n-base-close')).toHaveCount(0)
+  await waiting.evaluate(button => (button as HTMLButtonElement).click())
+  await page.keyboard.press('Escape'); await page.mouse.click(5, 5)
+  await expect(dialog).toBeVisible(); await expect.poll(() => installs.length).toBe(1)
+  await page.screenshot({ path: testInfo.outputPath('install-pending-light.png'), animations: 'disabled' })
+  await page.evaluate(async () => { await (window as any).pluginFixture.theme(true); (window as any).pluginFixture.wallpaper(true) })
+  await page.setViewportSize({ width: 390, height: 900 })
+  await expect(dialog).toBeInViewport({ ratio: .95 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('install-pending-dark-mobile.png'), animations: 'disabled' })
+  first.release()
+  await expect(dialog.getByRole('alert')).toContainText('Release activation failed')
+  await expect(dialog.getByRole('button', { name: '安装', exact: true })).toBeEnabled()
+  await expect(dialog.getByRole('button', { name: '取消', exact: true })).toBeEnabled()
+  await expect(dialog.getByRole('status')).toHaveCount(0)
+  expect(state.installed).toBeUndefined()
+  await page.screenshot({ path: testInfo.outputPath('install-error-mobile.png'), animations: 'disabled' })
+  await page.evaluate(() => { (window as any).pluginFixture.appearance({ brightness: 'light', appearance: { global: {}, regions: {} } }); (window as any).pluginFixture.wallpaper(false) })
+  state.failInstall = false
+  const retry = heldRequest(); state.installGate = retry.promise
+  await confirm(page, '安装')
+  await expect(waiting).toBeDisabled(); await expect(dialog.getByRole('alert')).toHaveCount(0)
+  retry.release()
+  await expect(dialog).toHaveCount(0)
+  await expect(market.getByText('已安装', { exact: true })).toBeVisible()
+  expect(installs).toHaveLength(2)
+})
+
+test('keeps manual source installation visible with locked inputs until its request completes', async ({ page }) => {
+  const { state, installs } = await setup(page, { empty: true })
+  const held = heldRequest(); state.installGate = held.promise
+  await page.getByRole('button', { name: '安装插件', exact: true }).click()
+  const modal = page.locator('.plugin-install-modal')
+  await modal.getByRole('textbox').fill(directory); await modal.getByRole('checkbox').check()
+  await modal.getByRole('button', { name: '安装', exact: true }).click()
+  await expect(modal.getByRole('button', { name: /正在安装…$/ })).toBeDisabled()
+  await expect(modal.getByRole('status')).toBeVisible()
+  await expect(modal.getByRole('textbox')).toBeDisabled(); await expect(modal.getByRole('checkbox')).toBeDisabled()
+  await page.keyboard.press('Escape'); await page.mouse.click(5, 5)
+  await expect(modal).toBeVisible(); await expect.poll(() => installs.length).toBe(1)
+  held.release()
+  await expect(modal).toHaveCount(0)
+  await expect(page.getByTestId('plugin-card-notes')).toBeVisible()
+})
+
+test('shows build/install feedback for both trusted and first-time development activation', async ({ page }) => {
+  const { state } = await setup(page, { empty: true, development: true })
+  const held = heldRequest(); state.developmentGate = held.promise
+  await page.getByRole('tab', { name: /开发插件/ }).click()
+  const card = page.getByTestId('plugin-card-notes'), dialog = page.locator('.n-dialog')
+  await card.getByRole('button', { name: '启用', exact: true }).click(); await confirm(page, '启用')
+  await expect(dialog.getByRole('button', { name: /正在安装…$/ })).toBeDisabled()
+  await expect(dialog.getByRole('status')).toBeVisible(); await expect.poll(() => state.starts).toBe(1)
+  held.release(); await expect(dialog).toHaveCount(0)
+  await card.getByRole('button', { name: '详情', exact: true }).click()
+  const drawer = page.locator('.n-drawer')
+  await drawer.getByRole('button', { name: '禁用', exact: true }).click()
+  const again = heldRequest(); state.developmentGate = again.promise
+  await drawer.getByRole('button', { name: '启用', exact: true }).click()
+  await expect(drawer.getByRole('status')).toBeVisible(); await expect(dialog).toHaveCount(0)
+  again.release(); await expect(drawer.getByRole('status')).toHaveCount(0)
+  await expect(drawer.getByRole('button', { name: '禁用', exact: true })).toBeVisible()
 })
