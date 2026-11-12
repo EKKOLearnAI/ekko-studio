@@ -40,6 +40,7 @@ function scopeKeydown(event: KeyboardEvent) {
 }
 const { entries: marketEntries, loading: marketLoading, failed: marketFailed, loaded: marketLoaded, refresh: refreshMarket } = usePluginMarket(computed(() => scope.value === 'all'))
 const search = ref(''), category = ref<PluginCategory>('all'), state = ref('all')
+watch(scope, value => { if (value !== 'all' && ['installed', 'notInstalled'].includes(state.value)) state.value = 'all' })
 const selectedMarketId = ref('')
 const selectedMarket = computed({ get: () => marketEntries.value.find(plugin => plugin.id === selectedMarketId.value), set: (plugin: MarketPlugin | undefined) => { selectedMarketId.value = plugin?.id || '' } })
 const showSubmission = ref(false)
@@ -83,12 +84,21 @@ const activeCount = computed(() => snapshot.value.plugins.filter(plugin => plugi
 const localEntries = computed(() => scope.value === 'development' ? developmentCatalog.value : catalog.value)
 const filtered = computed(() => localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.capabilities, category.value)
   && (state.value === 'all' || plugin.status === state.value) && matchesPluginSearch(plugin.manifest, search.value)))
-const filteredMarket = computed(() => marketEntries.value.filter(plugin => matchesPluginCategory(plugin.capabilities, category.value) && matchesPluginSearch(plugin, search.value)))
 const categoryCount = (value: PluginCategory) => scope.value === 'all'
   ? marketEntries.value.filter(plugin => matchesPluginCategory(plugin.capabilities, value)).length
   : localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.capabilities, value)).length
 const marketInstalled = (plugin: MarketPlugin) => installedMarketPlugin(plugin, snapshot.value.plugins)
 const marketConflict = (plugin: MarketPlugin) => !marketInstalled(plugin) && snapshot.value.plugins.some(local => local.manifest.id === plugin.manifestId)
+const marketStatus = (plugin: MarketPlugin) => marketInstalled(plugin)?.status || (marketConflict(plugin) ? 'marketConflict' : 'notInstalled')
+function matchesMarketState(plugin: MarketPlugin) {
+  const installed = marketInstalled(plugin)
+  if (state.value === 'all') return true
+  if (state.value === 'installed') return Boolean(installed)
+  if (state.value === 'notInstalled') return !installed
+  return installed?.status === state.value
+}
+const filteredMarket = computed(() => marketEntries.value.filter(plugin => matchesMarketState(plugin)
+  && matchesPluginCategory(plugin.capabilities, category.value) && matchesPluginSearch(plugin, search.value)))
 const marketAction = (plugin: MarketPlugin) => marketConflict(plugin) ? undefined : publishedPluginAction(marketInstalled(plugin), plugin.release)
 const actionLabel = (action: PublishedPluginAction | undefined, version: string | null | undefined) => t('studioPlugins.' + ({ install: 'install', switch: 'installMarketVersion', upgrade: 'updateTo', reinstall: 'reinstallVersion' }[action || 'install']), { version })
 const installationLabel = (plugin: InstalledPlugin) => t('studioPlugins.' + ({ development: 'updateDevelopment', local: 'localVersion', package: 'installed' }[pluginInstallationKind(plugin)]))
@@ -163,7 +173,8 @@ function confirmInstallation(options: { title: string; content: string; positive
     },
   })
 }
-const stateOptions = computed(() => ['all', 'active', 'disabled', 'failed'].map(value => ({ value, label: t('studioPlugins.' + (value === 'all' ? 'allStates' : value)) })))
+const stateOptions = computed(() => ['all', ...(scope.value === 'all' ? ['installed', 'notInstalled'] : []), 'active', 'disabled', 'failed']
+  .map(value => ({ value, label: t('studioPlugins.' + (value === 'all' ? 'allStates' : value)) })))
 function syncDrafts() {
   for (const plugin of snapshot.value.plugins) {
     if (!configDirty.value[plugin.manifest.id]) {
@@ -307,7 +318,7 @@ async function logs(id: string) {
         <NInput v-model:value="search" clearable size="large" :placeholder="t('studioPlugins.search')" :aria-label="t('studioPlugins.search')">
           <template #prefix><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg></template>
         </NInput>
-        <NSelect v-if="scope !== 'all'" v-model:value="state" class="state-filter" :options="stateOptions" :aria-label="t('studioPlugins.allStates')" />
+        <NSelect v-model:value="state" class="state-filter" :options="stateOptions" :aria-label="t('studioPlugins.allStates')" />
       </div>
       <div class="catalog-toolbar">
         <nav class="category-tabs" :aria-label="t('studioPlugins.categories')">
@@ -324,7 +335,11 @@ async function logs(id: string) {
           <article v-for="plugin in filteredMarket" :key="plugin.id" class="plugin-card" data-theme-surface="card" :data-testid="`market-plugin-${plugin.manifestId || plugin.id}`">
             <PluginIcon class="card-icon" :plugin="{ manifest: { name: plugin.name } }" :icon-url="plugin.iconUrl" />
             <div class="card-copy">
-              <div class="card-heading"><button type="button" class="card-title" @click="selectedMarket = plugin">{{ plugin.name }}</button><NTag v-if="marketInstalled(plugin)" size="small" :bordered="false">{{ installationLabel(marketInstalled(plugin)!) }}</NTag></div>
+              <div class="card-heading">
+                <button type="button" class="card-title" @click="selectedMarket = plugin">{{ plugin.name }}</button>
+                <NTag v-if="marketInstalled(plugin)" size="small" :bordered="false">{{ installationLabel(marketInstalled(plugin)!) }}</NTag>
+                <span class="status" :class="{ running: marketStatus(plugin) === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + marketStatus(plugin)) }}</span>
+              </div>
               <p class="card-description">{{ plugin.description }}</p>
               <PluginCardMetadata compact :author="plugin.author?.name" :repository="plugin.repository" :stars="plugin.repositoryStars"
                 :version="marketInstalled(plugin)?.manifest.version || plugin.version" :installed="Boolean(marketInstalled(plugin))"
@@ -395,7 +410,11 @@ async function logs(id: string) {
     <NDrawer :show="Boolean(selectedMarket)" :width="'min(560px, 100vw)'" @update:show="value => { if (!value) selectedMarket = undefined }">
       <NDrawerContent v-if="selectedMarket" :title="selectedMarket.name" closable>
         <div class="detail-stack">
-          <div class="detail-identity"><PluginIcon :plugin="{ manifest: { name: selectedMarket.name } }" :icon-url="selectedMarket.iconUrl" /><span>{{ selectedMarket.version ? 'v' + selectedMarket.version : '' }}</span><NTag v-if="marketInstalled(selectedMarket)">{{ installationLabel(marketInstalled(selectedMarket)!) }}</NTag></div>
+          <div class="detail-identity">
+            <PluginIcon :plugin="{ manifest: { name: selectedMarket.name } }" :icon-url="selectedMarket.iconUrl" /><span>{{ selectedMarket.version ? 'v' + selectedMarket.version : '' }}</span>
+            <NTag v-if="marketInstalled(selectedMarket)">{{ installationLabel(marketInstalled(selectedMarket)!) }}</NTag>
+            <span class="status" :class="{ running: marketStatus(selectedMarket) === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + marketStatus(selectedMarket)) }}</span>
+          </div>
           <PluginCardMetadata :author="selectedMarket.author?.name" :repository="selectedMarket.repository" :stars="selectedMarket.repositoryStars"
             :version="marketInstalled(selectedMarket)?.manifest.version || selectedMarket.version" :installed="Boolean(marketInstalled(selectedMarket))"
             :published-version="selectedMarket.version" :update-state="marketUpdateState(selectedMarket)" />

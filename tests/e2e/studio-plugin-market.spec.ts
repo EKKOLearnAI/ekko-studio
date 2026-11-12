@@ -33,6 +33,11 @@ async function setup(page: Page, options: { ordinary?: boolean; unavailable?: bo
       state.revision++
       return route.fulfill({ json: { ok: true } })
     }
+    if (route.request().method() === 'PATCH' && path.startsWith('/api/studio/plugins/') && route.request().postDataJSON().action === 'uninstall') {
+      state.plugins = state.plugins.filter(plugin => plugin.manifest.id !== path.split('/').at(-1))
+      state.revision++
+      return route.fulfill({ json: { ok: true } })
+    }
     if (path === '/api/studio/plugins') return route.fulfill({ json: { revision: state.revision, plugins: state.plugins } })
     if (path.endsWith('/events')) return route.fulfill({ json: { cursor: 0, generation: 'market', events: [] } })
     return route.fulfill({ json: {} })
@@ -64,6 +69,7 @@ test('defaults to installed plugins, filters the full market and installs an exa
   await expect(page.locator('.plugin-card')).toHaveCount(1)
   const card = page.getByTestId('market-plugin-plugin-101')
   await expect(card).toContainText('Last-page Agent')
+  await expect(card.locator('.status')).toHaveText('未安装')
   expect(marketRequests.map(url => url.searchParams.get('page'))).toEqual(['1', '2'])
   await page.getByRole('textbox', { name: '搜索插件名称、描述…' }).fill('not-a-plugin')
   await expect(page.getByText('没有匹配的插件')).toBeVisible()
@@ -83,11 +89,83 @@ test('defaults to installed plugins, filters the full market and installs an exa
   await card.getByRole('button', { name: '安装', exact: true }).click()
   await page.locator('.n-dialog').getByRole('button', { name: '安装', exact: true }).click()
   await expect(card.getByText('已安装', { exact: true })).toBeVisible()
+  await expect(card.locator('.status')).toHaveText('已禁用')
   await expect(page.locator('.n-dialog')).toHaveCount(0)
   expect(installs).toEqual([{ source: `github:example/plugin-101#${'b'.repeat(40)}`, pluginId: 'plugin-101', expectedVersion: '1.0.0', revision: 1, trusted: true }])
   await page.getByRole('tab', { name: /^已安装/ }).click()
   await expect(page.getByTestId('plugin-card-plugin-101')).toBeVisible()
   for (const headers of cloudHeaders) for (const key of ['authorization', 'cookie', 'x-hermes-profile', 'referer']) expect(headers[key]).toBeUndefined()
+})
+
+test('shows and filters live installation statuses in All without confusing another repository', async ({ page }, testInfo) => {
+  const { state } = await setup(page, { entries: [1, 2, 3, 4, 5].map(index => published(index)) })
+  for (const [index, status] of [[2, 'active'], [3, 'failed'], [5, 'active']] as const) {
+    const repository = index === 5 ? 'https://github.com/another/plugin-5' : `https://github.com/example/plugin-${index}`
+    state.plugins.push({ ...state.plugins[0], status, enabled: true,
+      manifest: { ...state.plugins[0].manifest, id: `plugin-${index}`, name: `Installed ${index}`, repository, capabilities: ['tools'] },
+      source: 'git+' + repository + '#' + 'c'.repeat(40) })
+  }
+  state.revision++
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await page.getByRole('tab', { name: /^全部/ }).click()
+  const card = (index: number) => page.getByTestId(`market-plugin-plugin-${index}`)
+  const filter = page.locator('.state-filter')
+  async function selectStatus(label: string) {
+    await filter.click()
+    await page.locator('.n-base-select-option').getByText(label, { exact: true }).click()
+  }
+  for (const [index, status] of [[1, '已禁用'], [2, '运行中'], [3, '失败'], [4, '未安装'], [5, '已安装其他来源']] as const) {
+    await expect(card(index).locator('.status')).toHaveText(status)
+  }
+  await card(1).getByRole('button', { name: '详情', exact: true }).click()
+  await expect(page.getByRole('dialog').locator('.detail-identity .status')).toHaveText('已禁用')
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('market-statuses.png'), fullPage: true, animations: 'disabled' })
+
+  await selectStatus('已安装')
+  await expect(page.locator('.plugin-card')).toHaveCount(3)
+  await expect(card(5)).toHaveCount(0)
+  await selectStatus('未安装')
+  await expect(page.locator('.plugin-card')).toHaveCount(2)
+  await expect(card(4)).toBeVisible()
+  await expect(card(5).getByRole('button', { name: '已安装其他来源' })).toBeDisabled()
+  await page.getByRole('tab', { name: /^已安装/ }).click()
+  await expect(filter).toContainText('全部状态')
+  await expect(page.locator('.plugin-card')).toHaveCount(4)
+  await page.getByRole('tab', { name: /^全部/ }).click()
+
+  await selectStatus('失败')
+  await expect(page.locator('.plugin-card')).toHaveCount(1)
+  await expect(card(3)).toBeVisible()
+  await selectStatus('运行中')
+  await expect(page.locator('.plugin-card')).toHaveCount(1)
+  await expect(card(2)).toBeVisible()
+  await page.getByRole('textbox', { name: '搜索插件名称、描述…' }).fill('Published 3')
+  await expect(page.getByText('没有匹配的插件')).toBeVisible()
+  await page.getByRole('textbox', { name: '搜索插件名称、描述…' }).fill('')
+  await page.getByRole('button', { name: /^聊天命令/ }).click()
+  await expect(page.getByText('没有匹配的插件')).toBeVisible()
+  await page.getByRole('button', { name: /^所有类型/ }).click()
+  await selectStatus('已禁用')
+  await expect(card(1)).toBeVisible()
+  await page.getByRole('tab', { name: /^已安装/ }).click()
+  await expect(filter).toContainText('已禁用')
+  await expect(page.locator('.plugin-card')).toHaveCount(1)
+  await page.getByRole('tab', { name: /^全部/ }).click()
+  state.plugins[0].status = 'active'; state.plugins[0].enabled = true; state.revision++
+  await page.evaluate(() => (window as any).pluginFixture.changed())
+  await expect(card(1)).toHaveCount(0)
+  await selectStatus('运行中')
+  await expect(card(1).locator('.status')).toHaveText('运行中')
+  await expect(page.locator('.plugin-card')).toHaveCount(2)
+  await card(1).getByRole('button', { name: '卸载', exact: true }).click()
+  await page.locator('.n-dialog').getByRole('button', { name: '确定', exact: true }).click()
+  await expect(page.locator('.n-dialog')).toHaveCount(0)
+  await expect(card(1)).toHaveCount(0)
+  await selectStatus('未安装')
+  await expect(card(1).locator('.status')).toHaveText('未安装')
+  await expect(card(1).getByRole('button', { name: '安装', exact: true })).toBeEnabled()
 })
 
 test('rechecks local identity after confirmation instead of replacing a newly installed plugin', async ({ page }) => {
