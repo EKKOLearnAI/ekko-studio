@@ -38,6 +38,23 @@ it('keeps model credentials private and settings isolated by actual user/Profile
   expect(paths.dataDir).toContain(f.home)
   expect(JSON.stringify(visible)).not.toContain('private-key')
 })
+it('recovers update checks through the public release redirect without anonymous REST API access', async () => {
+  const f = await setup()
+  await f.runtime.invoke('rpc', 'save-settings', { ...f.settings, executable: '' }, who)
+  let failed = true
+  const request = vi.fn(async (url: string, options?: RequestInit) => {
+    if (url.startsWith('https://api.github.com/')) return new Response('API rate limit exceeded', { status: 403 })
+    expect(url).toBe('https://github.com/can1357/oh-my-pi/releases/latest')
+    expect(options).toMatchObject({ method: 'HEAD', redirect: 'manual' })
+    return failed ? new Response(null, { status: 429 }) : new Response(null, { status: 302, headers: { location: 'https://github.com/can1357/oh-my-pi/releases/tag/v18.19.0' } })
+  })
+  vi.stubGlobal('fetch', request)
+  await expect(f.agent.checkUpdate(who)).rejects.toMatchObject({ status: 503, code: 'OMP_RELEASE_LOOKUP' })
+  failed = false
+  expect(await f.agent.checkUpdate(who)).toMatchObject({ currentVersion: '', latestVersion: '18.19.0', updateAvailable: true })
+  expect(await f.agent.checkUpdate(who)).toMatchObject({ latestVersion: '18.19.0' })
+  expect(request).toHaveBeenCalledTimes(2)
+})
 it('exposes managed engine removal and automatic update support without deleting external binaries or settings', async () => {
   const f = await setup()
   expect(f.agent.descriptor().actions).toMatchObject({ remove: true, autoUpdate: true })
