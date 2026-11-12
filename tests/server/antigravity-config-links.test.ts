@@ -43,6 +43,20 @@ it('keeps native links when supported and tolerates repeat preparation', async (
   await prepare(); await prepare()
   expect((await lstat(join(rootDir, '.gemini/google_accounts.json'))).isSymbolicLink()).toBe(true)
 })
+
+it('keeps a same-name user MCP and grants only the dedicated plugin servers it actually injects', async () => {
+  const managed = { command: 'node', env: { ELECTRON_RUN_AS_NODE: '1', HERMES_WEB_UI_MANAGED_MCP: '1', HERMES_MCP_TOOLSET: 'plugins' } }
+  await writeFile(join(home, '.gemini/config/mcp_config.json'), JSON.stringify({ mcpServers: { user: { command: 'user-owned' }, stale: managed } }))
+  await prepareAntigravityRuntime({ home, rootDir, systemPrompt: 'managed prompt', managedMcp: { user: managed, fresh: managed, disabled: { ...managed, enabled: false } } })
+  const servers = JSON.parse(await readFile(join(rootDir, '.gemini/config/mcp_config.json'), 'utf8')).mcpServers
+  expect(servers.user.command).toBe('user-owned')
+  expect(servers).not.toHaveProperty('stale')
+  expect(servers.fresh).toMatchObject(managed)
+  const settings = JSON.parse(await readFile(join(rootDir, '.gemini/antigravity-cli/settings.json'), 'utf8'))
+  expect(settings.permissions.allow).toContain('mcp(fresh/*)')
+  expect(settings.permissions.allow).not.toContain('mcp(user/*)')
+  expect(settings.permissions.allow).not.toContain('mcp(disabled/*)')
+})
 it('does not share native credentials for an external model', async () => {
   link.mockRejectedValue(Object.assign(new Error('links unavailable'), { code: 'EPERM' }))
   await prepare({ baseUrl: 'http://example.invalid', token: 'synthetic' })

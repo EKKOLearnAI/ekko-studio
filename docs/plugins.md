@@ -304,7 +304,43 @@ localStorage 或登录凭证；HTTP 请求统一通过 `ctx.api`。
 
 ## Agent 与工作流
 
-启用的工具自动出现在独立的 `ekko-studio-plugins` MCP 服务中，由 `ekko-studio-mcp plugins` 启动；`ekko-studio-api` 只保留接口文档和接口调用工具。工具名使用 `插件ID__工具名`，例如 `notebook__append`、`tool-demo__hello`，并附带插件描述。为兼容各 Agent，标识符中的下划线和点分别转义为 `_u`、`_d`；名称超过 64 个字符时保留两端可读前缀并附加稳定的防重名后缀。
+默认情况下，启用的工具放在共享的 `ekko-studio-plugins` MCP 服务中。插件可在 `plugin.json` 中选择独立服务名：
+
+```json
+{
+  "capabilities": ["tools"],
+  "mcp": { "name": "notebook-tools" }
+}
+```
+
+这是清单片段，需与插件原有的 ID、版本、入口等字段合并。不声明 `mcp`，或显式声明
+`"mcp": { "name": "ekko-studio-plugins" }`，均使用共享服务。声明独立名称后，
+本插件工具只出现在该 MCP，不再出现在共享服务，也看不到其他插件的工具。插件仍通过
+`ctx.tools.register` 注册工具，无需自行实现或启动 MCP 服务。
+
+独立名称为 1–64 个小写字母、数字、下划线或连字符，必须以字母开头；不能使用 Studio
+保留前缀（`ekko-studio`、`hermes-studio`、`hermes-web-ui`）或另一已安装插件占用的独立名称。
+安装与升级时检查重名，禁用的插件也保留名称。避免与自己配置的外部 MCP 重名；Hermes/Ekko
+若发现同名非托管服务，会保留用户配置并跳过该 Profile 的自动同步。
+
+Studio 在安装、升级、回滚和卸载后同步 Hermes/Ekko 的 MCP 配置，Coding Agent 在生成运行配置时
+使用当前插件服务名。各服务在 MCP 管理页可独立启停；插件禁用后保留服务配置及其开关，
+工具列表为空，卸载后移除托管服务。服务名称变更会使 Coding Agent 的空闲运行失效，正在执行的
+运行在当前轮结束后重新准备。
+
+Studio 会将插件变更通知所有已启动的 Hermes Worker，包括群聊和任务使用的隔离 Worker，
+不会为清理操作启动新的 Worker。Worker 空闲时复用现有 MCP 删除逻辑清理已卸载或改名的独立服务，
+并刷新仍在使用的插件 MCP；共享的 `ekko-studio-plugins` 保留，只更新工具目录。
+同名的非托管服务不受影响。若该 Worker 仍有前台运行或后台任务，连接刷新延后到空闲边界；
+插件宿主仍立即拒绝已卸载插件的新调用。刷新完成后，已有会话在下一轮重建 Agent 实例以读取新工具，
+保留会话历史、运行记录和后台任务状态；原生工具注册表残留的旧工具名也会从新快照中过滤。
+刷新失败会保留待处理状态，在后续请求或运行结束时重试。Studio Bridge 之外的现有 MCP 客户端
+仍需自行刷新或重连以读取新服务。
+
+共享和独立服务均由 `ekko-studio-mcp plugins` 启动，通过 `HERMES_MCP_SERVER_NAME` 选择工具集合；
+直接运行且未设置该变量时使用共享集合。`ekko-studio-api` 只保留接口文档和接口调用工具。
+工具名使用 `插件ID__工具名`，例如 `notebook__append`、`tool-demo__hello`，独立服务也保持此格式，
+并附带插件描述。为兼容各 Agent，标识符中的下划线和点分别转义为 `_u`、`_d`；名称超过 64 个字符时保留两端可读前缀并附加稳定的防重名后缀。
 适用于启用了该 MCP server 的 Hermes、Ekko 和已接入 Studio MCP 的 Coding Agent。升级后刷新 MCP 管理页，已有 Agent 连接需重新连接或新开一轮运行，以加载独立服务和新工具名。外部运行时可能缓存工具目录，
 安装/启用后刷新 MCP 或开始新一轮运行；禁用后即使目录缓存仍在，调用也会被拒绝。
 

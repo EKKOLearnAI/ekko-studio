@@ -64,6 +64,7 @@ Environment:
   HERMES_WEB_UI_TOKEN     Optional explicit API token.
   AUTH_TOKEN              Optional explicit API token fallback.
   HERMES_MCP_TOOLSET      Tool category to expose: api, plugins, browser, use, or plan. Default: api.
+  HERMES_MCP_SERVER_NAME  MCP name; plugins exposes only plugins assigned to this name. Default: ekko-studio-plugins for plugins.
 
 When run without options, this process waits for MCP JSON-RPC messages on stdin.
 `)
@@ -1935,7 +1936,7 @@ function serverInstructions() {
   return category ? `${category.description} Coverage: ${category.coverage}` : ''
 }
 
-const pluginTools = createPluginTools(request)
+const pluginTools = createPluginTools(request, process.env.HERMES_MCP_SERVER_NAME || 'ekko-studio-plugins')
 async function visibleTools() {
   if (ACTIVE_TOOLSET === 'plugins') return pluginTools.list()
   const categoryToolset = categoryToolsetDefinition(ACTIVE_TOOLSET)

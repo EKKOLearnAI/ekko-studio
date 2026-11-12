@@ -67,25 +67,32 @@ it('serves plugins exclusively from the dedicated MCP toolset over the real stdi
     const chunks = []; for await (const chunk of req) chunks.push(chunk)
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : {}
     res.setHeader('Content-Type', 'application/json')
-    if (req.url === '/api/studio/plugins') res.end(JSON.stringify({ plugins: enabled ? [{ status: 'active', manifest: { id: 'demo', name: 'Demo' }, tools: [{ name: 'hello', description: 'Greet the caller', readOnly: true, inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } }] }] : [] }))
+    if (req.url === '/api/studio/plugins') {
+      const tools = [{ name: 'hello', description: 'Greet the caller', readOnly: true, inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } }]
+      res.end(JSON.stringify({ plugins: enabled ? [
+        { status: 'active', manifest: { id: 'demo', name: 'Demo' }, tools },
+        { status: 'active', manifest: { id: 'private', name: 'Private', mcp: { name: 'greeting-tools' } }, tools },
+      ] : [] }))
+    }
     else {
-      expect(req.url).toBe('/api/studio/plugins/demo/invoke')
+      expect(['/api/studio/plugins/demo/invoke', '/api/studio/plugins/private/invoke']).toContain(req.url)
       expect(body).toEqual({ kind: 'tool', name: 'hello', input: { name: 'Ekko' } })
       res.end(JSON.stringify({ result: { ok: true, content: 'Hello Ekko' } }))
     }
   })
   http.listen(0, '127.0.0.1'); await once(http, 'listening')
-  async function connect(toolset: string) {
+  async function connect(toolset: string, serverName?: string) {
     const client = new Client({ name: 'plugin-toolset-test', version: '1.0.0' })
     clients.push(client)
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [resolve('bin/ekko-studio-mcp.mjs'), toolset], env: {
       PATH: process.env.PATH || '', HERMES_WEB_UI_URL: `http://127.0.0.1:${(http.address() as any).port}`,
       HERMES_WEB_UI_PROFILE: 'caller-profile', HERMES_WEB_UI_TOKEN: 'test-only',
+      ...(serverName ? { HERMES_MCP_SERVER_NAME: serverName } : {}),
     } }))
     return client
   }
   try {
-    const api = await connect('api'), plugins = await connect('plugins')
+    const api = await connect('api'), plugins = await connect('plugins'), dedicated = await connect('plugins', 'greeting-tools')
     expect((await api.listTools()).tools.map(tool => tool.name)).toEqual(['ekko_studio_api_openapi_get', 'ekko_studio_api_request'])
     expect(requests).toEqual([])
     expect((await api.callTool({ name: 'demo__hello', arguments: {} })).isError).toBe(true)
@@ -95,10 +102,16 @@ it('serves plugins exclusively from the dedicated MCP toolset over the real stdi
     expect(listed.map(tool => tool.name)).toEqual(['demo__hello'])
     expect(listed[0].inputSchema).toMatchObject({ required: ['name'] })
     expect(await plugins.callTool({ name: 'demo__hello', arguments: { name: 'Ekko' } })).toMatchObject({ isError: false, content: [{ type: 'text', text: 'Hello Ekko' }] })
+    expect((await dedicated.listTools()).tools.map(tool => tool.name)).toEqual(['private__hello'])
+    expect(await dedicated.callTool({ name: 'private__hello', arguments: { name: 'Ekko' } })).toMatchObject({ isError: false, content: [{ type: 'text', text: 'Hello Ekko' }] })
+    expect((await plugins.callTool({ name: 'private__hello', arguments: {} })).isError).toBe(true)
+    expect((await dedicated.callTool({ name: 'demo__hello', arguments: {} })).isError).toBe(true)
     expect((await plugins.callTool({ name: 'ekko_studio_api_request', arguments: {} })).isError).toBe(true)
     enabled = false
     expect((await plugins.listTools(undefined, { cacheMode: 'refresh' })).tools).toEqual([])
     expect((await plugins.callTool({ name: 'demo__hello', arguments: { name: 'Ekko' } })).isError).toBe(true)
+    expect((await dedicated.listTools(undefined, { cacheMode: 'refresh' })).tools).toEqual([])
+    expect((await dedicated.callTool({ name: 'private__hello', arguments: {} })).isError).toBe(true)
   } finally {
     await Promise.allSettled(clients.map(client => client.close()))
     http.closeAllConnections(); await new Promise<void>(done => http.close(() => done()))

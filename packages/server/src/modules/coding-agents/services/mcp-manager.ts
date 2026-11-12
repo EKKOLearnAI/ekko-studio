@@ -15,6 +15,7 @@ import {
 import { setManagedMcpServerEnabled, setManagedMcpServerOverride } from './mcp-overrides'
 import { getWebUiHome } from '../../studio/public/config'
 import { probeCodingAgentMcpConfig } from './mcp-runtime-isolation'
+import { isPluginMcpServerName, mergePluginMcpServers } from '../../studio/public/plugin-mcp'
 
 const CODING_AGENT_IDS = new Set(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])
 const STUDIO_MANAGED_NAMES = new Set([
@@ -31,6 +32,7 @@ const STUDIO_MANAGED_NAMES = new Set([
   'ekko-studio-interaction',
 ])
 const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
+const isManagedName = (name: string) => STUDIO_MANAGED_NAMES.has(name) || isPluginMcpServerName(name)
 
 export interface CodingAgentMcpServer {
   name: string
@@ -304,9 +306,7 @@ async function readServers(id: string, scope: CodingAgentConfigScope): Promise<{
 
   servers.delete('ekko-studio-plan')
   const managed = getCodingAgentManagedMcpServerConfigs(id as CodingAgentId, scope.profile)
-  for (const [name, config] of Object.entries(managed)) {
-    servers.set(name, normalizeConfig(config))
-  }
+  servers = new Map(Object.entries(mergePluginMcpServers(Object.fromEntries(servers), managed)).map(([name, config]) => [name, normalizeConfig(config)]))
   return {
     content: file.content,
     servers,
@@ -326,7 +326,7 @@ async function writeServer(
   }
   if (isNativeCodingAgent(id) || id === 'claude-code' || id === 'pi' || (id === 'cursor' || id === 'antigravity')) {
     const { root } = parseJsonDocument(id === 'antigravity' ? JSON.stringify(parseAntigravityConfig(originalContent)) : originalContent)
-    const persistedServers = isRecord(root.mcpServers) ? { ...root.mcpServers } : {}
+    const persistedServers = mergePluginMcpServers(isRecord(root.mcpServers) ? root.mcpServers : {}, {})
     for (const managedName of STUDIO_MANAGED_NAMES) delete persistedServers[managedName]
     if (config) {
       const native = { ...config }
@@ -343,7 +343,7 @@ async function writeServer(
   }
   if (id === 'opencode') {
     const { root } = parseOpenCodeDocument(originalContent)
-    const persistedServers = isRecord(root.mcp) ? { ...root.mcp } : {}
+    const persistedServers = mergePluginMcpServers(isRecord(root.mcp) ? root.mcp : {}, {})
     for (const managedName of STUDIO_MANAGED_NAMES) delete persistedServers[managedName]
     if (config) persistedServers[name] = serializeOpenCodeConfig(config)
     else delete persistedServers[name]
@@ -352,7 +352,7 @@ async function writeServer(
     return
   }
   const { other, blocks } = splitTomlDocument(originalContent)
-  for (const managedName of STUDIO_MANAGED_NAMES) blocks.delete(managedName)
+  for (const [managedName, block] of blocks) if (STUDIO_MANAGED_NAMES.has(managedName) || block.includes(MANAGED_ENV_KEY)) blocks.delete(managedName)
   if (config) blocks.set(name, serializeTomlServer(name, config))
   else blocks.delete(name)
   const mcp = [...blocks.values()].join('\n\n')
@@ -482,7 +482,7 @@ export async function upsertCodingAgentMcpServer(
     ;(error as any).status = 400
     throw error
   }
-  if (STUDIO_MANAGED_NAMES.has(normalizedName)) {
+  if (isManagedName(normalizedName) && (STUDIO_MANAGED_NAMES.has(normalizedName) || isManaged(normalizedName, (await readServers(id, scope)).servers.get(normalizedName) || {}))) {
     const profile = scope.profile || 'default'
     const managedConfig = normalizeConfig(getCodingAgentManagedMcpServerConfigs(
       id as CodingAgentId,
@@ -538,7 +538,7 @@ export async function removeCodingAgentMcpServer(
   name: string,
   scope: CodingAgentConfigScope = {},
 ): Promise<{ ok: true }> {
-  if (STUDIO_MANAGED_NAMES.has(name)) {
+  if (isManagedName(name) && (STUDIO_MANAGED_NAMES.has(name) || isManaged(name, (await readServers(id, scope)).servers.get(name) || {}))) {
     setManagedMcpServerEnabled(id, scope.profile || 'default', name, false)
     invalidateCodingAgentConfigRuntime(id, scope, { profileScoped: true })
     return { ok: true }

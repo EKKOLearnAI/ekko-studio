@@ -25,6 +25,7 @@ from bridge_runtime import (
     _resolve_runtime,
     _restore_profile_env,
     _start_parent_process_watchdog,
+    _tool_names_from_definitions,
     _worker_profile,
 )
 from bridge_transport import _make_listen_socket, _read_json_request, _write_json_response
@@ -38,11 +39,15 @@ class BridgeServer:
         self.pool = AgentPool()
         self._stop = threading.Event()
         self._last_gc = time.time()
+        self._pending_plugin_mcps: set[str] = set()
+        self._removed_plugin_mcps: set[str] = set()
 
     def handle(self, req: dict[str, Any]) -> dict[str, Any]:
         action = str(req.get("action") or "").strip()
         if not action:
             raise ValueError("action is required")
+        if action != "mcp_plugins_changed":
+            self.pool.refresh_mcp_if_idle()
 
         if action == "ping":
             with self.pool._lock:
@@ -419,6 +424,20 @@ class BridgeServer:
         if profile is None:
             profile = _worker_profile() or "default"
 
+        if action == "mcp_plugins_changed":
+            names, removed = req.get("servers", []), req.get("removed", [])
+            if not isinstance(names, list) or not isinstance(removed, list) or any(not isinstance(name, str) or not name for name in names + removed):
+                return {"ok": False, "error": "Plugin MCP names must be string arrays"}
+            with self.pool._lock:
+                self._pending_plugin_mcps.update(names)
+                self._removed_plugin_mcps.update(removed)
+                self._removed_plugin_mcps.difference_update(set(names) - set(removed))
+                self._removed_plugin_mcps.discard("ekko-studio-plugins")
+                refreshed = self.pool.schedule_mcp_refresh(lambda: self._refresh_plugin_mcps(
+                    profile, _servers, _lock, _run_on_mcp_loop, register_mcp_servers,
+                ))
+            return {"ok": True, "deferred": not refreshed}
+
         dispatch = {
             "mcp_list":            lambda: self._mcp_list(profile, _servers, _lock),
             "mcp_server_add":      lambda: self._mcp_server_add(req, profile, discover_mcp_tools),
@@ -432,6 +451,39 @@ class BridgeServer:
         if handler:
             return handler()
         return {"error": f"unknown MCP action: {action}", "ok": False}
+
+    def _refresh_plugin_mcps(self, profile, servers, lock, run_on_mcp_loop, register_mcp_servers) -> None:
+        """Reuse per-server removal, and refresh only Studio-owned plugin transports."""
+        cfg = self._read_mcp_config(profile).get("mcp_servers", {}) or {}
+        register = {}
+        def tool_names(task):
+            return set(getattr(task, "_registered_tool_names", None) or []) | set(_tool_names_from_definitions(getattr(task, "_tools", [])))
+        for name in sorted(self._pending_plugin_mcps):
+            config = cfg.get(name)
+            with lock:
+                task_config = getattr(servers.get(name), "_config", None)
+            ownership = config if config is not None else task_config
+            if ownership is not None:
+                env = ownership.get("env", {}) if isinstance(ownership, dict) else {}
+                if env.get("HERMES_WEB_UI_MANAGED_MCP") != "1" or env.get("HERMES_MCP_TOOLSET") != "plugins":
+                    continue
+            with lock:
+                self.pool._retired_mcp_tools.update(tool_names(servers.get(name)))
+            if name in self._removed_plugin_mcps or config is None:
+                self._mcp_server_remove({"name": name}, profile, servers, lock, run_on_mcp_loop)
+            else:
+                self._shutdown_mcp_server(name, servers, lock, run_on_mcp_loop)
+                if str(config.get("enabled", True)).lower() not in {"false", "0", "no", "off"}:
+                    register[name] = config
+        if register:
+            # Finish discovery before a new AIAgent takes its tool snapshot.
+            with _profile_env(profile):
+                register_mcp_servers(register)
+        with lock:
+            for task in servers.values():
+                self.pool._retired_mcp_tools.difference_update(tool_names(task))
+        self._pending_plugin_mcps.clear()
+        self._removed_plugin_mcps.clear()
 
     def _reload_skills(self, profile: str | None = None) -> dict[str, Any]:
         resolved_profile = profile or _worker_profile() or "default"

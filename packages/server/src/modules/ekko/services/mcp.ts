@@ -7,6 +7,7 @@ import {
 } from '../../../../../ekko-agent/src'
 import { createMcpToolProvider } from '../../../../../ekko-agent/src/tools/mcp'
 import { config } from '../../studio/public/config'
+import { pluginMcpServers, isPluginMcpServerName } from '../../studio/public/plugin-mcp'
 import { setupGlobalEkkoAgent } from './manager'
 
 const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
@@ -143,7 +144,7 @@ function managedMcpServerConfig(
 export function buildManagedEkkoMcpServers(profile: string): Record<string, EkkoMcpServerConfig> {
   if (!shouldInjectManagedMcpServers()) return {}
   const normalizedProfile = normalizeProfile(profile)
-  return Object.fromEntries(MANAGED_SERVERS.map(server => [
+  return Object.fromEntries([...MANAGED_SERVERS, ...pluginMcpServers()].map(server => [
     server.name,
     managedMcpServerConfig(normalizedProfile, server.name, server.toolset),
   ]))
@@ -153,13 +154,15 @@ export function buildManagedEkkoMcpServers(profile: string): Record<string, Ekko
 export function injectManagedEkkoMcpServers(
   setup: EkkoAgentSetup = setupGlobalEkkoAgent(),
 ): EkkoMcpInjectionResult {
+  const managedServers = [...MANAGED_SERVERS, ...pluginMcpServers()]
+  const managedNames = new Set(managedServers.map(server => server.name))
   const desiredDefault = managedMcpServerConfig(
     'default',
     MANAGED_SERVERS[0].name,
     MANAGED_SERVERS[0].toolset,
   )
   const result: EkkoMcpInjectionResult = {
-    serverNames: [...MANAGED_SERVER_NAMES],
+    serverNames: [...managedNames],
     command: String(desiredDefault.command),
     targets: [],
   }
@@ -173,7 +176,7 @@ export function injectManagedEkkoMcpServers(
   for (const profile of profiles) {
     const existingProfile = next.mcp.profiles[profile]
     const servers = { ...(existingProfile?.servers ?? {}) }
-    const unmanagedCollision = MANAGED_SERVERS.find(server => {
+    const unmanagedCollision = managedServers.find(server => {
       const existing = servers[server.name]
       return existing && !isManagedServerConfig(existing)
     })
@@ -200,7 +203,7 @@ export function injectManagedEkkoMcpServers(
     }
 
     for (const [name, server] of Object.entries(servers)) {
-      if (MANAGED_SERVER_NAMES.has(name)) continue
+      if (managedNames.has(name)) continue
       if (!LEGACY_MANAGED_SERVER_NAMES.has(name) && !isManagedServerConfig(server)) continue
       if (LEGACY_MANAGED_SERVER_NAMES.has(name) && !isManagedServerConfig(server)) continue
       delete servers[name]
@@ -208,7 +211,7 @@ export function injectManagedEkkoMcpServers(
       hadManagedExisting = true
     }
 
-    for (const definition of MANAGED_SERVERS) {
+    for (const definition of managedServers) {
       const existing = servers[definition.name]
       const desired = managedMcpServerConfig(profile, definition.name, definition.toolset)
       if (existing?.enabled === false) desired.enabled = false
@@ -258,7 +261,7 @@ export function resolveEkkoMcpServers(
 }
 
 export function isManagedEkkoMcpServerName(name: string): boolean {
-  return MANAGED_SERVER_NAMES.has(name)
+  return MANAGED_SERVER_NAMES.has(name) || isPluginMcpServerName(name)
 }
 
 export function listEkkoMcpServers(

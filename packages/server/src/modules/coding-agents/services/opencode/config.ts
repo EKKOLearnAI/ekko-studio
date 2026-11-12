@@ -1,4 +1,5 @@
 import type { CodingAgentContextPolicy } from '../context-policy'
+import { mergePluginMcpServers } from '../../../studio/public/plugin-mcp'
 
 export const OPENCODE_PROVIDER_ID = 'hermes-studio'
 export const OPENCODE_CONFIG_FILE = 'opencode.json'
@@ -190,10 +191,7 @@ export function createOpenCodeConfig(host: {
           ...(runtime.systemPrompt ? [runtime.systemPrompt] : []),
         ])],
       } : {}),
-      mcp: {
-        ...externalMcp,
-        ...managedMcp,
-      },
+      mcp: mergePluginMcpServers(externalMcp, managedMcp),
       permission: { '*': 'allow' },
     }, null, 2)}\n`
   }

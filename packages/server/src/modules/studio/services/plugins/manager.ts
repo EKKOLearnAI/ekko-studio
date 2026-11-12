@@ -99,6 +99,10 @@ export class PluginManager {
   }
   private async replace(identity: PluginIdentity, state: PluginState, id: string, next: PluginRecord | undefined): Promise<void> {
     const old = state.records[id]
+    const mcpName = next?.manifest.mcp?.name
+    if (mcpName && mcpName !== 'ekko-studio-plugins' && Object.values(state.records).some(other => other.manifest.id !== id && other.manifest.mcp?.name === mcpName)) {
+      throw new PluginError(`Plugin MCP name ${mcpName} is already used by another plugin`, 'PLUGIN_MCP_CONFLICT', 409)
+    }
     if (next) next.runtimeIdentity = { userId: identity.userId, profile: identity.profile }
     for (const other of Object.values(state.records)) {
       const required = other.manifest.dependencies?.[id]

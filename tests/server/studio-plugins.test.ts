@@ -34,6 +34,28 @@ async function source(dir: string, version = '1.0.0', code = server) {
 afterEach(async () => { for (const manager of managers.splice(0)) await manager.close(); for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }); vi.useRealTimers() })
 
 describe('Studio plugin host', () => {
+  it('reserves dedicated MCP names across installed plugins and checks upgrades and rollback before replacing a runtime', async () => {
+    const dir = await home(), manager = new PluginManager(dir, ports()); managers.push(manager)
+    const first = await source(dir)
+    const put = async (directory: string, id: string, name: string) => writeFile(join(directory, 'plugin.json'), JSON.stringify({ ...definition, id, mcp: { name } }))
+    await put(first, 'notes', 'notes-tools')
+    await manager.install(who, first, 0)
+    await manager.update(who, 'notes', 1, { enabled: true })
+    const second = await source(await home())
+    await put(second, 'other', 'notes-tools')
+    await expect(manager.install(who, second, 2)).rejects.toMatchObject({ code: 'PLUGIN_MCP_CONFLICT' })
+    expect(manager.snapshot().revision).toBe(2)
+    expect(manager.snapshot().plugins.map(plugin => plugin.manifest.id)).toEqual(['notes'])
+    await put(first, 'notes', 'new-notes-tools')
+    await manager.install(who, first, 2, 'notes')
+    await manager.install(who, second, 3)
+    await expect(manager.update(who, 'notes', 4, { action: 'rollback' })).rejects.toMatchObject({ code: 'PLUGIN_MCP_CONFLICT' })
+    expect(manager.snapshot().plugins.find(plugin => plugin.manifest.id === 'notes')).toMatchObject({ status: 'active', manifest: { mcp: { name: 'new-notes-tools' } } })
+    expect(await manager.runtime(who, 'notes').invoke('command', 'echo', 'still running', who)).toMatchObject({ args: 'still running' })
+    await manager.update(who, 'other', 4, { action: 'uninstall' })
+    await manager.update(who, 'notes', 5, { action: 'rollback' })
+    expect(manager.snapshot().plugins[0]).toMatchObject({ status: 'active', manifest: { mcp: { name: 'notes-tools' } } })
+  })
   it('stores global plugin data and explicit cumulative namespaces without mixing plugins or paths', async () => {
     const store = new PluginStore(await home()), signal = new AbortController()
     const storage = store.storage('first', () => signal.signal.throwIfAborted())

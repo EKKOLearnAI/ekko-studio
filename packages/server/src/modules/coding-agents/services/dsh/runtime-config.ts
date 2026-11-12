@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseDocument, stringify } from 'yaml'
 import { writeManagedPromptFile } from '../prompt-file'
-import { updateDshMcpServer } from './config'
+import { readDshMcpServers, updateDshMcpServer } from './config'
+import { mergePluginMcpServers } from '../../../studio/public/plugin-mcp'
 import { DSH_STREAM_PLUGIN } from './stream-plugin'
 import { anchorDshPatch, prepareDshWebProfile } from './web-profile'
 import type { CodingAgentContextPolicy } from '../context-policy'
@@ -99,7 +100,10 @@ export async function prepareDshRuntime(input: {
   } catch (error: any) { if (error.code !== 'ENOENT') throw error }
   let patch = await read('cordis.patch.yml')
   if (web) patch = anchorDshPatch(patch, join(input.sourceHome, 'cordis.patch.yml'))
-  for (const [name, config] of Object.entries(input.managedMcp)) patch = updateDshMcpServer(patch, name, config)
+  const existingMcp = Object.fromEntries(readDshMcpServers(patch))
+  const mergedMcp = mergePluginMcpServers(existingMcp, input.managedMcp)
+  for (const name of Object.keys(existingMcp)) if (!Object.hasOwn(mergedMcp, name)) patch = updateDshMcpServer(patch, name, null)
+  for (const [name, config] of Object.entries(input.managedMcp)) if (mergedMcp[name] === config) patch = updateDshMcpServer(patch, name, config)
   await writeFile(join(input.rootDir, 'cordis.patch.yml'), patch || '[]\n', { mode: 0o600 })
   const promptFile = join(input.rootDir, 'AGENTS.md')
   const pluginInstructions = web ? `\n\nDSH plugin configuration source: ${input.sourceHome}\nPlugin installation target: web profile. When invoking dsh plugin, explicitly set DSH_HOME to that source directory and pass --profile web. The inherited DSH_HOME is Studio's private conversation runtime; do not install packages into its profiles/web. Web backend plugins and the source default Agent preset are loaded when Studio next prepares an ACP runtime. Browser plugin interfaces are not hosted by Studio ACP.\n` : ''
