@@ -97,12 +97,18 @@ ekko-studio plugins unlink my-plugin
 不同项目不能登记相同 ID；移动项目后先 `unlink`，再从新位置 `link`。
 CLI 的 `create/link/dev` 只登记项目，不执行插件，不读取登录 token。
 
-进入 **插件中心**，超级管理员可以在统一卡片列表中看到所有开发链接，以“开发”标记区分。
-尚未构建的项目也显示清单中的名称、图标与版本；已有同 ID 安装时合并为一张卡片。
+进入 **插件中心**，已安装列表展示实际安装副本，开发插件列表展示登记的源码项目。
+尚未构建的项目也显示清单中的名称、图标与版本。只有正在使用同一开发目录的安装才关联其运行状态；
+同 ID 的市场版与开发项目分开展示，启用或重载市场版不会触发开发构建。
 卡片和详情使用普通的 **启用**、**禁用** 与 **重载** 操作，源码目录位于详情中。
 首次启用开发链接时需要信任项目及其构建脚本，随后 Studio 构建、安装并启用插件；
 如果存在同 ID 的安装，会替换该安装并保留配置与数据。已信任同一目录后，启用和重载直接执行。
 开发链接启用后自动监听源码变化；普通本地目录安装后不会自动同步源码。
+
+**卸载** 移除安装记录并停止运行，保留插件数据、开发源码与登记；市场随即重新提供安装入口。
+**解除开发链接** 仅移除登记并停止源码监听，保留已安装副本。保留副本标记为本地版本，
+不会被当成已安装的市场版；需要彻底停止使用时仍可直接卸载。两项操作在卡片中明确分开。
+显式卸载后，即使此前从未安装内置版本，列表刷新或宿主重启也不会自动恢复同名内置插件。
 
 开发链接启用期间宿主每秒检查源文件，稳定两次后执行可选的 `npm run build`，再复制到新的运行目录。
 没有 build 脚本的 JavaScript 模板直接加载；同版本的源码修改也会生效，无需反复提高版本号。
@@ -658,14 +664,23 @@ Tools → `tools`, and Automation → `automation`. These are overlapping declar
 capabilities, not runtime registration counts; disabling a plugin does not change
 its categories. Plugins without any of these capabilities appear only under All types.
 
-Market entries are marked installed only when both the manifest ID and normalized
-repository match a local installation. Development installations can be recognized
-but are never upgraded from the market. A different source with the same manifest
-ID blocks installation instead of replacing the local plugin. Missing or incompatible
-release metadata remains browsable with installation disabled. New installations
-and upgrades require interactive administrator trust confirmation, recheck local
-state, and pass the immutable commit, expected plugin ID and exact version to the
-existing installer. A newer local version is never downgraded.
+Market entries match the manifest ID and normalized repository, then distinguish
+released packages from active development copies and retained local snapshots.
+Local/development copies show their source type and offer **Install marketplace
+version**, even if the published version is older. This explicit switch has its
+own trust confirmation, shows both versions, warns about a possible downgrade,
+stops source watching and preserves configuration, data and source files. A mere
+development registration does not mark a marketplace entry installed.
+
+Released packages offer an upgrade only for a higher version; a newer installed
+package is labelled newer than the marketplace and is never silently downgraded.
+A failed package at the published version offers reinstall. A different repository
+with the same manifest ID blocks installation instead of replacing the local plugin.
+Missing or incompatible releases remain browsable with installation disabled.
+Install, switch, upgrade and uninstall recheck the selected installation identity
+(including source, version and install time) after confirmation and use the latest
+revision for the transaction. Install requests pass the immutable commit, expected
+plugin ID and exact version. Failed operations retain the current installed state.
 
 Cards in both lists show the declared author, a direct repository link, cached
 GitHub stars and version information. Stars come from the cloud directory's
@@ -677,7 +692,7 @@ version and a differing published version, with an update state visible to all
 accounts. Failed or unmatched checks are unknown rather than “no upgrade.”
 Development and local-only sources are identified separately. Failed refreshes
 retain previously received stars; development metadata can be read without
-enabling market upgrades for a development installation.
+enabling automatic upgrades for a development installation.
 
 The independent cloud server reads root `plugin.json` when a submission is approved. It stores manifest metadata, a full snapshot, and an immutable source commit. Its periodic worker automatically publishes higher versions from the repository default branch.
 

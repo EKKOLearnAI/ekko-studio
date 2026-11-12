@@ -26,6 +26,7 @@ const stars = computed(() => {
 })
 const updateKeys: Record<PluginUpdateState, string> = {
   available: 'updateAvailable', current: 'updateNone', unknown: 'updateUnknown', checking: 'updateChecking', development: 'updateDevelopment', manual: 'updateManual',
+  ahead: 'updateAhead', local: 'updateLocal',
 }
 </script>
 

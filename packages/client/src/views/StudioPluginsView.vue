@@ -16,8 +16,9 @@ import { pluginLinks, safePluginLink } from '@/plugins/navigation'
 import { usePluginUpdates } from '@/composables/usePluginUpdates'
 import { usePluginMarket } from '@/composables/usePluginMarket'
 import type { MarketPlugin } from '@/api/studio/plugin-market'
+import type { PluginRelease } from '@/api/studio/plugin-releases'
 import { pluginCategories as categories, matchesPluginCategory, matchesPluginSearch, installedMarketPlugin, type PluginCategory } from '@/plugins/catalog'
-import { availablePluginUpdate, pluginRepository, pluginUpdateState } from '@/plugins/updates'
+import { pluginRepository, pluginUpdateState, pluginInstallationKind, publishedPluginAction, samePluginInstallation, type PublishedPluginAction } from '@/plugins/updates'
 
 const { t } = useI18n(), dialog = useDialog(), message = useMessage(), router = useRouter(), route = useRoute()
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
@@ -34,9 +35,11 @@ function scopeKeydown(event: KeyboardEvent) {
 }
 const { entries: marketEntries, loading: marketLoading, failed: marketFailed, loaded: marketLoaded, refresh: refreshMarket } = usePluginMarket(computed(() => scope.value === 'all'))
 const search = ref(''), category = ref<PluginCategory>('all'), state = ref('all')
-const selectedMarket = ref<MarketPlugin>()
+const selectedMarketId = ref('')
+const selectedMarket = computed({ get: () => marketEntries.value.find(plugin => plugin.id === selectedMarketId.value), set: (plugin: MarketPlugin | undefined) => { selectedMarketId.value = plugin?.id || '' } })
 const showSubmission = ref(false)
 const selectedId = ref(''), detailTab = ref('overview')
+const selectedDevelopment = ref(false)
 const configs = ref<Record<string, Record<string, Json>>>({}), sources = ref<Record<string, string>>({})
 const configValid = ref<Record<string, boolean>>({})
 const configDirty = ref<Record<string, boolean>>({}), configRevisions = ref<Record<string, number>>({})
@@ -57,23 +60,22 @@ async function refreshDevelopment() {
 async function pollDevelopment() { await refreshDevelopment(); if (!controller.signal.aborted && canManage.value) developmentTimer = setTimeout(pollDevelopment, 2000) }
 watch(canManage, enabled => { if (developmentTimer) clearTimeout(developmentTimer); if (enabled) void pollDevelopment(); else { developmentSequence++; projects.value = [] } }, { immediate: true })
 onBeforeUnmount(() => { controller.abort(); if (developmentTimer) clearTimeout(developmentTimer) })
-type CatalogPlugin = InstalledPlugin & { installed: boolean; development?: PluginDevelopmentProject }
-const catalog = computed<CatalogPlugin[]>(() => {
-  const entries = new Map(snapshot.value.plugins.map(plugin => [plugin.manifest.id, { ...plugin, installed: true } as CatalogPlugin]))
-  for (const project of projects.value) {
-    const installed = entries.get(project.id)
-    entries.set(project.id, installed ? { ...installed, development: project } : {
+type CatalogPlugin = InstalledPlugin & { installed: boolean; development?: PluginDevelopmentProject; developmentEntry?: boolean }
+const catalog = computed<CatalogPlugin[]>(() => snapshot.value.plugins.map(plugin => ({ ...plugin, installed: true,
+  development: projects.value.find(project => project.id === plugin.manifest.id && project.directory === plugin.developmentDirectory),
+})))
+const developmentCatalog = computed<CatalogPlugin[]>(() => projects.value.map(project => {
+    const installed = catalog.value.find(plugin => plugin.manifest.id === project.id && plugin.developmentDirectory === project.directory)
+    return installed ? { ...installed, development: project, developmentEntry: true } : {
       manifest: project.manifest || { id: project.id, name: project.id, version: '', apiVersion: 1, capabilities: [] },
       source: project.directory, installedAt: project.createdAt || 0, installed: false, enabled: false,
       status: ['missing', 'error'].includes(project.status) ? 'failed' : 'disabled', error: project.error,
-      config: {}, tools: [], commands: [], actions: [], development: project,
-    })
-  }
-  return [...entries.values()]
-})
-const selected = computed(() => catalog.value.find(plugin => plugin.manifest.id === selectedId.value))
+      config: {}, tools: [], commands: [], actions: [], development: project, developmentEntry: true,
+    }
+}))
+const selected = computed(() => (selectedDevelopment.value ? developmentCatalog.value : catalog.value).find(plugin => plugin.manifest.id === selectedId.value))
 const activeCount = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').length)
-const localEntries = computed(() => catalog.value.filter(plugin => scope.value === 'development' ? plugin.development : plugin.installed))
+const localEntries = computed(() => scope.value === 'development' ? developmentCatalog.value : catalog.value)
 const filtered = computed(() => localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.capabilities, category.value)
   && (state.value === 'all' || plugin.status === state.value) && matchesPluginSearch(plugin.manifest, search.value)))
 const filteredMarket = computed(() => marketEntries.value.filter(plugin => matchesPluginCategory(plugin.capabilities, category.value) && matchesPluginSearch(plugin, search.value)))
@@ -82,11 +84,11 @@ const categoryCount = (value: PluginCategory) => scope.value === 'all'
   : localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.capabilities, value)).length
 const marketInstalled = (plugin: MarketPlugin) => installedMarketPlugin(plugin, snapshot.value.plugins)
 const marketConflict = (plugin: MarketPlugin) => !marketInstalled(plugin) && snapshot.value.plugins.some(local => local.manifest.id === plugin.manifestId)
-const marketUpdate = (plugin: MarketPlugin) => {
-  const installed = marketInstalled(plugin)
-  return installed && plugin.release ? availablePluginUpdate(installed, plugin.release) : undefined
-}
+const marketAction = (plugin: MarketPlugin) => marketConflict(plugin) ? undefined : publishedPluginAction(marketInstalled(plugin), plugin.release)
+const actionLabel = (action: PublishedPluginAction | undefined, version: string | null | undefined) => t('studioPlugins.' + ({ install: 'install', switch: 'installMarketVersion', upgrade: 'updateTo', reinstall: 'reinstallVersion' }[action || 'install']), { version })
+const installationLabel = (plugin: InstalledPlugin) => t('studioPlugins.' + ({ development: 'updateDevelopment', local: 'localVersion', package: 'installed' }[pluginInstallationKind(plugin)]))
 const localRelease = (plugin: InstalledPlugin) => publishedReleases.value[pluginRepository(plugin) || '']
+const localAction = (plugin: CatalogPlugin) => plugin.installed && !plugin.developmentEntry ? publishedPluginAction(plugin, localRelease(plugin)) : undefined
 const localPublishedVersion = (plugin: InstalledPlugin) => {
   const release = localRelease(plugin)
   return release?.manifestId === plugin.manifest.id ? release.version : undefined
@@ -102,22 +104,24 @@ function manageMarket(plugin: MarketPlugin) {
   if (installed) { selectedMarket.value = undefined; details(installed) }
 }
 function installMarket(plugin: MarketPlugin) {
-  const release = plugin.release
-  if (!canManage.value || !release || marketConflict(plugin)) return
-  const installed = marketInstalled(plugin)
-  if (installed && !marketUpdate(plugin)) return
+  if (marketAction(plugin) && plugin.release) installPublished(plugin.release, plugin.name, marketInstalled(plugin))
+}
+function installPublished(release: PluginRelease, name: string, installed?: InstalledPlugin) {
+  const action = publishedPluginAction(installed, release)
+  if (!canManage.value || !action) return
   dialog.warning({
-    title: t(installed ? 'studioPlugins.updateAvailable' : 'studioPlugins.installTitle'),
-    content: t('studioPlugins.marketInstallConfirm', { name: plugin.name, version: release.version, repository: release.repository }),
-    positiveText: t(installed ? 'studioPlugins.upgrade' : 'studioPlugins.install'), negativeText: t('common.cancel'),
+    title: actionLabel(action, release.version),
+    content: t('studioPlugins.' + (action === 'switch' ? 'switchMarketConfirm' : action === 'upgrade' ? 'updateConfirm' : 'marketInstallConfirm'),
+      { name, current: installed?.manifest.version, version: release.version, repository: release.repository }),
+    positiveText: actionLabel(action, release.version), negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const success = await perform(async () => {
-        const latest = await pluginList(), current = installedMarketPlugin(plugin, latest.plugins)
-        if (installed ? !current || current.manifest.version !== installed.manifest.version || !availablePluginUpdate(current, release)
-          : latest.plugins.some(local => local.manifest.id === release.manifestId)) throw new Error(t('studioPlugins.marketChanged'))
+        const latest = await pluginList(), current = latest.plugins.find(local => local.manifest.id === release.manifestId)
+        if (!samePluginInstallation(installed, current) || publishedPluginAction(current, release) !== action) throw new Error(t('studioPlugins.marketChanged'))
         // Verify the package identity for both new installs and upgrades.
         await pluginRequest(undefined, '/install', { source: release.installSource, pluginId: release.manifestId,
           expectedVersion: release.version, revision: latest.revision, trusted: true })
+        sources.value[release.manifestId] = release.installSource
         message.success(t('common.ok'))
       })
       if (!success) message.error(actionError.value)
@@ -141,8 +145,8 @@ watch(profile, () => {
   outputs.value = {}; argumentsText.value = {}; actionError.value = ''
 })
 watch(() => route.query.manage, value => { selectedId.value = typeof value === 'string' ? value : ''; detailTab.value = 'overview' }, { immediate: true })
-function details(plugin: InstalledPlugin) { void router.replace({ query: { ...route.query, manage: plugin.manifest.id } }) }
-function closeDetails() { const { manage: _, ...query } = route.query; selectedId.value = ''; void router.replace({ query }) }
+function details(plugin: InstalledPlugin & { developmentEntry?: boolean }) { selectedDevelopment.value = !!plugin.developmentEntry; void router.replace({ query: { ...route.query, manage: plugin.manifest.id } }) }
+function closeDetails() { const { manage: _, ...query } = route.query; selectedId.value = ''; selectedDevelopment.value = false; void router.replace({ query }) }
 async function perform(work: (boundProfile: string) => Promise<unknown>) {
   if (busy.value) return false
   const bound = profile.value
@@ -163,19 +167,8 @@ async function install(id?: string) {
   if (success && !id) { showInstall.value = false; source.value = ''; trusted.value = false }
 }
 function upgrade(plugin: InstalledPlugin) {
-  const release = availableUpdates.value[plugin.manifest.id]
-  if (!release) return
-  dialog.warning({
-    title: t('studioPlugins.updateAvailable'),
-    content: t('studioPlugins.updateConfirm', { name: plugin.manifest.name, current: plugin.manifest.version, version: release.version, repository: release.repository }),
-    positiveText: t('studioPlugins.updateTo', { version: release.version }), negativeText: t('common.cancel'),
-    onPositiveClick: () => perform(async () => {
-      await pluginRequest(undefined, '/install', { source: release.installSource, pluginId: plugin.manifest.id,
-        expectedVersion: release.version, revision: snapshot.value.revision, trusted: true })
-      sources.value[plugin.manifest.id] = release.installSource
-      message.success(t('studioPlugins.updateSucceeded', { version: release.version }))
-    }),
-  })
+  const release = localRelease(plugin)
+  if (release) installPublished(release, plugin.manifest.name, plugin)
 }
 async function update(plugin: InstalledPlugin, input: object) {
   const revision = 'config' in input ? configRevisions.value[plugin.manifest.id] : snapshot.value.revision
@@ -183,17 +176,23 @@ async function update(plugin: InstalledPlugin, input: object) {
   if (success) { configDirty.value[plugin.manifest.id] = false; syncDrafts() }
   return success
 }
-function uninstall(plugin: CatalogPlugin) {
-  const linked = Boolean(plugin.development)
-  dialog.warning({ title: t(linked ? 'studioPlugins.devUnlink' : 'studioPlugins.uninstall'), content: t(linked ? 'studioPlugins.devUnlinkConfirm' : 'studioPlugins.uninstallConfirm', { name: plugin.manifest.name }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    const success = linked
-      ? await perform(async () => { const { revision } = await pluginList(); await pluginRequest(undefined, '/' + encodeURIComponent(plugin.manifest.id) + '/development?revision=' + revision, undefined, 'DELETE') })
-      : await update(plugin, { action: 'uninstall' })
+function uninstall(plugin: InstalledPlugin) {
+  dialog.warning({ title: t('studioPlugins.uninstall'), content: t('studioPlugins.uninstallConfirm', { name: plugin.manifest.name }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
+    const success = await perform(async () => {
+      const latest = await pluginList(), current = latest.plugins.find(local => local.manifest.id === plugin.manifest.id)
+      if (!samePluginInstallation(plugin, current)) throw new Error(t('studioPlugins.marketChanged'))
+      await pluginRequest(undefined, '/' + encodeURIComponent(plugin.manifest.id), { action: 'uninstall', revision: latest.revision }, 'PATCH')
+    })
     if (success) {
-      if (!linked) { delete configs.value[plugin.manifest.id]; delete sources.value[plugin.manifest.id] }
-      else if (plugin.installed) scope.value = 'installed'
+      delete configs.value[plugin.manifest.id]; delete sources.value[plugin.manifest.id]; delete configDirty.value[plugin.manifest.id]
       closeDetails()
     }
+  } })
+}
+function unlinkDevelopment(plugin: CatalogPlugin) {
+  dialog.warning({ title: t('studioPlugins.devUnlink'), content: t('studioPlugins.devUnlinkConfirm', { name: plugin.manifest.name }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
+    const success = await perform(async () => { const { revision } = await pluginList(); await pluginRequest(undefined, '/' + encodeURIComponent(plugin.manifest.id) + '/development?revision=' + revision, undefined, 'DELETE') })
+    if (success) { if (plugin.installed) scope.value = 'installed'; closeDetails() }
   } })
 }
 function activateLinkedPlugin(plugin: CatalogPlugin, label: 'common.enable' | 'studioPlugins.reload') {
@@ -281,7 +280,7 @@ async function logs(id: string) {
         <div v-else-if="!filteredMarket.length && !marketFailed" class="catalog-empty"><NEmpty :description="t(marketEntries.length ? 'studioPlugins.noResults' : 'studioPlugins.marketEmpty')" /></div>
         <div v-else class="plugin-grid" :aria-busy="marketLoading">
           <article v-for="plugin in filteredMarket" :key="plugin.id" class="plugin-card" data-theme-surface="card" :data-testid="`market-plugin-${plugin.manifestId || plugin.id}`">
-            <div class="card-top"><PluginIcon :plugin="{ manifest: { name: plugin.name } }" :icon-url="plugin.iconUrl" /><NTag v-if="marketInstalled(plugin)" size="small" :bordered="false">{{ t('studioPlugins.installed') }}</NTag></div>
+            <div class="card-top"><PluginIcon :plugin="{ manifest: { name: plugin.name } }" :icon-url="plugin.iconUrl" /><NTag v-if="marketInstalled(plugin)" size="small" :bordered="false">{{ installationLabel(marketInstalled(plugin)!) }}</NTag></div>
             <div class="card-copy"><button type="button" class="card-title" @click="selectedMarket = plugin">{{ plugin.name }}</button><p>{{ plugin.description }}</p></div>
             <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
             <PluginCardMetadata :author="plugin.author?.name" :repository="plugin.repository" :stars="plugin.repositoryStars"
@@ -291,8 +290,9 @@ async function logs(id: string) {
               <div class="actions">
                 <NButton size="small" quaternary @click="selectedMarket = plugin">{{ t('studioPlugins.details') }}</NButton>
                 <NButton v-if="marketInstalled(plugin)" size="small" secondary @click="manageMarket(plugin)">{{ t('studioPlugins.manage') }}</NButton>
-                <NButton v-if="canManage && marketUpdate(plugin)" size="small" type="primary" secondary :disabled="busy" @click="installMarket(plugin)">{{ t('studioPlugins.updateTo', { version: plugin.version }) }}</NButton>
+                <NButton v-if="canManage && marketAction(plugin)" size="small" type="primary" secondary :disabled="busy" @click="installMarket(plugin)">{{ actionLabel(marketAction(plugin), plugin.version) }}</NButton>
                 <NButton v-else-if="canManage && !marketInstalled(plugin)" size="small" type="primary" secondary :disabled="busy || !plugin.release || marketConflict(plugin)" @click="installMarket(plugin)">{{ t(marketConflict(plugin) ? 'studioPlugins.marketConflict' : plugin.release ? 'studioPlugins.install' : 'studioPlugins.marketNotInstallable') }}</NButton>
+                <NButton v-if="canManage && marketInstalled(plugin)" size="small" quaternary type="error" :disabled="busy" @click="uninstall(marketInstalled(plugin)!)">{{ t('studioPlugins.uninstall') }}</NButton>
               </div>
             </footer>
           </article>
@@ -302,7 +302,7 @@ async function logs(id: string) {
       <div v-else-if="!filtered.length" class="catalog-empty"><NEmpty :description="t(localEntries.length || search || category !== 'all' || state !== 'all' ? 'studioPlugins.noResults' : 'studioPlugins.empty')" /></div>
       <div v-else class="plugin-grid">
         <article v-for="plugin in filtered" :key="plugin.manifest.id" class="plugin-card" data-theme-surface="card" :data-testid="`plugin-card-${plugin.manifest.id}`">
-          <div class="card-top"><PluginIcon :plugin="plugin" /><div class="actions"><NTag v-if="plugin.development" size="small" :bordered="false">{{ t('studioPlugins.devLabel') }}</NTag><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + plugin.status) }}</span></div></div>
+          <div class="card-top"><PluginIcon :plugin="plugin" /><div class="actions"><NTag v-if="plugin.developmentEntry || pluginInstallationKind(plugin) !== 'package'" size="small" :bordered="false">{{ plugin.developmentEntry || plugin.developmentDirectory ? t('studioPlugins.devLabel') : t('studioPlugins.localVersion') }}</NTag><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + plugin.status) }}</span></div></div>
           <div class="card-copy">
             <button type="button" class="card-title" @click="details(plugin)">{{ plugin.manifest.name }}</button>
             <p>{{ plugin.manifest.description || plugin.manifest.id }}</p>
@@ -312,11 +312,12 @@ async function logs(id: string) {
             :version="plugin.manifest.version" :installed="plugin.installed" :published-version="localPublishedVersion(plugin)" :update-state="localUpdateState(plugin)" />
           <footer class="card-footer">
             <div class="actions">
-              <NButton v-if="canManage && availableUpdates[plugin.manifest.id]" size="small" type="primary" secondary :disabled="busy" @click="upgrade(plugin)">{{ t('studioPlugins.updateTo', { version: availableUpdates[plugin.manifest.id]!.version }) }}</NButton>
+              <NButton v-if="canManage && localAction(plugin)" size="small" type="primary" secondary :disabled="busy" @click="upgrade(plugin)">{{ actionLabel(localAction(plugin), localRelease(plugin)?.version) }}</NButton>
               <NButton size="small" quaternary @click="details(plugin)">{{ t('studioPlugins.details') }}</NButton>
               <NButton v-if="plugin.status === 'active' && pluginPages(plugin).length" size="small" secondary @click="router.push(pluginPageLocation(plugin))">{{ t('studioPlugins.open') }} <span aria-hidden="true">&nbsp;↗</span></NButton>
               <NButton v-else-if="canManage && !plugin.enabled" size="small" secondary :disabled="activationBusy(plugin)" @click="enablePlugin(plugin)">{{ t('common.enable') }}</NButton>
-              <NButton v-if="canManage && plugin.development" size="small" quaternary type="error" :aria-label="t('studioPlugins.devUnlink')" :title="t('studioPlugins.devUnlink')" :disabled="busy" @click="uninstall(plugin)">{{ t('common.delete') }}</NButton>
+              <NButton v-if="canManage && plugin.installed" size="small" quaternary type="error" :disabled="busy" @click="uninstall(plugin)">{{ t('studioPlugins.uninstall') }}</NButton>
+              <NButton v-if="canManage && plugin.development" size="small" quaternary :disabled="busy" @click="unlinkDevelopment(plugin)">{{ t('studioPlugins.devUnlink') }}</NButton>
             </div>
           </footer>
         </article>
@@ -339,18 +340,20 @@ async function logs(id: string) {
     <NDrawer :show="Boolean(selectedMarket)" :width="'min(560px, 100vw)'" @update:show="value => { if (!value) selectedMarket = undefined }">
       <NDrawerContent v-if="selectedMarket" :title="selectedMarket.name" closable>
         <div class="detail-stack">
-          <div class="detail-identity"><PluginIcon :plugin="{ manifest: { name: selectedMarket.name } }" :icon-url="selectedMarket.iconUrl" /><span>{{ selectedMarket.version ? 'v' + selectedMarket.version : '' }}</span><NTag v-if="marketInstalled(selectedMarket)">{{ t('studioPlugins.installed') }}</NTag></div>
+          <div class="detail-identity"><PluginIcon :plugin="{ manifest: { name: selectedMarket.name } }" :icon-url="selectedMarket.iconUrl" /><span>{{ selectedMarket.version ? 'v' + selectedMarket.version : '' }}</span><NTag v-if="marketInstalled(selectedMarket)">{{ installationLabel(marketInstalled(selectedMarket)!) }}</NTag></div>
+          <PluginCardMetadata :author="selectedMarket.author?.name" :repository="selectedMarket.repository" :stars="selectedMarket.repositoryStars"
+            :version="marketInstalled(selectedMarket)?.manifest.version || selectedMarket.version" :installed="Boolean(marketInstalled(selectedMarket))"
+            :published-version="selectedMarket.version" :update-state="marketUpdateState(selectedMarket)" />
           <p class="detail-description">{{ selectedMarket.description }}</p>
           <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(selectedMarket!.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
           <div class="project-metadata">
-            <p v-if="selectedMarket.author"><strong>{{ t('studioPlugins.author') }}:</strong> {{ selectedMarket.author.name }}</p>
             <p v-if="selectedMarket.license"><strong>{{ t('studioPlugins.license') }}:</strong> {{ selectedMarket.license }}</p>
-            <a :href="selectedMarket.repository" target="_blank" rel="noopener noreferrer">{{ selectedMarket.repository }}</a>
           </div>
           <div class="actions">
             <NButton v-if="marketInstalled(selectedMarket)" @click="manageMarket(selectedMarket)">{{ t('studioPlugins.manage') }}</NButton>
-            <NButton v-if="canManage && marketUpdate(selectedMarket)" type="primary" :disabled="busy" @click="installMarket(selectedMarket)">{{ t('studioPlugins.updateTo', { version: selectedMarket.version }) }}</NButton>
+            <NButton v-if="canManage && marketAction(selectedMarket)" type="primary" :disabled="busy" @click="installMarket(selectedMarket)">{{ actionLabel(marketAction(selectedMarket), selectedMarket.version) }}</NButton>
             <NButton v-else-if="canManage && !marketInstalled(selectedMarket)" type="primary" :disabled="busy || !selectedMarket.release || marketConflict(selectedMarket)" @click="installMarket(selectedMarket)">{{ t(marketConflict(selectedMarket) ? 'studioPlugins.marketConflict' : selectedMarket.release ? 'studioPlugins.install' : 'studioPlugins.marketNotInstallable') }}</NButton>
+            <NButton v-if="canManage && marketInstalled(selectedMarket)" quaternary type="error" :disabled="busy" @click="uninstall(marketInstalled(selectedMarket)!)">{{ t('studioPlugins.uninstall') }}</NButton>
           </div>
           <NAlert v-if="actionError" type="error">{{ actionError }}</NAlert>
         </div>
@@ -362,13 +365,14 @@ async function logs(id: string) {
         <div class="detail-stack">
           <div class="detail-identity"><PluginIcon :plugin="selected" /><div class="identity-copy"><h3>{{ selected.manifest.name }}</h3><span class="eyebrow">{{ selected.manifest.id }} · v{{ selected.manifest.version }}</span></div><NTag size="small" :bordered="false">{{ t('studioPlugins.' + selected.status) }}</NTag></div>
           <p class="detail-description">{{ selected.manifest.description }}</p>
-          <NAlert v-if="availableUpdates[selected.manifest.id]" type="info">
+          <NAlert v-if="selected.installed && !selected.developmentEntry && availableUpdates[selected.manifest.id]" type="info">
             {{ t('studioPlugins.newVersion', { current: selected.manifest.version, version: availableUpdates[selected.manifest.id]!.version }) }}
             <NButton v-if="canManage" text :disabled="busy" @click="upgrade(selected)">{{ t('studioPlugins.updateTo', { version: availableUpdates[selected.manifest.id]!.version }) }}</NButton>
           </NAlert>
           <div class="actions">
             <NButton v-if="selected.status === 'active' && pluginPages(selected).length" type="primary" @click="router.push(pluginPageLocation(selected))">{{ t('studioPlugins.open') }}</NButton>
             <NButton v-if="canManage" :disabled="selected.enabled ? busy : activationBusy(selected)" @click="selected.enabled ? update(selected, { enabled: false }) : enablePlugin(selected)">{{ t(selected.enabled ? 'common.disable' : 'common.enable') }}</NButton>
+            <NButton v-if="canManage && selected.installed" :disabled="busy" type="error" secondary @click="uninstall(selected)">{{ t('studioPlugins.uninstall') }}</NButton>
           </div>
           <NAlert v-if="selected.error || selected.development?.error || actionError" type="error">{{ actionError || selected.development?.error || selected.error }}</NAlert>
           <NTabs v-model:value="detailTab" type="line" animated>
@@ -425,7 +429,7 @@ async function logs(id: string) {
                   <NButton :disabled="busy || !selections[selected.manifest.id]" @click="invoke(selected)">{{ t('studioPlugins.invoke') }}</NButton>
                 </template>
                 <pre v-if="outputs[selected.manifest.id]">{{ outputs[selected.manifest.id] }}</pre>
-                <NButton v-if="canManage" :disabled="busy" type="error" secondary @click="uninstall(selected)">{{ t(selected.development ? 'studioPlugins.devUnlink' : 'studioPlugins.uninstall') }}</NButton>
+                <NButton v-if="canManage && selected.development" :disabled="busy" secondary @click="unlinkDevelopment(selected)">{{ t('studioPlugins.devUnlink') }}</NButton>
               </div>
             </NTabPane>
           </NTabs>

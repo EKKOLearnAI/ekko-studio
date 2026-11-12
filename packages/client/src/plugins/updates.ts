@@ -31,7 +31,26 @@ export function pluginRepository(plugin: InstalledPlugin): string | null {
   return normalizePluginRepository(plugin.manifest.repository)
 }
 export function installedPluginRepository(plugin: InstalledPlugin): string | null {
-  return plugin.developmentDirectory ? null : pluginRepository(plugin)
+  return pluginInstallationKind(plugin) === 'package' ? pluginRepository(plugin) : null
+}
+export function pluginInstallationKind(plugin: InstalledPlugin): 'development' | 'local' | 'package' {
+  if (plugin.developmentDirectory) return 'development'
+  // Unlinking stops watching but retains the local snapshot and its original source.
+  return /^(?:\/|[a-z]:[\\/]|\\\\)/i.test(plugin.source) ? 'local' : 'package'
+}
+export function samePluginInstallation(left: InstalledPlugin | undefined, right: InstalledPlugin | undefined): boolean {
+  return !left || !right ? left === right : left.manifest.id === right.manifest.id && left.manifest.version === right.manifest.version
+    && left.source === right.source && left.developmentDirectory === right.developmentDirectory && left.installedAt === right.installedAt
+}
+export type PublishedPluginAction = 'install' | 'switch' | 'upgrade' | 'reinstall'
+export function publishedPluginAction(plugin: InstalledPlugin | undefined, release?: PluginRelease | null): PublishedPluginAction | undefined {
+  if (!release) return
+  if (!plugin) return 'install'
+  if (pluginRepository(plugin) !== release.repository || plugin.manifest.id !== release.manifestId || plugin.manifest.apiVersion !== release.apiVersion) return
+  if (pluginInstallationKind(plugin) !== 'package') return 'switch'
+  const compared = comparePluginVersions(release.version, plugin.manifest.version)
+  if (compared === 1) return 'upgrade'
+  if (compared === 0 && plugin.status === 'failed') return 'reinstall'
 }
 export function availablePluginUpdate(plugin: InstalledPlugin, release?: PluginRelease): PluginRelease | undefined {
   if (!release || installedPluginRepository(plugin) !== release.repository || plugin.manifest.id !== release.manifestId
@@ -39,13 +58,16 @@ export function availablePluginUpdate(plugin: InstalledPlugin, release?: PluginR
   return release
 }
 
-export type PluginUpdateState = 'available' | 'current' | 'unknown' | 'checking' | 'development' | 'manual'
+export type PluginUpdateState = 'available' | 'current' | 'ahead' | 'local' | 'unknown' | 'checking' | 'development' | 'manual'
 export function pluginUpdateState(plugin: InstalledPlugin, release?: PluginRelease | null, checking = false, failed = false): PluginUpdateState {
   if (plugin.developmentDirectory) return 'development'
   if (!pluginRepository(plugin)) return 'manual'
+  if (pluginInstallationKind(plugin) === 'local') return release?.repository === pluginRepository(plugin)
+    && release.manifestId === plugin.manifest.id && release.apiVersion === plugin.manifest.apiVersion
+    && comparePluginVersions(release.version, plugin.manifest.version) === -1 ? 'ahead' : 'local'
   if (availablePluginUpdate(plugin, release || undefined)) return 'available'
   if (checking) return 'checking'
   if (failed || !release || release.repository !== pluginRepository(plugin) || release.manifestId !== plugin.manifest.id
     || release.apiVersion !== plugin.manifest.apiVersion || comparePluginVersions(release.version, plugin.manifest.version) === null) return 'unknown'
-  return 'current'
+  return comparePluginVersions(release.version, plugin.manifest.version) === -1 ? 'ahead' : 'current'
 }

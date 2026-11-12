@@ -9,7 +9,7 @@ function published(index: number, extra: Record<string, unknown> = {}) {
 }
 async function setup(page: Page, options: { ordinary?: boolean; unavailable?: boolean; entries?: any[] } = {}) {
   const local = { manifest: { id: 'plugin-1', name: 'Installed commands', description: 'Disabled, but still a chat-command plugin', version: '2.0.0', apiVersion: 1,
-    repository: 'https://github.com/example/plugin-1', author: { name: 'Local Maintainer' }, capabilities: ['commands', 'tools'] }, source: '/local/plugin', installedAt: 0,
+    repository: 'https://github.com/example/plugin-1', author: { name: 'Local Maintainer' }, capabilities: ['commands', 'tools'] }, source: 'github:example/plugin-1#' + 'c'.repeat(40), installedAt: 0,
     enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [] }
   const state = { plugins: [local], revision: 1, unavailable: Boolean(options.unavailable), entries: options.entries || [published(1), published(2, { name: 'Agent extension', capabilities: ['agents', 'ui'] })] }
   const installs: any[] = [], marketRequests: URL[] = [], cloudHeaders: Record<string, string>[] = []

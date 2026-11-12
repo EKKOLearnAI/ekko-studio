@@ -111,7 +111,7 @@ test('manages a plugin and runs an isolated frontend through authenticated API a
   await page.getByRole('button', { name: '禁用', exact: true }).click()
   await expect(page.locator('iframe')).toHaveCount(0)
   await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(0)
-  await page.getByRole('button', { name: '卸载', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '卸载', exact: true }).click()
   await page.getByRole('button', { name: '确定', exact: true }).click()
   await expect(page.getByText('尚未安装 Studio 插件')).toBeVisible()
 })

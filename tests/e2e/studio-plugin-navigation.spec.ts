@@ -30,7 +30,7 @@ test('exposes plugin navigation, settings and workspaces on desktop and mobile',
   await page.goto('/__plugin_navigation__')
   await page.getByRole('button', { name: '详情', exact: true }).click()
   await expect(page.getByRole('link', { name: '代码仓库' })).toHaveAttribute('href', 'https://example.com/repo')
-  await expect(page.getByText('Example author', { exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog').getByText('Example author', { exact: true })).toBeVisible()
   await expect(page.locator('.detail-identity img')).toHaveAttribute('src', icon)
   await page.keyboard.press('Escape')
   const rail = page.locator('.studio-navigation-rail')

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { PluginManager } from '../../packages/server/src/modules/studio/services/plugins/manager'
 import { reconcileBuiltinPlugins } from '../../packages/server/src/modules/studio/services/plugins/builtin'
+import { builtinPluginDirectory } from '../../packages/server/src/modules/studio/services/plugins/builtin-directory'
 
 const who = { userId: 1, profile: 'work' }, cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
@@ -35,6 +36,16 @@ it('retires only old examples from this checkout while retaining their stored da
   await reconcileBuiltinPlugins(manager, who)
   expect(manager.snapshot().plugins.map(plugin => plugin.manifest.id)).toEqual(['omp'])
   expect(await store.get('keep')).toBe('user notes')
+})
+it('does not resurrect an explicitly removed local plugin when no bundled version was previously recorded', async () => {
+  const manager = await setup()
+  await manager.install(who, builtinPluginDirectory('omp'), 0)
+  expect(manager.store.read().builtinVersions).toBeUndefined()
+  await manager.update(who, 'omp', manager.snapshot().revision, { action: 'uninstall' })
+  await reconcileBuiltinPlugins(manager, who)
+  expect(manager.snapshot().plugins).toEqual([])
+  await manager.install(who, builtinPluginDirectory('omp'), manager.snapshot().revision)
+  expect(manager.snapshot().plugins).toHaveLength(1)
 })
 it('keeps deliberately installed fixtures and preserves builtin configuration/data during package updates', async () => {
   const manager = await setup()
