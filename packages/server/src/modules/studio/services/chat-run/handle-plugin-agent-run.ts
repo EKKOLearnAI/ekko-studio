@@ -22,7 +22,7 @@ import type { ContentBlock, SessionState } from './types'
 
 export async function handlePluginAgentRun(
   nsp: ReturnType<Server['of']>, socket: Socket,
-  data: CodingAgentRunSocketData & { queue_id?: string; display_input?: string | ContentBlock[] | null; onEvent?: (event: string, payload: any) => void },
+  data: CodingAgentRunSocketData & { queue_id?: string; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command'; storage_message?: string; onEvent?: (event: string, payload: any) => void },
   profile: string, states: Map<string, SessionState>, dequeue: (socket: Socket, sessionId: string, profile?: string) => void,
 ) {
   const sessionId = data.session_id
@@ -59,9 +59,20 @@ export async function handlePluginAgentRun(
   let disposeModel: (() => void) | undefined
   let text = '', reasoning = ''
   let finalized = false
+  const pendingTools = new Map<string, string>()
+  const persistToolResult = (callId: string, output: unknown, failed: boolean) => {
+    const name = pendingTools.get(callId)
+    if (name === undefined) throw new Error('Unknown Agent tool call')
+    persistRunMessages(state, { sessionId, runMarker: runId, appendToState: true, messages: [{
+      role: 'tool', tool_call_id: callId, tool_name: name,
+      content: typeof output === 'string' ? output : JSON.stringify(output ?? null), finish_reason: failed ? 'error' : null,
+    }] })
+    pendingTools.delete(callId)
+  }
   const flushPartial = () => {
     if (finalized || state.activeRunMarker !== runId) return
     finalized = true
+    for (const callId of pendingTools.keys()) persistToolResult(callId, 'Tool execution interrupted', true)
     if (text || reasoning) persistRunMessages(state, { sessionId, runMarker: runId, appendToState: true, messages: [{ role: 'assistant', content: text, reasoning: reasoning || null, finish_reason: 'interrupted' }] })
   }
   state.pluginAgent = { id, flushPartial }
@@ -110,12 +121,18 @@ export async function handlePluginAgentRun(
     const history: AgentMessage[] = []
     for (const message of state.messages) {
       if (!['system', 'user', 'assistant', 'tool'].includes(message.role)) continue
-      history.push({ role: message.role as AgentMessage['role'], content: await content(message.content), ...(message.tool_call_id ? { toolCallId: message.tool_call_id } : {}) })
+      // Tool results are arbitrary JSON, not Studio upload content blocks.
+      const parts = message.role === 'tool' ? [{ type: 'text' as const, text: message.content }] : await content(message.content)
+      history.push({ role: message.role as AgentMessage['role'], content: parts, ...(message.tool_call_id ? { toolCallId: message.tool_call_id } : {}) })
     }
     signal.throwIfAborted()
-    const userMessage = persistRunMessages(state, { sessionId, runMarker: runId, appendToState: true,
-      messages: [{ role: 'user', content: contentBlocksToString(data.input) }] }).messages[0]
-    emit('message.created', { message_id: userMessage.id, role: 'user', content: userMessage.content, timestamp: userMessage.timestamp })
+    const displayInput = data.display_input === undefined ? data.input : data.display_input
+    if (displayInput !== null) {
+      const role = data.display_role || 'user'
+      const userMessage = persistRunMessages(state, { sessionId, runMarker: runId, appendToState: true,
+        messages: [{ role, content: data.storage_message ?? contentBlocksToString(displayInput) }] }).messages[0]
+      emit('message.created', { message_id: userMessage.id, role, content: userMessage.content, timestamp: userMessage.timestamp })
+    }
     let model: AgentScopedModel | { model?: string; reasoningEffort?: string }
     if (mode === 'global') {
       const catalog = await agent.models(identity, false, signal)
@@ -142,7 +159,6 @@ export async function handlePluginAgentRun(
     updateSession(sessionId, { model: model.model || '', provider: mode === 'global' ? '' : (model as AgentScopedModel).provider, agent_mode: mode,
       reasoning_effort: data.reasoning_effort || '', api_mode: mode === 'global' ? '' : data.apiMode || data.api_mode || stored?.api_mode || '' })
     emit('run.started', { model: model.model, agent: id })
-    const toolIds = new Set<string>()
     const interactions = agentRunInteractions({ sessionId, runId, signal, deadlineAt, emit })
     const result = await agent.execute({ identity, mode, paths, model, signal, deadlineAt, mcpServers: mcpServers as any, interactions,
       request: { input, history, instructions: [{ kind: 'system', text: getSystemPrompt() }, ...(data.task_plan_context_id ? [{ kind: 'task' as const, text: withTaskPlanTurnContext('', data.task_plan_context_id, surface === 'chat') as string }] : []), ...(data.group_system_prompt ? [{ kind: 'role' as const, text: data.group_system_prompt }] : []), ...(data.instructions ? [{ kind: 'task' as const, text: data.instructions }] : [])], options: {} },
@@ -155,12 +171,23 @@ export async function handlePluginAgentRun(
         if (event.type === 'text.delta') { if (typeof event.text !== 'string') throw new Error('Invalid Agent text delta'); text += event.text; emit('message.delta', { delta: event.text }) }
         else if (event.type === 'reasoning.summary.delta') { reasoning += event.text; emit('reasoning.delta', { delta: event.text }) }
         else if (event.type === 'status') emit('run.updated', { status: event.phase, message: event.message })
-        else if (event.type === 'tool.started') { if (toolIds.has(event.callId)) throw new Error('Duplicate Agent tool call'); toolIds.add(event.callId); emit('tool.started', { tool_call_id: event.callId, name: event.name, arguments: event.input }) }
-        else if (event.type === 'tool.completed' || event.type === 'tool.failed') { if (!toolIds.delete(event.callId)) throw new Error('Unknown Agent tool call'); emit(event.type, { tool_call_id: event.callId, ...(event.type === 'tool.completed' ? { result: event.result } : { error: event.error }) }) }
+        else if (event.type === 'tool.started') {
+          if (pendingTools.has(event.callId)) throw new Error('Duplicate Agent tool call')
+          persistRunMessages(state, { sessionId, runMarker: runId, appendToState: true, messages: [{
+            role: 'assistant', content: '', finish_reason: 'tool_calls',
+            tool_calls: [{ id: event.callId, type: 'function', function: { name: event.name, arguments: JSON.stringify(event.input) } }],
+          }] })
+          pendingTools.set(event.callId, event.name)
+          emit('tool.started', { tool_call_id: event.callId, name: event.name, arguments: event.input })
+        } else if (event.type === 'tool.completed' || event.type === 'tool.failed') {
+          persistToolResult(event.callId, event.type === 'tool.completed' ? event.result : event.error, event.type === 'tool.failed')
+          emit(event.type, { tool_call_id: event.callId, ...(event.type === 'tool.completed' ? { result: event.result } : { error: event.error }) })
+        }
         else throw new Error('Unknown Agent event')
       },
     })
     if (!current()) return
+    if (pendingTools.size) throw new Error('Agent run ended with unfinished tool calls')
     const outputParts = await Promise.all(result.content.map(async part => {
       if (part.type === 'text') return { type: 'text' as const, text: part.text }
       const file = await attachment(part.assetId)

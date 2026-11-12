@@ -3117,6 +3117,11 @@ export class ChatRunSocket {
           if (automaticApprovals.has(approvalId)) return
           automaticApprovals.add(approvalId)
           if (!choices.includes(choice)) throw new Error(`approval choice "${choice}" is not available`)
+          const pluginResult = respondAgentInteraction(sessionId, approvalId, 'approval', choice)
+          if (pluginResult.handled) {
+            if (!pluginResult.resolved) throw new Error('Automatic tool approval could not be applied')
+            return // The plugin broker publishes its own resolved event.
+          }
           const ekkoResult = respondToEkkoToolApproval(sessionId, approvalId, choice)
           const codingAgentResult = ekkoResult.handled ? ekkoResult : codingAgentRunManager.resolveApproval(sessionId, approvalId, choice)
           const result = codingAgentResult.handled

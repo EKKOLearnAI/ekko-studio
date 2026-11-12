@@ -24,7 +24,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
 }))
 vi.mock('../../packages/server/src/modules/studio/repositories/run-usage-store', () => ({ completeRunUsage: (_session: string, runId: string, assistantMessageId: string) => ({ runId, assistantMessageId, inputTokens: null, outputTokens: null }) }))
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/compression', () => ({
-  getOrCreateSession: (states: Map<string, any>, id: string) => { if (!states.has(id)) states.set(id, { messages: [], queue: [], events: [], isWorking: false }); return states.get(id) },
+  getOrCreateSession: (states: Map<string, any>, id: string) => { if (!states.has(id)) states.set(id, { messages: fixture.rows.filter(row => row.session_id === id).map(row => ({ ...row })), queue: [], events: [], isWorking: false }); return states.get(id) },
   replaceState() {},
 }))
 vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', () => ({ chatCodingAgentRunManager: { hasSession: () => false, stop: (...args: any[]) => fixture.stop(...args) }, hasChatEkkoBackgroundTasks: () => false, abortChatEkkoBackgroundTasks: async () => {} }))
@@ -90,13 +90,19 @@ it('injects only the Studio scoped proxy binding and revokes it after a workflow
 it('stops plugin workflow runs without calling Hermes and saves partial output without duplicate terminals', async () => {
   let ready!: () => void, captured: any
   const started = new Promise<void>(resolve => { ready = resolve })
-  const f = await setup(async (_input, run) => { captured = run; await run.events.emit({ type: 'text.delta', text: 'Partial' }); ready(); return new Promise(() => {}) })
+  const f = await setup(async (_input, run) => {
+    captured = run
+    await run.events.emit({ type: 'text.delta', text: 'Partial' })
+    await run.events.emit({ type: 'tool.started', callId: 'pending', name: 'read', input: { path: 'proof.txt' } })
+    ready(); return new Promise(() => {})
+  })
   const pending = f.run({ source: 'workflow' }); await started
   const bridge = { interrupt: vi.fn(), goalPause: vi.fn() }
   await handleAbort(f.nsp, f.socket, 'session', f.states, bridge, vi.fn())
   await pending
   expect(bridge.interrupt).not.toHaveBeenCalled(); expect(captured.signal.aborted).toBe(true)
-  expect(fixture.rows.filter(message => message.role === 'assistant')).toMatchObject([{ content: 'Partial', finish_reason: 'interrupted' }])
+  expect(fixture.rows.filter(message => message.role === 'assistant' && !message.tool_calls)).toMatchObject([{ content: 'Partial', finish_reason: 'interrupted' }])
+  expect(fixture.rows.filter(message => message.role === 'tool')).toMatchObject([{ tool_call_id: 'pending', tool_name: 'read', finish_reason: 'error', content: 'Tool execution interrupted' }])
   expect(f.events.filter(event => event.event === 'abort.completed')).toHaveLength(1)
   expect(f.events.filter(event => event.event === 'run.completed' || event.event === 'run.failed')).toHaveLength(0)
   await expect(captured.events.emit({ type: 'text.delta', text: 'late' })).rejects.toThrow()
@@ -122,4 +128,71 @@ it('rejects a file replaced with a symlink after the run input was authorized', 
   await writeFile(path, 'allowed'); await writeFile(join(fixture.home, 'private.txt'), 'private')
   await f.run({ input: [{ type: 'file', path, name: 'file.txt' }] })
   expect(f.events.find(event => event.event === 'run.completed').output).toBe('blocked')
+})
+
+it('persists successful and failed tools and restores their results after the session cache is cleared', async () => {
+  const engine = vi.fn<AgentSession['run']>().mockImplementationOnce(async (_input, run) => {
+    await run.events.emit({ type: 'tool.started', callId: 'read-1', name: 'read', input: { path: 'proof.txt' } })
+    await run.events.emit({ type: 'tool.completed', callId: 'read-1', result: { text: 'saved evidence' } })
+    await run.events.emit({ type: 'tool.started', callId: 'write-1', name: 'write', input: { path: 'missing/result.txt' } })
+    await run.events.emit({ type: 'tool.failed', callId: 'write-1', error: 'Directory missing' })
+    return { content: [{ type: 'text', text: 'Read succeeded; write failed' }], finishReason: 'stop' }
+  }).mockResolvedValue({ content: [{ type: 'text', text: 'Resumed' }], finishReason: 'stop' })
+  const f = await setup(engine)
+  await f.run()
+  expect(fixture.rows.map(row => row.role)).toEqual(['user', 'assistant', 'tool', 'assistant', 'tool', 'assistant'])
+  expect(fixture.rows[1].tool_calls).toEqual([{ id: 'read-1', type: 'function', function: { name: 'read', arguments: '{"path":"proof.txt"}' } }])
+  expect(fixture.rows[2]).toMatchObject({ tool_call_id: 'read-1', tool_name: 'read', content: '{"text":"saved evidence"}', finish_reason: null })
+  expect(fixture.rows[4]).toMatchObject({ tool_call_id: 'write-1', tool_name: 'write', content: 'Directory missing', finish_reason: 'error' })
+  expect(new Set(fixture.rows.map(row => row.run_marker)).size).toBe(1)
+  expect(f.states.get('session').events).toEqual([])
+  f.states.clear()
+  await f.run({ input: 'Continue' })
+  expect(engine.mock.calls[1][0].history.filter(message => message.role === 'tool')).toEqual([
+    { role: 'tool', toolCallId: 'read-1', content: [{ type: 'text', text: '{"text":"saved evidence"}' }] },
+    { role: 'tool', toolCallId: 'write-1', content: [{ type: 'text', text: 'Directory missing' }] },
+  ])
+})
+
+it.each(['throw', 'unfinished'] as const)('retains an interrupted tool when the runtime ends with %s', async ending => {
+  const f = await setup(async (_input, run) => {
+    await run.events.emit({ type: 'tool.started', callId: 'call-1', name: 'read', input: {} })
+    if (ending === 'throw') throw new Error('Engine failed')
+    return { content: [], finishReason: 'stop' }
+  })
+  await f.run()
+  expect(f.events.filter(event => event.event === 'run.failed')).toHaveLength(1)
+  expect(fixture.rows.filter(row => row.role === 'tool')).toMatchObject([{ tool_call_id: 'call-1', finish_reason: 'error' }])
+})
+
+it('restores JSON tool output without interpreting engine image data as a Studio upload', async () => {
+  const output = [{ type: 'image', data: 'AQID', mimeType: 'image/png' }]
+  const engine = vi.fn<AgentSession['run']>().mockImplementationOnce(async (_input, run) => {
+    await run.events.emit({ type: 'tool.started', callId: 'image', name: 'screenshot', input: {} })
+    await run.events.emit({ type: 'tool.completed', callId: 'image', result: output })
+    return { content: [{ type: 'text', text: 'Done' }], finishReason: 'stop' }
+  }).mockResolvedValue({ content: [{ type: 'text', text: 'Resumed' }], finishReason: 'stop' })
+  const f = await setup(engine)
+  await f.run()
+  f.states.clear()
+  await f.run({ input: 'Continue' })
+  expect(engine).toHaveBeenCalledTimes(2)
+  expect(engine.mock.calls[1][0].history.find(message => message.role === 'tool')?.content).toEqual([{ type: 'text', text: JSON.stringify(output) }])
+})
+
+it.each([
+  { data: {}, expected: 'Internal execution prompt', role: 'user' },
+  { data: { display_input: 'User task summary' }, expected: 'User task summary', role: 'user' },
+  { data: { display_input: [{ type: 'text', text: 'Corrected task' }] }, expected: '[{"type":"text","text":"Corrected task"}]', role: 'user' },
+  { data: { display_input: 'Command', display_role: 'command', storage_message: 'Stored command' }, expected: 'Stored command', role: 'command' },
+  { data: { display_input: null, storage_message: 'Hidden continuation' }, expected: null, role: 'user' },
+])('honors display and storage overrides: $data', async ({ data, expected, role }) => {
+  const engine = vi.fn<AgentSession['run']>().mockResolvedValue({ content: [{ type: 'text', text: 'Done' }], finishReason: 'stop' })
+  const f = await setup(engine)
+  await f.run({ input: 'Internal execution prompt', ...data })
+  expect(engine.mock.calls[0][0].input).toEqual([{ type: 'text', text: 'Internal execution prompt' }])
+  const rows = fixture.rows.filter(row => row.role === role)
+  expect(rows.map(row => row.content)).toEqual(expected === null ? [] : [expected])
+  const created = f.events.filter(event => event.event === 'message.created')
+  expect(created.map(event => event.content)).toEqual(expected === null ? [] : [expected])
 })
