@@ -260,7 +260,7 @@ function clarifyContent(action: Extract<GlobalPendingAction, { kind: 'chat-clari
     h('div', { class: 'global-clarify-question' }, action.pending.question),
     action.pending.choices?.length
       ? h('div', { class: 'global-clarify-choices' }, action.pending.choices.map(choice => h(NButton, {
-          size: 'small', secondary: clarifyDrafts[action.key] !== choice,
+          class: 'global-clarify-choice', size: 'small', secondary: clarifyDrafts[action.key] !== choice,
           type: clarifyDrafts[action.key] === choice ? 'primary' : 'default',
           onClick: () => { clarifyDrafts[action.key] = choice },
         }, { default: () => choice })))
@@ -501,6 +501,8 @@ onUnmounted(() => {
 .global-pending-title:hover { text-decoration-color: currentcolor; }
 .global-pending-title:focus-visible { border-radius: var(--radius-component, 2px); outline: 2px solid var(--accent-info); outline-offset: 3px; }
 .global-pending-actions, .global-clarify-choices { display: flex; flex-wrap: wrap; gap: calc(8px * var(--spacing-scale, 1)); }
+.global-clarify-choice { max-width: 100%; height: auto; min-height: var(--n-height); padding-block: calc(4px * var(--spacing-scale, 1)); line-height: var(--line-height, 1.4); white-space: normal; text-align: start; }
+.global-clarify-choice .n-button__content { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .global-approval-content, .global-clarify-content { display: grid; gap: calc(12px * var(--spacing-scale, 1)); max-width: 520px; max-height: min(420px, calc(100dvh - 190px)); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
 .global-approval-description { padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); border: var(--border-width, 1px) solid rgba(var(--warning-rgb), 0.28); border-radius: var(--radius-component, 10px); background: rgba(var(--warning-rgb), 0.08); color: var(--text-secondary); font-size: calc(var(--font-size-base, 14px) * 13 / 14); line-height: var(--line-height, 1.55); }
 .global-approval-command { min-width: 0; overflow: hidden; border: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.1); border-radius: var(--radius-component, 10px); background: rgba(var(--accent-primary-rgb), 0.055); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.035); }
