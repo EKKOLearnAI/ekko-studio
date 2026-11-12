@@ -56,7 +56,7 @@ it('injects a separate managed service for Hermes, Ekko and supported coding age
       const fs = require('node:fs'), path = require('node:path');
       const {PluginManager} = require('./packages/server/src/modules/studio/services/plugins/manager');
       const source = path.join(process.env.HERMES_WEB_UI_HOME,'source');
-      fs.cpSync(path.resolve('examples/plugins/tool-demo'),source,{recursive:true});
+      fs.cpSync(path.resolve('tests/fixtures/plugins/tool-demo'),source,{recursive:true});
       const manifestPath = path.join(source,'plugin.json');
       const manifest = JSON.parse(fs.readFileSync(manifestPath,'utf8'));
       manifest.mcp={name:'greeting-tools'}; fs.writeFileSync(manifestPath,JSON.stringify(manifest));

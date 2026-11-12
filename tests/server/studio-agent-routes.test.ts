@@ -10,6 +10,7 @@ import { PluginStore } from '../../packages/server/src/modules/studio/services/p
 
 const state = vi.hoisted(() => ({ user: { id: 2, role: 'super_admin' } as any, shared: false, agents: [] as any[] }))
 vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({
+  ensureBuiltinPlugins: async () => {},
   getPluginManager: () => ({ registeredAgents: () => state.agents }),
   resolvePluginIdentity: (identity: any) => identity,
 }))

@@ -6,6 +6,7 @@ import type { PluginManifest } from '../../contracts/plugins'
 import { manifest } from './schema'
 import { PluginError } from './errors'
 import { windowsCmdShimExecution } from '../../public/windows-command'
+import { builtinPluginDirectory } from './builtin-directory'
 
 export async function pluginFile(directory: string, entry: string): Promise<string> {
   const root = await realpath(directory)
@@ -42,8 +43,8 @@ export async function installPackage(root: string, source: string): Promise<{ ma
   const dispose = () => rm(stage, { recursive: true, force: true })
   try {
     let directory: string
-    if (isAbsolute(source)) {
-      const real = await realpath(source)
+    if (isAbsolute(source) || source.startsWith('builtin:')) {
+      const real = await realpath(source.startsWith('builtin:') ? builtinPluginDirectory(source.slice(8)) : source)
       if (!(await stat(real)).isDirectory()) throw new PluginError('Local plugin source must be a directory')
       if (stage.startsWith(`${real}${sep}`)) throw new PluginError('Plugin source contains its installation directory')
       await readManifest(real)
@@ -62,6 +63,8 @@ export async function installPackage(root: string, source: string): Promise<{ ma
       if (names.length !== 1 || !/^(?:@[\w.-]+\/)?[\w.-]+$/.test(names[0])) throw new PluginError('Unable to locate installed plugin package')
       directory = join(stage, 'node_modules', names[0])
     }
-    return { manifest: await readManifest(directory), directory, dispose }
+    const result = await readManifest(directory)
+    if (source.startsWith('builtin:') && result.id !== source.slice(8)) throw new PluginError('Bundled plugin id does not match its directory')
+    return { manifest: result, directory, dispose }
   } catch (error) { await dispose(); throw error }
 }

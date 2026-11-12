@@ -13,7 +13,7 @@ vi.mock('../../packages/server/src/modules/studio/services/auth/run-mcp-credenti
   authenticate: () => mocks.bound ? { profile: 'work', sessionId: 'bound-session', contextId: 'run', agentId: 'codex' } : undefined,
   recognizes: () => mocks.bound,
 } }))
-vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ resolvePluginIdentity: (identity: any) => identity, pluginAdministrationIdentity: (userId: number) => ({ userId, profile: 'default' }), getPluginManager: () => ({
+vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ ensureBuiltinPlugins: async () => {}, resolvePluginIdentity: (identity: any) => identity, pluginAdministrationIdentity: (userId: number) => ({ userId, profile: 'default' }), getPluginManager: () => ({
   snapshot: () => ({ revision: 2, plugins: [{ manifest: { id: 'notes', configSchema: { type: 'object', properties: { secret: { type: 'string', secret: true } } } }, config: { public: 'visible', secret: 'hidden' } }] }),
   install: mocks.install, update: mocks.update, request: mocks.request, runtime: mocks.runtime,
 }) }))

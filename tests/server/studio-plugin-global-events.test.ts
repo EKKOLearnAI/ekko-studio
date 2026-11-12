@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  reconcile: vi.fn(),
   consumer: undefined as undefined | ((event: any) => Promise<void>),
   session: undefined as any,
   manager: { restore: vi.fn(), dispatch: vi.fn(), close: vi.fn() },
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   ],
 }))
 vi.mock('../../packages/server/src/modules/studio/services/plugins/manager', () => ({ PluginManager: vi.fn(function () { return mocks.manager }) }))
+vi.mock('../../packages/server/src/modules/studio/services/plugins/builtin', () => ({ reconcileBuiltinPlugins: mocks.reconcile }))
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ config: { appHome: '/unused-plugin-host-fixture' } }))
 vi.mock('../../packages/server/src/modules/studio/public/auth', () => ({ issueModelRunJwt: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({ logger: { info: vi.fn(), warn: vi.fn() } }))
@@ -29,9 +31,21 @@ vi.mock('../../packages/server/src/modules/studio/services/webhooks/app-events',
   canReceiveAppEvent: (user: any, event: any) => event.payload.recipients.includes(user.id),
   appEventEnvelope: (event: any) => ({ type: event.type, safe: true }),
 }))
-import { startPluginHost, stopPluginHost } from '../../packages/server/src/modules/studio/services/plugins/host'
+import { startPluginHost, stopPluginHost, ensureBuiltinPlugins } from '../../packages/server/src/modules/studio/services/plugins/host'
 
 afterEach(async () => { await stopPluginHost(); vi.clearAllMocks(); mocks.session = undefined })
+it('initializes bundled plugins once after the first administrator logs in', async () => {
+  const users = mocks.users.splice(0)
+  try {
+    await startPluginHost('http://127.0.0.1:1')
+    expect(mocks.reconcile).not.toHaveBeenCalled()
+    mocks.users.push(...users)
+    await Promise.all([ensureBuiltinPlugins(), ensureBuiltinPlugins()])
+    await ensureBuiltinPlugins()
+    expect(mocks.reconcile).toHaveBeenCalledTimes(1)
+    expect(mocks.reconcile).toHaveBeenCalledWith(mocks.manager, { userId: 1, profile: 'default', surface: 'ui', workspace: undefined })
+  } finally { mocks.users.splice(0, mocks.users.length, ...users) }
+})
 it('delivers global plugin events under each eligible recipient, independently of the installation account and Profile', async () => {
   await startPluginHost('http://127.0.0.1:1')
   expect(mocks.manager.restore).toHaveBeenCalledTimes(1)

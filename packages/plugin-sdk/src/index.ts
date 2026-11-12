@@ -181,6 +181,8 @@ export interface PluginAction {
 export type PluginHook = 'input.transform' | 'context.transform' | 'tool.before' | 'tool.after'
 export interface HookResult { value?: Json; deny?: string }
 export interface PluginContext {
+  /** Stable host-owned directories, retained across plugin package upgrades. */
+  readonly paths: { readonly dataDir: string }
   agents: { register(definition: import('./agents').AgentDefinition): import('./agents').AgentRegistration }
   readonly plugin: Readonly<PluginManifest>
   /** Current caller inside a handler; activation identity during startup/scheduled work. */
@@ -207,6 +209,7 @@ export interface PluginContext {
 }
 export interface PluginModule { apply(ctx: PluginContext): void | Dispose | Promise<void | Dispose> }
 export interface ClientContext {
+  readonly locale?: string
   readonly plugin: Readonly<PluginManifest>
   readonly identity: PluginIdentity
   readonly view: string

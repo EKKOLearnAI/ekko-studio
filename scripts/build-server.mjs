@@ -48,6 +48,10 @@ cpSync(
   resolve(serverOutDir, 'openapi.json'),
 )
 
+const builtinPluginsOutDir = resolve(rootDir, 'dist/plugins/builtin')
+rmSync(builtinPluginsOutDir, { recursive: true, force: true })
+cpSync(resolve(rootDir, 'plugins/builtin'), builtinPluginsOutDir, { recursive: true })
+
 const skillsOutDir = resolve(rootDir, 'dist/skills')
 rmSync(skillsOutDir, { recursive: true, force: true })
 cpSync(

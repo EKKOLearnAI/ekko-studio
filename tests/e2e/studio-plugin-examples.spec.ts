@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 async function example(page: Page, id: string, handle: (path: string, body: any) => unknown) {
-  const directory = resolve('examples/plugins', id)
+  const directory = resolve('tests/fixtures/plugins', id)
   const manifest = JSON.parse(await readFile(resolve(directory, 'plugin.json'), 'utf8'))
   const source = await readFile(resolve(directory, 'client.mjs'), 'utf8')
   await page.route(url => url.pathname.startsWith('/api/'), route => {

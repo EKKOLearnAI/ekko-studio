@@ -14,7 +14,7 @@ test('manages a plugin Agent, updates dynamic choices, and edits its own isolate
     if (path.endsWith('/upgrade')) { expect(route.request().postDataJSON()).toEqual({ version: '2.0.0', expectedVersion: '1.0.0' }); version = '2.0.0'; return route.fulfill({ json: { installedVersion: version } }) }
     if (path.startsWith('/api/studio/agents/') && path.endsWith('/settings')) return route.fulfill({ json: { name: 'studio.pluginSettings', params: { pluginId: 'custom-agent', viewId: 'settings' } } })
     if (path === '/api/studio/plugins') return route.fulfill({ json: { revision: 1, plugins: [plugin] } })
-    if (path.endsWith('/client')) return route.fulfill({ json: { source: await import('node:fs/promises').then(fs => fs.readFile(resolve('examples/plugins/custom-agent/client.mjs'), 'utf8')) } })
+    if (path.endsWith('/client')) return route.fulfill({ json: { source: await import('node:fs/promises').then(fs => fs.readFile(resolve('tests/fixtures/plugins/custom-agent/client.mjs'), 'utf8')) } })
     if (path.endsWith('/invoke')) { const body = route.request().postDataJSON(); if (body.name === 'save-settings') prefix = body.input.prefix; return route.fulfill({ json: { result: body.name === 'get-settings' ? { prefix } : { ok: true } } }) }
     if (path.endsWith('/events')) return route.fulfill({ json: { cursor: 0, generation: 'fixture', events: [] } })
     return route.fulfill({ json: {} })

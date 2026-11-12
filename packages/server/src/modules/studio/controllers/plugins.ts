@@ -1,7 +1,7 @@
 import type { Context } from 'koa'
 import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
 import type { ApiRequest, PluginIdentity } from '../contracts/plugins'
-import { resolvePluginIdentity, pluginAdministrationIdentity, getPluginManager } from '../services/plugins/host'
+import { resolvePluginIdentity, pluginAdministrationIdentity, getPluginManager, ensureBuiltinPlugins } from '../services/plugins/host'
 import { PluginError } from '../services/plugins/errors'
 import { identifier, json } from '../services/plugins/schema'
 import { mergeSecrets, publicConfig } from '../services/plugins/policy'
@@ -35,8 +35,9 @@ async function respond(ctx: Context, work: () => unknown | Promise<unknown>) {
 function clientConfig(record: ReturnType<ReturnType<typeof getPluginManager>['snapshot']>['plugins'][number]) {
   return publicConfig(record.config, record.manifest.configSchema)
 }
-export const list = (ctx: Context) => respond(ctx, () => {
+export const list = (ctx: Context) => respond(ctx, async () => {
   login(ctx)
+  await ensureBuiltinPlugins()
   const snapshot = getPluginManager().snapshot()
   return { ...snapshot, plugins: snapshot.plugins.map(record => ({ ...record, config: clientConfig(record) })) }
 })

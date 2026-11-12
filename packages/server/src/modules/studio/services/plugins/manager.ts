@@ -93,6 +93,7 @@ export class PluginManager {
         if (old && !expectedId) throw new PluginError('Plugin already installed; use Update', 'PLUGIN_EXISTS', 409)
         const next: PluginRecord = { manifest: pkg.manifest, directory: pkg.directory, source, installedAt: Date.now(), enabled: old?.enabled || false,
           config: configuration(pkg.manifest.configSchema, old?.config || {}, !!old?.enabled), ...(old ? { previous: previousVersion(old) } : {}) }
+        if (source.startsWith('builtin:')) (state.builtinVersions ||= {})[id] = pkg.manifest.version
         await this.replace(identity, state, id, next)
         return this.snapshot(identity)
       } catch (e) { await pkg.dispose(); throw e }

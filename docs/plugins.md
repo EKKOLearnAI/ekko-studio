@@ -1,37 +1,51 @@
 # Studio 插件与 ctx SDK
 
 Studio 插件用于定制工作台页面、设置页面、独立工作区、Agent 运行时、工具、命令和自动化动作。
-插件功能尚未开放，暂时隐藏导航栏的 **插件中心**、主侧栏插件页面及设置侧栏插件入口。
-内部调试可直接访问 `/#/studio/plugins`，插件页面与工作区的直达路由仍保留。插件中心与 Hermes、DSH
-各自的原生插件管理分开。插件安装、启用、配置和运行实例属于整个 Studio，所有账号、Profile 和任务均可使用，无需重复安装。
+插件中心在主导航中开放，位于自定义插件业务入口之前、API Key 之前。插件页面与其他 Studio 页面复用固定页头。
+插件中心与 Hermes、DSH 各自的原生插件管理分开。插件安装、启用、配置和运行实例属于整个 Studio，所有账号、Profile 和任务均可使用，无需重复安装。
 
-## 运行示例
+## 内置插件与 OMP
 
-仓库提供五个不需要构建的示例：
+正式内置插件放在 `plugins/builtin/<id>`，使用与第三方插件相同的 `plugin.json`、SDK、管理和运行通道。
+构建将整个目录复制到 `dist/plugins/builtin`，随 npm 包和桌面端分发。它们不是硬编码的新 Coding Agent。
+Studio 启动后以有效超级管理员身份安装缺失的内置插件，首次安装默认启用。后续随 Studio 更新插件版本，保留禁用状态和数据；用户主动卸载后不自动装回，可在插件中心使用 `builtin:omp` 重新安装。无有效管理员时等待首次登录，再在读取插件或 Agent 列表时初始化。
 
-- `examples/plugins/session-dashboard`（会话看板）：纯前端页面，读取已有会话接口，展示统计、按 Agent 筛选、搜索已加载会话、分页和跳转。
-- `examples/plugins/notebook`（工作便签）：独立工作区、动态便签侧栏、个人偏好设置页、Agent 工具、聊天命令、工作流共享持久化便签；支持完成状态和删除，显示记录来源。
-- `examples/plugins/activity-digest`：订阅业务事件，定期生成摘要，也可以由命令或工作流触发。
-- `examples/plugins/tool-demo`（工具注入演示）：仅注册一个只读 `hello` 工具。启用后，在 MCP 管理页的 `ekko-studio-plugins` 工具列表中查找 `tool-demo__hello`（描述为 `[工具注入演示/hello]`），参数为 `{"name":"Ekko"}`；工具返回问候语和实际调用的 Profile。
-- `examples/plugins/custom-agent`：注册自定义 Agent，提供自己的设置页面和用户设置 RPC；全局模式使用本地 Echo 模型，scoped 模式通过 Studio 模型代理调用用户选择的模型。
+当前内置 **Oh My Pi（OMP）**，Agent ID 为 `plugin:omp/omp`：
 
-在插件中心点击“安装插件”，输入示例目录的绝对路径，确认信任、安装，再启用。配置位于“详情 → 配置”。
-本地安装会复制目录；编辑源文件后使用“升级”重新安装。重载重新执行已安装的版本。
-也可运行 `node scripts/create-plugin.mjs /absolute/path/my-plugin my-plugin` 创建完整示例。
+1. 进入 Agent 管理，点击 OMP 的“检查更新”，再选择版本升级，首次操作会安装引擎。
+2. 安装从 OMP 官方 GitHub Release 下载当前系统架构的独立可执行文件，校验 SHA-256 和实际版本，保存到本插件数据目录。不会修改系统 Bun、全局 CLI 或用户已有 OMP 目录。网络失败会保留原来的引擎选择。
+3. 点击“设置”打开插件自己的前端与 RPC 后端。也可填写已有 OMP 可执行文件的绝对路径；这种情况下引擎由用户维护，Studio 不替换该文件。
+4. scoped 模式直接使用 Studio 当前选择的模型和本轮代理凭证，无需在插件内重复填写模型密钥。
+5. 全局模式在 OMP 设置页填写原生 `models.yml` 的 JSON 等价结构。配置按真实调用账号与 Profile 分区，密钥只返回遮蔽值；保留遮蔽值后保存会保持原密钥。
 
-### 两个可操作示例
+例如“模型与凭证（JSON）”：
 
-开发环境打开 `http://localhost:8649/#/studio/plugins`，任意账号与 Profile 均可看到全局插件列表。安装与维护仍由超级管理员执行。
-启用后，点击卡片的“打开”进入独立页面：
+```json
+{
+  "providers": {
+    "custom": {
+      "api": "openai-completions",
+      "baseUrl": "https://your-provider.example/v1",
+      "apiKey": "YOUR_API_KEY",
+      "models": [{ "id": "your-model", "name": "Your model", "input": ["text", "image"] }]
+    }
+  }
+}
+```
 
-1. **会话看板**：搜索标题、选择 Agent；点击会话返回原对话。总会话数来自接口，消息数和最近七天活跃数仅统计已加载会话。
-2. **工作便签**：添加一条内容，勾选完成，再刷新页面验证仍然存在。删除会先弹确认框；数据跨账号和 Profile 共享，最多保留最近 100 条。
-3. 在任意 Profile 的空闲聊天中发送 `/notebook:note 这是从聊天保存的便签`，回到插件页面即可看到来源为“聊天命令”的记录。
-4. “详情 → 开发与维护”中选择 `append` 工具，输入 `{"text":"这是工具写入的便签"}` 并执行；结果会同步出现在插件独立页面。Agent 同样可以调用 `notebook/append`、`notebook/list`、`notebook/complete`。
-5. 工作流节点选择插件动作 `notebook/capture`，将上游输出保存成便签；已有的工具列表可能需要刷新或新开一轮运行才能看到新插件。
-6. 工作区侧栏显示最近便签，点击后通过 URL 查询参数定位；刷新仍可恢复。通过插件详情的“配置”进入“便签偏好”，选择当前账号的默认筛选。
+默认模型可填 `custom/your-model`，也可留空后从 OMP 返回给 Studio 的模型目录选择。
+“OMP 运行设置（JSON）”使用原生 `config.yml` 结构。scoped 模式由插件将宿主注入的 `apiMode/baseUrl/token/model` 写成临时原生模型配置；默认及辅助模型角色均绑定本轮 Studio 模型。每轮结束删除临时配置，原生会话文件保留供续接。
 
-这里的会话来自真实后端；便签从空白开始，不会自动创建示例数据或发起模型请求。
+OMP 使用官方 stdio RPC：文本和推理流、原生工具事件、图片、文件路径读取、会话检查点、用量、取消、受管 MCP 和交互请求通过 SDK 接入。引擎实例及会话按宿主的用户、Profile、模式与会话隔离；私密输入不通过普通问答收集。
+实现以 OMP 18.19.0 的协议验证，自动升级下载时仍会检查目标版本与平台资源。
+
+### 开发测试夹具
+
+原来的五个演示包已移入 `tests/fixtures/plugins`，只用于开发回归，不随正式插件目录发布：`session-dashboard`、`notebook`、`activity-digest`、`tool-demo`、`custom-agent`。
+启动迁移仅卸载从当前仓库旧 `examples/plugins/<id>` 路径安装的这些演示包，保留历史数据与包文件。显式从其他目录安装的同名插件不受影响。
+
+开发新插件使用 `node scripts/create-plugin.mjs /absolute/path/my-plugin my-plugin`，生成最小设置页面与 RPC 模板，不再复制演示业务。
+测试时可在插件中心安装夹具的绝对路径，再启用；本地安装复制目录，源码改动后需要重新安装，重载只执行已安装版本。
 
 插件安装支持本地目录、`package@1.2.3` 或 `github:owner/repository#完整40位提交`。
 远程安装禁止生命周期脚本，必须提供编译后的入口。版本必须是精确版本。
@@ -161,7 +175,8 @@ export function apply(ctx) {
 `ctx.storage` 与 `run.storage` 访问同一份插件级存储。根上下文的身份与 API 在每次调用中自动绑定实际调用者，异步代码也保持此绑定。
 `run.session.get()` 读取当前会话；`run.workspace.read/write()` 使用会话工作区接口；
 `run.tools.call('插件id/工具名', args)` 调用插件工具；`run.ui.notify/emit` 向页面发事件。
-共享记录的 read-modify-write 需要插件串行处理，Notebook 示例展示了这一点。
+共享记录的 read-modify-write 需要插件串行处理，Notebook 测试夹具展示了这一点。
+`ctx.paths.dataDir` 是本插件稳定的私有文件目录，升级与重载后不变，供原生引擎、配置和缓存使用；卸载保留它。优先使用 `ctx.storage` 保存普通结构化数据。
 
 ### 数据范围由插件决定
 
@@ -196,7 +211,9 @@ run.ui.emit('notebook.updated', { id: note.id }, { audience: 'plugin' })
 
 工作便签示例选择全局共享；Activity Digest 示例自行按账号和 Profile 分区。数据位于 `plugins/global/data`，由插件 ID 和命名空间数组确定文件名。
 
-## 前端 ctx 与现有后端 API
+## 前端 ctx
+
+`ctx.locale` 是 Studio 当前界面语言，插件可据此渲染自己的文案；切换语言会重新挂载页面。前端通过受限桥接访问现有后端 API。
 
 ```js
 export async function mount(element, ctx) {
@@ -414,7 +431,7 @@ export function apply(ctx) {
 ```
 
 该片段展示全局本地运行时。包含 scoped 模型代理调用的完整示例见
-`examples/plugins/custom-agent/server.mjs`。实际 scoped 引擎必须把模型请求发送到宿主注入的代理。
+`tests/fixtures/plugins/custom-agent/server.mjs`。实际 scoped 引擎必须把模型请求发送到宿主注入的代理。
 
 ### 管理与设置
 

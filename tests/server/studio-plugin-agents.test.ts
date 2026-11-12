@@ -132,7 +132,7 @@ it('installs the shipped Agent example and sends scoped multimodal requests to t
   const directory = await mkdtemp(join(tmpdir(), 'studio-agent-example-')); directories.push(directory)
   const manager = new PluginManager(directory, { authorize() {}, api: async () => null, emit() {}, log() {} })
   try {
-    await manager.install({ userId: 1, profile: 'installer' }, resolve('examples/plugins/custom-agent'), 0)
+    await manager.install({ userId: 1, profile: 'installer' }, resolve('tests/fixtures/plugins/custom-agent'), 0)
     await manager.update({ userId: 1, profile: 'installer' }, 'custom-agent', 1, { enabled: true })
     const agent = manager.registeredAgents()[0]
     expect(await agent.settings({ userId: 2, profile: 'work' })).toMatchObject({ params: { pluginId: 'custom-agent', viewId: 'settings' } })

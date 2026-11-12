@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
 import type { ApiRequest, Capability, Dispose, HookResult, Json, PluginAction, PluginCommand, PluginContext, PluginEvent, PluginHook, PluginIdentity, PluginModule, PluginRecord, PluginTool, RunContext, ToolResult } from '../../contracts/plugins'
 import { createStudioApi } from '../../../../../../plugin-sdk/src'
 import { PluginEffects } from './effects'
@@ -87,6 +88,7 @@ export class PluginRuntime {
       return this.api(current.identity, current.signal).request<T>(path, options)
     })
     return {
+      paths: Object.freeze({ dataDir: join(this.store.directory(), 'plugin-data', this.record.manifest.id) }),
       agents: { register: definition => {
         this.require('agents')
         if (this.started) throw new PluginError('Agents must be registered during apply')

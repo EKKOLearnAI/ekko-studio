@@ -11,12 +11,12 @@ const props = defineProps<{ plugin: InstalledPlugin; profile: string; view: stri
 const frame = ref<HTMLIFrameElement>()
 const height = ref(180)
 const error = ref('')
-const router = useRouter(), dialog = useDialog(), message = useMessage(), { t } = useI18n()
+const router = useRouter(), dialog = useDialog(), message = useMessage(), { t, locale } = useI18n()
 const route = useRoute()
 const documentSource = pluginFrameDocument()
 let release: (() => void) | undefined
 
-watch(() => [frame.value, props.plugin, props.profile, props.view, props.sessionId, props.data, route.fullPath] as const, async () => {
+watch(() => [frame.value, props.plugin, props.profile, props.view, props.sessionId, props.data, route.fullPath, locale.value] as const, async () => {
   release?.(); error.value = ''
   if (!frame.value) return
   const element = frame.value, controller = new AbortController(), channel = crypto.randomUUID()
@@ -57,7 +57,7 @@ watch(() => [frame.value, props.plugin, props.profile, props.view, props.session
     started = true
     const theme = themeSnapshot()
     const query = Object.fromEntries(Object.entries(route.query).map(([key, value]) => [key, Array.isArray(value) ? value.map(item => item ?? '') : value ?? '']))
-    send({ type: 'studio.plugin.init', source, theme, context: { plugin: plugin.manifest, config: plugin.config, identity: { userId: getStoredUserId(), profile, sessionId, surface: props.slot }, view: props.view, slot: props.slot, data: props.data ?? null, location: { path: route.path, query } } })
+    send({ type: 'studio.plugin.init', source, theme, context: { plugin: plugin.manifest, config: plugin.config, locale: locale.value, identity: { userId: getStoredUserId(), profile, sessionId, surface: props.slot }, view: props.view, slot: props.slot, data: props.data ?? null, location: { path: route.path, query } } })
     void poll()
   }
   async function receive(event: MessageEvent) {

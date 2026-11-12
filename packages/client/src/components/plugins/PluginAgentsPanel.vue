@@ -49,7 +49,7 @@ onBeforeUnmount(() => { alive = false; sequence++; window.removeEventListener('s
     <article v-for="agent in agents" :key="agent.id" class="plugin-agent-card" data-theme-surface="card" :data-testid="`agent-card-${agent.id}`">
       <header class="plugin-agent-heading">
         <img v-if="agent.icon" :src="agent.icon" alt="" width="40" height="40" />
-        <div><h3>{{ agent.name }}</h3><span>{{ agent.status.version }}</span></div>
+        <div><h3>{{ agent.name }}</h3><span>{{ agent.status.installed ? agent.status.version : t('codingAgents.notInstalled') }}</span></div>
         <NTag size="small" :bordered="false">{{ agent.vendor }}</NTag>
       </header>
       <p v-if="agent.description">{{ agent.description }}</p>

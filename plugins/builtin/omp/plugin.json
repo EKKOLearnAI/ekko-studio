@@ -1,0 +1,16 @@
+{
+  "id": "omp",
+  "name": "Oh My Pi",
+  "version": "0.1.2",
+  "apiVersion": 1,
+  "description": "OMP Agent runtime for Studio, with native model configuration and Studio scoped models.",
+  "icon": "icon.png",
+  "author": { "name": "Ekko Studio" },
+  "repository": "https://github.com/EKKOLearnAI/ekko-studio",
+  "documentation": "https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md",
+  "license": "BSL-1.1",
+  "server": "server.mjs",
+  "client": "client.mjs",
+  "capabilities": ["agents", "ui"],
+  "views": [{ "id": "settings", "title": "OMP", "slot": "settings" }]
+}

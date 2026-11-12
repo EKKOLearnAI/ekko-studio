@@ -29,3 +29,9 @@ New tests are picked up without editing the workflows, and any assertion failure
 fails the corresponding Test or E2E check. Lockfile checks remain separate.
 Blanket coverage, browser shards and cross-platform regression matrices are not
 required.
+
+OMP integration tests use a small local RPC fixture by default. To also verify an
+official standalone engine, set `STUDIO_TEST_OMP_BINARY` to its absolute path and
+run `npx vitest run tests/server/studio-omp-plugin.test.ts tests/server/studio-omp-transport.test.ts`.
+The optional cases use isolated configuration and a local model server; they do
+not contact a paid model provider or change the user's OMP installation.

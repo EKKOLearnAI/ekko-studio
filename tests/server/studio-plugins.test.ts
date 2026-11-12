@@ -87,7 +87,7 @@ describe('Studio plugin host', () => {
       });
       (async () => {
         try {
-          await manager.install(identity, require('node:path').resolve('examples/plugins/notebook'), 0);
+          await manager.install(identity, require('node:path').resolve('tests/fixtures/plugins/notebook'), 0);
           await manager.update(identity, 'notebook', 1, { enabled: true });
           await manager.callTool(identity, 'notebook/append', { text: 'development loader' });
           await manager.update(identity, 'notebook', 2, { action: 'reload' });
@@ -106,7 +106,7 @@ describe('Studio plugin host', () => {
   it('runs the shipped frontend, full-stack and automation examples through the actual installer', async () => {
     const dir = await home(), manager = new PluginManager(dir, ports()); managers.push(manager)
     for (const id of ['session-dashboard', 'notebook', 'activity-digest']) {
-      await manager.install(who, resolve('examples/plugins', id), manager.snapshot(who).revision)
+      await manager.install(who, resolve('tests/fixtures/plugins', id), manager.snapshot(who).revision)
       await manager.update(who, id, manager.snapshot(who).revision, { enabled: true })
     }
     expect(manager.snapshot(who).plugins.every(plugin => plugin.status === 'active')).toBe(true)
@@ -241,7 +241,7 @@ describe('Studio plugin host', () => {
   })
   it('shares notebook data and update events across accounts, Profiles and sessions as the plugin chooses', async () => {
     const dir = await home(), manager = new PluginManager(dir, ports()); managers.push(manager)
-    await manager.install(who, resolve('examples/plugins/notebook'), 0)
+    await manager.install(who, resolve('tests/fixtures/plugins/notebook'), 0)
     await manager.update(who, 'notebook', 1, { enabled: true })
     const otherAccount = { userId: 2, profile: who.profile }, otherProfile = { ...who, profile: 'other' }
     await Promise.all([manager.callTool(who, 'notebook/append', { text: 'shared note' }), manager.callTool(otherAccount, 'notebook/append', { text: 'other account note' })])
