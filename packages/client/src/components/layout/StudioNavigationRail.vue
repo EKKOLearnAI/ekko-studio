@@ -58,12 +58,6 @@ function handleNavigate(key: string) {
     <PageSidebarFooter rail collapsed />
     <nav class="studio-navigation-rail__nav">
       <template v-for="entry in entries" :key="entry.key">
-      <div v-if="entry.key === 'studioPlugins' && pluginEntries.length" class="studio-navigation-rail__plugins" role="group" :aria-label="t('studioPlugins.workspace')">
-        <NTooltip v-for="{ plugin, view } in pluginEntries" :key="plugin.manifest.id + ':' + view.id" placement="right" trigger="hover">
-          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin, view.id)" :active="pluginActive(plugin.manifest.id, view)" :aria-label="view.slot === 'workspace' ? plugin.manifest.name : view.title" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginIcon :plugin="plugin" :icon="view.icon" compact /></RouteLinkItem></template>
-          {{ view.slot === 'workspace' ? plugin.manifest.name : view.title }}
-        </NTooltip>
-      </div>
       <NTooltip placement="right" trigger="hover">
         <template #trigger>
           <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: entry.route }" :active="activeKey === entry.key" :aria-label="t(entry.label)" @click="handleNavigate(entry.key)">
@@ -74,6 +68,12 @@ function handleNavigate(key: string) {
         </template>
         {{ t(entry.label) }}
       </NTooltip>
+      <div v-if="entry.key === 'studioPlugins' && pluginEntries.length" class="studio-navigation-rail__plugins" role="group" :aria-label="t('studioPlugins.workspace')">
+        <NTooltip v-for="{ plugin, view } in pluginEntries" :key="plugin.manifest.id + ':' + view.id" placement="right" trigger="hover">
+          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin, view.id)" :active="pluginActive(plugin.manifest.id, view)" :aria-label="view.slot === 'workspace' ? plugin.manifest.name : view.title" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginIcon :plugin="plugin" :icon="view.icon" compact /></RouteLinkItem></template>
+          {{ view.slot === 'workspace' ? plugin.manifest.name : view.title }}
+        </NTooltip>
+      </div>
       </template>
       <NTooltip placement="right" trigger="hover">
         <template #trigger>
