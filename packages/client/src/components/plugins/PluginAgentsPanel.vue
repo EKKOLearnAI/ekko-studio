@@ -59,7 +59,10 @@ async function action(agent: StudioAgent, kind: 'settings' | 'check-update' | 'u
   busy.value = agent.id; busyAction.value = kind; error.value = ''
   try {
     if (kind === 'settings') await router.push(await studioAgentAction<RouteLocationRaw>(agent.id, kind))
-    else if (kind === 'check-update') updates.value[agent.id] = await studioAgentAction<AgentUpdate>(agent.id, kind)
+    else if (kind === 'check-update') {
+      try { updates.value[agent.id] = await studioAgentAction<AgentUpdate>(agent.id, kind) }
+      finally { await refreshPolicies() }
+    }
     else if (kind === 'remove') {
       await studioAgentAction(agent.id, 'remove', { expectedVersion: agent.status.version })
       delete updates.value[agent.id]

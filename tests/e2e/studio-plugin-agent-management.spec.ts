@@ -3,9 +3,9 @@ import { resolve } from 'node:path'
 
 test('manages plugin engine deletion, reinstall and supported automatic updates using native Agent controls', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
-  let installed = true, version = '1.0.0', autoUpdate = false, toggles = 0, removes = 0
+  let installed = true, version = '1.0.0', autoUpdate = false, toggles = 0, removes = 0, checkFailed = true
   const id = 'plugin:managed/worker', external = 'plugin:external/worker'
-  const policy = (supported: boolean) => ({ autoUpdate: supported && autoUpdate, autoUpdateSupported: supported, status: 'current', currentVersion: version, latestVersion: version, checkedAt: '' })
+  const policy = (supported: boolean) => ({ autoUpdate: supported && autoUpdate, autoUpdateSupported: supported, status: checkFailed ? 'failed' : 'current', currentVersion: version, latestVersion: version, checkedAt: '', ...(checkFailed ? { error: 'OMP release lookup returned 403' } : {}) })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const request = route.request(), path = decodeURIComponent(new URL(request.url()).pathname)
     if (path === '/api/auth/me') return route.fulfill({ json: { user: { id: 1, username: 'Tester', role: 'super_admin' } } })
@@ -29,7 +29,7 @@ test('manages plugin engine deletion, reinstall and supported automatic updates 
       removes++; installed = false; version = ''; autoUpdate = false
       return route.fulfill({ json: { removed: true } })
     }
-    if (path.endsWith('/check-update')) return route.fulfill({ json: { currentVersion: version, latestVersion: '2.0.0', updateAvailable: !installed } })
+    if (path.endsWith('/check-update')) { checkFailed = false; return route.fulfill({ json: { currentVersion: version, latestVersion: '2.0.0', updateAvailable: !installed } }) }
     if (path.endsWith('/upgrade')) {
       expect(request.postDataJSON()).toEqual({ version: '2.0.0', expectedVersion: '' })
       installed = true; version = '2.0.0'
@@ -52,6 +52,10 @@ test('manages plugin engine deletion, reinstall and supported automatic updates 
   await toggle.click()
   await expect(toggle).toBeChecked()
   await page.reload()
+  await expect(toggle).toBeChecked()
+  await expect(card).toContainText('检查更新失败')
+  await card.getByRole('button', { name: '检查更新', exact: true }).click()
+  await expect(card).not.toContainText('检查更新失败')
   await expect(toggle).toBeChecked()
   await card.getByRole('button', { name: '删除', exact: true }).click()
   await page.getByRole('button', { name: '取消', exact: true }).click()

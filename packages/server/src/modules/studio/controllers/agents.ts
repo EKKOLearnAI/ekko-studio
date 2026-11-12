@@ -26,7 +26,8 @@ export const models = (ctx: Context) => respond(ctx, () => agentModels(ctx.param
 export const settings = (ctx: Context) => respond(ctx, () => agentSettings(ctx.params.id, identity(ctx)))
 export const checkUpdate = (ctx: Context) => respond(ctx, () => {
   if (runMcpCredentials.recognizes(ctx.get('authorization').replace(/^Bearer\s+/i, ''))) throw new PluginError('Agent management requires an interactive login', 'AGENT_FORBIDDEN', 403)
-  return agentCheckUpdate(ctx.params.id, identity(ctx))
+  const who = identity(ctx)
+  return isPluginAgentId(ctx.params.id) ? getPluginAgentUpdates().checkUpdate(ctx.params.id, who) : agentCheckUpdate(ctx.params.id, who)
 })
 export const upgrade = (ctx: Context) => respond(ctx, () => {
   if (runMcpCredentials.recognizes(ctx.get('authorization').replace(/^Bearer\s+/i, ''))) throw new PluginError('Agent management requires an interactive login', 'AGENT_FORBIDDEN', 403)

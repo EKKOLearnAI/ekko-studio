@@ -24,6 +24,8 @@ export class AgentUpdatePolicy {
   private writes: Promise<void> = Promise.resolve()
   constructor(private home: string, private adapter: UpdateAdapter, private filename = 'agent-update-policy.json') {}
   private state(id: string) { return this.states[id] ||= { ...blank(), autoUpdate: Boolean(this.preferences[id]?.autoUpdate) } }
+  /** Discard checks belonging to an unloaded runtime, retaining its saved preference. */
+  invalidate(id: string) { delete this.states[id]; this.checks.delete(id); this.idle.delete(id) }
   async load(): Promise<void> {
     try {
       const data=JSON.parse(await readFile(join(this.home,this.filename),'utf8'))
@@ -68,7 +70,7 @@ export class AgentUpdatePolicy {
   start(): void { if(this.timer)return;void this.tick();this.timer=setInterval(()=>void this.tick(),60_000);this.timer.unref?.() }
   stop(): void { if(this.timer)clearInterval(this.timer);this.timer=undefined }
   /** One check result shared by manual requests and scheduler; never install here. */
-  async checkNow(id: string, afterInstall = false): Promise<Awaited<ReturnType<UpdateAdapter['check']>>> {
+  async checkNow(id: string, afterInstall = false, check?: UpdateAdapter['check']): Promise<Awaited<ReturnType<UpdateAdapter['check']>>> {
     if (!this.adapter.ids().includes(id)) throw new Error('Invalid agent update policy')
     if (this.manualInstalls.has(id) && !afterInstall) throw new Error('Agent install in progress')
     const pending = this.checks.get(id)
@@ -77,7 +79,7 @@ export class AgentUpdatePolicy {
     if (state.status === 'updating') throw new Error('Agent update in progress')
     state.status = 'checking'
     state.error = undefined
-    const job = Promise.resolve().then(() => this.adapter.check(id)).then(result => {
+    const job = Promise.resolve().then(() => check ? check(id) : this.adapter.check(id)).then(result => {
       state.checkedAt = new Date().toISOString()
       state.currentVersion = result.tool.version
       if (!result.success) {
@@ -94,7 +96,7 @@ export class AgentUpdatePolicy {
       state.status = 'failed'
       state.error = error instanceof Error ? error.message : 'Update check failed'
       throw error
-    }).finally(() => { this.checks.delete(id) })
+    }).finally(() => { if (this.checks.get(id) === job) this.checks.delete(id) })
     this.checks.set(id, job)
     return job
   }
@@ -110,10 +112,12 @@ export class AgentUpdatePolicy {
         const state=this.state(id)
         try {
           if (this.manualInstalls.has(id)) continue
-          if(force||!state.checkedAt||Date.now()-Date.parse(state.checkedAt)>=6*60*60_000) {
+          const interval = state.status === 'failed' ? 5*60_000 : 6*60*60_000
+          if(force||!state.checkedAt||Date.now()-Date.parse(state.checkedAt)>=interval) {
             const result = await this.checkNow(id)
             if (!result.success) continue
           }
+          if (state !== this.state(id)) continue
           if (!state.autoUpdate || !this.adapter.safelyManaged(id) || !['available','waiting'].includes(state.status)) { this.idle.delete(id); continue }
           if (this.adapter.busy(id)) { this.idle.delete(id); state.status='waiting'; continue }
           const revision = this.adapter.activityRevision(id)

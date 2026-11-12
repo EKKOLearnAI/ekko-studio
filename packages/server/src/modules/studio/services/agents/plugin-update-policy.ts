@@ -9,6 +9,7 @@ import { AgentUpdatePolicy } from './update-policy'
 export class PluginAgentUpdates {
   readonly policy: AgentUpdatePolicy
   private eligible = new Map<PluginAgentRuntime, boolean>()
+  private runtimes = new Map<string, PluginAgentRuntime>()
   private loaded: Promise<void>
   private timer?: ReturnType<typeof setInterval>
   constructor(home: string, private agents: () => PluginAgentRuntime[] = pluginAgentRuntimes) {
@@ -39,13 +40,36 @@ export class PluginAgentUpdates {
   }
   private async refreshCapabilities(id?: string) {
     const current = this.agents()
-    await Promise.all((id ? [this.find(id)] : current).map(async agent => {
+    const selected = id ? [this.find(id)] : current
+    for (const agent of selected) if (this.runtimes.get(agent.id) !== agent) {
+      this.policy.invalidate(agent.id)
+      this.runtimes.set(agent.id, agent)
+    }
+    await Promise.all(selected.map(async agent => {
       try {
         const status = await agent.status(agent.owner.identity)
-        this.eligible.set(agent, status.installed && await agent.supportsAutoUpdate(agent.owner.identity))
-      } catch { this.eligible.set(agent, false) }
+        const supported = status.installed && await agent.supportsAutoUpdate(agent.owner.identity)
+        if (this.runtimes.get(agent.id) === agent) this.eligible.set(agent, supported)
+      } catch { if (this.runtimes.get(agent.id) === agent) this.eligible.set(agent, false) }
     }))
-    for (const agent of this.eligible.keys()) if (!current.includes(agent)) this.eligible.delete(agent)
+    const live = this.agents()
+    for (const agent of this.eligible.keys()) if (!live.includes(agent)) this.eligible.delete(agent)
+    for (const [key, agent] of this.runtimes) if (!live.includes(agent)) { this.runtimes.delete(key); this.policy.invalidate(key) }
+  }
+  async checkUpdate(id: string, identity: PluginIdentity) {
+    const agent = this.find(id)
+    await this.loaded; await this.refreshCapabilities(id)
+    if (identity.userId !== agent.owner.identity.userId || identity.profile !== agent.owner.identity.profile) {
+      // Profile-specific checks cannot become the target for host-wide automatic updates.
+      const result = await agent.checkUpdate(identity)
+      await this.policy.checkNow(id).catch(() => {})
+      return result
+    }
+    const result = await this.policy.checkNow(id, false, async () => {
+      const tool = await agent.status(identity), update = await agent.checkUpdate(identity)
+      return { success: true, tool: { ...tool, version: update.currentVersion }, ...update }
+    })
+    return { currentVersion: result.tool.version, latestVersion: result.latestVersion, updateAvailable: result.updateAvailable, ...(result.message ? { message: result.message } : {}) }
   }
   async snapshot(id: string, identity?: PluginIdentity) {
     const agent = this.find(id)
