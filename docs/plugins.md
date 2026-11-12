@@ -643,6 +643,30 @@ Bot 的执行预设也从注册目录读取支持单聊的插件，并按实际�
 
 ## Published directory and installed-plugin updates
 
+The plugin center opens on **Installed**, followed by **All**, which browses the
+public cloud directory. Installed includes disabled and failed installations.
+Administrators with linked projects also have a **Development plugins** tab;
+registered projects without an installed snapshot are shown there, not as installed.
+The directory is loaded lazily when All is selected, cached for five minutes,
+and can be refreshed manually. All pages are fetched before applying search and
+capability filters, so results are not limited to the first page. A failed load
+keeps the last successful directory and does not block local plugin management.
+
+Both lists classify plugins by `plugin.json` capabilities: Agents → `agents`,
+UI extensions (including settings views) → `ui`, Chat commands → `commands`,
+Tools → `tools`, and Automation → `automation`. These are overlapping declared
+capabilities, not runtime registration counts; disabling a plugin does not change
+its categories. Plugins without any of these capabilities appear only under All types.
+
+Market entries are marked installed only when both the manifest ID and normalized
+repository match a local installation. Development installations can be recognized
+but are never upgraded from the market. A different source with the same manifest
+ID blocks installation instead of replacing the local plugin. Missing or incompatible
+release metadata remains browsable with installation disabled. New installations
+and upgrades require interactive administrator trust confirmation, recheck local
+state, and pass the immutable commit, expected plugin ID and exact version to the
+existing installer. A newer local version is never downgraded.
+
 The independent cloud server reads root `plugin.json` when a submission is approved. It stores manifest metadata, a full snapshot, and an immutable source commit. Its periodic worker automatically publishes higher versions from the repository default branch.
 
 The plugin center checks the public cloud directory when opened, refreshed, focused after five minutes, and every five minutes while mounted. Requests include only the normalized repository URL, with no local token, cookie, Profile, or referrer. Local lists remain usable when the cloud is unavailable. A matching repository, manifest ID and API version plus a higher semantic version produces an update badge. Development installations are excluded.

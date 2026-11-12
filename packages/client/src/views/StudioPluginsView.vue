@@ -2,7 +2,7 @@
 import { ref, shallowRef, computed, watch, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NCheckbox, NEmpty, NInput, NSelect, NTag, NDrawer, NDrawerContent, NModal, NTabs, NTabPane, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCheckbox, NEmpty, NInput, NSelect, NTag, NDrawer, NDrawerContent, NModal, NTabs, NTab, NTabPane, NSpin, useDialog, useMessage } from 'naive-ui'
 import { isStoredSuperAdmin } from '@/api/client'
 import { pluginList, pluginRequest, pluginInvoke, type InstalledPlugin, type PluginDevelopmentProject, type Json } from '@/api/studio/plugins'
 import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
@@ -13,12 +13,27 @@ import PluginSubmissionDialog from '@/components/plugins/PluginSubmissionDialog.
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import { pluginLinks, safePluginLink } from '@/plugins/navigation'
 import { usePluginUpdates } from '@/composables/usePluginUpdates'
+import { usePluginMarket } from '@/composables/usePluginMarket'
+import type { MarketPlugin } from '@/api/studio/plugin-market'
+import { pluginCategories as categories, matchesPluginCategory, matchesPluginSearch, installedMarketPlugin, type PluginCategory } from '@/plugins/catalog'
+import { availablePluginUpdate } from '@/plugins/updates'
 
 const { t } = useI18n(), dialog = useDialog(), message = useMessage(), router = useRouter(), route = useRoute()
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
 const { updates: availableUpdates, failed: updateCheckFailed, checking: checkingUpdates, refresh: refreshUpdates } = usePluginUpdates(computed(() => snapshot.value.plugins))
 const busy = ref(false), actionError = ref(''), source = ref(''), trusted = ref(false), showInstall = ref(false)
-const search = ref(''), category = ref('all'), state = ref('all')
+const scope = ref<'installed' | 'all' | 'development'>('installed')
+function scopeKeydown(event: KeyboardEvent) {
+  const tabs = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="tab"]')]
+  const current = tabs.findIndex(tab => tab === document.activeElement)
+  if (current < 0) return
+  const target = event.key === 'ArrowRight' ? (current + 1) % tabs.length : event.key === 'ArrowLeft' ? (current + tabs.length - 1) % tabs.length
+    : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : ['Enter', ' '].includes(event.key) ? current : -1
+  if (target >= 0) { event.preventDefault(); tabs[target].click(); tabs[target].focus() }
+}
+const { entries: marketEntries, loading: marketLoading, failed: marketFailed, loaded: marketLoaded, refresh: refreshMarket } = usePluginMarket(computed(() => scope.value === 'all'))
+const search = ref(''), category = ref<PluginCategory>('all'), state = ref('all')
+const selectedMarket = ref<MarketPlugin>()
 const showSubmission = ref(false)
 const selectedId = ref(''), detailTab = ref('overview')
 const configs = ref<Record<string, Record<string, Json>>>({}), sources = ref<Record<string, string>>({})
@@ -27,6 +42,7 @@ const configDirty = ref<Record<string, boolean>>({}), configRevisions = ref<Reco
 const selections = ref<Record<string, string>>({}), argumentsText = ref<Record<string, string>>({}), outputs = ref<Record<string, string>>({})
 const canManage = computed(isStoredSuperAdmin)
 const projects = shallowRef<PluginDevelopmentProject[]>([]), developmentError = ref('')
+watch(() => projects.value.length, count => { if (!count && scope.value === 'development') scope.value = 'installed' })
 const controller = new AbortController()
 let developmentTimer: ReturnType<typeof setTimeout> | undefined, developmentSequence = 0
 async function refreshDevelopment() {
@@ -56,19 +72,47 @@ const catalog = computed<CatalogPlugin[]>(() => {
 })
 const selected = computed(() => catalog.value.find(plugin => plugin.manifest.id === selectedId.value))
 const activeCount = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').length)
-const categories = ['all', 'pages', 'chat', 'tools', 'automation'] as const
-function matchesCategory(plugin: InstalledPlugin, value: string) {
-  if (value === 'pages') return pluginPages(plugin).length > 0
-  if (value === 'chat') return plugin.commands.length > 0
-  if (value === 'tools') return plugin.tools.length > 0 || plugin.manifest.capabilities.includes('tools')
-  if (value === 'automation') return plugin.actions.length > 0 || plugin.manifest.capabilities.includes('automation')
-  return true
+const localEntries = computed(() => catalog.value.filter(plugin => scope.value === 'development' ? plugin.development : plugin.installed))
+const filtered = computed(() => localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.capabilities, category.value)
+  && (state.value === 'all' || plugin.status === state.value) && matchesPluginSearch(plugin.manifest, search.value)))
+const filteredMarket = computed(() => marketEntries.value.filter(plugin => matchesPluginCategory(plugin.capabilities, category.value) && matchesPluginSearch(plugin, search.value)))
+const categoryCount = (value: PluginCategory) => scope.value === 'all'
+  ? marketEntries.value.filter(plugin => matchesPluginCategory(plugin.capabilities, value)).length
+  : localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.capabilities, value)).length
+const marketInstalled = (plugin: MarketPlugin) => installedMarketPlugin(plugin, snapshot.value.plugins)
+const marketConflict = (plugin: MarketPlugin) => !marketInstalled(plugin) && snapshot.value.plugins.some(local => local.manifest.id === plugin.manifestId)
+const marketUpdate = (plugin: MarketPlugin) => {
+  const installed = marketInstalled(plugin)
+  return installed && plugin.release ? availablePluginUpdate(installed, plugin.release) : undefined
 }
-const filtered = computed(() => catalog.value.filter(plugin => {
-  const query = search.value.trim().toLocaleLowerCase()
-  return matchesCategory(plugin, category.value) && (state.value === 'all' || plugin.status === state.value)
-    && (!query || [plugin.manifest.name, plugin.manifest.id, plugin.manifest.description || '', plugin.manifest.author?.name || '', ...(plugin.manifest.keywords || [])].some(value => value.toLocaleLowerCase().includes(query)))
-}))
+function manageMarket(plugin: MarketPlugin) {
+  const installed = marketInstalled(plugin)
+  if (installed) { selectedMarket.value = undefined; details(installed) }
+}
+function installMarket(plugin: MarketPlugin) {
+  const release = plugin.release
+  if (!canManage.value || !release || marketConflict(plugin)) return
+  const installed = marketInstalled(plugin)
+  if (installed && !marketUpdate(plugin)) return
+  dialog.warning({
+    title: t(installed ? 'studioPlugins.updateAvailable' : 'studioPlugins.installTitle'),
+    content: t('studioPlugins.marketInstallConfirm', { name: plugin.name, version: release.version, repository: release.repository }),
+    positiveText: t(installed ? 'studioPlugins.upgrade' : 'studioPlugins.install'), negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const success = await perform(async () => {
+        const latest = await pluginList(), current = installedMarketPlugin(plugin, latest.plugins)
+        if (installed ? !current || current.manifest.version !== installed.manifest.version || !availablePluginUpdate(current, release)
+          : latest.plugins.some(local => local.manifest.id === release.manifestId)) throw new Error(t('studioPlugins.marketChanged'))
+        // Verify the package identity for both new installs and upgrades.
+        await pluginRequest(undefined, '/install', { source: release.installSource, pluginId: release.manifestId,
+          expectedVersion: release.version, revision: latest.revision, trusted: true })
+        message.success(t('common.ok'))
+      })
+      if (!success) message.error(actionError.value)
+      return success
+    },
+  })
+}
 const stateOptions = computed(() => ['all', 'active', 'disabled', 'failed'].map(value => ({ value, label: t('studioPlugins.' + (value === 'all' ? 'allStates' : value)) })))
 function syncDrafts() {
   for (const plugin of snapshot.value.plugins) {
@@ -80,7 +124,7 @@ function syncDrafts() {
   }
 }
 watch(snapshot, syncDrafts)
-async function reloadCatalog() { await Promise.all([refresh(true), refreshDevelopment(), refreshUpdates(true)]); configDirty.value = {}; actionError.value = ''; syncDrafts() }
+async function reloadCatalog() { await Promise.all([refresh(true), refreshDevelopment(), refreshUpdates(true), refreshMarket(true)]); configDirty.value = {}; actionError.value = ''; syncDrafts() }
 watch(profile, () => {
   outputs.value = {}; argumentsText.value = {}; actionError.value = ''
 })
@@ -135,6 +179,7 @@ function uninstall(plugin: CatalogPlugin) {
       : await update(plugin, { action: 'uninstall' })
     if (success) {
       if (!linked) { delete configs.value[plugin.manifest.id]; delete sources.value[plugin.manifest.id] }
+      else if (plugin.installed) scope.value = 'installed'
       closeDetails()
     }
   } })
@@ -181,7 +226,7 @@ async function logs(id: string) {
 
 <template>
   <main class="studio-plugins">
-    <PageHeader><header class="page-header center-header"><h2 class="header-title">{{ t('studioPlugins.title') }}</h2><NButton quaternary size="small" :loading="loading" @click="reloadCatalog">{{ t('mcp.refresh') }}</NButton></header></PageHeader>
+    <PageHeader><header class="page-header center-header"><h2 class="header-title">{{ t('studioPlugins.title') }}</h2><NButton quaternary size="small" :loading="loading || (scope === 'all' && marketLoading)" @click="reloadCatalog">{{ t('mcp.refresh') }}</NButton></header></PageHeader>
     <div class="center-scroll">
     <div class="center-content">
       <header class="center-intro">
@@ -198,22 +243,49 @@ async function logs(id: string) {
       <NAlert v-if="error || actionError" type="error" closable @close="error = ''; actionError = ''">{{ actionError || error }}</NAlert>
       <NAlert v-if="developmentError" type="error" closable @close="developmentError = ''">{{ developmentError }}</NAlert>
       <NAlert v-if="updateCheckFailed" type="warning">{{ t('studioPlugins.updateCheckFailed') }} <NButton text :loading="checkingUpdates" @click="refreshUpdates(true)">{{ t('common.retry') }}</NButton></NAlert>
+      <NTabs v-model:value="scope" type="line" class="catalog-scopes" role="tablist" :aria-label="t('studioPlugins.title')" @keydown="scopeKeydown">
+        <NTab name="installed" id="plugins-tab-installed" role="tab" :aria-selected="scope === 'installed'" :tabindex="scope === 'installed' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.installed') }} <span class="scope-count">{{ snapshot.plugins.length }}</span></NTab>
+        <NTab name="all" id="plugins-tab-all" role="tab" :aria-selected="scope === 'all'" :tabindex="scope === 'all' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.all') }} <span v-if="marketLoaded" class="scope-count">{{ marketEntries.length }}</span></NTab>
+        <NTab v-if="canManage && projects.length" name="development" id="plugins-tab-development" role="tab" :aria-selected="scope === 'development'" :tabindex="scope === 'development' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.devProjects') }} <span class="scope-count">{{ projects.length }}</span></NTab>
+      </NTabs>
+      <section id="plugin-catalog-panel" class="catalog-panel" role="tabpanel" :aria-labelledby="'plugins-tab-' + scope">
+      <NAlert v-if="scope === 'all' && marketFailed" type="warning">{{ t('studioPlugins.marketUnavailable') }} <NButton text :loading="marketLoading" @click="refreshMarket(true)">{{ t('common.retry') }}</NButton></NAlert>
       <div class="search-row">
         <NInput v-model:value="search" clearable size="large" :placeholder="t('studioPlugins.search')" :aria-label="t('studioPlugins.search')">
           <template #prefix><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg></template>
         </NInput>
-        <NSelect v-model:value="state" class="state-filter" :options="stateOptions" :aria-label="t('studioPlugins.allStates')" />
+        <NSelect v-if="scope !== 'all'" v-model:value="state" class="state-filter" :options="stateOptions" :aria-label="t('studioPlugins.allStates')" />
       </div>
       <div class="catalog-toolbar">
         <nav class="category-tabs" :aria-label="t('studioPlugins.categories')">
           <button v-for="item in categories" :key="item" type="button" :class="{ selected: category === item }" :aria-pressed="category === item" @click="category = item">
-            {{ t('studioPlugins.' + item) }}<span>{{ catalog.filter(plugin => matchesCategory(plugin, item)).length }}</span>
+            {{ t('studioPlugins.' + (item === 'all' ? 'categoryAll' : item)) }}<span>{{ categoryCount(item) }}</span>
           </button>
         </nav>
-        <span class="catalog-count">{{ t('studioPlugins.activeCount', { count: activeCount }) }}</span>
+        <span v-if="scope !== 'all'" class="catalog-count">{{ t('studioPlugins.activeCount', { count: activeCount }) }}</span>
       </div>
-      <div v-if="loading && !catalog.length" class="catalog-empty"><NSpin /></div>
-      <div v-else-if="!filtered.length" class="catalog-empty"><NEmpty :description="t(catalog.length ? 'studioPlugins.noResults' : 'studioPlugins.empty')" /></div>
+      <template v-if="scope === 'all'">
+        <div v-if="marketLoading && !marketLoaded" class="catalog-empty"><NSpin /></div>
+        <div v-else-if="!filteredMarket.length && !marketFailed" class="catalog-empty"><NEmpty :description="t(marketEntries.length ? 'studioPlugins.noResults' : 'studioPlugins.marketEmpty')" /></div>
+        <div v-else class="plugin-grid" :aria-busy="marketLoading">
+          <article v-for="plugin in filteredMarket" :key="plugin.id" class="plugin-card" data-theme-surface="card" :data-testid="`market-plugin-${plugin.manifestId || plugin.id}`">
+            <div class="card-top"><PluginIcon :plugin="{ manifest: { name: plugin.name } }" :icon-url="plugin.iconUrl" /><NTag v-if="marketInstalled(plugin)" size="small" :bordered="false">{{ t('studioPlugins.installed') }}</NTag></div>
+            <div class="card-copy"><button type="button" class="card-title" @click="selectedMarket = plugin">{{ plugin.name }}</button><p>{{ plugin.description }}</p></div>
+            <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+            <footer class="card-footer">
+              <span class="version">{{ plugin.version ? 'v' + plugin.version : '' }}</span>
+              <div class="actions">
+                <NButton size="small" quaternary @click="selectedMarket = plugin">{{ t('studioPlugins.details') }}</NButton>
+                <NButton v-if="marketInstalled(plugin)" size="small" secondary @click="manageMarket(plugin)">{{ t('studioPlugins.manage') }}</NButton>
+                <NButton v-if="canManage && marketUpdate(plugin)" size="small" type="primary" secondary :disabled="busy" @click="installMarket(plugin)">{{ t('studioPlugins.updateTo', { version: plugin.version }) }}</NButton>
+                <NButton v-else-if="canManage && !marketInstalled(plugin)" size="small" type="primary" secondary :disabled="busy || !plugin.release || marketConflict(plugin)" @click="installMarket(plugin)">{{ t(marketConflict(plugin) ? 'studioPlugins.marketConflict' : plugin.release ? 'studioPlugins.install' : 'studioPlugins.marketNotInstallable') }}</NButton>
+              </div>
+            </footer>
+          </article>
+        </div>
+      </template>
+      <div v-else-if="loading && !localEntries.length" class="catalog-empty"><NSpin /></div>
+      <div v-else-if="!filtered.length" class="catalog-empty"><NEmpty :description="t(localEntries.length || search || category !== 'all' || state !== 'all' ? 'studioPlugins.noResults' : 'studioPlugins.empty')" /></div>
       <div v-else class="plugin-grid">
         <article v-for="plugin in filtered" :key="plugin.manifest.id" class="plugin-card" data-theme-surface="card" :data-testid="`plugin-card-${plugin.manifest.id}`">
           <div class="card-top"><PluginIcon :plugin="plugin" /><div class="actions"><NTag v-if="plugin.development" size="small" :bordered="false">{{ t('studioPlugins.devLabel') }}</NTag><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + plugin.status) }}</span></div></div>
@@ -221,7 +293,7 @@ async function logs(id: string) {
             <button type="button" class="card-title" @click="details(plugin)">{{ plugin.manifest.name }}</button>
             <p>{{ plugin.manifest.description || plugin.manifest.id }}</p>
           </div>
-          <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesCategory(plugin, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+          <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.manifest.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
           <footer class="card-footer">
             <div class="version"><span>{{ plugin.manifest.version ? 'v' + plugin.manifest.version : '' }}</span><NTag v-if="availableUpdates[plugin.manifest.id]" size="small" type="warning" :bordered="false">{{ t('studioPlugins.updateAvailable') }}</NTag></div>
             <div class="actions">
@@ -234,6 +306,7 @@ async function logs(id: string) {
           </footer>
         </article>
       </div>
+      </section>
     </div>
     </div>
 
@@ -247,6 +320,27 @@ async function logs(id: string) {
         <NButton type="primary" :disabled="!trusted || !source.trim() || busy" :loading="busy" @click="install()">{{ t('studioPlugins.install') }}</NButton>
       </div>
     </NModal>
+
+    <NDrawer :show="Boolean(selectedMarket)" :width="'min(560px, 100vw)'" @update:show="value => { if (!value) selectedMarket = undefined }">
+      <NDrawerContent v-if="selectedMarket" :title="selectedMarket.name" closable>
+        <div class="detail-stack">
+          <div class="detail-identity"><PluginIcon :plugin="{ manifest: { name: selectedMarket.name } }" :icon-url="selectedMarket.iconUrl" /><span>{{ selectedMarket.version ? 'v' + selectedMarket.version : '' }}</span><NTag v-if="marketInstalled(selectedMarket)">{{ t('studioPlugins.installed') }}</NTag></div>
+          <p class="detail-description">{{ selectedMarket.description }}</p>
+          <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(selectedMarket!.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+          <div class="project-metadata">
+            <p v-if="selectedMarket.author"><strong>{{ t('studioPlugins.author') }}:</strong> {{ selectedMarket.author.name }}</p>
+            <p v-if="selectedMarket.license"><strong>{{ t('studioPlugins.license') }}:</strong> {{ selectedMarket.license }}</p>
+            <a :href="selectedMarket.repository" target="_blank" rel="noopener noreferrer">{{ selectedMarket.repository }}</a>
+          </div>
+          <div class="actions">
+            <NButton v-if="marketInstalled(selectedMarket)" @click="manageMarket(selectedMarket)">{{ t('studioPlugins.manage') }}</NButton>
+            <NButton v-if="canManage && marketUpdate(selectedMarket)" type="primary" :disabled="busy" @click="installMarket(selectedMarket)">{{ t('studioPlugins.updateTo', { version: selectedMarket.version }) }}</NButton>
+            <NButton v-else-if="canManage && !marketInstalled(selectedMarket)" type="primary" :disabled="busy || !selectedMarket.release || marketConflict(selectedMarket)" @click="installMarket(selectedMarket)">{{ t(marketConflict(selectedMarket) ? 'studioPlugins.marketConflict' : selectedMarket.release ? 'studioPlugins.install' : 'studioPlugins.marketNotInstallable') }}</NButton>
+          </div>
+          <NAlert v-if="actionError" type="error">{{ actionError }}</NAlert>
+        </div>
+      </NDrawerContent>
+    </NDrawer>
 
     <NDrawer :show="Boolean(selected)" :width="'min(560px, 100vw)'" @update:show="value => { if (!value) closeDetails() }">
       <NDrawerContent v-if="selected" :title="selected.manifest.name" closable>
@@ -339,6 +433,8 @@ async function logs(id: string) {
 p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .search-row { display: flex; gap: 12px; align-items: center; }
 .state-filter { flex: 0 0 140px; }
+.catalog-panel { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.scope-count { margin-inline-start: 8px; color: $text-muted; font-size: 12px; }
 .catalog-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .category-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 .category-tabs button { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 0; background: transparent; border-radius: $radius-sm; color: $text-secondary; cursor: pointer; font: inherit; }

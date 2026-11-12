@@ -31,11 +31,17 @@ export async function fetchPluginRelease(repository: string, signal?: AbortSigna
   if (!response.ok) throw new Error('Plugin catalog unavailable')
   const body = await response.json()
   if (body?.ok !== true || !Array.isArray(body?.data?.list)) throw new Error('Invalid plugin catalog response')
-  const release = body.data.list[0]
+  return parsePluginRelease(body.data.list[0], canonical)
+}
+
+export function parsePluginRelease(release: any, canonical: string): PluginRelease | null {
   if (!release) return null
   if (typeof release.id !== 'string' || !/^[a-f0-9]{64}$/.test(release.id) || normalizePluginRepository(release.repository) !== canonical) throw new Error('Invalid plugin catalog response')
   if (!release.version || !release.manifestId || !release.sourceCommit) return null
   if (typeof release.manifestId !== 'string' || typeof release.version !== 'string' || release.apiVersion !== 1
+    || !/^[a-z][a-z0-9._-]{0,79}$/.test(release.manifestId) || release.manifestId.includes('..')
+    || ['constructor', 'prototype', '__proto__'].includes(release.manifestId)
+    || release.version.length > 128 || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(release.version)
     || !/^[a-f0-9]{40}$/.test(release.sourceCommit)) throw new Error('Invalid plugin release')
   const url = new URL(canonical), path = url.pathname.slice(1)
   const installSource = url.hostname === 'github.com' ? `github:${path}#${release.sourceCommit}`
