@@ -2,6 +2,7 @@ import { cp, mkdir, readdir, readFile, stat, symlink, writeFile, rm } from 'node
 import { join } from 'node:path'
 import { writeManagedPromptFile } from '../prompt-file'
 import { linkAntigravityNativeKeychain } from './native-keychain'
+import { mergePluginMcpServers } from '../../../studio/public/plugin-mcp'
 
 /** A copy is a private run snapshot when the OS cannot create a link. Never
  * overwrite an existing native state path or copy generated settings upstream. */
@@ -97,6 +98,13 @@ export async function prepareAntigravityRuntime(input: {
   const settingsPath = join(shadow, 'antigravity-cli', 'settings.json')
   const promptFile = join(shadow, 'config', 'AGENTS.md')
   const userRules = await readFile(join(source, 'config', 'AGENTS.md'), 'utf8').catch(() => '')
+  const managedMcp = Object.fromEntries(Object.entries(input.managedMcp).map(([name, value]) => {
+    const config = { ...(value as Record<string, unknown>) }
+    if (config.url) { config.serverUrl = config.url; delete config.url }
+    if (typeof config.enabled === 'boolean') { config.disabled = !config.enabled; delete config.enabled }
+    return [name, config]
+  }))
+  const mergedMcp = mergePluginMcpServers(root.mcpServers || {}, managedMcp)
   const runtimeSettings = parseAntigravityConfig(settings)
   if (input.externalModel) runtimeSettings.modelProvider = 'gemini'
   // Only grant Studio's injected MCP servers, not shell/file tools. Existing
@@ -104,16 +112,10 @@ export async function prepareAntigravityRuntime(input: {
   const permissions = runtimeSettings.permissions || {}
   runtimeSettings.permissions = { ...permissions, allow: [...new Set([
     ...(Array.isArray(permissions.allow) ? permissions.allow : []),
-    ...Object.entries(input.managedMcp).filter(([, value]) => !(value as any)?.disabled).map(([name]) => `mcp(${name}/*)`),
+    ...Object.entries(managedMcp).filter(([name, value]) => mergedMcp[name] === value && !value.disabled).map(([name]) => `mcp(${name}/*)`),
   ])] }
   await writeFile(settingsPath, JSON.stringify(runtimeSettings, null, 2), { mode: 0o600 })
-  const managedMcp = Object.fromEntries(Object.entries(input.managedMcp).map(([name, value]) => {
-    const config = { ...(value as Record<string, unknown>) }
-    if (config.url) { config.serverUrl = config.url; delete config.url }
-    if (typeof config.enabled === 'boolean') { config.disabled = !config.enabled; delete config.enabled }
-    return [name, config]
-  }))
-  await writeFile(mcpPath, JSON.stringify({ ...root, mcpServers: { ...(root.mcpServers || {}), ...managedMcp } }, null, 2), { mode: 0o600 })
+  await writeFile(mcpPath, JSON.stringify({ ...root, mcpServers: mergedMcp }, null, 2), { mode: 0o600 })
   await writeManagedPromptFile(promptFile, input.systemPrompt, userRules)
   return {
     env: { HOME: input.rootDir, USERPROFILE: input.rootDir,

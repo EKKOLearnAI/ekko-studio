@@ -5,6 +5,7 @@ import { resolvePluginIdentity, pluginAdministrationIdentity, getPluginManager }
 import { PluginError } from '../services/plugins/errors'
 import { identifier, json } from '../services/plugins/schema'
 import { mergeSecrets, publicConfig } from '../services/plugins/policy'
+import { synchronizePluginMcpServers } from '../services/plugins/mcp'
 
 function body(ctx: Context): Record<string, any> { return (ctx.request.body || {}) as Record<string, any> }
 function login(ctx: Context) {
@@ -43,6 +44,7 @@ export const install = (ctx: Context) => respond(ctx, async () => {
   const who = management(ctx), input = body(ctx)
   if (input.trusted !== true) throw new PluginError('Confirm that this executable plugin is trusted')
   await getPluginManager().install(who, input.source, input.revision, input.pluginId)
+  await synchronizePluginMcpServers()
   return { ok: true }
 })
 export const update = (ctx: Context) => respond(ctx, async () => {
@@ -56,6 +58,7 @@ export const update = (ctx: Context) => respond(ctx, async () => {
     input.config = mergeSecrets(json(input.config), record.config, record.manifest.configSchema)
   }
   await getPluginManager().update(who, id, input.revision, input)
+  await synchronizePluginMcpServers()
   return { ok: true }
 })
 export const client = (ctx: Context) => respond(ctx, async () => ({ source: await getPluginManager().client(identity(ctx), ctx.params.id) }))

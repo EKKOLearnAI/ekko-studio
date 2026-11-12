@@ -12,11 +12,15 @@ import { studioMcpCapabilities } from '../../packages/server/src/modules/studio/
 import { studioMcpUsageGuidelines } from '../../packages/server/src/modules/studio/public/runs/prompt'
 
 it('binds the plugin MCP to the actual Ekko run and revokes it with the run', async () => {
-  const servers = { 'ekko-studio-plugins': { command: 'node', env: { HERMES_WEB_UI_MANAGED_MCP: '1', HERMES_WEB_UI_TOKEN: 'old' } } }
+  const servers = {
+    'ekko-studio-plugins': { command: 'node', env: { HERMES_WEB_UI_MANAGED_MCP: '1', HERMES_WEB_UI_TOKEN: 'old' } },
+    'greeting-tools': { command: 'node', env: { HERMES_WEB_UI_MANAGED_MCP: '1', HERMES_MCP_TOOLSET: 'plugins' } },
+  }
   const controller = new AbortController()
   const lease = await leaseEkkoMcpServers(servers, { userId: 42, sessionId: 'session', profile: 'work', signal: controller.signal })
   expect(credentials.issue).toHaveBeenCalledWith(expect.objectContaining({ userId: 42, profile: 'work', sessionId: 'session', agentId: 'ekko-agent' }), { preserveOtherContexts: true })
   expect(lease.servers!['ekko-studio-plugins']).toMatchObject({ env: { HERMES_WEB_UI_RUN_TOKEN_FILE: '/test/run-auth.json', HERMES_WEB_UI_TOKEN: '', AUTH_TOKEN: '', HERMES_WEB_UI_PROFILE: 'work' } })
+  expect(lease.servers!['greeting-tools']).toMatchObject({ env: { HERMES_WEB_UI_RUN_TOKEN_FILE: '/test/run-auth.json', HERMES_WEB_UI_TOKEN: '', AUTH_TOKEN: '', HERMES_WEB_UI_PROFILE: 'work' } })
   expect(servers['ekko-studio-plugins'].env.HERMES_WEB_UI_TOKEN).toBe('old')
   controller.abort()
   expect(lease.signal.aborted).toBe(true)
@@ -30,6 +34,9 @@ it('recognizes a plugins-only configuration without advertising API tools', () =
   expect(prompt).toContain('ekko-studio-plugins')
   expect(prompt).not.toContain('ekko_studio_api_openapi_get')
   expect(studioMcpCapabilities({ 'ekko-studio-plugins': { disabled: true } }).plugins).toBe(false)
+  expect(studioMcpCapabilities({ 'greeting-tools': { env: { HERMES_WEB_UI_MANAGED_MCP: '1', HERMES_MCP_TOOLSET: 'plugins' } } })).toMatchObject({ plugins: true, api: false })
+  expect(studioMcpCapabilities({ 'greeting-tools': { environment: { HERMES_WEB_UI_MANAGED_MCP: '1', HERMES_MCP_TOOLSET: 'plugins' }, enabled: false } }).plugins).toBe(false)
+  expect(studioMcpCapabilities({ 'greeting-tools': { env: { HERMES_MCP_TOOLSET: 'plugins' } } }).plugins).toBe(false)
 })
 
 it('injects a separate managed service for Hermes, Ekko and supported coding agents and preserves its enable switch', async () => {
@@ -46,30 +53,77 @@ it('injects a separate managed service for Hermes, Ekko and supported coding age
       assert.equal(server.env.ELECTRON_RUN_AS_NODE,'1');
     }
     (async()=>{
+      const fs = require('node:fs'), path = require('node:path');
+      const {PluginManager} = require('./packages/server/src/modules/studio/services/plugins/manager');
+      const source = path.join(process.env.HERMES_WEB_UI_HOME,'source');
+      fs.cpSync(path.resolve('examples/plugins/tool-demo'),source,{recursive:true});
+      const manifestPath = path.join(source,'plugin.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestPath,'utf8'));
+      manifest.mcp={name:'greeting-tools'}; fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+      const manager = new PluginManager(path.join(process.env.HERMES_WEB_UI_HOME,'plugins'),{authorize(){},log(){},emit(){},api:async()=>null});
+      const who = {userId:1,profile:'default'};
+      await manager.install(who,source,0);
       const {injectBundledMcpServer} = require('./packages/server/src/modules/hermes/services/mcp/studio-autoinject');
       await injectBundledMcpServer(); check(hermes.mcp_servers['ekko-studio-plugins']);
+      check(hermes.mcp_servers['greeting-tools']);
+      assert.equal(hermes.mcp_servers['greeting-tools'].env.HERMES_MCP_SERVER_NAME,'greeting-tools');
+      hermes.mcp_servers['greeting-tools'].enabled=false;
       hermes.mcp_servers['ekko-studio-plugins'].enabled=false;
       await injectBundledMcpServer(); assert.equal(hermes.mcp_servers['ekko-studio-plugins'].enabled,false);
+      assert.equal(hermes.mcp_servers['greeting-tools'].enabled,false);
       const {injectManagedEkkoMcpServers} = require('./packages/server/src/modules/ekko/services/mcp');
       let value = {mcp:{profiles:{default:{servers:{}},work:{servers:{external:{command:'custom'}}}}}};
       const setup = {profiles:()=>[{profile:'work'}],config:{read:()=>value,replace:next=>{value=next}}};
       injectManagedEkkoMcpServers(setup);
       for(const profile of ['default','work']) check(value.mcp.profiles[profile].servers['ekko-studio-plugins']);
+      for(const profile of ['default','work']) check(value.mcp.profiles[profile].servers['greeting-tools']);
+      value.mcp.profiles.work.servers['greeting-tools'].enabled=false;
       value.mcp.profiles.work.servers['ekko-studio-plugins'].enabled=false;
       injectManagedEkkoMcpServers(setup);
       assert.equal(value.mcp.profiles.work.servers['ekko-studio-plugins'].enabled,false);
+      assert.equal(value.mcp.profiles.work.servers['greeting-tools'].enabled,false);
       assert.equal(value.mcp.profiles.work.servers.external.command,'custom');
       const {getCodingAgentManagedMcpServerConfigs:configs} = require('./packages/server/src/modules/coding-agents/services');
       for(const agent of ['claude-code','codex','pi','grok','opencode','dsh','cursor','antigravity','qwen','kimi','codebuddy','qoder','copilot']) {
         const server=configs(agent,'work','/test/auth.json')['ekko-studio-plugins'];
         const env=server.env||server.environment;
         check({env}); assert.equal(env.HERMES_WEB_UI_RUN_TOKEN_FILE,'/test/auth.json'); assert.equal(env.HERMES_WEB_UI_PROFILE,'work');
+        const dedicated=configs(agent,'work','/test/auth.json')['greeting-tools'];
+        const dedicatedEnv=dedicated.env||dedicated.environment;
+        check({env:dedicatedEnv}); assert.equal(dedicatedEnv.HERMES_MCP_SERVER_NAME,'greeting-tools');
+        assert.equal(dedicatedEnv.HERMES_WEB_UI_RUN_TOKEN_FILE,'/test/auth.json');
       }
       assert.deepEqual(configs('zcode'),{});
       const {setManagedMcpServerEnabled} = require('./packages/server/src/modules/coding-agents/services/mcp-overrides');
       setManagedMcpServerEnabled('codex','work','ekko-studio-plugins',false);
       assert.equal(configs('codex','work')['ekko-studio-plugins'].enabled,false);
       assert.notEqual(configs('codex','work')['ekko-studio-api'].enabled,false);
+      const {removeCodingAgentMcpServer,upsertCodingAgentMcpServer} = require('./packages/server/src/modules/coding-agents/services/mcp-manager');
+      await removeCodingAgentMcpServer('codex','greeting-tools',{profile:'work'});
+      assert.equal(configs('codex','work')['greeting-tools'].enabled,false);
+      await upsertCodingAgentMcpServer('codex','greeting-tools',{enabled:true},{profile:'work'});
+      assert.notEqual(configs('codex','work')['greeting-tools'].enabled,false);
+      manifest.mcp.name='renamed-greeting'; fs.writeFileSync(manifestPath,JSON.stringify(manifest));
+      await manager.install(who,source,manager.snapshot().revision,'tool-demo');
+      hermes.mcp_servers['renamed-greeting']={command:'user-owned'};
+      assert.equal((await injectBundledMcpServer()).targets[0].status,'skipped');
+      assert.equal(hermes.mcp_servers['renamed-greeting'].command,'user-owned');
+      delete hermes.mcp_servers['renamed-greeting'];
+      await injectBundledMcpServer();
+      check(hermes.mcp_servers['renamed-greeting']); assert(!hermes.mcp_servers['greeting-tools']);
+      assert.equal(hermes.mcp_servers['ekko-studio-plugins'].enabled,false);
+      value.mcp.profiles.work.servers['renamed-greeting']={command:'user-owned'};
+      injectManagedEkkoMcpServers(setup);
+      assert.equal(value.mcp.profiles.work.servers['renamed-greeting'].command,'user-owned');
+      delete value.mcp.profiles.work.servers['renamed-greeting'];
+      injectManagedEkkoMcpServers(setup);
+      check(value.mcp.profiles.work.servers['renamed-greeting']); assert(!value.mcp.profiles.work.servers['greeting-tools']);
+      check(configs('codex','work')['renamed-greeting']); assert(!configs('codex','work')['greeting-tools']);
+      await manager.update(who,'tool-demo',manager.snapshot().revision,{action:'uninstall'});
+      await injectBundledMcpServer(); injectManagedEkkoMcpServers(setup);
+      assert(!hermes.mcp_servers['renamed-greeting']); assert(!value.mcp.profiles.work.servers['renamed-greeting']);
+      assert(!configs('codex','work')['renamed-greeting']);
+      await manager.close();
       process.stdout.write('managed plugin MCP configuration verified\\n',()=>process.exit(0));
     })().catch(error=>{console.error(error);process.exit(1)});
   `

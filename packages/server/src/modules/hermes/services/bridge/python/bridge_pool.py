@@ -209,6 +209,44 @@ class AgentPool:
         self._approval_handlers: dict[str, Callable[..., str]] = {}
         self._exec_ask_depth = 0
         self._exec_ask_previous: str | None = None
+        self._mcp_generation = 0
+        self._pending_mcp_refresh: Callable[[], None] | None = None
+        self._retired_mcp_tools: set[str] = set()
+
+    def schedule_mcp_refresh(self, refresh: Callable[[], None]) -> bool:
+        with self._lock:
+            self._pending_mcp_refresh = refresh
+            return self.refresh_mcp_if_idle()
+
+    def refresh_mcp_if_idle(self) -> bool:
+        """Shared transports cannot be replaced while any foreground/background task uses them."""
+        with self._lock:
+            refresh = self._pending_mcp_refresh
+            if refresh is None or any(session.running or self.has_active_background_for_session(session.session_id) for session in self._sessions.values()):
+                return False
+            try:
+                refresh()
+            except Exception as exc:
+                print(f"[hermes_bridge] plugin MCP refresh pending: {exc}", file=sys.stderr, flush=True)
+                return False
+            self._pending_mcp_refresh = None
+            self._mcp_generation += 1
+            return True
+
+    def _filter_retired_mcp_tools(self, agent: Any) -> None:
+        if not self._retired_mcp_tools or not isinstance(getattr(agent, "tools", None), list):
+            return
+        # Native discovery may finish registering a transport after register_mcp_servers returns.
+        # Recheck live registrations after discovery before filtering the new Agent snapshot.
+        try:
+            from tools.mcp_tool import _servers, _lock
+            with _lock:
+                for task in _servers.values():
+                    self._retired_mcp_tools.difference_update(getattr(task, "_registered_tool_names", None) or [])
+                    self._retired_mcp_tools.difference_update(_tool_names_from_definitions(getattr(task, "_tools", [])))
+        except ImportError:
+            pass
+        agent.tools = [tool for tool in agent.tools if not self._retired_mcp_tools.intersection(_tool_names_from_definitions([tool]))]
 
     def _install_usage_hook(self) -> None:
         """Observe exact per-request model usage without requiring a user plugin."""
@@ -413,7 +451,20 @@ class AgentPool:
         # cached AgentSession.
         _refresh_worker_profile_env()
         with self._lock:
+            self.refresh_mcp_if_idle()
             existing = self._sessions.get(session_id)
+            refresh_session = None
+            if (existing is not None and not existing.running
+                    and existing.config.get("mcp_generation", 0) != self._mcp_generation
+                    and not self.has_active_background_for_session(session_id)
+                    and (not profile or existing.config.get("profile") == profile)):
+                # Reuse the session and history; only rebuild the idle AIAgent's tool snapshot.
+                refresh_session = existing
+                requested_model = requested_model or str(existing.config.get("model") or "")
+                requested_provider = requested_provider or str(existing.config.get("provider") or "")
+                if background_delegation_enabled is None:
+                    background_delegation_enabled = existing.config.get("background_delegation_enabled")
+                existing = None
             if existing is not None:
                 # If profile changed, destroy old session and recreate
                 profile_changed = bool(profile and existing.config.get("profile") != profile)
@@ -529,6 +580,9 @@ class AgentPool:
                     tool_complete_callback=self._tool_complete_callback(session_id),
                     clarify_callback=self._clarify_callback(session_id),
                 )
+                # Some native registries retain definitions after their transport shuts down.
+                # Never advertise those retired names in a newly built model tool snapshot.
+                self._filter_retired_mcp_tools(agent)
                 agent.compression_enabled = False
                 self._install_compression_hook(agent, session_id)
                 self._install_prepersist_dedup_hook(agent)
@@ -554,12 +608,28 @@ class AgentPool:
                         "resumed_message_count": 0,
                         "mcp_tool_count": len(discovered_mcp_tools),
                         "active_mcp_tool_count": len(mcp_tool_names),
+                        "mcp_generation": self._mcp_generation,
                         "db_error": self._db.error,
                         # This is an Agent-session policy, not a per-turn flag.
                         # Callers select it when the cached AIAgent is created.
                         "background_delegation_enabled": background_delegation_enabled is not False,
                     },
                 )
+                if refresh_session is not None:
+                    refresh_session.agent = agent
+                    refresh_session.config.update({
+                        "profile": session.config["profile"],
+                        "model": session.config["model"],
+                        "provider": session.config["provider"],
+                        "base_url": session.config["base_url"],
+                        "api_mode": session.config["api_mode"],
+                        "mcp_generation": self._mcp_generation,
+                        "mcp_tool_count": len(discovered_mcp_tools),
+                        "active_mcp_tool_count": len(mcp_tool_names),
+                        "mcp_restore_history": True,
+                    })
+                    refresh_session.last_used_at = time.time()
+                    session = refresh_session
                 self._install_boundary_interrupt(session)
                 session.config["boundary_interrupt_supported"] = session.boundary_supported
                 if session.boundary_error:
@@ -1793,11 +1863,13 @@ class AgentPool:
         with session.lock:
             if session.running:
                 raise RuntimeError(f"session {session_id} is already running")
+            if session.config.pop("mcp_restore_history", False) and conversation_history is None:
+                conversation_history = copy.deepcopy(session.history)
             run_id = uuid.uuid4().hex
             record = RunRecord(run_id=run_id, session_id=session_id)
             with self._lock:
                 self._runs[run_id] = record
-            session.running = True
+                session.running = True
             session.current_run_id = run_id
             session.boundary_phase = "model"
             session.boundary_pending_run_id = None
@@ -1842,6 +1914,7 @@ class AgentPool:
             self._fail_unexpected_run(session, record, exc)
         finally:
             self._fail_unexpected_run(session, record, RuntimeError("Hermes run worker exited without a terminal result"))
+            self.refresh_mcp_if_idle()
 
     def _fail_unexpected_run(self, session: AgentSession | None, record: RunRecord, exc: BaseException) -> None:
         with session.lock if session else self._lock:

@@ -18,7 +18,8 @@ export function studioMcpCapabilities(servers: unknown): StudioMcpCapabilities {
     const server = value as Record<string, any>
     if (server.enabled === false || server.disabled === true) continue
     const match = /^(?:ekko|hermes)-studio-(api|plugins|browser|devices|use|interaction|plan)$/.exec(name)
-    const toolset = match?.[1]
+    const env = server.env || server.environment
+    const toolset = match?.[1] || (env?.HERMES_WEB_UI_MANAGED_MCP === '1' && env?.HERMES_MCP_TOOLSET === 'plugins' ? 'plugins' : undefined)
     if (toolset) capabilities[toolset === 'plan' ? 'interaction' : toolset as keyof StudioMcpCapabilities] = true
   }
   return capabilities

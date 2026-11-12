@@ -9,7 +9,8 @@ export async function leaseEkkoMcpServers(servers: Record<string, unknown> | und
   const contextId = randomUUID()
   const managed = Object.entries(servers || {}).filter(([name, value]) => {
     const server = value as { env?: Record<string, string> } | null
-    return /^ekko-studio-(api|plugins|browser|devices|use)$/.test(name) && server?.env?.HERMES_WEB_UI_MANAGED_MCP === '1'
+    return server?.env?.HERMES_WEB_UI_MANAGED_MCP === '1'
+      && (/^ekko-studio-(api|plugins|browser|devices|use)$/.test(name) || server.env.HERMES_MCP_TOOLSET === 'plugins')
   })
   const dispose = () => {
     lifecycle.abort()

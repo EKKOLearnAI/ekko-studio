@@ -71,6 +71,13 @@ export function manifest(value: unknown): PluginManifest {
   }
   const capabilities = ['api.read', 'api.write', 'tools', 'commands', 'events', 'hooks', 'automation', 'ui', 'storage.client']
   if (!Array.isArray(m.capabilities) || m.capabilities.some(item => !capabilities.includes(item))) throw new PluginError('Invalid plugin capabilities')
+  if (m.mcp !== undefined) {
+    if (!m.mcp || typeof m.mcp !== 'object' || Array.isArray(m.mcp) || Object.keys(m.mcp).some(key => key !== 'name')
+      || typeof m.mcp.name !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(m.mcp.name)
+      || ['constructor', 'prototype', '__proto__'].includes(m.mcp.name)) throw new PluginError('Plugin MCP name must start with a lowercase letter and contain up to 64 lowercase letters, digits, underscores or hyphens')
+    if (m.mcp.name !== 'ekko-studio-plugins' && /^(?:(?:ekko|hermes)-studio(?:-|$)|hermes-web-ui(?:-|$))/.test(m.mcp.name)) throw new PluginError('Plugin MCP name is reserved by Studio')
+    if (!m.capabilities.includes('tools')) throw new PluginError('Plugin MCP configuration requires the tools capability')
+  }
   if (m.configSchema) validateSchema(m.configSchema)
   const ids = new Set<string>()
   if (m.views !== undefined && (!Array.isArray(m.views) || m.views.length > 50)) throw new PluginError('Invalid plugin views')

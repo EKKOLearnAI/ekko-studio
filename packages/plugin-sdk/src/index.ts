@@ -47,6 +47,8 @@ export interface PluginManifest {
   /** A bundled ES module exporting mount(element, ctx), optionally returning a disposer. */
   client?: string
   capabilities: Capability[]
+  /** Omit to share ekko-studio-plugins; otherwise expose tools on this dedicated MCP server. */
+  mcp?: { name: string }
   configSchema?: Schema
   dependencies?: Record<string, string>
   views?: PluginView[]

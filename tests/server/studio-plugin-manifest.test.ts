@@ -45,6 +45,19 @@ it('rejects mismatched package and plugin versions', async () => {
   await expect(readManifest(source)).rejects.toThrow(/versions must match/)
 })
 
+it('accepts an optional dedicated MCP name and rejects invalid or reserved names', () => {
+  const toolPlugin = { ...definition, capabilities: ['ui', 'tools'] }
+  expect(manifest(toolPlugin).mcp).toBeUndefined()
+  for (const name of ['notebook-tools', 'my_tools', 'ekko-studio-plugins']) {
+    expect(manifest({ ...toolPlugin, mcp: { name } }).mcp).toEqual({ name })
+  }
+  for (const mcp of [null, [], {}, { name: '' }, { name: 'has.dot' }, { name: 'has space' }, { name: 'UPPER' }, { name: 'x'.repeat(65) },
+    { name: 'constructor' }, { name: 'ekko-studio-api' }, { name: 'hermes-studio-browser' }, { name: 'hermes-web-ui-mcp' }, { name: 'tools', command: 'custom' }]) {
+    expect(() => manifest({ ...toolPlugin, mcp })).toThrow(/MCP/)
+  }
+  expect(() => manifest({ ...definition, mcp: { name: 'tools' } })).toThrow(/tools capability/)
+})
+
 it('rejects unsafe project links, removed chat slots and invalid navigation declarations', () => {
   for (const patch of [
     { repository: 'javascript:alert(1)' }, { documentation: 'https://user:password@example.com' }, { icon: '../secret.png' },

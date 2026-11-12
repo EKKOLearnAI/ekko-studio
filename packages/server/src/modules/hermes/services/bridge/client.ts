@@ -813,6 +813,10 @@ export class AgentBridgeClient {
 
   // ───── MCP Management ─────
 
+  mcpPluginsChanged(servers: string[], removed: string[]): Promise<AgentBridgeResponse> {
+    return this.request({ action: 'mcp_plugins_changed', servers, removed }, { serialize: true, timeoutMs: 180_000 })
+  }
+
   mcpList(profile?: string): Promise<McpActionResponse> {
     return this.request({ action: 'mcp_list', ...(profile ? { profile } : {}) })
   }

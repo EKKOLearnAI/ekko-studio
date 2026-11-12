@@ -167,12 +167,15 @@ class WorkerProcess:
                 except OSError:
                     pass
 
-    def request(self, req: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
-        passive = req.get("action") in {"status", "status_if_loaded", "background_poll", "list", "get_result", "get_output"}
+    def request(self, req: dict[str, Any], timeout: float | None = None, *, start_if_needed: bool = True) -> dict[str, Any]:
+        passive = req.get("action") in {"status", "status_if_loaded", "background_poll", "list", "get_result", "get_output", "mcp_plugins_changed"}
         with self._lock:
+            if not start_if_needed and not self.running:
+                return {"ok": True, "skipped": True}
             self.active_requests += 1
         try:
-            self.start()
+            if start_if_needed:
+                self.start()
             if not passive:
                 self.last_used_at = time.time()
             request_timeout = timeout if timeout is not None and timeout > 0 else self.REQUEST_TIMEOUT_SECONDS

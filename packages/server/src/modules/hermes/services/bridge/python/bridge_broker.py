@@ -7,6 +7,7 @@ import socket
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -445,6 +446,21 @@ class BridgeBroker:
         if action == "shutdown":
             self.stop()
             return {"status": "shutting_down"}
+
+        if action == "mcp_plugins_changed":
+            with self._lock:
+                workers = [(key, worker) for key, worker in self._workers.items() if worker.running]
+            def notify(entry):
+                key, worker = entry
+                try:
+                    result = worker.request(req, start_if_needed=False)
+                    return {"worker_key": key, "profile": worker.profile, **result}
+                except Exception as exc:
+                    return {"worker_key": key, "profile": worker.profile, "ok": False, "error": str(exc)}
+            with ThreadPoolExecutor(max_workers=min(8, len(workers)) or 1) as executor:
+                results = list(executor.map(notify, workers))
+            failed = [item for item in results if not item.get("ok")]
+            return {"ok": not failed, "workers": results, **({"error": "; ".join(item.get("error", "Worker notification failed") for item in failed)} if failed else {})}
 
         # ───── MCP Management ─────
         if action.startswith("mcp_"):

@@ -12,10 +12,11 @@ export function pluginToolName(pluginId, toolName) {
 }
 
 /** Managed MCP exposes global plugin tools; each call keeps its authenticated run context. */
-export function createPluginTools(request) {
+export function createPluginTools(request, serverName = 'ekko-studio-plugins') {
   async function catalog(signal) {
     const snapshot = await request('/api/studio/plugins', { signal })
-    return (snapshot.plugins || []).filter(plugin => plugin.status === 'active').flatMap(plugin => plugin.tools.map(tool => ({
+    return (snapshot.plugins || []).filter(plugin => plugin.status === 'active'
+      && (plugin.manifest.mcp?.name || 'ekko-studio-plugins') === serverName).flatMap(plugin => plugin.tools.map(tool => ({
       pluginId: plugin.manifest.id, tool: tool.name,
       definition: {
         name: pluginToolName(plugin.manifest.id, tool.name),

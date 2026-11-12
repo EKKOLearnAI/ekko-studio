@@ -7,16 +7,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PluginRuntime } from '../../packages/server/src/modules/studio/services/plugins/runtime'
 import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
-const mocks = vi.hoisted(() => ({ install: vi.fn(), request: vi.fn(), runtime: vi.fn(), user: { id: 1, role: 'super_admin' }, profile: 'work' as string | undefined, bound: false, shared: false }))
+const mocks = vi.hoisted(() => ({ install: vi.fn(), update: vi.fn(), request: vi.fn(), runtime: vi.fn(), user: { id: 1, role: 'super_admin' }, profile: 'work' as string | undefined, bound: false, shared: false }))
+vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({ logger: { warn: vi.fn() } }))
 vi.mock('../../packages/server/src/modules/studio/services/auth/run-mcp-credentials', () => ({ runMcpCredentials: {
   authenticate: () => mocks.bound ? { profile: 'work', sessionId: 'bound-session', contextId: 'run', agentId: 'codex' } : undefined,
   recognizes: () => mocks.bound,
 } }))
 vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ resolvePluginIdentity: (identity: any) => identity, pluginAdministrationIdentity: (userId: number) => ({ userId, profile: 'default' }), getPluginManager: () => ({
   snapshot: () => ({ revision: 2, plugins: [{ manifest: { id: 'notes', configSchema: { type: 'object', properties: { secret: { type: 'string', secret: true } } } }, config: { public: 'visible', secret: 'hidden' } }] }),
-  install: mocks.install, request: mocks.request, runtime: mocks.runtime,
+  install: mocks.install, update: mocks.update, request: mocks.request, runtime: mocks.runtime,
 }) }))
 import { studioPluginRoutes } from '../../packages/server/src/modules/studio/routes/plugins'
+import { configurePluginMcpSync } from '../../packages/server/src/modules/studio/public/plugin-mcp'
 beforeEach(() => { vi.clearAllMocks(); mocks.user = { id: 1, role: 'super_admin' }; mocks.profile = 'work'; mocks.bound = false; mocks.shared = false })
 async function server(test: (base: string) => Promise<void>) {
   const app = new Koa()
@@ -27,6 +29,25 @@ async function server(test: (base: string) => Promise<void>) {
   try { await test(`http://127.0.0.1:${(http.address() as any).port}`) }
   finally { http.closeAllConnections(); await new Promise<void>(done => http.close(() => done())) }
 }
+it('synchronizes MCP configuration after successful package changes and keeps a committed install on sync failure', async () => {
+  const sync = vi.fn(async () => {}), release = configurePluginMcpSync(sync)
+  try {
+    await server(async base => {
+      const install = () => fetch(`${base}/api/studio/plugins/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: '/tmp/plugin', revision: 0, trusted: true }) })
+      expect((await install()).status).toBe(200)
+      expect(sync).toHaveBeenCalledTimes(1)
+      const updated = await fetch(`${base}/api/studio/plugins/notes`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, revision: 1 }) })
+      expect(updated.status).toBe(200)
+      expect(sync).toHaveBeenCalledTimes(2)
+      mocks.install.mockRejectedValueOnce(new Error('Package rejected'))
+      expect((await install()).status).toBe(500)
+      expect(sync).toHaveBeenCalledTimes(2)
+      sync.mockRejectedValueOnce(new Error('Config sync failed'))
+      expect((await install()).status).toBe(200)
+      expect(sync).toHaveBeenCalledTimes(3)
+    })
+  } finally { release() }
+})
 it('requires trusted administrator installation and rejects run credentials and shared access', async () => {
   await server(async base => {
     const install = (body: object) => fetch(`${base}/api/studio/plugins/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
