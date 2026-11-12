@@ -39,7 +39,8 @@
     "hermes-web-ui-mcp": "./bin/hermes-web-ui-mcp.mjs",
     "hermes-studio-mcp": "./bin/hermes-studio-mcp.mjs",
     "ekko-studio-mcp": "./bin/ekko-studio-mcp.mjs",
-    "ekko-studio-web": "./bin/hermes-web-ui.mjs"
+    "ekko-studio-web": "./bin/hermes-web-ui.mjs",
+    "ekko-studio": "./bin/hermes-web-ui.mjs"
   },
   "scripts": {
     "start": "vite --host --port 8648",

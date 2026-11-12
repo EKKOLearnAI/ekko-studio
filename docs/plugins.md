@@ -53,6 +53,72 @@ OMP 使用官方 stdio RPC：文本和推理流、原生工具事件、图片、
 依赖使用 manifest 中的精确版本，启用前必须先启用依赖；禁用依赖前要禁用使用它的插件。
 卸载释放运行资源，但保留数据与历史包目录，方便恢复；它不是清除磁盘数据操作。
 
+## 独立项目开发与调试
+
+安装包含此功能的 Studio 版本后，使用 `ekko-studio plugins`；`ekko-studio-web plugins` 与
+`hermes-web-ui plugins` 也支持同一组命令。源码开发时可以用 `node bin/hermes-web-ui.mjs plugins ...`。
+
+```bash
+# 创建独立项目并登记到当前 Studio
+ekko-studio plugins create my-plugin
+
+# 指定源码目录，或登记已有项目
+ekko-studio plugins create another-plugin /absolute/path/another-plugin
+ekko-studio plugins link /absolute/path/existing-plugin
+
+# 查看所有已登记项目（含目录缺失的记录）
+ekko-studio plugins list
+
+# 按 ID 或目录选择项目，显示 Studio 中的调试入口
+ekko-studio plugins dev my-plugin
+ekko-studio plugins dev /absolute/path/existing-plugin
+
+# 只移除登记；不删除源码、已安装副本或数据
+ekko-studio plugins unlink my-plugin
+```
+
+命令与 Studio 服务端必须使用相同的 `HERMES_WEB_UI_HOME`（兼容 `HERMES_WEBUI_STATE_DIR`）。
+默认数据目录是 `~/.hermes-web-ui`，其中：
+
+- `plugin-projects/<id>/`：未指定目标路径时的默认源码目录；可以单独初始化 Git 仓库。
+- `plugins/development/<id>.json`：所有通过 CLI 创建或登记的项目索引，保存真实绝对路径。
+- `plugins/global/`：宿主管理的已安装运行副本、配置和数据；无需手动修改。
+
+源码可放在任意独立仓库。CLI 不修改 Studio 的源码、依赖列表或内置插件目录。
+不同项目不能登记相同 ID；移动项目后先 `unlink`，再从新位置 `link`。
+CLI 的 `create/link/dev` 只登记项目，不执行插件，不读取登录 token。
+
+进入 **插件中心 → 开发插件**，超级管理员可以看到所有登记目录。
+点击 **开始调试** 并信任项目及其构建脚本后，Studio 构建、安装并启用该插件；
+如果存在同 ID 的安装，会替换该安装并保留配置与数据。只有明确启动调试的项目会被监听。
+这一步也是普通本地目录安装与开发调试的区别：普通安装后不会自动同步源码。
+
+调试期间宿主每秒检查源文件，稳定两次后执行可选的 `npm run build`，再复制到新的运行目录。
+没有 build 脚本的 JavaScript 模板直接加载；同版本的源码修改也会生效，无需反复提高版本号。
+后端旧实例被释放，前端通过已有插件事件重新挂载；这是整个插件的重载，不保留页面内存状态。
+嵌套模块也从新的运行目录加载，不会继续使用旧 ESM 缓存。每个开发项目保留当前和上一个运行副本。
+
+构建或加载失败时，开发列表显示错误，已运行的成功版本继续服务。
+修复源码后自动重试，也可以点 **重新构建**；**停止调试** 保留最后安装版本及数据并停止监听。
+禁用或卸载会停止同步；回滚同时退出调试，以免源码立即覆盖回滚结果。
+退出 Studio 会停止监听，重启后恢复仍启用的开发项目。取消登记后不再同步，已安装副本仍可使用。
+源码缺失、登记路径改变或激活管理员失去权限时不会继续执行构建。
+
+生成的项目包含与宿主匹配的本地 `sdk/`，`npm install` 后可通过
+`import type { PluginContext, ClientContext } from '@ekko-studio/plugin-sdk'` 使用类型，
+不需要克隆 Studio 源码或依赖尚未发布的 npm SDK。运行时辅助代码应由插件自己的构建打包。
+模板本身为可直接执行的 `.mjs`，无需先安装依赖才能在宿主中运行。
+
+使用 TypeScript、Vue 或 React 时，在项目内配置 build 脚本，并将清单入口指向
+`dist/server.mjs`、`dist/client.mjs` 等产物。将生成文件放在 `dist/` 或 `build/`；
+监听忽略这些目录、`node_modules`、`.git`、`coverage` 和 `.cache`，不跟随符号链接。
+开发源目录最多检查 20000 个条目；运行数据应保存在 `ctx.storage` 或 `ctx.paths.dataDir`。
+Studio 不自动安装项目的构建依赖；先在独立项目运行相应的依赖安装命令。
+
+前端可在浏览器 DevTools 的插件 iframe 中调试；后端使用 `ctx.log` 和插件详情的日志入口，
+断点附加到 Studio 的 Node 进程。Agent 插件启用后出现在 Agent 管理及已有会话入口中。
+远程部署时，登记目录必须位于 Studio 服务端所在机器；这组命令不会把本机源码上传到远端。
+
 ## 插件中心与使用入口
 
 插件中心使用卡片、名称/描述/作者/标签搜索、能力分类和状态筛选管理全局已安装插件，不是公共社区目录。详情展示作者、许可证、仓库、主页、文档、问题反馈和更新记录。安装与维护操作收进弹窗和详情抽屉；进入中心不会加载所有插件业务页面。

@@ -9,6 +9,7 @@ import { isPrivatePersonSession, ownsPersonSession } from '../../contracts/perso
 import { businessEvents } from '../webhooks/business-events'
 import { canReceivePluginEvent, pluginEventData } from './events'
 import { PluginManager } from './manager'
+import { PluginDevelopment } from './development'
 import { PluginError } from './errors'
 import { json } from './schema'
 import { pluginApiPath } from './policy'
@@ -18,6 +19,7 @@ import { synchronizePluginMcpServers } from './mcp'
 
 let baseUrl = ''
 let instance: PluginManager | undefined
+let development: PluginDevelopment | undefined
 let unsubscribe: (() => void) | undefined
 let builtinInitialization: Promise<void> | undefined
 // A new installation creates its first administrator at login, after host startup.
@@ -73,10 +75,17 @@ export function getPluginManager(): PluginManager {
   configurePluginAgents(() => instance?.registeredAgents() || [])
   return instance
 }
+export function getPluginDevelopment(): PluginDevelopment {
+  return development ||= new PluginDevelopment(getPluginManager(), identity => {
+    authorizePluginIdentity(identity)
+    if (findUserById(identity.userId)?.role !== 'super_admin') throw new PluginError('Plugin development requires an active super administrator', 'PLUGIN_FORBIDDEN', 403)
+  }, synchronizePluginMcpServers)
+}
 export async function startPluginHost(loopbackBaseUrl: string): Promise<void> {
   baseUrl = loopbackBaseUrl
   const manager = getPluginManager()
   await manager.restore()
+  getPluginDevelopment().watch()
   try { await ensureBuiltinPlugins() }
   catch (error) { logger.warn({ error }, 'Unable to reconcile bundled Studio plugins') }
   unsubscribe = businessEvents.subscribe('studio-plugins', async event => {
@@ -104,4 +113,4 @@ export async function startPluginHost(loopbackBaseUrl: string): Promise<void> {
     }
   })
 }
-export async function stopPluginHost(): Promise<void> { unsubscribe?.(); unsubscribe = undefined; await instance?.close(); instance = undefined; baseUrl = ''; builtinInitialization = undefined }
+export async function stopPluginHost(): Promise<void> { await development?.close(); development = undefined; unsubscribe?.(); unsubscribe = undefined; await instance?.close(); instance = undefined; baseUrl = ''; builtinInitialization = undefined }

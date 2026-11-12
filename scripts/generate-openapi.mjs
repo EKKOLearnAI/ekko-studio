@@ -2104,9 +2104,11 @@ for (const [method, path, tag, operationId, summary, properties, required] of co
 }
 openapi.paths['/api/studio/chat-run/runs'].post.responses['202'] = { description: 'Run accepted or queued; JSON includes status, session_id and available run_id/queue_id' }
 const pluginOperations = [
+  ['get', '/development', 'listStudioDevelopmentPlugins', 'List locally registered development projects and build status; super administrator login required', null],
+  ['post', '/{id}/development', 'startStudioPluginDevelopment', 'Trust, build, enable and watch a registered project; existing configuration and data are preserved', { revision: { type: 'integer' }, trusted: { type: 'boolean', enum: [true] } }],
   ['get', '', 'listStudioPlugins', 'List globally installed plugins and registered tools, commands and actions for every account; no Profile selection required', null],
   ['post', '/install', 'installStudioPlugin', 'Install or upgrade a trusted compiled plugin; requires a super administrator login', { source: { type: 'string', description: 'Absolute local directory, package@exact-version, or github:owner/repo#40-character-commit' }, revision: { type: 'integer' }, trusted: { type: 'boolean', enum: [true] }, pluginId: { type: 'string', description: 'Existing plugin id when upgrading' } }],
-  ['patch', '/{id}', 'updateStudioPlugin', 'Globally enable, disable, configure, reload, roll back or uninstall a plugin', { revision: { type: 'integer' }, enabled: { type: 'boolean' }, config: { type: 'object', additionalProperties: true }, action: { type: 'string', enum: ['reload', 'rollback', 'uninstall'] } }],
+  ['patch', '/{id}', 'updateStudioPlugin', 'Globally enable, disable, configure, reload, roll back or uninstall a plugin', { revision: { type: 'integer' }, enabled: { type: 'boolean' }, config: { type: 'object', additionalProperties: true }, action: { type: 'string', enum: ['reload', 'rollback', 'uninstall', 'stop-development'] } }],
   ['get', '/{id}/client', 'getStudioPluginClient', 'Read the enabled plugin frontend module as JSON {source}', null],
   ['get', '/{id}/logs', 'getStudioPluginLogs', 'Read the latest plugin logs; requires a super administrator login', null],
   ['get', '/events', 'pollStudioPluginEvents', 'Poll user/profile-scoped plugin events with generation and cursor', null],
@@ -2117,7 +2119,7 @@ const pluginOperations = [
 delete openapi.paths['/api/studio/plugins/']
 for (const [method, suffix, operationId, summary, properties] of pluginOperations) {
   const path = `/api/studio/plugins${suffix}`
-  const globalOperation = ['', '/install', '/{id}', '/{id}/logs'].includes(suffix)
+  const globalOperation = ['', '/install', '/{id}', '/{id}/logs', '/development', '/{id}/development'].includes(suffix)
   const parameters = globalOperation ? [] : [{ name: 'profile', in: 'query', schema: { type: 'string' }, description: 'Execution context only; installations and enablement are global. Managed run credentials remain bound to their run Profile.' }]
   if (suffix.includes('{id}')) parameters.push({ name: 'id', in: 'path', required: true, schema: { type: 'string' } })
   if (suffix === '/events') parameters.push(...['cursor', 'pluginId', 'sessionId'].map(name => ({ name, in: 'query', schema: { type: name === 'cursor' ? 'integer' : 'string' } })))
@@ -2125,7 +2127,7 @@ for (const [method, suffix, operationId, summary, properties] of pluginOperation
   openapi.paths[path][method] = { tags: ['Studio Plugins'], operationId, summary, parameters, security: [{ BearerAuth: [] }],
     responses: { 200: { description: 'JSON result' }, 403: { description: 'User, Profile or capability denied' }, 409: { description: 'Plugin unavailable, dependency failure or stale revision' } },
     ...(properties ? { requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties,
-      required: suffix === '/install' ? ['source', 'revision', 'trusted'] : method === 'patch' ? ['revision'] : suffix.endsWith('/invoke') ? ['kind', 'name'] : suffix.endsWith('/api') ? ['path'] : ['action'],
+      required: suffix === '/{id}/development' ? ['revision', 'trusted'] : suffix === '/install' ? ['source', 'revision', 'trusted'] : method === 'patch' ? ['revision'] : suffix.endsWith('/invoke') ? ['kind', 'name'] : suffix.endsWith('/api') ? ['path'] : ['action'],
     } } } } } : {}),
   }
 }

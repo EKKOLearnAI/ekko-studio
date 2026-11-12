@@ -9,6 +9,7 @@ import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables
 import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
 import PluginConfigFields from '@/components/plugins/PluginConfigFields.vue'
+import PluginDevelopmentPanel from '@/components/plugins/PluginDevelopmentPanel.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import { pluginLinks, safePluginLink } from '@/plugins/navigation'
 
@@ -122,6 +123,7 @@ async function logs(id: string) {
         <NButton v-if="canManage" type="primary" size="large" @click="showInstall = true">{{ t('studioPlugins.installTitle') }}</NButton>
       </header>
       <NAlert v-if="error || actionError" type="error" closable @close="error = ''; actionError = ''">{{ actionError || error }}</NAlert>
+      <PluginDevelopmentPanel v-if="canManage" @changed="refresh(true)" />
       <div class="search-row">
         <NInput v-model:value="search" clearable size="large" :placeholder="t('studioPlugins.search')" :aria-label="t('studioPlugins.search')">
           <template #prefix><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg></template>

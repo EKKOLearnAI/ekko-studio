@@ -21519,6 +21519,32 @@
         }
       }
     },
+    "/api/studio/plugins/development": {
+      "get": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "listStudioDevelopmentPlugins",
+        "summary": "List locally registered development projects and build status; super administrator login required",
+        "parameters": [],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        }
+      }
+    },
     "/api/studio/plugins/events": {
       "get": {
         "tags": [
@@ -21690,7 +21716,8 @@
                     "enum": [
                       "reload",
                       "rollback",
-                      "uninstall"
+                      "uninstall",
+                      "stop-development"
                     ]
                   }
                 },
@@ -21826,6 +21853,66 @@
           },
           "409": {
             "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        }
+      }
+    },
+    "/api/studio/plugins/{id}/development": {
+      "post": {
+        "tags": [
+          "Studio Plugins"
+        ],
+        "operationId": "startStudioPluginDevelopment",
+        "summary": "Trust, build, enable and watch a registered project; existing configuration and data are preserved",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JSON result"
+          },
+          "403": {
+            "description": "User, Profile or capability denied"
+          },
+          "409": {
+            "description": "Plugin unavailable, dependency failure or stale revision"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "trusted": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  }
+                },
+                "required": [
+                  "revision",
+                  "trusted"
+                ]
+              }
+            }
           }
         }
       }

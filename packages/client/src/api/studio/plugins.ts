@@ -4,6 +4,7 @@ export type { Json, PluginEvent, PluginManifest, Schema }
 export interface InstalledPlugin {
   manifest: PluginManifest
   source: string
+  developmentDirectory?: string
   installedAt: number
   enabled: boolean
   status: 'active' | 'disabled' | 'failed'

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { readFile, rm } from 'node:fs/promises'
+import { join, relative, sep, dirname } from 'node:path'
 import type { ApiRequest, HookResult, Json, PluginEvent, PluginHook, PluginIdentity, PluginRecord, PluginSnapshot, ToolResult } from '../../contracts/plugins'
 import { PluginError, message } from './errors'
 import { installPackage, pluginFile } from './installer'
@@ -83,7 +83,7 @@ export class PluginManager {
     this.operations.set(key, current)
     try { return await current } finally { if (this.operations.get(key) === current) this.operations.delete(key) }
   }
-  async install(identity: PluginIdentity, source: string, revision: number, expectedId?: string): Promise<PluginSnapshot> {
+  async install(identity: PluginIdentity, source: string, revision: number, expectedId?: string, options?: { developmentDirectory?: string; enabled?: boolean }): Promise<PluginSnapshot> {
     return this.transaction(identity, revision, async state => {
       const pkg = await installPackage(this.store.directory(), source)
       try {
@@ -91,8 +91,9 @@ export class PluginManager {
         if (expectedId && id !== expectedId) throw new PluginError('Update package has a different plugin id')
         const old = state.records[id]
         if (old && !expectedId) throw new PluginError('Plugin already installed; use Update', 'PLUGIN_EXISTS', 409)
-        const next: PluginRecord = { manifest: pkg.manifest, directory: pkg.directory, source, installedAt: Date.now(), enabled: old?.enabled || false,
-          config: configuration(pkg.manifest.configSchema, old?.config || {}, !!old?.enabled), ...(old ? { previous: previousVersion(old) } : {}) }
+        const next: PluginRecord = { manifest: pkg.manifest, directory: pkg.directory, source, installedAt: Date.now(), enabled: options?.enabled ?? old?.enabled ?? false,
+          ...(options?.developmentDirectory ? { developmentDirectory: options.developmentDirectory } : {}),
+          config: configuration(pkg.manifest.configSchema, old?.config || {}, !!(options?.enabled ?? old?.enabled)), ...(old ? { previous: previousVersion(old) } : {}) }
         if (source.startsWith('builtin:')) (state.builtinVersions ||= {})[id] = pkg.manifest.version
         await this.replace(identity, state, id, next)
         return this.snapshot(identity)
@@ -126,7 +127,7 @@ export class PluginManager {
       throw error
     }
   }
-  async update(identity: PluginIdentity, id: string, revision: number, input: { enabled?: boolean; config?: Record<string, Json>; action?: 'reload' | 'rollback' | 'uninstall' }): Promise<PluginSnapshot> {
+  async update(identity: PluginIdentity, id: string, revision: number, input: { enabled?: boolean; config?: Record<string, Json>; action?: 'reload' | 'rollback' | 'uninstall' | 'stop-development' }): Promise<PluginSnapshot> {
     identifier(id)
     return this.transaction(identity, revision, async state => {
       const record = state.records[id]
@@ -136,7 +137,9 @@ export class PluginManager {
       else if (input.action === 'rollback') {
         if (!record.previous) throw new PluginError('No previous plugin version')
         next = { ...record.previous, enabled: record.enabled, previous: previousVersion(record) }
+        delete next.developmentDirectory
       } else {
+        if (input.action === 'stop-development') delete next.developmentDirectory
         if (input.enabled !== undefined) next.enabled = input.enabled
         if (input.config !== undefined) next.config = configuration(next.manifest.configSchema, input.config)
       }
@@ -206,6 +209,13 @@ export class PluginManager {
     writeJson(file, entries.slice(-200))
   }
   logs(_identity: PluginIdentity, id: string) { return readJson<Json[]>(join(this.store.directory(), 'logs', `${identifier(id)}.json`), () => []) }
+  async pruneDevelopmentPackage(directory: string): Promise<void> {
+    const versions = join(this.store.directory(), 'versions')
+    const parts = relative(versions, directory).split(sep)
+    if (parts.length !== 2 || !/^[a-f0-9-]{36}$/.test(parts[0]) || parts[1] !== 'package') return
+    if (Object.values(this.store.read().records).some(record => record.directory === directory || record.previous?.directory === directory)) return
+    await rm(dirname(directory), { recursive: true, force: true }).catch(() => {})
+  }
   async close(): Promise<void> {
     this.closing = true
     await Promise.allSettled([...this.operations.values()])

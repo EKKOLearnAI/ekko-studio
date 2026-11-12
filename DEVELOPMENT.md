@@ -19,6 +19,14 @@ npm run build
 - `npm run test:e2e` runs Playwright browser tests against a mocked BFF API.
 - `npm run build` type-checks and builds both client and server.
 
+## Independent Studio Plugins
+
+Use `ekko-studio plugins create <id> [directory]`, `link <directory>`, `list`,
+`dev [id|directory]` and `unlink <id>` to manage standalone projects. Start
+debugging from the plugin center to build and watch a trusted project. The CLI
+and host must use the same `HERMES_WEB_UI_HOME`. See `docs/plugins.md` for the
+registry, local SDK, reload behavior and troubleshooting.
+
 ## Architecture
 
 - Frontend code lives under `packages/client/src`.

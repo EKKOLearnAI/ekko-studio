@@ -98,3 +98,10 @@ for (const firmwareVersion of ['v1', 'v2']) {
   if (firmwareVersion === 'v1') cpSync(firmwareSrc, legacyFirmwareOutPath)
   console.log(`[build-server] ESP32-C3 ${firmwareVersion} firmware copied from ${sourceLabel}`)
 }
+
+// Ship the SDK with the CLI so independent projects do not need this checkout.
+const pluginSdkOutDir = resolve(rootDir, 'dist/plugin-sdk')
+rmSync(pluginSdkOutDir, { recursive: true, force: true })
+mkdirSync(pluginSdkOutDir, { recursive: true })
+cpSync(resolve(rootDir, 'packages/plugin-sdk/package.json'), resolve(pluginSdkOutDir, 'package.json'))
+cpSync(resolve(rootDir, 'packages/plugin-sdk/src'), resolve(pluginSdkOutDir, 'src'), { recursive: true })
