@@ -87,3 +87,8 @@ config 不含 secret，storage 仅在清单声明 `storage.client` 时开放本�
 `attachments.resolve(assetId)` 返回元信息及 localPath；read 返回 Uint8Array，均校验访问权限。
 scoped 的 model 包括 provider/model/apiMode/baseUrl/token/reasoningEffort/contextWindow/outputLimit；
 global 的 model 只有可选原生 model/reasoningEffort。
+
+Agent 运行身份中的 `workspace` 与 `paths.workspaceDir` 对应本轮实际工作区；
+`workspace.read/write()` 仍受当前账号及会话的宿主权限约束。
+`input.history` 来自完整持久会话，不受聊天界面分页条数限制，也不包含本轮输入。
+Bot 任务使用任务所属账号及 Profile 调用插件；私有任务会话必须存在该账号的任务执行记录。

@@ -1726,6 +1726,8 @@ export class ChatRunSocket {
     const eventName = approval ? 'approval.requested' : 'clarify.requested'
     const pending = isPersonSession(sessionId) ? pendingChatEkkoInteractions(sessionId) : state?.events || []
     if (!state || !pending.some(entry => entry.event === eventName && (entry.data?.approval_id === id || entry.data?.clarify_id === id))) return false
+    const plugin = respondAgentInteraction(sessionId, id, approval ? 'approval' : 'clarify', response)
+    if (plugin.handled) return plugin.resolved // The plugin broker emits its own resolution.
     let resolved = false
     if (approval) {
       if (!['once', 'session', 'deny'].includes(response)) return false

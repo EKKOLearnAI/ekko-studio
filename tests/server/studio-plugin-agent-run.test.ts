@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { PluginRuntime } from '../../packages/server/src/modules/studio/services/plugins/runtime'
 import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
 import type { AgentSession } from '../../packages/plugin-sdk/src'
+import type { Capability } from '../../packages/plugin-sdk/src'
 
 const fixture = vi.hoisted(() => ({ home: '', sessions: new Map<string, any>(), rows: [] as any[], agents: new Map<string, any>(), lease: vi.fn(), revoked: vi.fn(), stop: vi.fn(), usage: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ config: { get appHome() { return fixture.home } } }))
@@ -16,6 +17,7 @@ vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => 
 vi.mock('../../packages/server/src/modules/studio/services/files/session-uploads', () => ({ recordSessionUploadAttachments: async () => {}, isSessionUploadAttachment: async () => false }))
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   getSession: (id: string) => fixture.sessions.get(id),
+  getSessionContextMessages: (id: string) => fixture.rows.filter(row => row.session_id === id && ['user', 'assistant', 'tool'].includes(row.role)),
   createSession: (session: any) => { fixture.sessions.set(session.id, session); return session },
   updateSession: (id: string, value: any) => { Object.assign(fixture.sessions.get(id), value) },
   addMessage: (message: any) => { const id = fixture.rows.length + 1; fixture.rows.push({ ...message, id }); return id },
@@ -40,10 +42,10 @@ import { handleAbort } from '../../packages/server/src/modules/studio/services/c
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); fixture.sessions.clear(); fixture.rows = []; fixture.agents.clear(); vi.clearAllMocks() })
-async function setup(run: AgentSession['run']) {
+async function setup(run: AgentSession['run'], capabilities: Capability[] = ['agents']) {
   fixture.home = await mkdtemp(join(tmpdir(), 'studio-plugin-agent-run-')); cleanup.push(() => rm(fixture.home, { recursive: true, force: true }))
   const workspace = join(fixture.home, 'workspace'); await mkdir(workspace)
-  const owner = new PluginRuntime({ directory: fixture.home, source: fixture.home, enabled: true, config: {}, installedAt: 0, manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, server: 'server.mjs', capabilities: ['agents'] } },
+  const owner = new PluginRuntime({ directory: fixture.home, source: fixture.home, enabled: true, config: {}, installedAt: 0, manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, server: 'server.mjs', capabilities } },
     { userId: 1, profile: 'installer' }, new PluginStore(fixture.home), { authorize() {}, api: async () => null, emit() {}, log() {} })
   await owner.load({ apply(ctx) { ctx.agents.register({ id: 'assistant', name: 'Assistant', vendor: 'Example', agentApiVersion: 1,
     getStatus: async () => ({ installed: true, version: '1.0.0' }), management: {},
@@ -85,6 +87,30 @@ it('injects only the Studio scoped proxy binding and revokes it after a workflow
   expect(binding).toMatchObject({ baseUrl: 'http://studio-proxy/v1', token: 'run-proxy-token' }); expect(binding).not.toHaveProperty('apiKey')
   expect(fixture.revoked).toHaveBeenCalledTimes(1); expect(fixture.sessions.get('session')).toMatchObject({ source: 'workflow', agent_mode: 'scoped', provider: 'custom:test' })
   expect(fixture.usage).not.toHaveBeenCalled()
+})
+
+it('binds SDK workspace reads and writes to the current persisted workspace on new and resumed runs', async () => {
+  const workspaces: string[] = []
+  const f = await setup(async (_input, run) => {
+    workspaces.push(run.identity.workspace!)
+    expect(run.identity.workspace).toBe(run.paths.workspaceDir)
+    await run.workspace.read('proof.txt')
+    await run.workspace.write('result.txt', 'done')
+    return { content: [{ type: 'text', text: 'Done' }], finishReason: 'stop' }
+  }, ['agents', 'api.read', 'api.write'])
+  const api = vi.spyOn(f.owner.ports, 'api')
+  await f.run()
+  const nextWorkspace = join(fixture.home, 'next-workspace')
+  await f.run({ workspace: nextWorkspace, input: 'Continue' })
+  expect(workspaces).toEqual([f.workspace, nextWorkspace])
+  expect(fixture.sessions.get('session').workspace).toBe(nextWorkspace)
+  expect(api.mock.calls.map(([identity, path, options]) => ({ workspace: identity.workspace, path, method: options.method || 'GET' }))).toEqual([
+    { workspace: f.workspace, path: '/api/studio/sessions/session/workspace-file/read', method: 'GET' },
+    { workspace: f.workspace, path: '/api/studio/sessions/session/workspace-file/write', method: 'PUT' },
+    { workspace: nextWorkspace, path: '/api/studio/sessions/session/workspace-file/read', method: 'GET' },
+    { workspace: nextWorkspace, path: '/api/studio/sessions/session/workspace-file/write', method: 'PUT' },
+  ])
+  expect(f.events.filter(event => event.event === 'run.failed')).toEqual([])
 })
 
 it('stops plugin workflow runs without calling Hermes and saves partial output without duplicate terminals', async () => {

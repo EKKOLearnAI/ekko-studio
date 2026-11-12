@@ -2,9 +2,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
 import type { Server, Socket } from 'socket.io'
-import type { AgentContent, AgentEvent, AgentMessage, AgentScopedModel } from '../../contracts/plugins'
+import type { AgentContent, AgentEvent, AgentMessage, AgentScopedModel, PluginIdentity } from '../../contracts/plugins'
 import { config } from '../../public/config'
-import { createSession, getSession, updateSession, updateSessionStats } from '../../repositories/session-store'
+import { createSession, getSession, getSessionContextMessages, updateSession, updateSessionStats } from '../../repositories/session-store'
 import { completeRunUsage } from '../../repositories/run-usage-store'
 import { recordSessionUsage } from '../../public/usage'
 import { pluginAgent, scopedAgentModel, pluginAgentMcpServers } from '../agents/registry'
@@ -31,7 +31,7 @@ export async function handlePluginAgentRun(
   const id = String(data.coding_agent_id || data.agent_id || stored?.agent || '')
   const agent = pluginAgent(id)
   const userId = Number(socket.data?.user?.id)
-  const identity = { userId, profile, sessionId, runtime: id, surface: data.session_source || data.source || 'chat', runId: randomUUID() }
+  let identity: PluginIdentity & { sessionId: string; runId: string } = { userId, profile, sessionId, runtime: id, surface: data.session_source || data.source || 'chat', runId: randomUUID() }
   authorizePluginIdentity(stored ? identity : { ...identity, sessionId: undefined })
   if (stored && stored.agent && stored.agent !== id) throw new Error('Session belongs to a different Agent')
   const mode = data.mode || (stored?.agent_mode === 'global' ? 'global' : agent.definition.modes.scoped ? 'scoped' : 'global')
@@ -86,7 +86,8 @@ export async function handlePluginAgentRun(
     if (!stored) createSession({ id: sessionId, profile, source, agent: id, agent_mode: mode, user_id: String(userId),
       model: data.model || '', provider: mode === 'global' ? '' : data.provider || '', workspace: workspaceDir,
       title: typeof data.input === 'string' ? data.input.slice(0, 100) : 'Agent', category_id: data.category_id, api_mode: mode === 'global' ? '' : data.apiMode || data.api_mode || '' })
-    updateSession(sessionId, { ended_at: null, end_reason: null, last_active: Math.floor(Date.now() / 1000) })
+    identity = { ...identity, workspace: workspaceDir }
+    updateSession(sessionId, { workspace: workspaceDir, ended_at: null, end_reason: null, last_active: Math.floor(Date.now() / 1000) })
     if (!(await agent.status(identity, signal)).installed) throw new Error('Agent engine is not installed')
     await recordSessionUploadAttachments(sessionId, profile, data.input)
     signal.throwIfAborted()
@@ -119,7 +120,8 @@ export async function handlePluginAgentRun(
       return { ...file, size: info.size }
     }
     const history: AgentMessage[] = []
-    for (const message of state.messages) {
+    // The display cache is paginated; runtimes need the complete durable conversation.
+    for (const message of getSessionContextMessages(sessionId)) {
       if (!['system', 'user', 'assistant', 'tool'].includes(message.role)) continue
       // Tool results are arbitrary JSON, not Studio upload content blocks.
       const parts = message.role === 'tool' ? [{ type: 'text' as const, text: message.content }] : await content(message.content)

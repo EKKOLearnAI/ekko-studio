@@ -6,6 +6,7 @@ import { logger } from '../../public/logging'
 import { findUserById, getDefaultProfileForUser, listUsers, userCanAccessProfile } from '../../repositories/users-store'
 import { getSession } from '../../repositories/session-store'
 import { isPrivatePersonSession, ownsPersonSession } from '../../contracts/person-session'
+import { ownedPersonTaskSession } from '../person/task-chat'
 import { businessEvents } from '../webhooks/business-events'
 import { canReceivePluginEvent, pluginEventData } from './events'
 import { PluginManager } from './manager'
@@ -47,7 +48,11 @@ export function authorizePluginIdentity(identity: PluginIdentity): void {
   if (!user || user.status !== 'active' || user.role !== 'super_admin' && !userCanAccessProfile(user.id, identity.profile)) throw new PluginError('Plugin user no longer has access to this profile', 'PLUGIN_FORBIDDEN', 403)
   if (identity.sessionId) {
     const session = getSession(identity.sessionId)
-    if (!session || (session.profile || 'default') !== identity.profile || isPrivatePersonSession(identity.sessionId) && !ownsPersonSession(user.id, session)) throw new PluginError('Session is unavailable in this plugin context', 'PLUGIN_SCOPE', 403)
+    if (!session || (session.profile || 'default') !== identity.profile) throw new PluginError('Session is unavailable in this plugin context', 'PLUGIN_SCOPE', 403)
+    if (isPrivatePersonSession(identity.sessionId) && !ownsPersonSession(user.id, session)) {
+      try { ownedPersonTaskSession(user.id, identity.sessionId) }
+      catch { throw new PluginError('Session is unavailable in this plugin context', 'PLUGIN_SCOPE', 403) }
+    }
   }
 }
 async function api(identity: PluginIdentity, path: string, options: ApiRequest, signal: AbortSignal): Promise<Json> {

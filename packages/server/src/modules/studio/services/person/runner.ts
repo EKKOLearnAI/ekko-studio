@@ -10,6 +10,7 @@ import type { ContentBlock } from '../../contracts/runs/session'
 import { personDb, personTransaction, personSettings, getPersonExecution, getPersonTask, setPersonExecution, personEvent,
   addPersonInteraction, answerPersonInteraction, promotePersonFollowups } from '../../repositories/person-store'
 import { personUser, validatePersonSelection } from './catalog'
+import { isPluginAgentId } from '../agents/registry'
 import { runPersonModel } from './model'
 import { personTools, personTool } from './tools'
 import { acknowledgePersonStop, personRunSignal, releasePersonRun } from './tasks'
@@ -106,7 +107,7 @@ async function execute(run: PersonExecution, abort: AbortController) {
       catch (error) { workspaceError = error as Error; throw error }
       const account = personUser(userId)
       const selection = JSON.parse(run.selection_json)
-      if (account.role !== 'super_admin' && (!account.profiles.includes(selection.profile) || selection.mode === 'global')) throw personError('Execution permission revoked', 403)
+      if (account.role !== 'super_admin' && (!account.profiles.includes(selection.profile) || selection.mode === 'global' && !isPluginAgentId(selection.runtime))) throw personError('Execution permission revoked', 403)
       personDb().prepare('UPDATE person_executions SET lease_until=? WHERE id=? AND generation=?').run(Date.now() + 90_000, run.id, run.generation)
     } catch (error) { abort.abort(error) }
   }, 15000)

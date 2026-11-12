@@ -53,6 +53,24 @@ it('routes internal plugin approvals once, preserves denial, and leaves interact
           }
         } finally {controller.abort();}
       }
+      for (const kind of ['approval','clarify']) {
+        const sessionId = 'person-task-plugin-' + kind, events = [], controller = new AbortController();
+        const state = {events:[]};
+        const server = Object.assign(Object.create(ChatRunSocket.prototype), { sessionMap:new Map([[sessionId,state]]) });
+        const interactions = agentRunInteractions({sessionId,runId:'run',signal:controller.signal,deadlineAt:Date.now()+5000,
+          emit:(event,data)=>{state.events.push({event,data});events.push({event,...data});}});
+        try {
+          const pending = kind === 'approval' ? interactions.approve({operationId:'read',title:'Read',details:''})
+            : interactions.clarify({question:'Which file?'});
+          const request = events.find(event=>event.event===kind+'.requested');
+          const id = request[kind+'_id'];
+          assert.equal(await server.respondPersonInteraction('another-session',id,'once',kind==='approval'),false);
+          assert.equal(await server.respondPersonInteraction(sessionId,id,kind==='approval'?'once':'proof.txt',kind==='approval'),true);
+          assert.deepEqual(await pending,kind==='approval'?{outcome:'approved'}:{outcome:'answered',text:'proof.txt'});
+          assert.equal(events.filter(event=>event.event===kind+'.resolved').length,1);
+          assert.equal(await server.respondPersonInteraction(sessionId,id,'once',kind==='approval'),false);
+        } finally {controller.abort();}
+      }
       console.log('plugin approval routing verified');
     })().then(()=>process.exit(0)).catch(error=>{console.error(error);process.exit(1)});
   `
