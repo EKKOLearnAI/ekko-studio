@@ -11,7 +11,10 @@ test.beforeEach(async ({page}) => {
 test('lists an accepted task while its return is pending and opens the original execution', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
-  await page.getByRole('button', { name: /大厨.*Agent/ }).click()
+  const capsule = page.getByRole('button', { name: /大厨.*Agent/ })
+  await expect(capsule.locator('.activity-counter')).toHaveText('1')
+  await expect(capsule.locator('.activity-counter svg')).toBeVisible()
+  await capsule.click()
   const row = page.getByRole('button', { name: 'Codex 登录页', exact: true })
   await expect(row).toBeVisible()
   await expect.poll(() => row.evaluate(element => {
