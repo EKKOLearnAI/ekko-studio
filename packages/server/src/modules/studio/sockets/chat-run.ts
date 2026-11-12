@@ -218,6 +218,7 @@ function isBridgeStatusLookupTimeout(error: unknown): boolean {
 }
 
 function isHermesWorkerBackedSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null }): boolean {
+  if (isPluginAgentId(session?.agent)) return false
   const source = session?.source || undefined
   // "api_server" is a legacy/default source value; Hermes sessions still use worker-backed runtime.
   // coding_agent runs have a separate lifecycle.
@@ -2488,7 +2489,7 @@ export class ChatRunSocket {
   private async reattachBridgeRun(socket: Socket, sid: string, state: SessionState) {
     const session = getSession(sid)
     const source = state.source || session?.source
-    if (!isHermesWorkerBackedSession({ source, agent: session?.agent, agent_session_id: session?.agent_session_id })) return
+    if (!isHermesWorkerBackedSession({ source, agent: state.pluginAgent?.id || session?.agent, agent_session_id: session?.agent_session_id })) return
     const profile = session?.profile || currentProfileFromSocket(socket)
     const previousRunId = state.runId
     const previousRunMarker = state.activeRunMarker
