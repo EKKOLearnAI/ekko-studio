@@ -2,6 +2,13 @@ export const PLUGIN_CATALOG_URL = 'https://api.ekkostudio.xyz/api/studio/plugins
 export interface PluginRelease {
   id: string; repository: string; manifestId: string; version: string; apiVersion: number
   sourceCommit: string; installSource: string; iconUrl?: string | null
+  repositoryStars?: number | null
+}
+
+export function repositoryStars(value: unknown, repository: string): number | null {
+  const canonical = normalizePluginRepository(repository)
+  return canonical && new URL(canonical).hostname === 'github.com'
+    && typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 4_294_967_295 ? value : null
 }
 
 export function normalizePluginRepository(value: unknown): string | null {
@@ -47,5 +54,6 @@ export function parsePluginRelease(release: any, canonical: string): PluginRelea
   const installSource = url.hostname === 'github.com' ? `github:${path}#${release.sourceCommit}`
     : `git+https://${url.hostname}/${path}.git#${release.sourceCommit}`
   if (release.installSource !== installSource) throw new Error('Invalid plugin release source')
-  return { ...release, repository: canonical, installSource }
+  return { ...release, repository: canonical, installSource,
+    ...(release.repositoryStars !== undefined ? { repositoryStars: repositoryStars(release.repositoryStars, canonical) } : {}) }
 }

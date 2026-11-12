@@ -4,11 +4,12 @@ import { resolve } from 'node:path'
 function published(index: number, extra: Record<string, unknown> = {}) {
   return { id: index.toString(16).padStart(64, '0'), name: `Published ${index}`, description: 'Available from the plugin marketplace',
     repository: `https://github.com/example/plugin-${index}`, manifestId: `plugin-${index}`, version: '1.0.0', apiVersion: 1,
+    author: { name: `Publisher ${index}` }, repositoryStars: 1234,
     capabilities: ['tools'], sourceCommit: 'b'.repeat(40), installSource: `github:example/plugin-${index}#${'b'.repeat(40)}`, ...extra }
 }
 async function setup(page: Page, options: { ordinary?: boolean; unavailable?: boolean; entries?: any[] } = {}) {
   const local = { manifest: { id: 'plugin-1', name: 'Installed commands', description: 'Disabled, but still a chat-command plugin', version: '2.0.0', apiVersion: 1,
-    repository: 'https://github.com/example/plugin-1', capabilities: ['commands', 'tools'] }, source: '/local/plugin', installedAt: 0,
+    repository: 'https://github.com/example/plugin-1', author: { name: 'Local Maintainer' }, capabilities: ['commands', 'tools'] }, source: '/local/plugin', installedAt: 0,
     enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [] }
   const state = { plugins: [local], revision: 1, unavailable: Boolean(options.unavailable), entries: options.entries || [published(1), published(2, { name: 'Agent extension', capabilities: ['agents', 'ui'] })] }
   const installs: any[] = [], marketRequests: URL[] = [], cloudHeaders: Record<string, string>[] = []
@@ -16,7 +17,8 @@ async function setup(page: Page, options: { ordinary?: boolean; unavailable?: bo
   await page.context().addCookies([{ name: 'cloud_cookie', value: 'private', url: 'https://api.ekkostudio.xyz' }])
   await page.route(url => url.hostname === 'api.ekkostudio.xyz', async route => {
     const url = new URL(route.request().url()); cloudHeaders.push(await route.request().allHeaders())
-    if (url.searchParams.has('repository')) return route.fulfill({ json: { ok: true, data: { list: [] } } })
+    if (url.searchParams.has('repository')) return state.unavailable ? route.fulfill({ status: 503, json: {} })
+      : route.fulfill({ json: { ok: true, data: { list: state.entries.filter(entry => entry.repository === url.searchParams.get('repository')) } } })
     marketRequests.push(url)
     if (state.unavailable) return route.fulfill({ status: 503, json: {} })
     const current = Number(url.searchParams.get('page')), size = Number(url.searchParams.get('pageSize'))
@@ -131,4 +133,46 @@ test('lets ordinary users browse and see installed state without install control
   await page.getByTestId('market-plugin-plugin-2').getByRole('button', { name: '详情', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('Agent extension')
   await expect(page.getByRole('dialog').getByRole('button', { name: '安装', exact: true })).toHaveCount(0)
+})
+
+test('shows authors, GitHub stars and links, installed/published versions and upgrades in both lists', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await setup(page, { entries: [published(1, { version: '3.0.0', repositoryStars: 12345 }), published(2, { repositoryStars: 0 }), published(3, { author: null, repositoryStars: null })] })
+  const installed = page.getByTestId('plugin-card-plugin-1')
+  await expect(installed.getByText('Local Maintainer', { exact: true })).toBeVisible()
+  await expect(installed.locator('.repository-stars')).toHaveText('12,345')
+  await expect(installed.getByRole('link', { name: '仓库 · GitHub' })).toHaveAttribute('href', 'https://github.com/example/plugin-1')
+  await expect(installed.getByRole('link', { name: '仓库 · GitHub' })).toHaveAttribute('target', '_blank')
+  await expect(installed.locator('.versions')).toContainText('已安装版本v2.0.0已发布v3.0.0')
+  await expect(installed.getByText('可更新', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('installed-card-metadata.png'), fullPage: true, animations: 'disabled' })
+  await page.getByRole('tab', { name: /^全部/ }).click()
+  const market = page.getByTestId('market-plugin-plugin-1')
+  await expect(market.getByText('Publisher 1', { exact: true })).toBeVisible()
+  await expect(market.locator('.repository-stars')).toHaveText('12,345')
+  await expect(market.locator('.versions')).toContainText('已安装版本v2.0.0已发布v3.0.0')
+  await expect(market.getByText('可更新', { exact: true })).toBeVisible()
+  await expect(market.getByRole('button', { name: '更新到 v3.0.0' })).toBeVisible()
+  await expect(page.getByTestId('market-plugin-plugin-2').locator('.repository-stars')).toHaveText('0')
+  await expect(page.getByTestId('market-plugin-plugin-3').locator('.repository-stars')).toHaveText('—')
+  await expect(page.getByTestId('market-plugin-plugin-3').getByText('未提供', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('market-card-metadata-light.png'), fullPage: true, animations: 'disabled' })
+  await page.evaluate(async () => { await (window as any).pluginFixture.theme(true); (window as any).pluginFixture.wallpaper(true) })
+  await page.setViewportSize({ width: 390, height: 900 })
+  await market.scrollIntoViewIfNeeded()
+  await expect(market.getByRole('link', { name: '仓库 · GitHub' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('market-card-metadata-mobile.png'), fullPage: true, animations: 'disabled' })
+})
+
+test('distinguishes no upgrade from a failed check and preserves the last known star count', async ({ page }) => {
+  const { state } = await setup(page, { entries: [published(1, { version: '2.0.0', repositoryStars: 42 })] })
+  const card = page.getByTestId('plugin-card-plugin-1')
+  await expect(card.getByText('无可用升级', { exact: true })).toBeVisible()
+  await expect(card.locator('.repository-stars')).toHaveText('42')
+  state.unavailable = true
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(card.getByText('暂无法确认更新', { exact: true })).toBeVisible()
+  await expect(card.getByText('无可用升级', { exact: true })).toHaveCount(0)
+  await expect(card.locator('.repository-stars')).toHaveText('42')
 })

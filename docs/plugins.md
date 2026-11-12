@@ -667,6 +667,18 @@ and upgrades require interactive administrator trust confirmation, recheck local
 state, and pass the immutable commit, expected plugin ID and exact version to the
 existing installer. A newer local version is never downgraded.
 
+Cards in both lists show the declared author, a direct repository link, cached
+GitHub stars and version information. Stars come from the cloud directory's
+`repositoryStars`, not from plugin-authored manifest fields or browser calls to
+the GitHub REST API. Zero remains zero; missing/invalid counts display an em dash,
+and non-GitHub repositories do not display GitHub stars. Missing authors and
+repository links have explicit placeholders. Installed cards show the installed
+version and a differing published version, with an update state visible to all
+accounts. Failed or unmatched checks are unknown rather than “no upgrade.”
+Development and local-only sources are identified separately. Failed refreshes
+retain previously received stars; development metadata can be read without
+enabling market upgrades for a development installation.
+
 The independent cloud server reads root `plugin.json` when a submission is approved. It stores manifest metadata, a full snapshot, and an immutable source commit. Its periodic worker automatically publishes higher versions from the repository default branch.
 
 The plugin center checks the public cloud directory when opened, refreshed, focused after five minutes, and every five minutes while mounted. Requests include only the normalized repository URL, with no local token, cookie, Profile, or referrer. Local lists remain usable when the cloud is unavailable. A matching repository, manifest ID and API version plus a higher semantic version produces an update badge. Development installations are excluded.

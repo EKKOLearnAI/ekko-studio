@@ -1,6 +1,6 @@
 import type { InstalledPlugin } from '@/api/studio/plugins'
 import type { MarketPlugin } from '@/api/studio/plugin-market'
-import { installedPluginRepository } from './updates'
+import { pluginRepository } from './updates'
 
 export const pluginCategories = ['all', 'agents', 'pages', 'chat', 'tools', 'automation'] as const
 export type PluginCategory = typeof pluginCategories[number]
@@ -15,5 +15,5 @@ export function matchesPluginSearch(plugin: { name: string; description?: string
 }
 export function installedMarketPlugin(entry: MarketPlugin, plugins: InstalledPlugin[]): InstalledPlugin | undefined {
   return plugins.find(plugin => plugin.manifest.id === entry.manifestId
-    && installedPluginRepository({ ...plugin, developmentDirectory: undefined }) === entry.repository)
+    && pluginRepository(plugin) === entry.repository)
 }

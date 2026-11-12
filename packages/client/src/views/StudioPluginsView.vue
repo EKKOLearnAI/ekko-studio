@@ -8,6 +8,7 @@ import { pluginList, pluginRequest, pluginInvoke, type InstalledPlugin, type Plu
 import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
+import PluginCardMetadata from '@/components/plugins/PluginCardMetadata.vue'
 import PluginConfigFields from '@/components/plugins/PluginConfigFields.vue'
 import PluginSubmissionDialog from '@/components/plugins/PluginSubmissionDialog.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
@@ -16,11 +17,11 @@ import { usePluginUpdates } from '@/composables/usePluginUpdates'
 import { usePluginMarket } from '@/composables/usePluginMarket'
 import type { MarketPlugin } from '@/api/studio/plugin-market'
 import { pluginCategories as categories, matchesPluginCategory, matchesPluginSearch, installedMarketPlugin, type PluginCategory } from '@/plugins/catalog'
-import { availablePluginUpdate } from '@/plugins/updates'
+import { availablePluginUpdate, pluginRepository, pluginUpdateState } from '@/plugins/updates'
 
 const { t } = useI18n(), dialog = useDialog(), message = useMessage(), router = useRouter(), route = useRoute()
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
-const { updates: availableUpdates, failed: updateCheckFailed, checking: checkingUpdates, refresh: refreshUpdates } = usePluginUpdates(computed(() => snapshot.value.plugins))
+const { updates: availableUpdates, releases: publishedReleases, unavailable: unavailableRepositories, failed: updateCheckFailed, checking: checkingUpdates, refresh: refreshUpdates } = usePluginUpdates(computed(() => snapshot.value.plugins))
 const busy = ref(false), actionError = ref(''), source = ref(''), trusted = ref(false), showInstall = ref(false)
 const scope = ref<'installed' | 'all' | 'development'>('installed')
 function scopeKeydown(event: KeyboardEvent) {
@@ -84,6 +85,17 @@ const marketConflict = (plugin: MarketPlugin) => !marketInstalled(plugin) && sna
 const marketUpdate = (plugin: MarketPlugin) => {
   const installed = marketInstalled(plugin)
   return installed && plugin.release ? availablePluginUpdate(installed, plugin.release) : undefined
+}
+const localRelease = (plugin: InstalledPlugin) => publishedReleases.value[pluginRepository(plugin) || '']
+const localPublishedVersion = (plugin: InstalledPlugin) => {
+  const release = localRelease(plugin)
+  return release?.manifestId === plugin.manifest.id ? release.version : undefined
+}
+const localUpdateState = (plugin: CatalogPlugin) => plugin.installed
+  ? pluginUpdateState(plugin, localRelease(plugin), checkingUpdates.value, unavailableRepositories.value.includes(pluginRepository(plugin) || '')) : undefined
+const marketUpdateState = (plugin: MarketPlugin) => {
+  const installed = marketInstalled(plugin)
+  return installed ? pluginUpdateState(installed, plugin.release, marketLoading.value, marketFailed.value) : undefined
 }
 function manageMarket(plugin: MarketPlugin) {
   const installed = marketInstalled(plugin)
@@ -272,8 +284,10 @@ async function logs(id: string) {
             <div class="card-top"><PluginIcon :plugin="{ manifest: { name: plugin.name } }" :icon-url="plugin.iconUrl" /><NTag v-if="marketInstalled(plugin)" size="small" :bordered="false">{{ t('studioPlugins.installed') }}</NTag></div>
             <div class="card-copy"><button type="button" class="card-title" @click="selectedMarket = plugin">{{ plugin.name }}</button><p>{{ plugin.description }}</p></div>
             <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+            <PluginCardMetadata :author="plugin.author?.name" :repository="plugin.repository" :stars="plugin.repositoryStars"
+              :version="marketInstalled(plugin)?.manifest.version || plugin.version" :installed="Boolean(marketInstalled(plugin))"
+              :published-version="plugin.version" :update-state="marketUpdateState(plugin)" />
             <footer class="card-footer">
-              <span class="version">{{ plugin.version ? 'v' + plugin.version : '' }}</span>
               <div class="actions">
                 <NButton size="small" quaternary @click="selectedMarket = plugin">{{ t('studioPlugins.details') }}</NButton>
                 <NButton v-if="marketInstalled(plugin)" size="small" secondary @click="manageMarket(plugin)">{{ t('studioPlugins.manage') }}</NButton>
@@ -294,8 +308,9 @@ async function logs(id: string) {
             <p>{{ plugin.manifest.description || plugin.manifest.id }}</p>
           </div>
           <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.manifest.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+          <PluginCardMetadata :author="plugin.manifest.author?.name" :repository="pluginRepository(plugin)" :stars="localRelease(plugin)?.repositoryStars"
+            :version="plugin.manifest.version" :installed="plugin.installed" :published-version="localPublishedVersion(plugin)" :update-state="localUpdateState(plugin)" />
           <footer class="card-footer">
-            <div class="version"><span>{{ plugin.manifest.version ? 'v' + plugin.manifest.version : '' }}</span><NTag v-if="availableUpdates[plugin.manifest.id]" size="small" type="warning" :bordered="false">{{ t('studioPlugins.updateAvailable') }}</NTag></div>
             <div class="actions">
               <NButton v-if="canManage && availableUpdates[plugin.manifest.id]" size="small" type="primary" secondary :disabled="busy" @click="upgrade(plugin)">{{ t('studioPlugins.updateTo', { version: availableUpdates[plugin.manifest.id]!.version }) }}</NButton>
               <NButton size="small" quaternary @click="details(plugin)">{{ t('studioPlugins.details') }}</NButton>
@@ -455,7 +470,6 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .card-copy p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 48px; font-size: 13px; }
 .card-features { display: flex; flex-wrap: wrap; gap: 12px; color: $text-muted; font-size: 12px; min-height: 18px; }
 .card-footer { border-top: 1px solid $border-color; padding-top: 16px; }
-.version { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: $text-muted; font-size: 12px; }
 .actions, .capability-list { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .catalog-empty { display: grid; place-items: center; min-height: 280px; }
 .detail-stack { display: flex; flex-direction: column; gap: 20px; }

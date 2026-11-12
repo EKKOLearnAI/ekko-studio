@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { fetchPluginRelease, normalizePluginRepository, type PluginRelease } from '../../packages/client/src/api/studio/plugin-releases'
-import { availablePluginUpdate, comparePluginVersions, installedPluginRepository } from '../../packages/client/src/plugins/updates'
+import { fetchPluginRelease, normalizePluginRepository, repositoryStars, type PluginRelease } from '../../packages/client/src/api/studio/plugin-releases'
+import { availablePluginUpdate, comparePluginVersions, installedPluginRepository, pluginRepository, pluginUpdateState } from '../../packages/client/src/plugins/updates'
 import type { InstalledPlugin } from '../../packages/client/src/api/studio/plugins'
 
 const repository = 'https://github.com/example/notes'
@@ -44,4 +44,31 @@ it('matches repository and manifest identity and prefers the actual installation
 it('normalizes repository identities and refuses unsupported or credential-bearing locations', () => {
   expect(normalizePluginRepository('https://GITHUB.com/Example/Notes.GIT/')).toBe(repository)
   for (const url of ['https://github.com.evil.test/a/b', 'https://user:pass@github.com/a/b', 'https://github.com/a/b#main', 'https://github.com/a/b/blob/main', '/tmp/plugin']) expect(normalizePluginRepository(url)).toBeNull()
+})
+it.each([[0, 0], [12345, 12345], [4_294_967_295, 4_294_967_295], [null, null], [undefined, null], [-1, null], [1.5, null], ['12', null], [4_294_967_296, null]])('validates the cached repository star count %s', (input, expected) => {
+  expect(repositoryStars(input, repository)).toBe(expected)
+})
+it('only displays GitHub star metadata and preserves zero through release parsing', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ok: true, data: { list: [{ ...release, repositoryStars: 0 }] } })))
+  expect((await fetchPluginRelease(repository))?.repositoryStars).toBe(0)
+  expect(repositoryStars(8, 'https://gitlab.com/example/notes')).toBeNull()
+  expect(repositoryStars(8, 'http://github.com/example/notes')).toBe(8)
+})
+it('distinguishes available, current and unknown updates without treating failed checks as current', () => {
+  expect(pluginUpdateState(plugin(), release)).toBe('available')
+  expect(pluginUpdateState(plugin(), { ...release, version: '1.9.0' })).toBe('current')
+  expect(pluginUpdateState(plugin(), { ...release, version: '1.8.0' })).toBe('current')
+  expect(pluginUpdateState(plugin(), { ...release, version: '1.9.0' }, false, true)).toBe('unknown')
+  expect(pluginUpdateState(plugin(), { ...release, manifestId: 'another' })).toBe('unknown')
+  expect(pluginUpdateState(plugin(), { ...release, repository: 'https://github.com/other/notes' })).toBe('unknown')
+  expect(pluginUpdateState(plugin())).toBe('unknown')
+  expect(pluginUpdateState(plugin(), undefined, true)).toBe('checking')
+  expect(pluginUpdateState(plugin(), release, false, true)).toBe('available')
+})
+it('shows metadata for development sources while leaving upgrades disabled and local-only sources manual', () => {
+  const development = { ...plugin(), developmentDirectory: '/work/plugin' }
+  expect(pluginRepository(development)).toBe(repository)
+  expect(installedPluginRepository(development)).toBeNull()
+  expect(pluginUpdateState(development, release)).toBe('development')
+  expect(pluginUpdateState({ ...plugin(), source: '/local/notes', manifest: { ...plugin().manifest, repository: undefined } })).toBe('manual')
 })

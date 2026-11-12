@@ -1,8 +1,9 @@
-import { PLUGIN_CATALOG_URL, normalizePluginRepository, parsePluginRelease, type PluginRelease } from './plugin-releases'
+import { PLUGIN_CATALOG_URL, normalizePluginRepository, parsePluginRelease, repositoryStars, type PluginRelease } from './plugin-releases'
 
 export interface MarketPlugin {
   id: string
   repository: string
+  repositoryStars: number | null
   name: string
   description: string
   manifestId: string | null
@@ -25,7 +26,7 @@ function marketPlugin(value: any): MarketPlugin {
   // Older/incompatible publications remain browsable, but cannot be installed.
   try { release = parsePluginRelease(value, repository) } catch { /* Unverified releases have no install action. */ }
   return {
-    id: value.id, repository, name: value.name, description: value.description,
+    id: value.id, repository, repositoryStars: repositoryStars(value.repositoryStars, repository), name: value.name, description: value.description,
     manifestId: typeof value.manifestId === 'string' ? value.manifestId : null,
     version: typeof value.version === 'string' ? value.version : null,
     capabilities: value.capabilities,

@@ -27,6 +27,15 @@ it('retains legacy or incompatible publications for browsing without an installa
   ])))
   expect((await fetchPluginMarket(new AbortController().signal)).map(entry => entry.release)).toEqual([null, null, null, null])
 })
+it('keeps public authors and distinguishes zero stars from unavailable counts', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(page([
+    { ...row(1), author: { name: 'Plugin Maintainer' }, repositoryStars: 0 },
+    { ...row(2), repositoryStars: null }, { ...row(3), repositoryStars: '42' },
+  ])))
+  const entries = await fetchPluginMarket(new AbortController().signal)
+  expect(entries[0].author?.name).toBe('Plugin Maintainer')
+  expect(entries.map(entry => entry.repositoryStars)).toEqual([0, null, null])
+})
 it('does not publish a partial result if another page is unavailable', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(page(Array.from({ length: 100 }, (_, i) => row(i)), 101))
     .mockResolvedValueOnce(new Response('', { status: 503 })))

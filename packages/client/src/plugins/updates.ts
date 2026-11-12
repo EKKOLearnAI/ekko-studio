@@ -23,16 +23,29 @@ export function comparePluginVersions(left: string, right: string): number | nul
   }
   return 0
 }
-export function installedPluginRepository(plugin: InstalledPlugin): string | null {
-  if ('developmentDirectory' in plugin && plugin.developmentDirectory) return null
+export function pluginRepository(plugin: InstalledPlugin): string | null {
   const github = /^github:([\w.-]+\/[\w.-]+)#[a-f0-9]{40}$/.exec(plugin.source)
   if (github) return normalizePluginRepository(`https://github.com/${github[1]}`)
   const git = /^git\+(https:\/\/[^#]+)#[a-f0-9]{40}$/.exec(plugin.source)
   if (git) return normalizePluginRepository(git[1])
   return normalizePluginRepository(plugin.manifest.repository)
 }
+export function installedPluginRepository(plugin: InstalledPlugin): string | null {
+  return plugin.developmentDirectory ? null : pluginRepository(plugin)
+}
 export function availablePluginUpdate(plugin: InstalledPlugin, release?: PluginRelease): PluginRelease | undefined {
   if (!release || installedPluginRepository(plugin) !== release.repository || plugin.manifest.id !== release.manifestId
     || plugin.manifest.apiVersion !== release.apiVersion || comparePluginVersions(release.version, plugin.manifest.version) !== 1) return
   return release
+}
+
+export type PluginUpdateState = 'available' | 'current' | 'unknown' | 'checking' | 'development' | 'manual'
+export function pluginUpdateState(plugin: InstalledPlugin, release?: PluginRelease | null, checking = false, failed = false): PluginUpdateState {
+  if (plugin.developmentDirectory) return 'development'
+  if (!pluginRepository(plugin)) return 'manual'
+  if (availablePluginUpdate(plugin, release || undefined)) return 'available'
+  if (checking) return 'checking'
+  if (failed || !release || release.repository !== pluginRepository(plugin) || release.manifestId !== plugin.manifest.id
+    || release.apiVersion !== plugin.manifest.apiVersion || comparePluginVersions(release.version, plugin.manifest.version) === null) return 'unknown'
+  return 'current'
 }

@@ -51,7 +51,7 @@ test('plugin pages and visible navigation follow enabled state across accounts a
   await page.getByRole('button', { name: '自动化 1', exact: true }).click()
   await expect(page.locator('.plugin-card')).toHaveCount(1)
   await expect(page.locator('.plugin-card')).toContainText('自动化助手')
-  await page.getByRole('button', { name: '全部 3', exact: true }).click()
+  await page.getByRole('button', { name: '所有类型 3', exact: true }).click()
   await page.screenshot({ path: testInfo.outputPath('center-light.png') })
   await page.getByRole('button', { name: 'Alpha 工作台', exact: true }).click()
   await page.locator('.n-tabs-tab').getByText('配置', { exact: true }).click()
