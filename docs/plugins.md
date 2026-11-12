@@ -6,8 +6,11 @@ Studio 插件用于定制工作台页面、设置页面、独立工作区、Agen
 
 ## 内置插件与 OMP
 
-正式内置插件放在 `plugins/builtin/<id>`，使用与第三方插件相同的 `plugin.json`、SDK、管理和运行通道。
-构建将整个目录复制到 `dist/plugins/builtin`，随 npm 包和桌面端分发。它们不是硬编码的新 Coding Agent。
+内置插件使用与第三方插件相同的 `plugin.json`、SDK、管理和运行通道。
+OMP 源码在独立仓库 [ekko-studio-plugin-omp](https://github.com/EKKOLearnAI/ekko-studio-plugin-omp) 维护，
+Studio 通过 `package.json` / `package-lock.json` 固定提交的包依赖引用；映射在 `plugins/builtin/packages.json`。
+源码开发从已安装依赖读取，构建复制到 `dist/plugins/builtin/<id>`，随 npm 包和桌面端分发，运行时无需联网获取插件。
+升级内置 OMP 时同步更新依赖及锁文件；调试独立仓库使用 `ekko-studio plugins link /absolute/path/ekko-studio-plugin-omp`。
 Studio 启动后以有效超级管理员身份安装缺失的内置插件，首次安装默认启用。后续随 Studio 更新插件版本，保留禁用状态和数据；用户主动卸载后不自动装回，可在插件中心使用 `builtin:omp` 重新安装。无有效管理员时等待首次登录，再在读取插件或 Agent 列表时初始化。
 
 当前内置 **Oh My Pi（OMP）**，Agent ID 为 `plugin:omp/omp`：

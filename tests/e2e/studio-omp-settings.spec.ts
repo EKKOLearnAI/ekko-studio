@@ -1,20 +1,23 @@
 import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { createRequire } from 'node:module'
 import { securityHeaders } from '../../packages/server/src/modules/studio/middleware/security'
 
 test('opens the built-in OMP settings in Studio locale and persists native model configuration', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   let saves = 0
   let settings = { executable: '', defaultModel: 'custom/test', models: { providers: { custom: { api: 'openai-completions', apiKey: '••••••••', models: [{ id: 'test' }] } } }, config: {} }
-  const manifest = JSON.parse(await readFile(resolve('plugins/builtin/omp/plugin.json'), 'utf8'))
+  const require = createRequire(resolve('package.json'))
+  const manifest = JSON.parse(await readFile(require.resolve('@ekko-studio/plugin-omp/plugin.json'), 'utf8'))
+  manifest.icon = `data:image/png;base64,${(await readFile(require.resolve('@ekko-studio/plugin-omp/icon.png'))).toString('base64')}`
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname)
     if (path === '/api/auth/me') return route.fulfill({ json: { user: { id: 1, username: 'Tester', role: 'super_admin' } } })
-    if (path === '/api/studio/agents') return route.fulfill({ json: { agents: [{ id: 'plugin:omp/omp', name: 'Oh My Pi', vendor: 'Stencil Labs', origin: 'plugin', modes: ['scoped', 'global'], actions: { settings: true, checkUpdate: true, upgrade: true }, status: { installed: false } }] } })
+    if (path === '/api/studio/agents') return route.fulfill({ json: { agents: [{ id: 'plugin:omp/omp', name: 'Oh My Pi', vendor: 'Stencil Labs', icon: manifest.icon, origin: 'plugin', modes: ['scoped', 'global'], actions: { settings: true, checkUpdate: true, upgrade: true }, status: { installed: false } }] } })
     if (path.endsWith('/settings')) return route.fulfill({ json: { name: 'studio.pluginSettings', params: { pluginId: 'omp', viewId: 'settings' } } })
     if (path === '/api/studio/plugins') return route.fulfill({ json: { revision: 1, plugins: [{ manifest, config: {}, status: 'active', enabled: true, tools: [], commands: [], actions: [] }] } })
-    if (path.endsWith('/client')) return route.fulfill({ json: { source: await readFile(resolve('plugins/builtin/omp/client.mjs'), 'utf8') } })
+    if (path.endsWith('/client')) return route.fulfill({ json: { source: await readFile(require.resolve('@ekko-studio/plugin-omp/client.mjs'), 'utf8') } })
     if (path.endsWith('/invoke')) {
       const body = route.request().postDataJSON()
       if (body.name === 'save-settings') { settings = body.input; saves++ }
@@ -30,6 +33,10 @@ test('opens the built-in OMP settings in Studio locale and persists native model
   await page.goto('/__omp_settings__')
   const card = page.getByTestId('agent-card-plugin:omp/omp')
   await expect(card).toContainText('未安装')
+  const icon = card.locator('img')
+  await expect(icon).toHaveAttribute('src', manifest.icon)
+  await expect.poll(() => icon.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(256)
+  await page.screenshot({ path: testInfo.outputPath('omp-official-logo.png') })
   await card.getByRole('button', { name: '设置', exact: true }).click()
   await expect(page).toHaveURL(/studio\/plugin-settings\/omp\/settings/)
   const frame = page.frameLocator('.plugin-workspace iframe')

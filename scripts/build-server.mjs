@@ -1,6 +1,7 @@
 import * as esbuild from 'esbuild'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'node:module'
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'fs'
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -51,6 +52,16 @@ cpSync(
 const builtinPluginsOutDir = resolve(rootDir, 'dist/plugins/builtin')
 rmSync(builtinPluginsOutDir, { recursive: true, force: true })
 cpSync(resolve(rootDir, 'plugins/builtin'), builtinPluginsOutDir, { recursive: true })
+// Independent plugin repositories are pinned in package-lock.json and shipped
+// as ordinary bundled packages; production needs no Git or npm access.
+const require = createRequire(import.meta.url)
+const builtinPackages = JSON.parse(readFileSync(resolve(rootDir, 'plugins/builtin/packages.json'), 'utf8'))
+for (const [id, name] of Object.entries(builtinPackages)) {
+  const source = dirname(require.resolve(`${name}/plugin.json`))
+  const manifest = JSON.parse(readFileSync(resolve(source, 'plugin.json'), 'utf8'))
+  if (manifest.id !== id) throw new Error(`Bundled plugin ${name} declares ${manifest.id}, expected ${id}`)
+  cpSync(source, resolve(builtinPluginsOutDir, id), { recursive: true })
+}
 
 const skillsOutDir = resolve(rootDir, 'dist/skills')
 rmSync(skillsOutDir, { recursive: true, force: true })

@@ -7,6 +7,8 @@ import { join, resolve } from 'node:path'
 import { PluginDevelopment } from '../../packages/server/src/modules/studio/services/plugins/development'
 import { PluginManager } from '../../packages/server/src/modules/studio/services/plugins/manager'
 import { registerPlugin, scaffoldPlugin } from '../../bin/plugin-development.mjs'
+import { builtinPluginDirectory } from '../../packages/server/src/modules/studio/services/plugins/builtin-directory'
+import { reconcileBuiltinPlugins } from '../../packages/server/src/modules/studio/services/plugins/builtin'
 
 const who = { userId: 1, profile: 'default' }, cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const dispose of cleanups.splice(0).reverse()) await dispose() })
@@ -25,6 +27,29 @@ async function fixture() {
   return { home, source, manager, development, authorize, changed, put, value }
 }
 const code = (value: string) => `export function apply(ctx) { ctx.rpc.register('read', async () => ${JSON.stringify(value)}); ctx.onDispose(() => {}); }`
+
+it('loads the standalone OMP project from an arbitrary directory and preserves settings across development reloads', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'omp-development-')); cleanups.push(() => rm(home, { recursive: true, force: true }))
+  const source = join(home, 'independent projects/omp')
+  await cp(builtinPluginDirectory('omp'), source, { recursive: true })
+  await registerPlugin(source, home)
+  const manager = new PluginManager(join(home, 'plugins'), { authorize() {}, emit() {}, log() {}, api: async () => null })
+  cleanups.push(() => manager.close())
+  await reconcileBuiltinPlugins(manager, who)
+  const settings = { executable: '', defaultModel: 'custom/test', models: { providers: {} }, config: {} }
+  await manager.runtime(who, 'omp').invoke('rpc', 'save-settings', settings, who)
+  const development = new PluginDevelopment(manager, () => {}); cleanups.push(() => development.close())
+  await development.start(who, 'omp', manager.snapshot().revision)
+  expect((await development.list()).projects[0]).toMatchObject({ id: 'omp', status: 'watching' })
+  expect(manager.registeredAgents().map(agent => agent.id)).toEqual(['plugin:omp/omp'])
+  await writeFile(join(source, 'client.mjs'), (await readFile(join(source, 'client.mjs'), 'utf8')) + '\n// development reload\n')
+  const revision = manager.snapshot().revision
+  await development.tick(); await development.tick()
+  expect(manager.snapshot().revision).toBeGreaterThan(revision)
+  expect(await manager.runtime(who, 'omp').invoke('rpc', 'get-settings', null, who)).toMatchObject(settings)
+  await reconcileBuiltinPlugins(manager, who)
+  expect(manager.snapshot().plugins[0].developmentDirectory).toBe(await realpath(source))
+})
 
 it('creates standalone projects through the shipped CLI, registers canonical directories and never overwrites another project', async () => {
   const home = await mkdtemp(join(tmpdir(), 'plugin-cli-')); cleanups.push(() => rm(home, { recursive: true, force: true }))
