@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fetchAgentAvailabilitySnapshot } from '@/api/agent-status'
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import { NButton, NSelect } from 'naive-ui'
@@ -71,6 +72,7 @@ function applyFilters(value: UsageStatsFilters) {
 const initializing = ref(true)
 
 onMounted(() => {
+  void fetchAgentAvailabilitySnapshot().catch(() => {})
   void loadUsage(30).finally(() => { initializing.value = false })
 })
 </script>

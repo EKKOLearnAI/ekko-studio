@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fetchAgentAvailabilitySnapshot } from '@/api/agent-status'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/hermes/app'
 import SessionListSidebar from '@/components/hermes/chat/SessionListSidebar.vue'
@@ -684,6 +685,7 @@ watch([selectedSessionId, () => route.query.message], async () => {
   await refresh()
 })
 onMounted(async () => {
+  void fetchAgentAvailabilitySnapshot().catch(() => {})
   try {
     chatStore.setRuntimeMode('default')
     await Promise.all([settingsStore.fetchSettings(), loadConversations().then(async () => {

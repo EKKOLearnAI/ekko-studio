@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fetchAgentAvailabilitySnapshot } from '@/api/agent-status'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import SidebarResizeHandle from "@/components/layout/SidebarResizeHandle.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
@@ -396,6 +397,7 @@ async function syncRouteSession() {
 
 
 onMounted(async () => {
+  void fetchAgentAvailabilitySnapshot().catch(() => {})
 
 
 

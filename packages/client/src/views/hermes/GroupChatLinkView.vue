@@ -1,9 +1,9 @@
 <script setup lang="ts">
+import type { ChatCodingAgentId } from '@/api/coding-agents'
 import { agentMetadata, agentSupportsSurface } from '@/utils/agent-catalog'
 
 import { deploymentUrl } from '@/utils/deployment-url'
 import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
-import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -128,19 +128,7 @@ function getAgentModelGroups(profile: string) {
     .filter((group) => {
       if (group.provider === 'moa') return selectedAgentType.value === 'hermes'
       if (selectedAgentType.value === 'hermes') return true
-      const codingAgentId = selectedAgentType.value === 'ekko'
-        ? 'ekko-agent'
-        : selectedAgentType.value === 'claude'
-          ? 'claude-code'
-          : selectedAgentType.value === 'pi'
-            ? 'pi'
-            : selectedAgentType.value === 'grok'
-              ? 'grok'
-            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
-              ? 'cursor'
-            : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
-              ? 'opencode'
-              : 'codex'
+      const codingAgentId = (agentMetadata(selectedAgentType.value)?.id || selectedAgentType.value) as ChatCodingAgentId
       return canScopedCodingAgentUseProvider(codingAgentId, group.provider)
     })
 }

@@ -64,7 +64,7 @@ export interface PersonRuntimePort {
     model_meta?: Record<string, { alias?: string; disabled?: boolean; reasoning?: boolean; reasoning_efforts?: string[] }>
   }> }>
   model(input: PersonModelCall): Promise<string>
-  nativeModels(runtime: string): Promise<{ status: string; models: Array<{ id: string; name: string; isDefault?: boolean; reasoningEffort?: string; reasoningEfforts?: string[] }> }>
+  nativeModels(runtime: string, identity: { userId: number; profile: string }): Promise<{ status: string; models: Array<{ id: string; name: string; isDefault?: boolean; reasoningEffort?: string; reasoningEfforts?: string[] }> }>
   execute(input: { purpose?: 'development' | 'verification'; waitForTermination?: boolean; user: AuthenticatedUser; selection: PersonSelection; sessionId: string; workspace: string; taskTimeoutMinutes: number; prompt: string | import('../contracts/runs/session').ContentBlock[]; displayInput?: string | import('../contracts/runs/session').ContentBlock[]; signal: AbortSignal; onEvent(event: string, payload: Record<string, unknown>): void }): Promise<{ ok: boolean; output?: string; error?: string; interrupted?: boolean; stop_reason?: string }>
   interruptForInsertion?(sessionId: string, expectedRunId: string, expectedRunMarker?: string): Promise<{ status: string; phase?: string }>
   answer(sessionId: string, id: string, response: string, approval: boolean): Promise<boolean>

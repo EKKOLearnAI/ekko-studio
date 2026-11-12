@@ -589,6 +589,7 @@ function withRuntimeNodeData(data: WorkflowAgentNodeData): WorkflowAgentNodeData
     skillOptions: skillOptionsForAgent(data.agent),
     skillsLoading: skillsLoadingForAgent(data.agent),
     modelGroups: modelGroups.value,
+    profile: activeWorkflowProfile.value,
     onUpdate: updateNodeData,
     onUploadImages: uploadNodeImages,
   }
@@ -677,6 +678,7 @@ function makeNode(
       skillOptions: skillOptionsForAgent(agent),
       skillsLoading: skillsLoadingForAgent(agent),
       modelGroups: modelGroups.value,
+      profile: activeWorkflowProfile.value,
       onUpdate: updateNodeData,
       onUploadImages: uploadNodeImages,
     },
@@ -915,6 +917,7 @@ const { catalog: workflowChatNativeCatalog } = useCodingAgentModels(
   },
   () => workflowChatPanelVisible.value && chatStore.activeSession?.id === workflowChatPanelSessionId.value
     && chatStore.activeSession?.codingAgentMode === 'global',
+  () => chatStore.activeSession?.profile,
 )
 const workflowChatPanelModelLabel = computed(() => {
   const session = chatStore.activeSession
@@ -2630,7 +2633,7 @@ function workflowValidationError(): string | null {
     }
     if (node.data.agent === 'dsh' && (!node.data.agentPreset || node.data.agentPresetReady === false)) return t('dshPresets.selectMode')
     if (!node.data.title.trim()) return t('workflow.validation.nodeNameRequired', { node: node.id })
-    const usesGlobalCodingAgent = ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(node.data.agent)
+    const usesGlobalCodingAgent = Boolean(agentMetadata(node.data.agent)?.modes.includes('global'))
       && node.data.agentMode === 'global'
     if (!usesGlobalCodingAgent && !node.data.provider.trim()) return t('workflow.validation.providerRequired', { node: label })
     if (!usesGlobalCodingAgent && !node.data.model.trim()) return t('workflow.validation.modelRequired', { node: label })

@@ -24,7 +24,7 @@ function agentName(agent: string): string {
 function agentAvatar(agent: string): AgentAvatar | null {
   if (agent === 'zhezhe') return { type: 'image', dataUrl: PERSON_AVATAR.src }
   const entry = metadata(agent)
-  return entry ? { type: 'image', dataUrl: chatSessionAgentAvatar({ agent: entry.id }).src } : null
+  return entry || agent.startsWith('plugin:') ? { type: 'image', dataUrl: chatSessionAgentAvatar({ agent: entry?.id || agent }).src } : null
 }
 function formatTokens(n: number): string { return formatUsageTokens(n, locale?.value) }
 

@@ -1,3 +1,4 @@
+import { pluginAgent, isPluginAgentId } from '../modules/studio/services/agents/registry'
 import { createPersonAgent } from './person-chat-agent'
 import { createPersonDefaultWorkspace } from './person-workspace'
 import { AgentRuntime, AgentToolRegistry } from '../../../ekko-agent/src'
@@ -36,7 +37,8 @@ configurePersonRuntime({
       ephemeralContext: true, reasoningEffort: input.reasoningEffort, onEvent: input.onEvent })
     return result.output.content
   },
-  async nativeModels(runtime) {
+  async nativeModels(runtime, identity) {
+    if (isPluginAgentId(runtime)) return pluginAgent(runtime).models(identity)
     const result = await getCodingAgentModels({ agent: runtime })
     const catalog = result.agents[0]
     return { status: catalog?.status || 'unsupported', models: catalog?.models.filter(m => !m.hidden).map(m => ({ id: m.id, name: m.name, isDefault: m.isDefault, reasoningEffort: m.reasoningEffort, reasoningEfforts: m.reasoningEfforts })) || [] }

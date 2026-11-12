@@ -38,5 +38,5 @@ export function usesServerManagedProviderAuth(
   agentId: ChatCodingAgentId,
   provider?: string,
 ): boolean {
-  return agentId === 'ekko-agent' && isAuthModelProvider(provider)
+  return agentId.startsWith('plugin:') || agentId === 'ekko-agent' && isAuthModelProvider(provider)
 }

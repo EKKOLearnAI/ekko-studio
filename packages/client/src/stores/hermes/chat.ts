@@ -446,7 +446,7 @@ export interface QueueInsertionState {
   generation: string
   runId?: string
   queueId: string
-  runtime: 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
+  runtime: `plugin:${string}/${string}` | 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
   phase: 'requesting' | 'waiting_for_tool_batch' | 'stopping_current_turn'
   guarantee: 'strict' | 'immediate'
   requestedAt: number
@@ -3282,7 +3282,7 @@ function createChatState(scopedSessionId?: string) {
       generation,
       runId: typeof raw.run_id === 'string' ? raw.run_id : undefined,
       queueId,
-      runtime: raw.runtime === 'ekko'
+      runtime: typeof raw.runtime === 'string' && raw.runtime.startsWith('plugin:') ? raw.runtime as `plugin:${string}/${string}` : raw.runtime === 'ekko'
         || raw.runtime === 'claude-code'
         || raw.runtime === 'codex'
         || raw.runtime === 'pi'
@@ -3741,32 +3741,7 @@ function createChatState(scopedSessionId?: string) {
   }
 
   function completionNotificationAgent(session: Session): { icon: string } {
-    const codingAgentId = session.codingAgentId || agentToCodingAgentId(session.agent)
-    if (codingAgentId === 'codex') {
-      return { icon: '/coding-agents/codex-openai.png' }
-    }
-    if (codingAgentId === 'claude-code') {
-      return { icon: '/coding-agents/claude-code.svg' }
-    }
-    if (codingAgentId === 'pi') {
-      return { icon: '/coding-agents/pi.svg' }
-    }
-    if (codingAgentId === 'grok') {
-      return { icon: '/coding-agents/grok.svg' }
-    }
-    if (codingAgentId === 'dsh') return { icon: '/coding-agents/deepseek.svg' }
-    if (codingAgentId === 'opencode') {
-      return { icon: '/coding-agents/opencode.png' }
-    }
-    if (isNativeCodingAgent(codingAgentId)) return { icon: chatSessionAgentAvatar(session).src }
-    if (codingAgentId === 'antigravity') return { icon: '/coding-agents/antigravity.png' }
-    if (codingAgentId === 'cursor') {
-      return { icon: '/coding-agents/cursor-logo.png' }
-    }
-    if (codingAgentId === 'ekko-agent') {
-      return { icon: '/coding-agents/ekko-agent.png' }
-    }
-    return { icon: '/coding-agents/hermes.png' }
+    return { icon: chatSessionAgentAvatar(session).src }
   }
 
   function completionNotificationBody(session: Session, message?: Message): string {

@@ -1,4 +1,5 @@
 import { request } from './client'
+import { agentMetadata } from '../utils/agent-catalog'
 import type { ProviderApiMode } from './studio/provider-api-mode'
 
 export type CodingAgentId = `plugin:${string}/${string}` | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
@@ -96,10 +97,10 @@ export interface CodingAgentModelCatalog {
   cached: boolean
 }
 
-export async function fetchCodingAgentModels(options: { agent?: CodingAgentId; refresh?: boolean } = {}) {
+export async function fetchCodingAgentModels(options: { agent?: CodingAgentId; refresh?: boolean; profile?: string } = {}) {
   if (options.agent?.startsWith('plugin:')) {
-    const catalog = await request<CodingAgentModelCatalog>(`/api/studio/agents/${encodeURIComponent(options.agent)}/models?refresh=${options.refresh === true}`)
-    return { agents: [{ ...catalog, agentId: options.agent, name: options.agent, source: 'sdk' as const, checkedAt: new Date().toISOString(), cached: false }] }
+    const catalog = await request<CodingAgentModelCatalog>(`/api/studio/agents/${encodeURIComponent(options.agent)}/models?refresh=${options.refresh === true}`, options.profile ? { headers: { 'X-Hermes-Profile': options.profile } } : {})
+    return { agents: [{ ...catalog, agentId: options.agent, name: agentMetadata(options.agent)?.name || options.agent, source: 'sdk' as const, checkedAt: new Date().toISOString(), cached: false }] }
   }
   const params = new URLSearchParams()
   if (options.agent) params.set('agent', options.agent)

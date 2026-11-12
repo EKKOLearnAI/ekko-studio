@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { fetchCodingAgentModels, type CodingAgentId, type CodingAgentModelCatalog } from '@/api/coding-agents'
-import { getBaseUrl, getStoredUserId } from '@/api/client'
+import { getBaseUrl, getStoredUserId, getActiveProfileName } from '@/api/client'
 import { onAuthInvalidated } from '@/api/auth-invalidation'
 
 const CACHE_PREFIX = 'studio_native_models_v1:'
@@ -8,7 +8,7 @@ const MAX_CACHE_AGE = 24 * 60 * 60 * 1000
 const entries = new Map<string, ReturnType<typeof createEntry>>()
 const usable = (catalog?: CodingAgentModelCatalog) => catalog?.status === 'ready' || catalog?.status === 'empty'
 
-function createEntry(key: string, agent: CodingAgentId) {
+function createEntry(key: string, agent: CodingAgentId, profile?: string) {
   const catalog = shallowRef<CodingAgentModelCatalog>()
   const loading = ref(false)
   const refreshFailed = ref(false)
@@ -33,7 +33,7 @@ function createEntry(key: string, agent: CodingAgentId) {
     refreshFailed.value = false
     pending = (async () => {
       try {
-        const result = await fetchCodingAgentModels({ agent, refresh })
+        const result = await fetchCodingAgentModels({ agent, refresh, profile })
         const next = result.agents.find(entry => entry.agentId === agent)
         if (!next || !usable(next)) {
           refreshFailed.value = true
@@ -55,25 +55,26 @@ function createEntry(key: string, agent: CodingAgentId) {
   return { catalog, loading, refreshFailed, reload }
 }
 
-function cachedEntry(agent: CodingAgentId) {
+function cachedEntry(agent: CodingAgentId, requestedProfile?: string) {
   let identity = ['local', 'authenticated'] as Array<string | number | null>
   try { identity = [getBaseUrl(), getStoredUserId()] } catch { /* Non-browser environments. */ }
-  const key = `${CACHE_PREFIX}${JSON.stringify([...identity, agent])}`
+  const profile = agent.startsWith('plugin:') ? requestedProfile || getActiveProfileName() || 'default' : undefined
+  const key = `${CACHE_PREFIX}${JSON.stringify([...identity, agent, ...(profile ? [profile] : [])])}`
   let entry = entries.get(key)
   if (!entry) {
     if (entries.size >= 64) entries.delete(entries.keys().next().value!)
-    entry = createEntry(key, agent)
+    entry = createEntry(key, agent, profile)
     entries.set(key, entry)
   }
   return entry
 }
 onAuthInvalidated(() => entries.clear())
 
-/** Native catalogs belong to the selected CLI, independently of Hermes Profiles. */
-export function useCodingAgentModels(agent: () => CodingAgentId, enabled: () => boolean) {
+/** Native CLI catalogs are shared; plugin catalogs also belong to the selected Profile. */
+export function useCodingAgentModels(agent: () => CodingAgentId, enabled: () => boolean, profile: () => string | undefined = () => undefined) {
   const entry = shallowRef<ReturnType<typeof createEntry>>()
-  watch([agent, enabled], () => {
-    entry.value = enabled() ? cachedEntry(agent()) : undefined
+  watch([agent, enabled, profile], () => {
+    entry.value = enabled() ? cachedEntry(agent(), profile()) : undefined
     void entry.value?.reload()
   }, { immediate: true })
   return {

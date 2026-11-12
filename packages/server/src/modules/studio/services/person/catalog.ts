@@ -1,5 +1,6 @@
+import { agentDescriptors, agentStatus, isPluginAgentId, agentDescriptor } from '../agents/registry'
 import { FALLBACK_REASONING_EFFORTS, resolveModelReasoningEffort } from '../../../../../../shared/reasoning-effort'
-import { findUserById, listUserProfiles, userCanAccessProfile } from '../../repositories/users-store'
+import { findUserById, listUserProfiles, userCanAccessProfile, getDefaultProfileForUser } from '../../repositories/users-store'
 import { getActiveProfileName, listProfileNamesFromDisk } from '../../public/profile-config'
 import { getAgentAvailabilitySnapshot } from '../../public/agent-status-registry'
 import { getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
@@ -24,13 +25,20 @@ export function personProfiles(userId: number) {
   const user = personUser(userId)
   return listProfileNamesFromDisk().filter(p => user.role === 'super_admin' || user.profiles.includes(p)).sort()
 }
-export function personCapabilities(userId: number) {
+export async function personCapabilities(userId: number, profile = getDefaultProfileForUser(userId) || 'default') {
   personUser(userId)
-  return getAgentAvailabilitySnapshot().agents.map(a => ({
+  const builtins = getAgentAvailabilitySnapshot().agents.map(a => ({
     runtime: a.id === 'ekko-agent' ? 'ekko' : a.id,
     installed: a.installed, status: a.installed ? 'requires_model_selection' : 'not_installed',
     controls: ['start', 'cancel', 'checkpoint_resume'], interaction: 'person',
   }))
+  const plugins = await Promise.all(agentDescriptors().filter(a => a.origin === 'plugin' && a.surfaces.includes('chat')).map(async descriptor => {
+    let installed = false
+    try { installed = (await agentStatus(descriptor.id, { userId, profile, surface: 'ui' })).installed } catch { /* Unavailable plugins cannot receive tasks. */ }
+    return { runtime: descriptor.id, installed, status: installed ? 'requires_model_selection' : 'not_installed',
+      controls: ['start', 'cancel', 'checkpoint_resume'], interaction: 'person', descriptor }
+  }))
+  return [...builtins, ...plugins]
 }
 type PersonProtocolGroup = { provider: string; api_mode?: string; api_mode_by_model?: Record<string, string | null> }
 
@@ -110,19 +118,21 @@ export async function validatePersonSelection(userId: number, selection: PersonS
   const user = personUser(userId)
   if (!isAgentRuntime(selection.runtime) || !['global', 'scoped'].includes(selection.mode)) throw personError('Invalid runtime')
   if (!personProfiles(userId).includes(selection.profile) || (user.role !== 'super_admin' && !userCanAccessProfile(userId, selection.profile))) throw personError('Execution resource is unavailable', 403)
-  const available = personCapabilities(userId).find(a => a.runtime === selection.runtime)
+  const available = (await personCapabilities(userId, selection.profile)).find(a => a.runtime === selection.runtime)
   if (!available?.installed) throw personError('Agent is not installed', 409)
+  const plugin = isPluginAgentId(selection.runtime) ? agentDescriptor(selection.runtime) : undefined
+  if (plugin && !plugin.modes.includes(selection.mode)) throw personError('Agent does not support this mode', 409)
   if (selection.mode === 'global') {
-    if (user.role !== 'super_admin' || ['ekko', 'hermes'].includes(selection.runtime)) throw personError('Native machine credentials are not assigned to this account', 403)
+    if ((!plugin && user.role !== 'super_admin') || ['ekko', 'hermes'].includes(selection.runtime)) throw personError('Native machine credentials are not assigned to this account', 403)
     if (!selection.model && !selection.reasoningEffort) return // Delegate native defaults to the installed runtime.
-    const result = await personRuntime().nativeModels(selection.runtime)
+    const result = await personRuntime().nativeModels(selection.runtime, { userId, profile: selection.profile })
     const model = result.models.find(m => selection.model ? m.id === selection.model : m.isDefault)
     if (result.status !== 'ready' || !model) throw personError(`Native model unavailable: ${result.status}`, 409)
     if (selection.reasoningEffort && (model.reasoningEffort ? model.reasoningEffort !== selection.reasoningEffort
       : !model.reasoningEfforts?.includes(selection.reasoningEffort))) throw personError('Native model does not support this reasoning effort')
     return
   }
-  if (!['ekko','hermes'].includes(selection.runtime) && isScopedCodingAgentAuthProvider(selection.provider)) throw personError('Use native mode for subscription providers', 409)
+  if (!plugin && !['ekko','hermes'].includes(selection.runtime) && isScopedCodingAgentAuthProvider(selection.provider)) throw personError('Use native mode for subscription providers', 409)
   const groups = await getSessionAvailableModelGroups(selection.profile)
   const group = groups.find(g => g.provider === selection.provider && g.models?.includes(selection.model))
   if (selection.runtime !== 'hermes' && ['bedrock_converse','codex_app_server'].includes(selection.apiMode || '')) throw personError('Runtime does not support this model protocol', 409)

@@ -5,8 +5,9 @@ import { NAlert, NButton, NInput, NSelect, NSpin } from 'naive-ui'
 import { personRequest, type PersonAgentPreset } from '@/api/person'
 import type { AvailableModelGroup } from '@/api/hermes/system'
 import type { CodingAgentId, ChatCodingAgentId } from '@/api/coding-agents'
-import { AGENT_OPTIONS } from '@/utils/agent-options'
-import { isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import type { StudioAgent } from '@/api/studio/agents'
+import { AGENT_OPTIONS, syncPluginAgentOptions } from '@/utils/agent-options'
+import { isGlobalOnlyCodingAgent, agentSupportsSurface, agentMetadata } from '@/utils/agent-catalog'
 import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import { agentReasoningEffortOptions, agentReasoningEffortValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
@@ -31,8 +32,8 @@ const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(prop
 watch(() => JSON.stringify(props.agents || []), value => { draft.value = JSON.parse(value); editingId.value = null }, { immediate: true })
 watch(() => props.saving, (saving, wasSaving) => { if (wasSaving && !saving && !props.saveError && !dirty.value) editingId.value = null })
 const profiles = computed(() => resourceProfiles.value.map(value => ({ label: value, value })))
-const agentOptions = computed(() => AGENT_OPTIONS.map(option => ({ ...option, value: option.value === 'ekko-agent' ? 'ekko' : option.value,
-  disabled: !installed.value.includes(option.value === 'ekko-agent' ? 'ekko' : option.value) || (!nativeAllowed.value && isGlobalOnlyCodingAgent(option.value)) })))
+const agentOptions = computed(() => AGENT_OPTIONS.filter(option => agentSupportsSurface(option.value, 'chat')).map(option => ({ ...option, value: option.value === 'ekko-agent' ? 'ekko' : option.value,
+  disabled: !installed.value.includes(option.value === 'ekko-agent' ? 'ekko' : option.value) || (!nativeAllowed.value && !option.value.startsWith('plugin:') && isGlobalOnlyCodingAgent(option.value)) })))
 const valid = computed(() => draft.value.every(agent => agent.name.trim() && agent.description.trim() && agent.selection.runtime && agent.selection.profile
   && (agent.selection.mode === 'global' || (agent.selection.provider && agent.selection.model))))
 function groupsFor(agent: PersonAgentPreset) {
@@ -80,8 +81,9 @@ onMounted(async () => {
   try {
     const [models, capabilities] = await Promise.all([
       personRequest<{ groups: Array<AvailableModelGroup & { profile: string }>; profiles?: string[] }>('/agent-models'),
-      personRequest<{ agents: Array<{ runtime: string; installed: boolean }>; native_allowed: boolean }>('/capabilities'),
+      personRequest<{ agents: Array<{ runtime: string; installed: boolean; descriptor?: Omit<StudioAgent, 'status'> }>; native_allowed: boolean }>('/capabilities'),
     ])
+    syncPluginAgentOptions(capabilities.agents.flatMap(agent => agent.descriptor ? [{ ...agent.descriptor, status: { installed: agent.installed, version: '' } }] : []))
     groups.value = models.groups
     resourceProfiles.value = models.profiles || [...new Set(models.groups.map(group => group.profile))]
     installed.value = capabilities.agents.filter(agent => agent.installed).map(agent => agent.runtime)
@@ -107,7 +109,7 @@ onMounted(async () => {
         <label class="field-wide">{{ t('person.agentPurpose') }}<NInput v-model:value="editingAgent.description" type="textarea" :maxlength="1000" :disabled="saving" :autosize="{ minRows: 2, maxRows: 4 }" :input-props="{ 'aria-label': t('person.agentPurpose') }" /></label>
         <label v-if="editingAgent.selection.runtime && !['ekko', 'hermes'].includes(editingAgent.selection.runtime)">{{ t('codingAgents.launchModeScope') }}
           <NSelect v-model:value="editingAgent.selection.mode" :disabled="saving || isGlobalOnlyCodingAgent(editingAgent.selection.runtime)" :aria-label="t('codingAgents.launchModeScope')"
-            :options="[{ label: t('codingAgents.modelScope'), value: 'scoped' }, { label: t('codingAgents.launchModeGlobalShort'), value: 'global', disabled: !nativeAllowed }]" @update:value="resetModel(editingAgent)" />
+            :options="[{ label: t('codingAgents.modelScope'), value: 'scoped' }, { label: t('codingAgents.launchModeGlobalShort'), value: 'global', disabled: !agentMetadata(editingAgent.selection.runtime)?.modes.includes('global') || (!nativeAllowed && !editingAgent.selection.runtime.startsWith('plugin:')) }]" @update:value="resetModel(editingAgent)" />
         </label>
         <template v-if="editingAgent.selection.mode === 'scoped'">
           <label>{{ t('person.chooseModel') }}<ScopedModelSelector :provider="editingAgent.selection.provider" :model="editingAgent.selection.model" :groups="groupsFor(editingAgent)" :disabled="saving || !editingAgent.selection.runtime"
@@ -116,8 +118,8 @@ onMounted(async () => {
           <label>{{ t('chat.reasoningEffort.tooltip') }}<NSelect :value="agentReasoningEffortValue(editingAgent.selection.reasoningEffort, efforts(editingAgent))" @update:value="editingAgent.selection.reasoningEffort = $event" :options="efforts(editingAgent)" :disabled="saving || !editingAgent.selection.model" :aria-label="t('chat.reasoningEffort.tooltip')" /></label>
         </template>
         <template v-else>
-          <label>{{ t('person.chooseModel') }}<NativeCodingAgentModelFields :agent="editingAgent.selection.runtime as CodingAgentId" :model="editingAgent.selection.model" :reasoning-effort="editingAgent.selection.reasoningEffort" :disabled="saving" @change="Object.assign(editingAgent.selection, $event)" /></label>
-          <label>{{ t('chat.reasoningEffort.tooltip') }}<NativeCodingAgentModelFields field="reasoning-effort" :agent="editingAgent.selection.runtime as CodingAgentId" :model="editingAgent.selection.model" :reasoning-effort="editingAgent.selection.reasoningEffort" :disabled="saving" @change="Object.assign(editingAgent.selection, $event)" /></label>
+          <label>{{ t('person.chooseModel') }}<NativeCodingAgentModelFields :agent="editingAgent.selection.runtime as CodingAgentId" :profile="editingAgent.selection.profile" :model="editingAgent.selection.model" :reasoning-effort="editingAgent.selection.reasoningEffort" :disabled="saving" @change="Object.assign(editingAgent.selection, $event)" /></label>
+          <label>{{ t('chat.reasoningEffort.tooltip') }}<NativeCodingAgentModelFields field="reasoning-effort" :agent="editingAgent.selection.runtime as CodingAgentId" :profile="editingAgent.selection.profile" :model="editingAgent.selection.model" :reasoning-effort="editingAgent.selection.reasoningEffort" :disabled="saving" @change="Object.assign(editingAgent.selection, $event)" /></label>
         </template>
         </div>
         <footer class="editor-actions"><NButton :disabled="saving" @click="cancelEdit">{{ t('common.cancel') }}</NButton><NButton attr-type="submit" type="primary" :loading="saving" :disabled="!valid || !!error">{{ t('common.save') }}</NButton></footer>

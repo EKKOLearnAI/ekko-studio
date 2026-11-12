@@ -1,4 +1,5 @@
 import { isCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode } from '@/api/coding-agents'
+import { isPluginAgentId } from './agent-catalog'
 import { AGENT_OPTIONS } from './agent-options'
 import { DEFAULT_REASONING_EFFORTS } from './model-reasoning-effort'
 
@@ -31,11 +32,11 @@ export function loadNewChatFormPreferences(account: number | null): NewChatFormP
     if (!raw) return memory.get(key) || null
     const saved = JSON.parse(raw)
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return null
-    const agent = AGENT_OPTIONS.find(option => option.value === saved.agent)?.value || AGENT_OPTIONS[0].value
-    const nativeModels = Object.fromEntries(AGENT_OPTIONS.filter(option => option.value !== 'hermes' && option.value !== 'ekko-agent')
-      .flatMap(option => {
-        const selection = saved.nativeModels?.[option.value]
-        return selection && typeof selection === 'object' ? [[option.value, {
+    const agent = isPluginAgentId(saved.agent) ? saved.agent : AGENT_OPTIONS.find(option => option.value === saved.agent)?.value || AGENT_OPTIONS[0].value
+    const nativeModels = Object.fromEntries(Object.keys(saved.nativeModels || {}).filter(id => isPluginAgentId(id) || AGENT_OPTIONS.some(option => option.value === id && !['hermes', 'ekko-agent'].includes(id)))
+      .flatMap(id => {
+        const selection = saved.nativeModels?.[id]
+        return selection && typeof selection === 'object' ? [[id, {
           model: stringValue(selection.model),
           reasoningEffort: stringValue(selection.reasoningEffort),
         }]] : []

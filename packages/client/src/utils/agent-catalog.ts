@@ -32,3 +32,7 @@ export function isGlobalOnlyCodingAgent(value: unknown): boolean {
 export function isCatalogCodingAgent(value: unknown): value is CodingAgentId {
   return agentMetadata(String(value || ''))?.kind === 'coding-agent'
 }
+
+export function isPluginAgentId(value: unknown): value is `plugin:${string}/${string}` {
+  return typeof value === 'string' && /^plugin:[a-z][a-z0-9._-]*\/[a-z][a-z0-9._-]*$/.test(value)
+}

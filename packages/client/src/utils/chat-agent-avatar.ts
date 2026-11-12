@@ -1,3 +1,4 @@
+import { agentMetadata } from './agent-catalog'
 import { deploymentUrl } from './deployment-url'
 import { personBotLabel } from './person-bot-label'
 import { DEFAULT_PERSON_BOT_TYPE, PERSON_BOTS, personBot } from '../../../shared/person-bots'
@@ -76,6 +77,10 @@ export function chatSessionAgentAvatar(session?: ChatAgentSessionIdentity | null
     return { label: customName || personBotLabel(bot), src: deploymentUrl(bot.avatar) }
   }
   const runtime = String(session?.codingAgentId || session?.agent || '').trim().toLowerCase()
+  if (runtime.startsWith('plugin:')) {
+    const metadata = agentMetadata(runtime)
+    return { label: metadata?.name || runtime, src: deploymentUrl(metadata?.icon || '/logo.png') }
+  }
   if (runtime === 'hermes') return AGENT_AVATARS.hermes
   if (runtime === 'ekko-agent' || runtime === 'ekko_agent' || runtime === 'ekko') return AGENT_AVATARS['ekko-agent']
   if (runtime === 'claude' || runtime === 'claude-code') return AGENT_AVATARS['claude-code']

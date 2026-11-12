@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { agentSupportsSurface } from "@/utils/agent-catalog"
-import { agentMetadata, isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import { agentMetadata, isNativeCodingAgent, isGlobalOnlyCodingAgent, isPluginAgentId } from '@/utils/agent-catalog'
 import SessionListSidebar from "./SessionListSidebar.vue"
 import SessionSelectionToolbar from "./SessionSelectionToolbar.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
@@ -509,6 +509,7 @@ function handleOpenDesktopBrowserPanelRequest() {
 }
 
 onMounted(() => {
+  void fetchAgentAvailabilitySnapshot().catch(() => {});
 
 
 
@@ -921,7 +922,7 @@ const NEW_CHAT_AGENT_STORAGE_KEY = "hermes_new_chat_agent_v1";
 function loadNewChatAgent(): "hermes" | ChatCodingAgentId {
   try {
     const saved = localStorage.getItem(NEW_CHAT_AGENT_STORAGE_KEY);
-    return AGENT_OPTIONS.find(option => option.value === saved)?.value || AGENT_OPTIONS[0].value;
+    return isPluginAgentId(saved) ? saved : AGENT_OPTIONS.find(option => option.value === saved)?.value || AGENT_OPTIONS[0].value;
   } catch {
     return AGENT_OPTIONS[0].value;
   }
@@ -1171,6 +1172,7 @@ const isNewChatGlobalCodingAgent = computed(() =>
 const { catalog: newChatNativeCatalog, loading: newChatNativeModelsLoading, refreshFailed: newChatNativeModelsRefreshFailed, reload: reloadNewChatNativeModels } = useCodingAgentModels(
   () => newChatAgent.value as CodingAgentId,
   () => showNewChatPage.value && isNewChatGlobalCodingAgent.value,
+  () => newChatProfile.value,
 );
 const newChatNativeSelection = computed(() => newChatNativeSelections.value[newChatAgent.value] || { model: "", reasoningEffort: "" });
 const selectedNewChatNativeModel = computed(() => nativeCatalogModel(newChatNativeCatalog.value?.models, newChatNativeSelection.value.model));
@@ -1182,6 +1184,7 @@ const { catalog: activeSessionNativeCatalog } = useCodingAgentModels(
     return (agentMetadata(id)?.id || id) as CodingAgentId;
   },
   () => !showNewChatPage.value && activeSessionUsesGlobalCodingAgentConfig.value,
+  () => chatStore.activeSession?.profile,
 );
 const activeSessionNativeReasoningEfforts = computed(() => {
   return nativeCatalogModel(activeSessionNativeCatalog.value?.models, chatStore.activeSession?.model || "")?.reasoningEfforts;
@@ -1238,7 +1241,7 @@ function openNewChatModelSettings() {
 
 const newChatUsesProviderModel = computed(() => !isNewChatGlobalCodingAgent.value);
 const newChatNeedsBaseUrl = computed(() =>
-  isNewChatCodingAgent.value && effectiveNewChatAgentMode.value === "scoped" && !selectedNewChatProviderGroup.value?.base_url,
+  isNewChatCodingAgent.value && !isPluginAgentId(newChatAgent.value) && effectiveNewChatAgentMode.value === "scoped" && !selectedNewChatProviderGroup.value?.base_url,
 );
 const newChatUsesServerAuth = computed(() =>
   usesServerManagedProviderAuth(newChatAgent.value as ChatCodingAgentId, selectedNewChatProviderGroup.value?.provider),
@@ -1474,22 +1477,7 @@ async function submitNewChat(text: string, attachments?: Attachment[]): Promise<
     const source = newChatAgent.value === "hermes" ? "cli" : newChatAgent.value === "ekko-agent" ? "builtin_agent" : "coding_agent";
     const codingAgentMode = effectiveNewChatAgentMode.value;
     const isGlobalCodingAgent = source === "coding_agent" && codingAgentMode === "global";
-    const agent = newChatAgent.value === "codex"
-      ? "codex"
-      : newChatAgent.value === "claude-code"
-        ? "claude"
-        : newChatAgent.value === "pi"
-          ? "pi"
-        : newChatAgent.value === "grok"
-          ? "grok"
-        : newChatAgent.value === "dsh" ? "dsh" : newChatAgent.value === "opencode"
-          ? "opencode"
-        : isNativeCodingAgent(newChatAgent.value) ? newChatAgent.value
-        : newChatAgent.value === "antigravity" ? "antigravity" : newChatAgent.value === "cursor"
-          ? "cursor"
-        : newChatAgent.value === "ekko-agent"
-          ? "ekko-agent"
-        : "hermes";
+    const agent = newChatAgent.value === "claude-code" ? "claude" : newChatAgent.value;
     deployment = prepareAgentDeployment(chatMainContentRef.value?.querySelector('.agent-card.active'));
     const session = chatStore.newChat({
       profile: newChatProfile.value,

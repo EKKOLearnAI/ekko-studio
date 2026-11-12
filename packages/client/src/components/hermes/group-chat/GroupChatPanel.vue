@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import type { ChatCodingAgentId } from '@/api/coding-agents'
 import { agentMetadata, agentSupportsSurface } from '@/utils/agent-catalog'
 
 import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
 import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
 import type { CodingAgentId } from '@/api/coding-agents'
-import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import { isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import SidebarResizeHandle from "@/components/layout/SidebarResizeHandle.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
@@ -311,19 +312,7 @@ function getAgentModelGroups(profile: string) {
         .filter((group) => {
             if (group.provider === 'moa') return selectedAgentType.value === 'hermes'
             if (selectedAgentType.value === 'hermes') return true
-            const codingAgentId = selectedAgentType.value === 'ekko'
-                ? 'ekko-agent'
-                : selectedAgentType.value === 'claude'
-                    ? 'claude-code'
-                    : selectedAgentType.value === 'pi'
-                        ? 'pi'
-                        : selectedAgentType.value === 'grok'
-                            ? 'grok'
-                            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
-                                ? 'cursor'
-                            : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
-                                ? 'opencode'
-                            : 'codex'
+            const codingAgentId = (agentMetadata(selectedAgentType.value)?.id || selectedAgentType.value) as ChatCodingAgentId
             return canScopedCodingAgentUseProvider(codingAgentId, group.provider)
         })
 }
@@ -2901,7 +2890,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     </div>
                     <div v-if="usesGlobalAgentMode" class="form-group">
                         <label class="form-label">{{ t('models.models') }}</label>
-                        <NativeCodingAgentModelFields :key="nativeAgentId" :agent="nativeAgentId"
+                        <NativeCodingAgentModelFields :key="nativeAgentId" :agent="nativeAgentId" :profile="selectedProfile || undefined"
                             :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
                             :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                     </div>
@@ -2922,7 +2911,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     </div>
                     <div class="form-group">
                         <label class="form-label">{{ t('chat.reasoningEffort.tooltip') }}</label>
-                        <NativeCodingAgentModelFields v-if="usesGlobalAgentMode" :key="nativeAgentId" :agent="nativeAgentId"
+                        <NativeCodingAgentModelFields v-if="usesGlobalAgentMode" :key="nativeAgentId" :agent="nativeAgentId" :profile="selectedProfile || undefined"
                             field="reasoning-effort" :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
                             :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                         <NSelect

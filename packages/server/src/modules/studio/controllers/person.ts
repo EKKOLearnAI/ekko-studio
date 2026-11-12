@@ -1,3 +1,4 @@
+import { ensureBuiltinPlugins } from '../services/plugins/host'
 import { forgetPersonMemory } from '../services/person/memory'
 import { personDisplayResponse } from '../services/chat-run/person-display'
 import type { Context } from 'koa'
@@ -38,7 +39,7 @@ export const snapshot = (ctx: Context) => handle(ctx, id => {
 })
 export const clear = (ctx: Context) => handle(ctx, (id, body) => clearPerson(id, body))
 export const settings = (ctx: Context) => handle(ctx, (id, body) => configurePerson(id, body))
-export const capabilities = (ctx: Context) => handle(ctx, id => ({ agents: personCapabilities(id), native_allowed: personUser(id).role === 'super_admin' }))
+export const capabilities = (ctx: Context) => handle(ctx, async id => { await ensureBuiltinPlugins(); return { agents: await personCapabilities(id), native_allowed: personUser(id).role === 'super_admin' } })
 export const modelCatalog = (ctx: Context) => handle(ctx, id => personModelCatalog(id))
 export const executionModelCatalog = (ctx: Context) => handle(ctx, id => personExecutionModelCatalog(id))
 export const tasks = (ctx: Context) => handle(ctx, (id, body) => ({ tasks: listPersonTasks(id, String(body.search || '').slice(0,200), Math.max(0, Number(body.offset) || 0), { sessionId: body.session_id ? requirePersonSession(id, String(body.session_id)).id : undefined, status: ['open','completed','closed'].includes(String(body.status)) ? String(body.status) : '', order: String(body.order || ''), limit: Number(body.limit) }) }))
