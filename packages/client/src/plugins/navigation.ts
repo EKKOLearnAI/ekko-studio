@@ -1,8 +1,5 @@
 import type { InstalledPlugin } from '@/api/studio/plugins'
 
-/** Keep plugin navigation hidden until the feature is ready to ship. Direct routes remain available. */
-export const PLUGIN_NAVIGATION_VISIBLE = false
-
 export const pluginPages = (plugin: InstalledPlugin) => (plugin.manifest.views || [])
   .slice().sort((a, b) => (a.order || 0) - (b.order || 0))
 

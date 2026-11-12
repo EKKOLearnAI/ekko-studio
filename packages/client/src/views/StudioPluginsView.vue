@@ -110,7 +110,8 @@ async function logs(id: string) {
 
 <template>
   <main class="studio-plugins">
-    <PageHeader><div class="center-header"><h2>{{ t('studioPlugins.title') }}</h2><NButton quaternary size="small" :loading="loading" @click="reloadCatalog">{{ t('mcp.refresh') }}</NButton></div></PageHeader>
+    <PageHeader><header class="page-header center-header"><h2 class="header-title">{{ t('studioPlugins.title') }}</h2><NButton quaternary size="small" :loading="loading" @click="reloadCatalog">{{ t('mcp.refresh') }}</NButton></header></PageHeader>
+    <div class="center-scroll">
     <div class="center-content">
       <header class="center-intro">
         <div>
@@ -155,6 +156,7 @@ async function logs(id: string) {
           </footer>
         </article>
       </div>
+    </div>
     </div>
 
     <NModal v-model:show="showInstall" preset="card" :title="t('studioPlugins.installTitle')" class="plugin-install-modal" style="width: min(540px, calc(100vw - 32px))">
@@ -240,10 +242,11 @@ async function logs(id: string) {
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
-.studio-plugins { width: 100%; min-width: 0; overflow: auto; color: $text-primary; padding: 24px; }
+.studio-plugins { display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; color: $text-primary; }
 .center-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; }
 .center-header h2 { margin: 0; font-size: 16px; }
-.center-content { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; padding: 28px 8px; }
+.center-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px; }
+.center-content { width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; padding: 28px 8px; }
 .center-intro { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 12px; }
 .center-intro h1 { margin: 10px 0; font-size: clamp(24px, 3vw, 32px); font-weight: 650; letter-spacing: -.5px; line-height: 1.35; }
 .eyebrow { color: $text-muted; font-size: 12px; }
@@ -286,7 +289,7 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .operation-list strong { display: block; color: $text-primary; font-weight: 500; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: 12px; }
 @media (max-width: 600px) {
-  .studio-plugins { padding: 16px; }
+  .center-scroll { padding: 0 16px; }
   .center-content { padding: 20px 0; gap: 20px; }
   .center-intro { align-items: flex-start; flex-direction: column; gap: 16px; }
   .plugin-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }

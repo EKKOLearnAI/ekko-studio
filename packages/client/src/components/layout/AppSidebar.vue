@@ -11,8 +11,7 @@ import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { isStoredSuperAdmin } from "@/api/client";
 import { usePluginCatalog, pluginPages, pluginPageLocation } from '@/composables/usePluginCatalog';
 import PluginIcon from '@/components/plugins/PluginIcon.vue';
-import { PLUGIN_NAVIGATION_VISIBLE } from '@/plugins/navigation';
-const { snapshot: pluginSnapshot } = usePluginCatalog(computed(() => PLUGIN_NAVIGATION_VISIBLE));
+const { snapshot: pluginSnapshot } = usePluginCatalog();
 const pluginSettings = computed(() => pluginSnapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginPages(plugin).filter(view => view.slot === 'settings').map(view => ({ plugin, view }))));
 
 const { t } = useI18n();
