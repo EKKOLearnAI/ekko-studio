@@ -22,7 +22,7 @@ beforeEach(async () => {
 })
 afterEach(async () => { db.close(); vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
 
-it.each(['antigravity', 'codex', 'dsh'] as const)('%s global model and effort survive add, edit, and database reopen', agent => {
+it.each(['antigravity', 'codex', 'dsh', 'plugin:custom-agent/assistant'] as const)('%s global model and effort survive add, edit, and database reopen', agent => {
   const added = storage.addRoomAgent('room', 'runtime', 'default', 'Synthetic', '', 0, { agent, agentMode: 'global', model: 'model-a', reasoningEffort: 'high', provider: 'ignored' })
   expect(added).toMatchObject({ model: 'model-a', reasoningEffort: 'high', provider: '', apiMode: '' })
   const updated = storage.updateRoomAgent('room', added.id, 'default', 'Synthetic', 'edited', { agent, agentMode: 'global', model: 'model-b', reasoningEffort: 'low' })

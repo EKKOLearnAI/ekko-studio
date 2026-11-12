@@ -161,7 +161,8 @@ export function securityHeaders(): Middleware {
       "base-uri 'self'",
       "object-src 'none'",
       "frame-ancestors 'none'",
-      "script-src 'self' 'unsafe-inline'",
+      // Plugin views load their received module from a Blob inside an opaque-origin iframe.
+      "script-src 'self' 'unsafe-inline' blob:",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { agentSupportsSurface } from "@/utils/agent-catalog"
 import { agentMetadata, isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import SessionListSidebar from "./SessionListSidebar.vue"
 import SessionSelectionToolbar from "./SessionSelectionToolbar.vue"
@@ -1064,7 +1065,7 @@ const mostRecentDefaultWorkspace = computed(() => {
 
 const newChatAgentAvailability = ref<AgentAvailabilitySnapshot | null>(null);
 const newChatAgentOptions = computed(() => AGENT_OPTIONS.filter(option =>
-  agentInstallationState(newChatAgentAvailability.value, option.value) === "installed",
+  agentInstallationState(newChatAgentAvailability.value, option.value) === "installed" && agentSupportsSurface(option.value, 'chat'),
 ));
 
 const newChatApiModeOptions = computed(() => [
@@ -1160,7 +1161,7 @@ const selectedNewChatProviderGroup = computed(() =>
 );
 
 const isNewChatCodingAgent = computed(() => newChatAgent.value !== "hermes");
-const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || (newChatAgent.value === "antigravity" || isNativeCodingAgent(newChatAgent.value)) || isGlobalOnlyCodingAgent(newChatAgent.value) || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
+const isNewChatExternalCodingAgent = computed(() => newChatAgent.value.startsWith("plugin:") || newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || (newChatAgent.value === "antigravity" || isNativeCodingAgent(newChatAgent.value)) || isGlobalOnlyCodingAgent(newChatAgent.value) || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
 const effectiveNewChatAgentMode = computed(() =>
   effectiveNewChatMode(newChatAgent.value, newChatAgentMode.value),
 );

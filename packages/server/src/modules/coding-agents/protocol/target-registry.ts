@@ -1,6 +1,7 @@
 import { assertProviderAvailable } from '../../studio/contracts/providers'
 import { randomBytes } from 'crypto'
 import type { AgentApiMode } from './types'
+import type { CanonicalResponsesEvent } from './adapters/responses-stream'
 
 export interface AgentTargetInput {
   provider: string
@@ -12,6 +13,7 @@ export interface AgentTargetInput {
   agentId?: string
   agentSessionId?: string
   chatSessionId?: string
+  onUsageEvent?: (event: CanonicalResponsesEvent, apiDuration?: number, baseUrl?: string) => void
 }
 
 export type NormalizedAgentTargetInput<T extends AgentTargetInput> = Omit<T, 'apiMode'> & {

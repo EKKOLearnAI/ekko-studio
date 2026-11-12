@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { agentMetadata, agentSupportsSurface } from '@/utils/agent-catalog'
+
 import { deploymentUrl } from '@/utils/deployment-url'
 import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
@@ -105,7 +107,7 @@ const hasServerHandoff = computed(() => (
   && !!handoffPairingTicket.value
 ))
 const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
-const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((option) => {
+const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.filter(option => agentSupportsSurface(option.value, 'group-chat')).map((option) => {
   const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
   return {
     ...option,
@@ -191,7 +193,7 @@ const agentReasoningEffortValue = computed({
   get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
   set: (value: string) => { selectedAgentReasoningEffort.value = value },
 })
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => Boolean(agentMetadata(selectedAgentType.value)?.modes.includes('global')) || ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },

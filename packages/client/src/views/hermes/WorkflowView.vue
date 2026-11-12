@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { agentMetadata, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import { agentMetadata, agentSupportsSurface, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import { useCodingAgentModels } from '@/composables/useCodingAgentModels'
 import { nativeModelLabel } from '@/utils/native-model-families'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
@@ -428,9 +428,9 @@ const workflowSchedulePendingIds = ref<Set<string>>(new Set())
 let edgePreviewTimer: number | null = null
 let workflowBudgetClock: number | null = null
 
-const workflowAgentDefinitions = AGENT_OPTIONS
+const workflowAgentDefinitions = computed(() => AGENT_OPTIONS.filter(option => agentSupportsSurface(option.value, 'workflow')))
 
-const agentOptions = computed<WorkflowSelectOption[]>(() => workflowAgentDefinitions.filter(option =>
+const agentOptions = computed<WorkflowSelectOption[]>(() => workflowAgentDefinitions.value.filter(option =>
   isAgentAvailable(agentAvailabilitySnapshot.value, option.value),
 ))
 
@@ -439,7 +439,7 @@ const firstAvailableWorkflowAgent = computed(() =>
 )
 
 function workflowAgentDisplayName(agent: string): string {
-  return String(workflowAgentDefinitions.find(option => option.value === agent)?.label || agent)
+  return String(workflowAgentDefinitions.value.find(option => option.value === agent)?.label || agent)
 }
 
 async function refreshAgentAvailability() {
@@ -660,7 +660,7 @@ function makeNode(
       pluginAction: data.pluginAction,
       pluginInput: data.pluginInput,
       agent,
-      agentMode: isGlobalOnlyCodingAgent(agent) || (data.agentMode === 'global' && ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agent)) ? 'global' : 'scoped',
+      agentMode: isGlobalOnlyCodingAgent(agent) || (data.agentMode === 'global' && (agent.startsWith('plugin:') || ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agent))) ? 'global' : 'scoped',
       priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
       provider: usesGlobal ? '' : data.provider || defaultModelSelection.value.provider,
       model: usesGlobal ? (hasLegacyGlobalSelection ? '' : data.model || '') : data.model || defaultModelSelection.value.model,

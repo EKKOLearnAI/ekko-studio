@@ -23,6 +23,7 @@ export class PluginManager {
   private sequence = 0
   private closing = false
   private ports: PluginPorts
+  registeredAgents() { return [...this.runtimes.values()].flatMap(runtime => [...runtime.agents.values()]) }
   constructor(home: string, ports: PluginPorts) {
     this.store = new PluginStore(home)
     this.ports = { ...ports, emit: (id, event) => { this.publish(id, event, event.audience === 'plugin'); ports.emit(id, event) },

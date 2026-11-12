@@ -14,6 +14,7 @@ export function chatCompletionsToResponses(body: any): any {
       const content = Array.isArray(message.content) ? message.content.map((part: any) => {
         if (part.type === 'text') return { type: message.role === 'assistant' ? 'output_text' : 'input_text', text: part.text }
         if (part.type === 'image_url') return { type: 'input_image', image_url: part.image_url?.url, detail: part.image_url?.detail }
+        if (part.type === 'file' && (part.file?.file_data || part.file?.file_id)) return { type: 'input_file', ...part.file }
         throw Object.assign(new Error(`Unsupported Chat Completions content: ${part.type}`), { status: 400 })
       }) : message.content
       input.push({ role: message.role, content })

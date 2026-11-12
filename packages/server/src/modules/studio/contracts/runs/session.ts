@@ -137,6 +137,8 @@ export interface QueueInsertionControl {
 }
 
 export interface SessionState {
+  /** Process-local plugin runtime ownership; never sent to clients. */
+  pluginAgent?: { id: string; flushPartial(): void }
   /** Manual Hermes compression also holds history against message deletion. */
   isCompressing?: boolean
   /** Explicit Stop suppresses automatic wakeups until the next user run. */
@@ -180,7 +182,7 @@ export interface SessionState {
   queueInsertion?: QueueInsertionControl
   responseRun?: ResponseRunState
   source?: ChatRunSource
-  webhookAgent?: 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
+  webhookAgent?: `plugin:${string}/${string}` | 'bridge' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
   webhookRoomId?: string
   webhookWorkflowId?: string
   webhookWorkflowNodeId?: string
@@ -228,7 +230,7 @@ export interface BridgeContextState {
 }
 
 export type ChatRunSource = 'api_server' | 'cli' | 'coding_agent' | 'builtin_agent' | 'global_agent' | 'workflow' | 'group_chat'
-export type ChatCodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode' | 'ekko-agent'
+export type ChatCodingAgentId = `plugin:${string}/${string}` | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode' | 'ekko-agent'
 
 export interface BridgeCompressionResult {
   messages: ChatMessage[]

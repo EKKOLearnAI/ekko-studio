@@ -1,7 +1,9 @@
+import { syncPluginAgentOptions } from '@/utils/agent-options'
+import type { StudioAgent } from '@/api/studio/agents'
 import { request } from './client'
 
-export type AgentStatusId = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
-export type AgentStatusSource = 'managed-runtime' | 'user-cli' | 'built-in' | 'not-installed'
+export type AgentStatusId = `plugin:${string}/${string}` | 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
+export type AgentStatusSource = 'plugin' | 'managed-runtime' | 'user-cli' | 'built-in' | 'not-installed'
 
 export interface AgentStatusRecord {
   id: AgentStatusId
@@ -56,6 +58,7 @@ const AGENT_STATUS_ALIASES: Record<string, AgentStatusId> = {
 }
 
 export function resolveAgentStatusId(agent: string): AgentStatusId | null {
+  if (/^plugin:[a-z][a-z0-9._-]*\/[a-z][a-z0-9._-]*$/.test(agent)) return agent as `plugin:${string}/${string}`
   return AGENT_STATUS_ALIASES[agent.trim().toLowerCase()] || null
 }
 
@@ -93,9 +96,13 @@ export function agentInstallationState(
 }
 
 export async function fetchAgentAvailabilitySnapshot(): Promise<AgentAvailabilitySnapshot> {
-  return request<AgentAvailabilitySnapshot>('/api/agents/availability')
+  const value = await request<AgentAvailabilitySnapshot>('/api/agents/availability')
+  syncPluginAgentOptions((value.agents || []).filter(agent => agent.id.startsWith('plugin:')).map(agent => ({ ...agent, origin: 'plugin' })) as unknown as StudioAgent[])
+  return value
 }
 
 export async function fetchAgentStatusSnapshot(): Promise<AgentStatusSnapshot> {
-  return request<AgentStatusSnapshot>('/api/agents/status')
+  const value = await request<AgentStatusSnapshot>('/api/agents/status')
+  syncPluginAgentOptions((value.agents || []).filter(agent => agent.id.startsWith('plugin:')).map(agent => ({ ...agent, origin: 'plugin' })) as unknown as StudioAgent[])
+  return value
 }

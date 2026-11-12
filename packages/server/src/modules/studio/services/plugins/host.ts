@@ -12,6 +12,7 @@ import { PluginManager } from './manager'
 import { PluginError } from './errors'
 import { json } from './schema'
 import { pluginApiPath } from './policy'
+import { configurePluginAgents } from '../agents/registry'
 
 let baseUrl = ''
 let instance: PluginManager | undefined
@@ -50,10 +51,13 @@ async function api(identity: PluginIdentity, path: string, options: ApiRequest, 
   try { return json(JSON.parse(text)) } catch { return json(text) }
 }
 export function getPluginManager(): PluginManager {
-  return instance ||= new PluginManager(join(config.appHome, 'plugins'), {
+  if (instance) return instance
+  instance = new PluginManager(join(config.appHome, 'plugins'), {
     api, authorize: authorizePluginIdentity, emit: () => {},
     log: (pluginId, identity, level, text) => logger.info({ pluginId, profile: identity.profile, level }, text),
   })
+  configurePluginAgents(() => instance?.registeredAgents() || [])
+  return instance
 }
 export async function startPluginHost(loopbackBaseUrl: string): Promise<void> {
   baseUrl = loopbackBaseUrl

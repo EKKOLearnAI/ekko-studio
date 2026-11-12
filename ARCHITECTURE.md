@@ -50,6 +50,7 @@ ownership decisions, allowed dependency matrix, and migration rules.
 - Module `services/` own reusable IO, domain behavior, processes, and integrations.
 - Studio `repositories/` and `infrastructure/` own application persistence.
 - Studio `middleware/legacy-app-api.ts` is the only released App and MCU firmware URL compatibility map.
+- Plugin Agent IDs use `plugin:<plugin-id>/<agent-id>` and retain that identity in chat, group chat, workflow and usage records. Studio owns registration, per-user/Profile run contexts and transport; plugins own their engine and settings UI. Bootstrap adapts existing Coding Agent management and model proxies into the shared Studio registry, preserving native runtime dispatch and released APIs. See `docs/plugins.md` for the runtime contract.
 
 Architecture rules:
 

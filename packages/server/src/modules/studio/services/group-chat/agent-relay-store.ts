@@ -1,3 +1,4 @@
+import { isPluginAgentId } from '../agents/registry'
 import { isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { getDb } from '../../infrastructure/database'
@@ -6,7 +7,7 @@ export const GROUP_AGENT_PAIRING_REQUEST_TTL_MS = 10 * 60_000
 export const GROUP_AGENT_PAIRING_TICKET_TTL_MS = 2 * 60_000
 
 export type RemoteGroupAgentDescriptor = {
-  agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
+  agent: `plugin:${string}/${string}` | 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
   agentMode: 'scoped' | 'global'
   priorAgentMode?: 'scoped' | 'global' | ''
   profile: string
@@ -42,9 +43,9 @@ export function normalizeRemoteGroupAgentDescriptor(
   }
   const input = value as Record<string, unknown>
   const agent = String(input.agent || 'hermes').trim() as RemoteGroupAgentDescriptor['agent']
-  if (!REMOTE_AGENT_TYPES.has(agent)) throw new Error('Invalid remote Agent type')
+  if (!REMOTE_AGENT_TYPES.has(agent) && !isPluginAgentId(agent)) throw new Error('Invalid remote Agent type')
   const agentMode = isGlobalOnlyCodingAgent(agent) ? 'global' : input.agentMode === 'global' ? 'global' : 'scoped'
-  if (agentMode === 'global' && !REMOTE_GLOBAL_MODE_AGENTS.has(agent)) {
+  if (agentMode === 'global' && !REMOTE_GLOBAL_MODE_AGENTS.has(agent) && !isPluginAgentId(agent)) {
     throw new Error('Remote Agent global mode is only available for Claude, Codex, Pi, Grok, and OpenCode')
   }
   const profile = boundedText(input.profile, 120, 'profile', true)

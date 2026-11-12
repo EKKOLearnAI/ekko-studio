@@ -18,7 +18,8 @@ export interface Schema {
   maxItems?: number
   secret?: boolean
 }
-export type Capability = 'api.read' | 'api.write' | 'tools' | 'commands' | 'events' | 'hooks' | 'automation' | 'ui' | 'storage.client'
+export type * from './agents'
+export type Capability = 'api.read' | 'api.write' | 'tools' | 'commands' | 'events' | 'hooks' | 'automation' | 'ui' | 'storage.client' | 'agents'
 export interface PluginView {
   id: string
   title: string
@@ -180,6 +181,7 @@ export interface PluginAction {
 export type PluginHook = 'input.transform' | 'context.transform' | 'tool.before' | 'tool.after'
 export interface HookResult { value?: Json; deny?: string }
 export interface PluginContext {
+  agents: { register(definition: import('./agents').AgentDefinition): import('./agents').AgentRegistration }
   readonly plugin: Readonly<PluginManifest>
   /** Current caller inside a handler; activation identity during startup/scheduled work. */
   readonly identity: PluginIdentity

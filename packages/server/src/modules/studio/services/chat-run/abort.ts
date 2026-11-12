@@ -67,7 +67,7 @@ export async function handleAbort(
     state = { messages: [], isWorking: true, events: [], queue: [], source: hasCodingAgentRun ? 'coding_agent' : 'builtin_agent' }
     sessionMap.set(sessionId, state)
   }
-  const isCodingAgentRun = state?.source === 'coding_agent' || state?.source === 'builtin_agent' || state?.webhookAgent === 'ekko' || hasCodingAgentRun || hasEkkoBackgroundTasks
+  const isCodingAgentRun = !!state?.pluginAgent || state?.source === 'coding_agent' || state?.source === 'builtin_agent' || state?.webhookAgent === 'ekko' || hasCodingAgentRun || hasEkkoBackgroundTasks
   if (state) {
     state.backgroundWakeStopped = true
     const dropped = state.queue.filter(item => item.goalContinuation || item.autonomous || item.backgroundDelegationId)
@@ -163,6 +163,7 @@ export async function handleAbort(
   const shouldAbortThroughBridge = isBridgeRunSource(activeState.source) && !isCodingAgentRun
 
   // Flush in-memory assistant text to DB before aborting the stream.
+  activeState.pluginAgent?.flushPartial()
   if (shouldAbortThroughBridge) {
     flushBridgePendingToDb(activeState, sessionId)
   } else {
@@ -308,6 +309,7 @@ export async function markAbortCompleted(
   state.runId = undefined
   state.responseRun = undefined
   state.activeRunMarker = undefined
+  state.pluginAgent = undefined
   state.finalizeRunUsage = undefined
   state.nativeUsageSource = undefined
 

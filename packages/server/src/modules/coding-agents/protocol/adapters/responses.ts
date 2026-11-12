@@ -507,7 +507,7 @@ function responseContentToOpenAiChat(content: unknown): string | any[] {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return stringifyContent(content)
   const parts: any[] = []
-  let hasImage = false
+  let hasMedia = false
   for (const part of content) {
     if (typeof part === 'string') {
       parts.push({ type: 'text', text: part })
@@ -520,7 +520,7 @@ function responseContentToOpenAiChat(content: unknown): string | any[] {
     if (part?.type === 'input_image') {
       const url = openAiImageUrl(part)
       if (url) {
-        hasImage = true
+        hasMedia = true
         const detail = typeof part.detail === 'string' ? part.detail : ''
         parts.push({
           type: 'image_url',
@@ -532,10 +532,16 @@ function responseContentToOpenAiChat(content: unknown): string | any[] {
       }
       continue
     }
+    if (part?.type === 'input_file') {
+      hasMedia = true
+      parts.push({ type: 'file', file: { ...(part.filename ? { filename: part.filename } : {}),
+        ...(part.file_data ? { file_data: part.file_data } : {}), ...(part.file_id ? { file_id: part.file_id } : {}) } })
+      continue
+    }
     const text = stringifyContent(part)
     if (text) parts.push({ type: 'text', text })
   }
-  if (hasImage) return parts
+  if (hasMedia) return parts
   return parts.map(part => String(part.text || '')).filter(Boolean).join('\n')
 }
 
@@ -794,6 +800,13 @@ function responsesContentToAnthropicContent(content: unknown, role: 'user' | 'as
       const source = url ? imageUrlToAnthropicSource(url) : null
       return source ? { type: 'image', source } : null
     }
+    if (part?.type === 'input_file') {
+      const match = typeof part.file_data === 'string' && part.file_data.match(/^data:([^;,]+);base64,([\s\S]+)$/)
+      if (!match || !['application/pdf', 'text/plain'].includes(match[1])) throw Object.assign(new Error('Anthropic file input requires an inline PDF or text file'), { status: 400 })
+      return { type: 'document', ...(part.filename ? { title: part.filename } : {}), source: match[1] === 'text/plain'
+        ? { type: 'text', media_type: 'text/plain', data: Buffer.from(match[2], 'base64').toString('utf8') }
+        : { type: 'base64', media_type: match[1], data: match[2] } }
+    }
     return null
   }).filter(Boolean)
   return mapped.length ? mapped : [{ type: 'text', text: '' }]
@@ -802,7 +815,7 @@ function responsesContentToAnthropicContent(content: unknown, role: 'user' | 'as
 function responsesToolOutputToAnthropicContent(output: unknown): string | any[] {
   if (typeof output === 'string') return output
   const parts = responsesContentToAnthropicContent(output, 'user')
-  if (parts.some(part => part?.type === 'image')) return parts
+  if (parts.some(part => part?.type === 'image' || part?.type === 'document')) return parts
   return parts.map(part => String(part.text || '')).filter(Boolean).join('\n')
 }
 

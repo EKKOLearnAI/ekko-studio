@@ -1,18 +1,19 @@
 # Studio 插件与 ctx SDK
 
-Studio 插件用于定制工作台页面、设置页面、独立工作区、Agent 工具、命令和自动化动作。
+Studio 插件用于定制工作台页面、设置页面、独立工作区、Agent 运行时、工具、命令和自动化动作。
 插件功能尚未开放，暂时隐藏导航栏的 **插件中心**、主侧栏插件页面及设置侧栏插件入口。
 内部调试可直接访问 `/#/studio/plugins`，插件页面与工作区的直达路由仍保留。插件中心与 Hermes、DSH
 各自的原生插件管理分开。插件安装、启用、配置和运行实例属于整个 Studio，所有账号、Profile 和任务均可使用，无需重复安装。
 
 ## 运行示例
 
-仓库提供四个不需要构建的示例：
+仓库提供五个不需要构建的示例：
 
 - `examples/plugins/session-dashboard`（会话看板）：纯前端页面，读取已有会话接口，展示统计、按 Agent 筛选、搜索已加载会话、分页和跳转。
 - `examples/plugins/notebook`（工作便签）：独立工作区、动态便签侧栏、个人偏好设置页、Agent 工具、聊天命令、工作流共享持久化便签；支持完成状态和删除，显示记录来源。
 - `examples/plugins/activity-digest`：订阅业务事件，定期生成摘要，也可以由命令或工作流触发。
 - `examples/plugins/tool-demo`（工具注入演示）：仅注册一个只读 `hello` 工具。启用后，在 MCP 管理页的 `ekko-studio-plugins` 工具列表中查找 `tool-demo__hello`（描述为 `[工具注入演示/hello]`），参数为 `{"name":"Ekko"}`；工具返回问候语和实际调用的 Profile。
+- `examples/plugins/custom-agent`：注册自定义 Agent，提供自己的设置页面和用户设置 RPC；全局模式使用本地 Echo 模型，scoped 模式通过 Studio 模型代理调用用户选择的模型。
 
 在插件中心点击“安装插件”，输入示例目录的绝对路径，确认信任、安装，再启用。配置位于“详情 → 配置”。
 本地安装会复制目录；编辑源文件后使用“升级”重新安装。重载重新执行已安装的版本。
@@ -142,6 +143,7 @@ export function apply(ctx) {
 | `ctx.models.list / respond` | 已配置模型及 Responses API；返回完整响应，使用现有用量统计 |
 | `ctx.storage` | 插件级全局 JSON 存储；`namespace(...)` 显式分区 |
 | `ctx.tools.register` | 注册跨 Agent 工具；返回 `{ok, content, data?, error?}` |
+| `ctx.agents.register` | 注册可在 Agent 管理、新建会话、群聊和工作流使用的 Agent 运行时 |
 | `ctx.commands.register` | 注册 `/插件id:命令 参数` 聊天命令 |
 | `ctx.rpc.register` | 为前端注册后端函数 |
 | `ctx.on(type, handler)` | 订阅 Studio 业务事件，支持精确名称、`chat.*`、`chat.run.*` 等前缀及 `*` |
@@ -365,3 +367,128 @@ Studio 会将插件变更通知所有已启动的 Hermes Worker，包括群聊�
 
 验证命令：`npx vitest run tests/server/studio-plugins.test.ts tests/server/studio-plugin-*.test.ts tests/ekko-agent/plugin-hooks.test.ts`；
 浏览器旅程：`npm run test:e2e -- tests/e2e/studio-plugins.spec.ts tests/e2e/studio-plugin-navigation.spec.ts`。
+
+## 注册 Agent 运行时
+
+插件清单声明 `agents` 能力，后端在 `apply(ctx)` 中调用 `ctx.agents.register(definition)`。
+注册 ID 是插件内部 ID；Studio 生成完整 ID `plugin:<pluginId>/<agentId>`，与内置 Agent ID 分开。
+`vendor` 表示管理卡片上的开发方；模型配置中的 `provider` 仍表示模型提供商。
+文本、图片、文件都是必需输入，不提供 `images/files/supportsImages` 等开关。
+类型契约在 `packages/plugin-sdk/src/agents.ts`。
+
+```js
+export function apply(ctx) {
+  const registration = ctx.agents.register({
+    id: 'assistant', name: 'My Agent', vendor: 'My Team', agentApiVersion: 1,
+    getStatus: async () => ({ installed: true, version: '1.0.0' }),
+    management: {
+      settings: () => ({ viewId: 'agent-settings' }),
+      checkUpdate: async () => ({ currentVersion: '1.0.0', latestVersion: '1.0.0', updateAvailable: false }),
+      // upgrade: async ({ version, expectedVersion }, management) => ...,
+    },
+    modes: {
+      global: { listModels: async () => ({ status: 'ready', source: 'sdk', scope: 'builtin', models: [{ id: 'native', name: 'Native', isDefault: true }] }) },
+    },
+    capabilities: { surfaces: ['chat', 'group-chat', 'workflow', 'api'], streaming: true, resume: false },
+    runtime: {
+      createSession(session) {
+        return {
+          async run(input, run) {
+            // Replace this local example with the plugin's own engine/SDK/CLI.
+            const parts = []
+            for (const part of input.input) {
+              if (part.type === 'text') parts.push(part.text)
+              else parts.push(`${part.name}: ${(await run.attachments.read(part.assetId)).byteLength} bytes`)
+            }
+            const text = parts.join('\n')
+            await run.events.emit({ type: 'text.delta', text })
+            return { content: [{ type: 'text', text }], finishReason: 'stop' }
+          },
+          dispose() {},
+        }
+      },
+    },
+  })
+  return () => registration.dispose()
+}
+```
+
+该片段展示全局本地运行时。包含 scoped 模型代理调用的完整示例见
+`examples/plugins/custom-agent/server.mjs`。实际 scoped 引擎必须把模型请求发送到宿主注入的代理。
+
+### 管理与设置
+
+`getStatus` 返回 `{installed, version, source?, path?, error?}`。普通目录不暴露安装路径。
+管理页的三个操作绑定 `management.settings/checkUpdate/upgrade`；未提供的操作不显示。
+设置回调返回本插件清单中 `slot: 'settings'` 的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。
+页面继续通过 `client.mjs` 的 `mount(root, ctx)` 和服务端 `ctx.rpc.register` 实现。
+生产安全策略允许视图加载 Blob 模块；iframe 保持不透明来源，自己的 CSP 禁止直接网络请求，业务调用仍经认证桥接。
+插件负责配置持久化、校验、文件格式、环境变量和启动参数，不要求宿主生成设置表单。
+私有设置应以 RPC 的实际 `run.identity` 分区；URL 查询参数不构成身份或权限依据。
+
+`checkUpdate` 只检查 Agent 引擎，返回 `currentVersion/latestVersion/updateAvailable`。
+`upgrade({version, expectedVersion}, ctx)` 更新引擎，返回 `installedVersion`。
+它们与 Studio 插件包的版本和升级操作独立。安装维护沿用超级管理员权限，运行凭证不能调用管理操作。
+宿主在升级前重新检查当前版本和可用版本，拒绝在途运行，清理空闲实例，升级后重新探测实际版本。
+失败不意味着外部二进制已经回滚，插件应自行实现其引擎的恢复策略。
+
+管理上下文含当前 `identity`（账号、Profile、Agent ID）、`signal`、`log`、`resources.add` 和
+`progress({message, percent?})`。管理操作不绑定会话，其普通调用上限为 120 秒。
+
+### global 与 scoped
+
+- `global`：插件通过 `modes.global.listModels(ctx)` 提供原生模型目录，Studio 展示并回传模型 ID 和推理参数。
+  目录可返回 `ready/empty/not_installed/auth_required/unsupported/timeout/error`。
+  宿主不注入 scoped 代理地址，不替插件改写原生全局配置。
+- `scoped`：Studio 按实际用户的 Profile 解析选定模型，提供 `provider/model/apiMode/baseUrl/token`、
+  `reasoningEffort` 和 `contextWindow/outputLimit`。其中 token 是 Studio 代理凭证，上游 API key 保留在 Studio。
+  `apiMode` 是引擎到 Studio 的协议，与上游提供商协议独立；插件在 `protocols` 声明其支持的请求协议。
+  宿主负责代理的协议转换、用量记录和凭证撤销，插件负责如何写配置并使引擎请求该代理。
+
+两种模式都不增加账号、Profile 或工作区权限。模式或绑定改变时，插件根据本轮上下文重配或重建原生引擎。
+
+### 实例、输入与运行上下文
+
+`createSession(session)` 收到可信的 `identity`、`mode`、`paths.runtimeDir/workspaceDir`、实例生命周期 `signal`、
+`log`、`resources.add` 及可选 `resumeState`，返回 `run`、`dispose` 和可选 `checkpoint`。
+实例按插件运行版本、Agent、用户、Profile、会话、模式隔离，同实例串行执行。
+运行资源在 `run.resources` 追踪，长期资源在 `session.resources` 追踪。
+声明 `resume: true` 时必须实现 `checkpoint()`；检查点需包含正整数 `schemaVersion` 和 JSON `data`。
+升级后检查点格式的兼容处理由插件的 `createSession` 负责；恢复不等于重放尚未确定结果的操作。
+
+`run(input, run)` 的输入包含本轮 `input`、不含本轮输入的历史 `history`、宿主 `instructions` 和 `options`。
+内容块为文本 `{type:'text',text}` 或附件 `{type:'image'|'file',assetId,name,mediaType}`。
+宿主统一处理上传与权限，插件用 `run.attachments.resolve(assetId)` 获取元信息和本地路径，
+或用 `read(assetId)` 读取二进制。插件必须把图片和文件传给其引擎或工具处理，不得丢弃或仅用占位文本冒充处理。
+格式、文件大小和模型侧限制应明确报告为运行错误。
+
+本轮上下文还包含：
+
+| 字段 | 语义 |
+| --- | --- |
+| `identity` | 当前实际用户、Profile、会话、运行、Agent 和来源；不借用安装者权限 |
+| `mode / model` | 按模式区分的原生模型选择或 Studio 代理绑定 |
+| `signal / deadlineAt` | 当前取消和超时；Agent 运行独立于普通 RPC 的 120 秒上限，单次运行上限为一小时，父任务可更早停止 |
+| `api / models / tools / workspace` | 现有插件 SDK 的当前用户能力，继续受 manifest 和原业务接口权限约束 |
+| `storage` | 当前 Agent、账号、Profile、会话及模式的分区存储；插件全局共享存储仍使用根 `ctx.storage` |
+| `mcpServers` | 由 Studio 生成的本轮受管 MCP 配置，带短期运行凭证文件；引擎配置格式由插件适配 |
+| `interactions.approve` | 请求审批并返回 `approved/denied/cancelled/timeout`；只有显式 approved 才能继续相应操作 |
+| `interactions.clarify` | 返回 `answered` 和文本，或 `dismissed/cancelled/timeout` |
+| `events.emit / log / resources` | 过程事件、运行日志与本轮资源清理 |
+
+模型代理和 MCP 凭证在运行结束或取消时失效，不得记录到日志、前端或聊天历史。
+异步回调中的根 `ctx.identity/api/models/signal` 也绑定当前调用者。运行结束后保存下来的上下文不可继续使用。
+Node.js 插件仍是可信代码；取消信号无法强行中断同进程的无限循环，插件必须正确释放其进程和连接。
+
+标准事件为 `text.delta`、`reasoning.summary.delta`、`status`、`tool.started/completed/failed`。
+宿主生成运行 ID、校验事件，并以 Promise 提供背压。最终返回 `{content,finishReason,usage?,checkpoint?}`，
+其中 `content` 是完整回复，增量只作预览，宿主只保存一份最终回复。
+成功、失败、取消与持久化均由宿主控制；结束后的迟到事件不能写回。停止会保留已生成的部分内容。
+
+### 既有 Coding Agent 兼容
+
+统一管理入口为 `/api/studio/agents`，设置、检查更新和升级由宿主按注册来源分发。
+内置适配器映射既有状态检测、更新协调器、原生模型发现器及设置路由。
+原 `/api/coding-agents/*`、稳定 Agent ID、别名、会话和工作流引用继续保留；模型 `provider` 不改名。
+内置 CLI/SDK/ACP、配置生成、安装删除、自动更新、回滚及运行管理器继续使用原实现。
+插件 Agent 使用同一管理和模式约定，接入现有单聊、群聊、工作流的运行、停止、历史和事件通道。

@@ -1,5 +1,7 @@
 import { desktopBrowserRoutes } from '../modules/studio/routes/desktop-browser'
 import { studioPluginRoutes } from '../modules/studio/routes/plugins'
+import './plugin-agent-adapter'
+import { studioAgentRoutes } from '../modules/studio/routes/agents'
 import type { Context, Next } from 'koa'
 import './hermes-ops-adapter'
 import './agent-log-adapter'
@@ -103,6 +105,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
 
   // --- Protected routes (auth required) ---
   app.use(authProtectedRoutes.routes())
+  app.use(studioAgentRoutes.routes())
   app.use(studioPluginRoutes.routes())
   app.use(desktopBrowserRoutes.routes())
   app.use(mcuDeviceRoutes.routes())

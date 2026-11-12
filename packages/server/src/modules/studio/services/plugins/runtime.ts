@@ -9,6 +9,7 @@ import { importPlugin } from './loader.cjs'
 import { pluginFile } from './installer'
 import { identifier, json, validate, validateSchema } from './schema'
 import type { PluginStore } from './store'
+import { PluginAgentRuntime } from './agent-runtime'
 
 export interface PluginPorts {
   api(identity: PluginIdentity, path: string, options: ApiRequest, signal: AbortSignal): Promise<Json>
@@ -22,6 +23,7 @@ type Listener = (event: PluginEvent, ctx: RunContext) => void | Promise<void>
 type Hook = { priority: number; handler(value: Json, ctx: RunContext): HookResult | Promise<HookResult> }
 
 export class PluginRuntime {
+  readonly agents = new Map<string, PluginAgentRuntime>()
   readonly effects = new PluginEffects()
   readonly tools = new Map<string, PluginTool>()
   readonly commands = new Map<string, PluginCommand>()
@@ -85,6 +87,14 @@ export class PluginRuntime {
       return this.api(current.identity, current.signal).request<T>(path, options)
     })
     return {
+      agents: { register: definition => {
+        this.require('agents')
+        if (this.started) throw new PluginError('Agents must be registered during apply')
+        const agent = new PluginAgentRuntime(this, definition)
+        const remove = this.register(this.agents, definition.id, agent)
+        const close = this.effects.add(() => agent.closeSessions())
+        return { id: agent.id, dispose: async () => { remove(); await close() } }
+      } },
       plugin: Object.freeze(structuredClone(this.record.manifest)), get identity() { return Object.freeze({ ...self.current().identity }) },
       config: Object.freeze(structuredClone(this.record.config)), get signal() { return self.current().signal },
       storage: this.store.storage(this.record.manifest.id, assertActive),
@@ -188,5 +198,18 @@ export class PluginRuntime {
     try { return json(await call) }
     catch (error) { this.log('error', message(error), undefined, identity); throw error }
     finally { if (rejectAbort) signal.removeEventListener('abort', rejectAbort); lifetime.abort(); this.calls.delete(call) }
+  }
+
+  /** Agent instances use the coordinator's lifetime, independently of ordinary RPC timeouts. */
+  async withIdentity<T>(identity: PluginIdentity, external: AbortSignal, work: (signal: AbortSignal) => Promise<T> | T): Promise<T> {
+    this.effects.assertActive(); await this.ports.authorize(identity)
+    const lifetime = new AbortController()
+    const signal = AbortSignal.any([external, lifetime.signal, this.effects.controller.signal])
+    signal.throwIfAborted()
+    let abort!: () => void
+    const cancelled = new Promise<never>((_, reject) => { abort = () => reject(signal.reason); signal.addEventListener('abort', abort, { once: true }) })
+    const call = this.invocation.run({ identity, signal }, () => Promise.race([Promise.resolve().then(() => { signal.throwIfAborted(); return work(signal) }), cancelled]))
+    this.calls.add(call)
+    try { return await call } finally { signal.removeEventListener('abort', abort); lifetime.abort(); this.calls.delete(call) }
   }
 }

@@ -3,13 +3,15 @@ import { deploymentUrl } from '@/utils/deployment-url'
 import { agentMetadata } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
+import PluginAgentsPanel from '@/components/plugins/PluginAgentsPanel.vue'
+import { studioAgentAction, type AgentUpdate } from '@/api/studio/agents'
+import type { RouteLocationRaw } from 'vue-router'
 import { getAgentUpdatePolicies, setAgentAutoUpdate, type AgentUpdatePolicyState } from '@/api/coding-agents'
 import { computed, defineAsyncComponent, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import {
-  checkCodingAgentUpdate,
   deleteCodingAgent,
   fetchCodingAgentsStatus,
   installCodingAgent,
@@ -424,6 +426,16 @@ async function handleInstall(id: CodingAgentId, options: { version?: string; rol
     if ((id === 'cursor' || id === 'antigravity' || agentMetadata(id)?.installation.method === 'manual') && typeof window !== 'undefined') {
       window.open(agentMetadata(id)?.installation.docsUrl || (id === 'antigravity' ? 'https://antigravity.google/docs/cli/install' : 'https://cursor.com/install'), '_blank', 'noopener,noreferrer')
     }
+    const installed = toolStatus(id)
+    const target = options.version || availableUpdateVersion(id)
+    if (installed?.installed && target && !options.rollback) {
+      await studioAgentAction(id, 'upgrade', { version: target, expectedVersion: installed.version })
+      tools.value = (await fetchCodingAgentsStatus()).tools
+      updateInfo.value[id] = null
+      await refreshPolicies()
+      message.success(t('codingAgents.installSuccess'))
+      return
+    }
     const result = await installCodingAgent(id, options)
     tools.value = result.tools
     if (result.updateState) updatePolicies.value[id] = result.updateState
@@ -457,10 +469,16 @@ async function handleDelete(id: CodingAgentId) {
   }
 }
 
+async function openAgentSettings(id: CodingAgentId) {
+  try { await router.push(await studioAgentAction<RouteLocationRaw>(id, 'settings')) }
+  catch (error) { message.error(errorMessage(error)) }
+}
+
 async function handleCheckUpdate(id: CodingAgentId) {
   checkingUpdate.value[id] = true
   try {
-    const result = await checkCodingAgentUpdate(id)
+    const checked = await studioAgentAction<AgentUpdate>(id, 'check-update')
+    const result: CodingAgentUpdateResult = { success: true, tool: toolStatus(id)!, ...checked }
     if (!result.success) throw new Error(result.message || t('codingAgents.checkUpdateFailed'))
     replaceTool(result.tool)
     updateInfo.value[id] = result
@@ -519,6 +537,7 @@ onUnmounted(() => {
 
       <div class="agent-manager-spin">
         <div class="agent-manager-content">
+          <PluginAgentsPanel />
           <NAlert v-if="loadError" type="error" :bordered="false">
             {{ loadError }}
           </NAlert>
@@ -640,10 +659,7 @@ onUnmounted(() => {
                   size="small"
                   v-if="agentMetadata(agent.id)?.config.mcp || agentMetadata(agent.id)?.config.settings"
                   :data-testid="`agent-settings-${agent.id}`"
-                  @click="router.push({
-                    name: 'codingAgent.config',
-                    params: { agentId: agent.id, section: agentMetadata(agent.id)?.config.settings || agentMetadata(agent.id)?.config.memory ? 'settings' : 'mcp' },
-                  })"
+                  @click="openAgentSettings(agent.id)"
                 >
                   {{ t('sidebar.settings') }}
                 </NButton>
