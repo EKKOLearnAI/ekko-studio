@@ -157,6 +157,19 @@ Studio 的 harness/build 检查 SDK 变化是否同时修改了架构、ctx 或�
 
 例如 `/#/studio/plugins/session-dashboard/sessions` 和 `/#/studio/plugins/notebook/notes`。独立页面使用完整内容区。切换 Profile 后插件列表与导航入口不变，页面重新绑定当前调用上下文。全局禁用或卸载会移除各账号的入口与挂载实例；不存在的页面显示返回中心的提示。`ctx.ui.navigate('/studio/plugins/notebook/notes')` 可跳到其他已声明页面，实际访问仍受目标插件状态约束。
 
+### 提交插件审核
+
+插件中心提供“提交插件”入口，填写仓库地址、名称、描述后发送给云端管理员审核。
+所有能进入插件中心的账号均可提交；成功提示等待审核，不改变本机已安装列表。
+
+客户端直接向 `https://api.ekkostudio.xyz/api/studio/plugins/submissions` 发送普通 JSON，
+仅包含 repository/name/description，不携带本机 Authorization、cookie 或 Profile。
+名称最多 160 字符，描述最多 4000 字符；仓库地址最多 2048 字符，使用 HTTP(S)，
+不含账号密码、查询参数或锚点。提交时校验字段并禁止重复点击，失败保留输入。
+网络中断或超时无法证明服务端没有收到，因此提示结果未确认且不自动重试。
+
+本次只接提交。云端列表、仓库数据抓取和安装来源解析在后台流程确定后接入。
+
 ### 全局安装与调用上下文
 
 全局注册表位于 Web UI 状态目录的 `plugins/global/state.json`。一个插件只激活一个后端实例，依赖检查、配置、版本并发控制和启停均为全局；定时器不会因切换账号或 Profile 重复启动。插件自身定时任务使用最近激活它的管理员默认 Profile。该身份失去权限时相应后台 API 调用会被拒绝，不影响其他合法账号调用插件。

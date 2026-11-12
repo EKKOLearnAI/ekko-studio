@@ -10,6 +10,7 @@ import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
 import PluginConfigFields from '@/components/plugins/PluginConfigFields.vue'
 import PluginDevelopmentPanel from '@/components/plugins/PluginDevelopmentPanel.vue'
+import PluginSubmissionDialog from '@/components/plugins/PluginSubmissionDialog.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import { pluginLinks, safePluginLink } from '@/plugins/navigation'
 
@@ -17,6 +18,7 @@ const { t } = useI18n(), dialog = useDialog(), message = useMessage(), router = 
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
 const busy = ref(false), actionError = ref(''), source = ref(''), trusted = ref(false), showInstall = ref(false)
 const search = ref(''), category = ref('all'), state = ref('all')
+const showSubmission = ref(false)
 const selectedId = ref(''), detailTab = ref('overview')
 const configs = ref<Record<string, Record<string, Json>>>({}), sources = ref<Record<string, string>>({})
 const configValid = ref<Record<string, boolean>>({})
@@ -120,7 +122,10 @@ async function logs(id: string) {
           <h1>{{ t('studioPlugins.hero') }}</h1>
           <p>{{ t('studioPlugins.description') }}</p>
         </div>
-        <NButton v-if="canManage" type="primary" size="large" @click="showInstall = true">{{ t('studioPlugins.installTitle') }}</NButton>
+        <div class="actions">
+          <NButton size="large" @click="showSubmission = true">{{ t('studioPluginSubmission.title') }}</NButton>
+          <NButton v-if="canManage" type="primary" size="large" @click="showInstall = true">{{ t('studioPlugins.installTitle') }}</NButton>
+        </div>
       </header>
       <NAlert v-if="error || actionError" type="error" closable @close="error = ''; actionError = ''">{{ actionError || error }}</NAlert>
       <PluginDevelopmentPanel v-if="canManage" @changed="refresh(true)" />
@@ -161,6 +166,7 @@ async function logs(id: string) {
     </div>
     </div>
 
+    <PluginSubmissionDialog v-model:show="showSubmission" />
     <NModal v-model:show="showInstall" preset="card" :title="t('studioPlugins.installTitle')" class="plugin-install-modal" style="width: min(540px, calc(100vw - 32px))">
       <div class="detail-stack">
         <p>{{ t('studioPlugins.installHint') }}</p>
