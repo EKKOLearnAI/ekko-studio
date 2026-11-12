@@ -7,11 +7,17 @@ import type { RouteLocationRaw } from 'vue-router'
 import { isStoredSuperAdmin } from '@/api/client'
 import { listStudioAgents, studioAgentAction, type AgentUpdate, type StudioAgent } from '@/api/studio/agents'
 import { syncPluginAgentOptions } from '@/utils/agent-options'
+import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
+import AgentManagerCard from '@/components/coding-agents/AgentManagerCard.vue'
 
 const router = useRouter(), { t } = useI18n(), message = useMessage()
 const agents = ref<StudioAgent[]>([]), error = ref(''), busy = ref('')
 const busyAction = ref('')
 const updates = ref<Record<string, AgentUpdate>>({})
+function formatVersion(version: string) {
+  const value = version.trim()
+  return value ? (/^v(?=\d)/i.test(value) ? value : `v${value}`) : t('agentManager.unknownVersion')
+}
 let alive = true, sequence = 0
 async function refresh() {
   const current = ++sequence
@@ -48,32 +54,29 @@ onBeforeUnmount(() => { alive = false; sequence++; window.removeEventListener('s
 </script>
 
 <template>
-  <NAlert v-if="error" type="error" closable @close="error = ''">{{ error }}</NAlert>
-  <section v-if="agents.length" class="plugin-agent-grid">
-    <article v-for="agent in agents" :key="agent.id" class="plugin-agent-card" data-theme-surface="card" :data-testid="`agent-card-${agent.id}`">
-      <header class="plugin-agent-heading">
-        <img v-if="agent.icon" :src="agent.icon" alt="" width="40" height="40" />
-        <div><h3>{{ agent.name }}</h3><span>{{ agent.status.installed ? agent.status.version : t('codingAgents.notInstalled') }}</span></div>
-        <NTag size="small" :bordered="false">{{ agent.vendor }}</NTag>
-      </header>
-      <p v-if="agent.description">{{ agent.description }}</p>
-      <NAlert v-if="agent.status.error" type="error">{{ agent.status.error }}</NAlert>
-      <div class="plugin-agent-actions">
-        <NButton v-if="agent.actions.settings" size="small" secondary :loading="busy === agent.id && busyAction === 'settings'" :disabled="Boolean(busy)" @click="action(agent, 'settings')">{{ t('sidebar.settings') }}</NButton>
-        <NButton v-if="!agent.status.installed && agent.actions.upgrade && agent.actions.checkUpdate && isStoredSuperAdmin()" size="small" type="primary" :loading="busy === agent.id && busyAction === 'install'" :disabled="Boolean(busy)" @click="action(agent, 'install')">{{ t(busy === agent.id && busyAction === 'install' ? 'codingAgents.installing' : 'codingAgents.kinds.install') }}</NButton>
-        <NButton v-if="agent.actions.checkUpdate && (agent.status.installed || !agent.actions.upgrade) && isStoredSuperAdmin()" size="small" secondary :loading="busy === agent.id && busyAction === 'check-update'" :disabled="Boolean(busy)" @click="action(agent, 'check-update')">{{ t('codingAgents.checkUpdate') }}</NButton>
-        <NButton v-if="agent.status.installed && agent.actions.upgrade && updates[agent.id]?.updateAvailable && isStoredSuperAdmin()" size="small" type="primary" :loading="busy === agent.id && busyAction === 'upgrade'" :disabled="Boolean(busy)" @click="action(agent, 'upgrade')">{{ t('agentManager.updateToVersion', { version: updates[agent.id]?.latestVersion }) }}</NButton>
-      </div>
-    </article>
-  </section>
+  <NAlert v-if="error" class="plugin-agent-error" type="error" closable @close="error = ''">{{ error }}</NAlert>
+  <AgentManagerCard
+    v-for="agent in agents"
+    :key="agent.id"
+    :name="agent.name"
+    :logo="chatSessionAgentAvatar({ agent: agent.id }).src"
+    :version="agent.status.installed ? formatVersion(agent.status.version) : undefined"
+    :data-testid="`agent-card-${agent.id}`"
+  >
+    <template #badges>
+      <NTag size="small" :bordered="false">{{ agent.vendor }}</NTag>
+      <NTag :type="agent.status.installed ? 'success' : 'warning'" size="small" :bordered="false">{{ t(agent.status.installed ? 'codingAgents.installed' : 'codingAgents.notInstalled') }}</NTag>
+    </template>
+    <template #actions>
+      <NButton v-if="agent.actions.settings" size="small" secondary :loading="busy === agent.id && busyAction === 'settings'" :disabled="Boolean(busy)" @click="action(agent, 'settings')">{{ t('sidebar.settings') }}</NButton>
+      <NButton v-if="!agent.status.installed && agent.actions.upgrade && agent.actions.checkUpdate && isStoredSuperAdmin()" size="small" type="primary" secondary :loading="busy === agent.id && busyAction === 'install'" :disabled="Boolean(busy)" @click="action(agent, 'install')">{{ t('codingAgents.installNow') }}</NButton>
+      <NButton v-if="agent.actions.checkUpdate && (agent.status.installed || !agent.actions.upgrade) && !(agent.actions.upgrade && updates[agent.id]?.updateAvailable) && isStoredSuperAdmin()" size="small" secondary :loading="busy === agent.id && busyAction === 'check-update'" :disabled="Boolean(busy)" @click="action(agent, 'check-update')">{{ t('codingAgents.checkUpdate') }}</NButton>
+      <NButton v-if="agent.status.installed && agent.actions.upgrade && updates[agent.id]?.updateAvailable && isStoredSuperAdmin()" size="small" type="primary" secondary :loading="busy === agent.id && busyAction === 'upgrade'" :disabled="Boolean(busy)" @click="action(agent, 'upgrade')">{{ t('agentManager.updateToVersion', { version: formatVersion(updates[agent.id]!.latestVersion) }) }}</NButton>
+    </template>
+    <NAlert v-if="agent.status.error" type="error">{{ agent.status.error }}</NAlert>
+  </AgentManagerCard>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables' as *;
-.plugin-agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
-.plugin-agent-card { background: $bg-card; color: $text-primary; border: 1px solid $border-light; border-radius: $radius-lg; padding: 16px; min-width: 0; }
-.plugin-agent-heading, .plugin-agent-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.plugin-agent-heading h3 { margin: 0; }
-.plugin-agent-heading span, .plugin-agent-card p { color: $text-muted; }
-.plugin-agent-actions { margin-top: 16px; }
+.plugin-agent-error { grid-column: 1 / -1; }
 </style>
