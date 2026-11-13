@@ -693,6 +693,12 @@ description form the main identity; author, repository and version metadata stay
 together, with primary actions separated from details and uninstall. Rows wrap
 on narrow screens without hiding management actions. The header links directly
 to development documentation and the plugin template, alongside plugin submission.
+It also offers **Create a blank project** and **Link an existing project** guides,
+with copyable CLI commands to run on the Studio server machine. Creating a project
+includes a minimal settings-page example, SDK and development docs and registers
+the project automatically; linking requires an existing `plugin.json`. Both guides
+explain how to enable the project from the development tab and use the same Studio
+data home as the CLI. Opening a guide or copying a command does not execute it.
 
 Entries in both lists show the declared author, a direct repository link, cached
 GitHub stars and version information. Stars come from the cloud directory's

@@ -12,6 +12,7 @@ import PluginCardMetadata from '@/components/plugins/PluginCardMetadata.vue'
 import PluginInstallFeedback from '@/components/plugins/PluginInstallFeedback.vue'
 import PluginConfigFields from '@/components/plugins/PluginConfigFields.vue'
 import PluginSubmissionDialog from '@/components/plugins/PluginSubmissionDialog.vue'
+import PluginDevelopmentGuide from '@/components/plugins/PluginDevelopmentGuide.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import ExternalLinkIcon from '@/components/common/ExternalLinkIcon.vue'
 import ChevronRightIcon from '@/components/common/ChevronRightIcon.vue'
@@ -44,6 +45,7 @@ watch(scope, value => { if (value !== 'all' && ['installed', 'notInstalled'].inc
 const selectedMarketId = ref('')
 const selectedMarket = computed({ get: () => marketEntries.value.find(plugin => plugin.id === selectedMarketId.value), set: (plugin: MarketPlugin | undefined) => { selectedMarketId.value = plugin?.id || '' } })
 const showSubmission = ref(false)
+const developmentGuide = ref<'create' | 'link' | null>(null)
 const selectedId = ref(''), detailTab = ref('overview')
 const selectedDevelopment = ref(false)
 const configs = ref<Record<string, Record<string, Json>>>({}), sources = ref<Record<string, string>>({})
@@ -293,13 +295,20 @@ async function logs(id: string) {
     <div class="center-content">
       <aside class="developer-banner" data-theme-surface="card" :aria-label="t('studioPlugins.developTitle')">
         <svg class="developer-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 7-5 5 5 5m10-10 5 5-5 5M14 4l-4 16" /></svg>
-        <div class="developer-copy"><h1>{{ t('studioPlugins.developTitle') }}</h1><p>{{ t('studioPlugins.developDescription') }}</p></div>
+        <div class="developer-copy">
+          <h1>{{ t('studioPlugins.developTitle') }}</h1><p>{{ t('studioPlugins.developDescription') }}</p>
+          <div class="developer-start-actions">
+            <NButton size="small" secondary @click="developmentGuide = 'create'">{{ t('studioPlugins.developCreate') }}</NButton>
+            <NButton size="small" secondary @click="developmentGuide = 'link'">{{ t('studioPlugins.developLink') }}</NButton>
+          </div>
+        </div>
         <nav class="developer-links" :aria-label="t('studioPlugins.developResources')">
           <a href="https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md" target="_blank" rel="noopener noreferrer"><span>{{ t('studioPlugins.developGuide') }}</span><ExternalLinkIcon /></a>
           <a href="https://github.com/EKKOLearnAI/ekko-studio/tree/main/packages/plugin-sdk/template" target="_blank" rel="noopener noreferrer"><span>{{ t('studioPlugins.developTemplate') }}</span><ExternalLinkIcon /></a>
           <NButton text @click="showSubmission = true">{{ t('studioPluginSubmission.title') }}</NButton>
         </nav>
       </aside>
+      <PluginDevelopmentGuide v-model:mode="developmentGuide" />
       <PluginInstallFeedback v-if="installing && !installConfirmationOpen && !showInstall && !selected" loading />
       <NAlert v-if="error || actionError" type="error" closable @close="error = ''; actionError = ''">{{ actionError || error }}</NAlert>
       <NAlert v-if="developmentError" type="error" closable @close="developmentError = ''">{{ developmentError }}</NAlert>
@@ -526,6 +535,7 @@ async function logs(id: string) {
 .developer-copy { flex: 1; min-width: 0; }
 .developer-copy h1 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
 .developer-copy p { font-size: 12px; }
+.developer-start-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .developer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; font-size: 12px; line-height: 20px; }
 .developer-links a { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; color: $text-secondary; text-decoration: none; }
 .developer-links a:hover { color: $accent-primary; text-decoration: underline; text-underline-offset: 3px; }
