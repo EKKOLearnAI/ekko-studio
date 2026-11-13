@@ -33,6 +33,8 @@ export interface AvailableModelGroup {
   available_models?: string[]
   model_count?: number
   api_key: string
+  /** The selected profile can resolve its custom-provider key on the server. */
+  credential_configured?: boolean
   api_mode?: ProviderApiMode
   api_mode_by_model?: Record<string, ProviderApiMode | null>
   builtin?: boolean

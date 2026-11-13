@@ -24,7 +24,11 @@ Voice has two control planes:
 - **Hermes native** keeps using provider blocks already present in the profile's `config.yaml`, including local providers such as Local STT, Piper, NeuTTS, and KittenTTS.
 - **Ekko Studio** keeps upstream settings and secrets in Web UI storage. Hermes sees one command provider named `hermes-studio`, regardless of which upstream Web UI provider is active.
 
-Selecting a Web UI-managed provider writes only the `hermes-studio` command provider into the active profile. Existing native provider blocks are merged and preserved. The command calls a profile-scoped loopback URL:
+Selecting or saving a Web UI-managed provider updates only the corresponding STT or TTS section in the requested profile. Existing native provider blocks and other section settings are merged and preserved. Deleting an inactive provider or its secret does not write the profile. Deleting an active provider or secret updates only an existing Studio-managed selection, using the appropriate fallback when needed; a native selection is left alone.
+
+An existing `hermes-studio` block with a hand-edited command or a different provider type is preserved in full, including when selecting a Web UI provider again. Explicit selection can change the section's `provider` selector, but does not reclaim that custom block. To restore Studio's generated command, remove the custom `providers.hermes-studio` block and select the Web UI provider again. Commands matching Studio's generated transport remain managed across loopback port changes; other command changes, including a different curl config path, are treated as custom.
+
+Studio's generated command calls a profile-scoped loopback URL:
 
 ```text
 /api/studio/voice/proxy/:profile/v1/tts

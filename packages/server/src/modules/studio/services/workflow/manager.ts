@@ -1148,7 +1148,7 @@ export class WorkflowManager extends EventEmitter<WorkflowManagerEvents> {
   async recoverActiveRuns(workflowId?: string): Promise<{ runs: number; sessions: number }> {
     const activeRuns = listActiveWorkflowRuns().filter(run => !workflowId || run.workflow_id === workflowId)
     if (activeRuns.length === 0) return { runs: 0, sessions: 0 }
-    const reason = 'Workflow runtime cannot safely resume because the server restarted'
+    const reason = 'Workflow execution was interrupted because the server process exited or restarted. Automatic resume is unsafe; check completed work and rerun from a node in the run details.'
     const finishedAt = Date.now()
     const sessionIds = new Set<string>()
     for (const run of activeRuns) {

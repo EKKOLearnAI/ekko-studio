@@ -43,6 +43,7 @@ vi.mock('../../packages/server/src/modules/hermes/services/providers/copilot-mod
 
 import { PROVIDER_ENV_MAP } from '../../packages/server/src/modules/hermes/services/profiles/config'
 import { getAvailable, getAvailableModelConfigForProfile } from '../../packages/server/src/modules/hermes/controllers/models'
+import { resolveCustomProviderApiKey } from '../../packages/server/src/modules/studio/contracts/provider-compat'
 
 const keylessProviders = Object.entries(PROVIDER_ENV_MAP)
   .filter(([, mapping]) => !mapping.api_key_env)
@@ -122,4 +123,63 @@ it('still requires Copilot activation and a runtime-readable token', async () =>
   mocks.copilotToken.mockResolvedValue('fixture-copilot')
   expect((await getAvailableModelConfigForProfile('work')).groups.map(group => group.provider)).toEqual(['copilot'])
   expect(mocks.copilotToken).toHaveBeenCalledWith('', false)
+})
+
+it.each(['custom_providers', 'providers'])(
+  'advertises profile key_env credentials from %s without returning the secret',
+  async schema => {
+    const entry = { name: 'cn', base_url: 'https://provider.invalid/v1', key_env: 'CN_API_KEY', model: 'deepseek-v4.1-flash' }
+    mocks.readConfig.mockResolvedValue(schema === 'providers'
+      ? { providers: { cn: entry } } : { custom_providers: [entry] })
+    await writeFile(join(mocks.home, 'work', '.env'), 'CN_API_KEY="fixture-profile-key"\n')
+    const ctx = { query: { profile: 'work' }, state: {} } as any
+
+    await getAvailable(ctx)
+
+    expect(ctx.status).not.toBe(500)
+    expect(ctx.body.groups).toEqual([expect.objectContaining({
+      provider: 'custom:cn', credential_configured: true, api_key: '',
+    })])
+    expect(ctx.body.profiles[0].groups[0].credential_configured).toBe(true)
+    expect(JSON.stringify(ctx.body)).not.toContain('fixture-profile-key')
+    expect(resolveCustomProviderApiKey({ ...entry, source: schema as 'providers' | 'custom_providers' },
+      'CN_API_KEY="fixture-profile-key"\n')).toBe('fixture-profile-key')
+  },
+)
+
+it.each(['', 'CN_API_KEY=\n', 'CN_API_KEY=""\n', "CN_API_KEY=''\n"])(
+  'does not advertise a missing or empty key_env credential (%j)', async env => {
+    mocks.readConfig.mockResolvedValue({ providers: { cn: {
+      base_url: 'https://provider.invalid/v1', key_env: 'CN_API_KEY', model: 'model-a',
+    } } })
+    await writeFile(join(mocks.home, 'work', '.env'), env)
+    const result = await getAvailableModelConfigForProfile('work')
+    expect(result.groups[0]).toMatchObject({ provider: 'custom:cn', credential_configured: false, api_key: '' })
+  },
+)
+
+it('keeps readiness profile-local while merging the aggregate catalog', async () => {
+  mocks.readConfig.mockResolvedValue({ providers: { cn: {
+    base_url: 'https://provider.invalid/v1', key_env: 'CN_API_KEY', model: 'model-a',
+  } } })
+  await writeFile(join(mocks.home, 'work', '.env'), 'CN_API_KEY=work-only-key\n')
+  const ctx = { query: {}, state: {} } as any
+
+  await getAvailable(ctx)
+
+  expect(ctx.body.profiles.find((profile: any) => profile.profile === 'default').groups[0].credential_configured).toBe(false)
+  expect(ctx.body.profiles.find((profile: any) => profile.profile === 'work').groups[0].credential_configured).toBe(true)
+  expect(ctx.body.groups[0].credential_configured).toBe(true)
+  expect(JSON.stringify(ctx.body)).not.toContain('work-only-key')
+})
+
+it('preserves inline-key precedence over key_env', async () => {
+  const entry = { name: 'cn', base_url: 'https://provider.invalid/v1', api_key: 'inline-key', key_env: 'CN_API_KEY', model: 'model-a' }
+  mocks.readConfig.mockResolvedValue({ providers: { cn: entry } })
+  await writeFile(join(mocks.home, 'work', '.env'), 'CN_API_KEY=env-key\n')
+
+  const result = await getAvailableModelConfigForProfile('work')
+
+  expect(result.groups[0]).toMatchObject({ credential_configured: true, api_key: 'inline-key' })
+  expect(resolveCustomProviderApiKey({ ...entry, source: 'providers' }, 'CN_API_KEY=env-key\n')).toBe('inline-key')
 })

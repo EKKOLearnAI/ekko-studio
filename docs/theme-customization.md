@@ -37,6 +37,13 @@ value. Resetting one control removes only that override. Restoring defaults
 clears all appearance overrides and the three original color/font controls;
 the uploaded background retains its separate removal action.
 
+An explicit blur of zero disables the region's entire backdrop filter, including
+saturation. A global zero applies to all eight regions unless a region sets a
+positive blur. Missing/reset blur inherits as usual, including the wallpaper's
+glass defaults. This allows wallpaper surfaces to retain their color/opacity
+without backdrop filtering. Fixed table columns keep their separate legibility
+effect described below.
+
 Global settings additionally control secondary/muted/link colors, background
 gradient and image fit/position/dimming, border width, control height, spacing,
 chat width, font family, line height and letter spacing. Background opacity
