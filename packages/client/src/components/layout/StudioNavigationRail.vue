@@ -9,7 +9,7 @@ import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import PageSidebarFooter from './PageSidebarFooter.vue'
 import { useMobileNavigation } from '@/composables/usePageSidebar'
 import { pluginPages, pluginNavigation, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
-import PluginIcon from '@/components/plugins/PluginIcon.vue'
+import PluginNavigationIcon from '@/components/plugins/PluginNavigationIcon.vue'
 import PluginSymbol from '@/components/common/PluginIcon.vue'
 
 const route = useRoute()
@@ -17,10 +17,11 @@ const { t } = useI18n()
 const { snapshot } = usePluginCatalog()
 const pluginEntries = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginNavigation(plugin).map(view => ({ plugin, view }))))
 function pluginActive(id: string, view: { id: string; slot: string }) {
-  if (route.name !== 'studio.pluginPage' || route.params.pluginId !== id) return false
+  if (route.params.pluginId !== id) return false
   const plugin = snapshot.value.plugins.find(plugin => plugin.manifest.id === id)
   const current = plugin && pluginPages(plugin).find(item => item.id === (route.params.viewId || pluginNavigation(plugin)[0]?.id))
-  return current?.slot === 'workspace' ? view.slot === 'workspace' : current?.id === view.id
+  const workspaceEntries = plugin ? pluginNavigation(plugin).filter(entry => entry.slot === 'workspace') : []
+  return current?.slot === 'workspace' && workspaceEntries.length === 1 ? view.slot === 'workspace' : current?.id === view.id
 }
 const canManageAgents = computed(() => isStoredSuperAdmin())
 const entries = computed(() => [
@@ -37,7 +38,7 @@ const entries = computed(() => [
 ])
 const activeKey = computed(() => {
   const name = String(route.name || '')
-  if (route.meta.hermesConfig || route.meta.ekkoConfig || route.meta.codingAgentConfig) return 'agents'
+  if (route.meta.hermesConfig || route.meta.ekkoConfig || route.meta.codingAgentConfig || route.name === 'studio.pluginAgentSettings') return 'agents'
   if (['hermes.chat', 'hermes.session', 'hermes.globalAgent', 'hermes.globalAgentSession'].includes(name)) return 'chat'
   if (name.startsWith('hermes.groupChat')) return 'group'
   if (name.startsWith('hermes.history')) return 'history'
@@ -70,8 +71,8 @@ function handleNavigate(key: string) {
       </NTooltip>
       <div v-if="entry.key === 'studioPlugins' && pluginEntries.length" class="studio-navigation-rail__plugins" role="group" :aria-label="t('studioPlugins.workspace')">
         <NTooltip v-for="{ plugin, view } in pluginEntries" :key="plugin.manifest.id + ':' + view.id" placement="right" trigger="hover">
-          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin, view.id)" :active="pluginActive(plugin.manifest.id, view)" :aria-label="view.slot === 'workspace' ? plugin.manifest.name : view.title" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginIcon :plugin="plugin" :icon="view.icon" compact /></RouteLinkItem></template>
-          {{ view.slot === 'workspace' ? plugin.manifest.name : view.title }}
+          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin, view.id)" :active="pluginActive(plugin.manifest.id, view)" :aria-label="view.title" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginNavigationIcon :icon="view.icon" :size="22" /></RouteLinkItem></template>
+          {{ view.title }}
         </NTooltip>
       </div>
       </template>

@@ -365,11 +365,15 @@ test('pages messages and old collaboration cards together within a bounded windo
 
 test('can continue to older history when a timeline page contains only hidden display rows',async ({page})=>{
   const {state,errors}=await setup(page)
+  // Let resume finish before the independent settings snapshot, as can happen
+  // on a cold CI load. Its session summary has no message count.
+  state.snapshotDelay=500
   state.timelinePages.set('',{messages:[{id:'hidden',role:'assistant',content:'',timestamp:5000}],personFlows:{flows:[],cards:[],active_flows:[],active_flow_count:0,history_cleared_at:0,
     timeline:{items:[{id:'hidden',kind:'message',timestamp:5000,cursor:'hidden-page'}],before:'hidden-page',has_more:true,history_revision:0}}})
   state.timelinePages.set('hidden-page',{messages:[{id:'older-visible',role:'assistant',content:'更早的公开回复',timestamp:4000}],personFlows:{flows:[],cards:[],active_flows:[],active_flow_count:0,history_cleared_at:0,
     timeline:{items:[{id:'older-visible',kind:'message',timestamp:4000,cursor:'end'}],before:null,has_more:false,history_revision:0}}})
   await page.reload()
+  await expect(page.getByRole('button',{name:'test-model',exact:true})).toBeVisible()
   const more=page.locator('.history-loader button')
   await expect(more).toBeVisible()
   await more.click()

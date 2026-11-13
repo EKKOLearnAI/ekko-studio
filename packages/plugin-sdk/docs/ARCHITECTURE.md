@@ -28,7 +28,16 @@
 
 ## 页面与桥接
 
-`views` 支持 `page`、`settings`、`workspace`；`workspace.sidebar` 是可选动态侧栏视图。
+`views` 声明页面布局，支持 `page`、`settings`、`workspace`、`agent-settings`；声明页面不会自动产生全局侧栏入口。
+`navigation.main` 和 `navigation.settings` 分别显式声明主侧栏与设置侧栏入口，各项包含 `viewId`、必填 `icon`，以及可选 `title/order`。
+两类入口可独立指向同一已声明页面；省略某个列表或设置为空数组，表示该侧栏不展示入口，页面和 Agent 设置按钮仍可用。
+设置侧栏只接受宿主命名线条 icon；主侧栏还可使用包内 PNG/JPEG/WebP/GIF 或 base64 图片，均不得省略 icon 或依赖插件头像回退。
+命名 icon 清单见 SDK 的 `PLUGIN_ICON_PATHS`。`workspace` 和 `agent-settings` 页面的专属配置侧栏也必须提供命名 `views[].icon`。
+`agent-settings` 使用 `/studio/plugin-agent-settings/:pluginId/:viewId`，同类页面自动组成 Agent 设置导航，返回 Agent 管理；不会自动注册主侧栏或设置侧栏入口。
+`workspace.sidebar` 是可选动态侧栏视图，仅用于 workspace。
+
+迁移：旧版 `views[].slot` 自动产生全局导航的行为已移除。保留旧 slot 可继续直接打开页面；需要侧栏入口的插件应补充 navigation 与 icon。
+旧 `management.settings` 指向 settings 视图的行为仍兼容；新 Agent 建议使用 agent-settings 视图。
 每个视图由同一个客户端入口按 `ctx.view / slot / location` 渲染。路由变化会重新挂载。
 前端在不透明来源 iframe 内运行，不共享宿主 DOM、localStorage、登录 token。
 前端 bundle 必须自包含，框架可打包，资源需内联；iframe 不允许直接网络连接。

@@ -1,16 +1,82 @@
 import { test, expect } from '@playwright/test'
 import { resolve } from 'node:path'
 
+test('keeps global entries independent and opens a three-page Agent settings sidebar with line icons', async ({ page }, testInfo) => {
+  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aUioAAAAASUVORK5CYII='
+  let main = true, settings = true
+  const wrap = (manifest: object) => ({ manifest, status: 'active', enabled: true, config: {}, tools: [], commands: [], actions: [] })
+  const plugins = () => [
+    wrap({ id: 'omp', name: 'Oh My Pi', version: '0.1.7', apiVersion: 1, capabilities: ['agents', 'ui'], client: 'client.mjs', navigation: {}, views: [
+      { id: 'skills', title: 'Skill 管理', slot: 'agent-settings', icon: 'skills' },
+      { id: 'mcp', title: 'MCP 管理', slot: 'agent-settings', icon: 'mcp' },
+      { id: 'settings', title: '配置编辑', slot: 'agent-settings', icon: 'settings' },
+    ] }),
+    wrap({ id: 'entry-demo', name: 'Entry demo', version: '1.0.0', apiVersion: 1, capabilities: ['ui'], client: 'client.mjs', views: [{ id: 'home', title: 'Home', slot: 'page' }], navigation: {
+      main: main ? [{ viewId: 'home', title: '主入口', icon: image }] : [],
+      settings: settings ? [{ viewId: 'home', title: '设置入口', icon: 'code' }] : [],
+    } }),
+  ]
+  await page.route(url => url.pathname.startsWith('/api/'), route => {
+    const path = decodeURIComponent(new URL(route.request().url()).pathname)
+    if (path === '/api/auth/me') return route.fulfill({ json: { user: { id: 1, username: 'Tester', role: 'super_admin' } } })
+    if (path === '/api/studio/plugins') return route.fulfill({ json: { revision: 1, plugins: plugins() } })
+    if (path === '/api/studio/agents') return route.fulfill({ json: { agents: [{ id: 'plugin:omp/omp', name: 'Oh My Pi', vendor: 'Stencil Labs', origin: 'plugin', modes: ['global', 'scoped'], surfaces: ['chat'], actions: { settings: true, checkUpdate: false, upgrade: false }, status: { installed: false, version: '' } }] } })
+    if (path === '/api/studio/agents/plugin:omp/omp/settings') return route.fulfill({ json: { name: 'studio.pluginAgentSettings', params: { pluginId: 'omp', viewId: 'skills' } } })
+    if (path.endsWith('/client')) return route.fulfill({ json: { source: 'export function mount(root,ctx){root.textContent=ctx.slot+":"+ctx.view}' } })
+    if (path.endsWith('/events')) return route.fulfill({ json: { cursor: 0, generation: 'entry-test', events: [] } })
+    return route.fulfill({ json: {} })
+  })
+  const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugins.ts').replace(/^\//, '')
+  await page.route('**/__independent_entries__', route => route.fulfill({ contentType: 'text/html', body: `<div id="app"></div><script type="module" src="${entry}"></script>` }))
+  await page.goto('/__independent_entries__#/hermes/agentManager')
+  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(1)
+  await expect(page.getByRole('link', { name: '主入口', exact: true }).locator('img')).toHaveAttribute('src', image)
+  await page.getByTestId('agent-card-plugin:omp/omp').getByRole('button', { name: '设置', exact: true }).click()
+  const sidebar = page.locator('.plugin-config-sidebar'), frame = page.frameLocator('.plugin-workspace iframe')
+  await expect(sidebar.locator('.plugin-config-nav a')).toHaveCount(3)
+  await expect(sidebar.locator('.plugin-config-nav svg')).toHaveCount(3)
+  await expect(sidebar.locator('img')).toHaveCount(0)
+  await expect(frame.locator('#root')).toHaveText('agent-settings:skills')
+  await sidebar.getByRole('link', { name: 'MCP 管理', exact: true }).click()
+  await page.reload()
+  await expect(frame.locator('#root')).toHaveText('agent-settings:mcp')
+  await page.screenshot({ path: testInfo.outputPath('agent-settings-light.png') })
+  await page.evaluate(async () => { await (window as any).pluginFixture.theme(true); (window as any).pluginFixture.appearance({ brightness: 'dark', appearance: { global: { opacity: .7 }, regions: { sidebar: { opacity: 0, blur: 4, radius: 12, backgroundColor: '#315a76' } } } }); (window as any).pluginFixture.wallpaper(true) })
+  await page.screenshot({ path: testInfo.outputPath('agent-settings-dark-wallpaper.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: 'Menu', exact: true }).click()
+  await page.locator('.studio-mobile-navigation').getByRole('link', { name: '配置编辑', exact: true }).click()
+  await expect(frame.locator('#root')).toHaveText('agent-settings:settings')
+  await expect(page.locator('.studio-mobile-navigation')).not.toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.evaluate(() => (window as any).pluginFixture.navigate('/hermes/settings'))
+  await expect(page.locator('.sidebar').getByRole('link', { name: '设置入口', exact: true }).locator('svg')).toHaveCount(1)
+  await expect(page.locator('.sidebar').getByRole('link', { name: '设置入口', exact: true }).locator('img')).toHaveCount(0)
+  await expect(page.locator('.sidebar a[href*="/omp/"]')).toHaveCount(0)
+  main = false
+  await page.evaluate(() => (window as any).pluginFixture.changed())
+  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(0)
+  await expect(page.locator('.sidebar').getByRole('link', { name: '设置入口', exact: true })).toBeVisible()
+  settings = false
+  await page.evaluate(() => (window as any).pluginFixture.changed())
+  await expect(page.locator('.sidebar').getByRole('link', { name: '设置入口', exact: true })).toHaveCount(0)
+  await page.evaluate(() => (window as any).pluginFixture.navigate('/studio/plugins/entry-demo/home'))
+  await expect(frame.locator('#root')).toHaveText('page:home')
+  expect(errors).toEqual([])
+})
+
 test('exposes plugin navigation, settings and workspaces on desktop and mobile', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   let active = true
   const icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aUioAAAAASUVORK5CYII='
   const plugin = () => ({ manifest: { id: 'rooms', name: 'Team rooms', version: '1.0.0', apiVersion: 1, client: 'client.mjs', capabilities: ['ui'],
     author: { name: 'Example author' }, repository: 'https://example.com/repo', documentation: 'https://example.com/docs', license: 'MIT', keywords: ['collaboration'], icon,
-    workspace: { sidebar: 'room-list' }, views: [
+    navigation: { main: [{ viewId: 'dashboard', icon }, { viewId: 'rooms', title: 'Team rooms', icon: 'chat' }], settings: [{ viewId: 'preferences', icon: 'settings' }] }, workspace: { sidebar: 'room-list' }, views: [
       { id: 'dashboard', title: 'Dashboard', slot: 'page', order: 0 },
-      { id: 'history', title: 'History', slot: 'workspace', order: 2 },
-      { id: 'rooms', title: 'Rooms', slot: 'workspace', order: 1 },
+      { id: 'history', title: 'History', slot: 'workspace', icon: 'history', order: 2 },
+      { id: 'rooms', title: 'Rooms', slot: 'workspace', icon: 'chat', order: 1 },
       { id: 'preferences', title: 'Room settings', slot: 'settings', order: 3 },
     ] }, source: '/tmp/rooms', installedAt: 0, enabled: active, status: active ? 'active' : 'disabled', config: {}, tools: [], commands: [], actions: [] })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
@@ -52,7 +118,7 @@ test('exposes plugin navigation, settings and workspaces on desktop and mobile',
   await expect(page.frameLocator('.plugin-workspace iframe').locator('#root')).toContainText('workspace:rooms:alpha')
   await page.getByRole('button', { name: 'Toggle sidebar' }).click()
   await expect(sidebar).toHaveClass(/collapsed/)
-  await expect(sidebar.locator('.plugin-config-nav-item .plugin-icon').first()).toBeVisible()
+  await expect(sidebar.locator('.plugin-config-nav-item .plugin-navigation-icon').first()).toBeVisible()
   await page.getByRole('button', { name: 'Toggle sidebar' }).click()
   await expect.poll(() => sidebar.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(200)
   const lightColor = await sidebar.evaluate(element => getComputedStyle(element).color)
@@ -94,7 +160,7 @@ test('keeps plugin headers fixed while center and page content scroll on desktop
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   const plugins = Array.from({ length: 18 }, (_, index) => ({ manifest: {
     id: `demo-${index}`, name: `Demo ${index}`, description: 'Plugin content for scrolling verification.', version: '1.0.0', apiVersion: 1,
-    client: 'client.mjs', capabilities: ['ui'], views: [{ id: 'home', title: `Page ${index}`, slot: 'page' }],
+    client: 'client.mjs', capabilities: ['ui'], views: [{ id: 'home', title: `Page ${index}`, slot: 'page' }], navigation: { main: [{ viewId: 'home', icon: 'grid' }] },
   }, source: `/tmp/demo-${index}`, enabled: true, status: 'active', config: {}, tools: [], commands: [], actions: [] }))
   await page.route(url => url.pathname.startsWith('/api/'), route => {
     const path = new URL(route.request().url()).pathname

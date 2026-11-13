@@ -11,7 +11,7 @@ import type { PluginManifest } from '../../packages/plugin-sdk/src'
 const directories: string[] = []
 const definition: PluginManifest = { id: 'workspace', name: 'Workspace', version: '1.0.0', apiVersion: 1, client: 'client.mjs', capabilities: ['ui'],
   author: { name: 'Author', url: 'https://example.com/author' }, repository: 'https://example.com/repo', keywords: ['chat'], icon: 'icon.png',
-  views: [{ id: 'home', title: 'Home', slot: 'workspace' }, { id: 'preferences', title: 'Preferences', slot: 'settings' }], workspace: { sidebar: 'rooms' } }
+  views: [{ id: 'home', title: 'Home', slot: 'workspace', icon: 'grid' }, { id: 'preferences', title: 'Preferences', slot: 'settings' }], workspace: { sidebar: 'rooms' }, navigation: { main: [{ viewId: 'home', icon: 'icon.png' }], settings: [{ viewId: 'preferences', icon: 'settings' }] } }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'plugin-manifest-')); directories.push(root)
   const source = join(root, 'source'); await mkdir(source)
@@ -28,8 +28,28 @@ it('installs standalone metadata and bundled icons without modifying the source 
   const installed = await installPackage(join(root, 'host'), source)
   expect(installed.manifest).toMatchObject({ repository: definition.repository, author: definition.author, workspace: { sidebar: 'rooms' } })
   expect(installed.manifest.icon).toMatch(/^data:image\/png;base64,/)
+  expect(installed.manifest.navigation?.main?.[0].icon).toBe(installed.manifest.icon)
+  expect(installed.manifest.navigation?.settings?.[0].icon).toBe('settings')
+  expect(installed.manifest.views?.[0].icon).toBe('grid')
   expect(JSON.parse(await readFile(join(source, 'plugin.json'), 'utf8')).icon).toBe('icon.png')
   await installed.dispose()
+})
+
+it('separates page declarations from navigation and requires explicit, suitable icons for sidebar entries', () => {
+  expect(manifest({ ...definition, navigation: undefined }).navigation).toBeUndefined()
+  const agentView = { id: 'skills', title: 'Skills', slot: 'agent-settings', icon: 'skills' }
+  expect(manifest({ ...definition, views: [...definition.views!, agentView] }).views?.at(-1)).toEqual(agentView)
+  for (const navigation of [
+    { main: [{ viewId: 'home' }] }, { settings: [{ viewId: 'preferences' }] },
+    { settings: [{ viewId: 'preferences', icon: 'icon.png' }] },
+    { settings: [{ viewId: 'preferences', icon: 'unknown-icon' }] },
+    { main: [{ viewId: 'missing', icon: 'grid' }] },
+    { main: [{ viewId: 'home', icon: 'grid' }, { viewId: 'home', icon: 'chat' }] },
+    { main: [{ viewId: 'home', icon: 'https://example.com/icon.png' }] },
+  ]) expect(() => manifest({ ...definition, navigation })).toThrow()
+  for (const icon of [undefined, 'icon.png', '<svg/>']) {
+    expect(() => manifest({ ...definition, views: [{ ...agentView, icon }], workspace: undefined, navigation: undefined })).toThrow(/named icon/)
+  }
 })
 
 it('requires plugin.json even when package.json contains plugin metadata', async () => {

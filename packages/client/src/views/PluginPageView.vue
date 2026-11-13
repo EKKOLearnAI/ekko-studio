@@ -11,7 +11,8 @@ import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 const route = useRoute(), router = useRouter(), { t } = useI18n()
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
 const plugin = computed(() => snapshot.value.plugins.find(item => item.manifest.id === route.params.pluginId))
-const pages = computed(() => plugin.value ? pluginPages(plugin.value).filter(view => route.name === 'studio.pluginSettings' ? view.slot === 'settings' : view.slot !== 'settings') : [])
+const agentSettings = computed(() => route.name === 'studio.pluginAgentSettings')
+const pages = computed(() => plugin.value ? pluginPages(plugin.value).filter(view => agentSettings.value ? view.slot === 'agent-settings' : route.name === 'studio.pluginSettings' ? view.slot === 'settings' : ['page', 'workspace'].includes(view.slot)) : [])
 const view = computed(() => route.params.viewId ? pages.value.find(item => item.id === route.params.viewId) : pages.value[0])
 const available = computed(() => plugin.value?.status === 'active' && Boolean(view.value))
 </script>
@@ -21,7 +22,7 @@ const available = computed(() => plugin.value?.status === 'active' && Boolean(vi
     <PageHeader>
       <header class="page-header workspace-header">
         <div class="workspace-heading">
-          <RouteLinkItem :to="{ name: 'studio.plugins' }" class="back-link">{{ t('studioPlugins.title') }}</RouteLinkItem>
+          <RouteLinkItem :to="{ name: agentSettings ? 'hermes.agentManager' : 'studio.plugins' }" class="back-link">{{ t(agentSettings ? 'sidebar.agentManager' : 'studioPlugins.title') }}</RouteLinkItem>
           <span aria-hidden="true">/</span><h2>{{ plugin?.manifest.name || t('studioPlugins.workspace') }}</h2>
         </div>
         <NButton v-if="plugin" size="small" @click="router.push({ name: 'studio.plugins', query: { manage: plugin.manifest.id } })">{{ t('studioPlugins.manage') }}</NButton>

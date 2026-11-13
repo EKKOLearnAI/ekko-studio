@@ -7,7 +7,7 @@ test('manages a plugin and runs an isolated frontend through authenticated API a
   const calls: any[] = [], stored = new Map<string, unknown>()
   let notified = false
   const plugin = () => ({ manifest: { id: 'notes', name: 'Notebook', version, apiVersion: 1, client: 'client.mjs', server: 'server.mjs', capabilities: ['ui', 'api.read', 'api.write', 'tools', 'storage.client'],
-    views: [{ id: 'home', title: 'Notebook', slot: 'page' }], configSchema: { type: 'object', properties: { title: { type: 'string', title: 'Notebook title' }, token: { type: 'string', secret: true, title: 'Token' }, items: { type: 'array', title: 'Items', items: { type: 'string' } } } } },
+    views: [{ id: 'home', title: 'Notebook', slot: 'page' }], navigation: { main: [{ viewId: 'home', icon: 'book' }] }, configSchema: { type: 'object', properties: { title: { type: 'string', title: 'Notebook title' }, token: { type: 'string', secret: true, title: 'Token' }, items: { type: 'array', title: 'Items', items: { type: 'string' } } } } },
     source: '/tmp/notes', installedAt: 0, enabled, status: enabled ? 'active' : 'disabled', previousVersion, config, tools: [], commands: [], actions: [] })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const req = route.request(), url = new URL(req.url()), body = req.postData() ? req.postDataJSON() : {}

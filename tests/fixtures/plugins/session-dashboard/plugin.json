@@ -21,5 +21,14 @@
     "url": "https://github.com/EKKOLearnAI"
   },
   "repository": "https://github.com/EKKOLearnAI/ekko-studio",
-  "documentation": "https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md"
+  "documentation": "https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md",
+  "navigation": {
+    "main": [
+      {
+        "viewId": "sessions",
+        "icon": "grid"
+      }
+    ],
+    "settings": []
+  }
 }

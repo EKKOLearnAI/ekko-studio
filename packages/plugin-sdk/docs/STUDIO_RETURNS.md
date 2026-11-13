@@ -32,7 +32,7 @@ return { ok: false, content: '无法保存', error: '目标记录不存在' }
 | 入口 | 返回结构 |
 | --- | --- |
 | getStatus | `{ installed, version, source?, path?, error? }` |
-| management.settings | `{ viewId, query? }`；必须是本插件声明的 settings 视图。 |
+| management.settings | `{ viewId, query? }`；必须是本插件声明的 settings 或 agent-settings 视图；不要求注册任何全局侧栏入口。 |
 | management.checkUpdate | `{ currentVersion, latestVersion, updateAvailable, message? }` |
 | management.upgrade | `{ installedVersion, message? }`；输入含 version/expectedVersion，插件自行处理引擎恢复。 |
 | management.remove | `Promise<void>`；只移除受管引擎，成功后 getStatus 必须返回 installed:false，保留源码、配置、凭证及会话数据。 |

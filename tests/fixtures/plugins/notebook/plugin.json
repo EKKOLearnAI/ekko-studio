@@ -29,13 +29,15 @@
       "id": "notes",
       "title": "共享便签",
       "slot": "workspace",
-      "order": 0
+      "order": 0,
+      "icon": "book"
     },
     {
       "id": "usage",
       "title": "使用说明",
       "slot": "workspace",
-      "order": 1
+      "order": 1,
+      "icon": "history"
     },
     {
       "id": "preferences",
@@ -56,5 +58,19 @@
   "keywords": [
     "notes",
     "workspace"
-  ]
+  ],
+  "navigation": {
+    "main": [
+      {
+        "viewId": "notes",
+        "icon": "grid"
+      }
+    ],
+    "settings": [
+      {
+        "viewId": "preferences",
+        "icon": "settings"
+      }
+    ]
+  }
 }

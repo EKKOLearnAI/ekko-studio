@@ -162,19 +162,24 @@ Studio 的 harness/build 检查 SDK 变化是否同时修改了架构、ctx 或�
 
 插件中心使用卡片、名称/描述/作者/标签搜索、能力分类和状态筛选管理全局已安装插件，不是公共社区目录。详情展示作者、许可证、仓库、主页、文档、问题反馈和更新记录。安装与维护操作收进弹窗和详情抽屉；进入中心不会加载所有插件业务页面。
 
-插件中心入口在主导航显示。已启用插件按以下声明提供业务导航，禁用或卸载后移除对应入口；移动端在导航抽屉中提供相同入口。插件中心和业务页复用宿主固定页头，内容区独立滚动。
+插件中心入口在主导航显示。页面声明与使用入口相互独立：`views` 只定义页面，`navigation.main` 和 `navigation.settings` 分别定义主侧栏与设置侧栏入口。
+未声明某类导航列表，或列表为空，该侧栏就没有入口。页面仍可由直接地址、插件中心链接或 Agent 设置按钮打开。禁用或卸载移除对应入口和挂载实例；移动端使用相同声明。
 
-- `page`：主侧栏入口，打开独立路由 `/studio/plugins/:pluginId/:viewId`。每个页面有自己的导航项。
-- `settings`：设置侧栏入口，打开 `/studio/plugin-settings/:pluginId/:viewId`。插件中心的“配置”页保留宿主管理的 `configSchema` 表单，并链接到这些自定义页面。
-- `workspace`：插件独立侧栏里的页面，路由同 `page`。主侧栏为一个插件展示一个工作区入口；进入后显示类似 Agent 配置区的专属侧栏，统一处理折叠、选中、拖宽、主题和移动端抽屉。
+- `page`：独立页面，路由 `/studio/plugins/:pluginId/:viewId`。
+- `settings`：自定义设置页面，路由 `/studio/plugin-settings/:pluginId/:viewId`，不自动注册设置侧栏。
+- `workspace`：插件工作区页面，路由同 page；同类页面组成专属配置侧栏。
+- `agent-settings`：Agent 设置页面，路由 `/studio/plugin-agent-settings/:pluginId/:viewId`；同类页面组成专属配置侧栏，返回 Agent 管理，不自动注册任一全局入口。
 
-`views[].title/icon/order` 定义标题、图标和插件内排序（默认 `0`，同序保留声明顺序）。
-`workspace.sidebar` 可指定一个不与页面 ID 重复的动态侧栏视图；宿主仍使用同一个客户端入口调用
-`mount(root, ctx)`，其中 `ctx.slot === 'workspace-sidebar'`，`ctx.view` 为该 ID。
-插件在这里通过 RPC 获取群列表、项目列表等内容。`ctx.location.path/query` 提供当前插件路由，
-`ctx.ui.navigate()` 可切换页面或查询参数；路由变化会重新挂载视图，持久化状态应存于后端。
+`views[].title/icon/order` 定义页面标题、专属导航图标和排序。workspace 和 agent-settings 页面必须声明宿主命名线条 icon。
+导航项包含 `viewId`、必填 `icon`，以及可选的 `title/order`；标题默认使用目标页面标题，顺序默认 0，同序保持声明顺序。
+同一页面可以分别注册到两类全局导航，两类导航独立设置标题、图标及排序。主侧栏接受命名 icon、包内 PNG/JPEG/WebP/GIF 或 base64 图片；设置侧栏只接受命名 icon，统一颜色、尺寸和描边。
+命名 icon 为 `settings/skills/mcp/code/terminal/bot/folder/book/chart/grid/history/chat`；原始 SVG、远程图片和缺少 icon 的导航声明会被拒绝。
 
-插件 UI 仅支持以上三类入口，不挂载到单聊 Session 列表、聊天侧边或消息下方。
+`workspace.sidebar` 可指定一个不与页面 ID 重复的动态侧栏视图，调用同一个客户端入口，`ctx.slot === 'workspace-sidebar'`。
+`ctx.location.path/query` 提供页面路由，`ctx.ui.navigate()` 可切换页面或查询参数；路由变化重新挂载视图，持久化状态应存于后端。
+插件中心和业务页复用宿主固定页头，内容区独立滚动。插件不挂载到单聊 Session 列表、聊天侧边或消息下方。
+
+迁移时为需要保留的全局入口补充 navigation；旧 slot 不再隐式产生入口。保留 settings 页面与旧 Agent 设置回调无需改动运行数据。
 
 例如 `/#/studio/plugins/session-dashboard/sessions` 和 `/#/studio/plugins/notebook/notes`。独立页面使用完整内容区。切换 Profile 后插件列表与导航入口不变，页面重新绑定当前调用上下文。全局禁用或卸载会移除各账号的入口与挂载实例；不存在的页面显示返回中心的提示。`ctx.ui.navigate('/studio/plugins/notebook/notes')` 可跳到其他已声明页面，实际访问仍受目标插件状态约束。
 
@@ -225,10 +230,14 @@ RPC、工具、聊天命令、钩子、业务事件和工作流始终使用实�
   "capabilities": ["api.read", "api.write", "ui"],
   "views": [
     { "id": "overview", "title": "Overview", "slot": "page" },
-    { "id": "rooms", "title": "Rooms", "slot": "workspace", "order": 1 },
-    { "id": "history", "title": "History", "slot": "workspace", "order": 2 },
+    { "id": "rooms", "title": "Rooms", "slot": "workspace", "icon": "chat", "order": 1 },
+    { "id": "history", "title": "History", "slot": "workspace", "icon": "history", "order": 2 },
     { "id": "preferences", "title": "Preferences", "slot": "settings" }
   ],
+  "navigation": {
+    "main": [{ "viewId": "overview", "icon": "assets/icon.png" }, { "viewId": "rooms", "title": "Team rooms", "icon": "chat" }],
+    "settings": [{ "viewId": "preferences", "icon": "settings" }]
+  },
   "workspace": { "sidebar": "room-list" }
 }
 ```
@@ -433,7 +442,7 @@ ctx.on('group.message.delta', event => {
 需要拦截时使用 `ctx.hooks`。自定义 `ui.emit` 发给前端，不重新进入后端 `ctx.on`。
 
 前端还可使用 `ctx.storage`、`ctx.models`、`ctx.ui.notify/confirm/prompt/navigate`、
-`ctx.events.on` 和 `ctx.onDispose`。入口类型为 `page`、`settings`、`workspace`；
+`ctx.events.on` 和 `ctx.onDispose`。页面布局类型为 `page`、`settings`、`workspace`、`agent-settings`；
 动态工作区侧栏挂载时的 `ctx.slot` 为 `workspace-sidebar`。这些页面不绑定当前单聊会话，
 需要访问会话时由插件通过 SDK 显式指定 ID，宿主照常检查当前调用者权限。
 页面挂在独立 iframe 中，复用宿主主题变量，通过消息桥调用功能。iframe 不共享 DOM、
@@ -556,7 +565,7 @@ export function apply(ctx) {
 `getStatus` 返回 `{installed, version, source?, path?, error?}`。普通目录不暴露安装路径。
 管理页的操作绑定 `management.settings/checkUpdate/upgrade/remove`；未提供的操作不显示。
 同时提供 `checkUpdate/upgrade` 的插件 Agent，在 `installed:false` 时显示“安装”。点击后宿主先调用 `checkUpdate` 获取准确版本，再调用 `upgrade` 完成首次安装；安装期间禁用重复操作，成功后刷新状态。已安装时显示“检查更新”及可用的版本升级操作。
-设置回调返回本插件清单中 `slot: 'settings'` 的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。
+设置回调返回本插件清单中 `slot: 'agent-settings'`（兼容旧 settings）的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。该回调与两类全局导航独立，三个 Agent 页面可只声明 agent-settings 与命名 icon，不注册 navigation。
 页面继续通过 `client.mjs` 的 `mount(root, ctx)` 和服务端 `ctx.rpc.register` 实现。
 生产安全策略允许视图加载 Blob 模块；iframe 保持不透明来源，自己的 CSP 禁止直接网络请求，业务调用仍经认证桥接。
 插件负责配置持久化、校验、文件格式、环境变量和启动参数，不要求宿主生成设置表单。

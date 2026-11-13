@@ -18,6 +18,12 @@ it('registers the bundled OMP runtime and retains disable/uninstall decisions ac
   await reconcileBuiltinPlugins(manager, who)
   expect(manager.snapshot().plugins).toMatchObject([{ manifest: { id: 'omp' }, source: 'builtin:omp', status: 'active' }])
   expect(manager.registeredAgents().map(agent => agent.id)).toEqual(['plugin:omp/omp'])
+  const bundled = manager.snapshot().plugins[0].manifest
+  expect(bundled.navigation).toEqual({})
+  expect(bundled.views?.map(view => [view.id, view.slot, view.icon])).toEqual([
+    ['skills', 'agent-settings', 'skills'], ['mcp', 'agent-settings', 'mcp'], ['settings', 'agent-settings', 'settings'],
+  ])
+  expect(await manager.registeredAgents()[0].settings(who)).toMatchObject({ name: 'studio.pluginAgentSettings', params: { pluginId: 'omp', viewId: 'skills' } })
   await manager.update(who, 'omp', manager.store.read().revision, { enabled: false })
   await reconcileBuiltinPlugins(manager, who)
   expect(manager.snapshot().plugins[0].enabled).toBe(false)
@@ -56,7 +62,7 @@ it('keeps deliberately installed fixtures and preserves builtin configuration/da
   await manager.update(who, 'omp', manager.store.read().revision, { enabled: false })
   const state = manager.store.read(); state.records.omp.manifest.version = '0.0.1'; manager.store.write(state, state.revision)
   await reconcileBuiltinPlugins(manager, who)
-  expect(manager.snapshot().plugins.find(plugin => plugin.manifest.id === 'omp')).toMatchObject({ enabled: false, manifest: { version: '0.1.6' } })
+  expect(manager.snapshot().plugins.find(plugin => plugin.manifest.id === 'omp')).toMatchObject({ enabled: false, manifest: { version: '0.1.7' } })
   await manager.update(who, 'omp', manager.store.read().revision, { enabled: true })
   expect(manager.runtime(who, 'omp').context().paths.dataDir).toBe(path)
 })
