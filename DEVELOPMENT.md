@@ -83,8 +83,9 @@ registry, local SDK, reload behavior and troubleshooting.
 - Independent Test and E2E workflows run `npm test` and `npm run test:e2e`
   automatically on pushes to `main` and pull requests targeting `main` or `base`;
   both also support manual dispatch. Build reports harness and production-build
-  results separately. Lockfile checks remain separate. Coverage, browser shards
-  and platform test matrices remain removed. See `tests/README.md`.
+  results separately. E2E uses four Chromium shards with one worker each and a
+  combined `E2E` result and HTML report. Lockfile checks remain separate. Blanket
+  coverage and platform test matrices remain removed. See `tests/README.md`.
 
 ## npm Publishing
 
