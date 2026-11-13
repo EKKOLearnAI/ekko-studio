@@ -16,6 +16,7 @@
 | hooks handler | `{ value?: Json, deny?: string }`；value 替换内容，deny 拒绝；不用修改时返回空对象。 |
 | 业务观察 handler | void/Promise<void>；事件不能通过返回值修改原业务。 |
 | ui.emit | 传事件名、JSON data、可选 audience；没有业务返回值。 |
+| 前端 ui.selectModel | 宿主返回 `{profile,provider,model,apiMode?}`，关闭或取消返回 null；model 为规范 ID，不含凭证。调用方自行通过 RPC 保存；加载失败或重复打开时 Promise reject。 |
 
 工具 inputSchema 使用 SDK 的 Schema 子集（type/properties/items/required/enum 等）；
 它与项目 harness 的描述型 schema 分开，宿主 Schema 不支持 description/$ref 等任意 JSON Schema 关键字。

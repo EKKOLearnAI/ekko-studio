@@ -145,10 +145,10 @@ export async function fetchAvailableModels(): Promise<AvailableModelsResponse> {
   return request<AvailableModelsResponse>('/api/hermes/available-models')
 }
 
-export async function fetchAvailableModelsForProfile(profile: string): Promise<AvailableModelsResponse> {
+export async function fetchAvailableModelsForProfile(profile: string, signal?: AbortSignal): Promise<AvailableModelsResponse> {
   const params = new URLSearchParams()
   params.set('profile', profile || 'default')
-  return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`)
+  return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`, { signal })
 }
 
 export interface ProviderModelCatalog {

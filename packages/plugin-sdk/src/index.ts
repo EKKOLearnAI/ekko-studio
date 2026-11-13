@@ -235,6 +235,15 @@ export interface PluginContext {
   onDispose(dispose: Dispose): void
 }
 export interface PluginModule { apply(ctx: PluginContext): void | Dispose | Promise<void | Dispose> }
+export interface ClientModelSelection {
+  profile: string
+  provider: string
+  model: string
+  apiMode?: 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
+}
+export interface ClientModelPickerOptions {
+  current?: Pick<ClientModelSelection, 'provider' | 'model'>
+}
 export interface ClientContext {
   readonly locale?: string
   readonly plugin: Readonly<PluginManifest>
@@ -255,6 +264,8 @@ export interface ClientContext {
     notify(message: string, level?: 'info' | 'error' | 'success'): void
     confirm(message: string): Promise<boolean>
     prompt(message: string): Promise<string | null>
+    /** Open the host picker for this view's Profile. Cancellation returns null; no settings are changed. */
+    selectModel(options?: ClientModelPickerOptions): Promise<ClientModelSelection | null>
     navigate(path: string): void
   }
   onDispose(dispose: Dispose): void

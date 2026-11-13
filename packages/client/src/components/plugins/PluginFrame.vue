@@ -6,6 +6,8 @@ import { NAlert, NInput, useDialog, useMessage } from 'naive-ui'
 import { getStoredUserId } from '@/api/client'
 import { pluginApi, pluginInvoke, pluginRequest, type InstalledPlugin, type Json, type PluginEvent } from '@/api/studio/plugins'
 import { pluginFrameDocument } from '@/plugins/frame'
+import ModelCascader from '@/components/hermes/models/ModelCascader.vue'
+import { usePluginModelPicker } from '@/composables/usePluginModelPicker'
 
 const props = defineProps<{ plugin: InstalledPlugin; profile: string; view: string; slot: string; sessionId?: string; data?: Json; expanded?: boolean; sidebar?: boolean }>()
 const frame = ref<HTMLIFrameElement>()
@@ -14,6 +16,8 @@ const error = ref('')
 const router = useRouter(), dialog = useDialog(), message = useMessage(), { t, locale } = useI18n()
 const route = useRoute()
 const documentSource = pluginFrameDocument()
+const modelPicker = usePluginModelPicker()
+const { request: modelPickerRequest } = modelPicker
 let release: (() => void) | undefined
 
 watch(() => [frame.value, props.plugin, props.profile, props.view, props.sessionId, props.data, route.fullPath, locale.value] as const, async () => {
@@ -78,6 +82,7 @@ watch(() => [frame.value, props.plugin, props.profile, props.view, props.session
         case 'notify': message[['info', 'success', 'error'].includes(args.level) ? args.level as 'info' : 'info'](`${plugin.manifest.name}: ${String(args.message).slice(0, 2000)}`); value = null; break
         case 'confirm': value = await prompt(String(args.message).slice(0, 2000), false); break
         case 'prompt': value = await prompt(String(args.message).slice(0, 2000), true); break
+        case 'select-model': value = await modelPicker.open(profile, args, controller.signal); break
         case 'navigate':
           if (typeof args.path !== 'string' || !/^\/(?:hermes|studio|ekko)\//.test(args.path) || args.path.includes('\\')) throw new Error('Invalid Studio route')
           await router.push(args.path); window.dispatchEvent(new Event('studio.plugin.navigate')); value = null; break
@@ -99,6 +104,11 @@ onBeforeUnmount(() => release?.())
   <section class="plugin-frame" :class="{ 'plugin-frame--expanded': expanded, 'plugin-frame--sidebar': sidebar }" data-theme-surface="card">
     <NAlert v-if="error" type="error">{{ error }}</NAlert>
     <iframe ref="frame" :title="`${plugin.manifest.name}: ${view}`" sandbox="allow-scripts" referrerpolicy="no-referrer" :style="expanded ? undefined : { height: `${height}px` }" />
+    <ModelCascader v-if="modelPickerRequest" :show="true" :groups="modelPickerRequest.catalog.groups"
+      :provider="modelPickerRequest.current?.provider" :model="modelPickerRequest.current?.model"
+      :custom-models="modelPickerRequest.catalog.custom_models || {}" :display-name="modelPicker.displayName"
+      :title="`${plugin.manifest.name} · ${t('models.selectModel')}`" :close-on-select="false"
+      @select="modelPicker.choose" @update:show="show => { if (!show) modelPicker.cancel() }" />
   </section>
 </template>
 <style scoped lang="scss">
