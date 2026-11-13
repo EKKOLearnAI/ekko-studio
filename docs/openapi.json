@@ -53,6 +53,10 @@
       "description": "Scheduled job management"
     },
     {
+      "name": "Script Reports",
+      "description": "Opt-in script invocation reports for no_agent cron jobs"
+    },
+    {
       "name": "Kanban",
       "description": "Kanban board and task management"
     },
@@ -10816,6 +10820,105 @@
         "parameters": [
           {
             "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/hermes/script-reports/enrollments": {
+      "get": {
+        "tags": [
+          "Script Reports"
+        ],
+        "summary": "List enrollments",
+        "description": "GET /api/hermes/script-reports/enrollments",
+        "operationId": "list",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Script Reports"
+        ],
+        "summary": "Create enrollments",
+        "description": "POST /api/hermes/script-reports/enrollments",
+        "operationId": "enroll",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/hermes/script-reports/enrollments/{id}/revoke": {
+      "post": {
+        "tags": [
+          "Script Reports"
+        ],
+        "summary": "Create revoke",
+        "description": "POST /api/hermes/script-reports/enrollments/:id/revoke",
+        "operationId": "revoke",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {
