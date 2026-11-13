@@ -23,12 +23,19 @@ Independent Test (`.github/workflows/test.yml`) and E2E
 (`.github/workflows/playwright.yml`) workflows automatically run `npm test` and
 `npm run test:e2e` on pushes to `main` and pull requests targeting `main` or `base`.
 Both can also be run manually. Build reports the repository harness and production
-build separately. E2E installs Chromium only when browser test files exist, and
-uploads available HTML reports, screenshots and traces even when tests fail.
+build separately. E2E runs four Chromium shards with one worker each and
+`fail-fast: false`, so a failing shard does not cancel the other shards. The
+existing `fullyParallel` configuration distributes individual tests across shards.
+Each shard uploads a blob report and available screenshots/traces, including on
+test failure. A final job merges the blobs into one HTML report (`e2e-results`)
+and preserves the required check name `E2E`. This check fails if any shard fails,
+report merging fails, or any of the four reports is missing. PR updates still
+cancel superseded workflow runs.
 New tests are picked up without editing the workflows, and any assertion failure
 fails the corresponding Test or E2E check. Lockfile checks remain separate.
-Blanket coverage, browser shards and cross-platform regression matrices are not
-required.
+Blanket coverage and cross-platform regression matrices are not required.
+Local feature verification can continue to run only the relevant spec files;
+`--shard=1/4 --workers=1 --reporter=list,blob` reproduces one CI shard.
 
 OMP integration tests use a small local RPC fixture by default. To also verify an
 official standalone engine, set `STUDIO_TEST_OMP_BINARY` to its absolute path and

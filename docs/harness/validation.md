@@ -65,14 +65,15 @@ state and does not require a running Gateway.
 
 - Build (`build.yml`) runs `npm run harness:check` and the production build.
 - Test (`test.yml`) runs `npm test` and reports its own Test check.
-- E2E (`playwright.yml`) runs `npm run test:e2e` and reports its own E2E check.
-  Chromium is installed only when browser test files are present. HTML reports,
-  screenshots and traces are uploaded as available, including on test failure.
+- E2E (`playwright.yml`) runs `npm run test:e2e` across four Chromium shards,
+  each with one worker. Shards finish independently after failures and upload
+  blob reports plus available screenshots/traces. A final `E2E` check merges
+  reports into one HTML artifact and requires all four shards and reports to
+  succeed. Chromium is installed only when browser test files are present.
 - All three workflows run independently on pushes to `main` and pull requests
   targeting `main` or `base`. Test and E2E also support manual dispatch. Any test
   failure fails its own check. Coverage is not required.
-- The old Playwright shards and coding-agent, P2P and desktop-isolation test
-  matrices remain removed.
+- The old coding-agent, P2P and desktop-isolation test matrices remain removed.
 - The NPM lockfile workflow still verifies dependency lockfile synchronization.
 - Desktop/runtime/release workflows retain packaging, signing, artifact and
   isolated update-feed verification, without calls into the removed test suites.
