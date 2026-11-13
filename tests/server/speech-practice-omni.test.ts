@@ -14,7 +14,7 @@ import {
   validateOmniAnalysisInput,
   OMNI_AUDIO_SEGMENT_MAX,
   OMNI_FRAMES_MAX,
-} from '../../packages/server/src/services/speech-practice-omni'
+} from '../../packages/server/src/modules/studio/services/speech-practice-omni'
 
 const originalDashScopeKey = process.env.DASHSCOPE_API_KEY
 const originalDataDir = process.env.MEETING_ASR_DATA_DIR

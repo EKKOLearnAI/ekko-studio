@@ -159,7 +159,7 @@ watch(() => props.isRecording, async (recording) => {
     connect()
     // Notify server to start assist session
     try {
-      await request('/api/meeting-asr/assist/start', {
+      await request('/api/studio/meeting-asr/assist/start', {
         method: 'POST',
         body: JSON.stringify({ sessionId: props.sessionId, sceneTemplate: props.sceneTemplate, profile: resolveProfile() }),
       })
@@ -167,7 +167,7 @@ watch(() => props.isRecording, async (recording) => {
   } else {
     // Stop assist
     try {
-      await request('/api/meeting-asr/assist/stop', {
+      await request('/api/studio/meeting-asr/assist/stop', {
         method: 'POST',
         body: JSON.stringify({ sessionId: props.sessionId }),
       })
@@ -285,7 +285,7 @@ onUnmounted(() => {
         <div
           v-for="round in rounds"
           :key="round.id"
-          class="round-card"
+          class="round-card" data-theme-surface="card"
           :class="`priority-${round.priority}`"
         >
           <!-- Time + priority badge -->
@@ -378,7 +378,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--n-border-color, rgba(255, 255, 255, 0.08));
+  border-bottom: 1px solid var(--n-border-color, rgba(var(--text-primary-rgb), 0.08));
   flex-shrink: 0;
 }
 
@@ -392,8 +392,8 @@ onUnmounted(() => {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 10px;
-  background: rgba(24, 160, 88, 0.15);
-  color: #18a058;
+  background: rgba(var(--success-rgb), 0.15);
+  color: var(--success);
   font-weight: 600;
   letter-spacing: 0.5px;
 }
@@ -408,17 +408,17 @@ onUnmounted(() => {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #555;
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
   transition: background 0.3s;
 }
 
 .status-indicator.active .status-dot {
-  background: #18a058;
+  background: var(--success);
   animation: pulse 2s infinite;
 }
 
 .status-indicator.analyzing .status-dot {
-  background: #f0a020;
+  background: var(--warning);
   animation: pulse 1s infinite;
 }
 
@@ -429,7 +429,7 @@ onUnmounted(() => {
 
 .status-text {
   font-size: 12px;
-  color: var(--n-text-color3, #888);
+  color: var(--n-text-color3, var(--text-primary));
 }
 
 .assist-rounds-area {
@@ -470,9 +470,9 @@ onUnmounted(() => {
   display: flex;
   gap: 24px;
   padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--text-primary-rgb), 0.03);
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(var(--text-primary-rgb), 0.06);
   width: 100%;
 }
 
@@ -486,13 +486,13 @@ onUnmounted(() => {
 .stat-value {
   font-size: 20px;
   font-weight: 700;
-  color: var(--n-text-color, #fff);
+  color: var(--n-text-color, var(--text-primary));
   line-height: 1.2;
 }
 
 .stat-label {
   font-size: 11px;
-  color: var(--n-text-color3, #888);
+  color: var(--n-text-color3, var(--text-primary));
   margin-top: 2px;
 }
 
@@ -502,8 +502,8 @@ onUnmounted(() => {
   gap: 8px;
   padding: 8px 12px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(var(--text-primary-rgb), 0.03);
+  border: 1px solid rgba(var(--text-primary-rgb), 0.06);
   width: 100%;
 }
 
@@ -517,31 +517,31 @@ onUnmounted(() => {
 }
 
 .status-icon.recording {
-  background: rgba(208, 48, 80, 0.15);
-  color: #d03050;
+  background: rgba(var(--error-rgb), 0.15);
+  color: var(--error);
   animation: pulse 2s infinite;
 }
 
 .status-icon.analyzing {
-  background: rgba(240, 160, 32, 0.15);
-  color: #f0a020;
+  background: rgba(var(--warning-rgb), 0.15);
+  color: var(--warning);
   animation: pulse 1.5s infinite;
 }
 
 .status-icon.idle {
-  background: rgba(99, 99, 99, 0.15);
-  color: #888;
+  background: rgba(var(--text-primary-rgb), 0.15);
+  color: var(--text-primary);
 }
 
 .status-text-active {
   font-size: 12px;
   font-weight: 500;
-  color: var(--n-text-color, #fff);
+  color: var(--n-text-color, var(--text-primary));
 }
 
 .status-text-idle {
   font-size: 12px;
-  color: var(--n-text-color3, #888);
+  color: var(--n-text-color3, var(--text-primary));
 }
 
 .usage-hint {
@@ -549,7 +549,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--n-text-color3, #777);
+  color: var(--n-text-color3, var(--text-primary));
   line-height: 1.4;
   text-align: left;
 }
@@ -558,24 +558,24 @@ onUnmounted(() => {
 .round-card {
   border-radius: 10px;
   padding: 12px 14px;
-  background: var(--n-card-color, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--n-border-color, rgba(255, 255, 255, 0.06));
-  border-left: 3px solid rgba(99, 99, 99, 0.3);
+  background: var(--n-card-color, rgba(var(--text-primary-rgb), 0.04));
+  border: 1px solid var(--n-border-color, rgba(var(--text-primary-rgb), 0.06));
+  border-left: 3px solid rgba(var(--text-primary-rgb), 0.3);
   transition: all 0.3s ease;
 }
 
 .round-card.priority-normal {
-  border-left-color: rgba(99, 140, 200, 0.5);
+  border-left-color: rgba(var(--accent-info-rgb), 0.5);
 }
 
 .round-card.priority-attention {
-  border-left-color: #f0a020;
-  background: rgba(240, 160, 32, 0.04);
+  border-left-color: var(--warning);
+  background: rgba(var(--warning-rgb), 0.04);
 }
 
 .round-card.priority-urgent {
-  border-left-color: #d03050;
-  background: rgba(208, 48, 80, 0.06);
+  border-left-color: var(--error);
+  background: rgba(var(--error-rgb), 0.06);
 }
 
 .round-meta {
@@ -587,7 +587,7 @@ onUnmounted(() => {
 
 .round-time {
   font-size: 11px;
-  color: var(--n-text-color3, #777);
+  color: var(--n-text-color3, var(--text-primary));
   font-variant-numeric: tabular-nums;
 }
 
@@ -600,13 +600,13 @@ onUnmounted(() => {
 }
 
 .priority-badge.attention {
-  background: rgba(240, 160, 32, 0.15);
-  color: #f0a020;
+  background: rgba(var(--warning-rgb), 0.15);
+  color: var(--warning);
 }
 
 .priority-badge.urgent {
-  background: rgba(208, 48, 80, 0.15);
-  color: #d03050;
+  background: rgba(var(--error-rgb), 0.15);
+  color: var(--error);
 }
 
 /* Key point - prominent, eye-catching highlight */
@@ -621,21 +621,21 @@ onUnmounted(() => {
 }
 
 .round-keypoint.priority-normal {
-  color: #63e2b7;
-  background: rgba(99, 226, 183, 0.08);
-  border-left: 3px solid #63e2b7;
+  color: var(--success);
+  background: rgba(var(--success-rgb), 0.08);
+  border-left: 3px solid var(--success);
 }
 
 .round-keypoint.priority-attention {
-  color: #f0a020;
-  background: rgba(240, 160, 32, 0.1);
-  border-left: 3px solid #f0a020;
+  color: var(--warning);
+  background: rgba(var(--warning-rgb), 0.1);
+  border-left: 3px solid var(--warning);
 }
 
 .round-keypoint.priority-urgent {
-  color: #ff4d4f;
-  background: rgba(255, 77, 79, 0.15);
-  border-left: 3px solid #ff4d4f;
+  color: var(--error);
+  background: rgba(var(--error-rgb), 0.15);
+  border-left: 3px solid var(--error);
   font-size: 16px;
 }
 
@@ -643,14 +643,14 @@ onUnmounted(() => {
 .round-context {
   margin-bottom: 8px;
   padding: 6px 10px;
-  border-left: 3px solid #70c0e8;
-  background: rgba(112, 192, 232, 0.08);
+  border-left: 3px solid var(--accent-info);
+  background: rgba(var(--accent-info-rgb), 0.08);
   border-radius: 0 6px 6px 0;
 }
 
 .context-quote {
   font-size: 12px;
-  color: #9fd4f0;
+  color: var(--accent-info);
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -662,7 +662,7 @@ onUnmounted(() => {
 .round-analysis {
   font-size: 12px;
   line-height: 1.6;
-  color: #c8c8c8;
+  color: var(--text-primary);
   word-break: break-word;
 }
 
@@ -673,7 +673,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 10px 14px;
   font-size: 12px;
-  color: var(--n-text-color3, #888);
+  color: var(--n-text-color3, var(--text-primary));
 }
 
 /* --- Report action bar --- */
@@ -681,13 +681,13 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   padding: 12px 14px;
-  border-top: 1px solid var(--n-border-color, rgba(255, 255, 255, 0.08));
+  border-top: 1px solid var(--n-border-color, rgba(var(--text-primary-rgb), 0.08));
   flex-shrink: 0;
 }
 
 /* --- Report section --- */
 .assist-report-section {
-  border-top: 1px solid var(--n-border-color, rgba(255, 255, 255, 0.08));
+  border-top: 1px solid var(--n-border-color, rgba(var(--text-primary-rgb), 0.08));
   max-height: 50%;
   overflow-y: auto;
   padding: 14px;
@@ -711,17 +711,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--n-text-color3, #888);
+  color: var(--n-text-color3, var(--text-primary));
 }
 
 .report-error {
   font-size: 13px;
-  color: #d03050;
+  color: var(--error);
   margin-bottom: 8px;
   padding: 8px 12px;
-  background: rgba(208, 48, 80, 0.08);
+  background: rgba(var(--error-rgb), 0.08);
   border-radius: 6px;
-  border: 1px solid rgba(208, 48, 80, 0.2);
+  border: 1px solid rgba(var(--error-rgb), 0.2);
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -739,8 +739,8 @@ onUnmounted(() => {
 .assist-error {
   padding: 8px 14px;
   font-size: 12px;
-  color: #d03050;
-  border-top: 1px solid rgba(208, 48, 80, 0.2);
+  color: var(--error);
+  border-top: 1px solid rgba(var(--error-rgb), 0.2);
 }
 
 /* --- Transition --- */

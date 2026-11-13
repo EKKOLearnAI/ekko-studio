@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NModal, NForm, NFormItem, NInput, NButton, NSwitch, NText } from 'naive-ui'
+import { NModal, NForm, NFormItem, NInput, NButton, NSwitch, NText, useMessage } from 'naive-ui'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useI18n } from 'vue-i18n'
-import { useMessage } from '@/composables/useAppMessage'
 
 const emit = defineEmits<{
   close: []
@@ -17,7 +16,6 @@ const message = useMessage()
 const showModal = ref(true)
 const loading = ref(false)
 const name = ref('')
-const displayName = ref('')
 const clone = ref(false)
 const nameValidationMessage = ref('')
 
@@ -45,7 +43,7 @@ async function handleSave() {
 
   loading.value = true
   try {
-    const res = await profilesStore.createProfile(name.value.trim(), clone.value, displayName.value.trim())
+    const res = await profilesStore.createProfile(name.value.trim(), clone.value)
     if (res.success) {
       const stripped = res.strippedCredentials ?? []
       const disabled = res.disabledPlatforms ?? []
@@ -96,17 +94,6 @@ function handleClose() {
         {{ nameValidationMessage }}
       </NText>
 
-      <NFormItem :label="t('profiles.displayName')">
-        <NInput
-          v-model:value="displayName"
-          :placeholder="t('profiles.displayNamePlaceholder')"
-          maxlength="40"
-        />
-        <NText depth="3" style="font-size: 12px; margin-top: 4px;">
-          {{ t('profiles.displayNameHint') }}
-        </NText>
-      </NFormItem>
-
       <NFormItem :label="t('profiles.cloneFromCurrent')">
         <NSwitch v-model:value="clone" />
       </NFormItem>
@@ -130,7 +117,7 @@ function handleClose() {
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>
 
@@ -138,6 +125,6 @@ function handleClose() {
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

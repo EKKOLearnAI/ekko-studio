@@ -1,2 +1,3 @@
 #!/usr/bin/env node
-import './hermes-studio-mcp.mjs'
+// Compatibility entry point for existing MCP configurations.
+import './ekko-studio-mcp.mjs'

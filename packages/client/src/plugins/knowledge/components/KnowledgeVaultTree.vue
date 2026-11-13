@@ -93,11 +93,11 @@ const allCount = computed(() => props.documents.length)
   transition: background 0.15s ease;
 }
 .tree-item:hover {
-  background: var(--hover-color, rgba(255, 255, 255, 0.04));
+  background: var(--hover-color, rgba(var(--text-primary-rgb), 0.04));
 }
 .tree-item.is-active {
-  background: var(--primary-color-suppl, rgba(32, 128, 240, 0.12));
-  color: var(--primary-color, #2080f0);
+  background: var(--primary-color-suppl, rgba(var(--accent-info-rgb), 0.12));
+  color: var(--primary-color, var(--accent-info));
 }
 .tree-item--all {
   font-weight: 500;

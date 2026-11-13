@@ -16,19 +16,36 @@ agent can discover without chat history.
 - `ARCHITECTURE.md` documents package boundaries and state ownership.
 - `DEVELOPMENT.md` remains the contributor rules and command reference.
 - `docs/harness/validation.md` maps change types to checks.
-- `docs/harness/upstream-sync-runbook.md` documents the standard upstream sync path to `main`.
 - `docs/harness/worktree-runbook.md` explains isolated worktree development.
+- `docs/harness/task-artifacts.md` defines external task/report storage and safe cleanup; `scripts/task-artifacts.mjs` checks known leftovers without deleting anything.
 - `docs/harness/pr-review.md` provides a PR self-review checklist.
-- `docs/harness/update-system-overview.md` maps the device update pipeline and lists real production incidents.
-- `docs/harness/update-reconciliation-plan.md` is the five-phase plan for environment reconciliation. Specs per phase live under `.zcode/plans/update-reconciliation-phase*.md`.
-- `docs/harness/source-deploy-refactor.md` is the phase (a) spec for trustworthy source-deploy updates (atomic swap, identity, recovery). Companion to the reconciliation plan.
-- `scripts/harness-check.mjs` enforces baseline repository invariants.
+- `docs/harness/person-task-acceptance.md` documents opt-in background-task acceptance, durable completion gates, supported surfaces and validation.
+- `docs/harness/person-task-redirection.md` documents direction corrections, queue/callback invalidation, confirmed-stop barriers and focused verification.
+- `docs/harness/startup-tasks.md` describes one-time startup operations and their persistent execution records.
+- `docs/harness/server-module-boundaries.md` defines backend ownership and the migration target.
+- `docs/harness/jev-integrations.md` defines JEV feature switches, frontend configuration and integration registration.
+- `docs/harness/frontend-ui.md` defines theme ownership and UI verification.
+- `scripts/ui-theme-harness.mjs` inspects Vue/SCSS/inline styles; the exact
+  declarations in `scripts/ui-theme-baseline.json` track existing style debt.
+- `scripts/harness-check.mjs` is the single harness entry point. It enforces
+  repository, UI theme, desktop release/runtime, and backend module-boundary invariants.
+- `scripts/server-module-boundaries.mjs` implements the backend boundary portion
+  consumed by the unified harness and its focused unit tests.
+- `scripts/jev-integrations.json` registers concrete JEV consumers and their UI fields;
+  `scripts/jev-harness.mjs` checks them through the same unified harness.
+
+The only public harness command is:
+
+```bash
+npm run harness:check
+```
 
 ## Operating Model
 
 1. Read the root map and the specific doc for the task.
 2. Make the smallest scoped change.
-3. Add or update focused tests when behavior changes.
+3. Add small, focused tests for newly introduced features; the legacy suite has
+   been removed. Follow `tests/README.md` instead of restoring full regression sweeps.
 4. Run `npm run harness:check` and the relevant validation commands.
 5. If a failure pattern repeats, improve this harness with docs, tests, scripts,
    or CI instead of relying on a longer prompt.

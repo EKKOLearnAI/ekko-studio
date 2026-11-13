@@ -40,7 +40,7 @@ const VALID_IDENTITY = {
 async function callEndpoint(home: string): Promise<{ status?: number; body: any }> {
   process.env.HERMES_WEB_UI_HOME = home
   // Fresh import per scenario so module-level config picks up the env.
-  const { getUpdateIdentity } = await import('../../packages/server/src/controllers/update')
+  const { getUpdateIdentity } = await import('../../packages/server/src/modules/studio/controllers/update')
   const ctx: any = {}
   await getUpdateIdentity(ctx)
   return { status: ctx.status, body: ctx.body }

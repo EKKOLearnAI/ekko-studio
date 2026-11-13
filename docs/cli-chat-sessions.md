@@ -5,16 +5,6 @@
 > bridge 直连命令层已经不再是产品入口。
 >
 > 最后重建时间：2026-06-03。
->
-> 维护要求：后续 PR 如果修改本文列出的普通 Chat 链路核心文件，需要新增
-> `docs/chat-chain-changes/` 下的独立变更片段。每个 PR 一个变更片段，写清楚
-> 修改时间、PR/commit、动到的功能和行为影响，避免多个 PR 同时改本文产生冲突。
-> `packages/server/src/services/hermes/agent-bridge/` 是普通 Chat 的核心链路，
-> 该目录下任何改动都算 Chat 链路改动；即使只是启动、环境变量、日志或品牌
-> attribution，也要记录影响范围，必要时明确“运行行为无变化”。
-> `packages/server/src/services/hermes/group-chat/`、`/group-chat` Socket.IO、
-> group-chat 前端 store/API/component、共享压缩器和 context-engine 也属于核心
-> 聊天链路，改动时同样需要记录。
 
 ## 1. 结论先行
 
@@ -23,7 +13,7 @@
 ```text
 ChatPanel / ChatInput
   -> Pinia chat store
-  -> packages/client/src/api/hermes/chat.ts
+  -> packages/client/src/api/studio/chat.ts
   -> Socket.IO namespace /chat-run
   -> ChatRunSocket
   -> handleBridgeRun()
@@ -48,28 +38,6 @@ ChatPanel / ChatInput
 - 工具审批、用户澄清、压缩、abort、usage、slash command 都复用同一条
   `/chat-run` 事件通道。
 
-### 最近链路变更记录
-
-变更记录按 PR 拆分保存在 `docs/chat-chain-changes/`。新增 Chat session chain、
-Agent Bridge、compression 或 Group Chat 核心链路改动时，新增一个 fragment 文件，
-不要继续修改本文维护集中表格。
-
-每个 fragment 至少包含：
-
-```md
----
-date: YYYY-MM-DD
-pr: 1234
-feature: 改动功能
-impact: 行为影响
----
-
-补充说明。
-```
-
-开 PR 前还没有编号时可以先写 `pr: pending`，PR 创建后再把该 fragment 改成实际
-PR 号。
-
 ## 2. 主要文件
 
 ### 前端
@@ -81,9 +49,9 @@ PR 号。
 | `packages/client/src/components/hermes/chat/MessageList.vue` / `VirtualMessageList.vue` | 消息列表渲染和虚拟滚动。 |
 | `packages/client/src/components/hermes/chat/MessageItem.vue` | 单条消息渲染，包含 assistant、tool、reasoning、附件等 UI。 |
 | `packages/client/src/stores/hermes/chat.ts` | Chat 核心状态机：session 列表、发送、resume、队列、流式事件、审批、澄清、abort、压缩状态。 |
-| `packages/client/src/api/hermes/chat.ts` | `/chat-run` Socket.IO 客户端，负责连接、全局事件分发、run/resume/abort/approval/clarify 协议。 |
-| `packages/client/src/api/hermes/sessions.ts` | HTTP session API：列表、详情分页、删除、重命名、模型更新。 |
-| `packages/client/src/api/hermes/group-chat.ts` | `/group-chat` Socket.IO 客户端和 group-chat HTTP room/agent/config API。 |
+| `packages/client/src/api/studio/chat.ts` | `/chat-run` Socket.IO 客户端，负责连接、全局事件分发、run/resume/abort/approval/clarify 协议。 |
+| `packages/client/src/api/studio/sessions.ts` | HTTP session API：列表、详情分页、删除、重命名、模型更新。 |
+| `packages/client/src/api/studio/group-chat.ts` | `/group-chat` Socket.IO 客户端和 group-chat HTTP room/agent/config API。 |
 | `packages/client/src/stores/hermes/group-chat.ts` | Group Chat 状态机：rooms、members、messages、agents、streaming、context/compression 状态。 |
 | `packages/client/src/components/hermes/group-chat/*` | Group Chat 页面、输入框、消息列表、成员/agent 展示和房间创建配置。 |
 
@@ -91,29 +59,28 @@ PR 号。
 
 | 文件 | 职责 |
 | --- | --- |
-| `packages/server/src/services/hermes/run-chat/index.ts` | `ChatRunSocket`，`/chat-run` namespace 入口、认证、profile 校验、run/resume/abort/approval/clarify/queue 分发。 |
-| `packages/server/src/services/hermes/run-chat/handle-bridge-run.ts` | 当前主运行路径：创建/更新本地 session，构建上下文，调用 Agent Bridge，消费 bridge 事件，落库。 |
-| `packages/server/src/services/hermes/run-chat/handle-api-run.ts` | 保留的 API Server 路径实现；当前 `resolveRunSource()` 固定返回 `cli`，正常不会走到这里。 |
-| `packages/server/src/services/hermes/run-chat/session-command.ts` | slash command 解析和执行。 |
-| `packages/server/src/services/hermes/run-chat/abort.ts` | active run 中断、状态落盘、队列衔接。 |
-| `packages/server/src/services/hermes/run-chat/compression.ts` | DB history 构建、snapshot-aware history、上下文压缩。 |
-| `packages/server/src/services/hermes/run-chat/bridge-message.ts` | Bridge assistant/tool 消息的内存态与 DB flush。 |
-| `packages/server/src/services/hermes/run-chat/bridge-delta.ts` | 过滤 bridge 输出中的工具调用标记，避免 UI 文本重复或丢字符。 |
-| `packages/server/src/services/hermes/agent-bridge/client.ts` | Node 到 Python bridge 的本地 socket 客户端。 |
-| `packages/server/src/services/hermes/agent-bridge/manager.ts` | Python bridge broker 子进程生命周期管理。 |
-| `packages/server/src/services/hermes/agent-bridge/python/hermes_bridge.py` | Python broker/worker entrypoint；实现拆分在同目录的 `bridge_*.py` 模块中，覆盖 `AIAgent` 会话池、工具审批、澄清、压缩协作、goal/plan 命令等。 |
-| `packages/server/src/services/hermes/group-chat/index.ts` | `/group-chat` Socket.IO server、room/member/message 存储、agent 恢复、mention 分发、approval/interrupt 入口。 |
-| `packages/server/src/services/hermes/group-chat/agent-clients.ts` | Group Chat agent socket client，调用 Agent Bridge 执行被 mention 的 agent，并同步 tool/reasoning/context 状态。 |
-| `packages/server/src/services/hermes/context-engine/*` | Group Chat 上下文压缩和 summary cache。 |
-| `packages/server/src/lib/context-compressor/*` | 普通 Chat 和 Group Chat 共用的 token 估算、摘要压缩和 context message 处理。 |
-| `packages/server/src/routes/hermes/group-chat.ts` | Group Chat HTTP room/agent/config/compress/clear-context API。 |
-| `packages/server/src/db/hermes/session-store.ts` | Web UI 本地 session/message SQLite 存储。 |
-| `packages/server/src/controllers/hermes/sessions.ts` | HTTP session 列表、详情、分页、删除、导入/导出等控制器。 |
+| `packages/server/src/modules/studio/sockets/chat-run.ts` | `ChatRunSocket`，`/chat-run` namespace 入口、认证、profile 校验、run/resume/abort/approval/clarify/queue 分发。 |
+| `packages/server/src/modules/studio/services/chat-run/handle-bridge-run.ts` | 当前主运行路径：创建/更新本地 session，构建上下文，调用 Agent Bridge，消费 bridge 事件，落库。 |
+| `packages/server/src/modules/studio/services/chat-run/session-command.ts` | slash command 解析和执行。 |
+| `packages/server/src/modules/studio/services/chat-run/abort.ts` | active run 中断、状态落盘、队列衔接。 |
+| `packages/server/src/modules/studio/services/chat-run/compression.ts` | DB history 构建、snapshot-aware history、上下文压缩。 |
+| `packages/server/src/modules/studio/services/chat-run/bridge-message.ts` | Bridge assistant/tool 消息的内存态与 DB flush。 |
+| `packages/server/src/modules/studio/services/chat-run/bridge-delta.ts` | 过滤 bridge 输出中的工具调用标记，避免 UI 文本重复或丢字符。 |
+| `packages/server/src/modules/hermes/services/bridge/client.ts` | Node 到 Python bridge 的本地 socket 客户端。 |
+| `packages/server/src/modules/hermes/services/bridge/manager.ts` | Python bridge broker 子进程生命周期管理。 |
+| `packages/server/src/modules/hermes/services/bridge/python/hermes_bridge.py` | Python broker/worker entrypoint；实现拆分在同目录的 `bridge_*.py` 模块中，覆盖 `AIAgent` 会话池、工具审批、澄清、压缩协作、goal/plan 命令等。 |
+| `packages/server/src/modules/studio/sockets/group-chat.ts` | `/group-chat` Socket.IO server、room/member/message 存储、agent 恢复、mention 分发、approval/interrupt 入口。 |
+| `packages/server/src/modules/studio/services/group-chat/agent-clients.ts` | Group Chat agent socket client，经 Studio runtime port 调用具体 Agent，并同步 tool/reasoning/context 状态。 |
+| `packages/server/src/modules/studio/services/group-chat/*` | Group Chat 编排、上下文投影、summary cache、relay、附件与共享工作区。 |
+| `packages/server/src/modules/studio/services/context-compressor/*` | 普通 Chat 和 Group Chat 共用的 token 估算、摘要压缩和 context message 处理。 |
+| `packages/server/src/modules/studio/routes/group-chat.ts` | Group Chat HTTP room/agent/config/compress/clear-context API。 |
+| `packages/server/src/modules/studio/repositories/session-store.ts` | Web UI 本地 session/message SQLite 存储。 |
+| `packages/server/src/modules/studio/controllers/sessions.ts` | HTTP session 列表、详情、分页、删除、导入/导出等控制器。 |
 
 ## 3. 数据模型
 
 普通 Chat 使用 Web UI 本地 SQLite，而不是直接把 Hermes CLI 历史当作唯一状态。
-核心表由 `packages/server/src/db/hermes/schemas.ts` 初始化。
+核心表由 `packages/server/src/modules/studio/infrastructure/database/schemas.ts` 初始化。
 
 ### sessions
 
@@ -236,7 +203,7 @@ sendMessage(content, attachments?)
    - 且不是可立即处理的 mid-run slash command；
    - 则 UI 先显示 queued 消息。
 5. 如果有附件：
-   - 先走 `/upload`；
+   - 先走 `/api/studio/uploads`；
    - 再组装 `ContentBlock[]`；
    - image block 包含 `type/name/path/media_type`；
    - file block 包含 `type/name/path/media_type?`。
@@ -805,7 +772,7 @@ Socket.IO `/chat-run` 负责 active run。HTTP API 负责静态数据读写：
 
 | 能力 | 路径/模块 |
 | --- | --- |
-| session list | `controllers/hermes/sessions.ts` + `session-store.ts` |
+| session list | `modules/studio/controllers/sessions.ts` + `modules/studio/repositories/session-store.ts` |
 | session detail/page | `fetchSessionMessagesPage()` 对应后端分页 detail |
 | delete session | 删除 Web UI DB session/messages，同时尝试删除对应 Hermes profile 历史（如果存在） |
 | rename session | `renameSession()` |
@@ -825,7 +792,7 @@ context-compressor。
 ```text
 GroupChatPanel / GroupChatInput
   -> group-chat Pinia store
-  -> packages/client/src/api/hermes/group-chat.ts
+  -> packages/client/src/api/studio/group-chat.ts
   -> Socket.IO namespace /group-chat
   -> GroupChatServer
   -> AgentClients

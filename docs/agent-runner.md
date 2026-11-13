@@ -1,15 +1,25 @@
 # Coding Agent services
 
-`packages/server/src/services/coding-agents/` is the implementation home for
-managed Claude Code, Codex, and Pi runs. The services share one canonical event
+`packages/server/src/modules/coding-agents/` is the implementation home for
+managed Claude Code, Codex, Pi, and Grok runs. The services share one canonical event
 pipeline, one stream subscription model, and one persistence path while keeping
 agent-specific process and protocol behavior in named subdirectories.
+
+The Coding family also includes OpenCode, DSH, Cursor, Antigravity, and the
+[six native CLI integrations](native-coding-agents.md). Each runtime has its own
+`services/<id>/` directory. The shared `protocol/acp/` adapter serves Qwen, Kimi,
+CodeBuddy, Qoder, and Copilot; `services/zcode/` owns the official ZCode headless
+JSONL protocol. Qwen, Kimi, CodeBuddy, Copilot,
+and ZCode support isolated scoped model configuration and native global mode.
+Qoder remains global. All six share the same run manager, event persistence,
+group-chat and Workflow dispatch.
 
 ## Goals
 
 - Provide shared protocol plumbing that can be used by:
   - Claude Code and Codex local proxy routes.
   - Pi RPC turns.
+  - Grok headless `streaming-json` turns.
   - Hidden Coding Agent sessions launched from the Web UI Chat surface.
 - Normalize upstream provider streams into one internal event shape.
 - Let subscribers consume the same stream for HTTP/SSE responses, Socket.IO
@@ -28,22 +38,38 @@ agent-specific process and protocol behavior in named subdirectories.
 ## Current layout
 
 ```text
-services/coding-agents/
-  index.ts                 public install/config/launch facade
-  runtime/                 managed-run lifecycle and canonical event mapping
-  shared/                  provider bridge, stream utilities, and adapters
-  claude-code/             Claude Code proxy behavior
-  codex/                   Codex proxy behavior
-  pi/                      Pi RPC parsing and thinking-level translation
+modules/coding-agents/
+  contracts/               definition and configuration-file contracts
+  protocol/                provider bridge, stream utilities, ACP sessions
+  services/
+    index.ts               public install/config/launch facade
+    registry/              definitions and native adapter composition
+    runtime/               shared managed-run and process lifecycle
+    claude-code/           Claude Code definition and proxy
+    codex/                 Codex definition, proxy, compaction and usage
+    pi/                    Pi definition, RPC parsing and thinking levels
+    grok/                  Grok definition, config, turns and events
+    opencode/              OpenCode definition, config, turns and events
+    dsh/                   DSH definition, configuration and ACP/Web adapters
+    cursor/                Cursor definition, settings, turns and events
+    antigravity/           Antigravity definition, config, turns and events
+    qwen/                  Qwen definition and scoped configuration
+    kimi/                  Kimi definition and scoped configuration
+    codebuddy/             CodeBuddy definition and scoped configuration
+    qoder/                 Qoder definition for the shared ACP transport
+    copilot/               Copilot definition and scoped configuration
+    zcode/                 ZCode definition, install discovery, config and JSONL
 ```
 
 - `claude-code/proxy.ts` exposes an Anthropic-compatible local proxy for Claude
   Code.
 - `codex/proxy.ts` exposes a Responses-compatible local proxy for Codex and Pi.
 - `pi/jsonl-parser.ts` decodes Pi's RPC stdout stream.
-- `shared/provider-policy.ts` owns the scoped Coding Agent Provider allow/deny
+- `grok/` owns Grok's isolated `GROK_HOME`, prompt-file launches, and
+  `streaming-json` event adaptation.
+- `protocol/provider-policy.ts` owns the scoped Coding Agent Provider allow/deny
   boundary used by launches and Workflow capability checks.
-- `runtime/run-manager.ts` owns managed Claude Code, Codex, and Pi process
+- `runtime/run-manager.ts` owns managed Claude Code, Codex, Pi, and Grok process
   lifecycle for chat-driven Coding Agent sessions.
 - `index.ts` is the public facade for installation, configuration, and launch
   preparation. Consumers should not reach into an agent-specific directory.
@@ -187,7 +213,7 @@ Codex:
 ## Internal Web UI Flow
 
 1. Chat creates or reuses a managed Coding Agent session.
-2. The session launches Claude Code, Codex, or Pi in the existing scoped
+2. The session launches Claude Code, Codex, Pi, or Grok in the existing scoped
    `profile/provider/agent` config/workspace layout.
 3. Chat input is sent to the agent process.
 4. The process calls a local Claude/Codex-compatible proxy instead of the upstream
@@ -196,7 +222,8 @@ Codex:
    normalized to canonical Responses events for DB persistence and Chat events.
 6. Claude Code and Codex sessions are recycled after 30 minutes of inactivity
    and on service shutdown. Pi restores native session state into a fresh RPC
-   process for each turn.
+   process for each turn. Grok runs one headless CLI process per turn and resumes
+   the native Grok session on later turns.
 
 ## Session Binding
 
@@ -211,7 +238,7 @@ If no session ID is present, the proxy should not write to the chat DB.
 
 ## Security Rules
 
-- Never expose upstream API keys to launched Claude/Codex processes.
+- Never persist upstream API keys in launched Claude/Codex/Grok config files.
 - Keep local proxy tokens per route target.
 - Do not accept arbitrary session writes without validating target token first.
 - Do not let external request bodies override upstream provider/model unless the
@@ -353,6 +380,3 @@ Minimum checks for each phase:
 - `npm run test -- tests/server/run-chat-content-blocks.test.ts` when touching
   chat input conversion.
 - `npm run build` before merging shared TypeScript contracts.
-
-For chat session behavior changes, also add a fragment under
-`docs/chat-chain-changes/` according to the repository validation guide.

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NPopover } from 'naive-ui'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
-import type { MemberInfo, RoomAgent } from '@/api/hermes/group-chat'
+import type { MemberInfo, RoomAgent } from '@/api/studio/group-chat'
 import { groupAgentAvatar, parseStoredAvatar } from '@/utils/group-agent-avatar'
 
 const props = defineProps<{
@@ -74,11 +74,15 @@ function runtimeValue(value: string): string {
                     <span>{{ t('workflow.profile') }}</span>
                     <strong :title="runtimeValue(agent.profile)">{{ runtimeValue(agent.profile) }}</strong>
                 </div>
-                <div class="message-agent-runtime-row">
+                <div v-if="agent.agentMode === 'global'" class="message-agent-runtime-row">
+                    <span>{{ t('codingAgents.launchModeScope') }}</span>
+                    <strong>{{ t('codingAgents.launchModeGlobal') }}</strong>
+                </div>
+                <div v-if="agent.agentMode !== 'global'" class="message-agent-runtime-row">
                     <span>{{ t('profiles.provider') }}</span>
                     <strong :title="runtimeValue(agent.provider)">{{ runtimeValue(agent.provider) }}</strong>
                 </div>
-                <div class="message-agent-runtime-row">
+                <div v-if="agent.agentMode !== 'global'" class="message-agent-runtime-row">
                     <span>{{ t('profiles.model') }}</span>
                     <strong :title="runtimeValue(agent.model)">{{ runtimeValue(agent.model) }}</strong>
                 </div>
@@ -104,13 +108,13 @@ function runtimeValue(value: string): string {
     display: inline-flex;
     flex: 0 0 auto;
     overflow: visible;
-    border-radius: 8px;
+    border-radius: var(--radius-component, 8px);
     cursor: pointer;
 }
 
 .message-agent-avatar > :deep(.profile-avatar-view) {
     box-sizing: border-box;
-    border: 1px solid #fff;
+    border: var(--border-width, 1px) solid #fff;
 }
 
 .message-agent-owner-badge {
@@ -125,7 +129,7 @@ function runtimeValue(value: string): string {
     box-sizing: border-box;
     border: 2px solid $bg-main-surface;
     border-radius: 50%;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
     pointer-events: none;
 }
@@ -140,7 +144,7 @@ function runtimeValue(value: string): string {
 .message-agent-popover {
     display: flex;
     flex-direction: column;
-    gap: 9px;
+    gap: calc(9px * var(--spacing-scale, 1));
     width: 248px;
     min-width: 0;
 }
@@ -148,10 +152,10 @@ function runtimeValue(value: string): string {
 .message-agent-owner {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     min-width: 0;
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
     > span {
         min-width: 0;
@@ -165,7 +169,7 @@ function runtimeValue(value: string): string {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: calc(12px * var(--spacing-scale, 1));
     min-width: 0;
 }
 
@@ -173,29 +177,29 @@ function runtimeValue(value: string): string {
     min-width: 0;
     overflow: hidden;
     color: $text-primary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     font-weight: 600;
-    line-height: 1.4;
+    line-height: var(--line-height, 1.4);
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .message-agent-type {
     flex: 0 0 auto;
-    padding: 2px 6px;
+    padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
     border-radius: 999px;
     color: var(--accent-primary);
     background: rgba(var(--accent-primary-rgb), 0.1);
-    font-size: 10px;
-    line-height: 1.4;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+    line-height: var(--line-height, 1.4);
 }
 
 .message-agent-runtime {
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    padding: 8px 9px;
-    border: 1px solid rgba(var(--text-primary-rgb), 0.08);
+    gap: calc(5px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(9px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.08);
     border-radius: $radius-sm;
     background: rgba(var(--text-primary-rgb), 0.025);
 }
@@ -204,10 +208,10 @@ function runtimeValue(value: string): string {
     display: grid;
     grid-template-columns: 62px minmax(0, 1fr);
     align-items: center;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     min-width: 0;
-    font-size: 11px;
-    line-height: 1.45;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+    line-height: var(--line-height, 1.45);
 
     > span {
         color: $text-muted;
@@ -227,15 +231,15 @@ function runtimeValue(value: string): string {
 .message-agent-mention {
     align-self: flex-end;
     height: 27px;
-    padding: 0 10px;
+    padding: 0 calc(10px * var(--spacing-scale, 1));
     overflow: hidden;
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.28);
+    border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.28);
     border-radius: $radius-sm;
     color: var(--accent-primary);
     background: rgba(var(--accent-primary-rgb), 0.08);
     cursor: pointer;
-    font-size: 12px;
-    line-height: 1;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1);
     text-overflow: ellipsis;
     transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
     white-space: nowrap;

@@ -6,15 +6,15 @@ import { useOmniRealtime, type OmniDialogToolCall, type OmniUserTurnAudio } from
 import OmniVisualizer from '@/components/hermes/chat/OmniVisualizer.vue'
 import MarkdownRenderer from '@/components/hermes/chat/MarkdownRenderer.vue'
 import { meetingASRApi } from '@/utils/meeting-asr-api'
-import { executeOmniTool, OMNI_REALTIME_TOOLS } from '@/api/hermes/omni-tools'
+import { executeOmniTool, OMNI_REALTIME_TOOLS } from '@/api/studio/omni-tools'
 import { fetchPracticeSkills } from '@/api/hermes/skills'
 import {
   savePracticeReport,
   streamOmniPracticeAnalysis,
   type OmniAnalysisMediaMeta,
   type OmniAnalysisPayload,
-} from '@/api/hermes/practice-report'
-import { getDownloadUrl } from '@/api/hermes/download'
+} from '@/api/studio/practice-report'
+import { getDownloadUrl } from '@/api/studio/download'
 import { uid, useChatStore, type Message } from '@/stores/hermes/chat'
 import { useMeetingStore } from '@/stores/hermes/meeting'
 import { useRealtimeModelStore } from '@/stores/hermes/realtime-model'
@@ -1726,7 +1726,7 @@ async function handleCopyMarkdown(): Promise<void> {
   isolation: isolate;
   overflow: hidden;
   color: var(--text-primary);
-  background: var(--bg-primary);
+  background: var(--theme-card-bg, var(--bg-card));
 }
 
 .practice-stage__wash {
@@ -1749,7 +1749,7 @@ async function handleCopyMarkdown(): Promise<void> {
   align-items: center;
   gap: 14px;
   border-bottom: 1px solid var(--glass-realtime-border);
-  background: var(--glass-realtime-bg-subtle);
+  background: var(--theme-card-bg, var(--bg-card));
   -webkit-backdrop-filter: var(--glass-realtime-blur);
   backdrop-filter: var(--glass-realtime-blur);
 }
@@ -1761,13 +1761,13 @@ async function handleCopyMarkdown(): Promise<void> {
   place-items: center;
   border: 1px solid var(--glass-realtime-border);
   border-radius: 12px;
-  background: var(--glass-realtime-bg);
+  background: var(--theme-card-bg, var(--bg-card));
   color: inherit;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease;
 }
 
-.practice-stage__back:hover { background: var(--glass-realtime-bg-strong); border-color: rgba(var(--text-primary-rgb), 0.4); }
+.practice-stage__back:hover { background: var(--theme-card-bg, var(--bg-card)); border-color: rgba(var(--text-primary-rgb), 0.4); }
 .practice-stage__back svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; }
 
 .practice-stage__identity { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -1863,7 +1863,7 @@ async function handleCopyMarkdown(): Promise<void> {
   padding: 26px 24px;
   border: 1px solid var(--glass-realtime-border);
   border-radius: 20px;
-  background: var(--glass-realtime-bg-strong);
+  background: var(--theme-card-bg, var(--bg-card));
   -webkit-backdrop-filter: var(--glass-realtime-blur-strong);
   backdrop-filter: var(--glass-realtime-blur-strong);
   box-shadow: var(--glass-realtime-shadow);
@@ -1997,7 +1997,7 @@ async function handleCopyMarkdown(): Promise<void> {
   border-radius: 16px;
   font-size: 14px;
   line-height: 1.55;
-  background: var(--glass-realtime-bg-subtle);
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid var(--glass-realtime-border);
   -webkit-backdrop-filter: blur(16px) saturate(160%);
   backdrop-filter: blur(16px) saturate(160%);
@@ -2015,7 +2015,7 @@ async function handleCopyMarkdown(): Promise<void> {
 }
 .practice-stage__bubble--assistant {
   align-self: flex-start;
-  background: var(--glass-realtime-bg-strong);
+  background: var(--theme-card-bg, var(--bg-card));
   border-color: var(--glass-realtime-border-strong);
 }
 .practice-stage__bubble--live {
@@ -2047,7 +2047,7 @@ async function handleCopyMarkdown(): Promise<void> {
   margin-top: 8px;
   padding: 5px 12px;
   border-radius: 999px;
-  background: var(--glass-realtime-bg-subtle);
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid var(--glass-realtime-border);
   -webkit-backdrop-filter: var(--glass-realtime-blur);
   backdrop-filter: var(--glass-realtime-blur);
@@ -2086,7 +2086,7 @@ async function handleCopyMarkdown(): Promise<void> {
   place-items: center;
   border-radius: 50%;
   border: 1px solid var(--glass-realtime-border-strong);
-  background: var(--glass-realtime-bg);
+  background: var(--theme-card-bg, var(--bg-card));
   -webkit-backdrop-filter: var(--glass-realtime-blur);
   backdrop-filter: var(--glass-realtime-blur);
   color: inherit;
@@ -2095,7 +2095,7 @@ async function handleCopyMarkdown(): Promise<void> {
   box-shadow: var(--glass-realtime-shadow);
 }
 .practice-stage__control svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; }
-.practice-stage__control:hover { background: var(--glass-realtime-bg-strong); border-color: rgba(var(--text-primary-rgb), 0.4); }
+.practice-stage__control:hover { background: var(--theme-card-bg, var(--bg-card)); border-color: rgba(var(--text-primary-rgb), 0.4); }
 /* 静音 = ink 灰表达"非激活"；挂断 = accent 紫蓝强调（同 Omni 舞台）。 */
 .practice-stage__control--muted {
   border-color: rgba(var(--text-primary-rgb), 0.55);
@@ -2117,7 +2117,7 @@ async function handleCopyMarkdown(): Promise<void> {
   overflow: hidden;
   border: 1px solid var(--glass-realtime-border);
   border-radius: 18px;
-  background: var(--glass-realtime-bg-strong);
+  background: var(--theme-card-bg, var(--bg-card));
   -webkit-backdrop-filter: var(--glass-realtime-blur-strong);
   backdrop-filter: var(--glass-realtime-blur-strong);
   box-shadow: var(--glass-realtime-shadow);
@@ -2251,7 +2251,7 @@ async function handleCopyMarkdown(): Promise<void> {
   padding: 22px 24px 24px;
   border: 1px solid var(--glass-realtime-border);
   border-radius: 20px;
-  background: var(--glass-realtime-bg-strong);
+  background: var(--theme-card-bg, var(--bg-card));
   -webkit-backdrop-filter: var(--glass-realtime-blur-strong);
   backdrop-filter: var(--glass-realtime-blur-strong);
   box-shadow: var(--glass-realtime-shadow);
@@ -2281,7 +2281,7 @@ async function handleCopyMarkdown(): Promise<void> {
   padding: 5px 12px;
   border-radius: 999px;
   border: 1px solid var(--glass-realtime-border);
-  background: var(--glass-realtime-bg-subtle);
+  background: var(--theme-card-bg, var(--bg-card));
   font-size: 12px;
   color: rgba(var(--text-primary-rgb), 0.75);
   white-space: nowrap;
@@ -2303,7 +2303,7 @@ async function handleCopyMarkdown(): Promise<void> {
   padding: 14px 16px;
   border: 1px solid var(--glass-realtime-border);
   border-radius: 14px;
-  background: var(--bg-primary);
+  background: var(--theme-card-bg, var(--bg-card));
   color: var(--text-primary);
   font-size: 13.5px;
   line-height: 1.7;
@@ -2370,25 +2370,25 @@ async function handleCopyMarkdown(): Promise<void> {
 /* light 主题（日间）补充：与 Omni 舞台一致——控件实底白 + 深描边 +
  * 投影保证白底对比度；AI 气泡玻璃增强描边。 */
 html:not(.dark) .practice-stage__control {
-  background: rgba(255, 255, 255, 0.90);
-  border-color: rgba(26, 26, 26, 0.16);
-  box-shadow: 0 2px 14px rgba(26, 26, 26, 0.10);
+  background: rgba(var(--text-primary-rgb), 0.9);
+  border-color: rgba(var(--text-primary-rgb), 0.16);
+  box-shadow: 0 2px 14px rgba(var(--text-primary-rgb), 0.1);
 }
 
 html:not(.dark) .practice-stage__control:hover {
-  background: #ffffff;
-  border-color: rgba(26, 26, 26, 0.42);
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
+  border-color: rgba(var(--text-primary-rgb), 0.42);
 }
 
 html:not(.dark) .practice-stage__control--muted {
-  border-color: rgba(26, 26, 26, 0.44);
-  background: rgba(26, 26, 26, 0.08);
+  border-color: rgba(var(--text-primary-rgb), 0.44);
+  background: rgba(var(--text-primary-rgb), 0.08);
 }
 
 html:not(.dark) .practice-stage__bubble--assistant {
-  background: rgba(255, 255, 255, 0.92);
-  border-color: rgba(26, 26, 26, 0.14);
-  box-shadow: 0 2px 16px rgba(26, 26, 26, 0.08);
+  background: rgba(var(--text-primary-rgb), 0.92);
+  border-color: rgba(var(--text-primary-rgb), 0.14);
+  box-shadow: 0 2px 16px rgba(var(--text-primary-rgb), 0.08);
 }
 
 @media (max-width: 960px) {

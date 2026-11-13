@@ -80,9 +80,9 @@ function onDismiss() {
   gap: 10px;
   margin: 8px 12px;
   padding: 10px 12px;
-  border: 1px solid var(--danger-border, #e5484d);
+  border: 1px solid var(--danger-border, var(--error));
   border-radius: 8px;
-  background: var(--danger-bg, rgba(229, 72, 77, 0.08));
+  background: var(--danger-bg, rgba(var(--error-rgb), 0.08));
   color: inherit;
   font-size: 12px;
 }
@@ -119,8 +119,8 @@ function onDismiss() {
 }
 
 .identity-drift-banner__btn--primary {
-  background: var(--danger-border, #e5484d);
-  color: #fff;
+  background: var(--danger-border, var(--error));
+  color: var(--text-primary);
 }
 
 .identity-drift-banner__btn--primary:disabled {

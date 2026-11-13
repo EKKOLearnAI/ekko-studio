@@ -1,6 +1,6 @@
 export const OPENROUTER_APP_HEADERS = {
-  'HTTP-Referer': 'https://github.com/tangledup-ai/hermes-web-ui',
-  'X-OpenRouter-Title': 'Quanthermes Web UI',
+  'HTTP-Referer': 'https://ekkostudio.xyz',
+  'X-OpenRouter-Title': 'Ekko Studio',
   'X-OpenRouter-Categories': 'cli-agent,personal-agent',
 } as const
 

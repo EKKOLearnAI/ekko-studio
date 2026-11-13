@@ -59,7 +59,7 @@ watch(() => props.isRecording, async (recording) => {
   if (recording) {
     connect()
     try {
-      await request('/api/meeting-asr/assist/start', {
+      await request('/api/studio/meeting-asr/assist/start', {
         method: 'POST',
         body: JSON.stringify({
           sessionId: props.sessionId,
@@ -70,7 +70,7 @@ watch(() => props.isRecording, async (recording) => {
     } catch { /* best effort */ }
   } else {
     try {
-      await request('/api/meeting-asr/assist/stop', {
+      await request('/api/studio/meeting-asr/assist/stop', {
         method: 'POST',
         body: JSON.stringify({ sessionId: props.sessionId }),
       })
@@ -82,7 +82,7 @@ watch(() => props.isRecording, async (recording) => {
 // 立即分析：触发一次服务端分析
 function analyzeNow() {
   if (isAnalyzing.value) return
-  request('/api/meeting-asr/assist/analyze', {
+  request('/api/studio/meeting-asr/assist/analyze', {
     method: 'POST',
     body: JSON.stringify({ sessionId: props.sessionId }),
   }).catch(() => {})
@@ -175,7 +175,7 @@ onUnmounted(() => {
     </div>
 
     <!-- 常驻 KPI 头（sticky）：需求/痛点/跟进/参与度 -->
-    <div class="kpi-bar">
+    <div class="kpi-bar" data-theme-surface="card">
       <div class="kpi-cell">
         <span class="kpi-value">{{ summary.needCount }}</span>
         <span class="kpi-label">{{ t('meeting.interview.kpiNeeds') }}</span>
@@ -298,17 +298,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--n-text-color3, #888);
+  color: var(--n-text-color3, var(--text-primary));
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #555;
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
 
-  &.connected { background: #18a058; }
-  &.analyzing { background: #f0a020; animation: pulse 1s infinite; }
+  &.connected { background: var(--success); }
+  &.analyzing { background: var(--warning); animation: pulse 1s infinite; }
 }
 
 @keyframes pulse {
@@ -316,7 +316,7 @@ onUnmounted(() => {
   50% { opacity: 0.4; }
 }
 
-// 常驻 KPI 头：极简扁平（大数字 + 小标签，发丝分隔）
+/* 常驻 KPI 头：极简扁平（大数字 + 小标签，发丝分隔）*/
 .kpi-bar {
   position: sticky;
   top: -12px;
@@ -325,7 +325,7 @@ onUnmounted(() => {
   grid-template-columns: repeat(4, 1fr);
   gap: 0;
   padding: 10px 4px;
-  background: $bg-primary;
+  background: var(--theme-card-bg, var(--bg-card));
   flex-shrink: 0;
 }
 
@@ -336,27 +336,27 @@ onUnmounted(() => {
   gap: 3px;
   padding: 2px 0;
 
-  & + & { border-left: 1px solid rgba(255, 255, 255, 0.05); }
+  & + & { border-left: 1px solid rgba(var(--text-primary-rgb), 0.05); }
 }
 
 .kpi-value {
   font-size: 18px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--n-text-color, #fff);
+  color: var(--n-text-color, var(--text-primary));
   line-height: 1.1;
 
-  &.warn { color: #f0a020; }
+  &.warn { color: var(--warning); }
 }
 
-.kpi-label { font-size: 10px; color: var(--n-text-color3, #999); }
+.kpi-label { font-size: 10px; color: var(--n-text-color3, var(--text-primary)); }
 
 .eval-section {
   padding: 14px 2px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(var(--text-primary-rgb), 0.04);
 }
 
 .section-title {
@@ -367,43 +367,43 @@ onUnmounted(() => {
 
 .section-name { font-size: 13px; font-weight: 600; color: $text-primary; }
 .section-desc { font-size: 11px; color: $text-secondary; line-height: 1.5; }
-.empty-hint { font-size: 11px; color: var(--n-text-color3, #666); }
+.empty-hint { font-size: 11px; color: var(--n-text-color3, var(--text-primary)); }
 
-// 洞察流：按类型着色左缘
+/* 洞察流：按类型着色左缘*/
 .insight-item {
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 6px 8px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
-  border-left: 2px solid rgba(255, 255, 255, 0.1);
+  background: rgba(var(--text-primary-rgb), 0.03);
+  border-left: 2px solid rgba(var(--text-primary-rgb), 0.1);
 
-  &.type-need { border-left-color: #63e2b7; }
-  &.type-pain { border-left-color: #ff4d4f; }
-  &.type-opportunity { border-left-color: #70c0e8; }
-  &.type-competitor { border-left-color: #f0a020; }
+  &.type-need { border-left-color: var(--success); }
+  &.type-pain { border-left-color: var(--error); }
+  &.type-opportunity { border-left-color: var(--accent-info); }
+  &.type-competitor { border-left-color: var(--warning); }
 }
 
 .insight-type { font-size: 10px; font-weight: 600; color: $text-secondary; }
-.insight-text { font-size: 12px; color: #c8c8c8; line-height: 1.5; }
-.insight-quote { font-size: 11px; color: #9fd4f0; }
+.insight-text { font-size: 12px; color: var(--text-primary); line-height: 1.5; }
+.insight-quote { font-size: 11px; color: var(--accent-info); }
 
-// 引语卡
+/* 引语卡*/
 .quote-card {
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(112, 192, 232, 0.05);
-  border: 1px solid rgba(112, 192, 232, 0.12);
+  background: rgba(var(--accent-info-rgb), 0.05);
+  border: 1px solid rgba(var(--accent-info-rgb), 0.12);
 }
 
-.quote-text { font-size: 12px; color: #e8e8e8; line-height: 1.6; }
-.quote-speaker { font-size: 11px; color: #9fd4f0; align-self: flex-end; }
+.quote-text { font-size: 12px; color: var(--text-primary); line-height: 1.6; }
+.quote-speaker { font-size: 11px; color: var(--accent-info); align-self: flex-end; }
 
-// 追问建议
+/* 追问建议*/
 .followup-item {
   display: flex;
   align-items: flex-start;
@@ -411,7 +411,7 @@ onUnmounted(() => {
   font-size: 12px;
   padding: 6px 8px;
   border-radius: 6px;
-  background: rgba(112, 192, 232, 0.05);
+  background: rgba(var(--accent-info-rgb), 0.05);
 }
 
 .followup-index {
@@ -419,22 +419,22 @@ onUnmounted(() => {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: rgba(112, 192, 232, 0.15);
-  color: #70c0e8;
+  background: rgba(var(--accent-info-rgb), 0.15);
+  color: var(--accent-info);
   font-size: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.followup-text { color: #c8c8c8; line-height: 1.5; }
+.followup-text { color: var(--text-primary); line-height: 1.5; }
 
-// 报告
+/* 报告*/
 .report-section { gap: 8px; }
 .report-generate-row { display: flex; gap: 8px; }
 .report-generate-row .n-button { flex: 1; }
-.report-error { font-size: 12px; color: #d03050; padding: 6px 8px; background: rgba(208, 48, 80, 0.08); border-radius: 6px; }
-.report-loading { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--n-text-color3, #888); }
+.report-error { font-size: 12px; color: var(--error); padding: 6px 8px; background: rgba(var(--error-rgb), 0.08); border-radius: 6px; }
+.report-loading { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--n-text-color3, var(--text-primary)); }
 .report-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .report-content { font-size: 13px; line-height: 1.6; }
 </style>

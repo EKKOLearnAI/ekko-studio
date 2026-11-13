@@ -1,5 +1,5 @@
 {
-  "watch": ["packages/server/src", "packages/ekko-agent/src"],
+  "watch": ["packages/server/src", "packages/ekko-agent/src", "packages/shared"],
   "ext": "ts,tsx",
   "execMap": {
     "ts": "node -r ts-node/register"
@@ -7,7 +7,6 @@
   "env": {
     "NODE_ENV": "development",
     "PORT": "8647",
-    "BIND_HOST": "0.0.0.0",
     "TS_NODE_PROJECT": "packages/server/tsconfig.json",
     "HERMES_WEB_UI_STOP_GATEWAYS_ON_SHUTDOWN": "1"
   },

@@ -152,7 +152,7 @@ const panelTitle = computed(() => {
   flex: 0 0 auto;
   min-width: 280px;
   max-width: 100%;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
   border-left: 1px solid $border-color;
   display: flex;
   align-self: stretch;
@@ -196,7 +196,7 @@ const panelTitle = computed(() => {
       linear-gradient($text-muted, $text-muted) center 12px / 6px 1px no-repeat,
       linear-gradient($text-muted, $text-muted) center 19px / 6px 1px no-repeat,
       linear-gradient($text-muted, $text-muted) center 26px / 6px 1px no-repeat,
-      $bg-card;
+      var(--theme-card-bg, var(--bg-card));
     border: 1px solid $border-color;
     opacity: 0.9;
     transition: all $transition-fast;
@@ -214,7 +214,7 @@ const panelTitle = computed(() => {
       linear-gradient(var(--accent-primary), var(--accent-primary)) center 12px / 6px 1px no-repeat,
       linear-gradient(var(--accent-primary), var(--accent-primary)) center 19px / 6px 1px no-repeat,
       linear-gradient(var(--accent-primary), var(--accent-primary)) center 26px / 6px 1px no-repeat,
-      $bg-card;
+      var(--theme-card-bg, var(--bg-card));
     border-color: var(--accent-primary);
     opacity: 1;
   }
@@ -256,7 +256,7 @@ const panelTitle = computed(() => {
   flex-shrink: 0;
 }
 
-// 分析工具栏（独立一行，承载触发/启动/配置 + Agent 切换）
+/* 分析工具栏（独立一行，承载触发/启动/配置 + Agent 切换）*/
 .right-panel-toolbar {
   display: flex;
   align-items: center;
@@ -283,8 +283,8 @@ const panelTitle = computed(() => {
   transition: all 0.2s ease;
 
   &:hover {
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
+    background: rgba(var(--error-rgb), 0.1);
+    color: var(--error);
   }
 }
 

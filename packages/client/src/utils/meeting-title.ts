@@ -1,4 +1,4 @@
-import { getApiKey } from '@/api/client'
+import { getApiKey, getBaseUrl, getActiveProfileName } from '@/api/client'
 
 /**
  * 会议标题自动命名辅助函数（纯函数，便于单测）。
@@ -82,9 +82,11 @@ export async function requestAiMeetingTitle(transcript: string): Promise<string 
   if (!transcript || !transcript.trim()) return null
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    const profile = getActiveProfileName()
+    if (profile) headers['X-Hermes-Profile'] = profile
     const apiKey = getApiKey()
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
-    const response = await fetch('/api/meeting-asr/title', {
+    const response = await fetch(`${getBaseUrl()}/api/studio/meeting-asr/title`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ transcript }),

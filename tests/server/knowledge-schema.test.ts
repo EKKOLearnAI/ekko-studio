@@ -25,7 +25,7 @@ import {
   DEFAULT_KNOWLEDGE_EMBED_DIM,
   KnowledgeSchemaError,
   ensureKnowledgeSchema,
-} from '../../packages/server/src/db/knowledge-schema'
+} from '../../packages/server/src/modules/studio/infrastructure/database/knowledge-schema'
 
 type DatabaseSyncCtor = new (
   path: string,

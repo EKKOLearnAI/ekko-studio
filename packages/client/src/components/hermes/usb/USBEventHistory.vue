@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { NButton, NEmpty, NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { USBEventRecord } from '@/api/hermes/usb-socket'
+import type { USBEventRecord } from '@/api/studio/usb-socket'
 
 const props = defineProps<{
   events: USBEventRecord[]
@@ -132,7 +132,7 @@ function formatTime(ts: number): string {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px 10px 14px;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid $border-light;
   border-left: 2px solid var(--usb-event-line);
   border-radius: $radius-sm;

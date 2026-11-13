@@ -13,11 +13,11 @@ describe('usb service', () => {
     vi.resetModules()
     const { DatabaseSync } = await import('node:sqlite')
     db = new DatabaseSync(':memory:')
-    vi.doMock('../../packages/server/src/db/index', () => ({
+    vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({
       getDb: () => db,
       getStoragePath: () => ':memory:',
     }))
-    const { initAllHermesTables } = await import('../../packages/server/src/db/hermes/schemas')
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
     initAllHermesTables()
     tempRoot = mkdtempSync(resolve(tmpdir(), 'hermes-usb-service-'))
   })
@@ -27,13 +27,13 @@ describe('usb service', () => {
     db = null
     if (tempRoot) rmSync(tempRoot, { recursive: true, force: true })
     tempRoot = ''
-    vi.doUnmock('../../packages/server/src/db/index')
+    vi.doUnmock('../../packages/server/src/modules/studio/infrastructure/database/index')
     vi.unstubAllGlobals()
     vi.resetModules()
   })
 
   it('stays unsupported on non-linux hosts instead of crashing bootstrap', async () => {
-    const { USBService } = await import('../../packages/server/src/services/usb/USBService')
+    const { USBService } = await import('../../packages/server/src/modules/studio/services/usb/USBService')
     const service = new USBService({
       platform: 'win32',
       deployDir: tempRoot,
@@ -54,7 +54,7 @@ describe('usb service', () => {
     writeFileSync(resolve(mountPoint, 'hello.txt'), 'hello usb', 'utf-8')
     writeFileSync(resolve(mountPoint, 'docs', 'nested.txt'), 'nested usb', 'utf-8')
 
-    const { USBService } = await import('../../packages/server/src/services/usb/USBService')
+    const { USBService } = await import('../../packages/server/src/modules/studio/services/usb/USBService')
     const service = new USBService({
       platform: 'linux',
       deployDir: tempRoot,
@@ -116,7 +116,7 @@ describe('usb service', () => {
     mkdirSync(workspace, { recursive: true })
     writeFileSync(resolve(mountPoint, 'docs', 'nested.txt'), 'nested usb', 'utf-8')
 
-    const { USBService } = await import('../../packages/server/src/services/usb/USBService')
+    const { USBService } = await import('../../packages/server/src/modules/studio/services/usb/USBService')
     const service = new USBService({
       platform: 'linux',
       deployDir: tempRoot,
@@ -183,7 +183,7 @@ describe('usb service', () => {
       }
     })
 
-    const { USBService } = await import('../../packages/server/src/services/usb/USBService')
+    const { USBService } = await import('../../packages/server/src/modules/studio/services/usb/USBService')
     const service = new USBService({
       platform: 'linux',
       deployDir: tempRoot,

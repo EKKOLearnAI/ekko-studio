@@ -96,6 +96,6 @@ watch(
 <style scoped lang="scss">
 .provider-warning-text {
   margin: 0;
-  line-height: 1.6;
+  line-height: var(--line-height, 1.6);
 }
 </style>

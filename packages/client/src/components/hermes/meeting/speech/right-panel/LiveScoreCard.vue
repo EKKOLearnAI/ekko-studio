@@ -52,7 +52,7 @@ const { t } = useI18n()
 </template>
 
 <style scoped lang="scss">
-// --- 实时评分（更新式面板，自 SpeechEvaluationPanel 原样搬出） ---
+/* --- 实时评分（更新式面板，自 SpeechEvaluationPanel 原样搬出） ---*/
 .live-score-multi {
   display: flex;
   flex-direction: column;
@@ -65,14 +65,14 @@ const { t } = useI18n()
   gap: 8px;
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(112, 192, 232, 0.06);
-  border: 1px solid rgba(112, 192, 232, 0.2);
+  background: rgba(var(--accent-info-rgb), 0.06);
+  border: 1px solid rgba(var(--accent-info-rgb), 0.2);
   animation: score-flash 0.6s ease;
 }
 
 @keyframes score-flash {
-  0% { background: rgba(112, 192, 232, 0.2); }
-  100% { background: rgba(112, 192, 232, 0.06); }
+  0% { background: rgba(var(--accent-info-rgb), 0.2); }
+  100% { background: rgba(var(--accent-info-rgb), 0.06); }
 }
 
 .live-score-header {
@@ -81,8 +81,8 @@ const { t } = useI18n()
   justify-content: space-between;
 }
 
-.live-score-title { font-size: 13px; font-weight: 700; color: #70c0e8; }
-.live-score-time { font-size: 11px; color: var(--n-text-color3, #888); font-variant-numeric: tabular-nums; }
+.live-score-title { font-size: 13px; font-weight: 700; color: var(--accent-info); }
+.live-score-time { font-size: 11px; color: var(--n-text-color3, var(--text-primary)); font-variant-numeric: tabular-nums; }
 
 .live-score-grid {
   display: grid;
@@ -97,14 +97,14 @@ const { t } = useI18n()
   gap: 2px;
   padding: 6px 4px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--text-primary-rgb), 0.03);
 
   &.overall {
-    background: rgba(99, 226, 183, 0.08);
+    background: rgba(var(--success-rgb), 0.08);
   }
 }
 
-.live-score-label { font-size: 10px; color: var(--n-text-color3, #999); text-align: center; }
-.live-score-value { font-size: 18px; font-weight: 700; color: #70c0e8; font-variant-numeric: tabular-nums; }
-.live-score-item.overall .live-score-value { color: #63e2b7; }
+.live-score-label { font-size: 10px; color: var(--n-text-color3, var(--text-primary)); text-align: center; }
+.live-score-value { font-size: 18px; font-weight: 700; color: var(--accent-info); font-variant-numeric: tabular-nums; }
+.live-score-item.overall .live-score-value { color: var(--success); }
 </style>

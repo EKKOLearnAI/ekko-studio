@@ -303,9 +303,9 @@ function reset() {
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  border: 1px solid var(--border-light, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--border-light, rgba(var(--text-primary-rgb), 0.3));
   border-radius: 8px;
-  background: var(--bg-secondary, transparent);
+  background: var(--theme-card-bg, var(--bg-card));
 }
 
 .enhance-row {
@@ -320,7 +320,7 @@ function reset() {
 
 .enhance-label {
   font-size: 12px;
-  color: var(--text-muted, #999);
+  color: var(--text-muted, var(--text-primary));
   min-width: 34px;
   flex-shrink: 0;
 }
@@ -332,7 +332,7 @@ function reset() {
 
 .enhance-value {
   font-size: 11.5px;
-  color: var(--text-muted, #999);
+  color: var(--text-muted, var(--text-primary));
   width: 34px;
   text-align: right;
   flex-shrink: 0;
@@ -346,7 +346,7 @@ function reset() {
   padding: 2px 4px;
   border: none;
   background: none;
-  color: var(--text-muted, #999);
+  color: var(--text-muted, var(--text-primary));
   font-size: 12px;
   cursor: pointer;
   border-radius: 4px;
@@ -354,7 +354,7 @@ function reset() {
 
 .enhance-advanced-toggle:hover:not(:disabled) {
   color: var(--text-primary, inherit);
-  background: var(--bg-hover, rgba(128, 128, 128, 0.12));
+  background: var(--bg-hover, rgba(var(--text-primary-rgb), 0.12));
 }
 
 .enhance-advanced-toggle:disabled {
@@ -374,7 +374,7 @@ function reset() {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--primary, #4a90d9);
+  background: var(--accent-primary);
   margin-left: 2px;
 }
 
@@ -384,6 +384,6 @@ function reset() {
   gap: 8px;
   padding: 8px 8px 8px 10px;
   margin: -2px 0 0 6px;
-  border-left: 2px solid var(--border-light, rgba(128, 128, 128, 0.25));
+  border-left: 2px solid var(--border-light, rgba(var(--text-primary-rgb), 0.25));
 }
 </style>

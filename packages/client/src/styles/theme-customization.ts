@@ -6,6 +6,7 @@ export interface ThemeCustomization {
   fontSize: number
   textColor: string | null
   accentColor: string | null
+  appearance?: ThemeAppearance
 }
 
 export interface ResolvedThemeCustomization {
@@ -54,7 +55,7 @@ function channelsToHex(channels: [number, number, number]): string {
     .join('')}`
 }
 
-function mixHex(foreground: string, background: string, foregroundWeight: number): string {
+export function mixHex(foreground: string, background: string, foregroundWeight: number): string {
   const foregroundChannels = hexToChannels(foreground)
   const backgroundChannels = hexToChannels(background)
   return channelsToHex(foregroundChannels.map((channel, index) =>
@@ -62,7 +63,7 @@ function mixHex(foreground: string, background: string, foregroundWeight: number
   ) as [number, number, number])
 }
 
-function toRgbComponents(hex: string): string {
+export function toRgbComponents(hex: string): string {
   return hexToChannels(hex).join(', ')
 }
 
@@ -88,7 +89,7 @@ export function resolveThemeCustomization(
   customization: ThemeCustomization,
   isDark: boolean,
 ): ResolvedThemeCustomization {
-  const background = isDark ? '#1a1a1a' : '#fafafa'
+  const background = customization.appearance?.global.backgroundColor || (isDark ? '#1a1a1a' : '#fafafa')
   const resolved: ResolvedThemeCustomization = {
     fontSize: normalizeThemeFontSize(customization.fontSize),
   }
@@ -116,3 +117,4 @@ export function resolveThemeCustomization(
 
   return resolved
 }
+import type { ThemeAppearance } from '../../../shared/theme-appearance'

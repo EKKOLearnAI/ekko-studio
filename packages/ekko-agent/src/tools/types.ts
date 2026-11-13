@@ -43,6 +43,15 @@ export type AgentToolAuthorizer = (
 ) => Promise<AgentToolAuthorizationDecision>
 
 export interface AgentToolContext {
+  /** Host extensions run before authorization; transformed arguments are authorized normally. */
+  beforeTool?: (name: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>
+  afterTool?: (name: string, input: Record<string, unknown>, result: AgentToolResult) => Promise<AgentToolResult>
+  transformInput?: (messages: import('../model/messages').AgentMessageInput[]) => Promise<import('../model/messages').AgentMessageInput[]>
+  transformContext?: (messages: import('../model/types').AgentMessage[]) => Promise<import('../model/types').AgentMessage[]>
+  /** Host-bound reader for durable session goals; distinct from this run's updatePlan callback. */
+  listSessionTasks?: () => import('./session-tasks').AgentSessionTasksSnapshot | Promise<import('./session-tasks').AgentSessionTasksSnapshot>
+  /** Host-bound writer for the current session's goals, separate from run execution plans. */
+  updateSessionTasks?: (update: import('./session-tasks').AgentSessionTasksUpdate) => import('./session-tasks').AgentSessionTasksSnapshot | Promise<import('./session-tasks').AgentSessionTasksSnapshot>
   updatePlan?: (update: import('./plan').AgentPlanUpdate) => import('./plan').AgentTaskPlan
   runId?: string
   cwd?: string
@@ -64,6 +73,8 @@ export interface AgentToolContext {
   mcpServers?: Record<string, unknown>
   /** Isolate MCP connections for this scope; aborting it closes them without cancelling the agent. */
   mcpSessionSignal?: AbortSignal
+  /** Computer Use owns a native driver for this run; abort to close it and release the desktop. */
+  computerUseSessionSignal?: AbortSignal
   timeoutMs?: number
   signal?: AbortSignal
   requestToolApproval?: AgentToolApprovalRequester

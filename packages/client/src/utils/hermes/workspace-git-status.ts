@@ -1,4 +1,4 @@
-import type { GitFileStatus } from '@/api/hermes/files'
+import type { GitFileStatus } from '@/api/studio/files'
 
 const GIT_STATUS_BADGES: Record<GitFileStatus, string> = {
   modified: 'M',

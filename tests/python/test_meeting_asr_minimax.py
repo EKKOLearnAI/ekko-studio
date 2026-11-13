@@ -23,7 +23,7 @@ from pathlib import Path
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PY_BACKEND = REPO_ROOT / "packages" / "server" / "src" / "services" / "meeting-asr" / "python-backend"
+PY_BACKEND = REPO_ROOT / "packages" / "server" / "src" / "modules" / "studio" / "services" / "meeting-asr" / "python-backend"
 if str(PY_BACKEND) not in sys.path:
     sys.path.insert(0, str(PY_BACKEND))
 

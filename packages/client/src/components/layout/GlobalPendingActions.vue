@@ -3,16 +3,20 @@ import { h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { NButton, NInput, useMessage, useNotification, type NotificationReactive } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { useChatStore, type PendingApproval } from '@/stores/hermes/chat'
+import { useChatStore, type PendingApproval, type PendingClarify } from '@/stores/hermes/chat'
 import { useGroupChatStore, type GroupPendingApproval, type GroupPendingClarify } from '@/stores/hermes/group-chat'
+import PendingInteractionCountdown from '@/components/hermes/chat/PendingInteractionCountdown.vue'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
+import { connectChatRun, getChatRunSocket } from '@/api/studio/chat'
 import { copyToClipboard } from '@/utils/clipboard'
 import { playCompletionSound } from '@/utils/completion-sound'
 import { showSystemNotification } from '@/utils/completion-notification'
 import { workflowApprovalKey } from '@/utils/workflow-approval-key'
-import { approveWorkflowNode, type WorkflowRecord } from '@/api/hermes/workflows'
-import { listWorkflowsSocket, onWorkflowStatusUpdated, subscribeWorkflowStatuses, disconnectWorkflowSocket, type WorkflowRuntimeStatus } from '@/api/hermes/workflow-socket'
+import { PERSON_AVATAR } from '@/utils/chat-agent-avatar'
+import { PENDING_INTERACTION_EXPIRED_EVENT } from '@/utils/pending-interaction'
+import { approveWorkflowNode, type WorkflowRecord } from '@/api/studio/workflows'
+import { listWorkflowsSocket, onWorkflowStatusUpdated, subscribeWorkflowStatuses, disconnectWorkflowSocket, type WorkflowRuntimeStatus } from '@/api/studio/workflow-socket'
 
 const chatStore = useChatStore()
 const groupChatStore = useGroupChatStore()
@@ -99,7 +103,7 @@ function resetWorkflowSubscriptions(profile?: string | null) {
 type ApprovalChoice = PendingApproval['choices'][number]
 type GlobalPendingAction =
   | { key: string; profile: string; kind: 'chat-approval'; title: string; pending: PendingApproval }
-  | { key: string; profile: string; kind: 'chat-clarify'; title: string; pending: { sessionId: string; clarifyId: string; question: string; choices: string[] | null } }
+  | { key: string; profile: string; kind: 'chat-clarify'; title: string; pending: PendingClarify }
   | { key: string; profile: string; kind: 'group-approval'; title: string; pending: GroupPendingApproval }
   | { key: string; profile: string; kind: 'group-clarify'; title: string; pending: GroupPendingClarify }
   | { key: string; profile: string; kind: 'workflow-approval'; title: string; workflowId: string; runId: string; nodeId: string; executionId?: string }
@@ -109,6 +113,7 @@ function normalizePendingSourceTitle(title: string): string {
 }
 
 function sessionTitle(sessionId: string): string {
+  if (sessionId.startsWith('person-main-')) return PERSON_AVATAR.label
   return normalizePendingSourceTitle(chatStore.sessions.find(session => session.id === sessionId)?.title || sessionId)
 }
 
@@ -150,7 +155,7 @@ function pendingSoundActionKeys(): string[] {
 function pendingActions(suppressVisibleSources = true): GlobalPendingAction[] {
   const actions: GlobalPendingAction[] = []
   const profile = profilesStore.activeProfileName || 'default'
-  const visibleChatSessionId = suppressVisibleSources && ['hermes.chat', 'hermes.session', 'hermes.globalAgent', 'hermes.globalAgentSession'].includes(String(route.name || ''))
+  const visibleChatSessionId = suppressVisibleSources && ['hermes.person', 'hermes.chat', 'hermes.session', 'hermes.globalAgent', 'hermes.globalAgentSession'].includes(String(route.name || ''))
     ? chatStore.activeSessionId
     : null
   const visibleGroupRoomId = suppressVisibleSources && route.name === 'hermes.groupChatRoom' ? groupChatStore.currentRoomId : null
@@ -214,6 +219,10 @@ function approvalCommand(action: Extract<GlobalPendingAction, { kind: 'chat-appr
   ])
 }
 
+function interactionCountdown(action: Extract<GlobalPendingAction, { kind: 'chat-approval' | 'chat-clarify' | 'group-approval' | 'group-clarify' }>) {
+  return h(PendingInteractionCountdown, { deadline: action.pending.countdownDeadline })
+}
+
 function approvalButtons(action: Extract<GlobalPendingAction, { kind: 'chat-approval' | 'group-approval' }>) {
   const pending = action.pending
   const choices: ApprovalChoice[] = pending.isMemoryWrite ? ['once', 'deny'] : pending.choices
@@ -247,6 +256,7 @@ async function submitApproval(action: Extract<GlobalPendingAction, { kind: 'chat
 
 function clarifyContent(action: Extract<GlobalPendingAction, { kind: 'chat-clarify' | 'group-clarify' }>) {
   return h('div', { class: 'global-clarify-content' }, [
+    interactionCountdown(action),
     h('div', { class: 'global-clarify-question' }, action.pending.question),
     action.pending.choices?.length
       ? h('div', { class: 'global-clarify-choices' }, action.pending.choices.map(choice => h(NButton, {
@@ -298,6 +308,7 @@ async function submitWorkflowApproval(action: Extract<GlobalPendingAction, { kin
 function openPendingSource(action: GlobalPendingAction) {
   if (action.kind === 'chat-approval' || action.kind === 'chat-clarify') {
     const sessionId = action.pending.sessionId
+    if (sessionId.startsWith('person-main-')) { void router.push({ name: 'hermes.person', query: { session: sessionId } }); return }
     const session = chatStore.sessions.find(item => item.id === sessionId)
     void router.push({
       name: session?.source === 'global_agent' ? 'hermes.globalAgentSession' : 'hermes.session',
@@ -326,6 +337,7 @@ function systemNotificationCopy(action: GlobalPendingAction): { title: string; b
 function pendingSourceClickUrl(action: GlobalPendingAction): string {
   const profileQuery = `?profile=${encodeURIComponent(action.profile)}`
   if (action.kind === 'chat-approval' || action.kind === 'chat-clarify') {
+    if (action.pending.sessionId.startsWith('person-main-')) return `/person?session=${encodeURIComponent(action.pending.sessionId)}`
     const sessionId = encodeURIComponent(action.pending.sessionId)
     const session = chatStore.sessions.find(item => item.id === action.pending.sessionId)
     return session?.source === 'global_agent'
@@ -363,6 +375,10 @@ function notificationTitle(action: GlobalPendingAction, clarify: boolean) {
   }, `${action.title} · ${clarify ? t('chat.clarifyTitle') : t('chat.approvalTitle')}`)
 }
 
+function showPendingInteractionExpired() {
+  message.warning(t('chat.interactionExpired'))
+}
+
 function createGlobalNotification(action: GlobalPendingAction): NotificationReactive {
   const clarify = action.kind === 'chat-clarify' || action.kind === 'group-clarify'
   return notification.create({
@@ -372,6 +388,7 @@ function createGlobalNotification(action: GlobalPendingAction): NotificationReac
       : action.kind === 'workflow-approval'
         ? () => h('div', { class: 'global-approval-content' }, t('workflow.status.pending_approval'))
         : () => h('div', { class: 'global-approval-content' }, [
+            interactionCountdown(action),
             action.pending.description
               ? h('div', { class: 'global-approval-description' }, action.pending.description)
               : null,
@@ -438,6 +455,8 @@ watch(pendingActions, actions => {
 }, { deep: true, immediate: true })
 
 onMounted(() => {
+  if (!getChatRunSocket()) connectChatRun(profilesStore.activeProfileName)
+  window.addEventListener(PENDING_INTERACTION_EXPIRED_EVENT, showPendingInteractionExpired)
   window.addEventListener('hermes:workflow-approval-visible', handleVisibleWorkflowApproval)
   resetWorkflowSubscriptions(profilesStore.activeProfileName)
   void groupChatStore.connect().catch(() => undefined)
@@ -450,6 +469,7 @@ watch(() => profilesStore.activeProfileName, profile => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener(PENDING_INTERACTION_EXPIRED_EVENT, showPendingInteractionExpired)
   window.removeEventListener('hermes:workflow-approval-visible', handleVisibleWorkflowApproval)
   visibleWorkflowApprovalKeys.clear()
   settingsLoadGeneration++
@@ -469,25 +489,25 @@ onUnmounted(() => {
 <style>
 .n-notification:has(.global-approval-content, .global-clarify-content) {
   width: min(560px, calc(100vw - 32px));
-  border: 1px solid var(--border-color);
-  border-radius: 14px;
-  background: var(--bg-main-surface);
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 14px);
+  background: var(--theme-content-bg, var(--bg-main-surface));
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.14);
 }
 .n-notification:has(.global-approval-content, .global-clarify-content) .n-notification-main { margin-inline-start: 0; }
-.n-notification:has(.global-approval-content, .global-clarify-content) .n-notification-main__header { color: var(--text-primary); font-size: 15px; font-weight: 600; }
-.n-notification:has(.global-approval-content, .global-clarify-content) .n-notification-main-footer { padding-top: 12px; border-top: 1px solid var(--border-light); }
+.n-notification:has(.global-approval-content, .global-clarify-content) .n-notification-main__header { color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 15 / 14); font-weight: 600; }
+.n-notification:has(.global-approval-content, .global-clarify-content) .n-notification-main-footer { padding-top: calc(12px * var(--spacing-scale, 1)); border-top: var(--border-width, 1px) solid var(--border-light); }
 .global-pending-title { appearance: none; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
 .global-pending-title:hover { text-decoration-color: currentcolor; }
-.global-pending-title:focus-visible { border-radius: 2px; outline: 2px solid var(--accent-info); outline-offset: 3px; }
-.global-pending-actions, .global-clarify-choices { display: flex; flex-wrap: wrap; gap: 8px; }
-.global-approval-content, .global-clarify-content { display: grid; gap: 12px; max-width: 520px; max-height: min(420px, calc(100dvh - 190px)); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
-.global-approval-description { padding: 10px 12px; border: 1px solid rgba(var(--warning-rgb), 0.28); border-radius: 10px; background: rgba(var(--warning-rgb), 0.08); color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
-.global-approval-command { min-width: 0; overflow: hidden; border: 1px solid rgba(var(--text-primary-rgb), 0.1); border-radius: 10px; background: rgba(var(--accent-primary-rgb), 0.055); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.035); }
-.global-approval-command-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding: 4px 6px 4px 12px; border-bottom: 1px solid rgba(var(--text-primary-rgb), 0.08); }
-.global-approval-command-label { color: var(--text-secondary); font-size: 12px; font-weight: 600; }
-.global-approval-command pre { max-height: 240px; margin: 0; padding: 12px; overflow: auto; overscroll-behavior: contain; white-space: pre; }
-.global-approval-command code { display: block; width: max-content; min-width: 100%; color: var(--text-primary); font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace; font-size: 12px; line-height: 1.55; }
+.global-pending-title:focus-visible { border-radius: var(--radius-component, 2px); outline: 2px solid var(--accent-info); outline-offset: 3px; }
+.global-pending-actions, .global-clarify-choices { display: flex; flex-wrap: wrap; gap: calc(8px * var(--spacing-scale, 1)); }
+.global-approval-content, .global-clarify-content { display: grid; gap: calc(12px * var(--spacing-scale, 1)); max-width: 520px; max-height: min(420px, calc(100dvh - 190px)); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; overflow-wrap: anywhere; }
+.global-approval-description { padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); border: var(--border-width, 1px) solid rgba(var(--warning-rgb), 0.28); border-radius: var(--radius-component, 10px); background: rgba(var(--warning-rgb), 0.08); color: var(--text-secondary); font-size: calc(var(--font-size-base, 14px) * 13 / 14); line-height: var(--line-height, 1.55); }
+.global-approval-command { min-width: 0; overflow: hidden; border: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.1); border-radius: var(--radius-component, 10px); background: rgba(var(--accent-primary-rgb), 0.055); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.035); }
+.global-approval-command-header { display: flex; align-items: center; justify-content: space-between; gap: calc(12px * var(--spacing-scale, 1)); min-height: 36px; padding: calc(4px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); border-bottom: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.08); }
+.global-approval-command-label { color: var(--text-secondary); font-size: calc(var(--font-size-base, 14px) * 12 / 14); font-weight: 600; }
+.global-approval-command pre { max-height: 240px; margin: 0; padding: calc(12px * var(--spacing-scale, 1)); overflow: auto; overscroll-behavior: contain; white-space: pre; }
+.global-approval-command code { display: block; width: max-content; min-width: 100%; color: var(--text-primary); font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace; font-size: calc(var(--font-size-base, 14px) * 12 / 14); line-height: var(--line-height, 1.55); }
 .global-clarify-question { font-weight: 600; }
 
 @media (max-width: 600px) {

@@ -1,1 +1,0 @@
-Node.js ESM modules (`import`/`fileURLToPath`) for build scripts using esbuild, tar, node:crypto; Bash scripts with `set -Eeuo pipefail` and colorized logging; Python3 inline heredocs for atomic JSON writes and path utilities; OpenSSL for self-signed certs; systemd service units for update orchestration.

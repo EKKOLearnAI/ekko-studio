@@ -1,1 +1,0 @@
-Vitest for unit/integration tests (with jsdom-like window mocking), Playwright for end-to-end browser automation, Node.js `unittest` for Python USB tests, Socket.IO client for server-side WebSocket testing, and a custom stdio JSON-RPC MCP server (`fake-mcp-server.cjs`) for tool-integration scenarios.

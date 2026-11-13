@@ -16,7 +16,7 @@ import {
   chunkText,
   DEFAULT_CHUNK_CONFIG,
   type ChunkConfig,
-} from '../../packages/server/src/services/knowledge/chunker'
+} from '../../packages/server/src/modules/studio/services/knowledge/chunker'
 
 // --- Helpers --------------------------------------------------------------
 

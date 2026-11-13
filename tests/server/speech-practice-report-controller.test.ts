@@ -1,5 +1,5 @@
 /**
- * POST /api/hermes/speech-practice/report controller tests.
+ * POST /api/studio/speech-practice/report controller tests.
  *
  * The store itself is covered with a real temp dir in
  * speech-practice-report-store.test.ts; here the store is mocked so the
@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../packages/server/src/services/speech-practice-report', () => ({
+vi.mock('../../packages/server/src/modules/studio/services/speech-practice-report', () => ({
   PRACTICE_REPORT_MAX_CHARS: 1000,
   speechPracticeReportStore: {
     saveReport: vi.fn(),
@@ -19,12 +19,12 @@ vi.mock('../../packages/server/src/services/speech-practice-report', () => ({
 import {
   PRACTICE_REPORT_MAX_CHARS,
   speechPracticeReportStore,
-} from '../../packages/server/src/services/speech-practice-report'
+} from '../../packages/server/src/modules/studio/services/speech-practice-report'
 
 const saveReportMock = vi.mocked(speechPracticeReportStore.saveReport)
 
 async function dispatch(body: unknown): Promise<{ status: number; body: unknown }> {
-  const { savePracticeReport } = await import('../../packages/server/src/controllers/hermes/speech-practice')
+  const { savePracticeReport } = await import('../../packages/server/src/modules/studio/controllers/speech-practice')
   const ctx: any = {
     request: { body },
     status: 0,
@@ -42,7 +42,7 @@ beforeEach(() => {
   }))
 })
 
-describe('POST /api/hermes/speech-practice/report controller', () => {
+describe('POST /api/studio/speech-practice/report controller', () => {
   it('returns 400 for empty markdown without touching the store', async () => {
     const res = await dispatch({ markdown: '   ' })
     expect(res.status).toBe(400)

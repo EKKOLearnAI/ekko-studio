@@ -47,9 +47,10 @@ Use per-worktree state and ports to avoid colliding with a running local app:
 
 ```bash
 export PORT=18648
-export HERMES_WEB_UI_HOME="$PWD/.tmp/hermes-web-ui"
+export STUDIO_TASK_DIR="$(npm run --silent artifacts:new -- local-verification)"
+export HERMES_WEB_UI_HOME="$STUDIO_TASK_DIR/hermes-web-ui"
 export HERMES_WEBUI_STATE_DIR="$HERMES_WEB_UI_HOME"
-export UPLOAD_DIR="$PWD/.tmp/uploads"
+export UPLOAD_DIR="$STUDIO_TASK_DIR/uploads"
 npm run dev
 ```
 
@@ -66,6 +67,9 @@ npm run test:e2e
 
 Prefer existing Playwright fixtures and mocked backend services. Add real-service
 requirements only when the behavior cannot be represented with mocks.
+Wait for the required Socket.IO namespace before injecting events, and send them
+only to that namespace. Navigation can connect Person presence before a page's
+own socket is ready.
 
 ## Cleanup
 
@@ -76,3 +80,14 @@ git worktree remove ../worktrees/hermes-web-ui-<short-topic>
 ```
 
 Only remove the worktree you created.
+Keep reports and scratch files outside it using `docs/harness/task-artifacts.md`.
+After stopping verification processes and preserving requested evidence, remove
+only the marked external task directory you created. Keep runtime/user data when
+ownership, active use or recovery needs are uncertain.
+
+Vite development and Playwright servers use separate dependency caches. The client
+cache defaults to `node_modules/.vite/client`; Playwright sets
+`HERMES_WEB_UI_VITE_CACHE_DIR=node_modules/.vite/playwright-<port>`. Do not share
+optimized Vue bundles between concurrently running servers: replacing them while
+a page is open can mix Vue runtime instances and break slot rendering. Browser
+socket mocks must match nested cache directories as well as dependency filenames.

@@ -1,86 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { NAlert, NButton, NCard, NEmpty, NInput, NSelect, NSpin, NSwitch, NTag } from 'naive-ui'
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import { computed, ref, watch } from 'vue'
+import { NAlert, NButton, NEmpty, NInput, NSelect, NTag, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { fetchPlugins, setPluginEnabled, type HermesPluginInfo, type HermesPluginsMetadata } from '@/api/hermes/plugins'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { useMessage } from '@/composables/useAppMessage'
-import {
-  BUILTIN_PLUGINS,
-  isPluginEnabled,
-  listBuiltinPlugins,
-  readPluginEnabledMap,
-  writePluginEnabledMap,
-} from '@/plugins'
 
 const { t, te } = useI18n()
 const message = useMessage()
 const profilesStore = useProfilesStore()
-const router = useRouter()
 
 const plugins = ref<HermesPluginInfo[]>([])
 const warnings = ref<string[]>([])
 const metadata = ref<HermesPluginsMetadata | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const error = ref('')
 const actionLoading = ref<Record<string, boolean>>({})
-
-// 客户端插件（built-in Vue 插件，与 Hermes Agent 插件解耦）。
-interface ClientPluginRow {
-  id: string
-  name: string
-  version: string
-  description: string
-  author?: string
-  enabled: boolean
-  hasOverride: boolean
-}
-const clientPlugins = ref<ClientPluginRow[]>([])
-function loadClientPlugins() {
-  const persisted = readPluginEnabledMap()
-  clientPlugins.value = listBuiltinPlugins().map((m) => {
-    const registration = BUILTIN_PLUGINS.find(r => r.plugin.id === m.id)
-    return {
-      id: m.id,
-      name: m.name,
-      version: m.version,
-      description: m.description,
-      author: m.author,
-      enabled: isPluginEnabled(m.id, registration?.enabledByDefault ?? true),
-      hasOverride: Object.prototype.hasOwnProperty.call(persisted, m.id),
-    }
-  })
-}
-function persistClientPlugin(_row: ClientPluginRow) {
-  const map: Record<string, boolean> = {}
-  for (const r of clientPlugins.value) {
-    if (r.hasOverride) map[r.id] = r.enabled
-  }
-  writePluginEnabledMap(map)
-}
-function toggleClientPlugin(row: ClientPluginRow, value: boolean) {
-  row.enabled = value
-  row.hasOverride = true
-  persistClientPlugin(row)
-}
-function clientPluginLabel(row: ClientPluginRow) {
-  const key = `pluginsClient.${row.id}.name`
-  const translated = t(key)
-  return (translated && translated !== key) ? translated : row.name
-}
-function clientPluginDescription(row: ClientPluginRow) {
-  const key = `pluginsClient.${row.id}.description`
-  const translated = t(key)
-  return (translated && translated !== key) ? translated : row.description
-}
-function openClientPlugin(row: ClientPluginRow) {
-  const routeName = row.id === 'scanner' ? 'plugin-scanner.scanner' : null
-  if (routeName && router.hasRoute(routeName)) {
-    void router.push({ name: routeName })
-  }
-}
-onMounted(loadClientPlugins)
 
 const searchQuery = ref('')
 const sourceFilter = ref<string | null>(null)
@@ -197,17 +133,19 @@ watch(() => profilesStore.activeProfileName || 'default', () => {
 </script>
 
 <template>
-  <div class="plugins-view">
+  <PageLoading :show="loading && plugins.length === 0" class="plugins-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('plugins.title') }}</h2>
       <NButton size="small" quaternary :loading="loading" @click="loadPlugins">
         {{ t('plugins.refresh') }}
       </NButton>
     </header>
+    </PageHeader>
 
     <div class="plugins-content" :class="{ 'is-loading': loading && plugins.length === 0 }">
       <div v-if="loading && plugins.length === 0" class="plugins-loading-state">
-        <NSpin />
+
       </div>
       <template v-else>
         <NAlert type="info" :bordered="false" class="plugins-notice">
@@ -221,56 +159,6 @@ watch(() => profilesStore.activeProfileName || 'default', () => {
         <NAlert v-for="warning in warnings" :key="warning" type="warning" class="plugins-notice">
           {{ warning }}
         </NAlert>
-
-        <!-- 客户端插件（浏览器侧 Vue 插件，与下面表格里的 Hermes Agent 插件是两套体系） -->
-        <section v-if="clientPlugins.length > 0" class="client-plugins">
-          <div class="client-plugins-header">
-            <h3 class="section-title">{{ t('plugins.clientSectionTitle') }}</h3>
-            <span class="section-hint">{{ t('plugins.clientSectionHint') }}</span>
-          </div>
-          <div class="client-plugins-grid">
-            <NCard
-              v-for="row in clientPlugins"
-              :key="row.id"
-              class="client-plugin-card"
-              :class="{ 'is-disabled': !row.enabled }"
-              hoverable
-              @click="openClientPlugin(row)"
-            >
-              <div class="client-plugin-card-head">
-                <div class="client-plugin-card-title-block">
-                  <div class="client-plugin-card-title">
-                    <span>{{ clientPluginLabel(row) }}</span>
-                    <NTag size="small" round>v{{ row.version }}</NTag>
-                  </div>
-                  <div class="client-plugin-card-id">{{ row.id }}</div>
-                </div>
-                <NSwitch
-                  :value="row.enabled"
-                  size="small"
-                  @click.stop="(e: MouseEvent) => e.stopPropagation()"
-                  @update:value="(value: boolean) => toggleClientPlugin(row, value)"
-                />
-              </div>
-              <p class="client-plugin-card-desc">{{ clientPluginDescription(row) }}</p>
-              <div class="client-plugin-card-meta">
-                <span v-if="row.author">{{ t('clientPlugins.author', { author: row.author }) }}</span>
-                <NTag v-if="row.hasOverride" size="tiny" type="warning">
-                  {{ t('clientPlugins.overridden') }}
-                </NTag>
-                <NTag v-else-if="row.enabled" size="tiny" type="success">
-                  {{ t('clientPlugins.enabledTag') }}
-                </NTag>
-                <NTag v-else size="tiny" type="default">
-                  {{ t('clientPlugins.disabledTag') }}
-                </NTag>
-              </div>
-            </NCard>
-          </div>
-          <NAlert type="info" :bordered="false" size="small" class="client-plugins-refresh-hint">
-            {{ t('plugins.clientSectionRefreshHint') }}
-          </NAlert>
-        </section>
 
         <div class="summary-grid">
           <div class="summary-card">
@@ -369,268 +257,10 @@ watch(() => profilesStore.activeProfileName || 'default', () => {
         </div>
       </template>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
-@use '@/styles/variables' as *;
-
-.plugins-view {
-  height: calc(100 * var(--vh));
-  display: flex;
-  flex-direction: column;
-}
-
-.plugins-content {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 20px;
-
-  &.is-loading {
-    display: grid;
-    place-items: center;
-  }
-}
-
-.plugins-loading-state {
-  display: grid;
-  place-items: center;
-}
-
-.plugins-notice {
-  margin-bottom: 14px;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-// ── 客户端插件 section ──────────────────────────────────────────────
-.client-plugins {
-  margin-bottom: 18px;
-  padding-bottom: 16px;
-  border-bottom: 1px dashed $border-color;
-}
-
-.client-plugins-header {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.section-title {
-  font-size: 14px;
-  font-weight: 600;
-  margin: 0;
-}
-
-.section-hint {
-  font-size: 12px;
-  color: $text-muted;
-}
-
-.client-plugins-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-
-.client-plugin-card {
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
-
-  &.is-disabled {
-    opacity: 0.65;
-  }
-}
-
-.client-plugin-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.client-plugin-card-title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.client-plugin-card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-}
-
-.client-plugin-card-id {
-  font-size: 11px;
-  color: $text-muted;
-  font-family: var(--font-mono, monospace);
-}
-
-.client-plugin-card-desc {
-  font-size: 12.5px;
-  color: $text-secondary;
-  margin: 8px 0 4px;
-  line-height: 1.45;
-}
-
-.client-plugin-card-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-  color: $text-muted;
-  flex-wrap: wrap;
-}
-
-.client-plugins-refresh-hint {
-  margin-top: 10px;
-  font-size: 11.5px;
-}
-
-.summary-card {
-  padding: 14px;
-  border: 1px solid $border-color;
-  border-radius: $radius-md;
-  background: $bg-card;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-
-  strong {
-    font-size: 24px;
-    line-height: 1;
-  }
-
-  &.success strong { color: $success; }
-  &.warning strong { color: $warning; }
-  &.error strong { color: $error; }
-  &.info strong { color: $accent-primary; }
-}
-
-.summary-label {
-  font-size: 11px;
-  color: $text-muted;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.filter-row {
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) repeat(3, minmax(140px, 180px));
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-.plugins-table-wrap {
-  overflow-x: auto;
-  border: 1px solid $border-color;
-  border-radius: $radius-md;
-  background: $bg-card;
-}
-
-.plugins-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 980px;
-
-  th,
-  td {
-    padding: 12px;
-    border-bottom: 1px solid $border-color;
-    text-align: start;
-    vertical-align: top;
-    font-size: 13px;
-  }
-
-  th {
-    color: $text-muted;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: rgba(var(--accent-primary-rgb), 0.04);
-  }
-
-  tr:last-child td {
-    border-bottom: none;
-  }
-}
-
-.plugin-name {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-
-  span {
-    color: $text-muted;
-    font-size: 12px;
-  }
-}
-
-.description {
-  margin-top: 6px;
-  color: $text-secondary;
-  max-width: 420px;
-}
-
-.meta-line,
-.config-status,
-.muted {
-  margin-top: 6px;
-  color: $text-muted;
-  font-size: 11px;
-}
-
-.meta-line {
-  display: flex;
-  gap: 8px;
-}
-
-.capability-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: $text-secondary;
-}
-
-.path-cell {
-  display: inline-block;
-  max-width: 320px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: $text-muted;
-  background: rgba(var(--accent-primary-rgb), 0.06);
-  padding: 2px 6px;
-  border-radius: 6px;
-}
-
-.metadata-panel {
-  margin-top: 16px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  color: $text-muted;
-  font-size: 11px;
-
-  code {
-    color: $text-secondary;
-  }
-}
-
-@media (max-width: 900px) {
-  .summary-grid,
-  .filter-row {
-    grid-template-columns: 1fr;
-  }
-}
+@use '@/styles/plugins-page' as plugins-page;
+@include plugins-page.layout;
 </style>

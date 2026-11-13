@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import TaskPlanCard from '../chat/TaskPlanCard.vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useMessage } from 'naive-ui'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import {
     copyTextToClipboard,
@@ -14,23 +16,26 @@ import { useGlobalSpeech } from '@/composables/useSpeech'
 import { useVoiceSettings } from '@/composables/useVoiceSettings'
 import { speedToEdgeRate, hzToEdgePitch } from '@/utils/ttsHelpers'
 import { formatChatTimestamp } from '@/utils/chat-timestamp'
-import type { ChatMessage, GroupWorkspaceDiffFile, GroupWorkspaceDiffPayload, RoomAgent, MemberInfo } from '@/api/hermes/group-chat'
-import { useMessage } from '@/composables/useAppMessage'
-import { getGroupChatAttachmentUrl } from '@/api/hermes/group-chat-attachments'
+import {
+    type ChatMessage,
+    type GroupWorkspaceDiffFile,
+    type GroupWorkspaceDiffPayload,
+    type RoomAgent,
+    type MemberInfo,
+} from '@/api/studio/group-chat'
+import { getGroupChatAttachmentUrl } from '@/api/studio/group-chat-attachments'
 import { useGroupChatStore } from '@/stores/hermes/group-chat'
-import { useDiscussionReportDownload } from '@/composables/useDiscussionReportDownload'
-import { downloadGroupWorkspaceFile } from '@/api/hermes/group-chat'
 import { formatReferencedContentForDisplay, parseMessageReference } from '@/stores/hermes/chat'
 import { isPreviewableFile } from '@/utils/hermes/file-preview'
 import ToolChangeCard from '@/components/hermes/chat/ToolChangeCard.vue'
 import { useFilesStore } from '@/stores/hermes/files'
 import { useToolPanelStore } from '@/stores/hermes/tool-panel'
-import { isServerTtsProvider } from '@/api/hermes/tts'
+import { isServerTtsProvider } from '@/api/studio/tts'
 import { groupAgentAvatar, groupMessageAgent, parseStoredAvatar } from '@/utils/group-agent-avatar'
 import GroupAgentMessageAvatar from './GroupAgentMessageAvatar.vue'
 import GroupAgentRobotIcon from './GroupAgentRobotIcon.vue'
-
-const MarkdownRenderer = defineAsyncComponent(async () => (await import('../chat/MarkdownRenderer.vue')).default)
+import ImagePreviewOverlay from '@/components/hermes/chat/ImagePreviewOverlay.vue'
+import MarkdownRenderer from '../chat/MarkdownRenderer.vue'
 
 const TOOL_PAYLOAD_DISPLAY_LIMIT = 1000
 const JSON_STRING_DISPLAY_LIMIT = 200
@@ -58,7 +63,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const appMessage = useMessage()
 const toast = useMessage()
 const groupChatStore = useGroupChatStore()
 const filesStore = useFilesStore()
@@ -94,38 +98,6 @@ const agentOwnerInfo = computed(() => {
 const messageTtsProfile = computed(() => agentInfo.value?.profile?.trim() || '')
 
 const timeStr = computed(() => formatChatTimestamp(props.message.timestamp))
-
-// 当前消息是否为已结束讨论的统一意见报告：在报告消息卡片上提供下载入口。
-const isDiscussionReportMessage = computed(() => {
-    const roomId = groupChatStore.currentRoomId
-    if (!roomId) return false
-    const state = groupChatStore.discussionStates.get(roomId)
-    if (!state?.reportMessageId) return false
-    if (state.status === 'pending' || state.status === 'running' || state.status === 'paused') return false
-    return state.reportMessageId === props.message.id
-})
-const { isDownloading: isReportDownloading, downloadReport: downloadDiscussionReport } = useDiscussionReportDownload()
-
-// 报告消息卡片直接呈现本场讨论的交付文件（工作区「交付」目录），无需进入工作区面板。
-const reportDeliverables = computed(() => {
-    const roomId = groupChatStore.currentRoomId
-    if (!roomId || !isDiscussionReportMessage.value) return []
-    const state = groupChatStore.discussionStates.get(roomId)
-    return state?.deliverables || []
-})
-const isDeliverableDownloading = ref(false)
-async function downloadDeliverable(filePath: string): Promise<void> {
-    const roomId = groupChatStore.currentRoomId
-    if (!roomId || !filePath) return
-    isDeliverableDownloading.value = true
-    try {
-        await downloadGroupWorkspaceFile(roomId, filePath, filePath.split('/').pop() || '交付文件')
-    } catch (err: any) {
-        appMessage.error(err?.message || t('groupChat.discussion.summaryDownloadFailed'))
-    } finally {
-        isDeliverableDownloading.value = false
-    }
-}
 
 // 找当前消息发送者在 members 里的记录
 const memberInfo = computed(() => {
@@ -631,6 +603,10 @@ function isImage(type: string): boolean {
     return type.startsWith('image/')
 }
 
+function isVideo(type: string, name: string): boolean {
+    return type.startsWith('video/') || /\.(?:mp4|mov|m4v|webm)$/i.test(name)
+}
+
 function attachmentPath(attachment: { path?: string; url?: string }): string | null {
     if (attachment.path) return attachment.path
     try {
@@ -640,8 +616,30 @@ function attachmentPath(attachment: { path?: string; url?: string }): string | n
     }
 }
 
-function handleAttachmentClick(event: MouseEvent, attachment: { name: string; path?: string; url?: string }): void {
+function isStoredGroupAttachment(attachment: { path?: string; url?: string }): boolean {
+    const rawPath = String(attachment.path || '').trim()
+    if (rawPath) {
+        const path = rawPath.split(/[?#]/, 1)[0].split(/[\\/]/).pop() || ''
+        return /^[a-f0-9]{32}(?:\.[a-z0-9]{1,12})?$/i.test(path)
+    }
+    return /\/api\/studio\/group-chat\/(?:rooms|invites)\/[^/?#]+\/attachments\/[^/?#]+/i.test(String(attachment.url || ''))
+}
+
+function handleAttachmentClick(event: MouseEvent, attachment: { name: string; size?: number; path?: string; url?: string }): void {
     if (!isPreviewableFile(attachment.name)) return
+    if (isStoredGroupAttachment(attachment) && attachment.url) {
+        const previewEvent = new CustomEvent('hermes:preview-group-attachment', {
+            cancelable: true,
+            detail: {
+                sourceUrl: attachment.url,
+                fileName: attachment.name,
+                size: Number(attachment.size || 0),
+            },
+        })
+        window.dispatchEvent(previewEvent)
+        if (previewEvent.defaultPrevented) event.preventDefault()
+        return
+    }
     const path = attachmentPath(attachment)
     if (!path) return
     const previewEvent = new CustomEvent('hermes:preview-workspace-file', {
@@ -683,7 +681,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div v-if="isToolMessage" class="group-message tool-message" :class="{ embedded }">
+    <div v-if="message.taskPlan" class="group-task-plan-container">
+        <TaskPlanCard class="group-task-plan-card" :plan="message.taskPlan" />
+    </div>
+    <div v-else-if="isToolMessage" class="group-message tool-message" :class="{ embedded }">
         <div class="msg-body">
             <div v-if="!embedded" class="msg-header">
                 <GroupAgentMessageAvatar
@@ -770,9 +771,25 @@ onBeforeUnmount(() => {
                         v-for="att in renderedAttachments"
                         :key="att.id"
                         class="msg-attachment"
-                        :class="{ image: isImage(att.type) }"
+                        :class="{
+                            image: isImage(att.type),
+                            video: message.role === 'user' && isVideo(att.type, att.name),
+                        }"
                     >
                         <img v-if="isImage(att.type)" :src="att.url" :alt="att.name" class="msg-attachment-thumb" @click="previewUrl = att.url" />
+                        <template v-else-if="message.role === 'user' && isVideo(att.type, att.name)">
+                            <video
+                                class="msg-attachment-video"
+                                :src="att.url"
+                                controls
+                                playsinline
+                                preload="metadata"
+                            ></video>
+                            <div class="msg-attachment-video-footer">
+                                <span class="att-name">{{ att.name }}</span>
+                                <span v-if="att.size" class="att-size">{{ formatSize(att.size) }}</span>
+                            </div>
+                        </template>
                         <a v-else class="msg-attachment-file" :href="att.url" :title="t('download.downloadFile')" @click="handleAttachmentClick($event, att)">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -812,6 +829,7 @@ onBeforeUnmount(() => {
                     <MarkdownRenderer v-if="parsedMessageReference.reply" :content="parsedMessageReference.reply" :mention-names="mentionNames" :resolve-image-url="resolveGroupImageUrl" />
                 </template>
                 <MarkdownRenderer v-else-if="renderedDisplayBody" :content="renderedDisplayBody" :mention-names="mentionNames" :resolve-image-url="resolveGroupImageUrl" :defer-images="!!message.isStreaming" />
+                <slot name="before-workspace-changes" />
                 <ToolChangeCard
                     v-for="change in assistantWorkspaceChanges"
                     :key="change.change_id"
@@ -855,21 +873,6 @@ onBeforeUnmount(() => {
                     </svg>
                 </button>
                 <button
-                    v-if="isDiscussionReportMessage"
-                    type="button"
-                    class="copy-bubble-btn"
-                    :class="{ downloading: isReportDownloading }"
-                    :title="t('groupChat.discussion.downloadReport')"
-                    :disabled="isReportDownloading"
-                    @click="downloadDiscussionReport"
-                >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                </button>
-                <button
                     v-if="quotableContent"
                     type="button"
                     class="reference-bubble-btn"
@@ -883,31 +886,34 @@ onBeforeUnmount(() => {
                 </button>
                 <span v-if="!embedded" class="message-time">{{ timeStr }}</span>
             </div>
-            <div v-if="reportDeliverables.length" class="report-deliverables">
-                <div class="report-deliverables-title">{{ t('groupChat.discussion.deliverablesLabel') }}</div>
-                <div v-for="file in reportDeliverables" :key="file" class="report-deliverable">
-                    <span class="report-deliverable-name" :title="file">{{ file.split('/').pop() }}</span>
-                    <button
-                        type="button"
-                        class="report-deliverable-download"
-                        :disabled="isDeliverableDownloading"
-                        @click="downloadDeliverable(file)"
-                    >⬇️ {{ t('groupChat.discussion.downloadSummary') }}</button>
-                </div>
-            </div>
         </div>
     </div>
-    <div v-if="previewUrl" class="image-preview-overlay" @click.self="previewUrl = null">
-        <img :src="previewUrl" class="image-preview-img" @click="previewUrl = null" />
-    </div>
+    <ImagePreviewOverlay
+        v-if="previewUrl"
+        :src="previewUrl"
+        alt=""
+        @close="previewUrl = null"
+    />
 </template>
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
 
+.group-task-plan-container {
+    display: flow-root;
+    width: 100%;
+    min-width: 0;
+}
+
+.group-task-plan-card {
+    width: calc(100% - 10px);
+    max-width: none;
+    margin: 5px;
+}
+
 .group-message {
     display: flex;
-    padding: 2px 0;
+    padding: calc(2px * var(--spacing-scale, 1)) 0;
     min-width: 0;
     max-width: 100%;
     box-sizing: border-box;
@@ -928,56 +934,10 @@ onBeforeUnmount(() => {
         background-color: rgba(var(--accent-primary-rgb), 0.06);
     }
 
-    .report-deliverables {
-        margin-top: 8px;
-        padding: 8px 10px;
-        border: 1px solid rgba(var(--accent-primary-rgb), 0.25);
-        border-radius: 8px;
-        background-color: rgba(var(--accent-primary-rgb), 0.05);
-
-        .report-deliverables-title {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-secondary, #888);
-            margin-bottom: 6px;
-        }
-
-        .report-deliverable {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 3px 0;
-
-            .report-deliverable-name {
-                font-size: 13px;
-                word-break: break-all;
-                flex: 1;
-                min-width: 0;
-            }
-
-            .report-deliverable-download {
-                border: none;
-                background: rgba(var(--accent-primary-rgb), 0.12);
-                color: var(--accent-primary, #4c8dff);
-                border-radius: 6px;
-                padding: 3px 8px;
-                font-size: 12px;
-                cursor: pointer;
-                white-space: nowrap;
-
-                &:disabled {
-                    opacity: 0.5;
-                    cursor: not-allowed;
-                }
-            }
-        }
-    }
-
     &.agent .msg-content.agent-error {
         color: $error;
         background-color: rgba(var(--error-rgb), 0.06);
-        border: 1px solid rgba(var(--error-rgb), 0.2);
+        border: var(--border-width, 1px) solid rgba(var(--error-rgb), 0.2);
 
         :deep(.markdown-body),
         :deep(.markdown-body p),
@@ -1008,11 +968,11 @@ onBeforeUnmount(() => {
             background: transparent;
             border: 0;
             border-radius: 0;
-            padding: 8px 10px;
+            padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
         }
 
         .message-meta {
-            padding-inline: 10px;
+            padding-inline: calc(10px * var(--spacing-scale, 1));
         }
     }
 }
@@ -1021,18 +981,18 @@ onBeforeUnmount(() => {
     align-items: flex-start;
 
     &.embedded {
-        padding: 4px 8px;
+        padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     }
 }
 
 .tool-line {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 4px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding: calc(2px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     min-width: 0;
     max-width: 100%;
     box-sizing: border-box;
@@ -1049,7 +1009,7 @@ onBeforeUnmount(() => {
 .tool-interrupted-badge {
     flex: 0 0 auto;
     color: $text-muted;
-    font-size: 10px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
 }
 
 .tool-chevron {
@@ -1070,7 +1030,7 @@ onBeforeUnmount(() => {
 .tool-name {
     flex: 0 1 auto;
     min-width: 0;
-    font-family: $font-code;
+    font-family: var(--font-code, $font-code);
     color: $text-muted;
     font-weight: 400;
     overflow: hidden;
@@ -1099,12 +1059,12 @@ onBeforeUnmount(() => {
 }
 
 .tool-error-badge {
-    font-size: 9px;
+    font-size: calc(var(--font-size-base, 14px) * 9 / 14);
     color: $error;
     background: rgba(var(--error-rgb), 0.08);
-    padding: 0 4px;
-    border-radius: 3px;
-    line-height: 14px;
+    padding: 0 calc(4px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 3px);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 14 / 14));
     margin-inline-start: 4px;
 }
 
@@ -1112,7 +1072,7 @@ onBeforeUnmount(() => {
     margin-inline-start: 16px;
     margin-top: 2px;
     border-inline-start: 2px solid $border-light;
-    padding-inline-start: 10px;
+    padding-inline-start: calc(10px * var(--spacing-scale, 1));
 }
 
 .assistant-workspace-change {
@@ -1126,7 +1086,7 @@ onBeforeUnmount(() => {
 .tool-detail-label {
     margin-bottom: 2px;
     color: $text-muted;
-    font-size: 10px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
     font-weight: 600;
     letter-spacing: 0.3px;
     text-transform: uppercase;
@@ -1142,7 +1102,7 @@ onBeforeUnmount(() => {
     }
 
     :deep(code.hljs) {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         max-height: 300px;
         overflow-y: auto;
         white-space: pre-wrap;
@@ -1153,12 +1113,12 @@ onBeforeUnmount(() => {
 .tool-detail-reasoning {
     max-height: 300px;
     overflow-y: auto;
-    padding: 8px 10px;
-    border: 1px solid $border-light;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-light;
     border-radius: $radius-sm;
     background: rgba(var(--text-primary-rgb), 0.035);
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
     :deep(.markdown-body > :first-child) {
         margin-top: 0;
@@ -1178,7 +1138,7 @@ onBeforeUnmount(() => {
 .msg-body {
     display: flex;
     flex-direction: column;
-    min-width: min(260px, 85%);
+    min-width: min(500px, 100%);
     max-width: 85%;
     box-sizing: border-box;
 }
@@ -1186,11 +1146,11 @@ onBeforeUnmount(() => {
 .msg-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding-bottom: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding-bottom: calc(6px * var(--spacing-scale, 1));
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 22px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 22 / 14));
 
     .sender-name {
         min-width: 0;
@@ -1210,7 +1170,7 @@ onBeforeUnmount(() => {
     }
 
     .agent-desc {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
         font-style: italic;
     }
@@ -1218,7 +1178,7 @@ onBeforeUnmount(() => {
 
 .msg-time,
 .message-time {
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     color: var(--text-muted);
     opacity: 0.6;
     user-select: none;
@@ -1227,10 +1187,10 @@ onBeforeUnmount(() => {
 .message-meta {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     margin-top: 4px;
-    padding: 0 4px;
-    padding-bottom: 4px;
+    padding: 0 calc(4px * var(--spacing-scale, 1));
+    padding-bottom: calc(4px * var(--spacing-scale, 1));
     color: $text-muted;
     opacity: 1;
 }
@@ -1327,13 +1287,17 @@ onBeforeUnmount(() => {
     }
 }
 
+.group-message:not(.embedded) .msg-content {
+    min-width: min(500px, 100%);
+}
+
 .msg-content {
-    padding: 10px 14px;
+    padding: calc(10px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
     font-size: var(--font-size-base);
-    line-height: 1.65;
+    line-height: var(--line-height, 1.65);
     color: $text-primary;
-    border-radius: 10px;
-    background-color: $msg-user-bg;
+    border-radius: var(--radius-component, 10px);
+    background-color: var(--theme-userMessage-bg, $msg-user-bg);
     min-width: 0;
     max-width: 100%;
     box-sizing: border-box;
@@ -1351,7 +1315,7 @@ onBeforeUnmount(() => {
     &.agent-error {
         color: $error;
         background-color: rgba(var(--error-rgb), 0.06);
-        border: 1px solid rgba(var(--error-rgb), 0.2);
+        border: var(--border-width, 1px) solid rgba(var(--error-rgb), 0.2);
 
         :deep(.markdown-body),
         :deep(.markdown-body p),
@@ -1372,16 +1336,16 @@ onBeforeUnmount(() => {
 :global(html.theme-has-custom-background .group-message:not(.embedded) .msg-content:not(.agent-error)),
 :global(html.theme-has-custom-background .group-message.agent:not(.embedded) .msg-content.agent-content:not(.agent-error)),
 :global(html.theme-has-custom-background .group-message.self:not(.embedded) .msg-content:not(.agent-error)) {
-    background-color: rgba(var(--bg-main-surface-rgb), 0.78);
-    border: 1px solid rgba(var(--text-primary-rgb), 0.18);
-    -webkit-backdrop-filter: blur(8px) saturate(110%);
-    backdrop-filter: blur(8px) saturate(110%);
+    background-color: var(--message-theme-bg, rgba(var(--bg-main-surface-rgb), 0.78));
+    border: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.18);
+    -webkit-backdrop-filter: var(--message-theme-filter, blur(8px) saturate(110%));
+    backdrop-filter: var(--message-theme-filter, blur(8px) saturate(110%));
 }
 
 .msg-attachments {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     margin-bottom: 8px;
 }
 
@@ -1389,11 +1353,16 @@ onBeforeUnmount(() => {
     border-radius: $radius-sm;
     overflow: hidden;
     background-color: $bg-secondary;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
 
     &.image {
         width: 96px;
         height: 96px;
+    }
+
+    &.video {
+        width: min(360px, 100%);
+        background: #000;
     }
 }
 
@@ -1405,13 +1374,46 @@ onBeforeUnmount(() => {
     cursor: zoom-in;
 }
 
+.msg-attachment-video {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: 280px;
+    background: #000;
+    object-fit: contain;
+}
+
+.msg-attachment-video-footer {
+    display: flex;
+    align-items: center;
+    gap: calc(8px * var(--spacing-scale, 1));
+    padding: calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+    color: $text-secondary;
+    background: $bg-secondary;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+
+    .att-name {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .att-size {
+        flex-shrink: 0;
+        color: $text-muted;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+    }
+}
+
 .msg-attachment-file {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     min-width: 140px;
     max-width: 220px;
-    padding: 8px 10px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     color: $text-secondary;
     text-decoration: none;
 
@@ -1421,48 +1423,28 @@ onBeforeUnmount(() => {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 12px;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     }
 
     .att-size {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
     }
-}
-
-.image-preview-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: rgba(0, 0, 0, 0.82);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-}
-
-.image-preview-img {
-    max-width: min(96vw, 1400px);
-    max-height: 92vh;
-    object-fit: contain;
-    border-radius: 6px;
-    cursor: zoom-out;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
 }
 
 .thinking-block {
     margin-bottom: 8px;
-    padding: 4px 0;
-    border-bottom: 1px dashed $border-light;
+    padding: calc(4px * var(--spacing-scale, 1)) 0;
+    border-bottom: var(--border-width, 1px) dashed $border-light;
 
     .thinking-header {
         display: flex;
         align-items: center;
-        gap: 6px;
-        font-size: 11px;
+        gap: calc(6px * var(--spacing-scale, 1));
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
         cursor: pointer;
-        padding: 2px 4px;
+        padding: calc(2px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1));
         border-radius: $radius-sm;
         user-select: none;
 
@@ -1481,7 +1463,7 @@ onBeforeUnmount(() => {
     }
 
     .thinking-icon {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         flex-shrink: 0;
     }
 
@@ -1497,9 +1479,9 @@ onBeforeUnmount(() => {
 
     .thinking-body {
         margin-top: 6px;
-        padding: 6px 10px;
+        padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
         border-inline-start: 2px solid $border-light;
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         opacity: 0.85;
         font-style: italic;
 
@@ -1511,8 +1493,8 @@ onBeforeUnmount(() => {
 
 .streaming-dots {
     display: flex;
-    gap: 4px;
-    padding: 4px 0;
+    gap: calc(4px * var(--spacing-scale, 1));
+    padding: calc(4px * var(--spacing-scale, 1)) 0;
 
     span {
         width: 6px;
@@ -1536,6 +1518,26 @@ onBeforeUnmount(() => {
     40% {
         opacity: 1;
         transform: scale(1);
+    }
+}
+@media (max-width: $breakpoint-mobile) {
+    .group-message .msg-body {
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .group-message:not(.embedded) .msg-content {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .group-message.embedded {
+        .msg-content,
+        &.agent .msg-content.agent-content,
+        &.self .msg-content {
+            padding: calc(10px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
+        }
     }
 }
 </style>

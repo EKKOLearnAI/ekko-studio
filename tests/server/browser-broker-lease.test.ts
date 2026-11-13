@@ -7,7 +7,7 @@ import {
   LEASE_TTL_MS,
   TAKEOVER_CANCEL_MESSAGE,
   isProcessAlive,
-} from '../../packages/server/src/services/browser/broker-lease'
+} from '../../packages/server/src/modules/studio/services/browser/broker-lease'
 
 function createTable(overrides: { now?: () => number } = {}) {
   const revoked: string[] = []

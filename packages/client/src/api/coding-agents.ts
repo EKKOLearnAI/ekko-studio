@@ -1,7 +1,8 @@
 import { request } from './client'
-import type { ProviderApiMode } from './hermes/system'
+import { agentMetadata } from '../utils/agent-catalog'
+import type { ProviderApiMode } from './studio/provider-api-mode'
 
-export type CodingAgentId = 'claude-code' | 'codex' | 'dsh' | 'pi'
+export type CodingAgentId = `plugin:${string}/${string}` | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
 export type ChatCodingAgentId = CodingAgentId | 'ekko-agent'
 export const CODING_AGENT_API_MODES = [
   'chat_completions',
@@ -54,20 +55,62 @@ export interface CodingAgentToolStatus {
   name: string
   provider: string
   command: string
+  capabilities?: { modes: string[]; installation: string; images: boolean; nativeCompact: boolean; automaticUpdates: boolean }
   packageName: string
   installed: boolean
   version: string
   rawVersion: string
+  source?: 'user-cli' | 'not-installed'
+  path?: string
   error?: string
-  /** Whether the DeepSeek Harness SDK runtime (full streaming capability) is installed. */
-  sdkAvailable?: boolean
+  compatibility?: { pinnedVersion: string; previousVersion: string; adapterRevision: number; verifiedVersion: string }
 }
 
 export interface CodingAgentsStatus {
   tools: CodingAgentToolStatus[]
 }
 
+export interface CodingAgentModel {
+  id: string
+  name: string
+  resolvedModel?: string
+  provider?: string
+  isDefault?: boolean
+  hidden?: boolean
+  contextWindow?: number
+  maxOutputTokens?: number
+  reasoningEfforts?: string[]
+  modelFamily?: string
+  modelFamilyName?: string
+  reasoningEffort?: string
+  inputModalities?: string[]
+}
+
+export interface CodingAgentModelCatalog {
+  agentId: CodingAgentId
+  name: string
+  status: 'ready' | 'empty' | 'not_installed' | 'auth_required' | 'unsupported' | 'timeout' | 'error'
+  source: 'cli' | 'app-server' | 'control-protocol' | 'sdk' | 'acp' | 'config'
+  scope: 'available' | 'configured' | 'builtin'
+  models: CodingAgentModel[]
+  checkedAt: string
+  cached: boolean
+}
+
+export async function fetchCodingAgentModels(options: { agent?: CodingAgentId; refresh?: boolean; profile?: string } = {}) {
+  if (options.agent?.startsWith('plugin:')) {
+    const catalog = await request<CodingAgentModelCatalog>(`/api/studio/agents/${encodeURIComponent(options.agent)}/models?refresh=${options.refresh === true}`, options.profile ? { headers: { 'X-Hermes-Profile': options.profile } } : {})
+    return { agents: [{ ...catalog, agentId: options.agent, name: agentMetadata(options.agent)?.name || options.agent, source: 'sdk' as const, checkedAt: new Date().toISOString(), cached: false }] }
+  }
+  const params = new URLSearchParams()
+  if (options.agent) params.set('agent', options.agent)
+  if (options.refresh !== undefined) params.set('refresh', String(options.refresh))
+  const query = params.toString()
+  return request<{ agents: CodingAgentModelCatalog[] }>(`/api/coding-agents/models${query ? `?${query}` : ''}`)
+}
+
 export interface CodingAgentMutationResult extends CodingAgentsStatus {
+  updateState?: AgentUpdatePolicyState
   success: boolean
   tool: CodingAgentToolStatus
   message?: string
@@ -141,8 +184,8 @@ export async function fetchCodingAgentsStatus(): Promise<CodingAgentsStatus> {
   return request<CodingAgentsStatus>('/api/coding-agents')
 }
 
-export async function installCodingAgent(id: CodingAgentId): Promise<CodingAgentMutationResult> {
-  return request<CodingAgentMutationResult>(`/api/coding-agents/${id}/install`, { method: 'POST' })
+export async function installCodingAgent(id: CodingAgentId, options: { version?: string; rollback?: boolean } = {}): Promise<CodingAgentMutationResult> {
+  return request<CodingAgentMutationResult>(`/api/coding-agents/${id}/install`, { method: 'POST', body: JSON.stringify(options) })
 }
 
 export async function checkCodingAgentUpdate(id: CodingAgentId): Promise<CodingAgentUpdateResult> {
@@ -221,3 +264,15 @@ export async function stopCodingAgentRun(sessionId: string): Promise<{ stopped: 
     method: 'DELETE',
   })
 }
+
+export interface AgentUpdatePolicyState {
+ autoUpdate: boolean
+ autoUpdateSupported?: boolean
+ status: 'unknown'|'checking'|'current'|'available'|'waiting'|'updating'|'failed'
+ currentVersion: string
+ latestVersion: string
+ checkedAt: string
+ error?: string
+}
+export function getAgentUpdatePolicies() { return request<{agents:Record<string,AgentUpdatePolicyState>}>('/api/coding-agents/update-policies') }
+export function setAgentAutoUpdate(id: CodingAgentId, autoUpdate: boolean) { return request<{agents:Record<string,AgentUpdatePolicyState>}>(`/api/coding-agents/${id}/update-policy`, {method:'PUT',body:JSON.stringify({autoUpdate})}) }

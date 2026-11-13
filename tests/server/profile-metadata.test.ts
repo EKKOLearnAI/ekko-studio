@@ -5,7 +5,7 @@ import { tmpdir } from 'os'
 
 const tempRoot = mkdtempSync(join(tmpdir(), 'profile-meta-test-'))
 
-vi.mock('../../packages/server/src/config', () => ({
+vi.mock('../../packages/server/src/modules/studio/public/config', () => ({
   getWebUiHome: () => tempRoot,
 }))
 
@@ -17,7 +17,7 @@ import {
   setProfileAvatarRemote,
   setProfileAvatarGenerated,
   profileMetadataDir,
-} from '../../packages/server/src/services/hermes/profile-metadata'
+} from '../../packages/server/src/modules/hermes/services/profiles/metadata'
 
 describe('profile-metadata service', () => {
   beforeEach(() => {

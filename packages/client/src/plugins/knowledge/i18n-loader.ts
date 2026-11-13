@@ -6,6 +6,7 @@ import type { SupportedLocale } from '../types'
  */
 const LOADERS: Record<SupportedLocale, () => Promise<Record<string, unknown>>> = {
   en: () => import('./locales/en'),
+  tr: () => import('./locales/en'),
   zh: () => import('./locales/zh'),
   'zh-TW': () => import('./locales/zh-TW'),
   ja: () => import('./locales/ja'),

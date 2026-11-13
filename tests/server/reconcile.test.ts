@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 
-vi.mock('../../packages/server/src/services/update/manifest-client', () => ({
+vi.mock('../../packages/server/src/modules/studio/services/update/manifest-client', () => ({
   fetchDevicePackageManifest: vi.fn().mockResolvedValue(null),
   fetchSourcePackageManifest: vi.fn().mockResolvedValue(null),
   resolveManifestCheckResult: vi.fn(),
@@ -17,9 +17,9 @@ import {
   runEnvironmentCheck,
   startReconcileLoop,
   stopReconcileLoop,
-} from '../../packages/server/src/services/update/reconcile'
-import type { CapturedEnvironment } from '../../packages/server/src/services/update/reconcile'
-import type { DeviceEnvironment } from '../../packages/server/src/services/update/types'
+} from '../../packages/server/src/modules/studio/services/update/reconcile'
+import type { CapturedEnvironment } from '../../packages/server/src/modules/studio/services/update/reconcile'
+import type { DeviceEnvironment } from '../../packages/server/src/modules/studio/services/update/types'
 
 function makeState(overrides: Partial<CapturedEnvironment> = {}): CapturedEnvironment {
   return {

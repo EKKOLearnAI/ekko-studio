@@ -1,0 +1,32 @@
+import { beforeEach, it, expect, vi } from 'vitest'
+const mocks = vi.hoisted(() => ({ authorize: vi.fn(), invoke: vi.fn(), addMessage: vi.fn(() => 'message-id'), getSession: vi.fn(() => ({})), createSession: vi.fn(), updateSessionStats: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({ authorizePluginIdentity: mocks.authorize, getPluginManager: () => ({ runtime: () => ({ invoke: mocks.invoke }) }) }))
+vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => mocks)
+import { handlePluginCommand } from '../../packages/server/src/modules/studio/services/plugins/command'
+beforeEach(() => { vi.clearAllMocks(); mocks.authorize.mockReset() })
+it('runs namespaced chat commands and persists the command and response', async () => {
+  const identity = { userId: 1, profile: 'work', sessionId: 'session' }, state: any = { messages: [], isWorking: false }, emit = vi.fn()
+  mocks.invoke.mockResolvedValue('saved')
+  expect(await handlePluginCommand('/notebook:note hello', identity, state, emit)).toBe(true)
+  expect(mocks.invoke).toHaveBeenCalledWith('command', 'note', 'hello', expect.objectContaining(identity), expect.any(AbortSignal))
+  expect(state.messages.map((m: any) => m.content)).toEqual(['/notebook:note hello', 'saved'])
+  expect(state.isWorking).toBe(false)
+  expect(emit).toHaveBeenLastCalledWith(expect.objectContaining({ terminal: true, ok: true, message: 'saved' }))
+  expect(await handlePluginCommand('ordinary chat', identity, state, emit)).toBe(false)
+})
+it('stops a running command through the session abort signal and leaves the session usable', async () => {
+  const state: any = { messages: [], isWorking: false }, emit = vi.fn()
+  mocks.invoke.mockImplementation((_kind, _name, _input, _identity, signal) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(new Error('Canceled')))))
+  const result = handlePluginCommand('/notebook:note hello', { userId: 1, profile: 'work', sessionId: 'session' }, state, emit)
+  expect(state.isWorking).toBe(true); state.abortController.abort()
+  await result; expect(state.isWorking).toBe(false)
+  expect(emit).toHaveBeenLastCalledWith(expect.objectContaining({ terminal: true, ok: false, message: 'Canceled' }))
+})
+it('rejects inaccessible sessions before command lookup, history writes or run state mutation', async () => {
+  mocks.authorize.mockImplementation(() => { throw new Error('Session unavailable') })
+  const state: any = { messages: [], isWorking: false }, emit = vi.fn()
+  await handlePluginCommand('/missing:command input', { userId: 1, profile: 'work', sessionId: 'private' }, state, emit)
+  expect(mocks.invoke).not.toHaveBeenCalled(); expect(mocks.addMessage).not.toHaveBeenCalled(); expect(mocks.createSession).not.toHaveBeenCalled()
+  expect(state).toEqual({ messages: [], isWorking: false })
+  expect(emit).toHaveBeenCalledWith(expect.objectContaining({ ok: false, terminal: true }))
+})

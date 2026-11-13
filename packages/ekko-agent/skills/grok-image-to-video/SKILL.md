@@ -1,6 +1,6 @@
 ---
 name: grok-image-to-video
-description: Animate a local image into a short MP4 through Quanthermes Studio using xAI Grok Imagine.
+description: Animate a local image into a short MP4 through Ekko Studio using xAI Grok Imagine.
 metadata:
   keywords:
     - image to video
@@ -39,6 +39,6 @@ The local call can legitimately take several minutes. Set the `terminal_exec` to
 
 ## Errors
 
-- `missing_xai_token`: configure `XAI_API_KEY` or complete xAI OAuth login for the current Profile in Quanthermes Studio.
+- `missing_xai_token`: configure `XAI_API_KEY` or complete xAI OAuth login for the current Profile in Ekko Studio.
 - `profile_not_found`: the Ekko Profile does not map to an existing Studio/Hermes Profile used by the media endpoint.
 - `401`, `403`, connection failure, timeout, expired request, provider failure, or missing output: report the Studio error and stop. Do not bypass Studio or silently retry against another service.

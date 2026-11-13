@@ -1,7 +1,8 @@
-import { mkdir, open, writeFile } from 'node:fs/promises'
+import { open, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { AgentToolError, type AgentTool, type AgentToolContext, type AgentToolResult } from './types'
 import { resolveToolPath, resolveUnrestrictedToolPath } from './path-safety'
+import { ensureDirectory } from './directory'
 
 export const DEFAULT_READ_FILE_MAX_BYTES = 50_000
 
@@ -106,7 +107,9 @@ export class WriteFileTool implements AgentTool<WriteFileInput> {
   async execute(input: WriteFileInput, context: AgentToolContext = {}): Promise<AgentToolResult> {
     const filePath = resolveToolPath(input.path, context)
     if (input.createDirs !== false) {
-      await mkdir(path.dirname(filePath), { recursive: true })
+      // The parent directory of a file at a drive root (`D:\notes.txt`) is the
+      // root itself, which mkdir refuses to create on Windows.
+      await ensureDirectory(path.dirname(filePath))
     }
     await writeFile(filePath, input.content, input.encoding || 'utf8')
     return {

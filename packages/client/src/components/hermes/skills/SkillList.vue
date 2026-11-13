@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { NSwitch, useDialog } from 'naive-ui'
+import { NSwitch, useMessage, useDialog } from 'naive-ui'
 import type { SkillCategory, SkillSource, SkillInfo } from '@/api/hermes/skills'
 import { toggleSkill, deleteSkillApi } from '@/api/hermes/skills'
 import { useI18n } from 'vue-i18n'
-import { useMessage } from '@/composables/useAppMessage'
 
 type SourceFilter = SkillSource | 'modified'
 
@@ -12,14 +11,19 @@ const { t } = useI18n()
 const message = useMessage()
 const dialog = useDialog()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     categories: SkillCategory[]
     archived: SkillInfo[]
     selectedSkill: string | null
     searchQuery: string
     sourceFilter: SourceFilter | null
     readonly?: boolean
-}>()
+    toggleable?: boolean
+    toggleHandler?: (category: string, skill: string, enabled: boolean) => Promise<void>
+    deleteHandler?: (category: string, skill: string) => Promise<void>
+}>(), {
+    toggleable: true,
+})
 
 const emit = defineEmits<{
     select: [category: string, skill: string]
@@ -155,7 +159,8 @@ async function handleToggle(category: string, skillName: string, newEnabled: boo
     togglingSkills.value.add(skillName)
 
     try {
-        await toggleSkill(skillName, newEnabled)
+        if (props.toggleHandler) await props.toggleHandler(category, skillName, newEnabled)
+        else await toggleSkill(skillName, newEnabled)
         // Update local state
         const cat = props.categories.find(c => c.name === category)
         const skill = cat?.skills.find(s => s.name === skillName)
@@ -177,7 +182,8 @@ function confirmDelete(category: string, skillName: string) {
         onPositiveClick: async () => {
             deletingSkills.value.add(skillName)
             try {
-                await deleteSkillApi(category, skillName)
+                if (props.deleteHandler) await props.deleteHandler(category, skillName)
+                else await deleteSkillApi(category, skillName)
                 message.success(t('skills.deleteSuccess'))
                 message.info(t('skills.reloadHint'), { duration: 6000 })
                 emit('deleted', category, skillName)
@@ -242,7 +248,7 @@ function confirmDelete(category: string, skillName: string) {
                                     </span>
                                     <span v-if="skill.description" class="skill-desc">{{ skill.description }}</span>
                                 </div>
-                                <NSwitch v-if="!readonly" size="small" :value="skill.enabled !== false"
+                                <NSwitch v-if="!readonly && !skill.readonly && toggleable !== false" size="small" :value="skill.enabled !== false"
                                     :loading="togglingSkills.has(skill.name)"
                                     @update:value="handleToggle(cat.name, skill.name, $event)" @click.stop />
                             </button>
@@ -278,7 +284,7 @@ function confirmDelete(category: string, skillName: string) {
                             </span>
                             <span v-if="skill.description" class="skill-desc">{{ skill.description }}</span>
                         </div>
-                        <button v-if="!readonly && (skill.source ?? 'local') === 'local'" class="skill-action-btn"
+                        <button v-if="!readonly && !skill.readonly && (skill.source ?? 'local') === 'local'" class="skill-action-btn"
                             :title="t('skills.delete')" :disabled="deletingSkills.has(skill.name)"
                             @click.stop="confirmDelete(cat.name, skill.name)">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -290,7 +296,7 @@ function confirmDelete(category: string, skillName: string) {
                                 <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
                             </svg>
                         </button>
-                        <NSwitch v-if="!readonly" size="small" :value="skill.enabled !== false"
+                        <NSwitch v-if="!readonly && !skill.readonly && toggleable !== false" size="small" :value="skill.enabled !== false"
                             :loading="togglingSkills.has(skill.name)"
                             @update:value="handleToggle(cat.name, skill.name, $event)" @click.stop />
                     </button>
@@ -332,12 +338,12 @@ function confirmDelete(category: string, skillName: string) {
 .skill-list {
     flex: 1;
     overflow-y: auto;
-    padding: 8px;
+    padding: calc(8px * var(--spacing-scale, 1));
 }
 
 .skill-empty {
-    padding: 24px 16px;
-    font-size: 13px;
+    padding: calc(24px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     color: $text-muted;
     text-align: center;
 }
@@ -349,13 +355,13 @@ function confirmDelete(category: string, skillName: string) {
 .category-header {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     width: 100%;
-    padding: 6px 10px;
+    padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border: none;
     background: none;
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.3px;
@@ -367,8 +373,8 @@ function confirmDelete(category: string, skillName: string) {
     }
 
     &.sub {
-        padding-inline-start: 22px;
-        font-size: 11px;
+        padding-inline-start: calc(22px * var(--spacing-scale, 1));
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         text-transform: none;
         letter-spacing: 0;
     }
@@ -382,13 +388,13 @@ function confirmDelete(category: string, skillName: string) {
 .path-header {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     width: 100%;
-    padding: 6px 10px;
+    padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border: none;
     background: none;
     color: #f59e0b;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     font-weight: 600;
     cursor: pointer;
     border-radius: $radius-sm;
@@ -417,7 +423,7 @@ function confirmDelete(category: string, skillName: string) {
 }
 
 .path-group-body {
-    padding-inline-start: 4px;
+    padding-inline-start: calc(4px * var(--spacing-scale, 1));
 }
 
 .category-arrow {
@@ -438,15 +444,15 @@ function confirmDelete(category: string, skillName: string) {
 }
 
 .category-count {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     background: rgba(var(--accent-primary-rgb), 0.06);
-    padding: 1px 6px;
-    border-radius: 8px;
+    padding: calc(1px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 8px);
 }
 
 .category-skills {
-    padding: 2px 0 4px;
+    padding: calc(2px * var(--spacing-scale, 1)) 0 calc(4px * var(--spacing-scale, 1));
 }
 
 .skill-item {
@@ -454,16 +460,16 @@ function confirmDelete(category: string, skillName: string) {
     flex-direction: row;
     align-items: center;
     width: 100%;
-    padding: 6px 10px 6px 28px;
+    padding: calc(6px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1)) calc(28px * var(--spacing-scale, 1));
     border: none;
     background: none;
     color: $text-secondary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     text-align: start;
     cursor: pointer;
     border-radius: $radius-sm;
     transition: all $transition-fast;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
 
     &:hover {
         background: rgba(var(--accent-primary-rgb), 0.06);
@@ -518,14 +524,14 @@ function confirmDelete(category: string, skillName: string) {
 }
 
 .modified-badge {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $warning;
     margin-inline-start: 2px;
     opacity: 0.7;
 }
 
 .skill-desc {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     white-space: nowrap;
     overflow: hidden;
@@ -535,8 +541,8 @@ function confirmDelete(category: string, skillName: string) {
 
 .archive-section {
     margin-top: 12px;
-    padding-top: 8px;
-    border-top: 1px solid $border-color;
+    padding-top: calc(8px * var(--spacing-scale, 1));
+    border-top: var(--border-width, 1px) solid $border-color;
 }
 
 .archive-header {
@@ -545,7 +551,7 @@ function confirmDelete(category: string, skillName: string) {
 
 .skill-archived {
     opacity: 0.6;
-    padding-inline-start: 28px;
+    padding-inline-start: calc(28px * var(--spacing-scale, 1));
 }
 
 .skill-action-btn {

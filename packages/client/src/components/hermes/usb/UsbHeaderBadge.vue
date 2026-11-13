@@ -6,7 +6,7 @@
 import { computed } from 'vue'
 import { NDropdown, NTag, type DropdownOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { USBDeviceRecord } from '@/api/hermes/usb-socket'
+import type { USBDeviceRecord } from '@/api/studio/usb-socket'
 import { formatExplorerBytes } from '@/utils/usb-format'
 import type { UsbDetailSection } from './UsbDetailDrawer.vue'
 
@@ -76,7 +76,7 @@ function handleDropdown(key: string) {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: var(--bg-card, rgba(255, 255, 255, 0.04));
+  background: var(--bg-card, rgba(var(--text-primary-rgb), 0.04));
   border: 1px solid $border-light;
   border-radius: 999px;
   font-family: inherit;
@@ -87,7 +87,7 @@ function handleDropdown(key: string) {
 
   &:hover {
     border-color: $border-color;
-    background: var(--bg-secondary);
+    background: var(--theme-card-bg, var(--bg-card));
   }
 }
 

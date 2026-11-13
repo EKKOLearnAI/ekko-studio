@@ -1,0 +1,40 @@
+{
+  "name": "Ekko Studio ESP32-C3 Wi-Fi Setup Firmware v1",
+  "firmwareVersion": "v1",
+  "version": "v1-esp32-c3-wifi-setup-oled",
+  "buildDate": "2026-08-08",
+  "chip": "esp32c3",
+  "flashSize": "16MB",
+  "flashMode": "dio",
+  "flashFrequency": "40m",
+  "hardware": {
+    "board": "ESP32-C3 board with SSD1306-compatible OLED",
+    "i2c": {
+      "sda": 3,
+      "scl": 4
+    },
+    "oledAddress": "0x3C"
+  },
+  "features": [
+    "Wi-Fi setup portal",
+    "Open Ekko Studio-WIFI setup access point",
+    "Pre-AP Wi-Fi network scan dropdown",
+    "Manual Wi-Fi SSID fallback",
+    "Provisioning success page with LAN IP redirect",
+    "Saved Wi-Fi reconnect",
+    "LAN device tab",
+    "Fixed-port UDP Hermes endpoint discovery",
+    "Separate Web UI and desktop endpoint listing",
+    "MCU login form for discovered endpoints",
+    "Profile selection after MCU login",
+    "Socket.IO client connection to selected Hermes Web UI",
+    "Wi-Fi history scan before startup reconnect",
+    "Wi-Fi reprovisioning without clearing history",
+    "Remote active machine reauthentication",
+    "OLED status UI and idle animation",
+    "Selectable push-to-talk and local-VAD listening modes",
+    "Selectable Ekko and Hermes agent runtimes with isolated sessions",
+    "Sample-synchronized GB2312 subtitles during speech playback",
+    "Configurable connected standby with a three-minute default"
+  ]
+}

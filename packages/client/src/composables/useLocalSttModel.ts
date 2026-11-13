@@ -4,7 +4,7 @@ import {
   fetchLocalSttModelStatus,
   type LocalSttModelDownloadSource,
   type LocalSttModelStatus,
-} from '@/api/hermes/local-stt-model'
+} from '@/api/studio/local-stt-model'
 
 const status = ref<LocalSttModelStatus | null>(null)
 const loading = ref(false)

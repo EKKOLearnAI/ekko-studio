@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, nextTick } from 'vue'
-import { NModal, NForm, NFormItem, NInput, NInputNumber, NButton, NSelect, NRadioGroup, NRadioButton, useDialog } from 'naive-ui'
+import { NModal, NForm, NFormItem, NInput, NInputNumber, NButton, NSelect, NRadioGroup, NRadioButton, useMessage, useDialog } from 'naive-ui'
 import { useModelsStore } from '@/stores/hermes/models'
 import { useI18n } from 'vue-i18n'
 import CodexLoginModal from './CodexLoginModal.vue'
@@ -10,15 +10,15 @@ import XaiOAuthLoginModal from './XaiOAuthLoginModal.vue'
 import AnthropicLoginModal from './AnthropicLoginModal.vue'
 import MiniMaxOAuthLoginModal from './MiniMaxOAuthLoginModal.vue'
 import { checkCopilotToken, enableCopilot, type CopilotTokenSource } from '@/api/hermes/copilot-auth'
-import { fetchProviderModels, type ProviderApiMode } from '@/api/hermes/system'
+import { fetchProviderModels } from '@/api/hermes/system'
+import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
 import { inferApiKeyFunPresetProvider, isApiKeyFunBaseUrl, type ApiKeyFunPresetProvider } from '@/utils/providerBaseUrl'
-import { useMessage } from '@/composables/useAppMessage'
 
 const { t } = useI18n()
 
 const emit = defineEmits<{
   close: []
-  saved: []
+  saved: [globalModelsAlreadyRefreshed?: boolean]
 }>()
 
 const modelsStore = useModelsStore()
@@ -44,7 +44,7 @@ const formData = ref({
   api_key: '',
   model: '',
   context_length: null as number | null,
-  api_mode: 'chat_completions' as ProviderApiMode,
+  api_mode: 'chat_completions' as ProviderApiMode | 'auto',
 })
 
 const providerNameInputProps = {
@@ -76,13 +76,14 @@ const providerModelInputProps = {
 }
 
 const modelOptions = ref<Array<{ label: string; value: string }>>([])
-const apiModeOptions: Array<{ label: string; value: ProviderApiMode }> = [
+const apiModeOptions = computed(() => [
   { label: 'chat_completions (/chat/completions)', value: 'chat_completions' },
   { label: 'codex_responses (/responses)', value: 'codex_responses' },
   { label: 'anthropic_messages (/messages)', value: 'anthropic_messages' },
   { label: 'bedrock_converse (Converse API)', value: 'bedrock_converse' },
   { label: 'codex_app_server (App Server)', value: 'codex_app_server' },
-]
+  { label: t('models.apiModeAuto'), value: 'auto' },
+])
 
 const CODEX_KEY = 'openai-codex'
 const NOUS_KEY = 'nous'
@@ -128,6 +129,13 @@ const canFetchProviderCatalog = computed(() =>
   )),
 )
 
+const FUN_LINK_MAP: Record<string, string> = {
+  'fun-codex': 'https://apikey.fan/register?aff=LIBAPI',
+  'fun-claude': 'https://apikey.fan/register?aff=LIBAPI',
+}
+
+const funProviderLink = computed(() => selectedPreset.value ? FUN_LINK_MAP[selectedPreset.value] || '' : '')
+
 async function switchToApiKeyFunPreset(providerKey: ApiKeyFunPresetProvider, preferredModel: string) {
   const apiKey = formData.value.api_key
   const contextLength = formData.value.context_length
@@ -166,7 +174,10 @@ function customProviderKey(name: string): string {
   return `custom:${name.trim().toLowerCase().replace(/ /g, '-')}`
 }
 
+let presetCatalogRequest = 0
 watch(selectedPreset, (val) => {
+  const request = ++presetCatalogRequest
+  fetchingModels.value = false
   formData.value.model = ''
   alibabaCodingRegion.value = 'intl'
   if (val) {
@@ -179,6 +190,7 @@ watch(selectedPreset, (val) => {
       if (group.models.length > 0) {
         formData.value.model = group.models[0]
       }
+      void loadPresetCatalog(val, request)
     }
     if (val === COPILOT_KEY) {
       // 判断是否已能解析到 token：有 → 弹简单确认；无 → 走 in-app device flow
@@ -192,6 +204,20 @@ watch(selectedPreset, (val) => {
     }
   }
 })
+
+async function loadPresetCatalog(provider: string, request: number) {
+  fetchingModels.value = true
+  try {
+    const catalog = await modelsStore.fetchProviderCatalog(provider)
+    if (request !== presetCatalogRequest || selectedPreset.value !== provider || providerType.value !== 'preset') return
+    modelOptions.value = catalog.models.map(model => ({ label: model, value: model }))
+    if (!formData.value.model) formData.value.model = catalog.models[0] || ''
+  } catch (error: any) {
+    if (request === presetCatalogRequest) message.error(error?.message || t('models.providerEditorLoadFailed'))
+  } finally {
+    if (request === presetCatalogRequest) fetchingModels.value = false
+  }
+}
 
 watch(alibabaCodingRegion, (region) => {
   if (isAlibabaCoding.value) {
@@ -332,11 +358,11 @@ async function handleSave() {
       api_key: formData.value.api_key.trim(),
       model: formData.value.model,
       context_length: contextLength,
-      api_mode: formData.value.api_mode,
+      api_mode: formData.value.api_mode === 'auto' ? null : formData.value.api_mode,
       providerKey,
     })
     message.success(t('models.providerAdded'))
-    emit('saved')
+    emit('saved', true)
   } catch (e: any) {
     message.error(e.message)
   } finally {
@@ -493,6 +519,12 @@ function handleClose() {
           :placeholder="t('models.chooseProvider')"
           filterable
         />
+        <div v-if="selectedPreset && funProviderLink" class="fun-provider-hint">
+          <a :href="funProviderLink" target="_blank" rel="noopener noreferrer">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            {{ t('models.getApiKey') }}
+          </a>
+        </div>
       </NFormItem>
 
       <NFormItem v-if="providerType === 'custom'" :label="t('models.name')">
@@ -617,9 +649,32 @@ function handleClose() {
 </template>
 
 <style scoped lang="scss">
+.fun-provider-hint {
+  margin-top: 6px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+
+  a {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+    white-space: nowrap;
+    color: var(--accent-primary);
+    text-decoration: none;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+
+    svg {
+      flex-shrink: 0;
+    }
+
+    &:hover { opacity: 1; }
+  }
+}
+
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

@@ -2,16 +2,17 @@ import { request, getBaseUrlValue, getApiKey } from '../client'
 
 export interface HermesProfile {
   name: string
+  displayName?: string
   active: boolean
   model: string
   gatewayStatus?: string
   alias: string
-  displayName?: string
   avatar?: ProfileAvatar | null
 }
 
 export interface HermesProfileDetail {
   name: string
+  displayName?: string
   path: string
   model: string
   provider: string
@@ -19,13 +20,11 @@ export interface HermesProfileDetail {
   hasEnv: boolean
   hasSoulMd: boolean
   avatar?: ProfileAvatar | null
-  displayName?: string
 }
 
 export interface ProfileAvatar {
-  type: 'generated' | 'image' | 'remote'
+  type: 'generated' | 'image'
   seed?: string
-  url?: string
   dataUrl?: string
   updatedAt?: number
 }
@@ -98,14 +97,6 @@ export async function deleteProfileAvatar(name: string): Promise<void> {
   await request(`/api/hermes/profiles/${encodeURIComponent(name)}/avatar`, { method: 'DELETE' })
 }
 
-export async function updateProfileDisplayName(name: string, displayName: string): Promise<{ displayName: string }> {
-  const res = await request<{ success: boolean; displayName: string }>(
-    `/api/hermes/profiles/${encodeURIComponent(name)}/display-name`,
-    { method: 'PUT', body: JSON.stringify({ displayName }) },
-  )
-  return { displayName: res.displayName }
-}
-
 export async function restartProfileGateway(name: string): Promise<ProfileRuntimeStatus['gateway']> {
   const res = await request<{ success: boolean; gateway: ProfileRuntimeStatus['gateway'] }>(
     `/api/hermes/profiles/${encodeURIComponent(name)}/gateway/restart`,
@@ -132,7 +123,7 @@ export interface CreateProfileResult {
   strippedConfigCredentials?: string[]
 }
 
-export async function createProfile(name: string, clone?: boolean, displayName?: string): Promise<CreateProfileResult & { error?: string }> {
+export async function createProfile(name: string, clone?: boolean): Promise<CreateProfileResult & { error?: string }> {
   try {
     const res = await request<{
       success: boolean
@@ -142,7 +133,7 @@ export async function createProfile(name: string, clone?: boolean, displayName?:
       error?: string
     }>('/api/hermes/profiles', {
       method: 'POST',
-      body: JSON.stringify({ name, clone, ...(displayName ? { displayName } : {}) }),
+      body: JSON.stringify({ name, clone }),
     })
     return {
       success: !!res.success,
@@ -177,22 +168,11 @@ export async function renameProfile(name: string, newName: string): Promise<bool
   }
 }
 
-/** Persist the caller's active agent profile (per-user, server-side). */
 export async function switchProfile(name: string): Promise<boolean> {
-  if (!name) return false
-  try {
-    await request('/api/hermes/profiles/active', {
-      method: 'PUT',
-      body: JSON.stringify({ name }),
-    })
-    return true
-  } catch {
-    return false
-  }
+  return !!name
 }
 
 export async function switchHermesProfile(name: string): Promise<boolean> {
-  if (!name) return false
   try {
     await request('/api/hermes/profiles/active', {
       method: 'PUT',
@@ -263,4 +243,8 @@ export async function importProfile(file: File): Promise<ProfileArchiveResult> {
   } catch (err: any) {
     return { success: false, error: err?.message }
   }
+}
+
+export async function updateProfileDisplayName(name: string, displayName: string): Promise<{ displayName: string }> {
+  return request(`/api/hermes/profiles/${encodeURIComponent(name)}/display-name`, { method: 'PUT', body: JSON.stringify({ displayName }) })
 }

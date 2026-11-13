@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isNodeVersionRangeSatisfied } from '../../packages/server/src/services/update/device-package-contract'
+import { isNodeVersionRangeSatisfied } from '../../packages/server/src/modules/studio/services/update/device-package-contract'
 
 describe('device package contract', () => {
   it('allows patch and minor updates for tilde ranges without patch drift regressions', () => {

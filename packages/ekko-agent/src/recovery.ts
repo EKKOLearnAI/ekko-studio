@@ -135,7 +135,7 @@ export class EkkoRecoveryService {
           'If retry fails, inspect the exact target type and parent permissions with terminal_exec. Repair obvious blockers only inside the Ekko-owned target path, then retry.',
           'Safe retry and repair of an obvious Ekko-owned path blocker do not require asking the user. Never claim persistent memory is empty while ephemeral storage is active.',
           'Use strategy=rebuild only with confirmed=true; the original database family is preserved as a backup.',
-          'The repair tool runs ekko_self_check logic internally. After it succeeds, the host must reload Ekko Setup at a completed-run boundary; The host must recreate Setup before the next run.',
+          'The repair tool runs ekko_self_check logic internally. After it succeeds, the host must reload Ekko Setup at a completed-run boundary; Ekko Studio does this automatically.',
         ],
         automatic: false,
         requiresConfirmation: true,
@@ -230,7 +230,7 @@ export class EkkoRecoveryService {
     const restartContext = this.activeStorage === 'ephemeral' && this.targetReady
       ? [
           'Ekko persistent database now passes self-check, but this running setup still uses ephemeral storage.',
-          'Restart the optional Ekko host after active runs finish to reconnect persistent storage.',
+          'Ekko Studio will automatically reload Ekko Setup after all active runs finish; the next run will use persistent storage.',
           'A standalone host must recreate its Ekko Setup at the same completed-run boundary.',
         ].join('\n')
       : undefined

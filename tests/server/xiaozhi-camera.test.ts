@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
 const state = vi.hoisted(() => ({ describe: vi.fn().mockResolvedValue('画面中有一个红色物体。'), directory: '', config: { deviceId: '68:ee:8f:5d:a6:9c', deviceIds: ['98:a3:16:f3:0f:68'], deviceToken: 'camera-secret', gatewayMcpToken: 'mcp-secret' } }))
-vi.mock('../../packages/server/src/services/xiaozhi-vision', () => ({ describeXiaozhiFrame: state.describe }))
-vi.mock('../../packages/server/src/config', () => ({ getWebUiHome: () => state.directory }))
-vi.mock('../../packages/server/src/services/xiaozhi-provisioning', () => ({ readXiaozhiConfig: async () => state.config }))
-import { analyzeCameraPhoto, authorizeCameraUpload, captureXiaozhiPhoto, readCameraPhoto, saveCameraPhoto } from '../../packages/server/src/services/xiaozhi-camera'
-import { uploadCameraPhoto } from '../../packages/server/src/controllers/xiaozhi-camera'
+vi.mock('../../packages/server/src/modules/studio/services/xiaozhi-vision', () => ({ describeXiaozhiFrame: state.describe }))
+vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ getWebUiHome: () => state.directory }))
+vi.mock('../../packages/server/src/modules/studio/services/xiaozhi-provisioning', () => ({ readXiaozhiConfig: async () => state.config }))
+import { analyzeCameraPhoto, authorizeCameraUpload, captureXiaozhiPhoto, readCameraPhoto, saveCameraPhoto } from '../../packages/server/src/modules/studio/services/xiaozhi-camera'
+import { uploadCameraPhoto } from '../../packages/server/src/modules/studio/controllers/xiaozhi-camera'
 describe('XiaoZhi camera', () => {
   beforeEach(async () => { state.directory = await mkdtemp(join(tmpdir(), 'xiaozhi-camera-')) })
   afterEach(async () => { vi.unstubAllGlobals(); await rm(state.directory, { recursive: true, force: true }) })

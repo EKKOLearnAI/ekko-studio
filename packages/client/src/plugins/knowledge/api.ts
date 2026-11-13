@@ -78,11 +78,11 @@ export interface KnowledgeReference {
 // --- API calls ------------------------------------------------------------
 
 export async function listVaults(): Promise<{ vaults: KnowledgeVault[] }> {
-  return request('/api/knowledge/vaults')
+  return request('/api/studio/knowledge/vaults')
 }
 
 export async function createVault(rootPath: string, name: string): Promise<{ vault: KnowledgeVault }> {
-  return request('/api/knowledge/vaults', {
+  return request('/api/studio/knowledge/vaults', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ root_path: rootPath, name }),
@@ -91,7 +91,7 @@ export async function createVault(rootPath: string, name: string): Promise<{ vau
 
 export async function deleteVault(id: number, cascade: boolean = false): Promise<void> {
   const qs = cascade ? '?cascade=true' : ''
-  return request(`/api/knowledge/vaults/${id}${qs}`, { method: 'DELETE' })
+  return request(`/api/studio/knowledge/vaults/${id}${qs}`, { method: 'DELETE' })
 }
 
 export async function listDocuments(filters?: { vaultId?: number; status?: string }): Promise<{ documents: KnowledgeDocument[] }> {
@@ -99,15 +99,15 @@ export async function listDocuments(filters?: { vaultId?: number; status?: strin
   if (filters?.vaultId) params.set('vault_id', String(filters.vaultId))
   if (filters?.status) params.set('status', filters.status)
   const qs = params.toString() ? `?${params.toString()}` : ''
-  return request(`/api/knowledge/documents${qs}`)
+  return request(`/api/studio/knowledge/documents${qs}`)
 }
 
 export async function getDocument(id: number): Promise<{ document: KnowledgeDocument }> {
-  return request(`/api/knowledge/documents/${id}`)
+  return request(`/api/studio/knowledge/documents/${id}`)
 }
 
 export async function deleteDocument(id: number): Promise<void> {
-  return request(`/api/knowledge/documents/${id}`, { method: 'DELETE' })
+  return request(`/api/studio/knowledge/documents/${id}`, { method: 'DELETE' })
 }
 
 export async function searchKnowledge(body: {
@@ -118,7 +118,7 @@ export async function searchKnowledge(body: {
   maxDistance?: number
   session_id?: string
 }): Promise<SearchResponse> {
-  return request('/api/knowledge/search', {
+  return request('/api/studio/knowledge/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -139,11 +139,11 @@ export interface KnowledgeSettings {
 }
 
 export async function getSettings(): Promise<KnowledgeSettings> {
-  return request('/api/knowledge/settings')
+  return request('/api/studio/knowledge/settings')
 }
 
 export async function saveApiKey(apiKey: string): Promise<{ ok: boolean; initialized: boolean; enabled: boolean; reinitError?: string }> {
-  return request('/api/knowledge/settings', {
+  return request('/api/studio/knowledge/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ api_key: apiKey }),
@@ -151,26 +151,26 @@ export async function saveApiKey(apiKey: string): Promise<{ ok: boolean; initial
 }
 
 export async function getHealth(): Promise<KnowledgeHealth> {
-  return request('/api/knowledge/health')
+  return request('/api/studio/knowledge/health')
 }
 
 export async function fetchDocumentChunks(id: number): Promise<{ chunks: KnowledgeChunk[] }> {
-  return request(`/api/knowledge/documents/${id}/chunks`)
+  return request(`/api/studio/knowledge/documents/${id}/chunks`)
 }
 
 export async function fetchDocumentReferences(id: number, limit = 200): Promise<{ references: KnowledgeReference[] }> {
-  return request(`/api/knowledge/documents/${id}/references?limit=${limit}`)
+  return request(`/api/studio/knowledge/documents/${id}/references?limit=${limit}`)
 }
 
 /** Promote a metadata_only document to full indexing (async on the server). */
 export async function indexDocument(id: number): Promise<{ documentId: number; status: string }> {
-  return request(`/api/knowledge/documents/${id}/index`, { method: 'POST' })
+  return request(`/api/studio/knowledge/documents/${id}/index`, { method: 'POST' })
 }
 
 // --- Task-12: bootstrap, quota, directory browser, USB, task archive ----
 
 export function bootstrapDefaultVaults(): Promise<{ created: string[]; skipped: string[]; failed: Array<{ path: string; reason: string }> }> {
-  return request('/api/knowledge/vaults/bootstrap-defaults', { method: 'POST' })
+  return request('/api/studio/knowledge/vaults/bootstrap-defaults', { method: 'POST' })
 }
 
 export interface KnowledgeQuota {
@@ -183,7 +183,7 @@ export interface KnowledgeQuota {
 }
 
 export function fetchQuota(): Promise<KnowledgeQuota> {
-  return request('/api/knowledge/quota')
+  return request('/api/studio/knowledge/quota')
 }
 
 export interface DirEntry {
@@ -203,7 +203,7 @@ export interface DirListing {
 
 export function listDirs(path: string, includeHidden = false): Promise<DirListing> {
   const qs = `path=${encodeURIComponent(path)}${includeHidden ? '&includeHidden=true' : ''}`
-  return request(`/api/knowledge/dirs?${qs}`)
+  return request(`/api/studio/knowledge/dirs?${qs}`)
 }
 
 export interface UsbDriveEntry {
@@ -221,10 +221,10 @@ export interface HomeRootEntry {
 }
 
 export function listDrives(): Promise<{ usb: UsbDriveEntry[]; homeRoots: HomeRootEntry[] }> {
-  return request('/api/knowledge/drives')
+  return request('/api/studio/knowledge/drives')
 }
 
 export function scanUsbVolume(uuid: string): Promise<{ vaultId: number; status: string; documentsQueued: number; reused: boolean }> {
-  return request(`/api/knowledge/usb-volumes/${encodeURIComponent(uuid)}/scan`, { method: 'POST' })
+  return request(`/api/studio/knowledge/usb-volumes/${encodeURIComponent(uuid)}/scan`, { method: 'POST' })
 }
 

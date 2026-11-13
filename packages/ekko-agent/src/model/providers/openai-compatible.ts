@@ -1,4 +1,5 @@
 import { ModelProviderError } from '../errors'
+import { minimaxThinkingParameters } from './minimax'
 import { agentReasoningText, normalizeAgentReasoning } from '../messages'
 import {
   abortSignal,
@@ -110,6 +111,7 @@ interface OpenAIChatResponse {
     completion_tokens?: number
     total_tokens?: number
     prompt_tokens_details?: { cached_tokens?: number }
+    prompt_cache_hit_tokens?: number
     completion_tokens_details?: { reasoning_tokens?: number }
   } | null
   error?: {
@@ -170,6 +172,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     const toolCalls = new Map<number, { id: string; name: string; argumentsText: string }>()
+    let hasCompletedToolCalls = false
     let buffer = ''
     let finishReason: string | undefined
     let responseId: string | undefined
@@ -233,13 +236,16 @@ export class OpenAICompatibleModelClient implements ModelClient {
           for (const toolCallDelta of choice.delta?.tool_calls ?? []) {
             const index = toolCallDelta.index ?? 0
             const current = toolCalls.get(index) ?? { id: '', name: '', argumentsText: '' }
-            current.id = toolCallDelta.id ?? current.id
-            current.name = toolCallDelta.function?.name ?? current.name
+            current.id = toolCallDelta.id || current.id
+            current.name = toolCallDelta.function?.name || current.name
             current.argumentsText += toolCallDelta.function?.arguments ?? ''
             toolCalls.set(index, current)
           }
 
           if (choice.finish_reason === 'tool_calls') {
+            // OpenRouter repeats this finish reason in a usage-only trailer.
+            // Only ignore an empty trailer after a valid tool call was emitted.
+            if (toolCalls.size === 0 && hasCompletedToolCalls) continue
             let validToolCalls = 0
             for (const toolCall of toolCalls.values()) {
               const normalized = normalizeToolCall(toolCall.id, toolCall.name, toolCall.argumentsText)
@@ -251,6 +257,7 @@ export class OpenAICompatibleModelClient implements ModelClient {
             if (validToolCalls === 0) {
               throw invalidOpenAIToolCallError(this.provider)
             }
+            hasCompletedToolCalls = true
           }
         }
       }
@@ -374,7 +381,7 @@ export function toOpenAIChatPayload(config: ModelProviderConfig, request: ModelR
   )
   const supportsToolChoice = supportsOpenAIChatToolChoice(model)
   const tools = request.tools?.length ? request.tools.map(toOpenAIToolDefinition) : undefined
-  const messages = sanitizeOpenAIChatToolHistory(request.messages)
+  const messages = consolidateChatSystemMessages(sanitizeOpenAIChatToolHistory(request.messages))
   const chatMessages: OpenAIChatMessage[] = []
   const toolImageMessages: OpenAIChatMessage[] = []
   for (const message of messages) {
@@ -396,6 +403,7 @@ export function toOpenAIChatPayload(config: ModelProviderConfig, request: ModelR
     messages: chatMessages,
     temperature: request.temperature,
     max_tokens: request.maxTokens,
+    ...minimaxThinkingParameters(config, request, 'openai'),
     ...(tools
       ? {
           tools,
@@ -525,6 +533,7 @@ function openAIReasoningReplayField(
   // Several Chat Completions dialects use `reasoning_content`; the remaining
   // OpenAI-compatible Chat adapters receive the common `reasoning` field.
   if (identifier.includes('openrouter')) return 'reasoning_details'
+  if (/^https:\/\/api\.(?:minimax\.io|minimaxi\.com)(?:\/|$)/i.test(config.baseUrl || '')) return 'reasoning_content'
   if (usesReasoningContentProtocol(identifier)) return 'reasoning_content'
   return 'reasoning'
 }
@@ -684,6 +693,18 @@ function invalidOpenAIToolCallError(provider: string): ModelProviderError {
   )
 }
 
+function consolidateChatSystemMessages(messages: AgentMessage[]): AgentMessage[] {
+  const systemMessages = messages.filter(message => message.role === 'system')
+  if (systemMessages.length === 0 || systemMessages.length === 1 && messages[0] === systemMessages[0]) {
+    return messages
+  }
+  // Strict chat templates require one leading system message, as in the other transports.
+  return [{
+    ...systemMessages[0]!,
+    content: systemMessages.map(message => message.content).join('\n\n'),
+  }, ...messages.filter(message => message.role !== 'system')]
+}
+
 function sanitizeOpenAIChatToolHistory(messages: AgentMessage[]): AgentMessage[] {
   const pendingToolCalls = new Map<string, AgentToolCall>()
   const sanitized: AgentMessage[] = []
@@ -759,7 +780,7 @@ function normalizeContent(content: OpenAIMessageContent): string {
 }
 
 function normalizeUsage(usage: NonNullable<OpenAIChatResponse['usage']>): ModelUsage {
-  const cacheReadTokens = usage.prompt_tokens_details?.cached_tokens ?? 0
+  const cacheReadTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0
   const inputTokens = usage.prompt_tokens ?? 0
   return {
     ...(typeof usage.cost === 'number' && Number.isFinite(usage.cost) && usage.cost >= 0 ? { costUsd: usage.cost } : {}),

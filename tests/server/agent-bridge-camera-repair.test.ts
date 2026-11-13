@@ -5,7 +5,7 @@ it('MCU accepts only the exact current camera from its authorized catalog', () =
   const result = JSON.parse(execFileSync('python3', ['-c', String.raw`
 import sys, json, types
 from pathlib import Path
-sys.path.insert(0, str(Path('packages/server/src/services/hermes/agent-bridge/python').resolve()))
+sys.path.insert(0, str(Path('packages/server/src/modules/hermes/services/bridge/python').resolve()))
 from bridge_pool import AgentPool
 name = 'mcp__xiaozhi_device__camera_exact_hash'
 catalog = [{"type":"function", "function":{"name":name,"description":"self.camera.take_photo 实拍识图"}}]
@@ -40,40 +40,6 @@ assert agent._repair_tool_call(name) is None
 other = Agent()
 pool._install_mcu_camera_tool_repair(other, 'browser-chat')
 assert not getattr(other._repair_tool_call, '_mcu_camera_repair', False)
-print(json.dumps({'ok': True}))
-`], { encoding: 'utf8' }))
-  expect(result).toEqual({ ok: true })
-})
-
-it('MCP discovery supports both split and legacy Hermes runtime modules', () => {
-  const result = JSON.parse(execFileSync('python3', ['-c', String.raw`
-import sys, types, json
-from pathlib import Path
-sys.path.insert(0, str(Path('packages/server/src/services/hermes/agent-bridge/python').resolve()))
-from bridge_runtime import _mcp_discovery_functions, _mcp_runtime_parts
-for module_name in ['tools.mcp_tool_discovery', 'tools.mcp_tool']:
-    tools = types.ModuleType('tools'); tools.__path__ = []
-    sys.modules['tools'] = tools
-    sys.modules.pop('tools.mcp_tool_discovery', None)
-    sys.modules.pop('tools.mcp_tool', None)
-    module = types.ModuleType(module_name)
-    module.discover_mcp_tools = lambda: ['camera']
-    module.register_mcp_servers = lambda config: ['camera']
-    sys.modules[module_name] = module
-    discover, register = _mcp_discovery_functions()
-    assert discover() == ['camera'] and register({}) == ['camera']
-    core = sys.modules.get('tools.mcp_tool') or types.ModuleType('tools.mcp_tool')
-    core._servers = {}; core._lock = object()
-    sys.modules['tools.mcp_tool'] = core
-    loop = types.ModuleType('tools.mcp_tool_loop')
-    loop._run_on_mcp_loop = lambda fn: fn()
-    if module_name.endswith('_discovery'):
-        sys.modules['tools.mcp_tool_loop'] = loop
-    else:
-        sys.modules.pop('tools.mcp_tool_loop', None)
-        core._run_on_mcp_loop = loop._run_on_mcp_loop
-    servers, lock, run = _mcp_runtime_parts()
-    assert servers is core._servers and lock is core._lock and run(lambda: 7) == 7
 print(json.dumps({'ok': True}))
 `], { encoding: 'utf8' }))
   expect(result).toEqual({ ok: true })

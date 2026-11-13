@@ -11,20 +11,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { ensureKnowledgeSchema } from '../../packages/server/src/db/knowledge-schema'
+import { ensureKnowledgeSchema } from '../../packages/server/src/modules/studio/infrastructure/database/knowledge-schema'
 import {
   KnowledgeService,
   VaultLimitError,
   VaultPathInUseError,
   MAX_KNOWLEDGE_VAULTS,
-} from '../../packages/server/src/services/knowledge/knowledge.service'
+} from '../../packages/server/src/modules/studio/services/knowledge/knowledge.service'
 import {
   bootstrapDefaultVaults,
   planDefaultVaults,
   resolveDefaultVaultsMode,
-} from '../../packages/server/src/services/knowledge/bootstrap'
-import { allowedRoots, assertAllowed, ForbiddenPathError, listDirs } from '../../packages/server/src/services/knowledge/dir-browser'
-import { computeKnowledgeQuota } from '../../packages/server/src/services/knowledge/quota'
+} from '../../packages/server/src/modules/studio/services/knowledge/bootstrap'
+import { allowedRoots, assertAllowed, ForbiddenPathError, listDirs } from '../../packages/server/src/modules/studio/services/knowledge/dir-browser'
+import { computeKnowledgeQuota } from '../../packages/server/src/modules/studio/services/knowledge/quota'
 
 let dir: string
 let db: DatabaseSync

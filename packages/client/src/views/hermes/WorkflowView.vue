@@ -1,6 +1,16 @@
 <script setup lang="ts">
+import { agentMetadata, agentSupportsSurface, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import { useCodingAgentModels } from '@/composables/useCodingAgentModels'
+import { nativeModelLabel } from '@/utils/native-model-families'
+import PageSidebar from "@/components/layout/PageSidebar.vue"
+import SidebarResizeHandle from "@/components/layout/SidebarResizeHandle.vue"
+import { usePageSidebarState } from "@/composables/usePageSidebar"
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
+import { AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NCheckbox, NDrawer, NDrawerContent, NDropdown, NInput, NModal, NPopconfirm, NSelect, NSpace, NTooltip, NInputNumber, type DropdownOption } from 'naive-ui'
+import { NSpin, NButton, NCheckbox, NDrawer, NDrawerContent, NDropdown, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
 import {
   ConnectionMode,
   ConnectionLineType,
@@ -15,6 +25,7 @@ import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
+import { nextCodingAgentMode, workflowSavedAgentFields } from '@/utils/coding-agent-mode'
 import { buildWorkflowEvidenceRows, latestWorkflowNodeSession, workflowNodeSessionByExecution, summarizeWorkflowEvidenceRows, workflowEdgePlaybackState, type WorkflowEvidenceRow } from '@/utils/workflow-history'
 import { resolveWorkflowRunPageSwipe, type WorkflowRunPagerPage } from '@/utils/workflow-run-pager'
 import {
@@ -61,7 +72,7 @@ import {
   workflowLoopBodyNodeIds,
 } from '@/utils/workflow-edge-authoring'
 import WorkflowAgentNode from '@/components/hermes/workflow/WorkflowAgentNode.vue'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import WorkflowFieldHelp from '@/components/hermes/workflow/WorkflowFieldHelp.vue'
 import WorkflowConditionEdge from '@/components/hermes/workflow/WorkflowConditionEdge.vue'
 import FolderPicker from '@/components/hermes/chat/FolderPicker.vue'
@@ -69,11 +80,12 @@ import ChatInput from '@/components/hermes/chat/ChatInput.vue'
 import MessageList from '@/components/hermes/chat/MessageList.vue'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
+import ListActionsMenu from '@/components/layout/ListActionsMenu.vue'
 import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
 import { useAppStore } from '@/stores/hermes/app'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { uploadRuntimeFiles } from '@/api/hermes/files'
+import { uploadRuntimeFiles } from '@/api/studio/files'
 import {
   approveWorkflowNode,
   batchDeleteWorkflows,
@@ -100,7 +112,7 @@ import {
   type WorkflowRunRecord,
   type WorkflowRecord,
   type WorkflowViewport,
-} from '@/api/hermes/workflows'
+} from '@/api/studio/workflows'
 import {
   listWorkflowsSocket,
   onWorkflowStatusError,
@@ -108,11 +120,10 @@ import {
   subscribeWorkflowStatuses,
   type WorkflowRuntimeState,
   type WorkflowRuntimeStatus,
-} from '@/api/hermes/workflow-socket'
+} from '@/api/studio/workflow-socket'
 import { fetchSkills } from '@/api/hermes/skills'
-import { getProfileDisplayName } from '@/utils/hermes/profile-display'
-import { fetchSession } from '@/api/hermes/sessions'
-import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId } from '@/api/coding-agents'
+import { fetchSession } from '@/api/studio/sessions'
+import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentId } from '@/api/coding-agents'
 import { buildWorkflowSkillOptions, workflowAgentToSkillTarget } from '@/utils/hermes/workflow-skills'
 import type {
   WorkflowAgentNodeData,
@@ -121,12 +132,16 @@ import type {
   WorkflowSelectOption,
 } from '@/components/hermes/workflow/types'
 import type { AvailableModelGroup } from '@/api/hermes/system'
+import {
+  fetchAgentAvailabilitySnapshot,
+  isAgentAvailable,
+  type AgentAvailabilitySnapshot,
+} from '@/api/agent-status'
 
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
-import { useMessage } from '@/composables/useAppMessage'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -135,7 +150,7 @@ const chatStore = useChatStore()
 const profilesStore = useProfilesStore()
 const message = useMessage()
 const {
-  screenToFlowCoordinate, getViewport, setViewport, setNodes, setEdges, updateNodeInternals,
+  nodes: canvasNodes, screenToFlowCoordinate, getViewport, setViewport, setNodes, setEdges, updateNodeInternals,
   findNode, addSelectedNodes, removeSelectedElements,
 } = useVueFlow('hermes-workflow')
 const defaultViewport: WorkflowViewport = { x: 80, y: 80, zoom: 0.75 }
@@ -151,6 +166,7 @@ const workflowImportConfirmVisible = ref(false)
 const workflowImportPreview = ref<Awaited<ReturnType<typeof previewWorkflowImport>> | null>(null)
 const workflowImportProfile = ref('default')
 const workflowImportConfirming = ref(false)
+const agentAvailabilitySnapshot = ref<AgentAvailabilitySnapshot | null>(null)
 const WORKFLOW_CHAT_PANEL_MIN_WIDTH = 360
 const WORKFLOW_CHAT_PANEL_DEFAULT_WIDTH = 560
 const WORKFLOW_CANVAS_MIN_WIDTH = 360
@@ -310,15 +326,13 @@ const workflowWorkspace = ref<string | null>(null)
 const workspaceModalVisible = ref(false)
 const workspacePickerTarget = ref<'active' | 'create'>('active')
 const activeWorkflowId = ref('')
-const showWorkflowSidebar = ref(
-  typeof window === 'undefined' || !window.matchMedia('(max-width: 768px)').matches,
-)
+const { expanded: showWorkflowSidebar, isMobile } = usePageSidebarState()
 watch(
   showWorkflowSidebar,
   expanded => appStore.setPageSidebarExpanded(expanded),
   { immediate: true },
 )
-const isMobile = ref(false)
+
 const workflowsLoading = ref(false)
 const workflowProfileFilter = ref<string | null>(null)
 const createWorkflowDrawerVisible = ref(false)
@@ -382,6 +396,11 @@ const manuallyDeselectedWorkflowRunIds = ref<Set<string>>(new Set())
 const autoSelectRunningWorkflowIds = ref<Set<string>>(new Set())
 const workflowChatPanelVisible = ref(false)
 const workflowChatPanelLoading = ref(false)
+const initializingPage = ref(true)
+const workflowSelectionLoading = ref(false)
+let workflowSelectionSequence = 0
+let pageDisposed = false
+const pageLoading = computed(() => initializingPage.value || workflowsLoading.value || workflowSelectionLoading.value)
 const workflowChatPanelTitle = ref('')
 const workflowChatPanelNodeId = ref<string | null>(null)
 const workflowChatPanelSessionId = ref<string | null>(null)
@@ -395,7 +414,7 @@ const skillOptionRequests = new Map<string, Promise<void>>()
 const runtimeStatusByWorkflowId = ref<Record<string, WorkflowRuntimeStatus>>({})
 let removeWorkflowStatusListener: (() => void) | null = null
 let removeWorkflowStatusErrorListener: (() => void) | null = null
-let mobileQuery: MediaQueryList | null = null
+
 let applyingWorkflow = false
 let workflowRunsLoadSeq = 0
 let workflowRunsLoadingSeq = 0
@@ -409,13 +428,27 @@ const workflowSchedulePendingIds = ref<Set<string>>(new Set())
 let edgePreviewTimer: number | null = null
 let workflowBudgetClock: number | null = null
 
-const agentOptions = computed<WorkflowSelectOption[]>(() => [
-  { label: 'Hermes', value: 'hermes' },
-  { label: 'Ekko', value: 'ekko-agent' },
-  { label: 'Claude', value: 'claude-code' },
-  { label: 'Codex', value: 'codex' },
-  { label: 'Pi', value: 'pi' },
-])
+const workflowAgentDefinitions = computed(() => AGENT_OPTIONS.filter(option => agentSupportsSurface(option.value, 'workflow')))
+
+const agentOptions = computed<WorkflowSelectOption[]>(() => workflowAgentDefinitions.value.filter(option =>
+  isAgentAvailable(agentAvailabilitySnapshot.value, option.value),
+))
+
+const firstAvailableWorkflowAgent = computed(() =>
+  agentOptions.value.find(option => !option.disabled)?.value || null,
+)
+
+function workflowAgentDisplayName(agent: string): string {
+  return String(workflowAgentDefinitions.value.find(option => option.value === agent)?.label || agent)
+}
+
+async function refreshAgentAvailability() {
+  try {
+    agentAvailabilitySnapshot.value = await fetchAgentAvailabilitySnapshot()
+  } catch {
+    agentAvailabilitySnapshot.value = null
+  }
+}
 const workflowRunBudgetOptions = computed(() => WORKFLOW_RUN_BUDGET_PRESETS.map(option => ({
   value: option.value,
   label: t(`workflow.budget.options.${option.value}`),
@@ -439,7 +472,7 @@ const workflowRunBudgetValid = computed(() => isWorkflowRunBudgetValid(
   workflowRunBudgetCustomMinutes.value,
 ))
 
-const modelGroups = computed<AvailableModelGroup[]>(() => appStore.modelGroups)
+const modelGroups = computed<AvailableModelGroup[]>(() => appStore.modelGroups.filter(group => group.provider !== 'moa'))
 
 const defaultWorkflowProfile = computed(() =>
   profilesStore.activeProfileName || profilesStore.profiles[0]?.name || 'default',
@@ -447,15 +480,10 @@ const defaultWorkflowProfile = computed(() =>
 
 const workflowProfileOptions = computed(() => {
   const profiles = profilesStore.profiles.length > 0
-    ? profilesStore.profiles.map(profile => ({ label: getProfileDisplayName(profile), value: profile.name }))
+    ? profilesStore.profiles.map(profile => ({ label: profile.name, value: profile.name }))
     : [{ label: 'default', value: 'default' }]
   return profiles
 })
-
-const workflowProfileFilterOptions = computed(() => [
-  { label: t('chat.allProfiles'), value: '__all__' },
-  ...workflowProfileOptions.value,
-])
 
 function profileAvatarFor(profileName: string) {
   return profilesStore.profiles.find(profile => profile.name === profileName)?.avatar || null
@@ -561,6 +589,7 @@ function withRuntimeNodeData(data: WorkflowAgentNodeData): WorkflowAgentNodeData
     skillOptions: skillOptionsForAgent(data.agent),
     skillsLoading: skillsLoadingForAgent(data.agent),
     modelGroups: modelGroups.value,
+    profile: activeWorkflowProfile.value,
     onUpdate: updateNodeData,
     onUploadImages: uploadNodeImages,
   }
@@ -605,7 +634,7 @@ async function ensureSkillOptionsForAgent(agent: string, profile = activeWorkflo
 
 function ensureSkillOptionsForVisibleNodes() {
   const agents = new Set(nodes.value.map(node => node.data.agent))
-  for (const agent of agents) void ensureSkillOptionsForAgent(agent)
+  return Promise.all([...agents].map(agent => ensureSkillOptionsForAgent(agent)))
 }
 
 function makeNode(
@@ -614,6 +643,13 @@ function makeNode(
   position: { x: number; y: number },
   data: Partial<WorkflowAgentNodeEditableData> & { status?: WorkflowNodeStatus } = {},
 ): WorkflowNode {
+  const agent = data.agent || firstAvailableWorkflowAgent.value || 'hermes'
+  const usesGlobal = isGlobalOnlyCodingAgent(agent) || (agent !== 'hermes' && agent !== 'ekko-agent' && data.agentMode === 'global')
+  // Match server migration before clearing the provider: old Global nodes kept
+  // ignored Model-mode values, while native selections have no Studio provider.
+  const hasLegacyGlobalSelection = usesGlobal && (
+    Boolean(data.provider?.trim()) || (isGlobalOnlyCodingAgent(agent) && data.agentMode !== 'global')
+  )
   return {
     id,
     type: 'agent',
@@ -622,11 +658,16 @@ function makeNode(
     style: { width: `${WORKFLOW_NODE_DEFAULT_WIDTH}px`, height: `${WORKFLOW_NODE_DEFAULT_HEIGHT}px` },
     data: {
       title,
-      agent: data.agent || agentOptions.value[0]?.value || 'hermes',
-      provider: data.provider || defaultModelSelection.value.provider,
-      model: data.model || defaultModelSelection.value.model,
+      pluginAction: data.pluginAction,
+      pluginInput: data.pluginInput,
+      agent,
+      agentMode: isGlobalOnlyCodingAgent(agent) || (data.agentMode === 'global' && (agent.startsWith('plugin:') || ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(agent))) ? 'global' : 'scoped',
+      priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
+      provider: usesGlobal ? '' : data.provider || defaultModelSelection.value.provider,
+      model: usesGlobal ? (hasLegacyGlobalSelection ? '' : data.model || '') : data.model || defaultModelSelection.value.model,
       apiMode: data.apiMode || defaultApiMode(data.provider || defaultModelSelection.value.provider),
-      reasoningEffort: data.reasoningEffort || 'default',
+      agentPreset: data.agentPreset,
+      reasoningEffort: hasLegacyGlobalSelection ? 'default' : data.reasoningEffort || 'default',
       input: data.input || '',
       skills: data.skills || [],
       images: data.images || [],
@@ -634,9 +675,10 @@ function makeNode(
       orchestration: { join: data.orchestration?.join === 'any' ? 'any' : 'all' },
       status: data.status || 'idle',
       agentOptions: agentOptions.value,
-      skillOptions: skillOptionsForAgent(data.agent || agentOptions.value[0]?.value || 'hermes'),
-      skillsLoading: skillsLoadingForAgent(data.agent || agentOptions.value[0]?.value || 'hermes'),
+      skillOptions: skillOptionsForAgent(agent),
+      skillsLoading: skillsLoadingForAgent(agent),
       modelGroups: modelGroups.value,
+      profile: activeWorkflowProfile.value,
       onUpdate: updateNodeData,
       onUploadImages: uploadNodeImages,
     },
@@ -647,8 +689,28 @@ function makeInitialNodes(): WorkflowNode[] {
   return []
 }
 
-const nodes = ref<WorkflowNode[]>(makeInitialNodes())
+// Keep an authored-only input for Vue Flow's initial mount and workflow switches.
+// Read live nodes from its store so edits never replay stale measurements or geometry.
+const nodeDefinitions = ref<WorkflowNode[]>(makeInitialNodes())
+const nodes = computed<WorkflowNode[]>({
+  get: () => canvasNodes.value as WorkflowNode[],
+  set: (value) => {
+    nodeDefinitions.value = value.map(node => ({
+      id: node.id,
+      type: node.type,
+      position: node.position,
+      dragHandle: node.dragHandle,
+      style: node.style,
+      data: node.data,
+    }))
+    setNodes(nodeDefinitions.value)
+  },
+})
 const edges = ref<WorkflowEdge[]>([])
+
+function unavailableWorkflowAgent() {
+  return nodes.value.find(node => !node.data.pluginAction && !isAgentAvailable(agentAvailabilitySnapshot.value, node.data.agent))
+}
 
 const edgeEditorEdge = computed(() => edges.value.find(edge => edge.id === edgeEditorId.value) || null)
 function workflowEditorNodeName(nodeId: string): string {
@@ -848,6 +910,24 @@ const workflowChatPanelPendingApproval = computed(() => {
   return workflowNodeStatusFromRun(run, nodeId) === 'pending_approval'
 })
 
+const { catalog: workflowChatNativeCatalog } = useCodingAgentModels(
+  () => {
+    const id = chatStore.activeSession?.codingAgentId || chatStore.activeSession?.agent || 'codex'
+    return (agentMetadata(id)?.id || id) as CodingAgentId
+  },
+  () => workflowChatPanelVisible.value && chatStore.activeSession?.id === workflowChatPanelSessionId.value
+    && chatStore.activeSession?.codingAgentMode === 'global',
+  () => chatStore.activeSession?.profile,
+)
+const workflowChatPanelModelLabel = computed(() => {
+  const session = chatStore.activeSession
+  if (!session || session.id !== workflowChatPanelSessionId.value) return t('models.selectModel')
+  if (session.codingAgentMode === 'global') return nativeModelLabel(workflowChatNativeCatalog.value?.models, session.model || '', t('codingAgents.nativeModelDefault'))
+  if (!session.model) return t('models.selectModel')
+  if (session.provider === 'moa') return `MoA · ${session.model}`
+  return appStore.displayModelName(session.model, session.provider)
+})
+
 const visibleWorkflowApprovalKey = computed(() => {
   const run = selectedWorkflowRun.value
   const nodeId = workflowChatPanelNodeId.value
@@ -881,10 +961,9 @@ watch([workflowName, workflowWorkspace, nodes, edges, nextNodeIndex], () => {
 onMounted(() => {
   if (typeof window === 'undefined') return
   workflowBudgetClock = window.setInterval(() => { workflowBudgetNow.value = Date.now() }, 1000)
-  mobileQuery = window.matchMedia('(max-width: 768px)')
-  handleMobileChange(mobileQuery)
-  mobileQuery.addEventListener('change', handleMobileChange)
-  window.addEventListener('hermes:open-page-sidebar', openPageSidebar)
+
+
+
   window.addEventListener('resize', handleWorkflowChatPanelViewportResize)
   window.addEventListener('keydown', handleWorkflowUndoShortcut)
   handleWorkflowChatPanelViewportResize()
@@ -892,11 +971,12 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  pageDisposed = true
+  workflowSelectionSequence++
   publishVisibleWorkflowApproval(visibleWorkflowApprovalKey.value, false)
   if (workflowBudgetClock !== null) window.clearInterval(workflowBudgetClock)
   workflowBudgetClock = null
-  mobileQuery?.removeEventListener('change', handleMobileChange)
-  window.removeEventListener('hermes:open-page-sidebar', openPageSidebar)
+
   window.removeEventListener('resize', handleWorkflowChatPanelViewportResize)
   window.removeEventListener('keydown', handleWorkflowUndoShortcut)
   clearWorkflowEdgePreview()
@@ -907,15 +987,8 @@ onUnmounted(() => {
   removeWorkflowStatusErrorListener = null
 })
 
-function handleMobileChange(event: MediaQueryList | MediaQueryListEvent) {
-  isMobile.value = event.matches
-  showWorkflowSidebar.value = !event.matches
-  if (event.matches) showWorkflowRunsPanel.value = false
-}
+watch(isMobile, mobile => { if (mobile) showWorkflowRunsPanel.value = false })
 
-function openPageSidebar() {
-  showWorkflowSidebar.value = true
-}
 
 function loadWorkflowChatPanelWidth() {
   if (typeof window === 'undefined') return WORKFLOW_CHAT_PANEL_DEFAULT_WIDTH
@@ -992,6 +1065,9 @@ function defaultApiMode(provider: string) {
 }
 
 function normalizeNodeModel(data: WorkflowAgentNodeData): Pick<WorkflowAgentNodeData, 'provider' | 'model' | 'apiMode'> {
+  if (data.agentMode === 'global' || isGlobalOnlyCodingAgent(data.agent)) {
+    return { provider: '', model: data.model, apiMode: data.apiMode }
+  }
   const availableGroups = data.agent === 'hermes'
     ? modelGroups.value
     : modelGroups.value.filter(group => canScopedCodingAgentUseProvider(
@@ -999,8 +1075,9 @@ function normalizeNodeModel(data: WorkflowAgentNodeData): Pick<WorkflowAgentNode
         group.provider,
       ))
   const currentGroup = availableGroups.find(group => group.provider === data.provider)
-  if (currentGroup?.models.includes(data.model)) {
-    return { provider: data.provider, model: data.model, apiMode: data.apiMode || defaultApiMode(data.provider) }
+  // A workflow can retain a manually entered model under a supported provider.
+  if (currentGroup && data.model) {
+    return { provider: data.provider, model: data.model, apiMode: configuredProviderApiMode(currentGroup, data.model) || data.apiMode || defaultApiMode(data.provider) }
   }
   const fallbackGroup = availableGroups.find(group => group.models.length > 0)
   return {
@@ -1049,10 +1126,17 @@ function serializeWorkflowNodes(source: WorkflowNode[]): unknown[] {
     style: { ...node.style },
     data: {
       title: node.data.title,
-      agent: node.data.agent,
-      provider: node.data.provider,
-      model: node.data.model,
+      pluginAction: node.data.pluginAction,
+      pluginInput: node.data.pluginInput,
+      ...workflowSavedAgentFields({
+        agent: node.data.agent,
+        agentMode: node.data.agentMode,
+        priorAgentMode: node.data.priorAgentMode,
+        provider: node.data.provider,
+        model: node.data.model,
+      }),
       apiMode: node.data.apiMode,
+      agentPreset: node.data.agentPreset,
       reasoningEffort: node.data.reasoningEffort,
       input: node.data.input,
       skills: [...node.data.skills],
@@ -1108,9 +1192,14 @@ function normalizeStoredNode(raw: unknown, index: number): WorkflowNode {
     position,
     {
       agent: data.agent,
+      pluginAction: data.pluginAction,
+      pluginInput: data.pluginInput,
+      agentMode: data.agentMode === 'global' ? 'global' : 'scoped',
+      priorAgentMode: data.priorAgentMode === 'global' || data.priorAgentMode === 'scoped' ? data.priorAgentMode : undefined,
       provider: data.provider,
       model: data.model,
       apiMode: data.apiMode,
+      agentPreset: data.agentPreset,
       reasoningEffort: typeof data.reasoningEffort === 'string' ? data.reasoningEffort : 'default',
       input: data.input,
       skills: Array.isArray(data.skills) ? data.skills.filter(item => typeof item === 'string') : [],
@@ -1185,19 +1274,29 @@ async function openWorkflowNotificationTarget() {
 }
 
 async function initializeWorkflowPage() {
-  await profilesStore.fetchProfiles()
-  createWorkflowProfile.value = defaultWorkflowProfile.value
-  removeWorkflowStatusListener = onWorkflowStatusUpdated(handleWorkflowRuntimeStatus)
-  removeWorkflowStatusErrorListener = onWorkflowStatusError((error) => {
-    console.error('Workflow execution evidence read failed:', error)
-    message.error(error.error || t('workflow.evidence.loadFailed'))
-  })
-  await loadWorkflows()
-  await openWorkflowNotificationTarget()
-  void subscribeWorkflowStatuses().then(applyWorkflowRuntimeStatuses).catch((err) => {
-    console.error('Failed to subscribe workflow statuses:', err)
+  try {
+    await Promise.all([profilesStore.fetchProfiles(), appStore.loadModels(), refreshAgentAvailability()])
+    if (pageDisposed) return
+    createWorkflowProfile.value = defaultWorkflowProfile.value
+    removeWorkflowStatusListener = onWorkflowStatusUpdated(handleWorkflowRuntimeStatus)
+    removeWorkflowStatusErrorListener = onWorkflowStatusError((error) => {
+      console.error('Workflow execution evidence read failed:', error)
+      message.error(error.error || t('workflow.evidence.loadFailed'))
+    })
+    await loadWorkflows()
+    if (pageDisposed) return
+    await openWorkflowNotificationTarget()
+    if (pageDisposed) return
+    void subscribeWorkflowStatuses().then(applyWorkflowRuntimeStatuses).catch((err) => {
+      console.error('Failed to subscribe workflow statuses:', err)
+      message.error(err?.message || t('workflow.evidence.loadFailed'))
+    })
+  } catch (err: any) {
+    console.error('Failed to initialize workflow page:', err)
     message.error(err?.message || t('workflow.evidence.loadFailed'))
-  })
+  } finally {
+    initializingPage.value = false
+  }
 }
 
 watch(
@@ -2177,8 +2276,8 @@ function handleWorkflowRuntimeStatus(status: WorkflowRuntimeStatus) {
   }))
 }
 
-function handleWorkflowProfileFilterChange(value: string) {
-  workflowProfileFilter.value = value === '__all__' ? null : value
+function handleWorkflowProfileFilterChange(value: string | null) {
+  workflowProfileFilter.value = value
   selectedWorkflowIds.value = new Set()
 }
 
@@ -2291,30 +2390,41 @@ async function applyWorkflow(
   closeMobile: boolean,
   options: { resetRuntime?: boolean } = {},
 ) {
+  const selection = ++workflowSelectionSequence
+  workflowSelectionLoading.value = true
   applyingWorkflow = true
-  selectedWorkflowRunId.value = null
-  clearWorkflowSchedules()
-  activeWorkflowId.value = workflow.id
-  workflowName.value = workflow.name
-  workflowWorkspace.value = workflow.workspace
-  const runtimeStatus = workflowCanvasRuntimeStatus(workflow.id)
-  nodes.value = cloneWorkflowNodes(workflow.nodes, { resetRuntime: options.resetRuntime }).map<WorkflowNode>(node => ({
-    ...node,
-    data: withRuntimeNodeData({
-      ...node.data,
-      status: options.resetRuntime ? 'idle' : workflowNodeStatusFromRuntime(runtimeStatus, node.id),
-      statusError: options.resetRuntime ? null : workflowNodeErrorFromRuntime(runtimeStatus, node.id),
-      readonly: false,
-    }),
-  }))
-  edges.value = cloneWorkflowEdges(workflow.edges)
-  nextNodeIndex.value = workflow.nextNodeIndex
-  await nextTick()
-  await setViewport(workflow.viewport, { duration: 0 })
-  applyingWorkflow = false
-  ensureSkillOptionsForVisibleNodes()
-  void loadWorkflowRuns(workflow.id)
-  if (closeMobile && isMobile.value) showWorkflowSidebar.value = false
+  try {
+    selectedWorkflowRunId.value = null
+    clearWorkflowSchedules()
+    activeWorkflowId.value = workflow.id
+    workflowName.value = workflow.name
+    workflowWorkspace.value = workflow.workspace
+    const runtimeStatus = workflowCanvasRuntimeStatus(workflow.id)
+    nodes.value = cloneWorkflowNodes(workflow.nodes, { resetRuntime: options.resetRuntime }).map<WorkflowNode>(node => ({
+      ...node,
+      data: withRuntimeNodeData({
+        ...node.data,
+        ...(node.data.provider === 'moa' ? normalizeNodeModel(node.data) : {}),
+        status: options.resetRuntime ? 'idle' : workflowNodeStatusFromRuntime(runtimeStatus, node.id),
+        statusError: options.resetRuntime ? null : workflowNodeErrorFromRuntime(runtimeStatus, node.id),
+        readonly: false,
+      }),
+    }))
+    edges.value = cloneWorkflowEdges(workflow.edges)
+    nextNodeIndex.value = workflow.nextNodeIndex
+    await nextTick()
+    if (pageDisposed || selection !== workflowSelectionSequence) return
+    await setViewport(workflow.viewport, { duration: 0 })
+    if (pageDisposed || selection !== workflowSelectionSequence) return
+    applyingWorkflow = false
+    await Promise.all([ensureSkillOptionsForVisibleNodes(), loadWorkflowRuns(workflow.id)])
+    if (closeMobile && isMobile.value) showWorkflowSidebar.value = false
+  } finally {
+    if (selection === workflowSelectionSequence) {
+      applyingWorkflow = false
+      workflowSelectionLoading.value = false
+    }
+  }
 }
 
 async function selectWorkflow(workflowId: string) {
@@ -2516,10 +2626,18 @@ function workflowValidationError(): string | null {
 
   for (const node of nodes.value) {
     const label = workflowNodeLabel(node)
+    if (node.data.pluginAction) {
+      try { const args = JSON.parse(node.data.pluginInput || '{}'); if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error() }
+      catch { return t('studioPlugins.arguments') }
+      continue
+    }
+    if (node.data.agent === 'dsh' && (!node.data.agentPreset || node.data.agentPresetReady === false)) return t('dshPresets.selectMode')
     if (!node.data.title.trim()) return t('workflow.validation.nodeNameRequired', { node: node.id })
-    if (!node.data.provider.trim()) return t('workflow.validation.providerRequired', { node: label })
-    if (!node.data.model.trim()) return t('workflow.validation.modelRequired', { node: label })
-    if (node.data.agent !== 'hermes' && !node.data.apiMode) {
+    const usesGlobalCodingAgent = Boolean(agentMetadata(node.data.agent)?.modes.includes('global'))
+      && node.data.agentMode === 'global'
+    if (!usesGlobalCodingAgent && !node.data.provider.trim()) return t('workflow.validation.providerRequired', { node: label })
+    if (!usesGlobalCodingAgent && !node.data.model.trim()) return t('workflow.validation.modelRequired', { node: label })
+    if (!usesGlobalCodingAgent && node.data.agent !== 'hermes' && !node.data.apiMode) {
       return t('workflow.validation.apiModeRequired', { node: label })
     }
     if (!node.data.input.trim()) return t('workflow.validation.inputRequired', { node: label })
@@ -2623,6 +2741,14 @@ async function confirmWorkflowRunBudget() {
 
 async function executeWorkflowWithBudget(timeoutMs: number | undefined): Promise<boolean> {
   if (!activeWorkflowId.value || executingWorkflow.value || selectedWorkflowRunId.value) return false
+  await refreshAgentAvailability()
+  const unavailableAgentNode = unavailableWorkflowAgent()
+  if (unavailableAgentNode) {
+    message.warning(t('codingAgents.installRequired', {
+      agent: workflowAgentDisplayName(unavailableAgentNode.data.agent),
+    }))
+    return false
+  }
   const workflowId = activeWorkflowId.value
   const saved = await saveActiveWorkflow({ quiet: true })
   if (!saved) return false
@@ -2741,21 +2867,46 @@ function initialRunNodeStatuses(sourceNodes: WorkflowNode[], sourceEdges: Workfl
   ]))
 }
 
+const workflowModelSelections = new Map<string, Pick<WorkflowAgentNodeEditableData, 'provider' | 'model' | 'apiMode' | 'reasoningEffort'>>()
+function workflowModelSelectionKey(id: string, agent: string, mode: string) {
+  return JSON.stringify([activeWorkflowId.value, id, agent, mode])
+}
 function updateNodeData(id: string, patch: Partial<WorkflowAgentNodeEditableData>) {
   if (selectedWorkflowRunId.value) return
   nodes.value = nodes.value.map<WorkflowNode>((node) => {
     if (node.id !== id) return node
+    const agentChanged = typeof patch.agent === 'string' && patch.agent !== node.data.agent
+    const nextAgent = typeof patch.agent === 'string' ? patch.agent : node.data.agent
+    const switched = agentChanged
+      ? nextCodingAgentMode({
+        previousAgent: node.data.agent,
+        nextAgent,
+        agentMode: node.data.agentMode,
+        priorAgentMode: node.data.priorAgentMode,
+      })
+      : null
     const data = {
       ...node.data,
       ...patch,
-      skills: typeof patch.agent === 'string' && patch.agent !== node.data.agent ? [] : patch.skills ?? node.data.skills,
+      ...(agentChanged ? { agentPreset: undefined, agentPresetReady: undefined } : {}),
+      ...(switched ? { agentMode: switched.agentMode, priorAgentMode: switched.priorAgentMode } : {}),
+      skills: agentChanged ? [] : patch.skills ?? node.data.skills,
+    }
+    const modeChanged = data.agentMode !== node.data.agentMode
+    if (agentChanged || modeChanged) {
+      workflowModelSelections.set(workflowModelSelectionKey(id, node.data.agent, node.data.agentMode), {
+        provider: node.data.provider, model: node.data.model, apiMode: node.data.apiMode, reasoningEffort: node.data.reasoningEffort,
+      })
+      const saved = workflowModelSelections.get(workflowModelSelectionKey(id, data.agent, data.agentMode))
+      Object.assign(data, saved || (data.agentMode === 'global'
+        ? { provider: '', model: '', reasoningEffort: 'default' }
+        : { ...normalizeNodeModel({ ...data, provider: '', model: '' }), reasoningEffort: 'default' }))
     }
     return {
       ...node,
       style: patch.images ? expandNodeHeightForImages(node.style, patch.images.length) : node.style,
       data: withRuntimeNodeData({
         ...data,
-        ...(typeof patch.agent === 'string' && patch.agent !== node.data.agent ? normalizeNodeModel(data) : {}),
       }),
     }
   })
@@ -2808,13 +2959,12 @@ async function handleConnectEnd(event?: MouseEvent | TouchEvent) {
   transaction.after.edges[transaction.after.edges.length - 1] = {
     ...transaction.after.edges[transaction.after.edges.length - 1], animated: false, markerEnd: MarkerType.ArrowClosed,
   }
-  setNodes(transaction.after.nodes)
+  nodes.value = transaction.after.nodes
   await nextTick()
   updateNodeInternals([nodeId])
   setEdges(transaction.after.edges)
   await nextTick()
-  // Selection lives in Vue Flow's internal store, not in our definition
-  // array. Apply it after the release gesture has committed Node + Edge.
+  // Apply selection after the release gesture has committed Node + Edge.
   window.setTimeout(() => {
     removeSelectedElements()
     const createdNode = findNode(nodeId)
@@ -2828,7 +2978,7 @@ async function handleConnectEnd(event?: MouseEvent | TouchEvent) {
 function undoLastCanvasTransaction() {
   const transaction = lastCanvasTransaction.value
   if (!transaction || selectedWorkflowRunId.value) return
-  setNodes(transaction.before.nodes)
+  nodes.value = transaction.before.nodes
   setEdges(transaction.before.edges)
   nextNodeIndex.value = Math.max(1, nextNodeIndex.value - 1)
   lastCanvasTransaction.value = null
@@ -3085,6 +3235,11 @@ async function addAgentNode() {
     message.warning(t('workflow.actions.createWorkflowFirst'))
     return
   }
+  await refreshAgentAvailability()
+  if (!firstAvailableWorkflowAgent.value) {
+    message.warning(t('codingAgents.notInstalled'))
+    return
+  }
   const id = `agent-${nextNodeIndex.value}`
   nodes.value = [
     ...nodes.value,
@@ -3114,45 +3269,49 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 </script>
 
 <template>
-  <div class="workflow-view">
-    <div class="workflow-sidebar-backdrop" :class="{ active: showWorkflowSidebar }" @click="showWorkflowSidebar = false" />
+  <PageLoading :show="pageLoading" initial-only class="workflow-view">
+    <PageSidebar>
     <aside class="workflow-sidebar" :class="{ collapsed: !showWorkflowSidebar }">
+      <SidebarResizeHandle />
       <div v-if="showWorkflowSidebar" class="page-sidebar-top">
         <PageSidebarNav
           active="workflow"
           :primary-label="t('workflow.actions.newWorkflow')"
           @primary="openCreateWorkflowDrawer"
-        />
-        <div class="workflow-list-toolbar">
-          <NSelect
-            class="workflow-profile-filter"
-            :value="workflowProfileFilter || '__all__'"
-            :options="workflowProfileFilterOptions"
-            size="small"
-            :loading="profilesStore.loading"
-            @update:value="handleWorkflowProfileFilterChange"
-          />
-          <div class="workflow-list-actions">
-            <NButton
-              v-if="!isWorkflowBatchMode"
-              quaternary
-              size="tiny"
-              :title="t('workflow.batch.toggle')"
-              @click="toggleWorkflowBatchMode"
+        >
+          <template #actions>
+            <ListActionsMenu
+              :label="t('workflow.listActions')"
+              :profiles="workflowProfileOptions.map(option => ({ name: option.value }))"
+              :profile="workflowProfileFilter"
+              :loading="profilesStore.loading"
+              :batch-mode="isWorkflowBatchMode"
+              @filter="handleWorkflowProfileFilterChange"
+              @batch="toggleWorkflowBatchMode"
+            />
+            <button
+              v-if="isMobile"
+              class="workflow-sidebar-close"
+              type="button"
+              :aria-label="t('common.close')"
+              @click="showWorkflowSidebar = false"
             >
-              <template #icon>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M9 11l3 3L22 4" />
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                </svg>
-              </template>
-            </NButton>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="m18 6-12 12M6 6l12 12" />
+              </svg>
+            </button>
+          </template>
+        </PageSidebarNav>
+        <div v-if="isWorkflowBatchMode" class="workflow-list-toolbar">
+          <span class="workflow-selection-count" role="status">{{ t('chat.selectedSessions', { count: selectedWorkflowCount }) }}</span>
+          <div class="workflow-list-actions">
             <NButton
               v-if="isWorkflowBatchMode"
               quaternary
               size="tiny"
               :disabled="!canSelectAllWorkflows || isWorkflowBatchDeleting"
               :title="t('workflow.batch.selectAll')"
+              :aria-label="t('workflow.batch.selectAll')"
               @click="selectAllWorkflows"
             >
               <template #icon>
@@ -3170,7 +3329,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
               @positive-click="handleWorkflowBatchDeleteConfirm"
             >
               <template #trigger>
-                <NButton quaternary size="tiny" type="error" :loading="isWorkflowBatchDeleting" :disabled="isWorkflowBatchDeleting">
+                <NButton quaternary size="tiny" :title="t('common.delete')" :aria-label="t('common.delete')" :loading="isWorkflowBatchDeleting" :disabled="isWorkflowBatchDeleting">
                   <template #icon>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <polyline points="3 6 5 6 21 6" />
@@ -3186,6 +3345,8 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
               quaternary
               size="tiny"
               :disabled="isWorkflowBatchDeleting"
+              :title="t('common.cancel')"
+              :aria-label="t('common.cancel')"
               @click="toggleWorkflowBatchMode"
             >
               <template #icon>
@@ -3199,7 +3360,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
         </div>
       </div>
       <div v-if="showWorkflowSidebar" class="workflow-list">
-        <div v-if="workflowsLoading" class="workflow-list-empty">{{ t('common.loading') }}</div>
+        <div v-if="workflowsLoading" class="workflow-list-empty"><NSpin size="small" :description="t('common.loading')" /></div>
         <div v-else-if="workflowList.length === 0" class="workflow-list-empty">{{ t('common.noData') }}</div>
         <button
           v-for="workflow in workflowList"
@@ -3251,47 +3412,40 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
       </div>
       <PageSidebarFooter v-if="showWorkflowSidebar" />
     </aside>
+    </PageSidebar>
 
     <main
       class="workflow-main"
       :class="{ 'workflow-main--sidebar-collapsed': !showWorkflowSidebar }"
     >
+      <PageHeader>
       <header class="page-header">
         <div class="header-left">
-          <NButton
+          <HeaderSidebarToggle
             class="header-sidebar-toggle"
-            quaternary
-            size="small"
-            circle
-            @click="showWorkflowSidebar = !showWorkflowSidebar"
-          >
-            <template #icon>
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-              </svg>
-            </template>
-          </NButton>
+            :expanded="showWorkflowSidebar"
+            @toggle="showWorkflowSidebar = !showWorkflowSidebar"
+          />
           <div class="header-workflow-meta">
             <span class="header-workflow-title">{{ workflowName }}</span>
-            <button class="workspace-badge" type="button" :title="workflowWorkspace || t('workflow.workspace.select')" @click="openWorkspacePicker('active')">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              </svg>
-              <span>{{ workflowWorkspace ? (workflowWorkspace.split('/').pop() || workflowWorkspace) : t('workflow.workspace.select') }}</span>
-            </button>
           </div>
         </div>
         <div class="header-actions">
+          <NButton
+            class="header-workspace-button"
+            quaternary
+            size="small"
+            circle
+            :title="workflowWorkspace || t('workflow.workspace.select')"
+            :aria-label="t('workflow.workspace.select')"
+            @click="openWorkspacePicker('active')"
+          >
+            <template #icon>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              </svg>
+            </template>
+          </NButton>
           <NTooltip trigger="hover">
             <template #trigger>
               <NButton
@@ -3417,6 +3571,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
           </NTooltip>
         </div>
       </header>
+      </PageHeader>
     <NModal
       data-testid="workflow-schedules-modal"
       :show="workflowScheduleModalVisible"
@@ -3427,7 +3582,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     >
       <div class="workflow-schedules-layout">
         <section class="workflow-schedules-list">
-          <div v-if="workflowSchedulesLoading" class="workflow-schedules-empty">{{ t('common.loading') }}</div>
+          <div v-if="workflowSchedulesLoading" class="workflow-schedules-empty"><NSpin size="small" :description="t('common.loading')" /></div>
           <div v-else-if="workflowScheduleLoadError" class="workflow-schedule-error">{{ workflowScheduleLoadError }}</div>
           <div v-else-if="workflowSchedules.length === 0" class="workflow-schedules-empty">{{ t('workflow.schedule.empty') }}</div>
           <article v-for="schedule in workflowSchedules" :key="schedule.id" class="workflow-schedule-item">
@@ -3579,7 +3734,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
       v-model:show="workspaceModalVisible"
       preset="card"
       :title="t('workflow.workspace.title')"
-      :style="{ width: 'min(720px, calc(100vw - 32px))' }"
+      style="width: var(--studio-workspace-picker-width)"
     >
       <FolderPicker v-model="workspacePickerValue" />
       <template #footer>
@@ -3626,7 +3781,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
           </header>
           <div class="workflow-chat-content">
             <div v-if="workflowChatPanelLoading" class="workflow-chat-loading">
-              {{ t('common.loading') }}
+              <NSpin size="small" :description="t('common.loading')" />
             </div>
             <template v-else-if="workflowChatPanelSessionId">
               <div v-if="workflowChatPanelPendingApproval" class="workflow-node-approval-panel">
@@ -3652,7 +3807,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
                 </div>
               </div>
               <MessageList scroll-scope="workflow" />
-              <ChatInput />
+              <ChatInput :model-label="workflowChatPanelModelLabel" :model-disabled="true" reasoning-effort-disabled />
             </template>
             <div v-else class="workflow-chat-loading">
               {{ t('chat.noVisibleMessages') }}
@@ -3664,7 +3819,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
         <VueFlow
           :key="workflowFlowKey"
           id="hermes-workflow"
-          v-model:nodes="nodes"
+          :nodes="nodeDefinitions"
           v-model:edges="renderedEdges"
           :fit-view-on-init="false"
           :default-viewport="defaultViewport"
@@ -3725,6 +3880,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
         ref="workflowRunsPanelRef"
         v-if="showWorkflowRunsPanel"
         class="workflow-runs-panel"
+        :class="{ 'workflow-runs-panel--overlay': isMobile }"
         @pointerdown="startWorkflowRunPageSwipe"
         @pointerup="finishWorkflowRunPageSwipe"
         @pointercancel="cancelWorkflowRunPageSwipe"
@@ -3756,7 +3912,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
           </div>
         </div>
         <div ref="workflowRunsHistoryScrollRef" class="workflow-runs-page-scroll">
-          <div v-if="workflowRunsLoading" class="workflow-runs-empty">{{ t('common.loading') }}</div>
+          <div v-if="workflowRunsLoading" class="workflow-runs-empty"><NSpin size="small" :description="t('common.loading')" /></div>
           <div v-else-if="workflowRuns.length === 0" class="workflow-runs-empty">{{ t('workflow.runs.empty') }}</div>
           <div v-else class="workflow-runs-list">
           <button
@@ -3834,6 +3990,14 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
               {{ t('workflow.evidence.runDetails') }}
               <span aria-hidden="true">›</span>
             </button>
+          </div>
+          <div v-if="selectedWorkflowRun.quality_evaluations?.length" class="workflow-quality-results" data-testid="workflow-quality-results">
+            <h3>{{ t('workflow.quality.results') }}</h3>
+            <article v-for="quality in selectedWorkflowRun.quality_evaluations" :key="quality.id" class="workflow-quality-result">
+              <strong>{{ workflowEditorNodeName(quality.node_id) }} · {{ t(`workflow.quality.decision.${quality.decision}`) }}</strong>
+              <ul><li v-for="criterion in quality.criteria" :key="criterion.id">{{ criterion.id }} · {{ t(`workflow.quality.decision.${criterion.decision}`) }}</li></ul>
+              <button v-if="quality.decision === 'needs_improvement'" type="button" @click="rerunWorkflowFromNode(quality.node_id, true, undefined)">{{ t('workflow.quality.rerun') }}</button>
+            </article>
           </div>
           <div class="workflow-evidence-tabs" data-testid="workflow-evidence-tabs" role="tablist" :aria-label="t('workflow.evidence.pathChecks')" @keydown="handleWorkflowEvidenceTabKeydown">
             <button id="workflow-evidence-tab-actual" type="button" role="tab" aria-controls="workflow-evidence-tabpanel" :aria-selected="workflowEvidenceTab === 'actual'" :tabindex="workflowEvidenceTab === 'actual' ? 0 : -1" @click="selectWorkflowEvidenceTab('actual')">
@@ -4091,7 +4255,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
       </div>
     </NModal>
 
-    <NDrawer v-model:show="createWorkflowDrawerVisible" placement="right" :width="420">
+    <NDrawer v-model:show="createWorkflowDrawerVisible" placement="right" width="var(--studio-drawer-width)">
       <NDrawerContent :title="t('workflow.actions.newWorkflow')" closable>
         <div class="workflow-create-form">
           <label class="workflow-field">
@@ -4127,19 +4291,19 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
         </template>
       </NDrawerContent>
     </NDrawer>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .workflow-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   min-width: 0;
   position: relative;
   overflow: hidden;
-  background-color: $bg-card;
+  background-color: var(--theme-card-bg, $bg-card);
 }
 
 .workflow-main {
@@ -4150,9 +4314,9 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   flex-direction: column;
   margin: 10px 10px 10px 0;
   overflow: hidden;
-  background: $bg-main-surface;
-  border: 1px solid $border-color;
-  border-radius: 14px;
+  background: var(--theme-content-bg, $bg-main-surface);
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 14px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
 
   &--sidebar-collapsed {
@@ -4161,14 +4325,13 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 }
 
 .workflow-sidebar {
+  position: relative;
   width: $sidebar-width;
   min-height: 0;
   align-self: stretch;
-  margin: 10px;
-  background: $bg-sidebar-surface;
-  border: 1px solid $border-color;
-  border-radius: 14px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  margin: 0;
+  background: var(--theme-sidebar-bg, $bg-sidebar-surface);
+  border-inline-end: var(--border-width, 1px) solid $border-color;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -4190,27 +4353,43 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 
 .page-sidebar-top {
   flex-shrink: 0;
-  padding: 12px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(12px * var(--spacing-scale, 1));
 }
 
 .workflow-list-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 12px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  margin-top: 8px;
+  justify-content: space-between;
 }
 
-.workflow-profile-filter {
+.workflow-selection-count {
   min-width: 0;
-  flex: 1;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  color: $text-secondary;
+}
+
+.workflow-sidebar-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: calc(4px * var(--spacing-scale, 1));
+  border: 0;
+  border-radius: $radius-sm;
+  background: transparent;
+  color: $text-secondary;
+  cursor: pointer;
+  &:hover { background: rgba(var(--accent-primary-rgb), 0.06); }
 }
 
 .workflow-list-actions {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   height: 22px;
 
   .n-button {
@@ -4226,12 +4405,12 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px 6px 12px;
+  padding: 0 calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
 }
 
 .workflow-list-empty {
-  padding: 16px 10px;
-  font-size: 12px;
+  padding: calc(16px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   text-align: center;
 }
@@ -4240,13 +4419,13 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   width: 100%;
   min-width: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-component, 8px);
   background: transparent;
   color: $text-secondary;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1));
   text-align: start;
   cursor: pointer;
   transition:
@@ -4269,7 +4448,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     background: rgba(var(--accent-primary-rgb), 0.12);
     color: $text-primary;
     font-weight: 500;
-    border-radius: 6px;
+    border-radius: var(--radius-component, 6px);
   }
 
   &.active .workflow-list-name,
@@ -4333,7 +4512,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 }
 
 .workflow-list-name,
@@ -4345,14 +4524,14 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 }
 
 .workflow-list-name {
-  font-size: 13px;
-  line-height: 18px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
   color: inherit;
 }
 
 .workflow-list-meta {
-  font-size: 11px;
-  line-height: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 15 / 14));
   color: $text-muted;
 }
 
@@ -4360,12 +4539,12 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   flex-shrink: 0;
   opacity: 0;
   pointer-events: none;
-  padding: 2px;
+  padding: calc(2px * var(--spacing-scale, 1));
   border: none;
   background: none;
   color: var(--text-muted);
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
   transition: all var(--transition-fast);
 
   &:hover {
@@ -4383,112 +4562,112 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 
 .workflow-evidence {
   min-height: 100%;
-  background: $bg-card;
+  background: var(--workflow-run-panel-bg, $bg-card);
 }
-.workflow-evidence-overview { min-width: 0; padding: 14px 12px 12px; border-bottom: 1px solid var(--border-light); display: flex; flex-direction: column; gap: 8px; }
+.workflow-evidence-overview { min-width: 0; padding: calc(14px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)); border-bottom: var(--border-width, 1px) solid var(--border-light); display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); }
 .workflow-evidence-summary-topline,
-.workflow-evidence-result-duration { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-muted); font-size: 11px; }
-.workflow-evidence-summary-topline strong { color: var(--text-primary); font-size: 15px; }
-.workflow-evidence-result-duration strong { color: var(--text-secondary); font-size: 12px; font-weight: 600; }
-.workflow-evidence-actual-path-compact { min-width: 0; display: flex; flex-direction: column; gap: 3px; color: var(--text-primary); font-size: 11px; line-height: 16px; }
+.workflow-evidence-result-duration { display: flex; align-items: center; justify-content: space-between; gap: calc(8px * var(--spacing-scale, 1)); color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 11 / 14); }
+.workflow-evidence-summary-topline strong { color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 15 / 14); }
+.workflow-evidence-result-duration strong { color: var(--text-secondary); font-size: calc(var(--font-size-base, 14px) * 12 / 14); font-weight: 600; }
+.workflow-evidence-actual-path-compact { min-width: 0; display: flex; flex-direction: column; gap: calc(3px * var(--spacing-scale, 1)); color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 11 / 14); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14)); }
 .workflow-evidence-actual-path-compact strong { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-weight: 500; }
-.workflow-evidence-section-label { color: var(--text-muted); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-.workflow-run-budget-compact { min-width: 0; padding-top: 7px; border-top: 1px solid var(--border-light); display: flex; flex-direction: column; gap: 3px; color: var(--text-muted); font-size: 11px; line-height: 16px; }
+.workflow-evidence-section-label { color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 10 / 14); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.workflow-run-budget-compact { min-width: 0; padding-top: calc(7px * var(--spacing-scale, 1)); border-top: var(--border-width, 1px) solid var(--border-light); display: flex; flex-direction: column; gap: calc(3px * var(--spacing-scale, 1)); color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 11 / 14); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14)); }
 .workflow-run-budget-compact strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-weight: 500; }
-.workflow-run-evidence-details-trigger { align-self: flex-end; min-height: 36px; padding: 0 2px; border: 0; background: transparent; color: var(--accent-primary); display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; }
+.workflow-run-evidence-details-trigger { align-self: flex-end; min-height: 36px; padding: 0 calc(2px * var(--spacing-scale, 1)); border: 0; background: transparent; color: var(--accent-primary); display: inline-flex; align-items: center; gap: calc(4px * var(--spacing-scale, 1)); font-size: calc(var(--font-size-base, 14px) * 11 / 14); cursor: pointer; }
 .workflow-run-evidence-details-trigger:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
-.workflow-evidence-tabs { position: sticky; top: 0; z-index: 2; padding: 8px; border-bottom: 1px solid var(--border-light); background: $bg-card; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
-.workflow-evidence-tabs button { min-width: 0; min-height: 38px; padding: 5px 3px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font-size: 10px; white-space: nowrap; cursor: pointer; }
+.workflow-evidence-tabs { position: sticky; top: 0; z-index: 2; padding: calc(8px * var(--spacing-scale, 1)); border-bottom: var(--border-width, 1px) solid var(--border-light); background: var(--theme-card-bg, var(--workflow-run-item-bg, $bg-card)); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(4px * var(--spacing-scale, 1)); }
+.workflow-evidence-tabs button { min-width: 0; min-height: 38px; padding: calc(5px * var(--spacing-scale, 1)) calc(3px * var(--spacing-scale, 1)); border: var(--border-width, 1px) solid transparent; border-radius: var(--radius-component, 6px); background: transparent; color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 10 / 14); white-space: nowrap; cursor: pointer; }
 .workflow-evidence-tabs button[aria-selected="true"] { border-color: rgba(var(--accent-primary-rgb), 0.24); background: rgba(var(--accent-primary-rgb), 0.1); color: var(--text-primary); }
-.workflow-evidence-tabs button span { display: inline-grid; min-width: 17px; height: 17px; padding: 0 4px; place-items: center; border-radius: 999px; background: rgba(var(--accent-primary-rgb), 0.12); }
-.workflow-evidence-list { min-height: 0; overflow: visible; overscroll-behavior: contain; padding: 10px 12px 16px; display: flex; flex-direction: column; gap: 8px; }
-.workflow-evidence-row { flex: 0 0 auto; display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid var(--border-light); border-radius: 8px; background: rgba(var(--accent-primary-rgb), 0.04); font-size: 11px; color: var(--text-muted); }
+.workflow-evidence-tabs button span { display: inline-grid; min-width: 17px; height: 17px; padding: 0 calc(4px * var(--spacing-scale, 1)); place-items: center; border-radius: 999px; background: rgba(var(--accent-primary-rgb), 0.12); }
+.workflow-evidence-list { min-height: 0; overflow: visible; overscroll-behavior: contain; padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)); display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); }
+.workflow-evidence-row { flex: 0 0 auto; display: flex; flex-direction: column; gap: calc(7px * var(--spacing-scale, 1)); padding: 10px; border: var(--border-width, 1px) solid var(--border-light); border-radius: var(--radius-component, 8px); background: rgba(var(--accent-primary-rgb), 0.04); font-size: calc(var(--font-size-base, 14px) * 11 / 14); color: var(--text-muted); }
 .workflow-evidence-row.selected { border-color: rgba(var(--accent-primary-rgb), 0.24); background: rgba(var(--accent-primary-rgb), 0.08); }
-.workflow-evidence-topline { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-.workflow-evidence-row-title { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--text-primary); font-size: 12px; line-height: 17px; }
-.workflow-evidence-status { flex: 0 0 auto; max-width: 43%; color: var(--text-secondary); font-size: 10px; text-align: end; }
-.workflow-evidence-description { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--text-secondary); line-height: 16px; }
-.workflow-evidence-detail-trigger { align-self: flex-end; min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--accent-primary); font-size: 11px; cursor: pointer; }
+.workflow-evidence-topline { display: flex; align-items: flex-start; justify-content: space-between; gap: calc(8px * var(--spacing-scale, 1)); }
+.workflow-evidence-row-title { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 12 / 14); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 17 / 14)); }
+.workflow-evidence-status { flex: 0 0 auto; max-width: 43%; color: var(--text-secondary); font-size: calc(var(--font-size-base, 14px) * 10 / 14); text-align: end; }
+.workflow-evidence-description { margin: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--text-secondary); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14)); }
+.workflow-evidence-detail-trigger { align-self: flex-end; min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--accent-primary); font-size: calc(var(--font-size-base, 14px) * 11 / 14); cursor: pointer; }
 .workflow-evidence-detail { max-height: min(70vh, 680px); overflow-y: auto; color: var(--text-secondary); }
-.workflow-evidence-detail-description { margin: 12px 0 18px; color: var(--text-primary); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.workflow-evidence-detail h3 { margin: 0 0 10px; color: var(--text-primary); font-size: 13px; }
-.workflow-evidence-detail dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; }
+.workflow-evidence-detail-description { margin: 12px 0 18px; color: var(--text-primary); line-height: var(--line-height, 1.6); white-space: pre-wrap; overflow-wrap: anywhere; }
+.workflow-evidence-detail h3 { margin: 0 0 10px; color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 13 / 14); }
+.workflow-evidence-detail dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: calc(8px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1)); }
 .workflow-evidence-detail dt { color: var(--text-muted); }
 .workflow-evidence-detail dd { min-width: 0; margin: 0; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
 .workflow-evidence-detail code { color: var(--accent-primary); white-space: inherit; overflow-wrap: inherit; }
-.workflow-run-evidence-details-list { max-height: min(70vh, 680px); overflow-y: auto; display: flex; flex-direction: column; gap: 18px; color: var(--text-secondary); }
-.workflow-run-evidence-details-list section { display: flex; flex-direction: column; gap: 8px; }
-.workflow-run-evidence-details-list h3 { margin: 0; color: var(--text-primary); font-size: 13px; }
-.workflow-run-evidence-details-list ol, .workflow-run-evidence-details-list ul { margin: 0; padding-inline-start: 20px; }
+.workflow-run-evidence-details-list { max-height: min(70vh, 680px); overflow-y: auto; display: flex; flex-direction: column; gap: calc(18px * var(--spacing-scale, 1)); color: var(--text-secondary); }
+.workflow-run-evidence-details-list section { display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); }
+.workflow-run-evidence-details-list h3 { margin: 0; color: var(--text-primary); font-size: calc(var(--font-size-base, 14px) * 13 / 14); }
+.workflow-run-evidence-details-list ol, .workflow-run-evidence-details-list ul { margin: 0; padding-inline-start: calc(20px * var(--spacing-scale, 1)); }
 .workflow-run-evidence-details-list li { margin: 5px 0; }
-.workflow-run-evidence-details-list li span { display: block; color: var(--text-muted); font-size: 11px; }
+.workflow-run-evidence-details-list li span { display: block; color: var(--text-muted); font-size: calc(var(--font-size-base, 14px) * 11 / 14); }
 .workflow-run-evidence-details-list p { margin: 0; color: var(--text-muted); }
 
 .workflow-run-budget-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 }
 
 .workflow-run-budget-help {
   margin: 0;
   color: $text-muted;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
 }
 
 .workflow-create-form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 }
 
 .workflow-field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .workflow-field-label {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 500;
-  line-height: 16px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   color: $text-secondary;
 }
 
 .workflow-edge-editor-form {
   max-height: min(720px, calc(100vh - 180px));
   overflow-y: auto;
-  padding-inline-end: 6px;
+  padding-inline-end: calc(6px * var(--spacing-scale, 1));
 }
 
 .workflow-edge-connection-summary {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.28);
-  border-radius: 8px;
+  gap: calc(4px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.28);
+  border-radius: var(--radius-component, 8px);
   background: rgba(var(--accent-info-rgb), 0.08);
   color: $text-secondary;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.5);
 }
 
 .workflow-edge-connection-summary strong {
   color: $text-primary;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
 }
 
 .workflow-condition-semantics {
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.24);
-  border-radius: 8px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.24);
+  border-radius: var(--radius-component, 8px);
   background: rgba(var(--accent-info-rgb), 0.06);
   color: $text-secondary;
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.55);
 }
 
 .workflow-condition-semantics strong {
@@ -4502,13 +4681,13 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .workflow-loop-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.2);
-  border-radius: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.2);
+  border-radius: var(--radius-component, 8px);
   background: rgba(var(--accent-info-rgb), 0.05);
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .workflow-loop-panel > strong {
@@ -4522,7 +4701,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   background: transparent;
   color: $text-muted;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   cursor: pointer;
 }
 
@@ -4535,25 +4714,25 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: inline-flex;
   width: fit-content;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .workflow-field-error {
   color: #dc2626;
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.4);
 }
 
 .workflow-feedback-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
   flex: 1;
 }
@@ -4568,7 +4747,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   overflow: hidden;
 }
 
@@ -4583,50 +4762,16 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
   font-weight: 600;
-  line-height: 22px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 22 / 14));
   color: $text-primary;
-}
-
-.workspace-badge {
-  flex: 0 1 auto;
-  max-width: 160px;
-  min-width: 0;
-  border: 0;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.05);
-  color: $text-muted;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  line-height: 16px;
-  cursor: pointer;
-  overflow: hidden;
-
-  svg {
-    flex: 0 0 auto;
-  }
-
-  span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &:hover {
-    color: $text-secondary;
-    background: rgba(var(--accent-primary-rgb), 0.06);
-  }
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .workflow-body {
@@ -4642,7 +4787,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   position: relative;
   min-width: 0;
   min-height: 0;
-  background: $bg-primary;
+  background: var(--theme-content-bg, $bg-primary);
   flex: 1;
 }
 
@@ -4653,16 +4798,22 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   z-index: 8;
   transform: translateX(-50%);
   pointer-events: none;
-  padding: 5px 10px;
-  border: 1px solid rgba(var(--accent-info-rgb), 0.28);
+  padding: calc(5px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-info-rgb), 0.28);
   border-radius: 999px;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   color: $text-secondary;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   backdrop-filter: blur(8px);
   white-space: nowrap;
+}
+
+// The content surface paints the desktop panel; the mobile drawer owns its overlay.
+html:is(.theme-card-bg, .theme-has-custom-background) .workflow-view {
+  --workflow-run-panel-bg: transparent;
+  --workflow-run-item-bg: rgba(var(--text-primary-rgb), 0.04);
 }
 
 .workflow-runs-panel {
@@ -4670,9 +4821,10 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   width: 280px;
   flex: 0 0 280px;
   min-height: 0;
-  border-inline-start: 1px solid $border-color;
-  background: $bg-card;
-  overflow: hidden;
+  border-inline-start: var(--border-width, 1px) solid $border-color;
+  background: var(--workflow-run-panel-bg, $bg-card);
+  // Keep focus/scrollIntoView from adding scrollLeft to the page track's transform.
+  overflow: clip;
   overscroll-behavior-x: contain;
   touch-action: pan-y;
 }
@@ -4692,6 +4844,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .workflow-runs-pages {
   width: 200%;
   height: 100%;
+  flex-shrink: 0;
   display: flex;
   transform: translateX(0);
   transition: transform 220ms ease;
@@ -4729,15 +4882,15 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .workflow-run-back {
   min-height: 36px;
   margin: -6px 0 -6px -6px;
-  padding: 0 6px;
+  padding: 0 calc(6px * var(--spacing-scale, 1));
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-component, 6px);
   background: transparent;
   color: var(--accent-primary);
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 11px;
+  gap: calc(3px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   cursor: pointer;
 }
 
@@ -4753,8 +4906,8 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-width: 320px;
   max-width: 100%;
   min-height: 0;
-  border-inline-end: 1px solid $border-color;
-  background: $bg-card;
+  border-inline-end: var(--border-width, 1px) solid $border-color;
+  background: var(--theme-card-bg, $bg-card);
   display: flex;
   overflow: visible;
 }
@@ -4790,13 +4943,13 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     width: 12px;
     height: 38px;
     transform: translateY(-50%);
-    border-radius: 6px;
+    border-radius: var(--radius-component, 6px);
     background:
       linear-gradient($text-muted, $text-muted) center 12px / 6px 1px no-repeat,
       linear-gradient($text-muted, $text-muted) center 19px / 6px 1px no-repeat,
       linear-gradient($text-muted, $text-muted) center 26px / 6px 1px no-repeat,
       $bg-card;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
     opacity: 0.9;
     transition: all $transition-fast;
     z-index: 2;
@@ -4826,6 +4979,10 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+
+  :deep(.input-top-bar) { flex-wrap: wrap; }
+  :deep(.input-model-button) { min-width: 0; max-width: 190px; }
+  :deep(.input-model-label) { display: inline-block; }
 }
 
 .workflow-chat-header {
@@ -4833,9 +4990,9 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   min-height: 47px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid $border-color;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 }
 
 .workflow-chat-title {
@@ -4845,7 +5002,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
 }
 
@@ -4856,7 +5013,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: $bg-primary;
+  background: var(--theme-content-bg, $bg-primary);
 }
 
 .workflow-chat-loading {
@@ -4865,7 +5022,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   align-items: center;
   justify-content: center;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .workflow-node-approval-panel {
@@ -4873,25 +5030,25 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid $border-color;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   background: rgba(217, 119, 6, 0.08);
 }
 
 .workflow-node-approval-title {
   min-width: 0;
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
-  line-height: 18px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
 }
 
 .workflow-node-approval-actions {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .workflow-runs-header {
@@ -4899,32 +5056,32 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 12px;
-  border-bottom: 1px solid $border-light;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
 }
 
 .workflow-runs-title {
   min-width: 0;
   flex: 1;
   color: $text-primary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
-  line-height: 18px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
 }
 
 .workflow-runs-header-actions {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .workflow-runs-refresh {
   width: 26px;
   height: 26px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-component, 6px);
   background: transparent;
   color: $text-muted;
   display: inline-flex;
@@ -4939,40 +5096,47 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 }
 
 .workflow-runs-empty {
-  padding: 18px 12px;
+  padding: calc(18px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   text-align: center;
 }
 
 .workflow-runs-list {
-  padding: 10px;
+  padding: calc(10px * var(--spacing-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .workflow-run-item {
-  border: 1px solid $border-light;
-  border-radius: 8px;
-  background: $bg-secondary;
+  border: var(--border-width, 1px) solid var(--theme-card-border, $border-light);
+  border-radius: var(--theme-card-radius, var(--radius-component, 8px));
+  background: var(--theme-card-bg, var(--workflow-run-item-bg, $bg-secondary));
+  -webkit-backdrop-filter: var(--theme-card-filter, none);
+  backdrop-filter: var(--theme-card-filter, none);
+  box-shadow: var(--theme-card-shadow, none);
   color: inherit;
-  padding: 10px;
+  padding: calc(10px * var(--spacing-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   text-align: start;
   cursor: pointer;
   transition: border-color $transition-fast, background-color $transition-fast;
 
   &:hover {
     border-color: rgba(var(--accent-primary-rgb), 0.45);
-    background: rgba(var(--accent-primary-rgb), 0.06);
+    background:
+      linear-gradient(rgba(var(--accent-primary-rgb), 0.06), rgba(var(--accent-primary-rgb), 0.06)),
+      var(--theme-card-bg, var(--workflow-run-item-bg, transparent));
   }
 
   &.active {
     border-color: var(--accent-primary);
-    background: rgba(var(--accent-primary-rgb), 0.12);
+    background:
+      linear-gradient(rgba(var(--accent-primary-rgb), 0.12), rgba(var(--accent-primary-rgb), 0.12)),
+      var(--theme-card-bg, var(--workflow-run-item-bg, transparent));
   }
 }
 
@@ -4985,16 +5149,16 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 
 .workflow-run-topline {
   justify-content: space-between;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .workflow-run-status {
   min-width: 0;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   color: $text-primary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
-  line-height: 16px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
 }
 
 .workflow-run-status-dot {
@@ -5031,8 +5195,8 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 .workflow-run-meta,
 .workflow-run-budget-summary,
 .workflow-run-error {
-  font-size: 11px;
-  line-height: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 15 / 14));
 }
 
 .workflow-run-duration,
@@ -5049,7 +5213,7 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 }
 
 .workflow-run-meta {
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
 }
 
 .workflow-run-error {
@@ -5059,26 +5223,26 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   white-space: nowrap;
 }
 
-.workflow-schedules-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .9fr); gap: 20px; }
-.workflow-schedules-list { display: flex; min-height: 200px; flex-direction: column; gap: 10px; }
-.workflow-schedules-empty { color: $text-muted; padding: 16px 0; }
-.workflow-schedule-item { border: 1px solid $border-color; border-radius: 8px; padding: 12px; }
-.workflow-schedule-item-header, .workflow-schedule-actions, .workflow-schedule-submit { display: flex; align-items: center; gap: 8px; }
+.workflow-schedules-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .9fr); gap: calc(20px * var(--spacing-scale, 1)); }
+.workflow-schedules-list { display: flex; min-height: 200px; flex-direction: column; gap: calc(10px * var(--spacing-scale, 1)); }
+.workflow-schedules-empty { color: $text-muted; padding: calc(16px * var(--spacing-scale, 1)) 0; }
+.workflow-schedule-item { border: var(--border-width, 1px) solid $border-color; border-radius: var(--radius-component, 8px); padding: calc(12px * var(--spacing-scale, 1)); }
+.workflow-schedule-item-header, .workflow-schedule-actions, .workflow-schedule-submit { display: flex; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); }
 .workflow-schedule-item-header { justify-content: space-between; margin-bottom: 6px; }
-.workflow-schedule-status { color: var(--success); font-size: 12px; }.workflow-schedule-status.disabled { color: $text-muted; }
-.workflow-schedule-meta, .workflow-schedule-policy { color: $text-muted; font-size: 12px; line-height: 18px; }
-.workflow-schedule-error { color: var(--error); font-size: 12px; margin-top: 4px; word-break: break-word; }
+.workflow-schedule-status { color: var(--success); font-size: calc(var(--font-size-base, 14px) * 12 / 14); }.workflow-schedule-status.disabled { color: $text-muted; }
+.workflow-schedule-meta, .workflow-schedule-policy { color: $text-muted; font-size: calc(var(--font-size-base, 14px) * 12 / 14); line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14)); }
+.workflow-schedule-error { color: var(--error); font-size: calc(var(--font-size-base, 14px) * 12 / 14); margin-top: 4px; word-break: break-word; }
 .workflow-schedule-actions { margin-top: 10px; }
-.workflow-schedule-form { display: flex; flex-direction: column; gap: 12px; }.workflow-schedule-form h3 { margin: 0; }
-.workflow-schedule-form label { display: flex; flex-direction: column; gap: 6px; color: $text-secondary; font-size: 13px; }.workflow-schedule-form .workflow-schedule-checkbox { display: block; }
-.workflow-schedule-time-fields { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.workflow-schedule-form { display: flex; flex-direction: column; gap: calc(12px * var(--spacing-scale, 1)); }.workflow-schedule-form h3 { margin: 0; }
+.workflow-schedule-form label { display: flex; flex-direction: column; gap: calc(6px * var(--spacing-scale, 1)); color: $text-secondary; font-size: calc(var(--font-size-base, 14px) * 13 / 14); }.workflow-schedule-form .workflow-schedule-checkbox { display: block; }
+.workflow-schedule-time-fields { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: calc(8px * var(--spacing-scale, 1)); }
 .workflow-schedule-submit { justify-content: flex-end; }
 @media (max-width: $breakpoint-mobile) { .workflow-schedules-layout { grid-template-columns: 1fr; } }
 
 .workflow-flow {
   width: 100%;
   height: 100%;
-  background: $bg-primary;
+  background: var(--theme-content-bg, $bg-primary);
 
   :deep(.vue-flow__node) {
     cursor: grab;
@@ -5142,20 +5306,20 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   }
 
   :deep(.vue-flow__minimap) {
-    border: 1px solid $border-color;
-    border-radius: 8px;
-    background: $bg-card;
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 8px);
+    background: var(--theme-card-bg, $bg-card);
   }
 
   :deep(.vue-flow__controls) {
-    border: 1px solid $border-color;
-    border-radius: 8px;
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 8px);
     overflow: hidden;
     box-shadow: none;
   }
 
   :deep(.vue-flow__controls-button) {
-    background: $bg-card;
+    background: var(--theme-card-bg, $bg-card);
     border-bottom-color: $border-light;
     color: $text-primary;
   }
@@ -5177,16 +5341,16 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
 
   .workflow-sidebar {
     position: absolute;
-    left: 10px;
-    top: 10px;
-    bottom: 10px;
+    left: 0;
+    top: 0;
+    bottom: 0;
     height: auto;
     margin: 0;
     z-index: 120;
     width: $sidebar-width;
 
     &.collapsed {
-      transform: translateX(calc(-100% - 10px));
+      transform: translateX(-100%);
       opacity: 0;
     }
   }
@@ -5209,20 +5373,20 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
   .page-header {
     flex-wrap: nowrap;
     align-items: center;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     padding: 16px 12px !important;
   }
 
   .header-actions {
     flex: 0 0 auto;
     justify-content: flex-end;
-    gap: 4px;
+    gap: calc(4px * var(--spacing-scale, 1));
   }
 
   .header-left {
     flex: 1 1 auto;
     min-width: 0;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     align-items: center;
     overflow: hidden;
   }
@@ -5231,17 +5395,11 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     flex: 1 1 auto;
     min-width: 0;
     align-items: center;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
   }
 
   .header-workflow-title {
     display: none;
-  }
-
-  .workspace-badge {
-    flex: 1 1 auto;
-    max-width: none;
-    padding: 2px 6px;
   }
 
   .workflow-body {
@@ -5257,13 +5415,18 @@ function nodeColor(node: { data: WorkflowAgentNodeData }) {
     width: min(340px, 88vw);
     flex: none;
     min-height: 0;
-    border-inline-start: 1px solid $border-color;
+    border-inline-start: var(--border-width, 1px) solid $border-color;
+    background: var(--theme-overlay-bg, $bg-card);
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.16);
     display: flex;
 
     &:dir(rtl) {
       box-shadow: 8px 0 24px rgba(0, 0, 0, 0.16);
     }
+  }
+
+  .workflow-evidence {
+    background: transparent;
   }
 
   .workflow-chat-panel {

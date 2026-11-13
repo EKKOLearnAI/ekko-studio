@@ -52,9 +52,9 @@ const sentenceCount = computed(() => meetingStore.activeSession?.sentences.lengt
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(var(--text-primary-rgb), 0.2);
 
-  &.running { background: #63e2b7; animation: strip-pulse 1.6s infinite; }
+  &.running { background: var(--success); animation: strip-pulse 1.6s infinite; }
 }
 
 .strip-label {

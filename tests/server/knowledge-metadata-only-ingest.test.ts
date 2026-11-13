@@ -16,9 +16,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { KnowledgeService } from '../../packages/server/src/services/knowledge/knowledge.service'
-import type { KnowledgeConfig } from '../../packages/server/src/services/knowledge/config'
-import type { Embedder } from '../../packages/server/src/services/knowledge/embedder'
+import { KnowledgeService } from '../../packages/server/src/modules/studio/services/knowledge/knowledge.service'
+import type { KnowledgeConfig } from '../../packages/server/src/modules/studio/services/knowledge/config'
+import type { Embedder } from '../../packages/server/src/modules/studio/services/knowledge/embedder'
 
 type DatabaseSyncCtor = new (path: string, options?: Record<string, unknown>) => {
   exec: (sql: string) => void

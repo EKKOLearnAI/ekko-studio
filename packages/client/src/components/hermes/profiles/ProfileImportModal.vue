@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NModal, NUpload, NButton } from 'naive-ui'
+import { NModal, NUpload, NButton, useMessage } from 'naive-ui'
 import type { UploadFileInfo } from 'naive-ui'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useI18n } from 'vue-i18n'
-import { useMessage } from '@/composables/useAppMessage'
 
 const emit = defineEmits<{
   close: []
@@ -103,6 +102,6 @@ function handleClose() {
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

@@ -105,7 +105,7 @@ const timeoutMs = Math.min(Math.floor(requestedTimeout), 1_800_000)
 
 const token = firstToken()
 if (!token) {
-  fail('Missing Quanthermes Studio server token. Check AUTH_TOKEN, HERMES_WEB_UI_HOME, HERMES_WEBUI_STATE_DIR, or ~/.hermes-web-ui/.token.')
+  fail('Missing Ekko Studio server token. Check AUTH_TOKEN, HERMES_WEB_UI_HOME, HERMES_WEBUI_STATE_DIR, or ~/.hermes-web-ui/.token.')
 }
 const baseUrl = String(
   process.env.HERMES_WEB_UI_URL || `http://127.0.0.1:${process.env.PORT || '8648'}`,
@@ -134,7 +134,7 @@ const controller = new AbortController()
 const timer = setTimeout(() => controller.abort(), timeoutMs + 5_000)
 let response
 try {
-  response = await fetch(`${baseUrl}/api/hermes/media/apikey-image-generate`, {
+  response = await fetch(`${baseUrl}/api/studio/media/apikey-image-generate`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -146,7 +146,7 @@ try {
   })
 } catch (error) {
   clearTimeout(timer)
-  fail(error?.name === 'AbortError' ? 'Quanthermes Studio image request timed out.' : `Quanthermes Studio connection failed: ${error?.message || error}`)
+  fail(error?.name === 'AbortError' ? 'Ekko Studio image request timed out.' : `Ekko Studio connection failed: ${error?.message || error}`)
 }
 clearTimeout(timer)
 
@@ -158,7 +158,7 @@ try {
   result = { error: text || response.statusText }
 }
 if (!response.ok) {
-  fail(String(result.error || `Quanthermes Studio returned HTTP ${response.status}.`), {
+  fail(String(result.error || `Ekko Studio returned HTTP ${response.status}.`), {
     status: response.status,
     code: result.code,
   })
@@ -166,6 +166,6 @@ if (!response.ok) {
 const outputPaths = Array.isArray(result.output_paths) ? result.output_paths.map(String) : []
 const missingOutputs = outputPaths.filter(outputPath => !existsSync(outputPath))
 if (outputPaths.length === 0 || missingOutputs.length > 0) {
-  fail('Quanthermes Studio reported success without verifiable image output.', { output_paths: outputPaths, missing_outputs: missingOutputs })
+  fail('Ekko Studio reported success without verifiable image output.', { output_paths: outputPaths, missing_outputs: missingOutputs })
 }
 console.log(JSON.stringify({ ...result, output_paths: outputPaths, output_verified: true }, null, 2))

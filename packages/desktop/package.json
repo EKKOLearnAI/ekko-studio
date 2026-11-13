@@ -1,6 +1,7 @@
 {
   "name": "@quanthermes/hermes-web-ui-desktop",
-  "version": "0.8.9",
+  "desktopName": "com.hermeswebui.studio.desktop",
+  "version": "0.8.21",
   "description": "Hermes Studio desktop distribution with bundled Python runtime and hermes-agent",
   "homepage": "https://github.com/tangledup-ai/hermes-web-ui",
   "author": {
@@ -9,7 +10,7 @@
   },
   "license": "BSL-1.1",
   "private": true,
-  "main": "dist/main/index.js",
+  "main": "dist/main/entry.js",
   "scripts": {
     "build:main": "tsc -p tsconfig.json",
     "build": "npm run build:main",
@@ -26,6 +27,7 @@
     "prune:python": "node scripts/prune-python.mjs",
     "dev": "npm run build:main && electron .",
     "dist": "npm run build && node scripts/electron-builder.mjs",
+    "dist:update-test": "npm run build && node scripts/build-update-test.mjs",
     "dist:mac": "npm run build && node scripts/electron-builder.mjs --mac",
     "dist:win": "npm run build && node scripts/electron-builder.mjs --win",
     "dist:linux": "npm run build && node scripts/electron-builder.mjs --linux"
@@ -37,6 +39,7 @@
     "typescript": "~5.6.3"
   },
   "dependencies": {
+    "dbus-next": "0.10.2",
     "electron-updater": "^6.3.9",
     "tar": "^7.5.16"
   }

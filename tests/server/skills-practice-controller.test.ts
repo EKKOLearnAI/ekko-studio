@@ -14,12 +14,12 @@ vi.mock('../../packages/server/src/db/hermes/sessions-db', () => ({
   getSkillUsageStatsFromDb: mockGetSkillUsageStatsFromDb,
 }))
 
-vi.mock('../../packages/server/src/services/hermes/hermes-profile', () => ({
+vi.mock('../../packages/server/src/modules/hermes/services/profiles/profile', () => ({
   getActiveProfileName: mockGetActiveProfileName,
   getProfileDir: mockGetProfileDir,
 }))
 
-vi.mock('../../packages/server/src/services/config-helpers', () => ({
+vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
   readConfigYamlForProfile: mockReadConfigYamlForProfile,
   updateConfigYamlForProfile: vi.fn(async () => undefined),
   safeReadFile: mockSafeReadFile,
@@ -29,7 +29,7 @@ vi.mock('../../packages/server/src/services/config-helpers', () => ({
 
 async function loadController() {
   vi.resetModules()
-  return import('../../packages/server/src/controllers/hermes/skills')
+  return import('../../packages/server/src/modules/hermes/controllers/skills')
 }
 
 function practiceSkillMd(name: string, description: string, hermesPractice: string): string {

@@ -1,13 +1,14 @@
 import { request, getBaseUrlValue, getApiKey, getActiveProfileName } from '../client'
 
 export type SkillSource = 'builtin' | 'hub' | 'local' | 'external'
-export type SkillTarget = 'hermes' | 'claude' | 'codex' | 'pi'
+export type SkillTarget = 'hermes' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity'
 
 export interface SkillInfo {
   name: string
   description: string
   enabled?: boolean
   source?: SkillSource
+  readonly?: boolean
   modified?: boolean
   patchCount?: number
   useCount?: number
@@ -112,26 +113,6 @@ export async function fetchSkills(profile?: string, target: SkillTarget = 'herme
   return { categories: res.categories, archived: res.archived ?? [], paths: res.paths }
 }
 
-/** GET /api/hermes/skills/practice —— 列出已安装的口语对练技能（含契约 JSON）。 */
-export interface PracticeSkillListItem {
-  category: string
-  name: string
-  description: string
-  enabled: boolean
-  source: string
-  /** 服务端解析的 hermes_practice 契约（客户端按需做结构归一化）。 */
-  manifest: Record<string, unknown>
-}
-
-export async function fetchPracticeSkills(): Promise<PracticeSkillListItem[]> {
-  try {
-    const res = await request<{ skills?: PracticeSkillListItem[] }>('/api/hermes/skills/practice')
-    return Array.isArray(res.skills) ? res.skills : []
-  } catch {
-    return []
-  }
-}
-
 export async function fetchSkillUsageStats(days = 7): Promise<SkillUsageStats> {
   const params = new URLSearchParams({ days: String(days) })
   return request<SkillUsageStats>(`/api/hermes/skills/usage/stats?${params}`)
@@ -208,10 +189,10 @@ export async function saveExternalDirs(dirs: string[]): Promise<void> {
   })
 }
 
-export async function deleteSkillApi(category: string, name: string): Promise<void> {
+export async function deleteSkillApi(category: string, name: string, target: SkillTarget = 'hermes'): Promise<void> {
   const c = encodeURIComponent(category)
   const n = encodeURIComponent(name)
-  await request(`/api/hermes/skills/${c}/${n}`, { method: 'DELETE' })
+  await request(`/api/hermes/skills/${c}/${n}${targetQuery(target)}`, { method: 'DELETE' })
 }
 
 /**
@@ -220,7 +201,7 @@ export async function deleteSkillApi(category: string, name: string): Promise<vo
  * starts with the skill folder name; we forward those paths verbatim as the
  * `filename` parameter so the server can reconstruct the directory tree.
  */
-export async function importSkill(files: File[], category?: string): Promise<{ name: string }> {
+export async function importSkill(files: File[], category?: string, target: SkillTarget = 'hermes'): Promise<{ name: string }> {
   const baseUrl = getBaseUrlValue()
   const token = getApiKey()
   const headers: Record<string, string> = {}
@@ -235,7 +216,7 @@ export async function importSkill(files: File[], category?: string): Promise<{ n
   }
   if (category) formData.append('category', category)
 
-  const res = await fetch(`${baseUrl}/api/hermes/skills/import`, {
+  const res = await fetch(`${baseUrl}/api/hermes/skills/import${targetQuery(target)}`, {
     method: 'POST',
     headers,
     body: formData,
@@ -247,4 +228,23 @@ export async function importSkill(files: File[], category?: string): Promise<{ n
     throw new Error(payload?.error || text || `Import failed (${res.status})`)
   }
   return payload || { name: '' }
+}
+
+export interface PracticeSkillListItem {
+  category: string
+  name: string
+  description: string
+  enabled: boolean
+  source: string
+  /** 服务端解析的 hermes_practice 契约（客户端按需做结构归一化）。 */
+  manifest: Record<string, unknown>
+}
+
+export async function fetchPracticeSkills(): Promise<PracticeSkillListItem[]> {
+  try {
+    const res = await request<{ skills?: PracticeSkillListItem[] }>('/api/hermes/skills/practice')
+    return Array.isArray(res.skills) ? res.skills : []
+  } catch {
+    return []
+  }
 }

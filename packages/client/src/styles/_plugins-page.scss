@@ -1,0 +1,176 @@
+@use './variables' as *;
+
+// Shared by Hermes and DSH plugin management.
+@mixin layout($height: calc(100 * var(--vh))) {
+
+.plugins-view {
+  height: $height;
+  display: flex;
+  flex-direction: column;
+}
+
+.plugins-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: calc(20px * var(--spacing-scale, 1));
+
+  &.is-loading {
+    display: grid;
+    place-items: center;
+  }
+}
+
+.plugins-loading-state {
+  display: grid;
+  place-items: center;
+}
+
+.plugins-notice {
+  margin-bottom: 14px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: calc(12px * var(--spacing-scale, 1));
+  margin-bottom: 16px;
+}
+
+.summary-card {
+  padding: calc(14px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: $radius-md;
+  background: var(--theme-card-bg, $bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--spacing-scale, 1));
+
+  strong {
+    font-size: calc(var(--font-size-base, 14px) * 24 / 14);
+    line-height: var(--line-height, 1);
+  }
+
+  &.success strong { color: $success; }
+  &.warning strong { color: $warning; }
+  &.error strong { color: $error; }
+  &.info strong { color: $accent-primary; }
+}
+
+.summary-label {
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  color: $text-muted;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) repeat(3, minmax(140px, 180px));
+  gap: calc(10px * var(--spacing-scale, 1));
+  margin-bottom: 16px;
+}
+
+.plugins-table-wrap {
+  overflow-x: auto;
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: $radius-md;
+  background: var(--theme-card-bg, $bg-card);
+}
+
+.plugins-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 980px;
+
+  th,
+  td {
+    padding: calc(12px * var(--spacing-scale, 1));
+    border-bottom: var(--border-width, 1px) solid $border-color;
+    text-align: start;
+    vertical-align: top;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  }
+
+  th {
+    color: $text-muted;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: rgba(var(--accent-primary-rgb), 0.04);
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+}
+
+.plugin-name {
+  display: flex;
+  flex-direction: column;
+  gap: calc(2px * var(--spacing-scale, 1));
+
+  span {
+    color: $text-muted;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  }
+}
+
+.description {
+  margin-top: 6px;
+  color: $text-secondary;
+  max-width: 420px;
+}
+
+.meta-line,
+.config-status,
+.muted {
+  margin-top: 6px;
+  color: $text-muted;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+}
+
+.meta-line {
+  display: flex;
+  gap: calc(8px * var(--spacing-scale, 1));
+}
+
+.capability-list {
+  display: flex;
+  flex-direction: column;
+  gap: calc(4px * var(--spacing-scale, 1));
+  color: $text-secondary;
+}
+
+.path-cell {
+  display: inline-block;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: $text-muted;
+  background: rgba(var(--accent-primary-rgb), 0.06);
+  padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 6px);
+}
+
+.metadata-panel {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(10px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  color: $text-muted;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+
+  code {
+    color: $text-secondary;
+  }
+}
+
+@media (max-width: 900px) {
+  .summary-grid,
+  .filter-row {
+    grid-template-columns: 1fr;
+  }
+}
+}

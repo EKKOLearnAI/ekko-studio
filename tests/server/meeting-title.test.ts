@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { cleanMeetingTitle, generateMeetingTitle } from '../../packages/server/src/services/meeting-asr/direct-llm'
+import { cleanMeetingTitle, generateMeetingTitle } from '../../packages/server/src/modules/studio/services/meeting-asr/direct-llm'
 
 function fakeDeps(content: string | null, ok = true) {
   const fetchMock = vi.fn().mockResolvedValue({

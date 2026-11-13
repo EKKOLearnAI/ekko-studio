@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { downloadWithRangeResume, UpdateBinaryValidationError } from '../../packages/server/src/services/update/network-client'
+import { downloadWithRangeResume, UpdateBinaryValidationError } from '../../packages/server/src/modules/studio/services/update/network-client'
 
 let server: Server
 let baseUrl = ''

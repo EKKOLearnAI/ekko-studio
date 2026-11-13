@@ -18,7 +18,7 @@
  */
 
 import { ref, shallowRef, computed, onUnmounted, watch } from 'vue'
-import { getApiKey } from '@/api/client'
+import { meetingWebSocketUrl } from '@/utils/meeting-websocket'
 import {
   MAX_MALFORMED_CALL_STREAK,
   missingRequiredArgs,
@@ -997,14 +997,7 @@ export function useOmniRealtime(options: UseOmniRealtimeOptions = {}) {
     // A fresh session starts unmuted; the mute toggle is session-scoped.
     micMuted = false
 
-    const apiKey = getApiKey()
-    // Browsers can't set Authorization on a WS handshake directly, so we let
-    // the WS upgrade go through and rely on the Node proxy. Auth is enforced
-    // upstream via the api-key middleware.
-    void apiKey
-
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${proto}//${window.location.host}/ws/omni-realtime`
+    const url = meetingWebSocketUrl('/ws/omni-realtime')
     ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
 

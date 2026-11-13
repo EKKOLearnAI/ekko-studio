@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { NSpin, NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NProgress, NTag, useMessage } from 'naive-ui'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NAlert, NButton, NDrawer, NDrawerContent, NPopconfirm, NProgress, NSpin, NTag } from 'naive-ui'
+
 import {
   activateRuntimeVersion,
   deleteRuntimeVersion,
@@ -16,7 +17,8 @@ import {
   type VersionDownloadKind,
   type VersionDownloadSource,
 } from '@/api/hermes/runtime-versions'
-import { useMessage } from '@/composables/useAppMessage'
+import HermesDataDirectoryHint from '@/components/hermes/HermesDataDirectoryHint.vue'
+import { useRuntimeRestartPrompt } from '@/composables/useRuntimeRestartPrompt'
 import { desktopBridge } from '@/utils/desktop-bridge'
 
 const props = defineProps<{ show: boolean }>()
@@ -24,20 +26,29 @@ const emit = defineEmits<{ (event: 'update:show', value: boolean): void }>()
 
 const { t } = useI18n()
 const message = useMessage()
+const { requestRuntimeRestart, checkRuntimeDownloads } = useRuntimeRestartPrompt()
 
 const status = ref<RuntimeVersionStatus | null>(null)
 const jobs = ref<VersionDownloadJob[]>([])
 const loading = ref(false)
 const actionLoading = ref<Record<string, boolean>>({})
 const loadError = ref('')
+const cliDetailsShow = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-const canSelectRuntimeDirectory = computed(() => typeof desktopBridge()?.selectRuntimeDirectory === 'function')
+const canSelectRuntimeDirectory = computed(() => desktopBridge()?.remoteMode !== true
+  && typeof desktopBridge()?.selectRuntimeDirectory === 'function')
 const isDefaultRuntimeDirectory = computed(() => {
   const defaultDirectory = status.value?.hermes.defaultStorageDirectory
   const selectedDirectory = status.value?.hermes.pendingStorageDirectory || status.value?.hermes.storageDirectory
   return !defaultDirectory || selectedDirectory === defaultDirectory
 })
+
+const currentHermesSource = computed(() =>
+  status.value?.hermes.source
+  || status.value?.hermes.cliInstallations?.find(item => item.selected)?.source
+  || 'none',
+)
 
 const currentPlatformRuntime = computed(() =>
   (status.value?.hermes.installed || []).filter(item => item.platform === status.value?.platform),
@@ -46,6 +57,9 @@ const currentPlatformRuntime = computed(() =>
 const runtimeVersions = computed(() => uniqueVersions([
   ...(status.value?.hermes.remoteVersions || []),
   ...currentPlatformRuntime.value.map(item => item.version),
+  ...(status.value?.active?.runtimeValidationFailures || [])
+    .filter(failure => failure.platform === status.value?.platform)
+    .map(failure => failure.version),
 ]))
 
 const runtimeJobs = computed(() => jobs.value.filter(job => job.kind === 'runtime'))
@@ -54,11 +68,14 @@ watch(() => props.show, show => {
   if (show) {
     void loadAll()
   } else {
+    cliDetailsShow.value = false
     stopPolling()
   }
 })
 
-onBeforeUnmount(stopPolling)
+onBeforeUnmount(() => {
+  stopPolling()
+})
 
 function updateShow(show: boolean) {
   emit('update:show', show)
@@ -74,6 +91,7 @@ async function loadAll() {
   loadError.value = ''
   try {
     await Promise.all([loadStatus(), loadJobs()])
+    checkRuntimeDownloads()
     if (hasRunningJobs()) startPolling()
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : String(err)
@@ -200,6 +218,7 @@ async function startRuntimeDownload(version: string, source: VersionDownloadSour
   await runAction(`download-runtime-${source}-${version}`, async () => {
     const response = await downloadRuntimeVersion(version, source)
     jobs.value = [response.job, ...jobs.value.filter(job => job.id !== response.job.id)]
+    checkRuntimeDownloads()
     message.success(t('runtimeVersions.downloadStarted'))
     startPolling()
   })
@@ -209,11 +228,12 @@ async function useRuntime(version: string) {
   await runAction(`activate-runtime-${version}`, async () => {
     await activateRuntimeVersion(version)
     message.success(t('runtimeVersions.activateSuccess'))
-    await loadAll()
+    requestRuntimeRestart(version)
   })
 }
 
 async function chooseRuntimeDirectory() {
+  if (!canSelectRuntimeDirectory.value) return
   const selectDirectory = desktopBridge()?.selectRuntimeDirectory
   if (!selectDirectory) return
 
@@ -229,6 +249,7 @@ async function chooseRuntimeDirectory() {
 }
 
 async function resetRuntimeDirectory() {
+  if (!canSelectRuntimeDirectory.value) return
   const directory = status.value?.hermes.defaultStorageDirectory
   if (!directory) return
 
@@ -253,7 +274,7 @@ async function removeRuntime(version: string) {
   <NDrawer
     :show="props.show"
     placement="right"
-    :width="'min(860px, calc(100vw - 24px))'"
+    width="var(--studio-drawer-width)"
     @update:show="updateShow"
   >
     <NDrawerContent :title="t('runtimeVersions.title')" closable>
@@ -272,7 +293,18 @@ async function removeRuntime(version: string) {
               <h3>{{ t('runtimeVersions.runtimeTitle') }}</h3>
               <p>{{ t('runtimeVersions.platform') }}: {{ status?.platform || '-' }}</p>
             </div>
-            <NButton size="small" secondary @click="loadAll">{{ t('runtimeVersions.refresh') }}</NButton>
+            <div class="section-heading-actions">
+              <NButton
+                v-if="currentHermesSource === 'user-cli'"
+                data-testid="view-cli-details"
+                size="small"
+                secondary
+                @click="cliDetailsShow = true"
+              >
+                {{ t('runtimeVersions.viewCliDetails') }}
+              </NButton>
+              <NButton size="small" secondary @click="loadAll">{{ t('runtimeVersions.refresh') }}</NButton>
+            </div>
           </div>
           <div class="active-path stacked">
             <span
@@ -287,7 +319,29 @@ async function removeRuntime(version: string) {
             >
               {{ t('runtimeVersions.activeRuntimeDirectory') }}: {{ status?.hermes.activeDirectory || '-' }}
             </span>
+            <span
+              v-if="currentHermesSource !== 'user-cli'"
+              data-testid="active-python-path"
+              :title="status?.hermes.pythonPath || ''"
+            >
+              {{ t('runtimeVersions.activePythonPath') }}: {{ status?.hermes.pythonPath || '-' }}
+            </span>
+            <span
+              v-if="currentHermesSource !== 'user-cli'"
+              data-testid="active-agent-root"
+              :title="status?.hermes.agentRoot || ''"
+            >
+              {{ t('runtimeVersions.activeAgentRoot') }}: {{ status?.hermes.agentRoot || '-' }}
+            </span>
+            <span
+              v-if="currentHermesSource === 'managed-runtime'"
+              data-testid="active-data-directory"
+              :title="status?.hermes.dataDirectory || ''"
+            >
+              {{ t('runtimeVersions.activeDataDirectory') }}: {{ status?.hermes.dataDirectory || '-' }}
+            </span>
           </div>
+          <HermesDataDirectoryHint v-if="currentHermesSource === 'managed-runtime'" />
           <NAlert
             data-testid="runtime-cli-update-note"
             type="info"
@@ -295,7 +349,7 @@ async function removeRuntime(version: string) {
           >
             <div class="runtime-update-note">
               <span>{{ t('runtimeVersions.cliUpdateDescription') }}</span>
-              <code>hermes-studio cli update</code>
+              <code>ekko-studio cli update</code>
             </div>
           </NAlert>
           <div class="runtime-directory-control">
@@ -439,37 +493,61 @@ async function removeRuntime(version: string) {
       </NSpin>
     </NDrawerContent>
   </NDrawer>
+  <NDrawer
+    :show="cliDetailsShow"
+    placement="right"
+    width="var(--studio-drawer-width)"
+    @update:show="cliDetailsShow = $event"
+  >
+    <NDrawerContent :title="t('runtimeVersions.cliDetailsTitle')" closable>
+      <div data-testid="cli-details" class="cli-details">
+        <div class="cli-detail-row">
+          <strong>{{ t('runtimeVersions.activePythonPath') }}</strong>
+          <code :title="status?.hermes.pythonPath || ''">{{ status?.hermes.pythonPath || '-' }}</code>
+        </div>
+        <div class="cli-detail-row">
+          <strong>{{ t('runtimeVersions.activeAgentRoot') }}</strong>
+          <code :title="status?.hermes.agentRoot || ''">{{ status?.hermes.agentRoot || '-' }}</code>
+        </div>
+        <div class="cli-detail-row">
+          <strong>{{ t('runtimeVersions.activeDataDirectory') }}</strong>
+          <code :title="status?.hermes.dataDirectory || ''">{{ status?.hermes.dataDirectory || '-' }}</code>
+        </div>
+        <HermesDataDirectoryHint />
+      </div>
+    </NDrawerContent>
+  </NDrawer>
 </template>
 
 <style scoped lang="scss">
 .version-management {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 }
 
 .version-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .section-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 
   h3 {
     margin: 0;
-    font-size: 15px;
+    font-size: calc(var(--font-size-base, 14px) * 15 / 14);
     font-weight: 600;
   }
 
   p {
     margin: 4px 0 0;
     color: var(--text-color-3);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 
   &.compact {
@@ -477,15 +555,21 @@ async function removeRuntime(version: string) {
   }
 }
 
+.section-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--spacing-scale, 1));
+}
+
 .active-path {
   display: grid;
   grid-template-columns: minmax(130px, auto) minmax(0, 1fr);
-  gap: 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
   color: var(--text-color-2);
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   span {
     min-width: 0;
@@ -496,7 +580,7 @@ async function removeRuntime(version: string) {
 
   &.stacked {
     grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
+    gap: calc(4px * var(--spacing-scale, 1));
 
     span {
       overflow: visible;
@@ -515,24 +599,24 @@ async function removeRuntime(version: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
 }
 
 .runtime-update-note {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 
   code {
     width: fit-content;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: calc(2px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 4px);
     background: var(--hover-color);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 }
 
@@ -541,8 +625,8 @@ async function removeRuntime(version: string) {
   flex: 1 1 auto;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
+  gap: calc(2px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   span {
     overflow: hidden;
@@ -555,21 +639,48 @@ async function removeRuntime(version: string) {
 .runtime-directory-actions {
   display: flex;
   flex: 0 0 auto;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .runtime-directory-hint {
   margin: -4px 2px 0;
   color: var(--text-color-3);
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+}
+
+.cli-details {
+  display: flex;
+  flex-direction: column;
+  gap: calc(12px * var(--spacing-scale, 1));
+}
+
+.cli-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(12px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
+
+  strong {
+    color: var(--text-color-2);
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  }
+
+  code {
+    overflow-wrap: anywhere;
+    color: var(--text-color-1);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  }
 }
 
 .version-list,
 .job-list {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 6px);
   overflow: hidden;
 }
 
@@ -578,10 +689,10 @@ async function removeRuntime(version: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   min-height: 44px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color);
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid var(--border-color);
 
   &:last-child {
     border-bottom: 0;
@@ -593,14 +704,14 @@ async function removeRuntime(version: string) {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .job-main {
   flex: 1 1 auto;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 
   small {
     color: var(--text-color-3);
@@ -617,7 +728,7 @@ async function removeRuntime(version: string) {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .version-actions {
@@ -625,13 +736,13 @@ async function removeRuntime(version: string) {
   align-items: center;
   justify-content: flex-end;
   flex-shrink: 0;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .empty-row {
-  padding: 14px 10px;
+  padding: calc(14px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   color: var(--text-color-3);
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   text-align: center;
 }
 
@@ -648,9 +759,13 @@ async function removeRuntime(version: string) {
     flex-wrap: wrap;
   }
 
+  .section-heading-actions {
+    justify-content: flex-start;
+  }
+
   .active-path {
     grid-template-columns: 1fr;
-    gap: 4px;
+    gap: calc(4px * var(--spacing-scale, 1));
   }
 
   .version-actions {

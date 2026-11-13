@@ -122,31 +122,31 @@ watch(() => [props.selectedJobId, props.profileKey], () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 1px solid $border-light;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-light;
   flex-shrink: 0;
 }
 
 .history-title {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
   color: $text-primary;
 }
 
 .history-count {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .history-body {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 20px 20px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
 }
 
 .run-meta {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-muted;
-  font-family: $font-code;
+  font-family: var(--font-code, $font-code);
 }
 </style>

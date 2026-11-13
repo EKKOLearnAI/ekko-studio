@@ -63,7 +63,7 @@ After download, verify all of the following:
 - Version Management marks the same platform/version installed and active;
 - the Runtime directory passes validation and contains `runtime-manifest.json`;
 - the Agents page reports Hermes installed after refresh;
-- after restart, `hermes --version` reports a usable version.
+- after restart, `ekko-studio cli --version` reports a usable version.
 
 ## Upgrade distinctions
 
@@ -71,9 +71,9 @@ There are three separate upgrades:
 
 - **Desktop application:** use Desktop **Check for Updates**.
 - **Managed Runtime package:** download a newer Runtime version in Version Management, let it validate and activate, then restart. Previous inactive versions remain available until explicitly deleted.
-- **Hermes Agent source inside Runtime 0.19.1 or newer:** fully exit Quanthermes Studio, then run `hermes update`. This does not upgrade Desktop or Web UI.
+- **Hermes Agent source inside Runtime 0.19.1 or newer:** fully exit Ekko Studio, then run `ekko-studio cli update`. This does not upgrade Desktop or Web UI.
 
-Do not run `hermes update` while Studio still owns Runtime processes. Reopen Studio afterward and verify the Hermes version and Runtime path.
+Do not run `ekko-studio cli update` while Studio still owns Runtime processes. Reopen Studio afterward and verify the Hermes version and Runtime path.
 
 An active Runtime cannot be deleted. Activate and restart into another valid version first, then delete the inactive version through Version Management.
 
@@ -108,7 +108,7 @@ Activation writes the selected Runtime directory/version/platform and clears the
 
 Use Version Management's **Choose directory** action. The destination must already exist, be writable, not be inside the current Runtime storage, and not be the active Runtime directory or one of its children. Migration is unavailable while `HERMES_DESKTOP_RUNTIME_DIR` forces an override.
 
-Scheduling writes `pendingRuntimeRootDirectory` to `active-version.json`; it does not move files immediately. Restart Quanthermes Studio to apply the migration before local services start.
+Scheduling writes `pendingRuntimeRootDirectory` to `active-version.json`; it does not move files immediately. Restart Ekko Studio to apply the migration before local services start.
 
 On restart Desktop:
 

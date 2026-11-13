@@ -5,20 +5,30 @@ import { i18nReady } from './i18n'
 import App from './App.vue'
 import './styles/global.scss'
 import { desktopBridge } from '@/utils/desktop-bridge'
+import { useTheme } from '@/composables/useTheme'
 import { BUILTIN_PLUGINS, installClientPlugins } from '@/plugins'
 
 // Apply theme classes before mount to prevent FOUC (Flash of Unstyled Content)
-const savedBrightness = localStorage.getItem('hermes_brightness') || 'system'
-const savedStyle = localStorage.getItem('hermes_style') || 'ink'
+function storedPreference(key: string, fallback: string): string {
+  try {
+    return localStorage.getItem(key) || fallback
+  } catch {
+    return fallback
+  }
+}
+
+const savedBrightness = storedPreference('hermes_brightness', 'system')
+const themeStyle = useTheme().style.value
 
 // Resolve dark mode
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
 const isDark = savedBrightness === 'dark' || (savedBrightness === 'system' && prefersDark)
 
 // Resolve style
-const isComic = savedStyle === 'comic'
+const isComic = themeStyle === 'comic'
 const bridge = desktopBridge()
 const isDesktopShell = bridge?.isDesktop === true
+const isDesktopPetWindow = bridge?.windowKind === 'pet' || window.location.hash.startsWith('#/desktop-pet')
 
 // Apply classes to prevent FOUC
 if (isDark) {
@@ -33,6 +43,9 @@ if (isDesktopShell) {
 if (isDesktopShell && bridge?.platform === 'win32') {
   document.documentElement.classList.add('hermes-desktop-windows')
 }
+if (isDesktopPetWindow) {
+  document.documentElement.classList.add('hermes-desktop-pet-window')
+}
 
 // Read token from URL BEFORE router initializes (hash router strips params)
 const urlParams = new URLSearchParams(window.location.search)
@@ -45,14 +58,40 @@ if (urlToken) {
 async function mountApp(): Promise<void> {
   const i18n = await i18nReady
   const app = createApp(App)
+  app.config.errorHandler = (error, _instance, info) => {
+    console.error(`[client] uncaught Vue error (${info})`, error)
+  }
   app.use(createPinia())
   app.use(i18n)
+  await installClientPlugins(app, router, i18n, BUILTIN_PLUGINS)
   app.use(router)
   await router.isReady().catch(() => undefined)
-  // 客户端插件：每个插件 install() 自己注册路由 / 侧边栏 / i18n。
-  // 核心代码不直接 import 任何插件；安装与否完全由 BUILTIN_PLUGINS + localStorage 决定。
-  await installClientPlugins(app, router, i18n, BUILTIN_PLUGINS)
   app.mount('#app')
 }
 
-void mountApp()
+function renderFatalError(error: unknown): void {
+  const root = document.getElementById('app')
+  if (!root || root.dataset.fatalError === 'true') return
+  root.dataset.fatalError = 'true'
+  root.replaceChildren()
+
+  const container = document.createElement('main')
+  container.style.cssText = 'min-height:100vh;box-sizing:border-box;padding:32px;background:#1a1a1a;color:#eee;font-family:system-ui'
+  const title = document.createElement('h2')
+  title.textContent = 'Ekko Studio encountered an unexpected interface error'
+  const details = document.createElement('pre')
+  details.style.cssText = 'white-space:pre-wrap;color:#f88'
+  details.textContent = error instanceof Error ? error.message : String(error)
+  const retry = document.createElement('button')
+  retry.type = 'button'
+  retry.textContent = 'Reload'
+  retry.style.cssText = 'padding:8px 14px;cursor:pointer'
+  retry.addEventListener('click', () => window.location.reload())
+  container.append(title, details, retry)
+  root.append(container)
+}
+
+void mountApp().catch(error => {
+  console.error('[client] failed to mount application', error)
+  renderFatalError(error)
+})

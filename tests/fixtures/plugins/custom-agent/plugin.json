@@ -1,0 +1,29 @@
+{
+  "id": "custom-agent",
+  "name": "Custom Agent Example",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "description": "An Agent runtime with its own settings, a local global model, and Studio-proxied scoped models.",
+  "server": "server.mjs",
+  "client": "client.mjs",
+  "capabilities": [
+    "agents",
+    "ui"
+  ],
+  "views": [
+    {
+      "id": "settings",
+      "title": "Custom Agent settings",
+      "slot": "settings"
+    }
+  ],
+  "navigation": {
+    "main": [],
+    "settings": [
+      {
+        "viewId": "settings",
+        "icon": "settings"
+      }
+    ]
+  }
+}

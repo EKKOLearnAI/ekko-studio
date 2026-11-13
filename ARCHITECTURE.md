@@ -1,7 +1,8 @@
 # Architecture
 
-Hermes Web UI is a TypeScript monorepo that ships a browser dashboard, a Koa
-backend, and an Electron desktop distribution around Hermes Agent.
+Quanthermes Studio uses the upstream Ekko Studio module architecture in a TypeScript monorepo that ships a local-first AI workspace
+through a web console, a Koa backend, and an Electron desktop app. It integrates
+Ekko Agent, Hermes Agent, and coding agents for chat, coding, and workflows.
 
 ## Package Boundaries
 
@@ -9,33 +10,17 @@ backend, and an Electron desktop distribution around Hermes Agent.
 | --- | --- | --- |
 | Client | `packages/client/src` | Vue UI, routing, Pinia stores, API wrappers, i18n, browser-visible state. |
 | Server | `packages/server/src` | HTTP API, auth, Socket.IO, SQLite stores, file access, Hermes runtime integration. |
+| Ekko Agent | `packages/ekko-agent` | Canonical Ekko runtime, profile facade, providers, tools, memory, skills, conversations, and package API. |
 | Desktop | `packages/desktop` | Electron shell, local Web UI server bootstrap, updater, bundled Python/Hermes runtime. |
-| Tests | `tests` | Vitest unit/integration tests and Playwright browser tests. |
-| CI | `.github/workflows` | Build, e2e, lockfile, Docker, and desktop release automation. |
-
-## Product Boundaries
-
-Treat these as separate products even when they ship from one monorepo:
-
-- `Web UI Product` — the browser client, the Koa backend, Web UI state, and the in-app update entry points.
-- `Hermes Agent Product` — the Hermes runtime, profiles, and CLI lifecycle.
-- `Device Runtime Product` — host-level concerns such as users, Node.js, systemd, sudoers, deploy directories, and health recovery.
-- `Release And Distribution Product` — npm packages, device packages, manifests, GitHub Releases, OSS objects, and workflow-generated metadata.
-- `Desktop Product` — the Electron shell, bundled runtime assets, and desktop auto-update flow.
-
-Boundary rules:
-
-- Keep `Web UI Product` concerns out of host bootstrap code.
-- Keep `Hermes Agent Product` lifecycle decisions explicit instead of hiding them behind Web UI update flows.
-- Keep `Device Runtime Product` concerns in controlled installers or runners, not in ordinary request handlers.
-- Keep `Release And Distribution Product` metadata as a single contract that runtime code consumes instead of redefining.
-- Keep the `Desktop Product` update path separate from device in-app updates.
+| MCU | `packages/mcu` | ESP32-C3 source projects and release firmware; board-specific ESP32-S3 firmware. |
+| Tests | `tests` | Required focused tests for new features; the legacy suite has been removed. |
+| CI | `.github/workflows` | Independent Build, Test and E2E checks, lockfile, Docker, and desktop release automation. |
 
 ## Request Flow
 
 1. The browser loads the Vite-built client from the Koa server.
 2. Client modules call API helpers from `packages/client/src/api`.
-3. Server routes in `packages/server/src/routes` wire HTTP paths to controllers.
+3. Server routes in `packages/server/src/modules/*/routes` wire HTTP paths to controllers.
 4. Controllers validate request concerns and delegate reusable behavior to services.
 5. Services own side effects: files, SQLite, Hermes profiles, subprocesses, bridges, and credentials.
 6. Long-running chat and group-chat flows use Socket.IO namespaces managed by server services.
@@ -54,21 +39,27 @@ should not duplicate server persistence rules.
 
 ## Server Structure
 
-- `routes/` registers HTTP and WebSocket entry points.
-- `controllers/` handles request-level behavior.
-- `services/` owns reusable IO, domain behavior, external process calls, and integration logic.
-- `db/` owns SQLite schemas and stores.
-- `middleware/` owns request middleware such as user auth.
-- `shared/` contains cross-server constants and helpers.
+Server code is separated by business ownership under `modules/studio`,
+`modules/hermes`, `modules/ekko`, and `modules/coding-agents`; concrete module
+composition belongs in `bootstrap`.
+See `docs/harness/server-module-boundaries.md` for the complete target tree,
+ownership decisions, allowed dependency matrix, and migration rules.
+
+- Module `routes/` register HTTP entry points; `sockets/` own Socket.IO transports.
+- Module `controllers/` handle request-level behavior.
+- Module `services/` own reusable IO, domain behavior, processes, and integrations.
+- Studio `repositories/` and `infrastructure/` own application persistence.
+- Studio `middleware/legacy-app-api.ts` is the only released App and MCU firmware URL compatibility map.
+- Plugin Agent IDs use `plugin:<plugin-id>/<agent-id>` and retain that identity in chat, group chat, workflow and usage records. Studio owns registration, per-user/Profile run contexts and transport; plugins own their engine and settings UI. Bootstrap adapts existing Coding Agent management and model proxies into the shared Studio registry, preserving native runtime dispatch and released APIs. See `docs/plugins.md` for the runtime contract.
+- Independent plugin projects are registered by `ekko-studio plugins` under the Web UI home in `plugins/development`. Registration does not execute code. Administrator activation starts host-owned source watching, optional builds and snapshot replacement through the ordinary PluginManager; project sources stay outside the Studio checkout. See `docs/plugins.md`.
+- Product plugins live in `plugins/builtin/<id>` and ship in `dist/plugins/builtin`. Startup reconciles their versions through the normal PluginManager, respecting disabled state and explicit uninstalls. Demo packages live only in `tests/fixtures/plugins`. Stable `ctx.paths.dataDir` holds plugin-owned engine files independently of package versions. The OMP plugin owns its executable, settings, native RPC adaptation and per-turn configuration; Studio supplies scoped model proxies through the existing Agent contract.
 
 Architecture rules:
 
 - Register local API routes before proxy catch-all routes.
-- Keep auth behavior centralized in `packages/server/src/services/auth.ts`.
+- Keep auth behavior under `packages/server/src/modules/studio/services/auth`.
 - Prefer `execFile` or `spawn` with argument arrays over shell command strings.
 - Use structured file and YAML/JSON parsers when editing structured data.
-- Keep update controllers thin: version discovery, plan generation, task orchestration, privileged execution, and runtime reconciliation should not collapse into one file.
-- Treat in-app updates as orchestration only. Host bootstrap, privileged install, and repair flows belong behind controlled seams.
 
 ## Client Structure
 
@@ -90,11 +81,14 @@ Frontend rules:
 
 Desktop packaging is intentionally split:
 
-- Pull requests run the web UI build and tests in `.github/workflows/build.yml`.
+- Pull requests run the repository harness and web UI build in `.github/workflows/build.yml`.
 - Published GitHub Releases run Web UI artifact packaging and Docker image publishing without
   marking the release as GitHub latest.
 - Manual dispatches run full desktop artifact packaging in `.github/workflows/desktop-release.yml`.
 - `.github/workflows/desktop-manual-build.yml` builds one desktop target for targeted repairs or re-runs.
+- Windows x64 and ARM64 use native runners and separate updater manifests
+  (`latest.yml` and `latest-arm64.yml`). See `packages/desktop/WINDOWS-ARM64.md`
+  for native speech staging and runtime acceptance.
 - Each release matrix target uploads only the artifact globs for its own platform.
 - A successful full desktop release marks the target GitHub Release as latest after all desktop artifacts
   and the merged macOS updater manifest have been uploaded.
@@ -109,6 +103,13 @@ Hermes runtime assets are built separately by
 `.github/workflows/desktop-runtime.yml`. `packages/desktop/scripts/runtime-config.mjs`
 pins an upstream Hermes version, Git ref, and full commit; version overrides
 must supply the ref and commit together.
+
+For releases that declare placeholder package metadata (`0.0.0`), the runtime
+requires the matching `v<version>` source tag and uses upstream's install-stamp
+writer without changing tracked files. Installation and relocation checks read
+the canonical Hermes identity. Manual dispatches can override `python_version`
+and `python_build_tag` together; Hermes 0.22.2 uses Python 3.14.7 from the
+python-build-standalone `20260901` release.
 
 The portable Node.js included in runtime assets is pinned independently from
 the GitHub Actions runner. Manual runtime dispatches take a target release tag;
@@ -128,6 +129,8 @@ python/                 Hermes Agent Git checkout and source root
   agent-browser/
   node/                  browser CLI npm prefix
   ms-playwright/
+  manifest.json         Hermes PM payload paths on newer runtimes
+  runtime-tools/        PM-pinned Chromium on newer runtimes
 node/                    bundled Node.js
 git/                     bundled MinGit on Windows
 runtime-manifest.json
@@ -145,34 +148,58 @@ GitHub/CF archive and records them in schema 2 of the runtime manifest. Do not
 patch tracked Hermes source during this build:
 Studio-specific integration belongs in Studio, and the clean checkout is what
 allows users to run the upstream `hermes update` command directly.
-## Update And Deploy Boundaries
 
-The repository currently supports multiple update shapes. Keep them distinct:
+Hermes 0.23 runtime builds use Python 3.14.7 and Node.js 26.13.0 by default.
+Fetch steps reject cached interpreters from another pinned version before reuse.
+When the source exposes the native `tools.browser_launcher`, the build stages Chromium
+through PM's build-owned `prepare_tools` operation and writes a relative payload
+manifest. PM can then find the bundled executable after extraction without a
+profile-specific path or a first-use download. Older runtimes retain the
+agent-browser packaging path. Generated PM files are excluded through Git's
+local `info/exclude`; tracked upstream files remain unchanged. Packaging checks
+the PM-selected browser again after moving the source into its staging directory.
 
-- `npm-package` is a distribution shape, not a device-runtime policy.
-- `source-deploy` is a runtime reconciliation path for source-based installs.
-- `device-package` is a device-targeted release artifact with its own manifest and checksum contract.
-- `bootstrap` means preparing a host for the first install.
-- `runtime reconcile` means applying a known artifact to an already prepared host and restoring health.
-- `Hermes Agent upgrade` is a separate lifecycle step, not the default side effect of every Web UI update.
-
-Do not let one script remain the long-term owner of bootstrap, day-two updates, repair, and Hermes Agent upgrade. Those concerns belong to different seams even if they temporarily share implementation.
-Do not let in-app updates silently expand into host bootstrap or Agent lifecycle changes without an explicit release decision and runtime flag.
-
-For the current device update design and its evolving rules, see:
-
-- `docs/update-distribution/README.md`
-- `docs/update-distribution/10-development-rules.md`
-- `docs/update-distribution/11-product-boundaries-and-dependencies.md`
-- `docs/update-distribution/12-runtime-module-split-plan.md`
+Copilot activation prepares the `github-copilot` provider plugin when the selected
+Hermes release requires it, then stores the accepted OAuth credential in that
+profile's `.env`. Existing enabled profiles migrate on worker startup; read-only
+token detection does not install plugins. Model catalogs use runtime-readable
+credentials, while explicit Add can discover and accept a gh/VS Code login.
+Startup respects disabled lazy installation and never re-enables a disabled plugin.
 
 ## Validation Surface
 
 The minimum mechanical harness is:
 
 - `npm run harness:check` for repository docs, workflow, and package-script invariants.
-- `npm run test` or focused Vitest tests for local logic.
-- `npm run test:e2e` for browser-visible routing/auth/chat regressions.
+- Focused `npm run test -- <file>` for each new feature's logic.
+- Focused `npm run test:e2e -- <file>` for new browser journeys.
+- Independent Test (`test.yml`) and E2E (`playwright.yml`) workflows run all
+  current Vitest and Playwright tests. Build (`build.yml`) runs the harness and
+  production build. Each workflow reports its own status and can fail independently.
+- Empty suites are allowed during the reset, without waiving the requirement to
+  test new features.
+- CI does not require blanket coverage or browser shards.
 - `npm run build` for type checking and production bundles.
 
 See `docs/harness/validation.md` for change-specific commands.
+
+## Preserved Local Capabilities
+
+Studio owns USB storage, paired LAN devices, XiaoZhi provisioning, meeting
+recordings/ASR, knowledge vaults, scanning and grading. The client retains its
+optional built-in capability registry alongside the upstream independent
+plugin host; built-in capabilities remain disabled until enabled in settings.
+Expert Center and Experts Marketplace are removed.
+
+Studio services access Hermes profiles and bridge execution through injected
+public ports composed by `bootstrap`; they never import the Hermes module.
+Meeting ASR Python assets ship under `dist/server/python-backend`. Worklets
+remain static public assets and WebSocket upgrades retain the released
+`/ws/asr`, `/ws/diarize`, `/ws/omni-realtime` paths. Canonical local HTTP APIs
+use `/api/studio/*`. Released device URL aliases live in `legacy-app-api.ts`.
+
+Independent updates remain under Studio's update service and the existing
+`update-orchestrator.sh` entrypoint. Web UI updates do not bootstrap the host or
+upgrade Hermes Agent by default. State resolves through `getWebUiHome()`;
+identity, rollback, manifest policy and installer fingerprints retain their
+existing contracts. See `docs/harness/source-deploy-refactor.md`.

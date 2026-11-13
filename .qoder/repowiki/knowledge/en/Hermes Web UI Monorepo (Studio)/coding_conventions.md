@@ -1,5 +1,0 @@
-- Server code follows a strict layers pattern: routes register endpoints, controllers handle request-level behavior, services own side effects (files, SQLite, subprocesses, bridges), and middleware centralizes auth.
-- Client code uses Vue 3 Composition API with `<script setup lang="ts">`, scoped component styles, and locale files for all user-facing strings.
-- External processes are invoked via `execFile` or `spawn` with argument arrays rather than shell command strings.
-- Structured data edits use dedicated YAML/JSON parsers instead of string manipulation.
-- Update and distribution logic is kept orchestration-only, with host bootstrap, privileged install, and repair flows separated behind controlled seams.

@@ -8,7 +8,7 @@ import {
   type StoredTtsProvider,
   type TtsStoredSecretsInput,
   type TtsStoredSettings,
-} from '@/api/hermes/tts-settings'
+} from '@/api/studio/tts-settings'
 import {
   deleteSttProvider,
   fetchSttSettings,
@@ -18,7 +18,7 @@ import {
   type SttProvider,
   type SttStoredSecretsInput,
   type SttStoredSettings,
-} from '@/api/hermes/stt-settings'
+} from '@/api/studio/stt-settings'
 import { useVoiceSettings } from '@/composables/useVoiceSettings'
 import { useSttSettings } from '@/composables/useSttSettings'
 import { useLocalSttModel } from '@/composables/useLocalSttModel'

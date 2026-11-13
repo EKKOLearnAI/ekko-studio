@@ -85,62 +85,62 @@ onBeforeUnmount(() => { generation++; observer?.disconnect(); stage?.destroy() }
     gap: 8px;
     padding: 8px 12px;
     margin: 0 0 8px;
-    background: linear-gradient(180deg, #0f1413, #0a0e0d);
-    border: 1px solid #00ff8833;
+    background: linear-gradient(180deg, var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))), var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))));
+    border: 1px solid rgba(var(--success-rgb), 0.2);
     border-radius: 6px;
     font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
-    color: #00ff88;
-    box-shadow: 0 0 12px #00ff8810, inset 0 0 12px #00ff8808;
+    color: var(--success);
+    box-shadow: 0 0 12px rgba(var(--success-rgb), 0.063), inset 0 0 12px rgba(var(--success-rgb), 0.031);
     position: relative;
     align-items: center;
 
     /* 终端 prompt 前缀 */
     &::before {
       content: '$ ';
-      color: #00ff88;
-      text-shadow: 0 0 6px #00ff88;
+      color: var(--success);
+      text-shadow: 0 0 6px var(--success);
       margin-right: 4px;
       align-self: center;
       animation: pulse 2s ease-in-out infinite;
     }
 
     /* 工具栏整体悬停描边 */
-    &:hover { border-color: #00ff88aa; box-shadow: 0 0 18px #00ff8820, inset 0 0 18px #00ff8810; }
+    &:hover { border-color: rgba(var(--success-rgb), 0.667); box-shadow: 0 0 18px rgba(var(--success-rgb), 0.125), inset 0 0 18px rgba(var(--success-rgb), 0.063); }
 
     /* 覆盖 naive-ui 控件 */
     :deep(.n-button) {
-      background: #0a0e0d !important;
-      border: 1px solid #00ff8844 !important;
-      color: #00ff88 !important;
+      background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))) !important;
+      border: 1px solid rgba(var(--success-rgb), 0.267) !important;
+      color: var(--success) !important;
       font-family: inherit;
       letter-spacing: 0.03em;
       transition: all 0.15s ease;
       &:hover {
-        border-color: #00ff88 !important;
-        color: #00ff88 !important;
-        background: #111916 !important;
-        text-shadow: 0 0 6px #00ff88;
+        border-color: var(--success) !important;
+        color: var(--success) !important;
+        background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))) !important;
+        text-shadow: 0 0 6px var(--success);
       }
       &:disabled { opacity: 0.4; }
     }
 
     :deep(.n-select) {
-      .n-base-selection { background: #0a0e0d !important; border-color: #00ff8844 !important; }
-      .n-base-selection__content { color: #00ff88 !important; font-family: inherit; }
+      .n-base-selection { background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))) !important; border-color: rgba(var(--success-rgb), 0.267) !important; }
+      .n-base-selection__content { color: var(--success) !important; font-family: inherit; }
     }
 
     :deep(.n-input) {
-      .n-input__input-el { background: #0a0e0d !important; color: #00ff88 !important; font-family: inherit; }
-      .n-input__border { border-color: #00ff8844 !important; }
+      .n-input__input-el { background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))) !important; color: var(--success) !important; font-family: inherit; }
+      .n-input__border { border-color: rgba(var(--success-rgb), 0.267) !important; }
     }
 
     /* 颜色选择器 */
     input[type='color'] {
       width: 32px;
       height: 28px;
-      border: 1px solid #00ff8844;
+      border: 1px solid rgba(var(--success-rgb), 0.267);
       border-radius: 4px;
-      background: #0a0e0d;
+      background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
       padding: 0;
       cursor: pointer;
       &::-webkit-color-swatch-wrapper { padding: 2px; }
@@ -150,7 +150,7 @@ onBeforeUnmount(() => { generation++; observer?.disconnect(); stage?.destroy() }
     /* 笔宽滑块 */
     input[type='range'] {
       width: 120px;
-      accent-color: #00ff88;
+      accent-color: var(--success);
       filter: drop-shadow(0 0 4px #00ff88aa);
     }
   }
@@ -159,17 +159,17 @@ onBeforeUnmount(() => { generation++; observer?.disconnect(); stage?.destroy() }
   .canvas {
     width: 100%;
     /* 黑色 CRT + 极淡绿色扫描线 + 网格底 */
-    background-color: #050908;
+    background-color: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
     background-image:
-      repeating-linear-gradient(0deg, transparent 0 2px, #00ff8808 2px 3px),
-      linear-gradient(transparent calc(100% - 1px), #00ff8815 100%),
-      linear-gradient(90deg, transparent calc(100% - 1px), #00ff8815 100%);
+      repeating-linear-gradient(0deg, transparent 0 2px, rgba(var(--success-rgb), 0.031) 2px 3px),
+      linear-gradient(transparent calc(100% - 1px), rgba(var(--success-rgb), 0.082) 100%),
+      linear-gradient(90deg, transparent calc(100% - 1px), rgba(var(--success-rgb), 0.082) 100%);
     background-size: 100% 100%, 24px 24px, 24px 24px;
-    border: 1px solid #00ff8833;
+    border: 1px solid rgba(var(--success-rgb), 0.2);
     border-radius: 6px;
     overflow: hidden;
     position: relative;
-    box-shadow: 0 0 24px #00ff8815, inset 0 0 24px #00ff8810;
+    box-shadow: 0 0 24px rgba(var(--success-rgb), 0.082), inset 0 0 24px rgba(var(--success-rgb), 0.063);
 
     /* 画布四角的扫描装饰 */
     &::before, &::after {
@@ -177,7 +177,7 @@ onBeforeUnmount(() => { generation++; observer?.disconnect(); stage?.destroy() }
       position: absolute;
       width: 18px;
       height: 18px;
-      border: 1px solid #00ff88;
+      border: 1px solid var(--success);
       pointer-events: none;
       z-index: 1;
     }

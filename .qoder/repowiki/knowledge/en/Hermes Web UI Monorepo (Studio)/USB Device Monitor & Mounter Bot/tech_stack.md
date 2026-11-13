@@ -1,1 +1,0 @@
-Python 3 with `pyudev` for udev/netlink device monitoring, `subprocess` for invoking `mount`/`umount`/`blkid`/`sudo`, and `threading` for the heartbeat/cold-scan background threads. No third-party Python packages beyond pyudev.

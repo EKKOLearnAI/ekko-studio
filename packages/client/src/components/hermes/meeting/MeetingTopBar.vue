@@ -193,8 +193,8 @@ function onSpeakerCountUpdate(value: number | null) {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border-color, #e0e0e0);
-  background: var(--bg-card, #fff);
+  border-bottom: 1px solid var(--border-color, var(--border-color));
+  background: var(--bg-card, var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))));
   flex-shrink: 0;
 }
 
@@ -210,7 +210,7 @@ function onSpeakerCountUpdate(value: number | null) {
   }
 
   svg {
-    color: var(--accent-primary, #1a1a1a);
+    color: var(--accent-primary, var(--text-primary));
   }
 }
 

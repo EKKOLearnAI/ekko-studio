@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { NSpin, NButton, NButtonGroup, NInputNumber } from 'naive-ui'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { NButton, NButtonGroup, NInputNumber, NSpin } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 
 type PptxViewerInstance = {
@@ -161,13 +162,13 @@ onBeforeUnmount(() => {
   flex-direction: column;
   width: 100%;
   min-height: 0;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .pptx-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
@@ -175,7 +176,7 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 420px;
   overflow: auto;
-  padding: 12px;
+  padding: calc(12px * var(--spacing-scale, 1));
   background: rgba(127, 127, 127, 0.08);
 }
 

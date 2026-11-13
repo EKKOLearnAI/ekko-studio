@@ -1,11 +1,35 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { hasApiKey, isStoredSuperAdmin, setApiKey } from '@/api/client'
+import { hasApiKey, isStoredSuperAdmin } from '@/api/client'
 import { hasDesktopBrowserBridge } from '@/utils/desktop-bridge'
 import { resolveLoginRedirect } from '@/utils/login-redirect'
+import { captureProviderImport } from '@/utils/provider-import'
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
+    { path: '/hermes/meeting', name: 'hermes.meeting', component: () => import('@/views/hermes/MeetingView.vue') },
+    { path: '/hermes/usb', name: 'hermes.usb', component: () => import('@/views/hermes/USBView.vue') },
+    { path: '/hermes/devices', name: 'hermes.devices', component: () => import('@/views/hermes/DevicesView.vue'), meta: { requiresSuperAdmin: true } },
+    { path: '/hermes/client-plugins', name: 'hermes.clientPlugins', component: () => import('@/views/hermes/ClientPluginsView.vue') },
+    { path: '/studio/plugins', name: 'studio.plugins', component: () => import('@/views/StudioPluginsView.vue') },
+    { path: '/studio/plugin-settings/:pluginId/:viewId', name: 'studio.pluginSettings', component: () => import('@/views/PluginPageView.vue') },
+    { path: '/studio/plugin-agent-settings/:pluginId/:viewId?', name: 'studio.pluginAgentSettings', component: () => import('@/views/PluginPageView.vue') },
+    { path: '/studio/plugins/:pluginId/:viewId?', name: 'studio.pluginPage', component: () => import('@/views/PluginPageView.vue') },
+    { path: '/person', name: 'hermes.person', component: () => import('@/views/hermes/PersonView.vue') },
+    {
+      path: '/hermes/tasks',
+      name: 'hermes.tasks',
+      redirect: to => ({ name: 'hermes.chat', query: {
+        tasks: '1', taskSearch: to.query.search, taskStatus: to.query.status,
+        taskOrder: to.query.order, taskPage: to.query.page,
+      } }),
+    },
+    {
+      path: '/desktop-pet',
+      name: 'desktop.pet',
+      component: () => import('@/views/hermes/DesktopPetView.vue'),
+      meta: { public: true },
+    },
     {
       path: '/',
       name: 'login',
@@ -64,11 +88,13 @@ const router = createRouter({
       path: '/hermes/jobs',
       name: 'hermes.jobs',
       component: () => import('@/views/hermes/JobsView.vue'),
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/kanban',
       name: 'hermes.kanban',
       component: () => import('@/views/hermes/KanbanView.vue'),
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/workflow',
@@ -76,29 +102,20 @@ const router = createRouter({
       component: () => import('@/views/hermes/WorkflowView.vue'),
     },
     {
-      path: '/hermes/meeting',
-      name: 'hermes.meeting',
-      component: () => import('@/views/hermes/MeetingView.vue'),
-    },
-    {
       path: '/hermes/models',
       name: 'hermes.models',
-      component: () => import('@/views/hermes/ModelsView.vue'),
+      component: () => import('@/views/hermes/ChatView.vue'),
+    },
+    {
+      path: '/hermes/api-relay',
+      name: 'hermes.apiRelay',
+      component: () => import('@/views/hermes/ApiRelayView.vue'),
     },
     {
       path: '/hermes/profiles',
       name: 'hermes.profiles',
       component: () => import('@/views/hermes/ProfilesView.vue'),
-    },
-    {
-      path: '/hermes/experts',
-      name: 'hermes.experts',
-      component: () => import('@/views/hermes/ExpertsView.vue'),
-    },
-    {
-      path: '/hermes/experts/:slug',
-      name: 'hermes.expertDetail',
-      component: () => import('@/views/hermes/ExpertDetailView.vue'),
+      meta: { requiresSuperAdmin: true },
     },
     {
       path: '/hermes/logs',
@@ -120,6 +137,7 @@ const router = createRouter({
       path: '/hermes/journey',
       name: 'hermes.journey',
       component: () => import('@/views/hermes/JourneyView.vue'),
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/skills-usage',
@@ -130,16 +148,30 @@ const router = createRouter({
       path: '/hermes/skills',
       name: 'hermes.skills',
       component: () => import('@/views/hermes/SkillsView.vue'),
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/plugins',
       name: 'hermes.plugins',
       component: () => import('@/views/hermes/PluginsView.vue'),
+      meta: { hermesConfig: true },
+    },
+    {
+      path: '/hermes/petdex',
+      name: 'hermes.petdex',
+      component: () => import('@/views/hermes/PetdexView.vue'),
     },
     {
       path: '/hermes/memory',
       name: 'hermes.memory',
       component: () => import('@/views/hermes/MemoryView.vue'),
+      meta: { hermesConfig: true },
+    },
+    {
+      path: '/hermes/config/settings',
+      name: 'hermes.configSettings',
+      component: () => import('@/views/hermes/HermesSettingsView.vue'),
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/settings',
@@ -155,6 +187,14 @@ const router = createRouter({
       path: '/hermes/channels',
       name: 'hermes.channels',
       component: () => import('@/views/hermes/ChannelsView.vue'),
+      meta: { hermesConfig: true },
+    },
+    {
+      path: '/social-messages',
+      redirect: {
+        name: 'hermes.connections',
+        query: { view: 'messages' },
+      },
     },
     {
       path: '/hermes/terminal',
@@ -163,15 +203,49 @@ const router = createRouter({
       meta: { requiresSuperAdmin: true },
     },
     {
-      path: '/hermes/devices',
-      name: 'hermes.devices',
-      component: () => import('@/views/hermes/DevicesView.vue'),
+      path: '/hermes/connections',
+      name: 'hermes.connections',
+      component: () => import('@/views/hermes/ChatView.vue'),
+    },
+    {
+      path: '/studio/agents',
+      name: 'hermes.agentManager',
+      component: () => import('@/views/hermes/ChatView.vue'),
       meta: { requiresSuperAdmin: true },
     },
     {
-      path: '/hermes/usb',
-      name: 'hermes.usb',
-      component: () => import('@/views/hermes/USBView.vue'),
+      path: '/studio/agents/:agentId/:section(skills|mcp|settings|plugins|presets)',
+      name: 'codingAgent.config',
+      component: () => import('@/views/hermes/CodingAgentConfigView.vue'),
+      meta: { codingAgentConfig: true, requiresSuperAdmin: true },
+    },
+    {
+      path: '/ekko/memory',
+      name: 'ekko.memory',
+      component: () => import('@/views/ekko/MemoryView.vue'),
+      meta: { ekkoConfig: true, requiresSuperAdmin: true },
+    },
+    {
+      path: '/ekko/skills',
+      name: 'ekko.skills',
+      component: () => import('@/views/ekko/SkillsView.vue'),
+      meta: { ekkoConfig: true, requiresSuperAdmin: true },
+    },
+    {
+      path: '/ekko/mcp',
+      name: 'ekko.mcp',
+      component: () => import('@/views/ekko/McpView.vue'),
+      meta: { ekkoConfig: true, requiresSuperAdmin: true },
+    },
+    {
+      path: '/ekko/settings',
+      name: 'ekko.settings',
+      component: () => import('@/views/ekko/SettingsView.vue'),
+      meta: { ekkoConfig: true, requiresSuperAdmin: true },
+    },
+    {
+      path: '/hermes/agents',
+      redirect: { name: 'hermes.agentManager' },
     },
     {
       path: '/hermes/group-chat',
@@ -203,19 +277,8 @@ const router = createRouter({
       component: () => import('@/views/hermes/FilesView.vue'),
     },
     {
-      path: '/hermes/petdex',
-      name: 'hermes.petdex',
-      component: () => import('@/views/hermes/PetdexView.vue'),
-    },
-    {
-      path: '/hermes/desktop-pet',
-      name: 'hermes.desktopPet',
-      component: () => import('@/views/hermes/DesktopPetView.vue'),
-    },
-    {
       path: '/hermes/coding-agents',
-      name: 'hermes.codingAgents',
-      component: () => import('@/views/hermes/CodingAgentsView.vue'),
+      redirect: { name: 'hermes.agentManager' },
     },
     {
       path: '/hermes/version-preview',
@@ -227,11 +290,7 @@ const router = createRouter({
       path: '/hermes/mcp',
       name: 'hermes.mcp',
       component: () => import('@/views/hermes/McpManagerView.vue'),
-    },
-    {
-      path: '/hermes/client-plugins',
-      name: 'hermes.clientPlugins',
-      component: () => import('@/views/hermes/ClientPluginsView.vue'),
+      meta: { hermesConfig: true },
     },
   ],
 })
@@ -239,6 +298,11 @@ const router = createRouter({
 // Desktop exposes a dedicated settings page. Actual browsing stays inside the
 // chat tool panel so this route never creates or positions a WebContentsView.
 if (hasDesktopBrowserBridge()) {
+  router.addRoute({
+    path: '/hermes/browser/downloads',
+    name: 'hermes.browserDownloads',
+    component: () => import('@/views/hermes/BrowserDownloadsView.vue'),
+  })
   router.addRoute({
     path: '/hermes/browser',
     name: 'hermes.browser',
@@ -263,24 +327,21 @@ function isDesktopShell(): boolean {
 }
 
 router.beforeEach(async (to, _from, next) => {
-  // Restore a session token carried in the URL hash. The meeting entry hops
-  // http → https (same port, protocol-sniffing server); localStorage is
-  // scoped per origin, so the https side cannot read the http side's token.
-  // The token travels in the hash fragment (never sent to the server) and is
-  // stored here before any API call / auth check happens.
-  if (typeof window !== 'undefined') {
-    const tp = to.query.tp
-    if (typeof tp === 'string' && tp.trim()) {
-      setApiKey(tp)
-      // Strip the token from the URL so it does not linger in history/address bar.
-      const query = { ...to.query }
-      delete query.tp
-      next({ path: to.path, query, hash: to.hash, replace: true })
-      return
-    }
+  if (to.path === '/hermes/models' && Object.prototype.hasOwnProperty.call(to.query, 'importProvider')) {
+    captureProviderImport(to.query.importProvider)
+    const query = { ...to.query }
+    delete query.importProvider
+    // Replace before auth redirects; the credential-bearing fragment never
+    // becomes a persisted login redirect or a server request query.
+    next({ path: to.path, query, replace: true })
+    return
   }
-
   await ensureDesktopAuth()
+
+  if (to.name === 'codingAgent.config' && ['plugins', 'presets'].includes(String(to.params.section)) && to.params.agentId !== 'dsh') {
+    next({ name: 'codingAgent.config', params: { ...to.params, section: 'settings' }, replace: true })
+    return
+  }
 
   // Public pages don't need auth
   if (to.meta.public) {

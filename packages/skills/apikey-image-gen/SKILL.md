@@ -1,13 +1,13 @@
 ---
 name: apikey-image-gen
-description: "Generate or edit images through Hermes Studio using the selected/requested profile's configured Studio image provider from config.yaml."
+description: "Generate or edit images through Ekko Studio using the selected/requested profile's configured Studio image provider from config.yaml."
 version: 1.0.0
 author: Ekko
 license: MIT
 platforms: [linux, macos, windows, termux]
 metadata:
   hermes:
-    tags: [api.apikey.fun, custom-provider, image-generation, image-editing, media]
+    tags: [api.apikey.fan, custom-provider, image-generation, image-editing, media]
 prerequisites:
   commands: [curl]
 ---
@@ -16,7 +16,7 @@ prerequisites:
 
 Use this skill when the user wants to generate an image or edit an existing image.
 
-Always call Hermes Studio's media endpoint. Do not call an upstream image API directly, and do not ask the user for an API key. The server reads the selected/requested profile's `config.yaml` and uses a configured custom provider. By default it uses the provider named `fun-codex`, but callers may request another configured provider by sending `provider`, `provider_name`, or `custom_provider`.
+Always call Ekko Studio's media endpoint. Do not call an upstream image API directly, and do not ask the user for an API key. The server reads the selected/requested profile's `config.yaml` and uses a configured custom provider. By default it uses the provider named `fun-codex`, but callers may request another configured provider by sending `provider`, `provider_name`, or `custom_provider`.
 
 This skill is separate from Hermes Agent's native `image_generate` tool. The
 native tool reads `image_gen` from `config.yaml`; this Studio-managed endpoint
@@ -28,7 +28,7 @@ Do not use any built-in image generation tool as a fallback. If the Hermes Web U
 ```yaml
 custom_providers:
   - name: fun-codex
-    base_url: https://api.apikey.fun/v1
+    base_url: https://api.apikey.fan/v1
     api_key: ...
     model: gpt-5.5
     api_mode: codex_responses
@@ -62,19 +62,19 @@ server falls back to the other image route and then to `fun-codex`.
 Endpoint:
 
 ```bash
-POST <Hermes Web UI base URL>/api/hermes/media/apikey-image-generate
+POST <Hermes Web UI base URL>/api/studio/media/apikey-image-generate
 ```
 
 Resolve the Hermes Web UI base URL in this order:
 
 1. `HERMES_WEB_UI_URL` environment variable, if set.
 2. `http://127.0.0.1:${PORT}`, if `PORT` is set.
-3. `http://127.0.0.1:6060` for the Web UI single-server default.
+3. `http://127.0.0.1:8648` for the Web UI single-server default.
 
 Common local ports:
 
 - Development API backend: `http://127.0.0.1:8647`. Use this with `npm run dev`; do not target the Vite frontend port.
-- Web UI single-server default: `http://127.0.0.1:6060`.
+- Web UI single-server default: `http://127.0.0.1:8648`.
 - Desktop app default: `http://127.0.0.1:8748`.
 - Custom port: set `HERMES_WEB_UI_URL` to the full base URL, or set `PORT` to use `http://127.0.0.1:${PORT}`.
 
@@ -199,11 +199,11 @@ fi
 
 BASE_URL="${HERMES_WEB_UI_URL:-}"
 if [ -z "$BASE_URL" ]; then
-  BASE_URL="http://127.0.0.1:${PORT:-6060}"
+  BASE_URL="http://127.0.0.1:${PORT:-8648}"
 fi
 BASE_URL="${BASE_URL%/}"
 
-curl -sS -X POST "$BASE_URL/api/hermes/media/apikey-image-generate" \
+curl -sS -X POST "$BASE_URL/api/studio/media/apikey-image-generate" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -223,7 +223,7 @@ Successful responses include:
   "mode": "text",
   "output_paths": ["/absolute/path/to/output.png"],
   "provider": "fun-codex",
-  "base_url": "https://api.apikey.fun/v1"
+  "base_url": "https://api.apikey.fan/v1"
 }
 ```
 

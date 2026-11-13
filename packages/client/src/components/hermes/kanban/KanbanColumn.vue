@@ -59,10 +59,10 @@ const headerTitle = computed(() => `${statusIcon.value}  ${statusLabel.value}  (
   min-width: 200px;
   background-color: rgba(var(--accent-primary-rgb), 0.02);
   border-radius: $radius-md;
-  border: 1px solid $border-light;
+  border: var(--border-width, 1px) solid $border-light;
 
   :deep(.n-collapse) {
-    --n-title-font-size: 13px;
+    --n-title-font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     --n-title-font-weight: 600;
   }
 
@@ -71,7 +71,7 @@ const headerTitle = computed(() => `${statusIcon.value}  ${statusLabel.value}  (
   }
 
   :deep(.n-collapse-item__content-wrapper) {
-    padding: 0 10px 10px;
+    padding: 0 calc(10px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   }
 
   :deep(.n-collapse-item) {
@@ -85,7 +85,7 @@ const headerTitle = computed(() => `${statusIcon.value}  ${statusLabel.value}  (
   align-items: center;
   justify-content: center;
   min-height: 60px;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 </style>

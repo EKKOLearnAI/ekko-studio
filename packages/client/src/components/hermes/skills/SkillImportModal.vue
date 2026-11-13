@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { NModal, NUpload, NButton, NInput, NRadioGroup, NRadio } from 'naive-ui'
+import { NModal, NUpload, NButton, NInput, NRadioGroup, NRadio, useMessage } from 'naive-ui'
 import type { UploadFileInfo } from 'naive-ui'
 import { importSkill } from '@/api/hermes/skills'
 import { useI18n } from 'vue-i18n'
-import { useMessage } from '@/composables/useAppMessage'
+
+const props = defineProps<{
+  allowCategory?: boolean
+  importHandler?: (files: File[], category?: string) => Promise<{ name?: string }>
+}>()
 
 const emit = defineEmits<{
   close: []
@@ -79,7 +83,7 @@ async function handleSave() {
 
   loading.value = true
   try {
-    const res = await importSkill(files, category.value.trim() || undefined)
+    const res = await (props.importHandler || importSkill)(files, category.value.trim() || undefined)
     message.success(t('skills.importSuccess') + (res?.name ? `: ${res.name}` : ''))
     message.info(t('skills.reloadHint'), { duration: 6000 })
     emit('saved')
@@ -114,7 +118,7 @@ function handleClose() {
       <p class="hint">{{ mode === 'zip' ? t('skills.importHintZip') : t('skills.importHintFolder') }}</p>
     </div>
 
-    <div class="form-row">
+    <div v-if="allowCategory !== false" class="form-row">
       <label class="field-label">{{ t('skills.importTargetCategory') }}</label>
       <NInput
         v-model:value="category"
@@ -179,13 +183,13 @@ function handleClose() {
 
 .field-label {
   display: block;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
   margin-bottom: 4px;
 }
 
 .hint {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   margin: 6px 0 0;
 }
@@ -193,18 +197,18 @@ function handleClose() {
 .folder-picker {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
 .folder-info {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
 }
 
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

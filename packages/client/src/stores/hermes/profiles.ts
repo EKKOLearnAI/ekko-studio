@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as profilesApi from '@/api/hermes/profiles'
 import type { HermesProfile, HermesProfileDetail } from '@/api/hermes/profiles'
+import { fetchAgentStatusSnapshot } from '@/api/agent-status'
 import { useAppStore } from './app'
 
 const ACTIVE_PROFILE_STORAGE_KEY = 'hermes_active_profile_name'
@@ -14,28 +15,32 @@ export const useProfilesStore = defineStore('profiles', () => {
   const detailMap = ref<Record<string, HermesProfileDetail>>({})
   const loading = ref(false)
   const switching = ref(false)
+  const hermesAvailable = ref(false)
+  let profilesRequest: Promise<void> | null = null
 
-  async function fetchProfiles() {
+  function fetchProfiles(): Promise<void> {
+    // The page and its Profile selector mount together; share their initial load.
+    if (profilesRequest) return profilesRequest
+    profilesRequest = loadProfiles().finally(() => { profilesRequest = null })
+    return profilesRequest
+  }
+
+  async function refreshProfilesAfterMutation() {
+    // An earlier list request may predate the mutation, so always fetch again.
+    if (profilesRequest) await profilesRequest
+    await fetchProfiles()
+  }
+
+  async function loadProfiles() {
     loading.value = true
     try {
       profiles.value = await profilesApi.fetchProfiles()
-      // The server reports which profile is active on disk (requestedProfileName
-      // falls back to getActiveProfileName()). Trust that as the source of truth
-      // so a freshly-bound WeChat device surfaces the profile that actually owns
-      // the token_platform provider — the localStorage value can be stale (e.g.
-      // it was set before a re-login), which is what made the models page show
-      // "no default model" even though the bound profile already had one.
-      // localStorage is still used as a manual-switch hint when it names a
-      // profile that exists AND matches the server's active profile; otherwise
-      // the server's active profile wins.
-      const diskActive = profiles.value.find(p => p.active) ?? null
       const storedName = activeProfileName.value || localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY)
-      const storedExists = storedName && profiles.value.some(p => p.name === storedName)
-      let selected = (storedExists && storedName === diskActive?.name)
-        ? (profiles.value.find(p => p.name === storedName) ?? diskActive)
-        : diskActive
+      let selected = profiles.value.find(p => p.name === storedName) ?? null
       if (!selected && profiles.value.length > 0) {
         selected = profiles.value[0]
+        activeProfileName.value = selected.name
+        localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, selected.name)
       }
       profiles.value = profiles.value.map(profile => ({
         ...profile,
@@ -44,7 +49,6 @@ export const useProfilesStore = defineStore('profiles', () => {
       activeProfile.value = selected
       if (selected) {
         activeProfileName.value = selected.name
-        localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, selected.name)
       } else {
         activeProfileName.value = null
         localStorage.removeItem(ACTIVE_PROFILE_STORAGE_KEY)
@@ -61,10 +65,24 @@ export const useProfilesStore = defineStore('profiles', () => {
   async function fetchHermesProfiles() {
     loading.value = true
     try {
-      profiles.value = await profilesApi.fetchProfiles()
+      const [profilesResult, statusResult] = await Promise.allSettled([
+        profilesApi.fetchProfiles(),
+        fetchAgentStatusSnapshot(),
+      ])
+      if (profilesResult.status === 'rejected') throw profilesResult.reason
+      profiles.value = profilesResult.value
+      const hermes = statusResult.status === 'fulfilled'
+        ? statusResult.value.agents.find(agent => agent.id === 'hermes')
+        : undefined
+      hermesAvailable.value = Boolean(
+        hermes?.installed
+        && hermes.source !== 'not-installed'
+        && hermes.path,
+      )
       activeProfile.value = profiles.value.find(profile => profile.active) ?? null
       clearAllSessionCaches()
     } catch (err) {
+      hermesAvailable.value = false
       console.error('Failed to fetch Hermes profiles:', err)
     } finally {
       loading.value = false
@@ -123,9 +141,9 @@ export const useProfilesStore = defineStore('profiles', () => {
     return res
   }
 
-  async function createProfile(name: string, clone?: boolean, displayName?: string) {
-    const res = await profilesApi.createProfile(name, clone, displayName)
-    if (res.success) await fetchProfiles()
+  async function createProfile(name: string, clone?: boolean) {
+    const res = await profilesApi.createProfile(name, clone)
+    if (res.success) await refreshProfilesAfterMutation()
     return res
   }
 
@@ -133,7 +151,7 @@ export const useProfilesStore = defineStore('profiles', () => {
     const ok = await profilesApi.deleteProfile(name)
     if (ok) {
       delete detailMap.value[name]
-      await fetchProfiles()
+      await refreshProfilesAfterMutation()
     }
     return ok
   }
@@ -148,7 +166,7 @@ export const useProfilesStore = defineStore('profiles', () => {
     const ok = await profilesApi.renameProfile(name, newName)
     if (ok) {
       delete detailMap.value[name]
-      await fetchProfiles()
+      await refreshProfilesAfterMutation()
     }
     return ok
   }
@@ -190,17 +208,19 @@ export const useProfilesStore = defineStore('profiles', () => {
 
   async function importProfile(file: File) {
     const result = await profilesApi.importProfile(file)
-    if (result.success) await fetchProfiles()
+    if (result.success) await refreshProfilesAfterMutation()
     return result
   }
 
   return {
+    updateDisplayName,
     profiles,
     activeProfile,
     activeProfileName,
     detailMap,
     loading,
     switching,
+    hermesAvailable,
     fetchProfiles,
     fetchHermesProfiles,
     fetchProfileDetail,
@@ -213,7 +233,6 @@ export const useProfilesStore = defineStore('profiles', () => {
     importProfile,
     updateAvatar,
     deleteAvatar,
-    updateDisplayName,
     clearAllSessionCaches,
   }
 })

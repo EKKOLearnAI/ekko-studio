@@ -69,15 +69,15 @@ function cacheHitRate(m: { inputTokens: number; cacheTokens: number }): string {
 @use '@/styles/variables' as *;
 
 .model-breakdown {
-  background: $bg-card;
-  border: 1px solid $border-color;
+  background: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   margin-bottom: 20px;
 }
 
 .section-title {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
   color: $text-secondary;
   margin: 0 0 12px;
@@ -86,23 +86,23 @@ function cacheHitRate(m: { inputTokens: number; cacheTokens: number }): string {
 .model-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
+  gap: calc(8px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
   margin: 0 0 12px;
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .legend-item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: calc(5px * var(--spacing-scale, 1));
 }
 
 .legend-swatch,
 .model-swatch {
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-component, 2px);
   flex-shrink: 0;
 }
 
@@ -124,18 +124,18 @@ function cacheHitRate(m: { inputTokens: number; cacheTokens: number }): string {
 .model-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .model-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 .model-name {
-  font-size: 12px;
-  font-family: $font-code;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  font-family: var(--font-code, $font-code);
   color: $text-secondary;
   width: 140px;
   flex-shrink: 0;
@@ -148,13 +148,13 @@ function cacheHitRate(m: { inputTokens: number; cacheTokens: number }): string {
   flex: 1;
   height: 16px;
   background: $bg-secondary;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
   overflow: hidden;
 }
 
 .model-bar {
   height: 100%;
-  border-radius: 3px;
+  border-radius: var(--radius-component, 3px);
   min-width: 2px;
   transition: width 0.3s ease;
   display: flex;
@@ -167,7 +167,7 @@ function cacheHitRate(m: { inputTokens: number; cacheTokens: number }): string {
 }
 
 .model-tokens {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   width: 86px;
   text-align: end;
@@ -176,7 +176,7 @@ function cacheHitRate(m: { inputTokens: number; cacheTokens: number }): string {
   small {
     color: #f6ad55;
     margin-inline-start: 4px;
-    font-size: 10px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
   }
 }
 </style>

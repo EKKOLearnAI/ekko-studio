@@ -77,18 +77,18 @@ const { t } = useI18n()
   align-items: flex-start;
   gap: 8px;
   padding: 20px 16px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border-color, rgba(var(--text-primary-rgb), 0.08));
   border-radius: 10px;
-  background: var(--card-color, rgba(255, 255, 255, 0.02));
+  background: var(--card-color, rgba(var(--text-primary-rgb), 0.02));
   color: inherit;
   cursor: pointer;
   text-align: left;
   transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
 }
 .mode-card:hover {
-  border-color: var(--primary-color, #63e2b7);
+  border-color: var(--primary-color, var(--success));
   transform: translateY(-2px);
-  background: var(--hover-color, rgba(255, 255, 255, 0.05));
+  background: var(--hover-color, rgba(var(--text-primary-rgb), 0.05));
 }
 .mode-icon {
   width: 26px;

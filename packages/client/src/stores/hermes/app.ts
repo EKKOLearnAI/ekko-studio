@@ -1,45 +1,29 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { clampMessageForUi } from '@/utils/format-text'
 import {
-  checkHealth,
-  clearStaleUpdateStatus as clearStaleUpdateStatusRequest,
-  fetchUpdateIdentity,
-  repairUpdateIdentity as repairUpdateIdentityRequest,
-  type UpdateIdentityResponse,
   fetchAvailableModels,
-  fetchUpdateCapabilities,
-  fetchUpdateStatus,
-  fetchUpdateEnvironment,
-  reconcileUpdate as reconcileUpdateRequest,
   addCustomModel as persistCustomModel,
   removeCustomModel as deletePersistedCustomModel,
-  triggerUpdate,
   updateDefaultModel,
   updateModelVisibility,
   updateModelAlias,
   type AvailableModelGroup,
   type AvailableModelsResponse,
-  type EnvironmentCheckResponse,
-  type UpdateStatusResponse,
-  type UpdateTaskRecord,
-  type UpdateTaskStage,
-  type UpdateTaskStatus,
-  type UpdateCapabilitiesResponse,
   type ProfileAvailableModels,
   type ModelVisibility,
   type ModelVisibilityRule,
 } from '@/api/hermes/system'
+import { checkHealth, triggerUpdate, clearStaleUpdateStatus as clearStaleUpdateStatusRequest, fetchUpdateIdentity, repairUpdateIdentity as repairUpdateIdentityRequest, fetchUpdateCapabilities, fetchUpdateStatus, fetchUpdateEnvironment, reconcileUpdate as reconcileUpdateRequest, type UpdateIdentityResponse, type EnvironmentCheckResponse, type UpdateStatusResponse, type UpdateTaskRecord, type UpdateTaskStage, type UpdateTaskStatus, type UpdateCapabilitiesResponse } from '@/api/studio/device-update'
+import { clampMessageForUi } from '@/utils/format-text'
 import { hasApiKey } from '@/api/client'
+import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/utils/sidebar-width'
 
 const WEB_UI_VERSION = __APP_VERSION__
 
 const SIDEBAR_COLLAPSED_KEY = 'hermes_sidebar_collapsed'
+const SIDEBAR_WIDTH_KEY = 'hermes_sidebar_width'
 const ACTIVE_PROFILE_STORAGE_KEY = 'hermes_active_profile_name'
 const MODELS_CACHE_TTL_MS = 30000
-// Source deployment updates on real devices can take well beyond 10 minutes.
-// Keep polling long enough for slow installs, rebuilds, and service restarts
-// before surfacing a timeout to the UI.
 const UPDATE_RELOAD_TIMEOUT_MS = 30 * 60 * 1000
 const UPDATE_POLL_INTERVAL_MS = 3000
 
@@ -47,6 +31,14 @@ export const useAppStore = defineStore('app', () => {
   const sidebarOpen = ref(false)
   // Desktop-only collapsed state (icon-rail mode). Persisted to localStorage.
   const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1')
+  const sidebarWidth = ref(SIDEBAR_DEFAULT_WIDTH)
+  const sidebarResizing = ref(false)
+  try {
+    const savedWidth = localStorage.getItem(SIDEBAR_WIDTH_KEY)
+    if (savedWidth !== null) sidebarWidth.value = clampSidebarWidth(Number(savedWidth))
+  } catch {
+    // Keep resizing available when browser storage is unavailable.
+  }
   // Expanded state of route-owned sidebars, used by the Windows title bar.
   const pageSidebarExpanded = ref(true)
 
@@ -101,6 +93,7 @@ export const useAppStore = defineStore('app', () => {
   const maxTokens = ref(4096)
   let modelsLoadPromise: Promise<void> | null = null
   let modelsLastRequestedAt = 0
+
   let updatePollPromise: Promise<void> | null = null
 
   function sleep(ms: number) {
@@ -581,10 +574,8 @@ export const useAppStore = defineStore('app', () => {
 
   function startHealthPolling(interval = 30000) {
     stopHealthPolling()
-    void Promise.all([checkConnection(), checkUpdateStatus()])
-    healthPollTimer.value = setInterval(() => {
-      void Promise.all([checkConnection(), checkUpdateStatus()])
-    }, interval)
+    checkConnection()
+    healthPollTimer.value = setInterval(checkConnection, interval)
   }
 
   function stopHealthPolling() {
@@ -621,27 +612,22 @@ export const useAppStore = defineStore('app', () => {
     pageSidebarExpanded.value = expanded
   }
 
+  function setSidebarWidth(width: number, persist = true) {
+    sidebarWidth.value = clampSidebarWidth(width)
+    if (!persist) return
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value))
+    } catch {
+      // Keep the in-memory width when browser storage is unavailable.
+    }
+  }
+
   return {
-    sidebarOpen,
-    sidebarCollapsed,
-    pageSidebarExpanded,
-    toggleSidebar,
-    closeSidebar,
-    toggleSidebarCollapsed,
-    setPageSidebarExpanded,
-    connected,
-    serverVersion,
-    latestVersion,
-    nodeVersion,
     updateEnabled,
-    isDocker,
-    updateAvailable,
     updateSourceLabel,
     updateChannel,
     updateStrategy,
     updatePackageType,
-    clientOutdated,
-    updating,
     updateTaskId,
     updateTaskStatus,
     updateTaskStage,
@@ -659,8 +645,41 @@ export const useAppStore = defineStore('app', () => {
     updateLogDir,
     updateStagingDir,
     updateBackupDir,
-    doUpdate,
     clearStaleUpdateStatus,
+    checkUpdateStatus,
+    refreshUpdateCapabilities,
+    environmentCheck,
+    environmentDismissed,
+    updateIdentity,
+    identityDismissed,
+    identityDrift,
+    identityRepairAvailable,
+    identityRepairing,
+    refreshUpdateIdentity,
+    repairUpdateIdentity,
+    refreshEnvironmentCheck,
+    dismissEnvironmentDrift,
+    triggerEnvironmentReconcile,
+
+    sidebarOpen,
+    sidebarCollapsed,
+    sidebarWidth,
+    sidebarResizing,
+    setSidebarWidth,
+    pageSidebarExpanded,
+    toggleSidebar,
+    closeSidebar,
+    toggleSidebarCollapsed,
+    setPageSidebarExpanded,
+    connected,
+    serverVersion,
+    latestVersion,
+    nodeVersion,
+    isDocker,
+    updateAvailable,
+    clientOutdated,
+    updating,
+    doUpdate,
     reloadClient,
     modelGroups,
     profileModelGroups,
@@ -687,19 +706,5 @@ export const useAppStore = defineStore('app', () => {
     setModelVisibility,
     startHealthPolling,
     stopHealthPolling,
-    checkUpdateStatus,
-    refreshUpdateCapabilities,
-    environmentCheck,
-    environmentDismissed,
-    updateIdentity,
-    identityDismissed,
-    identityDrift,
-    identityRepairAvailable,
-    identityRepairing,
-    refreshUpdateIdentity,
-    repairUpdateIdentity,
-    refreshEnvironmentCheck,
-    dismissEnvironmentDrift,
-    triggerEnvironmentReconcile,
   }
 })

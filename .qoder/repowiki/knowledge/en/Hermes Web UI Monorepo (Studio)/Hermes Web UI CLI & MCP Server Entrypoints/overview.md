@@ -1,1 +1,0 @@
-Node.js CLI entrypoints that manage the Hermes Web UI daemon lifecycle and expose an MCP stdio server wrapping the Web UI's HTTP API as tools for AI agents.

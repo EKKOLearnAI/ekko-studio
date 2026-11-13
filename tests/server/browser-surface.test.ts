@@ -11,7 +11,7 @@ import {
   isBrowserSurfaceEnabled,
   resetBrowserSurfaceGateForTests,
   type BrowserSurfaceProbe,
-} from '../../packages/server/src/config/browser-surface'
+} from '../../packages/server/src/modules/studio/public/browser-surface'
 
 const GIB = 1024 ** 3
 
@@ -204,7 +204,7 @@ describe('browser surface gate', () => {
   })
 
   it('startup evaluates the gate exactly once, before routes are registered', () => {
-    const source = readFileSync('packages/server/src/index.ts', 'utf8')
+    const source = readFileSync('packages/server/src/bootstrap/http.ts', 'utf8')
 
     expect(source).toContain('initializeBrowserSurfaceGate(')
     // The gate module is the only reader of the env var in the startup path.

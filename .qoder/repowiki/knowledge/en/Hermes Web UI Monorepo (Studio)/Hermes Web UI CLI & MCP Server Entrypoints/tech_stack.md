@@ -1,1 +1,0 @@
-Pure Node.js ES modules (`.mjs`) with `#!/usr/bin/env node` shebangs; uses built-in `fetch`, `child_process.spawn`, `crypto.scryptSync`, `node:sqlite` DatabaseSync, and platform-native commands (`lsof`, `netstat`, `taskkill`, `open`, `xdg-open`) for cross-platform process/port management.

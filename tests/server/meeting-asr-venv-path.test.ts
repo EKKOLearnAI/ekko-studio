@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -52,7 +52,7 @@ describe('MeetingASRService path resolution (v0.7.16 venv relocation)', () => {
   })
 
   it('resolveVenvPath places the venv under dataDir, never under the python source dir', async () => {
-    const mod = await import('../../packages/server/src/services/meeting-asr')
+    const mod = await import('../../packages/server/src/modules/studio/services/meeting-asr/index')
     const svc = mod.meetingASRService as any
 
     const dataDir = mkTemp('hermes-data-')
@@ -68,11 +68,11 @@ describe('MeetingASRService path resolution (v0.7.16 venv relocation)', () => {
     expect(marker).toBe(join(dataDir, '.venv', '.hermes-ready'))
   })
 
-  it('getDataDir honors MEETING_ASR_DATA_DIR before falling back to cwd/data', async () => {
+  it('getDataDir honors MEETING_ASR_DATA_DIR before falling back to Web UI home', async () => {
     const override = mkTemp('hermes-override-')
     process.env.MEETING_ASR_DATA_DIR = override
 
-    const mod = await import('../../packages/server/src/services/meeting-asr')
+    const mod = await import('../../packages/server/src/modules/studio/services/meeting-asr/index')
     // singleton is process-global; reset so _config is empty
     ;(mod.meetingASRService as any)._config = {}
     const resolved = (mod.meetingASRService as any).getDataDir()
@@ -82,7 +82,7 @@ describe('MeetingASRService path resolution (v0.7.16 venv relocation)', () => {
   it('getVenvPythonPath resolves to a binary inside the data-dir venv, not the source dir', async () => {
     const dataDir = mkTemp('hermes-pyvenv-')
     const backendDir = mkTemp('hermes-backend-')
-    const mod = await import('../../packages/server/src/services/meeting-asr')
+    const mod = await import('../../packages/server/src/modules/studio/services/meeting-asr/index')
     const svc = mod.meetingASRService as any
     const venvPath = svc.resolveVenvPath(dataDir, backendDir)
     const pythonPath = svc.getVenvPythonPath(venvPath)
@@ -98,7 +98,7 @@ describe('MeetingASRService path resolution (v0.7.16 venv relocation)', () => {
     // The creation logic now lives in venv-manager.ts (v0.8 modularization);
     // index.ts keeps delegating methods with the same names/semantics.
     const src = readFileSync(
-      join(process.cwd(), 'packages/server/src/services/meeting-asr/venv-manager.ts'),
+      join(process.cwd(), 'packages/server/src/modules/studio/services/meeting-asr/venv-manager.ts'),
       'utf-8',
     )
 
@@ -119,11 +119,11 @@ describe('MeetingASRService path resolution (v0.7.16 venv relocation)', () => {
   it('source contract: getDataDir + pip install -r keep using absolute requirements path', async () => {
     const { readFileSync } = await import('fs')
     const indexSrc = readFileSync(
-      join(process.cwd(), 'packages/server/src/services/meeting-asr/index.ts'),
+      join(process.cwd(), 'packages/server/src/modules/studio/services/meeting-asr/index.ts'),
       'utf-8',
     )
     const venvSrc = readFileSync(
-      join(process.cwd(), 'packages/server/src/services/meeting-asr/venv-manager.ts'),
+      join(process.cwd(), 'packages/server/src/modules/studio/services/meeting-asr/venv-manager.ts'),
       'utf-8',
     )
 
@@ -133,5 +133,46 @@ describe('MeetingASRService path resolution (v0.7.16 venv relocation)', () => {
     // (the requirements path is computed in index.ts and injected).
     expect(indexSrc).toMatch(/path\.join\(__dirname,\s*['"]requirements\.txt['"]\)/)
     expect(venvSrc).toMatch(/opts\.requirementsPath/)
+  })
+})
+
+describe('Meeting ASR shared runtime paths', () => {
+  beforeEach(() => { originalEnv = { ...process.env } })
+
+  it('uses the same discovered certificate directory as the Node server', async () => {
+    const deployDir = mkTemp('meeting-tls-deploy-')
+    const certDir = join(deployDir, 'packages', 'certs')
+    mkdirSync(certDir, { recursive: true })
+    writeFileSync(join(certDir, 'server.crt'), 'test certificate')
+    writeFileSync(join(certDir, 'server.key'), 'test key')
+    process.env.DEPLOY_DIR = deployDir
+    process.env.HERMES_WEB_UI_MEETING_ASR_TLS = 'true'
+    delete process.env.HERMES_WEB_UI_SSL_CERTFILE
+    delete process.env.HERMES_WEB_UI_SSL_KEYFILE
+    const { MeetingASRService } = await import('../../packages/server/src/modules/studio/services/meeting-asr')
+    const service = new MeetingASRService() as any
+    expect(service._uvicornTlsArgs()).toEqual([
+      '--ssl-certfile', join(certDir, 'server.crt'), '--ssl-keyfile', join(certDir, 'server.key'),
+    ])
+  })
+
+  it('honors explicit uvicorn certificate overrides', async () => {
+    process.env.HERMES_WEB_UI_MEETING_ASR_TLS = 'true'
+    process.env.HERMES_WEB_UI_SSL_CERTFILE = '/custom/certificate.pem'
+    process.env.HERMES_WEB_UI_SSL_KEYFILE = '/custom/private-key.pem'
+    const { MeetingASRService } = await import('../../packages/server/src/modules/studio/services/meeting-asr')
+    const service = new MeetingASRService() as any
+    expect(service._uvicornTlsArgs()).toEqual([
+      '--ssl-certfile', '/custom/certificate.pem', '--ssl-keyfile', '/custom/private-key.pem',
+    ])
+  })
+
+  it('keeps default ASR state under the canonical Web UI state alias', async () => {
+    delete process.env.MEETING_ASR_DATA_DIR
+    delete process.env.HERMES_WEB_UI_HOME
+    const stateDir = mkTemp('meeting-state-alias-')
+    process.env.HERMES_WEBUI_STATE_DIR = stateDir
+    const { MeetingASRService } = await import('../../packages/server/src/modules/studio/services/meeting-asr')
+    expect((new MeetingASRService() as any).getDataDir()).toBe(join(stateDir, 'meeting-asr'))
   })
 })

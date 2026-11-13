@@ -36,6 +36,7 @@ function makeTree(root: string, version: string): string {
   const tree = join(root, `tree-${version}`)
   mkdirSync(join(tree, 'dist', 'server'), { recursive: true })
   writeFileSync(join(tree, 'package.json'), JSON.stringify({ name: 'hermes-web-ui', version }))
+  writeFileSync(join(tree, 'package-lock.json'), '{}')
   writeFileSync(join(tree, 'dist', 'server', 'index.js'), `console.log("${version}")`)
   return tree
 }
@@ -65,10 +66,11 @@ function makeFixture(targetVersion: string, opts: { wrap?: boolean; withNodeModu
   writeFileSync(join(deployDir, 'package.json'), JSON.stringify({ name: 'hermes-web-ui', version: '0.8.0' }))
   mkdirSync(join(deployDir, 'dist', 'server'), { recursive: true })
   writeFileSync(join(deployDir, 'dist', 'server', 'index.js'), 'old')
+  writeFileSync(join(deployDir, 'package-lock.json'), '{}')
   // Optionally seed node_modules in the old deploy tree so that
   // preserve_node_modules_across_swap can be exercised.
   if (opts.withNodeModules) {
-    mkdirSync(join(deployDir, 'node_modules', '.package-lock.json'), { recursive: true })
+    mkdirSync(join(deployDir, 'node_modules'), { recursive: true })
     writeFileSync(join(deployDir, 'node_modules', '.package-lock.json'), '{}')
   }
   rmSync(old, { recursive: true, force: true })
@@ -245,18 +247,15 @@ describe('update orchestrator (dry-run)', () => {
     expect(res.status).toBe(2)
   })
 
-  it.skipIf(!haveSymlinks)('pre-built archive: skips full build when dist/ is present in archive', () => {
+  it.skipIf(!haveSymlinks)('preserves pre-built dist while dry-run skips dependency installation and building', () => {
     // Archive has dist/server/index.js (pre-built by CI). The orchestrator
-    // should detect this and skip `npm run build`. Verify via the log message
-    // and that the deploy tree contains dist/ without node_modules (since
-    // dry-run skips npm ci).
+    // must survive the real swap even when dry-run skips npm ci and building.
     const fixture = makeFixture('0.9.0', { wrap: false })
     const res = runOrchestrator(fixture)
     expect(res.status, `orchestrator failed: ${res.stderr}`).toBe(0)
-    // Pre-built detection log should appear (info writes to stdout).
+    // Dry-run never launches the build toolchain.
     const output = res.stdout + res.stderr
-    expect(output).toContain('pre-built archive detected')
-    expect(output).toContain('skipping npm run build')
+    expect(output).toContain('dry-run: APP_USER unknown; skipping npm ci + build')
     // dist/ is present from the archive.
     expect(existsSync(join(fixture.deployDir, 'dist', 'server', 'index.js'))).toBe(true)
   })

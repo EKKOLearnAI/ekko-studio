@@ -1,7 +1,7 @@
 {
-  "name": "Hermes Studio",
-  "short_name": "Hermes",
-  "description": "Self-hosted AI chat dashboard for Hermes Agent",
+  "name": "Ekko Studio",
+  "short_name": "Ekko Studio",
+  "description": "Ekko Studio is a local-first AI workspace for multi-agent chat, coding, and visual workflows, available on desktop and the web.",
   "start_url": "/#/hermes/chat",
   "scope": "/",
   "display": "standalone",

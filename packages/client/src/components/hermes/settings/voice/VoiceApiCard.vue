@@ -251,9 +251,9 @@ function handleMoreSelect(key: string | number) {
 .voice-api-card {
   position: relative;
   overflow: hidden;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   transition: background $transition-fast;
 
   &.active::before {
@@ -269,15 +269,15 @@ function handleMoreSelect(key: string | number) {
   display: grid;
   grid-template-columns: minmax(210px, 240px) minmax(0, 1fr) 188px;
   align-items: start;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   min-width: 0;
-  padding: 14px 16px 14px 18px;
+  padding: calc(14px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1)) calc(18px * var(--spacing-scale, 1));
 }
 
 .provider-identity {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
@@ -289,10 +289,10 @@ function handleMoreSelect(key: string | number) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border: 1px solid $border-color;
-  background: $bg-input;
+  border: var(--border-width, 1px) solid $border-color;
+  background: var(--theme-input-bg, $bg-input);
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 700;
 }
 
@@ -303,7 +303,7 @@ function handleMoreSelect(key: string | number) {
 .provider-title-row {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
@@ -311,9 +311,9 @@ function handleMoreSelect(key: string | number) {
   min-width: 0;
   margin: 0;
   color: $text-primary;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   font-weight: 600;
-  line-height: 1.35;
+  line-height: var(--line-height, 1.35);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -322,21 +322,21 @@ function handleMoreSelect(key: string | number) {
 .provider-kind {
   flex-shrink: 0;
   color: $text-muted;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, 1.35);
 }
 
 .provider-description {
   margin: 5px 0 0;
   color: $text-muted;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.45);
 }
 
 .provider-meta {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px 16px;
+  gap: calc(7px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
   margin: 0;
   min-width: 0;
 }
@@ -344,7 +344,7 @@ function handleMoreSelect(key: string | number) {
 .provider-control {
   display: grid;
   justify-items: end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   width: 188px;
   min-width: 0;
 }
@@ -357,7 +357,7 @@ function handleMoreSelect(key: string | number) {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   width: 100%;
 
   :deep(.n-button) {
@@ -367,19 +367,19 @@ function handleMoreSelect(key: string | number) {
 
 .feedback-row {
   margin: 0 16px 14px 18px;
-  padding: 8px 10px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
-  background: $bg-input;
+  background: var(--theme-input-bg, $bg-input);
   color: $text-muted;
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.45);
 
   &.success {
     color: $success;
   }
 
   &.error {
-    border: 1px solid rgba(var(--error-rgb), 0.22);
+    border: var(--border-width, 1px) solid rgba(var(--error-rgb), 0.22);
     background: rgba(var(--error-rgb), 0.06);
     color: $error;
   }
@@ -400,13 +400,13 @@ function handleMoreSelect(key: string | number) {
   max-height: 160px;
   overflow: auto;
   margin: 6px 0 0;
-  padding: 8px;
+  padding: calc(8px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
   background: $code-bg;
   color: $text-secondary;
-  font-family: $font-code;
-  font-size: 11px;
-  line-height: 1.45;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, 1.45);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -414,7 +414,7 @@ function handleMoreSelect(key: string | number) {
 @media (max-width: 1080px) {
   .card-main {
     grid-template-columns: minmax(170px, 190px) minmax(0, 1fr) 156px;
-    gap: 14px;
+    gap: calc(14px * var(--spacing-scale, 1));
   }
 
   .provider-meta {
@@ -433,7 +433,7 @@ function handleMoreSelect(key: string | number) {
 @media (max-width: 820px) {
   .card-main {
     grid-template-columns: 1fr;
-    gap: 12px;
+    gap: calc(12px * var(--spacing-scale, 1));
   }
 
   .provider-control {

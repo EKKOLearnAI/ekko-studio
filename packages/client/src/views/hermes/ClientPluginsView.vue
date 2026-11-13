@@ -62,7 +62,7 @@ async function persist() {
     if (row.hasOverride) map[row.id] = row.enabled
   }
   try {
-    await request('/api/scanner/grading/settings', { method: 'POST', body: JSON.stringify({ enabled: map['paper-grading'] === true && map.scanner !== false }) })
+    await request('/api/studio/scanner/grading/settings', { method: 'POST', body: JSON.stringify({ enabled: map['paper-grading'] === true && map.scanner !== false }) })
     writePluginEnabledMap(map)
     syncError.value = ''
   } catch (error) { syncError.value = (error as Error).message; loadState() }
@@ -173,7 +173,9 @@ function nameFor(row: RowState) {
               </div>
               <NSwitch
                 :value="row.enabled"
+                :aria-label="nameFor(row)"
                 :disabled="BUILTIN_PLUGINS.find(r => r.plugin.id === row.id)?.plugin.dependencies?.some(id => !rows.find(r => r.id === id)?.enabled)"
+                :aria-disabled="BUILTIN_PLUGINS.find(r => r.plugin.id === row.id)?.plugin.dependencies?.some(id => !rows.find(r => r.id === id)?.enabled) || undefined"
                 size="small"
                 @update:value="(value) => toggle(row, value)"
               />
@@ -255,7 +257,6 @@ function nameFor(row: RowState) {
 }
 
 .plugin-card {
-  background: var(--bg-secondary);
   border: 1px solid $border-light;
 
   &.is-disabled {

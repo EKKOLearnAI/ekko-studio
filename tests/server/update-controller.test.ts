@@ -57,6 +57,10 @@ async function loadUpdateController(overrides: LoadUpdateControllerOptions = {})
   vi.doMock('child_process', () => ({ execFile, execFileSync, spawn }))
   vi.doMock('fs', () => ({
     appendFileSync,
+    accessSync: vi.fn(),
+    constants: { W_OK: 2 },
+    readdirSync: vi.fn(() => []),
+    statfsSync: vi.fn(() => ({ bsize: 4096, bavail: 10_000_000 })),
     closeSync: vi.fn(),
     createWriteStream: vi.fn(() => new Writable({
       write(_chunk, _encoding, callback) {
@@ -72,11 +76,11 @@ async function loadUpdateController(overrides: LoadUpdateControllerOptions = {})
     unlinkSync,
     writeFileSync,
   }))
-  vi.doMock('../../packages/server/src/services/runtime-environment', () => ({
+  vi.doMock('../../packages/server/src/modules/studio/public/runtime-environment', () => ({
     isDockerContainer: () => overrides.isDocker === true,
   }))
 
-  const mod = await import('../../packages/server/src/controllers/update')
+  const mod = await import('../../packages/server/src/modules/studio/controllers/update')
   return {
     ...mod,
     mocks: { execFile, execFileSync, spawn, unref, existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, appendFileSync },
@@ -194,7 +198,7 @@ describe('update controller', () => {
     // fall back to homedir(), which is NOT writable on CI runners — the
     // Linux-only writable preflight then rejects every handleUpdate with
     // update_dangerous_layout 409 (20-test cascade). See
-    // packages/server/src/services/update/preflight.ts.
+    // packages/server/src/modules/studio/services/update/preflight.ts.
     process.env.HERMES_WEB_UI_HOME = mkdtempSync(join(tmpdir(), 'update-controller-home-'))
     process.env.HERMES_WEBUI_STATE_DIR = process.env.HERMES_WEB_UI_HOME
     delete process.env.UPLOAD_DIR
@@ -228,7 +232,7 @@ describe('update controller', () => {
     }
     vi.doUnmock('child_process')
     vi.doUnmock('fs')
-    vi.doUnmock('../../packages/server/src/services/runtime-environment')
+    vi.doUnmock('../../packages/server/src/modules/studio/public/runtime-environment')
     vi.unstubAllGlobals()
     if (originalPort === undefined) {
       delete process.env.PORT
@@ -545,7 +549,7 @@ describe('update controller', () => {
         HERMES_WEB_UI_UPDATE_TASK_ID: expect.any(String),
         HERMES_WEB_UI_UPDATE_VERSION: PUBLISHED_VERSION,
         HERMES_WEB_UI_UPDATE_EXPECTED_SHA256: sha256,
-        HERMES_WEB_UI_UPDATE_INCLUDE_AGENT_UPGRADE: 'true',
+        HERMES_WEB_UI_UPDATE_INCLUDE_AGENT_UPGRADE: 'false',
       }),
     }))
     expect(mocks.spawn).toHaveBeenCalledWith(
@@ -971,7 +975,7 @@ describe('update controller', () => {
       }),
       runtime: expect.objectContaining({
         autoInstallDependencies: true,
-        includeAgentUpgrade: true,
+        includeAgentUpgrade: false,
       }),
       preflight: expect.objectContaining({
         strategy: 'device-package',
@@ -1704,6 +1708,10 @@ async function loadUpdateControllerWithEnvironment(overrides: {
   vi.doMock('child_process', () => ({ execFile, execFileSync, spawn }))
   vi.doMock('fs', () => ({
     appendFileSync,
+    accessSync: vi.fn(),
+    constants: { W_OK: 2 },
+    readdirSync: vi.fn(() => []),
+    statfsSync: vi.fn(() => ({ bsize: 4096, bavail: 10_000_000 })),
     closeSync: vi.fn(),
     createWriteStream: vi.fn(() => new Writable({
       write(_chunk, _encoding, callback) {
@@ -1719,14 +1727,14 @@ async function loadUpdateControllerWithEnvironment(overrides: {
     unlinkSync,
     writeFileSync,
   }))
-  vi.doMock('../../packages/server/src/services/runtime-environment', () => ({
+  vi.doMock('../../packages/server/src/modules/studio/public/runtime-environment', () => ({
     isDockerContainer: () => false,
   }))
 
   const state = overrides.state ?? null
   const manifest = overrides.manifest ?? null
 
-  vi.doMock('../../packages/server/src/services/update/reconcile', () => ({
+  vi.doMock('../../packages/server/src/modules/studio/services/update/reconcile', () => ({
     assertEnvironmentMatches: vi.fn((s: any, m: any) => {
       if (!s) return []
       if (m?.requiredNodeRange === '>=20.0.0' && s.nodeVersion === 'v18.20.0') {
@@ -1764,20 +1772,20 @@ async function loadUpdateControllerWithEnvironment(overrides: {
   }))
 
   if (overrides.manifestFetchError) {
-    vi.doMock('../../packages/server/src/services/update/manifest-client', () => ({
+    vi.doMock('../../packages/server/src/modules/studio/services/update/manifest-client', () => ({
       fetchDevicePackageManifest: vi.fn(async () => { throw overrides.manifestFetchError }),
       fetchSourcePackageManifest: vi.fn(async () => null),
       resolveManifestCheckResult: vi.fn(),
     }))
   } else {
-    vi.doMock('../../packages/server/src/services/update/manifest-client', () => ({
+    vi.doMock('../../packages/server/src/modules/studio/services/update/manifest-client', () => ({
       fetchDevicePackageManifest: vi.fn(async () => manifest),
       fetchSourcePackageManifest: vi.fn(async () => null),
       resolveManifestCheckResult: vi.fn(),
     }))
   }
 
-  const mod = await import('../../packages/server/src/controllers/update')
+  const mod = await import('../../packages/server/src/modules/studio/controllers/update')
   return { ...mod, mocks: { execFile, execFileSync, spawn, unref, existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, appendFileSync } }
 }
 
@@ -1790,9 +1798,9 @@ describe('update controller environment endpoint', () => {
     vi.resetModules()
     vi.doUnmock('child_process')
     vi.doUnmock('fs')
-    vi.doUnmock('../../packages/server/src/services/runtime-environment')
-    vi.doUnmock('../../packages/server/src/services/update/reconcile')
-    vi.doUnmock('../../packages/server/src/services/update/manifest-client')
+    vi.doUnmock('../../packages/server/src/modules/studio/public/runtime-environment')
+    vi.doUnmock('../../packages/server/src/modules/studio/services/update/reconcile')
+    vi.doUnmock('../../packages/server/src/modules/studio/services/update/manifest-client')
     vi.unstubAllGlobals()
     if (originalStrategy === undefined) delete process.env.WEBUI_UPDATE_STRATEGY
     else process.env.WEBUI_UPDATE_STRATEGY = originalStrategy

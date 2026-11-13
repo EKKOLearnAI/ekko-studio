@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, reactive, onUnmounted, watch } from 'vue'
-import { NSwitch, NInput, NButton, NSpin, useDialog } from 'naive-ui'
+import { NSpin, NSwitch, NInput, NButton, useDialog, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { clearCredentials as clearCredsApi, saveCredentials as saveCredsApi, fetchWeixinQrCode, pollWeixinQrStatus, saveWeixinCredentials } from '@/api/hermes/config'
 import PlatformCard from './PlatformCard.vue'
 import SettingRow from './SettingRow.vue'
-import { useMessage } from '@/composables/useAppMessage'
 
 const settingsStore = useSettingsStore()
 const message = useMessage()
@@ -158,7 +157,7 @@ function boolValue(value: unknown) {
   return value === true || value === 'true'
 }
 
-// Weixin QR code login state
+// This QR login belongs only to the Hermes channel credentials.
 const wxQrUrl = ref('')
 const wxQrId = ref('')
 const wxQrStatus = ref<'idle' | 'loading' | 'waiting' | 'scaned' | 'confirmed' | 'error' | 'expired'>('idle')
@@ -188,7 +187,7 @@ function pollWeixinStatus() {
   wxPollTimer = setTimeout(async () => {
     try {
       const data = await pollWeixinQrStatus(wxQrId.value)
-      if (data.status === 'wait') {
+      if (data.status === 'wait' || data.status === 'scaned_but_redirect') {
         pollWeixinStatus()
       } else if (data.status === 'scaned') {
         wxQrStatus.value = 'scaned'
@@ -574,13 +573,13 @@ watch(
 .weixin-qr-loading {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .weixin-qr-hint {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
 }
 
@@ -589,7 +588,7 @@ watch(
   align-items: center;
   justify-content: space-between;
   margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid $border-light;
+  padding-top: calc(12px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
 }
 </style>

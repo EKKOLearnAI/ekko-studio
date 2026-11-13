@@ -1,21 +1,25 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, ref } from 'vue'
-import { NAlert, NButton, NEmpty, NInput, NSelect, NSpin, NTag, useMessage } from 'naive-ui'
+import { NAlert, NButton, NEmpty, NInput, NSelect, NTag, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { fetchPetdexManifest, type PetdexManifest, type PetdexPet } from '@/api/petdex'
+import { fetchPetdexManifest, type PetdexManifest, type PetdexPet } from '@/api/studio/petdex'
 import { usePetsStore } from '@/stores/hermes/pets'
+import { desktopBridge } from '@/utils/desktop-bridge'
 
 const { t } = useI18n()
 const message = useMessage()
 const petsStore = usePetsStore()
 
 const manifest = ref<PetdexManifest | null>(null)
-const loading = ref(false)
+const loading = ref(true)
 const adoptingSlug = ref('')
 const error = ref('')
 const searchQuery = ref('')
 const kindFilter = ref<string | null>(null)
 const visibleLimit = ref(96)
+const DESKTOP_ADOPT_SCALE = 0.58
 
 const pets = computed(() => manifest.value?.pets ?? [])
 const generatedAt = computed(() => {
@@ -80,6 +84,11 @@ async function adopt(pet: PetdexPet) {
   adoptingSlug.value = pet.slug
   try {
     await petsStore.adopt(pet.slug)
+    const bridge = desktopBridge()
+    if (bridge?.isDesktop) {
+      await petsStore.savePreferences({ scale: DESKTOP_ADOPT_SCALE })
+      await bridge.setPetWindowVisible?.(true).catch(() => undefined)
+    }
     message.success(t('petdex.adopted', { name: pet.displayName }))
   } catch (err: any) {
     message.error(err?.message || t('petdex.adoptFailed'))
@@ -95,17 +104,19 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="petdex-view">
+  <PageLoading :show="loading && !manifest" class="petdex-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('petdex.title') }}</h2>
       <NButton size="small" quaternary :loading="loading" @click="loadManifest(true)">
         {{ t('petdex.refresh') }}
       </NButton>
     </header>
+    </PageHeader>
 
     <div class="petdex-content" :class="{ 'is-loading': loading && !manifest }">
       <div v-if="loading && !manifest" class="loading-state">
-        <NSpin />
+
       </div>
 
       <template v-else>
@@ -114,19 +125,19 @@ onMounted(() => {
         </NAlert>
 
         <div v-if="manifest" class="summary-grid">
-          <div class="summary-card">
+          <div class="summary-card" data-theme-surface="card">
             <span>{{ t('petdex.summary.total') }}</span>
             <strong>{{ manifest.total }}</strong>
           </div>
-          <div class="summary-card">
+          <div class="summary-card" data-theme-surface="card">
             <span>{{ t('petdex.summary.visible') }}</span>
             <strong>{{ filteredPets.length }}</strong>
           </div>
-          <div class="summary-card">
+          <div class="summary-card" data-theme-surface="card">
             <span>{{ t('petdex.summary.kinds') }}</span>
             <strong>{{ kindOptions.length }}</strong>
           </div>
-          <div class="summary-card wide">
+          <div class="summary-card wide" data-theme-surface="card">
             <span>{{ t('petdex.summary.generatedAt') }}</span>
             <strong>{{ generatedAt || '-' }}</strong>
           </div>
@@ -138,7 +149,7 @@ onMounted(() => {
         </div>
 
         <div v-if="visiblePets.length" class="pet-grid">
-          <article v-for="pet in visiblePets" :key="pet.slug" class="pet-card">
+          <article v-for="pet in visiblePets" :key="pet.slug" class="pet-card" data-theme-surface="card">
             <div class="pet-preview">
               <div class="pet-frame" :style="{ backgroundImage: `url(${pet.previewUrl || pet.spritesheetUrl})` }" />
             </div>
@@ -182,7 +193,7 @@ onMounted(() => {
         </div>
       </template>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -198,7 +209,7 @@ onMounted(() => {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 20px 24px 28px;
+  padding: calc(20px * var(--spacing-scale, 1)) calc(24px * var(--spacing-scale, 1)) calc(28px * var(--spacing-scale, 1));
 }
 
 .loading-state {
@@ -215,27 +226,27 @@ onMounted(() => {
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-bottom: 16px;
 }
 
 .summary-card {
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-secondary);
-  padding: 12px 14px;
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 8px);
+  background: var(--theme-card-bg, var(--theme-card-wallpaper-bg, var(--bg-secondary)));
+  padding: calc(12px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   min-width: 0;
 
   span {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 
   strong {
-    font-size: 20px;
+    font-size: calc(var(--font-size-base, 14px) * 20 / 14);
     font-weight: 650;
     white-space: nowrap;
     overflow: hidden;
@@ -246,21 +257,21 @@ onMounted(() => {
 .filter-row {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) 220px;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-bottom: 18px;
 }
 
 .pet-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
 }
 
 .pet-card {
   min-width: 0;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-secondary);
+  border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: var(--radius-component, 8px);
+  background: var(--theme-card-bg, var(--theme-card-wallpaper-bg, var(--bg-secondary)));
   overflow: hidden;
 }
 
@@ -289,21 +300,21 @@ onMounted(() => {
 }
 
 .pet-body {
-  padding: 12px;
+  padding: calc(12px * var(--spacing-scale, 1));
 }
 
 .pet-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 
   h3 {
     margin: 0;
     min-width: 0;
-    font-size: 15px;
+    font-size: calc(var(--font-size-base, 14px) * 15 / 14);
     font-weight: 650;
-    line-height: 1.25;
+    line-height: var(--line-height, 1.25);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -314,7 +325,7 @@ onMounted(() => {
 .pet-meta {
   margin-top: 5px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -323,12 +334,12 @@ onMounted(() => {
 .pet-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   margin-top: 10px;
 
   a {
-    color: var(--primary-color);
-    font-size: 12px;
+    color: var(--link-color, var(--accent-primary));
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     text-decoration: none;
 
     &:hover {
@@ -344,12 +355,12 @@ onMounted(() => {
 .load-more {
   display: flex;
   justify-content: center;
-  padding: 24px 0 4px;
+  padding: calc(24px * var(--spacing-scale, 1)) 0 calc(4px * var(--spacing-scale, 1));
 }
 
 @media (max-width: 720px) {
   .petdex-content {
-    padding: 16px;
+    padding: calc(16px * var(--spacing-scale, 1));
   }
 
   .summary-grid,

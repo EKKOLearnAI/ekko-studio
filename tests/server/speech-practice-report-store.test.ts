@@ -2,7 +2,7 @@
  * Speech-practice report persistence tests.
  *
  * Contract under test:
- *   - POST /api/hermes/speech-practice/report writes the Markdown report under
+ *   - POST /api/studio/speech-practice/report writes the Markdown report under
  *     the Web UI upload dir (`UPLOAD_DIR` / `HERMES_WEB_UI_HOME/upload`) —
  *     NOT process.cwd();
  *   - the store sanitizes the suggested file stem so a path-traversal attempt
@@ -40,7 +40,7 @@ afterEach(() => {
 })
 
 async function importStore() {
-  const mod = await import('../../packages/server/src/services/speech-practice-report')
+  const mod = await import('../../packages/server/src/modules/studio/services/speech-practice-report')
   return { store: mod.speechPracticeReportStore, max: mod.PRACTICE_REPORT_MAX_CHARS }
 }
 

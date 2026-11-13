@@ -47,7 +47,7 @@ const engagementLabel = computed(() => {
   padding: 8px 16px;
   font-size: 11px;
 
-  &.warn { background: rgba(240, 160, 32, 0.06); }
+  &.warn { background: rgba(var(--warning-rgb), 0.06); }
 
   .strip-left {
     display: flex;
@@ -63,8 +63,8 @@ const engagementLabel = computed(() => {
   .strip-engagement {
     color: $text-secondary;
 
-    &.engaged { color: #63e2b7; }
-    &.distracted, &.at_risk { color: #f0a020; }
+    &.engaged { color: var(--success); }
+    &.distracted, &.at_risk { color: var(--warning); }
     &.at_risk { font-weight: 700; }
   }
 

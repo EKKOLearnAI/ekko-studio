@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-vi.mock('../../packages/server/src/services/meeting-asr', () => ({ meetingASRService: {} }))
-import { createRealtimeBackendReady } from '../../packages/server/src/services/realtime-backend'
+vi.mock('../../packages/server/src/modules/studio/services/meeting-asr', () => ({ meetingASRService: {} }))
+import { createRealtimeBackendReady } from '../../packages/server/src/modules/studio/services/realtime-backend'
 
 describe('Realtime managed backend recovery', () => {
   it('shares startup across concurrent upgrades and reuses the running child', async () => {

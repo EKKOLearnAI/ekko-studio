@@ -1,0 +1,476 @@
+// MIT upstream @deepseek-ai/dsh-acp 0.2.2-rc.1. See LICENSE.
+// Unmodified session class, composition helper and ACP create/resume handlers.
+async function composeAgent(agentCtx, options) {
+	installModelSelection(agentCtx);
+	await mountAcpMcpServers(agentCtx, options.mcpServers, options.cwd);
+}
+var AcpSession = class AcpSession {
+	ctx;
+	notify;
+	/** The exact top-level Agent owned by this ACP session. */
+	agent;
+	modelControl;
+	outputTail = Promise.resolve();
+	inflight;
+	closing;
+	constructor(ctx, handle, notify) {
+		this.ctx = ctx;
+		this.notify = notify;
+		this.agent = handle.agent;
+		this.modelControl = new AcpModelControl(ctx.llm, handle.agent.model);
+		this.disposeAgent = () => handle.dispose();
+	}
+	disposeAgent;
+	/**
+	* Compose a fresh Agent and all requested MCP clients before publication.
+	* @param ctx - ACP plugin context with Agent, LLM, and persistence services.
+	* @param options - fresh session identity, workspace, route, MCP, and notifier.
+	* @returns the fully composed per-session module.
+	*/
+	static async create(ctx, options) {
+		return new AcpSession(ctx, await ctx.agents.create({
+			sessionId: options.sessionId,
+			meta: { cwd: options.cwd },
+			agentOptions: options.agentOptions,
+			signal: options.signal,
+			setup: (agentCtx) => composeAgent(agentCtx, options)
+		}), options.notify);
+	}
+	/**
+	* Restore a persisted Agent and compose the request's fresh MCP connections.
+	* The Session's recorded model selection survives; deployment options supply
+	* the route only when the Session records neither a selection nor a request.
+	* @param ctx - ACP plugin context with Agent, LLM, and persistence services.
+	* @param options - persisted identity, workspace, initial route, MCP, and notifier.
+	* @returns the restored per-session module.
+	*/
+	static async resume(ctx, options) {
+		return new AcpSession(ctx, await ctx.agents.resume({
+			resumeSessionId: options.sessionId,
+			agentOptions: options.agentOptions,
+			signal: options.signal,
+			setup: (agentCtx) => composeAgent(agentCtx, options)
+		}), options.notify);
+	}
+	/**
+	* Whether this module owns an exact Agent reference.
+	* @param agent - Agent observed on a scoped runtime event.
+	* @returns true only for this session's owned Agent.
+	*/
+	owns(agent) {
+		return this.agent === agent;
+	}
+	/**
+	* Whether this module owns an exact Session reference.
+	* @param session - Session observed on a durable event.
+	* @returns true only for this session's owned Session.
+	*/
+	ownsSession(session) {
+		return this.agent.session === session;
+	}
+	/**
+	* Return the complete standard model configuration state.
+	* @param signal - optional request cancellation.
+	* @returns provider-grouped model and exact-model reasoning options.
+	*/
+	configOptions(signal) {
+		this.assertActive();
+		return this.modelControl.options(signal);
+	}
+	/**
+	* Apply one standard configuration option from the next model step.
+	* @param configId - advertised standard option id.
+	* @param value - selected standard option value.
+	* @param signal - optional request cancellation.
+	* @returns the complete resulting option state.
+	*/
+	setConfig(configId, value, signal) {
+		this.assertActive();
+		return this.modelControl.set(configId, value, signal);
+	}
+	/** Resolve topology state off-chain, then serialize its notification without blocking execution updates. */
+	topologyChanged() {
+		if (this.closing !== void 0) return;
+		this.modelControl.options().then((configOptions) => {
+			if (this.closing !== void 0) return;
+			const previous = this.outputTail;
+			this.outputTail = previous.then(() => this.notify({
+				sessionId: this.agent.session.id,
+				update: {
+					sessionUpdate: "config_option_update",
+					configOptions
+				}
+			})).catch((error) => {
+				this.ctx.logger.warn(`acp: config-option update failed: ${errorChain(error)}`);
+			});
+			/* v8 ignore stop */
+		}).catch((error) => {
+			this.ctx.logger.warn(`acp: config-option update failed: ${errorChain(error)}`);
+		});
+		/* v8 ignore stop */
+	}
+	/**
+	* Admit one prompt and settle after the root, descendants, and updates finish.
+	* @param params - standard ACP prompt request for this session.
+	* @param imageEnabled - connection capability advertised at initialization.
+	* @param requestSignal - JSON-RPC request cancellation signal.
+	* @returns the correlated standard stop reason after ordered updates drain.
+	*/
+	async prompt(params, imageEnabled, requestSignal) {
+		this.assertActive();
+		if (this.inflight !== void 0) throw invalidParams$1("a prompt is already in flight for this session");
+		const completion = Promise.withResolvers();
+		const admission = Promise.withResolvers();
+		const admissionController = new AbortController();
+		const inflight = {
+			resolve: completion.resolve,
+			reject: completion.reject,
+			messageId: void 0,
+			messageQueued: false,
+			turn: void 0,
+			endReason: void 0,
+			admissionDone: admission.promise,
+			finishAdmission: admission.resolve,
+			admissionController,
+			cancellationDone: Promise.withResolvers(),
+			cancelStartedIdle: false,
+			settlementStarted: false,
+			outputError: void 0,
+			agentError: void 0
+		};
+		this.inflight = inflight;
+		const onRequestAbort = () => {
+			this.cancelPrompt("ACP prompt request cancelled");
+		};
+		requestSignal?.addEventListener("abort", onRequestAbort, { once: true });
+		/* v8 ignore next -- the SDK dispatches a live signal, then notifies abort through its listener. */
+		if (requestSignal?.aborted === true) onRequestAbort();
+		try {
+			let admissionFailure;
+			const promptSelection = this.agent.model.current();
+			try {
+				if (this.ctx.agents.get(this.agent.id) !== this.agent) throw internalError$1("prompt was not queued: the agent was disposed outside the bridge");
+				const content = await admitAcpPrompt(this.ctx, promptSelection, params.prompt, imageEnabled, admissionController.signal);
+				admissionController.signal.throwIfAborted();
+				if (this.ctx.agents.get(this.agent.id) !== this.agent) throw internalError$1("prompt was not queued: the agent was disposed outside the bridge");
+				const message = createUserMessage({
+					content,
+					source: { kind: "user" }
+				});
+				inflight.messageId = message.id;
+				inflight.messageQueued = true;
+				try {
+					this.agent.followup(message);
+				} catch (error) {
+					inflight.messageQueued = false;
+					throw error;
+				}
+			} catch (error) {
+				admissionFailure = error;
+			} finally {
+				inflight.finishAdmission();
+			}
+			if (inflight.admissionController.signal.aborted) {
+				this.settleAfterQuiescence(inflight);
+				return { stopReason: await completion.promise };
+			}
+			if (admissionFailure !== void 0) {
+				this.inflight = void 0;
+				if (admissionFailure instanceof AcpContentError) throw admissionFailure.kind === "invalid" ? invalidParams$1(admissionFailure.message) : internalError$1(admissionFailure.message);
+				if (admissionFailure instanceof RequestError) throw admissionFailure;
+				throw internalError$1(`prompt was not queued: ${admissionFailure.message}`);
+			}
+			this.settleAfterQuiescence(inflight);
+			return { stopReason: await completion.promise };
+		} finally {
+			requestSignal?.removeEventListener("abort", onRequestAbort);
+		}
+	}
+	/** Cancel the active prompt, or autonomous work when no ACP prompt exists. */
+	cancel() {
+		const inflight = this.inflight;
+		this.cancelPrompt("ACP prompt cancelled");
+		if (inflight === void 0) this.agent.cancel({ kind: "user" });
+	}
+	/**
+	* Process one durable event and enqueue its standard ACP projections.
+	* @param session - exact event-owning Session.
+	* @param event - committed durable event.
+	*/
+	onSessionEvent(session, event) {
+		if (event.type === "turn/start" && this.inflight?.turn !== void 0) {
+			this.inflight.turn = event.data.turn;
+			this.inflight.endReason = void 0;
+		}
+		try {
+			if (event.type === "assistant/message") {
+				const inflight = this.inflight?.turn === event.data.turn ? this.inflight : void 0;
+				const delivery = this.outputTail.then(async () => {
+					for (const update of await assistantUpdates(this.ctx, session, event)) await this.notify({
+						sessionId: this.agent.session.id,
+						update
+					});
+				});
+				this.outputTail = delivery.catch((error) => {
+					const failure = error;
+					if (inflight !== void 0) inflight.outputError ??= failure;
+					this.ctx.logger.warn(`acp: assistant output conversion failed: ${errorChain(error)}`);
+				});
+			} else if (event.type === "tool/call") {
+				const previous = this.outputTail;
+				this.outputTail = previous.then(() => this.notify({
+					sessionId: this.agent.session.id,
+					update: toolCallUpdate(event)
+				})).catch((error) => {
+					this.ctx.logger.warn(`acp: tool-call update delivery failed: ${errorChain(error)}`);
+				});
+			} else if (event.type === "tool/result") {
+				const previous = this.outputTail;
+				this.outputTail = previous.then(async () => this.notify({
+					sessionId: this.agent.session.id,
+					update: await toolResultUpdate(this.ctx, event)
+				})).catch((error) => {
+					this.ctx.logger.warn(`acp: tool-result update delivery failed: ${errorChain(error)}`);
+				});
+			}
+		} finally {
+			const inflight = this.inflight;
+			if (inflight !== void 0 && event.type === "turn/end" && inflight.turn === event.data.turn) {
+				inflight.endReason = event.data.reason;
+				inflight.agentError = void 0;
+			}
+		}
+	}
+	/**
+	* Correlate an accepted user message with its Agent turn.
+	* @param message - claimed durable inbox message.
+	* @param turn - allocated Agent turn.
+	*/
+	onInboxClaimed(message, turn) {
+		if (this.inflight !== void 0 && this.inflight.messageId === message.id) this.inflight.turn = turn;
+	}
+	/**
+	* Correlate an Agent interval failure with the active ACP prompt.
+	* @param error - original same-process failure.
+	*/
+	onAgentError(error) {
+		const inflight = this.inflight;
+		if (inflight === void 0 || !inflight.messageQueued) return;
+		inflight.agentError = new Error(errorChain(error));
+		this.settleAfterQuiescence(inflight);
+	}
+	/**
+	* Complete cancelled activity without following a later root driver.
+	* @param status - the emitted transition, which may precede a reentrant wake.
+	*/
+	onAgentStatus(status) {
+		const inflight = this.inflight;
+		if (inflight === void 0 || !inflight.messageQueued || !inflight.admissionController.signal.aborted) return;
+		if (status === "idle" || inflight.cancelStartedIdle) inflight.cancellationDone.resolve(this.outputTail);
+	}
+	/** Await every update queued before this call. */
+	drainUpdates() {
+		return this.outputTail;
+	}
+	/**
+	* Cancel, drain, flush, and dispose this session once.
+	* @param detail - cancellation detail for any prompt still in admission.
+	* @returns the shared quiescent teardown promise.
+	*/
+	close(detail) {
+		if (this.closing !== void 0) return this.closing;
+		this.closing = (async () => {
+			const failures = [];
+			const inflight = this.inflight;
+			this.cancelPrompt(detail);
+			if (inflight === void 0 || !inflight.messageQueued) this.agent.cancel({ kind: "user" });
+			try {
+				await inflight?.admissionDone;
+				await this.agent.whenIdle();
+				await this.outputTail;
+			} catch (error) {
+				failures.push(new Error("ACP session activity drain failed", { cause: error }));
+			}
+			const subagents = this.ctx.get("subagents");
+			try {
+				await subagents?.drainDescendants([this.agent]);
+			} catch (error) {
+				this.ctx.logger.warn(`acp: subagent teardown failed: ${errorChain(error)}`);
+				failures.push(new Error("subagent teardown failed", { cause: error }));
+			}
+			try {
+				await this.ctx.sessions.flush(this.agent.session);
+			} catch (error) {
+				failures.push(new Error("ACP session persistence flush failed", { cause: error }));
+			}
+			try {
+				await this.disposeAgent();
+			} catch (error) {
+				failures.push(error);
+			}
+			if (failures.length === 1) throw failures[0];
+			/* v8 ignore start -- independent teardown failures can aggregate only under multiple simultaneous provider faults. */
+			if (failures.length > 1) throw new AggregateError(failures, `ACP session teardown failed: ${failures.map(errorChain).join("; ")}`);
+			/* v8 ignore stop */
+		})();
+		return this.closing;
+	}
+	assertActive() {
+		if (this.closing !== void 0) throw invalidParams$1(`session is closing: ${this.agent.session.id}`);
+	}
+	cancelPrompt(detail) {
+		const inflight = this.inflight;
+		if (inflight === void 0) return;
+		const firstCancellation = !inflight.admissionController.signal.aborted;
+		if (firstCancellation) inflight.cancelStartedIdle = this.agent.status === "idle";
+		inflight.admissionController.abort(new Error(detail));
+		this.settleAfterQuiescence(inflight);
+		if (!inflight.messageQueued) {
+			inflight.cancellationDone.resolve();
+			return;
+		}
+		this.agent.cancel({ kind: "user" });
+		if (firstCancellation) {
+			const done = inflight.cancellationDone;
+			this.agent.whenIdle().then(() => {
+				done.resolve(this.outputTail);
+			}, done.reject);
+		}
+	}
+	settleAfterQuiescence(inflight) {
+		if (inflight.settlementStarted) return;
+		inflight.settlementStarted = true;
+		(async () => {
+			await inflight.admissionDone;
+			if (inflight.messageQueued) {
+				const subagents = this.ctx.get("subagents");
+				const cancelled = inflight.cancellationDone.promise;
+				const isCancelled = () => inflight.admissionController.signal.aborted;
+				const idleAt = (seq) => this.agent.status === "idle" && this.agent.session.seq === seq;
+				while (true) {
+					await Promise.race([this.agent.whenIdle(), cancelled]);
+					if (isCancelled()) break;
+					const idleSeq = this.agent.session.seq;
+					const children = await Promise.race([subagents?.waitForChildren(this.agent), cancelled]);
+					if (isCancelled()) break;
+					if (children || !idleAt(idleSeq)) continue;
+					await this.outputTail;
+					if (isCancelled() || idleAt(idleSeq)) break;
+				}
+				if (isCancelled()) await cancelled;
+			}
+			/* v8 ignore next -- this prompt owns the slot until this exact settlement clears it. */
+			if (this.inflight !== inflight) return;
+			this.inflight = void 0;
+			if (inflight.admissionController.signal.aborted) {
+				inflight.resolve("cancelled");
+				return;
+			}
+			if (inflight.outputError !== void 0) {
+				inflight.reject(internalError$1(`assistant output delivery failed: ${inflight.outputError.message}`));
+				return;
+			}
+			if (inflight.agentError !== void 0) {
+				inflight.reject(internalError$1(`turn failed: ${inflight.agentError.message}`));
+				return;
+			}
+			const end = inflight.endReason;
+			if (end === void 0) inflight.resolve("cancelled");
+			else if (end.kind === "error") inflight.reject(internalError$1(`turn failed: ${end.error.message}`));
+			else inflight.resolve(turnEndToStopReason(end));
+		})().catch((error) => {
+			if (this.inflight !== inflight) return;
+			this.inflight = void 0;
+			inflight.reject(internalError$1(`prompt settlement failed: ${errorChain(error)}`));
+		});
+		/* v8 ignore stop */
+	}
+};
+const implementation = {
+async newSession(params, signal) {
+			assertOpen();
+			validateWorkspaceParams(params);
+			const sessionId = brandString(randomUUID());
+			let record;
+			try {
+				record = await AcpSession.create(ctx, {
+					sessionId,
+					cwd: params.cwd,
+					mcpServers: params.mcpServers,
+					agentOptions: agentOptions(config),
+					signal,
+					notify
+				});
+			} catch (error) {
+				if (error instanceof AcpMcpConfigError) throw invalidParams(error.message);
+				throw error;
+			}
+			/* v8 ignore next 4 -- a real stdio close can race an in-flight create. */
+			if (closed) {
+				await record.close("connection closed during session/new");
+				throw internalError("connection closed during session/new");
+			}
+			sessions.set(sessionId, record);
+			try {
+				const configOptions = await record.configOptions(signal);
+				assertOpen();
+				await ctx.sessions.flush(record.agent.session);
+				assertOpen();
+				return {
+					sessionId,
+					configOptions
+				};
+			} catch (error) {
+				sessions.delete(sessionId);
+				await record.close("session/new activation failed");
+				throw error;
+			}
+		},
+async resumeSession(params, signal) {
+			assertOpen();
+			validateWorkspaceParams(params);
+			const sessionId = brandString(params.sessionId);
+			if (sessions.has(sessionId) || activating.has(sessionId) || ctx.sessions.get(sessionId) !== void 0) throw invalidParams(`session is already active: ${sessionId}`);
+			activating.add(sessionId);
+			return (async () => {
+				const persisted = (await persistence.stat(sessionId, { signal }))?.header;
+				if (persisted === void 0 || persisted.origin === "subagent") throw invalidParams(`session is not resumable: ${sessionId}`);
+				if (!await sameDirectory(persisted.cwd, params.cwd)) throw invalidParams(`session cwd does not match: ${params.cwd}`);
+				let record;
+				try {
+					record = await AcpSession.resume(ctx, {
+						sessionId,
+						cwd: params.cwd,
+						mcpServers: params.mcpServers ?? [],
+						agentOptions: agentOptions(config),
+						signal,
+						notify
+					});
+				} catch (error) {
+					if (error instanceof AcpMcpConfigError) throw invalidParams(error.message);
+					throw error;
+				}
+				/* v8 ignore start -- the persisted header was checked before resume; the factory restores that exact header. */
+				if (!await sameDirectory(record.agent.session.header.cwd, params.cwd)) {
+					await record.close("session/resume cwd mismatch");
+					throw invalidParams(`session cwd does not match: ${params.cwd}`);
+				}
+				/* v8 ignore stop */
+				/* v8 ignore next 4 -- a real stdio close can race an in-flight resume. */
+				if (closed) {
+					await record.close("connection closed during session/resume");
+					throw internalError("connection closed during session/resume");
+				}
+				sessions.set(sessionId, record);
+				try {
+					return { configOptions: await record.configOptions(signal) };
+				} catch (error) {
+					sessions.delete(sessionId);
+					await record.close("session/resume option discovery failed");
+					throw error;
+				}
+			})().finally(() => {
+				activating.delete(sessionId);
+			});
+		}
+};

@@ -76,11 +76,11 @@ const verbatimOptions = computed(() =>
 </template>
 
 <style scoped lang="scss">
-// --- 评估报告（自 SpeechEvaluationPanel 原样搬出） ---
+/* --- 评估报告（自 SpeechEvaluationPanel 原样搬出） ---*/
 .report-generate-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .report-generate-row .n-button { flex: 1; }
-.report-error { font-size: 12px; color: #d03050; padding: 6px 8px; background: rgba(208, 48, 80, 0.08); border-radius: 6px; }
-.report-loading { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--n-text-color3, #888); }
+.report-error { font-size: 12px; color: var(--error); padding: 6px 8px; background: rgba(var(--error-rgb), 0.08); border-radius: 6px; }
+.report-loading { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--n-text-color3, var(--text-primary)); }
 .report-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .report-content { font-size: 13px; line-height: 1.6; }
 </style>

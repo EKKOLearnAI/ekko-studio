@@ -3,9 +3,11 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import { formatChatTimestamp } from '@/utils/chat-timestamp'
-import type { ChatMessage, MemberInfo, RoomAgent } from '@/api/hermes/group-chat'
+import type { ChatMessage, MemberInfo, RoomAgent } from '@/api/studio/group-chat'
 import { groupMessageAgent, parseStoredAvatar } from '@/utils/group-agent-avatar'
 import GroupMessageItem from './GroupMessageItem.vue'
+import ToolRunSummary from '../chat/ToolRunSummary.vue'
+import RunUsageCard from '../chat/RunUsageCard.vue'
 import GroupAgentMessageAvatar from './GroupAgentMessageAvatar.vue'
 import GroupAgentRobotIcon from './GroupAgentRobotIcon.vue'
 
@@ -32,11 +34,15 @@ const items = computed(() =>
 const runToolItems = computed(() =>
     items.value.filter(item => item.role === 'tool').reverse()
 )
+const toolsActive = computed(() => !!props.message.isStreaming || runToolItems.value.some(item => item.toolStatus === 'running'))
 const transcriptItems = computed(() =>
-    runToolItems.value.length > 0
-        ? items.value.filter(item => item.role !== 'tool')
-        : items.value
+    items.value.filter(item => !item.runUsage && (runToolItems.value.length === 0 || item.role !== 'tool'))
 )
+const runUsage = computed(() => [...items.value].reverse().find(item => item.runUsage)?.runUsage)
+const runUsageMessageId = computed(() => {
+    const replies = transcriptItems.value.filter(item => item.role === 'assistant' && !item.taskPlan)
+    return replies.find(item => item.id === runUsage.value?.assistantMessageId)?.id || replies.at(-1)?.id
+})
 const stableAgentId = computed(() =>
     props.message.senderAgentRecordId || props.message.senderId
 )
@@ -48,6 +54,7 @@ const activeAgentInfo = computed(() => props.agents.find(agent =>
     )
 ))
 const agentInfo = computed(() => groupMessageAgent(props.message, props.agents))
+const isAssistantMessage = computed(() => Boolean(agentInfo.value) || props.message.role === 'agent_run')
 const memberInfo = computed(() => {
     if (agentInfo.value) return null
     return props.members?.find(member =>
@@ -104,33 +111,48 @@ function handleToolListWheel(event: WheelEvent): void {
                 <span class="run-agent-name">{{ message.senderName }}</span>
                 <GroupAgentRobotIcon v-if="agentInfo" class="run-agent-icon" />
             </div>
-            <div class="run-card" :class="{ streaming: message.isStreaming }">
-                <div
+            <div
+                v-if="transcriptItems.length || runToolItems.length || (runUsage && !message.isStreaming)"
+                class="run-card group-run-bubble"
+                :class="{
+                    streaming: message.isStreaming,
+                    'group-run-bubble--assistant': isAssistantMessage,
+                    'group-run-bubble--user': !isAssistantMessage,
+                }"
+            >
+                <ToolRunSummary
                     v-if="runToolItems.length"
-                    class="run-tool-list"
-                    tabindex="0"
-                    role="region"
-                    :aria-label="t('chat.showToolCalls')"
-                    :data-agent-id="stableAgentId"
-                    :data-run-id="message.run_id || undefined"
-                    @wheel="handleToolListWheel"
+                    class="run-tools"
+                    :run-id="message.run_id || message.id"
+                    :tools="runToolItems"
+                    :active="toolsActive"
                 >
                     <div
-                        v-for="item in runToolItems"
-                        :key="item.id"
-                        class="run-tool-item"
-                        :data-message-id="item.id"
+                        class="run-tool-list"
+                        tabindex="0"
+                        role="region"
+                        :aria-label="t('chat.showToolCalls')"
+                        :data-agent-id="stableAgentId"
+                        :data-run-id="message.run_id || undefined"
+                        @wheel="handleToolListWheel"
                     >
-                        <GroupMessageItem
-                            :message="item"
-                            :agents="agents"
-                            :members="members"
-                            :current-user-id="currentUserId"
-                            :allow-speech="props.allowSpeech"
-                            embedded
-                        />
+                        <div
+                            v-for="item in runToolItems"
+                            :key="item.id"
+                            class="run-tool-item"
+                            :data-message-id="item.id"
+                        >
+                            <GroupMessageItem
+                                :message="item"
+                                :agents="agents"
+                                :members="members"
+                                :current-user-id="currentUserId"
+                                :allow-speech="props.allowSpeech"
+                                embedded
+                            />
+                        </div>
                     </div>
-                </div>
+                </ToolRunSummary>
                 <div v-if="transcriptItems.length" class="run-transcript">
                     <div
                         v-for="item in transcriptItems"
@@ -145,8 +167,15 @@ function handleToolListWheel(event: WheelEvent): void {
                             :current-user-id="currentUserId"
                             :allow-speech="props.allowSpeech"
                             embedded
-                        />
+                        >
+                            <template v-if="runUsage && !message.isStreaming && item.id === runUsageMessageId" #before-workspace-changes>
+                                <RunUsageCard :usage="runUsage" />
+                            </template>
+                        </GroupMessageItem>
                     </div>
+                </div>
+                <div v-if="runUsage && !message.isStreaming && !runUsageMessageId" class="run-usage-only">
+                    <RunUsageCard :usage="runUsage" />
                 </div>
             </div>
             <span class="run-time">{{ timeText }}</span>
@@ -162,7 +191,7 @@ function handleToolListWheel(event: WheelEvent): void {
     align-items: flex-start;
     min-width: 0;
     max-width: 100%;
-    padding: 2px 0;
+    padding: calc(2px * var(--spacing-scale, 1)) 0;
     box-sizing: border-box;
 }
 
@@ -249,7 +278,7 @@ function handleToolListWheel(event: WheelEvent): void {
 .run-column {
     display: flex;
     flex-direction: column;
-    min-width: min(260px, 85%);
+    min-width: min(500px, 100%);
     width: fit-content;
     max-width: min(85%, 920px);
 }
@@ -257,11 +286,11 @@ function handleToolListWheel(event: WheelEvent): void {
 .run-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding-bottom: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding-bottom: calc(6px * var(--spacing-scale, 1));
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 22px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 22 / 14));
 }
 
 .run-agent-name {
@@ -287,14 +316,20 @@ function handleToolListWheel(event: WheelEvent): void {
     overflow: visible;
     box-sizing: border-box;
     border: none;
-    border-radius: 10px;
+    border-radius: var(--radius-component, 10px);
     background: rgba(var(--accent-primary-rgb), 0.055);
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.035);
 
     > :deep(.group-message + .group-message),
     .run-transcript-item + .run-transcript-item {
-        border-top: 1px solid rgba(var(--text-primary-rgb), 0.08);
+        border-top: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.08);
     }
+}
+
+.run-tools {
+    box-sizing: border-box;
+    width: 100%;
+    padding: calc(6px * var(--spacing-scale, 1));
 }
 
 .run-tool-list {
@@ -309,11 +344,11 @@ function handleToolListWheel(event: WheelEvent): void {
     &:focus-visible {
         outline: 2px solid rgba(var(--accent-primary-rgb), 0.45);
         outline-offset: -2px;
-        border-radius: 10px;
+        border-radius: var(--radius-component, 10px);
     }
 
     .run-tool-item + .run-tool-item {
-        border-top: 1px solid rgba(var(--text-primary-rgb), 0.08);
+        border-top: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.08);
     }
 }
 
@@ -323,30 +358,35 @@ function handleToolListWheel(event: WheelEvent): void {
     min-width: 0;
 }
 
-.run-tool-list + .run-transcript {
-    border-top: 1px solid rgba(var(--text-primary-rgb), 0.08);
+.run-tools + .run-transcript {
+    border-top: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.08);
 }
 
 .run-time {
     align-self: flex-start;
-    padding: 3px 4px 0;
+    padding: calc(3px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) 0;
     color: var(--text-muted);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     opacity: 0.6;
     user-select: none;
 }
 
-:global(html.theme-has-custom-background .run-card) {
-    background: rgba(var(--bg-main-surface-rgb), 0.78);
-    -webkit-backdrop-filter: blur(8px) saturate(110%);
-    backdrop-filter: blur(8px) saturate(110%);
+.run-usage-only {
+    min-width: 0;
+    padding: 0 calc(14px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
 }
 
-@media (max-width: 768px) {
+:global(html.theme-has-custom-background .group-run-bubble) {
+    background: var(--message-theme-bg, rgba(var(--bg-main-surface-rgb), 0.78));
+    -webkit-backdrop-filter: var(--message-theme-filter, blur(8px) saturate(110%));
+    backdrop-filter: var(--message-theme-filter, blur(8px) saturate(110%));
+}
+
+@media (max-width: $breakpoint-mobile) {
     .run-column {
-        min-width: min(260px, calc(100% - 46px));
-        width: fit-content;
-        max-width: calc(100% - 46px);
+        min-width: 0;
+        width: 100%;
+        max-width: 100%;
     }
 }
 </style>

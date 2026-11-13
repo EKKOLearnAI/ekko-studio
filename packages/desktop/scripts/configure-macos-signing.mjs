@@ -100,6 +100,13 @@ function userKeychains() {
 
 async function configureSigning() {
   const certificateLink = process.env.MAC_CSC_LINK?.trim()
+  if (process.argv.includes('--require-signed')) {
+    const required = ['MAC_CSC_LINK', 'MAC_APPLE_ID', 'MAC_APPLE_APP_SPECIFIC_PASSWORD', 'MAC_APPLE_TEAM_ID']
+    const missing = required.filter(key => !process.env[key]?.trim())
+    if (missing.length) {
+      throw new Error(`Signed update testing requires signing and notarization secrets: ${missing.join(', ')}`)
+    }
+  }
   if (!certificateLink) {
     appendGitHubEnv('CSC_IDENTITY_AUTO_DISCOVERY', 'false')
     appendGitHubEnv('MAC_BUILD_EXTRA_ARGS', '--config.mac.notarize=false')

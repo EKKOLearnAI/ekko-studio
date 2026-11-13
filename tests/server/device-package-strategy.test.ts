@@ -5,7 +5,7 @@ import type { AddressInfo } from 'net'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { UpdateError } from '../../packages/server/src/services/update/errors'
+import { UpdateError } from '../../packages/server/src/modules/studio/services/update/errors'
 import {
   assertDevicePackageCompatibility,
   assertInstallerScriptCompatible,
@@ -14,8 +14,8 @@ import {
   buildDevicePackageReconcileCommand,
   buildDevicePackageReconcileEnv,
   downloadAndVerifyDevicePackage,
-} from '../../packages/server/src/services/update/strategies/device-package'
-import type { DevicePackageManifest, UpdateConfig } from '../../packages/server/src/services/update/types'
+} from '../../packages/server/src/modules/studio/services/update/strategies/device-package'
+import type { DevicePackageManifest, UpdateConfig } from '../../packages/server/src/modules/studio/services/update/types'
 
 function createUpdateConfig(overrides: Partial<UpdateConfig> = {}): UpdateConfig {
   return {

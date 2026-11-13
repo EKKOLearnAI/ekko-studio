@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const tempDirs: string[] = []
 const originalHermesHome = process.env.HERMES_HOME
@@ -20,6 +20,11 @@ async function writeSkill(skillDir: string, frontmatter: string, body: string): 
   await writeFile(join(skillDir, 'SKILL.md'), `---\n${frontmatter}---\n\n${body}\n`, 'utf-8')
 }
 
+beforeEach(async () => {
+  await import('../../packages/server/src/bootstrap/agent-profile-adapter')
+  await import('../../packages/server/src/bootstrap/meeting-runtime-adapter')
+})
+
 afterEach(async () => {
   vi.resetModules()
   if (originalHermesHome === undefined) delete process.env.HERMES_HOME
@@ -31,7 +36,7 @@ afterEach(async () => {
 
 describe('meeting skill-resolver', () => {
   it('buildSkillInstructionsSection returns empty for no skills and joins bodies otherwise', async () => {
-    const { buildSkillInstructionsSection } = await import('../../packages/server/src/services/meeting-asr/skill-resolver')
+    const { buildSkillInstructionsSection } = await import('../../packages/server/src/modules/studio/services/meeting-asr/skill-resolver')
 
     expect(buildSkillInstructionsSection([])).toBe('')
 
@@ -58,7 +63,7 @@ describe('meeting skill-resolver', () => {
     // 禁用 custom-meeting-notes
     await writeFile(join(hermesHome, 'config.yaml'), 'skills:\n  disabled:\n    - custom-meeting-notes\n', 'utf-8')
 
-    const { loadAnalysisSkills } = await import('../../packages/server/src/services/meeting-asr/skill-resolver')
+    const { loadAnalysisSkills } = await import('../../packages/server/src/modules/studio/services/meeting-asr/skill-resolver')
     const skills = await loadAnalysisSkills('default')
 
     expect(skills.map(s => s.name)).toEqual(['meeting-analysis'])
@@ -73,7 +78,7 @@ describe('meeting skill-resolver', () => {
 
     await writeSkill(join(source, 'meeting-analysis'), 'name: meeting-analysis\ntags: [meeting]\n', '内置技能正文')
 
-    const { ensureMeetingAnalysisSkill } = await import('../../packages/server/src/services/meeting-asr/skill-resolver')
+    const { ensureMeetingAnalysisSkill } = await import('../../packages/server/src/modules/studio/services/meeting-asr/skill-resolver')
     await ensureMeetingAnalysisSkill('default')
 
     const installed = join(hermesHome, 'skills', 'meeting-analysis', 'SKILL.md')
@@ -89,7 +94,7 @@ describe('meeting skill-resolver', () => {
 
     await writeSkill(join(source, 'meeting-analysis'), 'name: meeting-analysis\ntags: [meeting]\n', '报告结构方法论')
 
-    const { prepareAnalysisSkillSection } = await import('../../packages/server/src/services/meeting-asr/skill-resolver')
+    const { prepareAnalysisSkillSection } = await import('../../packages/server/src/modules/studio/services/meeting-asr/skill-resolver')
     const section = await prepareAnalysisSkillSection('default')
 
     expect(section).toContain('分析技能')
@@ -105,7 +110,7 @@ describe('meeting skill-resolver', () => {
     await mkdir(join(hermesHome, 'profiles', 'alpha'), { recursive: true })
     await writeSkill(join(source, 'meeting-analysis'), 'name: meeting-analysis\ntags: [meeting]\n', '命名 profile 技能')
 
-    const { prepareAnalysisSkillSection } = await import('../../packages/server/src/services/meeting-asr/skill-resolver')
+    const { prepareAnalysisSkillSection } = await import('../../packages/server/src/modules/studio/services/meeting-asr/skill-resolver')
     const section = await prepareAnalysisSkillSection('alpha')
 
     expect(section).toContain('命名 profile 技能')

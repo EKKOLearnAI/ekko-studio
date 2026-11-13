@@ -1,31 +1,60 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onUnmounted, ref } from 'vue'
-import yaml from 'js-yaml'
-import { NAlert, NButton, NEmpty, NInput, NModal, NSpin, NRadioGroup, NRadioButton, NCheckbox, NScrollbar } from 'naive-ui'
+import {
+  NAlert, NButton, NEmpty, NInput, NModal,
+  NRadioGroup, NRadioButton, useMessage,
+  NCheckbox, NScrollbar,
+} from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import McpServerCard from '@/components/hermes/mcp/McpServerCard.vue'
+import { useMcpConfigInput } from '@/composables/useMcpConfigInput'
 import {
   fetchMcpServers, fetchMcpTools, mcpServerAdd, mcpServerRemove,
   mcpServerUpdate, mcpServerTest, mcpReload,
   type McpServerInfo, type McpServerConfig,
 } from '@/api/hermes/mcp'
-import { useMessage } from '@/composables/useAppMessage'
 
 const { t } = useI18n()
 const message = useMessage()
 
 const servers = ref<McpServerInfo[]>([])
-const loading = ref(false)
+const loading = ref(true)
 const error = ref('')
 const searchQuery = ref('')
 
 const showModal = ref(false)
 const modalMode = ref<'add' | 'edit'>('add')
 const editingName = ref('')
-const jsonText = ref('')
-const jsonError = ref('')
 const saving = ref(false)
-const inputMode = ref<'json' | 'yaml'>('json')
+
+const {
+  inputMode,
+  configText: jsonText,
+  configError: jsonError,
+  clearFormatTimer,
+  handleInput,
+  handleModeChange,
+  parseAndValidate,
+  setConfigText,
+} = useMcpConfigInput({
+  messages: {
+    invalidJson: () => t('mcp.invalidJson'),
+    invalidYaml: detail => detail ? `${t('mcp.invalidYaml')}: ${detail}` : t('mcp.invalidYaml'),
+    invalidConfig: () => t('mcp.invalidConfig'),
+  },
+  validateServer(name, config) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return `${name}: ${t('mcp.invalidServerConfig')}`
+    }
+    const serverConfig = config as Record<string, unknown>
+    if (!serverConfig.command && !serverConfig.url) {
+      return `${name}: ${t('mcp.missingCommandOrUrl')}`
+    }
+    return null
+  },
+})
 
 // Tools visibility modal
 const showToolsModal = ref(false)
@@ -40,7 +69,6 @@ const yamlPlaceholder = 'my-server:\n  command: npx\n  args:\n    - "-y"\n    - 
 
 const placeholder = computed(() => inputMode.value === 'json' ? jsonPlaceholder : yamlPlaceholder)
 
-let formatTimer: ReturnType<typeof setTimeout> | null = null
 let _pendingReload: ReturnType<typeof setTimeout> | null = null
 let _autoRetryCount = 0
 const MAX_AUTO_RETRIES = 5
@@ -52,127 +80,8 @@ function scheduleReload(delay = 3000) {
 }
 
 onUnmounted(() => {
-  if (formatTimer) { clearTimeout(formatTimer); formatTimer = null }
   if (_pendingReload) { clearTimeout(_pendingReload); _pendingReload = null }
 })
-
-function handleInput(text: string) {
-  if (formatTimer) clearTimeout(formatTimer)
-  if (!text.trim()) {
-    jsonError.value = ''
-    return
-  }
-  const { data, error: parseErr } = parseConfig(text)
-  if (parseErr) {
-    jsonError.value = parseErr
-    return
-  }
-  const { servers: extracted, error: extractErr } = extractServers(data)
-  if (extractErr) {
-    jsonError.value = extractErr
-    return
-  }
-  jsonError.value = ''
-  formatTimer = setTimeout(() => {
-    const formatted = inputMode.value === 'json'
-      ? JSON.stringify(extracted, null, 2)
-      : yaml.dump(extracted, { indent: 2, lineWidth: -1 }).trimEnd()
-    if (formatted !== text) jsonText.value = formatted
-  }, 1500)
-}
-
-function handleModeChange(mode: 'json' | 'yaml') {
-  if (!jsonText.value.trim()) return
-  // Try to parse current content in old format
-  const oldMode = mode === 'json' ? 'yaml' : 'json'
-  let data: Record<string, unknown> | null = null
-  try {
-    if (oldMode === 'json') {
-      data = JSON.parse(jsonText.value)
-    } else {
-      data = yaml.load(jsonText.value, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>
-    }
-  } catch {
-    // If parse fails, try the new format
-    try {
-      if (mode === 'json') {
-        data = JSON.parse(jsonText.value)
-      } else {
-        data = yaml.load(jsonText.value, { schema: yaml.JSON_SCHEMA }) as Record<string, unknown>
-      }
-    } catch {
-      return
-    }
-  }
-  if (!data || typeof data !== 'object') return
-  // Convert to new format
-  if (mode === 'json') {
-    jsonText.value = JSON.stringify(data, null, 2)
-  } else {
-    jsonText.value = yaml.dump(data, { indent: 2, lineWidth: -1 }).trimEnd()
-  }
-  jsonError.value = ''
-}
-
-function parseConfig(text: string): { data: Record<string, unknown> | null; error: string } {
-  if (inputMode.value === 'json') {
-    try {
-      const obj = JSON.parse(text)
-      if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-        return { data: null, error: t('mcp.invalidJson') }
-      }
-      return { data: obj, error: '' }
-    } catch {
-      return { data: null, error: t('mcp.invalidJson') }
-    }
-  } else {
-    try {
-      const obj = yaml.load(text, { schema: yaml.JSON_SCHEMA })
-      if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-        return { data: null, error: t('mcp.invalidYaml') }
-      }
-      return { data: obj as Record<string, unknown>, error: '' }
-    } catch (e: any) {
-      return { data: null, error: `${t('mcp.invalidYaml')}: ${e.message || ''}` }
-    }
-  }
-}
-
-function extractServers(data: Record<string, unknown> | null): { servers: Record<string, unknown>; error: string } {
-  if (!data) return { servers: {}, error: t('mcp.invalidConfig') }
-  // Unwrap mcpServers/mcp_servers wrapper
-  if (data.mcpServers && typeof data.mcpServers === 'object' && !data.command) {
-    return { servers: data.mcpServers as Record<string, unknown>, error: '' }
-  }
-  if (data.mcp_servers && typeof data.mcp_servers === 'object' && !data.command) {
-    return { servers: data.mcp_servers as Record<string, unknown>, error: '' }
-  }
-  return { servers: data, error: '' }
-}
-
-function validateServerConfig(name: string, config: unknown): string | null {
-  if (typeof config !== 'object' || config === null) {
-    return `${name}: ${t('mcp.invalidServerConfig')}`
-  }
-  const cfg = config as Record<string, unknown>
-  if (!cfg.command && !cfg.url) {
-    return `${name}: ${t('mcp.missingCommandOrUrl')}`
-  }
-  return null
-}
-
-function parseAndValidate(text: string): { servers: Record<string, unknown>; error: string } {
-  const { data, error: parseErr } = parseConfig(text)
-  if (parseErr) return { servers: {}, error: parseErr }
-  const { servers, error: extractErr } = extractServers(data)
-  if (extractErr) return { servers: {}, error: extractErr }
-  // Validate each server has command or url
-  for (const [name, config] of Object.entries(servers)) {
-    const err = validateServerConfig(name, config)
-    if (err) return { servers: {}, error: err }
-  }
-  return { servers, error: '' }
-}
 
 const toolsByServer = ref<Record<string, {name: string, description: string}[]>>({})
 
@@ -259,15 +168,12 @@ function openEditModal(server: McpServerInfo) {
   modalMode.value = 'edit'
   editingName.value = server.name
   const serverConfig = { [server.name]: server.raw_config }
-  jsonText.value = inputMode.value === 'yaml'
-    ? yaml.dump(serverConfig, { indent: 2, lineWidth: -1 }).trimEnd()
-    : JSON.stringify(serverConfig, null, 2)
-  jsonError.value = ''
+  setConfigText(serverConfig)
   showModal.value = true
 }
 
 async function saveServer() {
-  if (formatTimer) { clearTimeout(formatTimer); formatTimer = null }
+  clearFormatTimer()
   const { servers: parsed, error: validationErr } = parseAndValidate(jsonText.value)
   if (validationErr) {
     jsonError.value = validationErr
@@ -484,7 +390,8 @@ async function saveToolsVisibility() {
 </script>
 
 <template>
-  <div class="mcp-view">
+  <PageLoading :show="loading && servers.length === 0" class="mcp-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t('mcp.title') }}</h2>
       <div class="header-actions">
@@ -493,10 +400,11 @@ async function saveToolsVisibility() {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="mcp-content" :class="{ 'is-loading': loading && servers.length === 0 }">
       <div v-if="loading && servers.length === 0" class="mcp-loading-state">
-        <NSpin />
+
       </div>
       <template v-else>
         <NAlert v-if="error" type="error" class="mcp-notice">
@@ -643,201 +551,56 @@ async function saveToolsVisibility() {
         </div>
       </div>
     </NModal>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
+@use '@/styles/mcp-manager' as mcp-manager;
 
-.mcp-view {
-  height: calc(100 * var(--vh));
-  display: flex;
-  flex-direction: column;
-}
-
-.mcp-content {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 20px;
-
-  &.is-loading {
-    display: grid;
-    place-items: center;
-  }
-}
-
-.mcp-loading-state {
-  display: grid;
-  place-items: center;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 80px;
-  justify-content: flex-end;
-}
-
-.mcp-notice {
-  margin-bottom: 14px;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.summary-card {
-  padding: 14px;
-  border: 1px solid $border-color;
-  border-radius: $radius-md;
-  background: $bg-card;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-
-  strong {
-    font-size: 24px;
-    line-height: 1;
-  }
-
-  &.success strong { color: $success; }
-  &.warning strong { color: $warning; }
-  &.error strong { color: $error; }
-  &.info strong { color: $accent-primary; }
-}
-
-.summary-label {
-  font-size: 11px;
-  color: $text-muted;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.toolbar-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-
-  .search-input {
-    flex: 1;
-    min-width: 0;
-    max-width: 360px;
-  }
-}
-
-.btn-group {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 1;
-  min-width: 0;
-
-  .n-button {
-    flex: 1;
-    white-space: nowrap;
-  }
-}
-
-.servers-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
-  gap: 14px;
-}
-
-.mode-switch-row {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 8px;
-}
-
-.config-textarea {
-  font-family: monospace;
-  font-size: 13px;
-}
-
-.config-error {
-  color: var(--n-error-color);
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 16px;
-}
-
-@media (max-width: $breakpoint-mobile) {
-  .summary-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .toolbar-row {
-    flex-direction: column;
-    align-items: stretch;
-
-    .search-input {
-      max-width: none;
-    }
-
-    .btn-group {
-      width: 100%;
-    }
-  }
-
-  .servers-grid {
-    grid-template-columns: 1fr;
-  }
-}
+@include mcp-manager.layout;
 
 .tools-modal-content {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 }
 
 .tools-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .server-name-label {
   font-weight: 600;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
 }
 
 .tools-mode-selector {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
 .mode-label {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-muted;
   white-space: nowrap;
 }
 
 .tools-list-container {
-  border: 1px solid $border-color;
-  border-radius: 8px;
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
   overflow: hidden;
 }
 
 .tools-list-header {
-  padding: 10px 12px;
+  padding: calc(10px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   background: $bg-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   color: $text-muted;
   text-transform: uppercase;
@@ -845,27 +608,27 @@ async function saveToolsVisibility() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .tools-list-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
 }
 
 .tools-checkbox-list {
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .tool-checkbox-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
+  gap: calc(10px * var(--spacing-scale, 1));
+  padding: calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   transition: background 0.15s;
 
   &:hover {
@@ -879,19 +642,19 @@ async function saveToolsVisibility() {
 }
 
 .tool-name {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .tools-empty {
-  padding: 24px 12px;
+  padding: calc(24px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   text-align: center;
 }
 
 .tools-summary {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   text-align: center;
 }

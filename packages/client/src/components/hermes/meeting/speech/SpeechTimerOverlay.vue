@@ -70,7 +70,7 @@ const timer = injectSpeechTimer()
   align-items: center;
   justify-content: center;
   gap: 4px;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(var(--text-primary-rgb), 0.35);
   pointer-events: none;
 }
 
@@ -80,11 +80,11 @@ const timer = injectSpeechTimer()
   font-variant-numeric: tabular-nums;
   line-height: 1;
   letter-spacing: 2px;
-  // 荧光绿固定：数字恒为荧光绿 + 辉光，相位紧迫度由标签与提示色表达
-  color: #00ff9c;
+  /* 荧光绿固定：数字恒为荧光绿 + 辉光，相位紧迫度由标签与提示色表达*/
+  color: var(--success);
   text-shadow:
-    0 0 22px rgba(0, 255, 156, 0.45),
-    0 0 6px rgba(0, 255, 156, 0.5);
+    0 0 22px rgba(var(--success-rgb), 0.45),
+    0 0 6px rgba(var(--success-rgb), 0.5);
 }
 
 .cabin-phase {
@@ -92,11 +92,11 @@ const timer = injectSpeechTimer()
   font-weight: 500;
   letter-spacing: 0.25em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--text-primary-rgb), 0.4);
 
-  .phase-green & { color: rgba(99, 226, 183, 0.7); }
-  .phase-yellow & { color: rgba(240, 160, 32, 0.7); }
-  .phase-red & { color: rgba(255, 77, 79, 0.7); }
+  .phase-green & { color: rgba(var(--success-rgb), 0.7); }
+  .phase-yellow & { color: rgba(var(--warning-rgb), 0.7); }
+  .phase-red & { color: rgba(var(--error-rgb), 0.7); }
 }
 
 .cabin-mode {
@@ -105,10 +105,10 @@ const timer = injectSpeechTimer()
   right: 14px;
   font-size: 10px;
   letter-spacing: 0.15em;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--text-primary-rgb), 0.5);
 }
 
-// ── 控制条：单行幽灵按钮 ──
+/* ── 控制条：单行幽灵按钮 ──*/
 .cabin-dock {
   display: flex;
   align-items: center;
@@ -116,7 +116,7 @@ const timer = injectSpeechTimer()
   flex-wrap: wrap;
   gap: 10px;
   padding: 8px 16px;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(var(--text-primary-rgb), 0.3);
 }
 
 .ctl-start {
@@ -124,13 +124,13 @@ const timer = injectSpeechTimer()
 }
 
 .ctl-ghost {
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(var(--text-primary-rgb), 0.65);
 }
 
 .ctl-divider {
   width: 1px;
   height: 16px;
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(var(--text-primary-rgb), 0.1);
 }
 
 .ctl-segment {
@@ -140,17 +140,17 @@ const timer = injectSpeechTimer()
   .seg-btn {
     border: none;
     background: transparent;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(var(--text-primary-rgb), 0.4);
     font-size: 12px;
     padding: 4px 10px;
     border-radius: 6px;
     cursor: pointer;
     transition: all 0.15s ease;
 
-    &:hover { color: rgba(255, 255, 255, 0.8); }
+    &:hover { color: rgba(var(--text-primary-rgb), 0.8); }
     &.active {
-      color: #fff;
-      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-primary);
+      background: rgba(var(--text-primary-rgb), 0.08);
     }
   }
 }
@@ -158,15 +158,15 @@ const timer = injectSpeechTimer()
 .ctl-toggle {
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(var(--text-primary-rgb), 0.4);
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
 
-  &:hover { color: rgba(255, 255, 255, 0.8); }
-  &.on { color: #63e2b7; }
+  &:hover { color: rgba(var(--text-primary-rgb), 0.8); }
+  &.on { color: var(--success); }
 }
 
 .ctl-input {

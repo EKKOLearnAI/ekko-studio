@@ -8,10 +8,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { ensureKnowledgeSchema } from '../../packages/server/src/db/knowledge-schema'
-import { KnowledgeService } from '../../packages/server/src/services/knowledge/knowledge.service'
-import { scanUsbVolume, reconcileUsbMounts, listUsbVolumes } from '../../packages/server/src/services/knowledge/usb-scanner'
-import { archiveTaskFiles } from '../../packages/server/src/services/knowledge/task-archive'
+import { ensureKnowledgeSchema } from '../../packages/server/src/modules/studio/infrastructure/database/knowledge-schema'
+import { KnowledgeService } from '../../packages/server/src/modules/studio/services/knowledge/knowledge.service'
+import { scanUsbVolume, reconcileUsbMounts, listUsbVolumes } from '../../packages/server/src/modules/studio/services/knowledge/usb-scanner'
+import { archiveTaskFiles } from '../../packages/server/src/modules/studio/services/knowledge/task-archive'
 
 let base: string
 let home: string

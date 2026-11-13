@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { UpdateTaskStore, updateTaskStore } from '../../packages/server/src/services/update/task-store'
+import { UpdateTaskStore, updateTaskStore } from '../../packages/server/src/modules/studio/services/update/task-store'
 
 describe('update task store', () => {
   const tempDirs: string[] = []

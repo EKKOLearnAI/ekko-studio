@@ -9,15 +9,15 @@ import {
   isBrowserSurfaceEnabled,
   initializeBrowserSurfaceGate,
   resetBrowserSurfaceGateForTests,
-} from '../../packages/server/src/config/browser-surface'
+} from '../../packages/server/src/modules/studio/public/browser-surface'
 import {
   HeadlessRuntime,
   buildBrowserLaunchArgs,
   resolveBrowserProfileDir,
   stopHeadlessBrowserRuntime,
   type BrowserRuntimeDependencies,
-} from '../../packages/server/src/services/browser/runtime'
-import type { ResolvedBrowserExecutable } from '../../packages/server/src/services/browser/types'
+} from '../../packages/server/src/modules/studio/services/browser/runtime'
+import type { ResolvedBrowserExecutable } from '../../packages/server/src/modules/studio/services/browser/types'
 
 interface SpawnCall {
   command: string

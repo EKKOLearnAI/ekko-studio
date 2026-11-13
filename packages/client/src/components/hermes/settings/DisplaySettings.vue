@@ -1,18 +1,34 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { NButton, NSwitch, NInputNumber } from 'naive-ui'
+import { computed, ref } from 'vue'
+import { NButton, NSwitch, NInputNumber, NSelect, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { primeCompletionSound } from '@/utils/completion-sound'
 import { requestCompletionNotificationPermission, showCompletionNotification, showSystemNotification, type CompletionNotificationPermissionResult } from '@/utils/completion-notification'
 import { clampChatInputHeight, MAX_CHAT_INPUT_HEIGHT, MIN_CHAT_INPUT_HEIGHT } from '@/utils/chat-input-height'
+import { isDesktopShell } from '@/utils/desktop-bridge'
+import { getLinkOpenTarget, setLinkOpenTarget, type LinkOpenTarget } from '@/utils/desktop-browser'
 import SettingRow from './SettingRow.vue'
-import { useMessage } from '@/composables/useAppMessage'
 
 const settingsStore = useSettingsStore()
 const message = useMessage()
 const { t } = useI18n()
 const chatInputHeight = computed(() => clampChatInputHeight(settingsStore.display.chat_input_height))
+const desktopLinkSettingsAvailable = isDesktopShell()
+const linkOpenTarget = ref<LinkOpenTarget>(getLinkOpenTarget())
+const linkOpenTargetOptions = computed(() => [
+  { label: t('settings.display.linkOpenTargetHermesStudio'), value: 'hermes-studio' as const },
+  { label: t('settings.display.linkOpenTargetDefaultBrowser'), value: 'default-browser' as const },
+])
+
+function handleLinkOpenTargetChange(value: LinkOpenTarget) {
+  try {
+    linkOpenTarget.value = setLinkOpenTarget(value)
+    message.success(t('settings.saved'))
+  } catch {
+    message.error(t('settings.saveFailed'))
+  }
+}
 
 async function save(values: Record<string, any>) {
   try {
@@ -138,6 +154,20 @@ async function testCompletionNotification() {
     <SettingRow :label="t('settings.display.inlineDiffs')" :hint="t('settings.display.inlineDiffsHint')">
       <NSwitch :value="settingsStore.display.inline_diffs" @update:value="v => save({ inline_diffs: v })" />
     </SettingRow>
+    <SettingRow
+      v-if="desktopLinkSettingsAvailable"
+      :label="t('settings.display.linkOpenTarget')"
+      :hint="t('settings.display.linkOpenTargetHint')"
+    >
+      <NSelect
+        :value="linkOpenTarget"
+        :options="linkOpenTargetOptions"
+        :aria-label="t('settings.display.linkOpenTarget')"
+        class="link-open-target-select"
+        data-testid="link-open-target-select"
+        @update:value="handleLinkOpenTargetChange"
+      />
+    </SettingRow>
     <SettingRow :label="t('settings.display.bellOnComplete')" :hint="t('settings.display.bellOnCompleteHint')">
       <NSwitch :value="settingsStore.display.bell_on_complete" @update:value="v => save({ bell_on_complete: v })" />
     </SettingRow>
@@ -192,12 +222,16 @@ async function testCompletionNotification() {
 .notify-controls {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
+}
+
+.link-open-target-select {
+  width: 180px;
 }
 
 .chat-input-height-controls {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 </style>

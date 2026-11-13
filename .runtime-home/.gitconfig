@@ -1,3 +1,0 @@
-[http]
-	sslbackend = schannel
-	schannelUseSSLCAInfo = false

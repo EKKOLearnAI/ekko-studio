@@ -485,6 +485,11 @@ function codeExecChildEnvironment(input: {
     if (value === undefined) continue
     if (exactNames.has(key) || key.startsWith('LC_')) env[key] = value
   }
+  // Desktop uses Electron as process.execPath; its child must run the script as Node.
+  // Set this explicitly rather than inheriting arbitrary parent environment values.
+  if (input.language === 'node' && process.versions.electron) {
+    env.ELECTRON_RUN_AS_NODE = '1'
+  }
   Object.assign(env, workspaceTempEnvironment(input.tempDirectory))
   env.EKKO_CODE_RPC_HOST = input.rpc.host
   env.EKKO_CODE_RPC_PORT = String(input.rpc.port)

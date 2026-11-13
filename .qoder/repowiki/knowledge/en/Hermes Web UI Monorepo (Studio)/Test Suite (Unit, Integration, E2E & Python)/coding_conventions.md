@@ -1,6 +1,0 @@
-- Each feature area has its own dedicated test file named `<feature>.test.ts`, keeping client, server, and desktop concerns separated by directory rather than by test type.
-- External dependencies are isolated via `vi.mock()` calls at the top of test files (e.g., database, auth middleware, electron module), with hoisted state containers used when mocks need shared mutable state across imports.
-- E2E fixtures centralize API interception through a single `mockHermesApi(page, options)` helper that routes every `/api/*` and `/v1/*` request to deterministic JSON responses instead of hitting a real backend.
-- WebSocket-driven tests expose async utility functions (`once`, `emitAck`) that wrap `socket.once`/`socket.emit` with timeouts, returning Promises for clean assertion flow.
-- In-memory databases are created per test via `new DatabaseSync(':memory:')` and initialized with `initAllHermesTables()`, then closed in a `cleanup` function returned alongside the fixture.
-- Browser-only globals (`window`, `localStorage`, `matchMedia`) are polyfilled conditionally inside `tests/setup.ts` guarded by `typeof window !== 'undefined'` so the same test files can run in both jsdom and Node environments.

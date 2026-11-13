@@ -7,7 +7,7 @@ import type {
   USBReadyPayload,
   USBServiceRuntimeStatus,
   USBSubscribeResponse,
-} from '@/api/hermes/usb-socket'
+} from '@/api/studio/usb-socket'
 
 const MAX_HISTORY_ITEMS = 200
 

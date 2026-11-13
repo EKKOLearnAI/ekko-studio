@@ -106,8 +106,8 @@ function exportFeedback() {
 <style scoped lang="scss">
 .speaker-card {
   border-radius: 10px;
-  border: 1px solid rgba(112, 192, 232, 0.22);
-  background: rgba(112, 192, 232, 0.05);
+  border: 1px solid rgba(var(--accent-info-rgb), 0.22);
+  background: rgba(var(--accent-info-rgb), 0.05);
   overflow: hidden;
   min-width: 0;
   max-width: 100%;
@@ -120,21 +120,21 @@ function exportFeedback() {
   width: 100%;
   padding: 8px 10px;
   border: none;
-  background: rgba(112, 192, 232, 0.1);
+  background: rgba(var(--accent-info-rgb), 0.1);
   cursor: pointer;
   text-align: left;
   color: inherit;
   min-width: 0;
 
-  &:hover { background: rgba(112, 192, 232, 0.16); }
+  &:hover { background: rgba(var(--accent-info-rgb), 0.16); }
 }
 
-.chevron { font-size: 10px; color: var(--n-text-color3, #999); flex-shrink: 0; }
+.chevron { font-size: 10px; color: var(--n-text-color3, var(--text-primary)); flex-shrink: 0; }
 
 .speaker-name {
   font-size: 13px;
   font-weight: 700;
-  color: #9fd4f0;
+  color: var(--accent-info);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -143,10 +143,10 @@ function exportFeedback() {
 .speaker-score {
   font-size: 13px;
   font-weight: 700;
-  color: #63e2b7;
+  color: var(--success);
   padding: 0 8px;
   border-radius: 8px;
-  background: rgba(99, 226, 183, 0.12);
+  background: rgba(var(--success-rgb), 0.12);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
@@ -176,17 +176,17 @@ function exportFeedback() {
   gap: 2px;
   padding: 5px 4px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--text-primary-rgb), 0.03);
 
-  &.overall { background: rgba(99, 226, 183, 0.08); }
+  &.overall { background: rgba(var(--success-rgb), 0.08); }
 }
 
-.score-label { font-size: 10px; color: var(--n-text-color3, #999); text-align: center; }
-.score-value { font-size: 16px; font-weight: 700; color: #70c0e8; font-variant-numeric: tabular-nums; }
-.score-item.overall .score-value { color: #63e2b7; }
+.score-label { font-size: 10px; color: var(--n-text-color3, var(--text-primary)); text-align: center; }
+.score-value { font-size: 16px; font-weight: 700; color: var(--accent-info); font-variant-numeric: tabular-nums; }
+.score-item.overall .score-value { color: var(--success); }
 
 .tag-group { display: flex; flex-direction: column; gap: 4px; }
-.tag-title { font-size: 11px; color: var(--n-text-color3, #999); }
+.tag-title { font-size: 11px; color: var(--n-text-color3, var(--text-primary)); }
 
 .tag-tags {
   display: flex;

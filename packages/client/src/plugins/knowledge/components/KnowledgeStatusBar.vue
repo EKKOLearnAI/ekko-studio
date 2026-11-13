@@ -112,9 +112,9 @@ const queueCount = computed(() => {
   align-items: center;
   gap: 12px;
   padding: 6px 12px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-color, rgba(var(--text-primary-rgb), 0.06));
   border-radius: 8px;
-  background: var(--card-color, rgba(255, 255, 255, 0.02));
+  background: var(--card-color, rgba(var(--text-primary-rgb), 0.02));
   font-size: 12px;
 }
 .state {
@@ -127,13 +127,13 @@ const queueCount = computed(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #63e2b7;
+  background: var(--success);
 }
-.state.needsKey .dot { background: #f2c97d; }
-.state.disabled .dot { background: #e88080; }
+.state.needsKey .dot { background: var(--warning); }
+.state.disabled .dot { background: var(--warning); }
 .count { opacity: 0.7; white-space: nowrap; }
-.count.busy { color: #f2c97d; opacity: 1; }
-.count.bad { color: #e88080; opacity: 1; }
+.count.busy { color: var(--warning); opacity: 1; }
+.count.bad { color: var(--warning); opacity: 1; }
 .spacer { flex: 1; }
 .mode-icon,
 .gear-icon {

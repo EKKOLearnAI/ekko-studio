@@ -148,7 +148,7 @@ const decidedItems = () => local.value.filter(i => i.status === 'decided')
   gap: 4px;
   padding: 8px 10px;
   border-radius: 6px;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid var(--border-color);
 }
 .decision-panel__item--done {

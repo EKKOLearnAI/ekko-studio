@@ -30,7 +30,7 @@ Standalone Ekko's master and all four feature switches default to false. Numeric
 confidence threshold and a 0.8 write-review threshold (all range 0.5–1), and a
 3000 ms total deadline (range 100–30000 ms). These are configurable defaults,
 not a claim that provider confidence is calibrated for every application.
-Studio exposes every option in Models → JEV for the selected Profile, with numeric
+Studio exposes every option globally in Models → JEV, with numeric
 fields in Advanced parameters. Studio's memory master defaults to false and its
 four child switches default to true; saved explicit values take precedence.
 Switching the master off preserves child settings. Missing credentials still
@@ -45,9 +45,8 @@ Nested runs establish their own snapshot. Memory services can remain shared with
 storing mutable credentials or feature settings. Direct `MemoryService` CRUD outside
 a runtime retains its original deterministic behavior.
 
-Studio reads the complete selected Profile settings before each run. Missing keys
-or settings read errors explicitly disable JEV; another Profile or local credentials
-cannot substitute. This does not write back to the standalone configuration file.
+Studio reads the complete global JEV settings before each run. Missing keys
+or settings read errors explicitly disable JEV; local credentials cannot substitute. This does not write back to the standalone configuration file.
 
 ## Recall
 
@@ -89,6 +88,13 @@ existing shapes. Removed ids are recorded in JEV diagnostics, without introducin
 new public omission reasons or provider fields into results.
 
 ## Foreground write review
+
+Hosts may attach `metadata.authorizedContext` to trusted user evidence when the
+user requested remembering a verified task result. Write review receives that
+context separately from the original user text. It may support result details
+only under that user request; task text never supplies new instructions or
+permission. The host must validate the source, execution and permission before
+invoking the writer. Ordinary evidence without this metadata is unchanged.
 
 Deterministic validation runs first, including controlled kinds, authorized scopes,
 canonical keys, source ids and expected revisions. Before committing, batch the

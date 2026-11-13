@@ -20,7 +20,7 @@ import {
   type LanDeviceInfo,
   type LanDiscoveryState,
   type LanEndpointKind,
-} from '@/api/hermes/devices'
+} from '@/api/studio/devices'
 import { useMessage } from '@/composables/useAppMessage'
 
 const { t } = useI18n()
@@ -330,7 +330,7 @@ onMounted(() => {
         </div>
 
         <div v-else class="device-grid">
-          <article v-for="device in devices" :key="device.id" class="device-card">
+          <article v-for="device in devices" :key="device.id" class="device-card" data-theme-surface="card">
             <div class="device-card-header">
               <div class="device-title-block">
                 <div class="device-name">{{ device.computer_name || device.ip }}</div>
@@ -448,7 +448,7 @@ onMounted(() => {
     </NDrawer>
 
     <NModal v-model:show="showPairingCodeModal" :mask-closable="!pairingRequesting" @esc="closePairingCodeModal">
-      <div class="pairing-code-dialog">
+      <div class="pairing-code-dialog" data-theme-surface="card">
         <div class="pairing-code-title">{{ t('devices.pairingCodeTitle') }}</div>
         <NInput
           v-model:value="pairingCodeInput"
@@ -570,7 +570,7 @@ onMounted(() => {
   padding: 14px;
   border: 1px solid $border-color;
   border-radius: $radius-sm;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
 }
 
 .device-card-header,
@@ -687,8 +687,8 @@ onMounted(() => {
   gap: 14px;
   padding: 20px;
   border-radius: $radius-sm;
-  background: $bg-card;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24);
+  background: var(--theme-card-bg, var(--bg-card));
+  box-shadow: 0 12px 30px rgba(var(--text-primary-rgb), 0.24);
 }
 
 .pairing-code-title {

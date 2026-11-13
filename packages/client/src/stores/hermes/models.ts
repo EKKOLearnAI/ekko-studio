@@ -34,19 +34,9 @@ export const useModelsStore = defineStore('models', () => {
     ),
   )
 
-  const hasConfiguredProvider = computed(() =>
-    providers.value.some(group => group.models.length > 0),
-  )
-
-  const hasCompletedInitialSetup = computed(() =>
-    hasConfiguredProvider.value
-    && defaultProvider.value.trim().length > 0
-    && defaultModel.value.trim().length > 0,
-  )
-
-  async function fetchProviders() {
+  async function fetchProviders(options: { background?: boolean } = {}) {
     if (!hasApiKey()) return
-    loading.value = true
+    if (!options.background) loading.value = true
     try {
       const profile = getModelsPageProfile() || useProfilesStore().activeProfileName || 'default'
       const res = await systemApi.fetchAvailableModelsForProfile(profile)
@@ -61,7 +51,7 @@ export const useModelsStore = defineStore('models', () => {
     } catch (err) {
       console.error('Failed to fetch providers:', err)
     } finally {
-      loading.value = false
+      if (!options.background) loading.value = false
     }
   }
 
@@ -75,6 +65,11 @@ export const useModelsStore = defineStore('models', () => {
     } finally {
       refreshingModelCache.value = false
     }
+  }
+
+  async function fetchProviderCatalog(provider: string) {
+    const profile = getModelsPageProfile() || useProfilesStore().activeProfileName || 'default'
+    return systemApi.fetchProviderModelCatalog(provider, profile)
   }
 
   async function setDefaultModel(modelId: string, provider: string) {
@@ -101,7 +96,7 @@ export const useModelsStore = defineStore('models', () => {
   async function addProvider(data: CustomProvider) {
     await systemApi.addCustomProvider(data)
     await fetchProviders()
-    await useAppStore().reloadModels()
+    await useAppStore().reloadModels({ preserveSelection: true })
   }
 
   async function removeProvider(name: string, options: { source?: 'custom_providers' | 'providers'; providerKey?: string } = {}) {
@@ -159,9 +154,8 @@ export const useModelsStore = defineStore('models', () => {
     customProviders,
     builtinProviders,
     allModels,
-    hasConfiguredProvider,
-    hasCompletedInitialSetup,
     fetchProviders,
+    fetchProviderCatalog,
     refreshModelCache,
     setDefaultModel,
     setDefaultProvider,

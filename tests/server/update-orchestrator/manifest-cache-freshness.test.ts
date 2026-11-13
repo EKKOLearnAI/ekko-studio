@@ -5,7 +5,7 @@
  * Thresholds: < 24h green, < 7d yellow, < 30d orange, >= 30d red.
  */
 import { describe, expect, it } from 'vitest'
-import { manifestCacheFreshness } from '../../../packages/server/src/services/update/manifest-cache-freshness'
+import { manifestCacheFreshness } from '../../../packages/server/src/modules/studio/services/update/manifest-cache-freshness'
 
 const NOW = new Date('2026-09-06T12:00:00Z')
 

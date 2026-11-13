@@ -1,25 +1,30 @@
 <script setup lang="ts">
-import type { Attachment } from '@/stores/hermes/chat'
+import { DEFAULT_REASONING_EFFORTS, agentReasoningEffortOptions, agentReasoningEffortValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import type { NativeEffortChoice } from '@/utils/native-model-families'
+import { isBuiltinEkkoSession, isExternalCodingAgentSession, isHermesSession } from '@/utils/hermes/session-agent'
+import { EKKO_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
+import type { Attachment, Session } from '@/stores/hermes/chat'
 import { useChatStore } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
-import { fetchContextLength } from '@/api/hermes/sessions'
+import { fetchContextLength } from '@/api/studio/sessions'
 import { setModelContext } from '@/api/hermes/model-context'
 import { fetchSkills, type SkillCategory, type SkillInfo } from '@/api/hermes/skills'
 import { deleteSkillBundleApi, fetchSkillBundles, type SkillBundleInfo } from '@/api/hermes/skill-bundles'
-import { NButton, NTooltip, NModal, NInputNumber, NPopover, NPopselect, NSlider, NDropdown, useDialog, type DropdownOption } from 'naive-ui'
-import { useMessage } from '@/composables/useAppMessage'
+import { NSpin, NButton, NTooltip, NModal, NInputNumber, NPopover, NSlider, NDropdown, useDialog, useMessage, type DropdownOption } from 'naive-ui'
 import { computed, ref, nextTick, onMounted, onUnmounted, watch, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToolTraceVisibility } from '@/composables/useToolTraceVisibility'
 import { extractClipboardFiles } from '@/utils/clipboard-files'
 import VoiceDialogueControls from './VoiceDialogueControls.vue'
 import BundleCreateModal from './BundleCreateModal.vue'
-import { getProfileDisplayName } from '@/utils/hermes/profile-display'
 import { BRIDGE_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
 import { clampChatInputHeight, isMobileChatInputViewport } from '@/utils/chat-input-height'
 import { normalizeComposerVoiceTranscript, useComposerVoiceInput } from '@/composables/useComposerVoiceInput'
+import { extractRepresentativeVideoFrames, isVideoFile } from '@/utils/video-frame-extraction'
+import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
+import ScreenshotButton from './ScreenshotButton.vue'
 
 const chatStore = useChatStore()
 const appStore = useAppStore()
@@ -33,62 +38,135 @@ const { toolTraceVisible, toggleToolTraceVisible } = useToolTraceVisibility()
 const props = withDefaults(defineProps<{
   modelLabel?: string
   modelDisabled?: boolean
+  modelExpanded?: boolean
+  hideSettings?: boolean
+  initialText?: string
+  persistDraft?: boolean
+  draft?: boolean
+  draftConfig?: Pick<Session, 'profile' | 'provider' | 'model' | 'codingAgentMode' | 'agent'>
+  managedReasoningEffort?: boolean
+  reasoningEffort?: string
+  defaultEffortLabel?: string
+  reasoningEffortDisabled?: boolean
+  scopedReasoningEfforts?: string[]
+  nativeReasoningEfforts?: string[]
+  nativeEffortChoices?: NativeEffortChoice[]
+  stopDisabled?: boolean
+  /** Task hosts can supply their own lifecycle and cancellation transport. */
+  stopControl?: { active: boolean; pending: boolean; allowSend?: boolean; request: () => Promise<void> | void }
+  sendDisabled?: boolean
+  submit?: (text: string, attachments?: Attachment[]) => Promise<boolean>
 }>(), {
   modelLabel: '',
   modelDisabled: false,
+  modelExpanded: false,
+  hideSettings: false,
+  initialText: '',
+  persistDraft: true,
+  draft: false,
+  reasoningEffort: '',
+  reasoningEffortDisabled: false,
+  sendDisabled: false,
 })
 
+const composerSession = computed(() => props.draft ? null : chatStore.activeSession)
+const submitting = ref(false)
+
 const emit = defineEmits<{
-  modelClick: []
+  modelClick: [event: MouseEvent]
   voiceClick: []
+  omniClick: []
+  practiceClick: []
+  'update:reasoningEffort': [value: string]
 }>()
 
-const reasoningEffortOptions = computed(() => [
-  { label: t('chat.reasoningEffort.options.default'), value: '' },
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
-])
-const currentReasoningEffort = computed<string>(() =>
-  chatStore.activeSession?.reasoningEffort || ''
+const reasoningSession = computed(() => props.draft ? props.draftConfig : composerSession.value)
+const defaultReasoningEffortLabel = computed(() => t(props.reasoningEffortDisabled && isHermesSession(reasoningSession.value)
+  ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'))
+const isMoaSession = computed(() => reasoningSession.value?.provider === 'moa')
+const isGlobalCodingAgentSession = computed(() => reasoningSession.value?.codingAgentMode === 'global')
+const isReadOnlyCodingAgentEffort = computed(() => !props.draft && isGlobalCodingAgentSession.value && isExternalCodingAgentSession(composerSession.value))
+function effortLabel(value: string) {
+  return DEFAULT_REASONING_EFFORTS.includes(value) || ['ultra', 'disabled', 'enabled'].includes(value) ? t(`chat.reasoningEffort.options.${value}`) : value
+}
+const showReasoningEffort = ref(false)
+const reasoningEffortOptions = computed(() => agentReasoningEffortOptions(isGlobalCodingAgentSession.value && props.nativeEffortChoices
+  ? props.nativeEffortChoices.map(choice => ({ value: choice.effort,
+    label: choice.effort ? effortLabel(choice.effort) : defaultReasoningEffortLabel.value })) : [
+  { label: defaultReasoningEffortLabel.value, value: '' },
+  ...(isGlobalCodingAgentSession.value ? props.nativeReasoningEfforts || [] : props.scopedReasoningEfforts ?? modelReasoningEfforts(
+    appStore.profileModelGroups?.find(entry => entry.profile === (reasoningSession.value?.profile || profilesStore.activeProfileName))?.groups || appStore.modelGroups || [],
+    reasoningSession.value?.provider || appStore.selectedProvider || '',
+    reasoningSession.value?.model || appStore.selectedModel || '',
+  )).map(value => ({ label: effortLabel(value), value })),
+]))
+const requestedReasoningEffort = computed<string>(() =>
+  ((props.draft || props.managedReasoningEffort) ? props.reasoningEffort : composerSession.value?.reasoningEffort
+    || props.nativeEffortChoices?.find(choice => choice.model === composerSession.value?.model)?.effort) || ''
 )
+const currentReasoningEffort = computed(() => props.reasoningEffortDisabled || isReadOnlyCodingAgentEffort.value
+  ? requestedReasoningEffort.value
+  : agentReasoningEffortValue(requestedReasoningEffort.value, reasoningEffortOptions.value))
 const reasoningEffortSliderValue = computed(() => {
   const index = reasoningEffortOptions.value.findIndex(option => option.value === currentReasoningEffort.value)
   return index >= 0 ? index : 0
 })
-const reasoningEffortAccentColors = [
-  '#94a3b8',
-  '#2ac8e9',
-  '#2bd9b4',
-  '#4ed786',
-  '#b9d93a',
-  '#f9c33c',
-  '#f77734',
-  '#ef4444',
-] as const
+const reasoningEffortAccentColors: Record<string, string> = {
+  '': '#94a3b8',
+  none: '#2ac8e9',
+  disabled: '#2ac8e9',
+  enabled: '#b9d93a',
+  minimal: '#2bd9b4',
+  low: '#4ed786',
+  medium: '#b9d93a',
+  high: '#f9c33c',
+  xhigh: '#f77734',
+  max: '#ef4444',
+  ultra: '#ef4444',
+}
 const reasoningEffortAccentStyle = computed(() => ({
-  '--reasoning-effort-accent-color': reasoningEffortAccentColors[reasoningEffortSliderValue.value]
-    || reasoningEffortAccentColors[0],
+  '--reasoning-effort-accent-color': reasoningEffortAccentColors[currentReasoningEffort.value]
+    || reasoningEffortAccentColors[''],
 }))
-const isMoaSession = computed(() => chatStore.activeSession?.provider === 'moa')
-const isGlobalCodingAgentSession = computed(() =>
-  chatStore.activeSession?.codingAgentMode === 'global'
-)
+const supportsNativeReasoning = computed(() => (props.nativeReasoningEfforts?.length || 0) > 0)
+const canEditReasoningEffort = computed(() => !props.reasoningEffortDisabled && !isReadOnlyCodingAgentEffort.value && (!isGlobalCodingAgentSession.value || (supportsNativeReasoning.value && reasoningEffortOptions.value.length > 1
+  && (!currentReasoningEffort.value || reasoningEffortOptions.value.some(option => option.value === currentReasoningEffort.value)))))
 const reasoningEffortLabel = computed<string>(() => {
   const v = currentReasoningEffort.value
-  if (!v) return t('chat.reasoningEffort.defaultLabel')
+  if (!v) return defaultReasoningEffortLabel.value
   const opt = reasoningEffortOptions.value.find(o => o.value === v)
-  return opt?.label || v
+  return opt?.label || effortLabel(v)
 })
 function onReasoningEffortChange(value: string | null | undefined) {
+  if (!canEditReasoningEffort.value) return
+  if (props.draft || props.managedReasoningEffort) {
+    emit('update:reasoningEffort', value || '')
+    return
+  }
   const sid = chatStore.activeSessionId
   if (!sid) return
-  chatStore.setSessionReasoningEffort(sid, value || '')
+  const variant = props.nativeEffortChoices?.find(choice => choice.effort === (value || ''))
+  if (variant) void chatStore.setSessionReasoningEffort(sid, variant.effort, variant.model)
+  else void chatStore.setSessionReasoningEffort(sid, value || '')
 }
+// A rejected automatic write must not retrigger itself when the store rolls back.
+let lastAutomaticEffortWrite = ''
+watch([reasoningEffortOptions, requestedReasoningEffort, canEditReasoningEffort], ([options, requested]) => {
+  if (isMoaSession.value || !canEditReasoningEffort.value) {
+    showReasoningEffort.value = false
+    return
+  }
+  const fallback = agentReasoningEffortValue('', options)
+  if ((!requested && fallback) || (!isGlobalCodingAgentSession.value && requested && !options.some(option => option.value === requested))) {
+    if (!props.draft && !props.managedReasoningEffort) {
+      const key = JSON.stringify([chatStore.activeSessionId,
+        reasoningSession.value?.profile, reasoningSession.value?.provider, reasoningSession.value?.model, requested, fallback])
+      if (lastAutomaticEffortWrite === key) return
+      lastAutomaticEffortWrite = key
+    }
+    onReasoningEffortChange(fallback)
+  }
+}, { immediate: true })
 function reasoningEffortSliderLabel(value: number) {
   return reasoningEffortOptions.value[Math.round(value)]?.label || reasoningEffortLabel.value
 }
@@ -98,47 +176,9 @@ function onReasoningEffortSliderChange(value: number | [number, number]) {
   if (option) onReasoningEffortChange(option.value)
 }
 
-function handleModelButtonClick() {
+function handleModelButtonClick(event: MouseEvent) {
   if (props.modelDisabled) return
-  emit('modelClick')
-}
-
-const currentExpertName = computed(() =>
-  chatStore.activeSession?.profile || profilesStore.activeProfileName || 'default',
-)
-
-const currentExpertProfile = computed(() =>
-  profilesStore.profiles.find(p => p.name === currentExpertName.value),
-)
-
-const expertOptions = computed<DropdownOption[]>(() => {
-  const items = profilesStore.profiles.length > 0
-    ? profilesStore.profiles
-    : []
-
-  return items.map(profile => ({
-    label: getProfileDisplayName(profile),
-    value: profile.name,
-  }))
-})
-
-const compactExpertLabel = computed(() =>
-  getProfileDisplayName(currentExpertProfile.value) || currentExpertName.value || 'default',
-)
-
-async function handleExpertChange(value: string | number | null) {
-  const nextProfile = typeof value === 'string' && value ? value : 'default'
-  if (nextProfile === currentExpertName.value) return
-
-  if (chatStore.activeSession) {
-    chatStore.activeSession.profile = nextProfile
-    return
-  }
-
-  const ok = await profilesStore.switchProfile(nextProfile)
-  if (!ok) {
-    message.error(t('chat.expertSwitchFailed'))
-  }
+  emit('modelClick', event)
 }
 
 const compactModelLabel = computed(() => {
@@ -154,10 +194,14 @@ const textareaRef = ref<HTMLTextAreaElement>()
 const commandDropdownRef = ref<HTMLDivElement>()
 const fileInputRef = ref<HTMLInputElement>()
 const attachments = ref<Attachment[]>([])
+const previewAttachment = ref<Attachment | null>(null)
+const pendingVideoFrameJobs = new Set<Promise<void>>()
+const isPreparingAttachments = ref(false)
+let sendAwaitingAttachments = false
 const isDragging = ref(false)
 const dragCounter = ref(0)
 const isComposing = ref(false)
-const activeMessageReference = computed(() => chatStore.activeMessageReference)
+const activeMessageReference = computed(() => props.draft ? null : chatStore.activeMessageReference)
 const messageReferencePreview = computed(() =>
   activeMessageReference.value?.content.replace(/\s+/g, ' ').trim() || '',
 )
@@ -258,22 +302,16 @@ let bundlesLoadedKey = ''
 let bundlesLoadRequest: Promise<void> | null = null
 let bundlesLoadRequestKey = ''
 const isBridgeSession = computed(() => {
-  const session = chatStore.activeSession
+  if (props.draft) return false
+  const session = composerSession.value
   if (!session) return chatStore.runtimeMode !== 'global_agent'
-  return session.source === 'cli'
+  return session.source === 'cli' && !isBuiltinEkkoSession(session)
 })
-const isCodingAgentSession = computed(() => {
-  const session = chatStore.activeSession
-  return !!session && (
-    session.source === 'coding_agent'
-    || !!session.codingAgentId
-    || session.agent === 'claude'
-    || session.agent === 'codex'
-    || session.agent === 'claude-code'
-    || session.agent === 'pi'
-  )
-})
-const isForkCommandSession = computed(() => !!chatStore.activeSession && chatStore.activeSession.source !== 'coding_agent')
+const isEkkoSession = computed(() => isBuiltinEkkoSession(composerSession.value))
+const isCodingAgentSession = computed(() => isExternalCodingAgentSession(composerSession.value))
+const isCursorSession = computed(() => (composerSession.value?.codingAgentId === 'cursor' || composerSession.value?.codingAgentId === 'antigravity') || (composerSession.value?.agent === 'cursor' || composerSession.value?.agent === 'antigravity'))
+const showSessionUsage = computed(() => isCodingAgentSession.value)
+const isForkCommandSession = computed(() => !!composerSession.value && !isEkkoSession.value && !isCodingAgentSession.value)
 const skillPickerItems = computed(() => {
   const byName = new Map<string, SkillInfo>()
   for (const category of skillCategories.value) {
@@ -294,10 +332,18 @@ const skillPickerItems = computed(() => {
 })
 const filteredBridgeCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase()
-  const commands = isBridgeSession.value
+  const commands = /^person-(main|task)-/.test(composerSession.value?.id || '') ? [] : isEkkoSession.value
+    ? EKKO_SESSION_COMMAND_DEFINITIONS.map(command => ({ ...command, args: command.args || '', description: t(command.descriptionKey) }))
+    : isBridgeSession.value
     ? bridgeCommands.value
     : isCodingAgentSession.value
-      ? bridgeCommands.value.filter(command => CODING_AGENT_SLASH_COMMANDS.includes(command.name))
+      ? bridgeCommands.value.filter(command => CODING_AGENT_SLASH_COMMANDS.includes(command.name)
+        && !(command.name === 'context' && isCursorSession.value)
+        && !(command.name === 'compact' && (
+          composerSession.value?.codingAgentId === 'opencode'
+          || composerSession.value?.agent === 'opencode'
+          || isCursorSession.value
+        )))
       : isForkCommandSession.value
         ? bridgeCommands.value.filter(command => command.name === 'fork')
         : []
@@ -341,7 +387,7 @@ function skillCommandName(name: string) {
 }
 
 function currentSkillsKey() {
-  return chatStore.activeSession?.profile || profilesStore.activeProfileName || 'default'
+  return composerSession.value?.profile || profilesStore.activeProfileName || 'default'
 }
 
 async function loadSkills() {
@@ -483,9 +529,12 @@ function startResize(e: MouseEvent) {
 }
 
 const inputSettingsOptions = computed<DropdownOption[]>(() => [
+  { label: t('omniRealtime.entry'), key: 'omniMode', disabled: props.draft },
+  { label: t('speechPractice.entry'), key: 'practiceMode', disabled: props.draft },
   {
     label: t('realtimeVoice.mode'),
     key: 'voiceMode',
+    disabled: props.draft,
     icon: () => h('span', {
       class: 'settings-voice-mode-icon',
       'aria-hidden': 'true',
@@ -511,7 +560,8 @@ function readDraftMap(): DraftMap {
 }
 
 function getActiveDraftSessionId() {
-  return chatStore.activeSessionId || chatStore.activeSession?.id || ''
+  if (props.draft) return ''
+  return chatStore.activeSessionId || composerSession.value?.id || ''
 }
 
 function loadDraftForActiveSession() {
@@ -537,34 +587,37 @@ function saveDraftForActiveSession(value: string) {
 
 // 从 localStorage 读取设置
 onMounted(() => {
-  loadDraftForActiveSession()
+  if (props.initialText) inputText.value = props.initialText
+  else if (props.persistDraft) loadDraftForActiveSession()
   syncViewport()
-  if (profilesStore.profiles.length === 0 && !profilesStore.loading) {
-    void profilesStore.fetchProfiles()
-  }
   window.addEventListener('resize', syncViewport)
   nextTick(() => {
     applyConfiguredTextareaHeight()
+    if (props.initialText) focusComposer()
   })
 })
 
 function handleInputSettingsSelect(key: string | number) {
+  if (key === 'omniMode') { emit('omniClick'); return }
+  if (key === 'practiceMode') { emit('practiceClick'); return }
   if (key === 'voiceMode') {
-    if (chatStore.activeSessionId) emit('voiceClick')
+    if (!props.draft && chatStore.activeSessionId) emit('voiceClick')
     return
   }
 
   if (key === 'toolTrace') {
     toggleToolTraceVisible()
+    return
   }
 }
 
 watch(inputText, (value) => {
-  saveDraftForActiveSession(value)
+  if (props.persistDraft) saveDraftForActiveSession(value)
 })
 
-watch(() => chatStore.activeSession?.id, () => {
-  loadDraftForActiveSession()
+watch(() => composerSession.value?.id, () => {
+  if (props.persistDraft) loadDraftForActiveSession()
+  else inputText.value = props.initialText
   nextTick(() => {
     applyConfiguredTextareaHeight()
   })
@@ -580,7 +633,7 @@ watch(() => settingsStore.display.chat_input_height, () => {
 })
 
 watch(
-  () => [chatStore.activeSession?.profile, profilesStore.activeProfileName],
+  () => [composerSession.value?.profile, profilesStore.activeProfileName],
   () => {
     skillsLoadedKey = ''
     skillCategories.value = []
@@ -590,7 +643,8 @@ watch(
 )
 
 const canSend = computed(() => inputText.value.trim().length > 0 || attachments.value.length > 0)
-const sendButtonIsStop = computed(() => chatStore.isStreaming && !canSend.value)
+const sendButtonIsStop = computed(() => props.stopControl ? props.stopControl.active && (props.stopControl.pending || !props.stopControl.allowSend || !canSend.value) : !props.draft && chatStore.isStreaming && !canSend.value)
+const stopPending = computed(() => props.stopControl ? props.stopControl.pending : chatStore.isAborting)
 
 function scrollCommandIntoView() {
   nextTick(() => {
@@ -601,7 +655,7 @@ function scrollCommandIntoView() {
 }
 
 function updateSlashState() {
-  if (!isBridgeSession.value && !isCodingAgentSession.value && !isForkCommandSession.value) {
+  if (!isEkkoSession.value && !isBridgeSession.value && !isCodingAgentSession.value && !isForkCommandSession.value) {
     slashActive.value = false
     return
   }
@@ -762,8 +816,8 @@ async function saveContextLimit() {
 
   isSavingContextLimit.value = true
   try {
-    const provider = chatStore.activeSession?.provider || appStore.selectedProvider || ''
-    const model = chatStore.activeSession?.model || appStore.selectedModel || ''
+    const provider = composerSession.value?.provider || appStore.selectedProvider || ''
+    const model = composerSession.value?.model || appStore.selectedModel || ''
 
     if (!provider || !model) {
       message.error(t('chat.contextEditFailed'))
@@ -783,7 +837,7 @@ async function saveContextLimit() {
 }
 
 function currentContextLengthParams() {
-  const activeSession = chatStore.activeSession
+  const activeSession = composerSession.value
   return {
     profile: activeSession?.profile || profilesStore.activeProfileName || undefined,
     provider: activeSession?.provider || undefined,
@@ -797,6 +851,7 @@ function currentContextLengthKey() {
 }
 
 async function loadContextLength() {
+  if (props.draft || showSessionUsage.value) return
   const key = currentContextLengthKey()
   if (key === contextLengthLoadedKey) return
   if (key === contextLengthRequestKey && contextLengthRequest) return contextLengthRequest
@@ -812,7 +867,8 @@ async function loadContextLength() {
     } catch {
       if (currentContextLengthKey() !== key) return
       contextLength.value = FALLBACK_CONTEXT
-      contextLengthLoadedKey = key
+      // The fallback keeps the usage UI usable, but it is not resolved model
+      // metadata. Leave this key retryable on the next session/model lifecycle.
     } finally {
       if (contextLengthRequestKey === key) {
         contextLengthRequest = null
@@ -829,32 +885,41 @@ watch(
     profilesStore.activeProfileName,
     appStore.selectedProvider,
     appStore.selectedModel,
-    chatStore.activeSession?.id,
-    chatStore.activeSession?.profile,
-    chatStore.activeSession?.provider,
-    chatStore.activeSession?.model,
-    chatStore.activeSession?.source,
+    composerSession.value?.id,
+    composerSession.value?.profile,
+    composerSession.value?.provider,
+    composerSession.value?.model,
+    composerSession.value?.source,
+    composerSession.value?.agent,
+    composerSession.value?.codingAgentId,
   ],
   loadContextLength,
   { flush: 'post' },
 )
 
-const totalTokens = computed(() => {
-  const context = chatStore.activeSession?.contextTokens
-  if (typeof context === 'number' && Number.isFinite(context) && context > 0) return context
-  const input = chatStore.activeSession?.inputTokens ?? 0
-  const output = chatStore.activeSession?.outputTokens ?? 0
-  return input + output
+const cumulativeTokens = computed(() => {
+  const session = composerSession.value
+  return (session?.inputTokens ?? 0) + (session?.outputTokens ?? 0)
+    + (session?.cacheReadTokens ?? 0) + (session?.cacheWriteTokens ?? 0)
 })
-const showContextUsage = computed(() => !!chatStore.activeSession)
+const totalTokens = computed(() => {
+  if (showSessionUsage.value) return cumulativeTokens.value
+  const context = composerSession.value?.contextTokens
+  if (typeof context === 'number' && Number.isFinite(context) && context >= 0) return context
+  // Cumulative consumption is not the size of the current context window.
+  return null
+})
+const showContextUsage = computed(() => !!composerSession.value)
+const showContextLimit = computed(() => !showSessionUsage.value)
 
-const remainingTokens = computed(() => Math.max(0, contextLength.value - totalTokens.value))
+const remainingTokens = computed(() => totalTokens.value == null ? null : Math.max(0, contextLength.value - totalTokens.value))
 
 const usagePercent = computed(() =>
-  Math.min((totalTokens.value / contextLength.value) * 100, 100),
+  Math.min(((totalTokens.value ?? 0) / contextLength.value) * 100, 100),
 )
 
-function formatTokens(n: number): string {
+function formatTokens(n: number | null): string {
+  if (n == null) return '—'
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
   return String(n)
@@ -874,6 +939,33 @@ function addFile(file: File) {
     url,
     file,
   })
+  if (!isVideoFile(file)) return
+
+  let job: Promise<void>
+  job = extractRepresentativeVideoFrames(file)
+    .then((frames) => {
+      if (!attachments.value.some(attachment => attachment.id === id)) return
+      for (const frame of frames) {
+        attachments.value.push({
+          id: `${id}-frame-${attachments.value.length}`,
+          name: frame.name,
+          type: frame.type,
+          size: frame.size,
+          url: URL.createObjectURL(frame),
+          file: frame,
+          videoFrameFor: id,
+        })
+      }
+    })
+    .catch(() => {
+      // Keep the original video attachment. Coding agents can still inspect its local path.
+    })
+    .finally(() => {
+      pendingVideoFrameJobs.delete(job)
+      isPreparingAttachments.value = pendingVideoFrameJobs.size > 0
+    })
+  pendingVideoFrameJobs.add(job)
+  isPreparingAttachments.value = true
 }
 
 function addFiles(files: File[]) {
@@ -946,7 +1038,25 @@ defineExpose({ addFiles, focusComposer })
 
 // --- Send ---
 
-function handleSend() {
+function handleStop() {
+  if (!sendButtonIsStop.value || props.stopDisabled || stopPending.value) return
+  if (props.stopControl) void props.stopControl.request()
+  else chatStore.stopStreaming()
+}
+
+async function handleSend() {
+  if (props.sendDisabled || submitting.value) return
+  if (isPreparingAttachments.value) {
+    if (sendAwaitingAttachments) return
+    sendAwaitingAttachments = true
+    try {
+      while (pendingVideoFrameJobs.size > 0) {
+        await Promise.allSettled([...pendingVideoFrameJobs])
+      }
+    } finally {
+      sendAwaitingAttachments = false
+    }
+  }
   const text = inputText.value.trim()
   if (!text && attachments.value.length === 0) return
   if (isBridgeSession.value && text === '/skill' && attachments.value.length === 0) {
@@ -962,9 +1072,20 @@ function handleSend() {
     return
   }
 
-  chatStore.sendMessage(text, attachments.value.length > 0 ? attachments.value : undefined)
+  const files = attachments.value.length > 0 ? [...attachments.value] : undefined
+  if (props.submit) {
+    submitting.value = true
+    try {
+      if (!await props.submit(text, files)) return
+    } finally {
+      submitting.value = false
+    }
+  } else {
+    chatStore.sendMessage(text, files)
+  }
   inputText.value = ''
   saveDraftForActiveSession('')
+  previewAttachment.value = null
   attachments.value = []
   slashActive.value = false
 
@@ -1051,11 +1172,16 @@ onUnmounted(() => {
 })
 
 function removeAttachment(id: string) {
-  const idx = attachments.value.findIndex(a => a.id === id)
-  if (idx !== -1) {
-    URL.revokeObjectURL(attachments.value[idx].url)
-    attachments.value.splice(idx, 1)
+  const removedIds = new Set([id])
+  for (const attachment of attachments.value) {
+    if (attachment.videoFrameFor === id) removedIds.add(attachment.id)
   }
+  const removed = attachments.value.filter(attachment => removedIds.has(attachment.id))
+  if (previewAttachment.value && removedIds.has(previewAttachment.value.id)) {
+    previewAttachment.value = null
+  }
+  for (const attachment of removed) URL.revokeObjectURL(attachment.url)
+  attachments.value = attachments.value.filter(attachment => !removedIds.has(attachment.id))
 }
 
 function formatSize(bytes: number): string {
@@ -1067,20 +1193,32 @@ function formatSize(bytes: number): string {
 function isImage(type: string): boolean {
   return type.startsWith('image/')
 }
+
+function openAttachmentPreview(attachment: Attachment) {
+  if (!isImage(attachment.type)) return
+  previewAttachment.value = attachment
+}
 </script>
 
 <template>
   <div class="chat-input-area">
     <!-- Attachment previews -->
-    <div v-if="attachments.length > 0" class="attachment-previews">
+    <div v-if="attachments.some(att => !att.videoFrameFor)" class="attachment-previews">
       <div
-        v-for="att in attachments"
+        v-for="att in attachments.filter(item => !item.videoFrameFor)"
         :key="att.id"
         class="attachment-preview"
         :class="{ image: isImage(att.type), 'has-context': !!att.context }"
       >
         <template v-if="isImage(att.type)">
-          <img :src="att.url" :alt="att.name" class="attachment-thumb" />
+          <button
+            type="button"
+            class="attachment-thumb-button"
+            :aria-label="att.name"
+            @click="openAttachmentPreview(att)"
+          >
+            <img :src="att.url" :alt="att.name" class="attachment-thumb" />
+          </button>
         </template>
         <template v-else>
           <div class="attachment-file">
@@ -1098,6 +1236,12 @@ function isImage(type: string): boolean {
         </button>
       </div>
     </div>
+    <ImagePreviewOverlay
+      v-if="previewAttachment"
+      :src="previewAttachment.url"
+      :alt="previewAttachment.name"
+      @close="previewAttachment = null"
+    />
 
     <div v-if="activeMessageReference" class="message-reference-preview">
       <span class="message-reference-text">{{ messageReferencePreview }}</span>
@@ -1113,6 +1257,36 @@ function isImage(type: string): boolean {
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
       </button>
+    </div>
+
+    <slot name="before-context-usage" />
+    <div v-if="showContextUsage" class="context-usage-row">
+      <span class="context-info" :class="{ 'context-warning': showContextLimit && usagePercent > 80 }">
+        <template v-if="showSessionUsage">{{ t('chat.sessionUsage') }} </template>
+        {{ formatTokens(totalTokens) }}
+        <template v-if="showContextLimit">
+          /
+          <NTooltip trigger="hover" :disabled="isMobileViewport">
+            <template #trigger>
+              <span class="context-limit-editable" @click="handleEditContextLimit">
+                {{ formatTokens(contextLength) }}
+              </span>
+            </template>
+            <span>{{ t('chat.contextClickToEdit') }}</span>
+          </NTooltip>
+          · {{ t('chat.contextRemaining') }} {{ formatTokens(remainingTokens) }}
+        </template>
+      </span>
+      <div v-if="showContextLimit && totalTokens != null" class="context-bar">
+        <div
+          class="context-bar-fill"
+          :class="{
+            'context-bar-warn': usagePercent > 60 && usagePercent <= 80,
+            'context-bar-danger': usagePercent > 80,
+          }"
+          :style="{ width: `${usagePercent}%` }"
+        />
+      </div>
     </div>
 
     <div
@@ -1138,33 +1312,10 @@ function isImage(type: string): boolean {
         @mousedown="startResize"
         @dblclick="resetTextareaHeight"
       ></div>
-      <div v-if="showContextUsage" class="context-usage-row">
-        <span class="context-info" :class="{ 'context-warning': usagePercent > 80 }">
-          {{ formatTokens(totalTokens) }} /
-          <NTooltip trigger="hover" :disabled="isMobileViewport">
-            <template #trigger>
-              <span class="context-limit-editable" @click="handleEditContextLimit">
-                {{ formatTokens(contextLength) }}
-              </span>
-            </template>
-            <span>{{ t('chat.contextClickToEdit') }}</span>
-          </NTooltip>
-          · {{ t('chat.contextRemaining') }} {{ formatTokens(remainingTokens) }}
-        </span>
-        <div class="context-bar">
-          <div
-            class="context-bar-fill"
-            :class="{
-              'context-bar-warn': usagePercent > 60 && usagePercent <= 80,
-              'context-bar-danger': usagePercent > 80,
-            }"
-            :style="{ width: `${usagePercent}%` }"
-          />
-        </div>
-      </div>
       <textarea
         ref="textareaRef"
         v-model="inputText"
+        :readonly="submitting"
         class="input-textarea"
         dir="auto"
         :style="textareaHeight ? { height: textareaHeight + 'px' } : {}"
@@ -1190,89 +1341,10 @@ function isImage(type: string): boolean {
             {{ t('chat.attachFiles') }}
           </NTooltip>
 
-          <NPopselect
-            :value="currentExpertName"
-            :options="expertOptions"
-            trigger="click"
-            @update:value="handleExpertChange"
-          >
-            <NTooltip trigger="hover" :disabled="isMobileViewport">
-              <template #trigger>
-                <NButton
-                  quaternary
-                  size="tiny"
-                  class="input-expert-button"
-                  :aria-label="`${t('chat.expert')}: ${compactExpertLabel}`"
-                >
-                  <template #icon>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M12 3l2.6 5.26 5.8.84-4.2 4.1.99 5.8L12 16.98 6.81 19l.99-5.8-4.2-4.1 5.8-.84L12 3z" />
-                    </svg>
-                  </template>
-                  <span class="input-expert-label">{{ compactExpertLabel }}</span>
-                  <svg class="toolbar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-                </NButton>
-              </template>
-              {{ t('chat.expert') }}: {{ compactExpertLabel }}
-            </NTooltip>
-          </NPopselect>
-
-          <NPopover
-            v-if="!isMoaSession && !isGlobalCodingAgentSession"
-            trigger="click"
-            placement="top-start"
-          >
-            <template #trigger>
-              <NTooltip trigger="hover" :disabled="isMobileViewport">
-                <template #trigger>
-                  <NButton
-                    quaternary
-                    size="tiny"
-                    class="reasoning-effort-button"
-                    :class="{ active: !!currentReasoningEffort }"
-                    :style="reasoningEffortAccentStyle"
-                    :aria-label="`${t('chat.reasoningEffort.tooltip')}: ${reasoningEffortLabel}`"
-                  >
-                    <template #icon>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/>
-                        <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/>
-                      </svg>
-                    </template>
-                    <span class="reasoning-effort-label">{{ reasoningEffortLabel }}</span>
-                    <svg class="toolbar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-                  </NButton>
-                </template>
-                {{ t('chat.reasoningEffort.tooltip') }}: {{ reasoningEffortLabel }}
-              </NTooltip>
-            </template>
-
-            <div class="reasoning-effort-slider-popover" :style="reasoningEffortAccentStyle">
-              <div class="reasoning-effort-slider-heading">
-                <span>{{ t('chat.reasoningEffort.tooltip') }}</span>
-                <strong>{{ reasoningEffortLabel }}</strong>
-              </div>
-              <NSlider
-                class="reasoning-effort-slider"
-                :class="{ 'reasoning-effort-slider--max': currentReasoningEffort === 'max' }"
-                :value="reasoningEffortSliderValue"
-                :min="0"
-                :max="reasoningEffortOptions.length - 1"
-                :step="1"
-                :format-tooltip="reasoningEffortSliderLabel"
-                @update:value="onReasoningEffortSliderChange"
-              />
-              <div class="reasoning-effort-slider-range" aria-hidden="true">
-                <span>{{ reasoningEffortOptions[0].label }}</span>
-                <span>{{ reasoningEffortOptions[reasoningEffortOptions.length - 1].label }}</span>
-              </div>
-              <div class="reasoning-effort-slider-hint">
-                {{ t('chat.reasoningEffort.dragHint', { count: reasoningEffortOptions.length }) }}
-              </div>
-            </div>
-          </NPopover>
+          <ScreenshotButton :key="chatStore.activeSessionId || 'new'" :mobile="isMobileViewport" @capture="file => addFiles([file])" />
 
           <NDropdown
+            v-if="!hideSettings"
             trigger="click"
             :options="inputSettingsOptions"
             :show-arrow="true"
@@ -1309,6 +1381,8 @@ function isImage(type: string): boolean {
                 :disabled="props.modelDisabled"
                 :title="isMobileViewport ? undefined : props.modelLabel || t('models.selectModel')"
                 :aria-label="props.modelLabel || t('models.selectModel')"
+                aria-haspopup="dialog"
+                :aria-expanded="props.modelExpanded"
                 @click="handleModelButtonClick"
               >
                 <template #icon>
@@ -1340,6 +1414,65 @@ function isImage(type: string): boolean {
             {{ props.modelLabel || t('models.selectModel') }}
           </NTooltip>
 
+          <NPopover
+            v-if="(!draft || draftConfig) && !isMoaSession && (!isGlobalCodingAgentSession || supportsNativeReasoning || currentReasoningEffort)"
+            v-model:show="showReasoningEffort"
+            trigger="click"
+            placement="top-start"
+            :disabled="!canEditReasoningEffort"
+          >
+            <template #trigger>
+              <NTooltip trigger="hover" :disabled="isMobileViewport">
+                <template #trigger>
+                  <NButton
+                    quaternary
+                    size="tiny"
+                    class="reasoning-effort-button"
+                    :disabled="submitting || (draft && modelDisabled) || !canEditReasoningEffort"
+                    :class="{ active: !!currentReasoningEffort }"
+                    :aria-label="`${t('chat.reasoningEffort.tooltip')}: ${reasoningEffortLabel}`"
+                    @keydown.esc.stop="showReasoningEffort = false"
+                  >
+                    <template #icon>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/>
+                        <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/>
+                      </svg>
+                    </template>
+                    <span class="reasoning-effort-label">{{ reasoningEffortLabel }}</span>
+                    <svg v-if="canEditReasoningEffort" class="toolbar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                  </NButton>
+                </template>
+                {{ t('chat.reasoningEffort.tooltip') }}: {{ reasoningEffortLabel }}
+              </NTooltip>
+            </template>
+
+            <div class="reasoning-effort-slider-popover" :style="reasoningEffortAccentStyle" @keydown.esc.stop="showReasoningEffort = false">
+              <div class="reasoning-effort-slider-heading">
+                <span>{{ t('chat.reasoningEffort.tooltip') }}</span>
+                <strong>{{ reasoningEffortLabel }}</strong>
+              </div>
+              <NSlider
+                class="reasoning-effort-slider"
+                :class="{ 'reasoning-effort-slider--max': currentReasoningEffort === 'max' }"
+                :value="reasoningEffortSliderValue"
+                :min="0"
+                :max="reasoningEffortOptions.length - 1"
+                :disabled="!canEditReasoningEffort || reasoningEffortOptions.length <= 1"
+                :step="1"
+                :format-tooltip="reasoningEffortSliderLabel"
+                @update:value="onReasoningEffortSliderChange"
+              />
+              <div class="reasoning-effort-slider-range" aria-hidden="true">
+                <span>{{ reasoningEffortOptions[0].label }}</span>
+                <span>{{ reasoningEffortOptions[reasoningEffortOptions.length - 1].label }}</span>
+              </div>
+              <div class="reasoning-effort-slider-hint">
+                {{ t('chat.reasoningEffort.dragHint', { count: reasoningEffortOptions.length }) }}
+              </div>
+            </div>
+          </NPopover>
+
         </div>
         <div class="input-actions">
           <VoiceDialogueControls
@@ -1357,9 +1490,10 @@ function isImage(type: string): boolean {
             circle
             class="send-button"
             :class="{ 'send-button--stop': sendButtonIsStop }"
-            :disabled="sendButtonIsStop ? chatStore.isAborting : !canSend"
+            :disabled="sendButtonIsStop ? (stopDisabled || stopPending) : !canSend || sendDisabled || submitting"
+            :aria-busy="sendButtonIsStop && stopPending"
             :aria-label="sendButtonIsStop ? 'Stop' : 'Send'"
-            @click="sendButtonIsStop ? chatStore.stopStreaming() : handleSend()"
+            @click="sendButtonIsStop ? handleStop() : handleSend()"
           >
             <template #icon>
               <svg
@@ -1415,7 +1549,7 @@ function isImage(type: string): boolean {
         />
         <div class="skill-picker-list">
           <div v-if="skillPickerLoading" class="skill-picker-empty">
-            {{ t('common.loading') }}
+            <NSpin size="small" :description="t('common.loading')" />
           </div>
           <template v-else>
             <div
@@ -1461,7 +1595,7 @@ function isImage(type: string): boolean {
         </div>
         <div class="skill-picker-list">
           <div v-if="bundlePickerLoading" class="skill-picker-empty">
-            {{ t('common.loading') }}
+            <NSpin size="small" :description="t('common.loading')" />
           </div>
           <template v-else>
             <div
@@ -1562,16 +1696,16 @@ function isImage(type: string): boolean {
 .chat-input-area {
   position: relative;
   z-index: 80;
-  padding: 8px 20px 14px;
+  padding: calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border-top: 0;
-  background-color: $bg-main-surface;
+  background-color: var(--theme-content-bg, $bg-main-surface);
   flex-shrink: 0;
 }
 
 .input-top-bar {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   min-width: 0;
   flex: 1;
   padding: 0;
@@ -1580,8 +1714,8 @@ function isImage(type: string): boolean {
 .auto-play-speech-switch {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 0 0 2px;
+  gap: calc(5px * var(--spacing-scale, 1));
+  padding: 0 0 0 calc(2px * var(--spacing-scale, 1));
   margin-inline-start: 0;
 
   .switch-label {
@@ -1590,8 +1724,8 @@ function isImage(type: string): boolean {
     justify-content: center;
     width: 16px;
     height: 16px;
-    color: #999999;
-    font-size: 12px;
+    color: var(--text-muted);
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
     svg {
       opacity: 1;
@@ -1608,7 +1742,7 @@ function isImage(type: string): boolean {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #999999;
+  color: var(--text-muted);
   width: 24px;
   min-width: 24px;
   height: 22px;
@@ -1631,12 +1765,12 @@ function isImage(type: string): boolean {
   }
 
   &.active {
-    color: #999999;
+    color: var(--text-muted);
     opacity: 1;
   }
 
   &:hover {
-    color: #999999;
+    color: var(--text-muted);
     opacity: 1;
   }
 }
@@ -1644,10 +1778,10 @@ function isImage(type: string): boolean {
 .input-settings-button {
   color: $text-secondary;
   border-radius: 999px;
-  padding: 0 7px 0 6px;
+  padding: 0 calc(7px * var(--spacing-scale, 1)) 0 calc(6px * var(--spacing-scale, 1));
 
   :deep(.n-button__content) {
-    gap: 4px;
+    gap: calc(4px * var(--spacing-scale, 1));
   }
 
   :deep(.n-button__state-border),
@@ -1655,43 +1789,16 @@ function isImage(type: string): boolean {
   :deep(.n-button__ripple) {
     display: none;
   }
-}
-
-.input-expert-button {
-  color: $text-secondary;
-  border-radius: 999px;
-  max-width: 160px;
-  padding: 0 4px 0 6px;
-
-  :deep(.n-button__content) {
-    gap: 4px;
-    min-width: 0;
-  }
-
-  :deep(.n-button__state-border),
-  :deep(.n-button__border),
-  :deep(.n-button__ripple) {
-    display: none;
-  }
-}
-
-.input-expert-label {
-  display: inline-block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: top;
-  white-space: nowrap;
 }
 
 .input-model-button {
   color: $text-secondary;
   border-radius: 999px;
   max-width: 190px;
-  padding: 0 4px 0 6px;
+  padding: 0 calc(4px * var(--spacing-scale, 1)) 0 calc(6px * var(--spacing-scale, 1));
 
   :deep(.n-button__content) {
-    gap: 4px;
+    gap: calc(4px * var(--spacing-scale, 1));
     min-width: 0;
   }
 
@@ -1714,14 +1821,10 @@ function isImage(type: string): boolean {
 .reasoning-effort-button {
   color: $text-secondary;
   border-radius: 999px;
-  padding: 0 4px 0 6px;
-
-  &.active {
-    color: var(--reasoning-effort-accent-color);
-  }
+  padding: 0 calc(4px * var(--spacing-scale, 1)) 0 calc(6px * var(--spacing-scale, 1));
 
   :deep(.n-button__content) {
-    gap: 4px;
+    gap: calc(4px * var(--spacing-scale, 1));
     min-width: 0;
   }
 }
@@ -1737,7 +1840,7 @@ function isImage(type: string): boolean {
 
 .reasoning-effort-slider-popover {
   width: min(320px, calc(100vw - 64px));
-  padding: 4px 2px 2px;
+  padding: calc(4px * var(--spacing-scale, 1)) calc(2px * var(--spacing-scale, 1)) calc(2px * var(--spacing-scale, 1));
 }
 
 .reasoning-effort-slider-heading,
@@ -1745,20 +1848,20 @@ function isImage(type: string): boolean {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
 }
 
 .reasoning-effort-slider-hint {
   margin-top: 6px;
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   text-align: center;
 }
 
 .reasoning-effort-slider-heading {
   margin-bottom: 10px;
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   strong {
     color: var(--reasoning-effort-accent-color);
@@ -1872,7 +1975,7 @@ function isImage(type: string): boolean {
 .reasoning-effort-slider-range {
   margin-top: 4px;
   color: $text-muted;
-  font-size: 10px;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
 }
 
 .toolbar-chevron {
@@ -1883,21 +1986,41 @@ function isImage(type: string): boolean {
 .context-usage-row {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  position: absolute;
-  top: 9px;
-  right: 14px;
-  z-index: 1;
+  justify-content: flex-start;
+  gap: calc(7px * var(--spacing-scale, 1));
+  position: relative;
+  width: 100%;
   min-width: 0;
-  max-width: calc(100% - 28px);
-  padding: 0;
+  max-width: 100%;
+  margin-inline-start: 0;
+  padding: calc(4px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid var(--input-border-color);
+  border-bottom: 0;
+  border-radius: $radius-sm $radius-sm 0 0;
+  background-color: var(--theme-card-bg, $bg-card);
   color: $text-muted;
-  pointer-events: auto;
+  transition: border-color $transition-fast;
+
+  .dark & {
+    background-color: var(--theme-content-bg, $bg-main-surface);
+  }
+}
+
+.context-usage-row + .input-wrapper {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+
+.chat-input-area:has(.input-wrapper:hover) .context-usage-row {
+  border-color: var(--input-border-hover-color);
+}
+
+.chat-input-area:has(.input-wrapper:focus-within) .context-usage-row {
+  border-color: var(--input-border-focus-color);
 }
 
 .context-info {
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: inherit;
   min-width: 0;
   white-space: nowrap;
@@ -1909,14 +2032,14 @@ function isImage(type: string): boolean {
 
 .context-limit-editable {
   cursor: pointer;
-  border-bottom: 1px dashed transparent;
+  border-bottom: var(--border-width, 1px) dashed transparent;
   transition: all 0.2s ease;
-  padding: 0 2px;
+  padding: 0 calc(2px * var(--spacing-scale, 1));
 
   &:hover {
     border-bottom-color: $text-muted;
     background: rgba(128, 128, 128, 0.1);
-    border-radius: 2px;
+    border-radius: var(--radius-component, 2px);
   }
 }
 
@@ -1925,7 +2048,7 @@ function isImage(type: string): boolean {
   height: 4px;
   margin-inline-start: -4px;
   background: rgba(var(--text-muted-rgb), 0.2);
-  border-radius: 2px;
+  border-radius: var(--radius-component, 2px);
   overflow: hidden;
 }
 
@@ -1936,7 +2059,7 @@ function isImage(type: string): boolean {
     rgba(var(--text-muted-rgb), 0.45),
     rgba(var(--text-muted-rgb), 0.85)
   );
-  border-radius: 2px;
+  border-radius: var(--radius-component, 2px);
   transition: width 0.3s ease;
 
   &.context-bar-warn {
@@ -1980,16 +2103,19 @@ function isImage(type: string): boolean {
 @media (max-width: 768px) {
   .chat-input-area {
     --voice-overlay-mobile-bottom-offset: 146px;
-    padding: 8px 12px 12px;
+    padding: 6px 8px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .input-top-bar {
-    gap: 5px;
+    gap: calc(5px * var(--spacing-scale, 1));
   }
 
-  .reasoning-effort-label,
   .auto-play-speech-switch {
     display: none;
+  }
+
+  .reasoning-effort-label {
+    max-width: 64px;
   }
 
   .reasoning-effort-slider-popover {
@@ -2003,28 +2129,19 @@ function isImage(type: string): boolean {
   .input-model-button {
     min-width: 35px;
     max-width: 35px;
-    padding: 0 4px 0 6px;
+    padding: 0 calc(4px * var(--spacing-scale, 1)) 0 calc(6px * var(--spacing-scale, 1));
   }
 
-  .input-expert-button {
-    min-width: 35px;
-    max-width: 35px;
-    padding: 0 4px 0 6px;
-  }
   .input-model-label {
-    display: none;
-  }
-
-  .input-expert-label {
     display: none;
   }
 
   .input-settings-button {
     min-width: 36px;
-    padding: 0 4px 0 6px;
+    padding: 0 calc(4px * var(--spacing-scale, 1)) 0 calc(6px * var(--spacing-scale, 1));
 
     :deep(.n-button__content) {
-      gap: 2px;
+      gap: calc(2px * var(--spacing-scale, 1));
     }
 
     :deep(.n-button__icon) {
@@ -2039,8 +2156,8 @@ function isImage(type: string): boolean {
   .context-info {
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 10px;
-    line-height: 14px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 14 / 14));
   }
 
   .context-bar {
@@ -2053,8 +2170,8 @@ function isImage(type: string): boolean {
   width: 100%;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 0 10px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: 0 0 calc(10px * var(--spacing-scale, 1));
 }
 
 .attachment-preview {
@@ -2062,11 +2179,11 @@ function isImage(type: string): boolean {
   border-radius: $radius-sm;
   overflow: hidden;
   background-color: $bg-secondary;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
 
   &.image {
-    width: 64px;
-    height: 64px;
+    width: 112px;
+    height: 72px;
   }
 
   &.image.has-context {
@@ -2076,9 +2193,26 @@ function isImage(type: string): boolean {
 }
 
 .attachment-thumb {
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+}
+
+.attachment-thumb-button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background:
+    linear-gradient(45deg, rgba(127, 127, 127, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(127, 127, 127, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(127, 127, 127, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(127, 127, 127, 0.08) 75%);
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  background-size: 12px 12px;
+  cursor: zoom-in;
 }
 
 .attachment-preview.has-context .attachment-thumb {
@@ -2090,10 +2224,14 @@ function isImage(type: string): boolean {
   background: #fff;
 }
 
+.attachment-preview.has-context .attachment-thumb-button {
+  height: auto;
+}
+
 .attachment-context {
-  padding: 7px 9px;
-  border-top: 1px solid $border-color;
-  font-size: 11px;
+  padding: calc(7px * var(--spacing-scale, 1)) calc(9px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-color;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   color: $text-secondary;
 
   summary { cursor: pointer; user-select: none; }
@@ -2105,14 +2243,14 @@ function isImage(type: string): boolean {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 8px 12px;
+  gap: calc(2px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   min-width: 80px;
   max-width: 140px;
   color: $text-secondary;
 
   .file-name {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2120,7 +2258,7 @@ function isImage(type: string): boolean {
   }
 
   .file-size {
-    font-size: 10px;
+    font-size: calc(var(--font-size-base, 14px) * 10 / 14);
     color: $text-muted;
   }
 }
@@ -2155,13 +2293,13 @@ function isImage(type: string): boolean {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   width: 100%;
   min-height: 150px;
-  background-color: $bg-card;
-  border: 1px solid var(--input-border-color);
-  border-radius: 18px;
-  padding: 22px 12px 9px;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid var(--input-border-color);
+  border-radius: $radius-md;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
   position: relative;
   cursor: text;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
@@ -2182,7 +2320,7 @@ function isImage(type: string): boolean {
   }
 
   .dark & {
-    background-color: #333333;
+    background-color: var(--theme-content-bg, $bg-main-surface);
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
   }
 }
@@ -2198,7 +2336,7 @@ function isImage(type: string): boolean {
 
   &:hover {
     background: rgba($accent-primary, 0.15);
-    border-radius: 4px;
+    border-radius: var(--radius-component, 4px);
   }
 }
 
@@ -2211,8 +2349,8 @@ function isImage(type: string): boolean {
   outline: none;
   color: $text-primary;
   font-family: $font-ui;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
+  line-height: var(--line-height, 1.5);
   resize: none;
   max-height: 400px;
   min-height: 44px;
@@ -2220,7 +2358,7 @@ function isImage(type: string): boolean {
   overflow-y: auto;
 
   @media (max-width: 768px) {
-    font-size: 16px;
+    font-size: calc(var(--font-size-base, 14px) * 16 / 14);
   }
 
   &::placeholder {
@@ -2235,11 +2373,11 @@ function isImage(type: string): boolean {
 .message-reference-preview {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   min-width: 0;
   margin: 0 8px 8px;
-  padding: 4px 8px;
-  border-radius: 8px;
+  padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 8px);
   background: rgba(var(--accent-primary-rgb), 0.07);
   cursor: default;
 }
@@ -2249,8 +2387,8 @@ function isImage(type: string): boolean {
   min-width: 0;
   overflow: hidden;
   color: $text-secondary;
-  font-size: 12px;
-  line-height: 24px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 24 / 14));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2264,7 +2402,7 @@ function isImage(type: string): boolean {
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-component, 7px);
   background: transparent;
   color: $text-muted;
   cursor: pointer;
@@ -2277,7 +2415,7 @@ function isImage(type: string): boolean {
 
 .input-actions {
   display: flex;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   flex-shrink: 0;
   align-items: center;
 }
@@ -2286,7 +2424,7 @@ function isImage(type: string): boolean {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-top: auto;
   min-height: 32px;
 }
@@ -2345,11 +2483,11 @@ function isImage(type: string): boolean {
   max-height: 240px;
   overflow-y: auto;
   background: $bg-primary;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
   z-index: 20;
-  padding: 4px;
+  padding: calc(4px * var(--spacing-scale, 1));
 
   .dark & {
     background: #2a2a2a;
@@ -2360,8 +2498,8 @@ function isImage(type: string): boolean {
   display: grid;
   grid-template-columns: auto auto 1fr;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
   cursor: pointer;
   min-height: 36px;
@@ -2374,15 +2512,15 @@ function isImage(type: string): boolean {
 }
 
 .slash-command-name {
-  font-family: $font-code;
-  font-size: 13px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $accent-primary;
   white-space: nowrap;
 }
 
 .slash-command-args {
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   white-space: nowrap;
 }
@@ -2393,19 +2531,19 @@ function isImage(type: string): boolean {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: $text-secondary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .skill-picker-modal {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .bundle-picker-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 
   .skill-picker-search {
     min-width: 0;
@@ -2416,14 +2554,14 @@ function isImage(type: string): boolean {
 .skill-picker-search {
   width: 100%;
   height: 34px;
-  padding: 0 10px;
-  border: 1px solid $border-color;
+  padding: 0 calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
-  background: $bg-input;
+  background: var(--theme-input-bg, $bg-input);
   color: $text-primary;
   outline: none;
   font-family: $font-ui;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 
   &:focus {
     border-color: $accent-primary;
@@ -2435,7 +2573,7 @@ function isImage(type: string): boolean {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .skill-picker-item {
@@ -2444,8 +2582,8 @@ function isImage(type: string): boolean {
   width: 100%;
   height: 76px;
   box-sizing: border-box;
-  padding: 7px 10px;
-  border: 1px solid $border-color;
+  padding: calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-sm;
   background: $bg-secondary;
   color: $text-primary;
@@ -2473,7 +2611,7 @@ function isImage(type: string): boolean {
   display: block;
   width: 100%;
   height: 100%;
-  padding: 7px 42px 7px 10px;
+  padding: calc(7px * var(--spacing-scale, 1)) calc(42px * var(--spacing-scale, 1)) calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border: 0;
   background: transparent;
   color: inherit;
@@ -2493,7 +2631,7 @@ function isImage(type: string): boolean {
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-component, 7px);
   background: transparent;
   color: $text-muted;
   cursor: pointer;
@@ -2516,9 +2654,9 @@ function isImage(type: string): boolean {
   width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: $font-code;
-  font-size: 12px;
-  line-height: 16px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   color: $accent-primary;
   white-space: nowrap;
 }
@@ -2540,29 +2678,29 @@ function isImage(type: string): boolean {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: $text-muted;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
 }
 
 .skill-picker-name {
   margin-top: 3px;
-  font-size: 13px;
-  line-height: 18px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
   color: $text-primary;
 }
 
 .skill-picker-desc {
   margin-top: 3px;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
   color: $text-secondary;
 }
 
 .skill-picker-empty {
-  padding: 18px 10px;
+  padding: calc(18px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   text-align: center;
   color: $text-muted;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 @media (max-width: 768px) {
@@ -2575,12 +2713,18 @@ function isImage(type: string): boolean {
   }
 
   .input-wrapper {
-    min-height: 118px;
+    min-height: 96px;
+    gap: calc(6px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  }
+
+  .input-textarea {
+    min-height: 24px;
   }
 
   .input-textarea::placeholder {
-    font-size: 13px;
-    line-height: 1.35;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+    line-height: var(--line-height, 1.35);
   }
 }
 

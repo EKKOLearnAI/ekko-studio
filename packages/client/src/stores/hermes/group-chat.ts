@@ -1,12 +1,22 @@
+import { startDiscussion as startDiscussionApi, fetchDiscussion as fetchDiscussionApi, stopDiscussion as stopDiscussionApi, listGroupDocuments as listGroupDocumentsApi, uploadGroupDocument as uploadGroupDocumentApi, fetchGroupDocumentProgress as fetchGroupDocumentProgressApi, startGroupDocumentReading as startGroupDocumentReadingApi, type DiscussionState, type DiscussionStartInput, type GroupDocumentInfo, type GroupDocumentProgress } from '@/api/studio/group-chat'
+import { parseGroupTaskPlanMessage, isOlderGroupTaskPlan } from '@/utils/task-plan'
+import { parseGroupRunUsageMessage } from '@/utils/run-usage'
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useSettingsStore } from './settings'
 import { primeCompletionSound } from '@/utils/completion-sound'
-import { getActiveProfileName, getApiKey, getStoredUsername } from '@/api/client'
-import { fetchCurrentUser } from '@/api/auth'
-import { responseErrorMessage } from '@/utils/http-error'
+import {
+    isPendingInteractionExpiredError,
+    notifyPendingInteractionExpired,
+    pendingInteractionDeadline,
+    type PendingInteractionSubmitResult,
+} from '@/utils/pending-interaction'
+import { getActiveProfileName, getStoredUsername } from '@/api/client'
+import { fetchCurrentUser } from '@/api/studio/auth'
 import { formatMessageWithReference, type Attachment, type ContentBlock, type MessageReference } from './chat'
 import {
+    deleteGroupMessages as deleteGroupMessagesApi,
+    type GroupMessagesDeleted,
     connectGroupChat,
     disconnectGroupChat,
     getSocket,
@@ -16,12 +26,12 @@ import {
     type RoomAgent,
     type RoomAgentSummary,
     type GroupAgentActivity,
+    type GroupMessageRoutingDecision,
     type RoomAgentHandoffChain,
     type RoomAgentInput,
     type RoomSummaryConfig,
     type RoomSummaryState,
-    type DiscussionState,
-    type DiscussionStartInput,
+    type RoomSummaryReview,
     type ChatMessage,
     type GroupChatMention,
     type GroupExecutionQueueItem,
@@ -39,28 +49,22 @@ import {
     cloneRoom as cloneRoomApi,
     deleteRoom as deleteRoomApi,
     clearRoomContext,
-    archiveRoom as archiveRoomApi,
-    dismissArchivePrompt,
     updateInviteCode as updateInviteCodeApi,
     updateRoomWorkspace as updateRoomWorkspaceApi,
-    startDiscussion as startDiscussionApi,
-    fetchDiscussion as fetchDiscussionApi,
-    stopDiscussion as stopDiscussionApi,
-    listGroupDocuments as listGroupDocumentsApi,
-    uploadGroupDocument as uploadGroupDocumentApi,
-    fetchGroupDocumentProgress as fetchGroupDocumentProgressApi,
-    startGroupDocumentReading as startGroupDocumentReadingApi,
-    type GroupDocumentInfo,
-    type GroupDocumentProgress,
-} from '@/api/hermes/group-chat'
+} from '@/api/studio/group-chat'
 import {
     getGroupChatAttachmentUrl,
     uploadGroupChatAttachments,
-} from '@/api/hermes/group-chat-attachments'
+} from '@/api/studio/group-chat-attachments'
 import { groupMessageAgent } from '@/utils/group-agent-avatar'
 
 type GroupChatSocket = ReturnType<typeof connectGroupChat>
 export const GROUP_CHAT_MEMBER_REMOVED = 'ROOM_MEMBER_REMOVED'
+async function uploadDiscussionAttachments(roomId: string, attachments: Attachment[]): Promise<string[]> {
+  const uploaded: string[] = []
+  for (const attachment of attachments) { if (attachment.file) uploaded.push((await uploadGroupDocumentApi(roomId, attachment.file)).name) }
+  return uploaded
+}
 
 async function uploadGroupFiles(
     attachments: Attachment[],
@@ -68,35 +72,6 @@ async function uploadGroupFiles(
     inviteCode = '',
 ): Promise<{ name: string; path: string }[]> {
     return uploadGroupChatAttachments({ roomId, inviteCode: inviteCode || undefined }, attachments)
-}
-
-/**
- * Upload discussion attachments through the group-chat /documents endpoint
- * (streaming, no 50MB /upload cap) so large files actually land on the device
- * before the discussion starts. Throws if any file fails — the caller must not
- * start the discussion with a phantom file name.
- */
-async function uploadDiscussionAttachments(roomId: string, attachments: Attachment[]): Promise<string[]> {
-    const uploaded: string[] = []
-    for (const att of attachments) {
-        if (!att.file) continue
-        const formData = new FormData()
-        formData.append('file', att.file, att.name)
-        const token = getApiKey()
-        const profileName = getActiveProfileName()
-        const headers: Record<string, string> = {}
-        if (token) headers.Authorization = `Bearer ${token}`
-        if (profileName) headers['X-Hermes-Profile'] = profileName
-        const res = await fetch(`/api/hermes/group-chat/rooms/${encodeURIComponent(roomId)}/documents`, {
-            method: 'POST',
-            body: formData,
-            headers,
-        })
-        if (!res.ok) throw new Error(await responseErrorMessage(res, `Upload failed for ${att.name}`))
-        const data = await res.json() as { name: string }
-        uploaded.push(data.name)
-    }
-    return uploaded
 }
 
 function buildGroupContentBlocks(content: string, attachments: Attachment[], files: { name: string; path: string }[]): ContentBlock[] {
@@ -177,6 +152,7 @@ function needsFinalContentRecovery(message: ChatMessage): boolean {
 }
 
 function mergeFinalMessage(existing: ChatMessage | null, msg: ChatMessage): ChatMessage {
+    if (existing && isOlderGroupTaskPlan(existing, msg)) return existing
     return {
         ...msg,
         content: hasText(msg.content) ? msg.content : existing?.content || msg.content || '',
@@ -198,15 +174,7 @@ export interface GroupPendingApproval {
     allowPermanent: boolean
     isMemoryWrite: boolean
     requestedAt: number
-}
-
-export interface PendingGroupWelcomeMessage {
-    id: string
-    senderId: string
-    senderName: string
-    content: string
-    role?: string
-    timestamp?: number
+    countdownDeadline: number
 }
 
 export interface GroupPendingClarify {
@@ -219,14 +187,50 @@ export interface GroupPendingClarify {
     responseMode: string
     timeoutMs: number
     requestedAt: number
+    countdownDeadline: number
 }
 
 export const useGroupChatStore = defineStore('groupChat', () => {
+    const discussionStates = ref<Map<string, DiscussionState>>(new Map())
+    const documentStates = ref<Map<string, GroupDocumentInfo>>(new Map())
+    const documentProgress = ref<Map<string, GroupDocumentProgress>>(new Map())
+    let documentListRequest = 0
     // ─── State ─────────────────────────────────────────────
     const connected = ref(false)
     const currentRoomId = ref<string | null>(null)
     const rooms = ref<RoomInfo[]>([])
     const messages = ref<ChatMessage[]>([])
+    const messageDeletionRevisions = ref(new Map<string, number>())
+    const deletedMessageIds = new Map<string, Set<string>>()
+    const deletionHistoryNeedsReload = new Set<string>()
+
+    function applyMessagesDeleted(data: GroupMessagesDeleted) {
+        if (!data.roomId || !Array.isArray(data.messageIds)
+            || data.messageDeletionRevision <= (messageDeletionRevisions.value.get(data.roomId) || 0)) return
+        if (data.messageDeletionRevision > (messageDeletionRevisions.value.get(data.roomId) || 0) + 1) deletionHistoryNeedsReload.add(data.roomId)
+        messageDeletionRevisions.value.set(data.roomId, data.messageDeletionRevision)
+        const removed = deletedMessageIds.get(data.roomId) || new Set<string>()
+        for (const id of data.messageIds) removed.add(id)
+        deletedMessageIds.set(data.roomId, removed)
+        const room = rooms.value.find(item => item.id === data.roomId)
+        if (room) { room.totalTokens = data.totalTokens; room.messageDeletionRevision = data.messageDeletionRevision }
+        const reference = messageReferences.value.get(data.roomId)
+        if (reference && removed.has(reference.id)) clearMessageReference(data.roomId)
+        if (data.roomId !== currentRoomId.value) return
+        flushPendingStreamDeltas(data.roomId)
+        messages.value = messages.value.filter(message => !removed.has(message.id))
+        loadedMessageCount.value = messages.value.length
+        totalMessages.value = data.messageCount
+        hasMoreBefore.value = loadedMessageCount.value < totalMessages.value
+        for (const id of data.messageIds) messageRoutingDecisions.value.delete(id)
+        for (const [id, chain] of handoffChains.value) if (removed.has(chain.sourceMessageId)) handoffChains.value.delete(id)
+    }
+
+    async function deleteMessages(roomId: string, ids: string[], revision: string) {
+        const result = await deleteGroupMessagesApi(roomId, ids, revision)
+        applyMessagesDeleted(result)
+        return result
+    }
     const pendingStreamDeltas = new Map<string, {
         roomId: string
         messageId: string
@@ -244,21 +248,19 @@ export const useGroupChatStore = defineStore('groupChat', () => {
     const roomName = ref('')
     const isJoining = ref(false)
     const error = ref<string | null>(null)
-    const typingUsers = ref<Map<string, { name: string; timer: ReturnType<typeof setTimeout> }>>(new Map())
+    const typingUsers = ref<Map<string, { name: string; timer: ReturnType<typeof setTimeout>; sequence: number }>>(new Map())
+    let remoteTypingSequence = 0
     const realtimeJoinedRoomId = ref<string | null>(null)
     const realtimeJoinedSocketId = ref<string | null>(null)
     const contextStatuses = ref<Map<string, { agentName: string; status: string }>>(new Map())
     const activeAgentRuns = ref<Map<string, GroupAgentActivity>>(new Map())
     const roomSummaryStates = ref<Map<string, RoomSummaryState>>(new Map())
-const discussionStates = ref<Map<string, DiscussionState>>(new Map())
-    const documentStates = ref<Map<string, GroupDocumentInfo>>(new Map())
-    const documentProgress = ref<Map<string, GroupDocumentProgress>>(new Map())
+    const roomSummaryReviews = ref<Map<string, RoomSummaryReview>>(new Map())
+    const handoffChains = ref<Map<string, RoomAgentHandoffChain>>(new Map())
     const executionQueue = ref<GroupExecutionQueueItem[]>([])
+    const messageRoutingDecisions = ref<Map<string, GroupMessageRoutingDecision>>(new Map())
     const autoPlaySpeechEnabled = ref(false)
     const pendingApprovals = ref<Map<string, GroupPendingApproval>>(new Map())
-    const pendingWelcomeMessages = ref<Map<string, PendingGroupWelcomeMessage[]>>(new Map())
-    const archivePromptStates = ref<Map<string, { count: number; threshold: number }>>(new Map())
-    const handoffChains = ref<Map<string, RoomAgentHandoffChain>>(new Map())
     const pendingClarifies = ref<Map<string, GroupPendingClarify>>(new Map())
 
     function pendingApprovalKey(roomId: string, approvalId: string): string {
@@ -363,36 +365,6 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
 
     function setAutoPlaySpeech(enabled: boolean) {
         autoPlaySpeechEnabled.value = enabled
-    }
-
-    function queueRoomWelcomeMessages(roomId: string, welcomeMessages: PendingGroupWelcomeMessage[]) {
-        if (!roomId || welcomeMessages.length === 0) return
-        pendingWelcomeMessages.value.set(roomId, welcomeMessages)
-        pendingWelcomeMessages.value = new Map(pendingWelcomeMessages.value)
-    }
-
-    function applyPendingWelcomeMessages(roomId: string) {
-        const queued = pendingWelcomeMessages.value.get(roomId)
-        if (!queued?.length) return
-        const existingIds = new Set(messages.value.map(message => message.id))
-        const synthetic = queued
-            .filter(message => !existingIds.has(message.id))
-            .map((message, index) => ({
-                id: message.id,
-                roomId,
-                senderId: message.senderId,
-                senderName: message.senderName,
-                content: message.content,
-                timestamp: message.timestamp ?? (Date.now() + index),
-                role: message.role || 'assistant',
-            }))
-        if (synthetic.length > 0) {
-            messages.value = [...messages.value, ...synthetic]
-            loadedMessageCount.value = messages.value.length
-            totalMessages.value = Math.max(totalMessages.value, loadedMessageCount.value)
-        }
-        pendingWelcomeMessages.value.delete(roomId)
-        pendingWelcomeMessages.value = new Map(pendingWelcomeMessages.value)
     }
 
     function sortRoomsByActivity() {
@@ -552,7 +524,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         return null
     })
 
-    function upsertPendingApproval(data: { roomId: string; agentName?: string; approval_id?: string; command?: string; description?: string; choices?: string[]; allow_permanent?: boolean; requested_at?: number }) {
+    function upsertPendingApproval(data: { roomId: string; agentName?: string; approval_id?: string; command?: string; description?: string; choices?: string[]; allow_permanent?: boolean; timeout_ms?: number; remaining_timeout_ms?: number; requested_at?: number }) {
         if (!data.roomId || !data.approval_id) return
         const description = data.description || ''
         const normalizedDescription = description.trim().toLowerCase().replace(/\s+/g, ' ')
@@ -574,10 +546,11 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             allowPermanent: Boolean(data.allow_permanent),
             isMemoryWrite,
             requestedAt: Number(data.requested_at) || Date.now(),
+            countdownDeadline: pendingInteractionDeadline(data.remaining_timeout_ms, data.timeout_ms),
         })
     }
 
-    function upsertPendingClarify(data: { roomId: string; agentName?: string; clarify_id?: string; question?: string; choices?: string[] | null; initial_response?: string; response_mode?: string; timeout_ms?: number; requested_at?: number }) {
+    function upsertPendingClarify(data: { roomId: string; agentName?: string; clarify_id?: string; question?: string; choices?: string[] | null; initial_response?: string; response_mode?: string; timeout_ms?: number; remaining_timeout_ms?: number; requested_at?: number }) {
         if (!data.roomId || !data.clarify_id) return
         pendingClarifies.value.set(pendingClarifyKey(data.roomId, data.clarify_id), {
             roomId: data.roomId,
@@ -589,6 +562,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             responseMode: String(data.response_mode || ''),
             timeoutMs: Number(data.timeout_ms) || 300_000,
             requestedAt: Number(data.requested_at) || Date.now(),
+            countdownDeadline: pendingInteractionDeadline(data.remaining_timeout_ms, data.timeout_ms),
         })
     }
 
@@ -656,16 +630,48 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
     function refreshRemoteTypingUser(userId: string, userName: string) {
         const existing = typingUsers.value.get(userId)
         if (existing) clearTimeout(existing.timer)
+        const sequence = ++remoteTypingSequence
         const timer = setTimeout(() => {
+            if (typingUsers.value.get(userId)?.sequence !== sequence) return
             typingUsers.value.delete(userId)
             typingUsers.value = new Map(typingUsers.value)
         }, GROUP_CHAT_REMOTE_TYPING_TTL_MS)
-        typingUsers.value.set(userId, { name: userName, timer })
+        typingUsers.value.set(userId, { name: userName, timer, sequence })
         typingUsers.value = new Map(typingUsers.value)
     }
 
     function isUserTyping(memberUserId: string) {
         return typingUsers.value.has(memberUserId)
+    }
+
+    function applyRoomSummaryState(summary: RoomSummaryState) {
+        if (!summary?.roomId) return
+        const previous = roomSummaryStates.value.get(summary.roomId)
+        if (previous && (previous.version > summary.version
+            || (previous.version === summary.version && previous.updatedAt > summary.updatedAt))) return
+        roomSummaryStates.value.set(summary.roomId, summary)
+        roomSummaryStates.value = new Map(roomSummaryStates.value)
+    }
+
+    async function acceptRoutingSuggestion(messageId: string): Promise<void> {
+        const socket = getSocket(); const roomId = currentRoomId.value
+        if (!socket || !roomId) throw new Error('Group chat socket not connected')
+        await new Promise<void>((resolve, reject) => socket.emit('accept_routing_suggestion', { roomId, messageId }, (res?: { ok?: boolean; error?: string }) => res?.ok ? resolve() : reject(new Error(res?.error || 'Suggestion failed'))))
+    }
+
+    function applyRoomSummaryReview(review: RoomSummaryReview) {
+        if (!review?.roomId) return
+        const previous = roomSummaryReviews.value.get(review.roomId)
+        if (previous && (previous.createdAt > review.createdAt || previous.sourceVersion > review.sourceVersion)) return
+        roomSummaryReviews.value.set(review.roomId, review)
+        roomSummaryReviews.value = new Map(roomSummaryReviews.value)
+    }
+
+    function clearCurrentRoomTransientState() {
+        emitStopTyping()
+        clearRemoteTypingState()
+        contextStatuses.value.clear()
+        executionQueue.value = []
     }
 
     function snapshotCurrentMessageAgents(roomAgents: RoomAgent[]) {
@@ -739,7 +745,23 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         if (changed) historicalMessageAgents.value = [...historicalById.values()]
     }
 
-    function applyRealtimeJoinState(res: any, options: { syncMessages?: boolean } = {}) {
+    function applyRealtimeJoinState(res: any, options: { syncMessages?: boolean; cachedMessageIds?: Set<string>; deletionRevision?: number } = {}) {
+        const staleDeletionSnapshot = res.roomId && Number(res.messageDeletionRevision || 0)
+            < (messageDeletionRevisions.value.get(res.roomId) || 0)
+        if (options.syncMessages && res.roomId) {
+            const revision = Number(res.messageDeletionRevision || 0)
+            const previous = messageDeletionRevisions.value.get(res.roomId) || 0
+            if (revision < (options.deletionRevision || 0)) return
+            // Compare with the request boundary, since a newer deletion event may
+            // arrive before this join acknowledgement. Retain new live messages.
+            if (revision > (options.deletionRevision ?? previous) || deletionHistoryNeedsReload.has(res.roomId)) {
+                messages.value = options.cachedMessageIds
+                    ? messages.value.filter(message => !options.cachedMessageIds!.has(message.id))
+                    : []
+                if (revision >= previous) deletionHistoryNeedsReload.delete(res.roomId)
+            }
+            messageDeletionRevisions.value.set(res.roomId, Math.max(previous, revision))
+        }
         members.value = res.members || []
         if (res.agents) {
             snapshotCurrentMessageAgents(agents.value)
@@ -752,14 +774,27 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         if (currentMember?.name) userName.value = currentMember.name
         if (currentMember?.avatar) currentUserAvatar.value = currentMember.avatar
         if (options.syncMessages && Array.isArray(res.messages)) {
+            // Deltas received before the snapshot are already represented in it.
+            // Flush before replacing rows so the batching timer cannot replay them.
+            flushPendingStreamDeltas(currentRoomId.value || undefined)
             captureHistoricalMessageAgents(res.messages)
             const byId = new Map(messages.value.map(message => [message.id, message]))
             for (const message of res.messages) {
+                if (deletedMessageIds.get(res.roomId)?.has(message.id)) continue
                 const existing = byId.get(message.id)
-                byId.set(message.id, existing ? { ...existing, ...message } : message)
+                if (existing && isOlderGroupTaskPlan(existing, message)) continue
+                const isStreaming = message.isStreaming === true || message.finish_reason === 'streaming'
+                // A late snapshot must not reopen a message already finalized here.
+                if (isStreaming && existing && !existing.isStreaming && existing.finish_reason !== 'streaming') continue
+                byId.set(message.id, isStreaming
+                    ? { ...existing, ...message, isStreaming: true }
+                    : mergeFinalMessage(existing || null, message))
             }
             messages.value = Array.from(byId.values()).sort((a, b) => a.timestamp - b.timestamp)
-            if (typeof res.total === 'number' || typeof res.hasMore === 'boolean') {
+            if (staleDeletionSnapshot) {
+                loadedMessageCount.value = messages.value.length
+                hasMoreBefore.value = loadedMessageCount.value < totalMessages.value
+            } else if (typeof res.total === 'number' || typeof res.hasMore === 'boolean') {
                 applyMessagePaging(res)
             } else {
                 loadedMessageCount.value = Math.max(loadedMessageCount.value, messages.value.length)
@@ -772,6 +807,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         clearRemoteTypingState()
         if (res.typingUsers) {
             for (const u of res.typingUsers) {
+                if (u.userId === userId.value) continue
                 refreshRemoteTypingUser(u.userId, u.userName)
             }
         }
@@ -784,7 +820,9 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         } else {
             contextStatuses.value.clear()
         }
+        if (res.roomSummary?.roomId === currentRoomId.value) applyRoomSummaryState(res.roomSummary)
         executionQueue.value = Array.isArray(res.executionQueue) ? res.executionQueue : []
+        messageRoutingDecisions.value = new Map((Array.isArray(res.routingDecisions) ? res.routingDecisions : []).map((decision: GroupMessageRoutingDecision) => [decision.messageId, decision]))
         if (typeof res.roomId === 'string' && res.roomId) {
             replaceRoomPendingInteractions(res.roomId, res.pendingApprovals, res.pendingClarifies)
         }
@@ -793,6 +831,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
     let connectPromise: Promise<void> | null = null
     let boundSocket: GroupChatSocket | null = null
     let connectionGeneration = 0
+    let roomSelectionSequence = 0
     let pendingRealtimeJoin: { key: string; promise: Promise<void> } | null = null
 
     async function waitForRealtimeSocket(socket: GroupChatSocket): Promise<void> {
@@ -829,7 +868,9 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
     }
 
     async function joinRealtimeRoom(roomId: string, options: { syncMessages?: boolean; inviteCode?: string } = {}) {
+        const selectionSequence = roomSelectionSequence
         const socket = await ensureRealtimeSocket()
+        if (selectionSequence !== roomSelectionSequence) return
         const socketId = socket.id
         if (!socketId) throw new Error('Group chat socket not connected')
         if (
@@ -837,7 +878,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             realtimeJoinedSocketId.value === socketId
         ) return
 
-        const joinKey = `${socketId}:${roomId}`
+        const joinKey = `${socketId}:${roomId}:${selectionSequence}`
         if (pendingRealtimeJoin?.key === joinKey) {
             await pendingRealtimeJoin.promise
             return
@@ -850,6 +891,8 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         const storedAvatar = getStoredGroupUserAvatar()
 
         const joinGeneration = connectionGeneration
+        const cachedMessageIds = new Set(messages.value.map(message => message.id))
+        const deletionRevision = messageDeletionRevisions.value.get(roomId) || 0
         const joinPromise = new Promise<void>((resolve, reject) => {
             let settled = false
             const timeout = setTimeout(() => {
@@ -871,7 +914,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
                 description: storedDescription || undefined,
                 avatar: storedAvatar || undefined,
             }, (res: any) => {
-                if (currentRoomId.value !== roomId) {
+                if (currentRoomId.value !== roomId || selectionSequence !== roomSelectionSequence) {
                     finish(resolve)
                     return
                 }
@@ -891,7 +934,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
                     finish(() => reject(joinError))
                     return
                 }
-                applyRealtimeJoinState(res, options)
+                applyRealtimeJoinState(res, { ...options, cachedMessageIds, deletionRevision })
                 realtimeJoinedRoomId.value = roomId
                 realtimeJoinedSocketId.value = socketId
                 finish(resolve)
@@ -1025,6 +1068,8 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             pendingRealtimeJoin = null
             clearPendingStreamDeltas()
             resetLocalTypingState()
+            clearRemoteTypingState()
+            contextStatuses.value.clear()
             activeAgentRuns.value = new Map()
         })
 
@@ -1036,7 +1081,10 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             realtimeJoinedSocketId.value = null
         })
 
+        socket.on('messages_deleted', applyMessagesDeleted)
+
         socket.on('message', (msg: ChatMessage) => {
+            if (deletedMessageIds.get(msg.roomId)?.has(msg.id)) return
             if (msg.role !== 'tool' && msg.finish_reason !== 'streaming') {
                 recordPersistedRoomActivity(msg.roomId, Number(msg.persistedAt || msg.timestamp || 0))
             }
@@ -1078,6 +1126,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         })
 
         socket.on('message_stream_start', (msg: ChatMessage) => {
+            if (deletedMessageIds.get(msg.roomId)?.has(msg.id)) return
             if (msg.roomId !== currentRoomId.value) return
             flushPendingStreamDeltas(msg.roomId, msg.id)
             messages.value = messages.value.filter(m => !(
@@ -1250,11 +1299,9 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             hasMoreBefore.value = loadedMessageCount.value < totalMessages.value
         })
 
-        socket.on('room_summary_updated', (summary: RoomSummaryState) => {
-            if (!summary?.roomId) return
-            roomSummaryStates.value.set(summary.roomId, summary)
-            roomSummaryStates.value = new Map(roomSummaryStates.value)
-        })
+        socket.on('message_routing_updated', (decision: GroupMessageRoutingDecision) => { messageRoutingDecisions.value.set(decision.messageId, decision); messageRoutingDecisions.value = new Map(messageRoutingDecisions.value) })
+        socket.on('room_summary_updated', applyRoomSummaryState)
+        socket.on('room_summary_review_updated', applyRoomSummaryReview)
 
         socket.on('discussion_update', (state: DiscussionState) => {
             if (!state?.roomId) return
@@ -1264,7 +1311,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
 
         socket.on('document_ready', (payload: { roomId?: string; fileId: string; name: string; docType: string; chunkCount: number; fieldsCount?: number }) => {
             const roomId = payload.roomId || currentRoomId.value
-            if (!roomId || !payload.fileId) return
+            if (!roomId || roomId !== currentRoomId.value || !payload.fileId) return
             documentStates.value.set(payload.fileId, {
                 fileId: payload.fileId,
                 name: payload.name,
@@ -1307,7 +1354,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             handoffChains.value = new Map(handoffChains.value)
         })
 
-        socket.on('approval.requested', (data: { roomId: string; agentName?: string; approval_id?: string; command?: string; description?: string; choices?: string[]; allow_permanent?: boolean }) => {
+        socket.on('approval.requested', (data: { roomId: string; agentName?: string; approval_id?: string; command?: string; description?: string; choices?: string[]; allow_permanent?: boolean; timeout_ms?: number; remaining_timeout_ms?: number; requested_at?: number }) => {
             upsertPendingApproval(data)
             pendingApprovals.value = new Map(pendingApprovals.value)
         })
@@ -1318,7 +1365,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             pendingApprovals.value = new Map(pendingApprovals.value)
         })
 
-        socket.on('clarify.requested', (data: { roomId: string; agentName?: string; clarify_id?: string; question?: string; choices?: string[] | null; initial_response?: string; response_mode?: string; timeout_ms?: number }) => {
+        socket.on('clarify.requested', (data: { roomId: string; agentName?: string; clarify_id?: string; question?: string; choices?: string[] | null; initial_response?: string; response_mode?: string; timeout_ms?: number; remaining_timeout_ms?: number; requested_at?: number }) => {
             upsertPendingClarify(data)
             pendingClarifies.value = new Map(pendingClarifies.value)
         })
@@ -1395,10 +1442,6 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             if (room) room.totalTokens = data.totalTokens
             roomSummaryStates.value.delete(data.roomId)
             roomSummaryStates.value = new Map(roomSummaryStates.value)
-            discussionStates.value.delete(data.roomId)
-            discussionStates.value = new Map(discussionStates.value)
-            archivePromptStates.value.delete(data.roomId)
-            archivePromptStates.value = new Map(archivePromptStates.value)
             for (const [chainId, chain] of handoffChains.value) {
                 if (chain.roomId === data.roomId) handoffChains.value.delete(chainId)
             }
@@ -1417,33 +1460,11 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             }
         })
 
-        socket.on('room_archive_prompt', (data: { roomId: string; count: number; threshold: number }) => {
-            if (!data?.roomId) return
-            archivePromptStates.value.set(data.roomId, { count: data.count, threshold: data.threshold || 500 })
-            archivePromptStates.value = new Map(archivePromptStates.value)
-        })
-
-        socket.on('room_archived', (data: { roomId: string; deletedMessages: number; totalTokens: number }) => {
-            if (!data?.roomId) return
-            archivePromptStates.value.delete(data.roomId)
-            archivePromptStates.value = new Map(archivePromptStates.value)
-            const room = rooms.value.find(r => r.id === data.roomId)
-            if (room) room.totalTokens = data.totalTokens ?? 0
-            if (currentRoomId.value === data.roomId) {
-                // The archived rows are gone; reload the surviving transcript so the
-                // list no longer references deleted history.
-                void getRoomDetail(data.roomId).then((res) => {
-                    if (currentRoomId.value !== data.roomId) return
-                    messages.value = res.messages
-                    applyMessagePaging(res)
-                }).catch(() => { /* keep the stale list; the next reload repairs it */ })
-            }
-        })
-
         if (socket.connected) handleConnected()
     }
 
     function disconnect() {
+        roomSelectionSequence += 1
         connectionGeneration += 1
         resetLocalTypingState()
         clearRemoteTypingState()
@@ -1467,9 +1488,10 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         executionQueue.value = []
         roomSummaryStates.value.clear()
         discussionStates.value.clear()
-        pendingApprovals.value.clear()
-        archivePromptStates.value.clear()
+        documentStates.value.clear()
+        documentProgress.value.clear()
         handoffChains.value.clear()
+        pendingApprovals.value.clear()
         pendingClarifies.value.clear()
         inviteGuest.value = false
         activeInviteCode.value = ''
@@ -1515,42 +1537,44 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
 
     // ─── Room Actions ──────────────────────────────────────
     async function joinRoom(roomId: string) {
+        const sequence = ++roomSelectionSequence
         isJoining.value = true
         error.value = null
 
         try {
             const res = await getRoomDetail(roomId)
-            const previousRoomId = currentRoomId.value
-            if (previousRoomId && previousRoomId !== res.room.id) emitStopTyping(previousRoomId)
+            if (sequence !== roomSelectionSequence) return
+            clearCurrentRoomTransientState()
             clearPendingStreamDeltas()
             upsertRoom({ ...res.room, agents: summarizeRoomAgents(res.agents || []) })
             currentRoomId.value = res.room.id
             realtimeJoinedRoomId.value = null
             realtimeJoinedSocketId.value = null
-            if (previousRoomId !== res.room.id) clearRemoteTypingState()
             roomName.value = res.room.name
             historicalMessageAgents.value = []
             captureHistoricalMessageAgents(res.messages)
-            messages.value = res.messages
+            messages.value = res.messages.filter(message => !deletedMessageIds.get(res.room.id)?.has(message.id))
+            messageDeletionRevisions.value.set(res.room.id, Math.max(messageDeletionRevisions.value.get(res.room.id) || 0, Number(res.room.messageDeletionRevision || 0)))
             handoffChains.value = new Map((res.handoffChains || []).map(chain => [chain.chainId, chain]))
             applyMessagePaging(res)
             agents.value = res.agents
             projectRoomAgents(res.room.id, agents.value)
             members.value = res.members || []
-            applyPendingWelcomeMessages(res.room.id)
-            void loadDiscussion(res.room.id)
-            await joinRealtimeRoom(res.room.id)
+            await joinRealtimeRoom(res.room.id, { syncMessages: true })
         } catch (err: any) {
+            if (sequence !== roomSelectionSequence) return
             error.value = err.message
             throw err
         } finally {
-            isJoining.value = false
+            if (sequence === roomSelectionSequence) isJoining.value = false
         }
     }
 
     async function loadOlderMessages(): Promise<boolean> {
         const roomId = currentRoomId.value
         if (!roomId || isLoadingOlderMessages.value || !hasMoreBefore.value) return false
+        const deletionRevision = messageDeletionRevisions.value.get(roomId) || 0
+        const selectionSequence = roomSelectionSequence
         const before = messages.value[0]?.id
         if (!before) return false
         isLoadingOlderMessages.value = true
@@ -1574,10 +1598,11 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
                     })
                 })
                 : await getRoomDetail(roomId, { before, limit, history: true })
-            if (currentRoomId.value !== roomId) return false
+            if (currentRoomId.value !== roomId || selectionSequence !== roomSelectionSequence
+                || deletionRevision !== (messageDeletionRevisions.value.get(roomId) || 0)) return false
             const existingIds = new Set(messages.value.map(message => message.id))
             captureHistoricalMessageAgents(res.messages)
-            const olderMessages = res.messages.filter(message => !existingIds.has(message.id))
+            const olderMessages = res.messages.filter(message => !existingIds.has(message.id) && !deletedMessageIds.get(roomId)?.has(message.id))
             messages.value = [...olderMessages, ...messages.value]
             loadedMessageCount.value = messages.value.length
             totalMessages.value = res.total ?? totalMessages.value
@@ -1697,10 +1722,13 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
     }
 
     async function joinByCode(code: string, options: { guest?: boolean } = {}) {
+        const sequence = ++roomSelectionSequence
         try {
             const normalizedCode = code.trim()
             if (!normalizedCode) throw new Error('Invite code is required')
             const res = await joinRoomByCode(normalizedCode)
+            if (sequence !== roomSelectionSequence) return
+            clearCurrentRoomTransientState()
             clearPendingStreamDeltas()
             inviteGuest.value = options.guest === true
             activeInviteCode.value = normalizedCode
@@ -1710,9 +1738,11 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
             realtimeJoinedSocketId.value = null
             roomName.value = res.room.name
             await connect({ inviteCode: normalizedCode, guest: options.guest })
+            if (sequence !== roomSelectionSequence) return
             await joinRealtimeRoom(res.room.id, { syncMessages: true, inviteCode: normalizedCode })
             return res.room
         } catch (err: any) {
+            if (sequence !== roomSelectionSequence) return
             error.value = err.message
             throw err
         }
@@ -1766,49 +1796,24 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         const roomId = currentRoomId.value
         try {
             const res = await clearRoomContext(roomId)
-            clearPendingStreamDeltas()
-            messages.value = []
-            historicalMessageAgents.value = []
             clearMessageReference(roomId)
-            resetMessagePaging()
-            clearRemoteTypingState()
-            contextStatuses.value.clear()
+            if (currentRoomId.value === roomId) {
+                clearPendingStreamDeltas()
+                messages.value = []
+                historicalMessageAgents.value = []
+                resetMessagePaging()
+                clearRemoteTypingState()
+                contextStatuses.value.clear()
+            }
             clearActiveAgentRunsForRoom(roomId)
             roomSummaryStates.value.delete(roomId)
             roomSummaryStates.value = new Map(roomSummaryStates.value)
-            const idx = rooms.value.findIndex(r => r.id === currentRoomId.value)
-            if (idx >= 0 && res.room) rooms.value[idx] = res.room
-            return res
-        } catch (err: any) {
-            error.value = err.message
-            throw err
-        }
-    }
-
-    // ─── Archive Actions ───────────────────────────────────
-    async function archiveCurrentRoom() {
-        const roomId = currentRoomId.value
-        if (!roomId) return
-        try {
-            const res = await archiveRoomApi(roomId)
-            archivePromptStates.value.delete(roomId)
-            archivePromptStates.value = new Map(archivePromptStates.value)
-            if (res.room) upsertRoom(res.room)
-            return res
-        } catch (err: any) {
-            error.value = err.message
-            throw err
-        }
-    }
-
-    async function dismissCurrentRoomArchive(mode: 'ignore' | 'later') {
-        const roomId = currentRoomId.value
-        if (!roomId) return
-        try {
-            const res = await dismissArchivePrompt(roomId, mode)
-            archivePromptStates.value.delete(roomId)
-            archivePromptStates.value = new Map(archivePromptStates.value)
-            if (res.room) upsertRoom(res.room)
+            const idx = rooms.value.findIndex(r => r.id === roomId)
+            if (idx >= 0 && res.room) {
+                // Clearing history leaves the Agent roster intact. This response
+                // contains room metadata only; retain the sidebar's cached roster.
+                rooms.value[idx] = { ...rooms.value[idx], ...res.room }
+            }
             return res
         } catch (err: any) {
             error.value = err.message
@@ -1847,6 +1852,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         }
     }
 
+    // ─── Agent Actions ─────────────────────────────────────
     // ─── Discussion Actions ─────────────────────────────────
     async function loadDiscussion(roomId: string): Promise<void> {
         if (!roomId || inviteGuest.value) return
@@ -1891,9 +1897,11 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
 
     // ─── Document Pipeline ─────────────────────────────────
     async function refreshDocuments(roomId: string): Promise<void> {
-        if (!roomId) return
+        if (!roomId || roomId !== currentRoomId.value || inviteGuest.value) return
+        const request = ++documentListRequest
         try {
             const res = await listGroupDocumentsApi(roomId)
+            if (request !== documentListRequest || roomId !== currentRoomId.value) return
             const byId = new Map<string, GroupDocumentInfo>()
             for (const doc of res.documents) byId.set(doc.fileId, doc)
             // Preserve live progress over static list info.
@@ -1919,6 +1927,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
                 reportMessageId: null,
                 createdAt: Date.now(),
             }
+            if (roomId !== currentRoomId.value) return info
             documentStates.value.set(res.fileId, info)
             documentStates.value = new Map(documentStates.value)
             return info
@@ -1947,6 +1956,7 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
     async function fetchDocumentProgress(roomId: string, fileId: string): Promise<void> {
         try {
             const progress = await fetchGroupDocumentProgressApi(roomId, fileId)
+            if (roomId !== currentRoomId.value) return
             documentProgress.value.set(fileId, progress)
             documentProgress.value = new Map(documentProgress.value)
             const current = documentStates.value.get(fileId)
@@ -1957,7 +1967,6 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         } catch { /* ignore */ }
     }
 
-    // ─── Agent Actions ─────────────────────────────────────
     async function loadAgents(roomId: string) {
         try {
             const res = await listAgents(roomId)
@@ -2119,66 +2128,92 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         })
     }
 
-    async function respondApprovalFor(roomId: string, approvalId: string, choice: GroupPendingApproval['choices'][number]) {
+    async function respondApprovalFor(roomId: string, approvalId: string, choice: GroupPendingApproval['choices'][number]): Promise<PendingInteractionSubmitResult> {
         const key = pendingApprovalKey(roomId, approvalId)
         const pending = pendingApprovals.value.get(key)
-        if (!pending) return
+        if (!pending) return 'missing'
         const socket = await ensureRealtimeSocket()
         let resolved = false
-        await new Promise<void>((resolve, reject) => {
-            socket.emit('approval.respond', {
-                roomId: pending.roomId,
-                approval_id: pending.approvalId,
-                choice,
-            }, (res: any) => {
-                if (res?.error) reject(new Error(res.error))
-                else {
-                    resolved = res?.resolved !== false
-                    resolve()
-                }
+        let stale = false
+        try {
+            await new Promise<void>((resolve, reject) => {
+                socket.emit('approval.respond', {
+                    roomId: pending.roomId,
+                    approval_id: pending.approvalId,
+                    choice,
+                }, (res: any) => {
+                    if (res?.error) reject(new Error(res.error))
+                    else {
+                        resolved = res?.resolved !== false
+                        stale = res?.stale === true
+                        resolve()
+                    }
+                })
             })
-        })
+        } catch (error) {
+            if (!isPendingInteractionExpiredError(error)) throw error
+            stale = true
+            resolved = true
+        }
         if (resolved) {
             pendingApprovals.value.delete(key)
             pendingApprovals.value = new Map(pendingApprovals.value)
         }
+        if (stale) {
+            notifyPendingInteractionExpired()
+            return 'expired'
+        }
+        return 'submitted'
     }
 
-    async function respondApproval(choice: GroupPendingApproval['choices'][number]) {
+    async function respondApproval(choice: GroupPendingApproval['choices'][number]): Promise<PendingInteractionSubmitResult> {
         const pending = activePendingApproval.value
-        if (!pending) return
-        await respondApprovalFor(pending.roomId, pending.approvalId, choice)
+        if (!pending) return 'missing'
+        return respondApprovalFor(pending.roomId, pending.approvalId, choice)
     }
 
-    async function respondClarifyFor(roomId: string, clarifyId: string, response: string) {
+    async function respondClarifyFor(roomId: string, clarifyId: string, response: string): Promise<PendingInteractionSubmitResult> {
         const key = pendingClarifyKey(roomId, clarifyId)
         const pending = pendingClarifies.value.get(key)
-        if (!pending) return
+        if (!pending) return 'missing'
         const socket = await ensureRealtimeSocket()
         let resolved = false
-        await new Promise<void>((resolve, reject) => {
-            socket.emit('clarify.respond', {
-                roomId: pending.roomId,
-                clarify_id: pending.clarifyId,
-                response,
-            }, (res: any) => {
-                if (res?.error) reject(new Error(res.error))
-                else {
-                    resolved = res?.resolved !== false
-                    resolve()
-                }
+        let stale = false
+        try {
+            await new Promise<void>((resolve, reject) => {
+                socket.emit('clarify.respond', {
+                    roomId: pending.roomId,
+                    clarify_id: pending.clarifyId,
+                    response,
+                }, (res: any) => {
+                    if (res?.error) reject(new Error(res.error))
+                    else {
+                        resolved = res?.resolved !== false
+                        stale = res?.stale === true
+                        resolve()
+                    }
+                })
             })
-        })
+        } catch (error) {
+            if (!isPendingInteractionExpiredError(error)) throw error
+            stale = true
+            resolved = true
+        }
         if (resolved) {
             pendingClarifies.value.delete(key)
             pendingClarifies.value = new Map(pendingClarifies.value)
         }
+        if (stale) {
+            notifyPendingInteractionExpired()
+            return 'expired'
+        }
+        return 'submitted'
     }
 
-    async function respondClarify(response: string) {
+    async function respondClarify(response: string): Promise<PendingInteractionSubmitResult> {
         const pending = activePendingClarify.value
-        if (!pending) return
-        await respondClarifyFor(pending.roomId, pending.clarifyId, response)
+        if (!pending) return 'missing'
+        return respondClarifyFor(pending.roomId, pending.clarifyId, response)
     }
 
     async function cancelExecutionQueueItem(queueId: string) {
@@ -2200,7 +2235,26 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         })
     }
 
+    watch(currentRoomId, roomId => {
+      documentListRequest++
+      documentStates.value = new Map()
+      documentProgress.value = new Map()
+      if (roomId) { void loadDiscussion(roomId); void refreshDocuments(roomId) }
+    })
+
     return {
+        discussionStates,
+        documentStates,
+        documentProgress,
+        loadDiscussion,
+        beginDiscussion,
+        endDiscussion,
+        clearDiscussion,
+        refreshDocuments,
+        uploadDocument,
+        startDocumentReading,
+        fetchDocumentProgress,
+
         // State
         connected,
         currentRoomId,
@@ -2216,18 +2270,20 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         contextStatuses,
         activeAgentRuns,
         roomSummaryStates,
-        discussionStates,
-        documentStates,
-        documentProgress,
+        roomSummaryReviews,
+        applyRoomSummaryState,
+        applyRoomSummaryReview,
         handoffChains,
         executionQueue,
+        messageDeletionRevisions,
+        deleteMessages,
+        messageRoutingDecisions,
+        acceptRoutingSuggestion,
         pendingApprovals,
         pendingClarifies,
         activePendingApproval,
         activePendingClarify,
         autoPlaySpeechEnabled,
-        pendingWelcomeMessages,
-        archivePromptStates,
         activeMessageReference,
         totalMessages,
         loadedMessageCount,
@@ -2257,7 +2313,6 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         setUserInfo,
         updateCurrentMemberProfile,
         setAutoPlaySpeech,
-        queueRoomWelcomeMessages,
         setMessageReference,
         clearMessageReference,
         joinRoom,
@@ -2277,22 +2332,12 @@ const discussionStates = ref<Map<string, DiscussionState>>(new Map())
         deleteRoom,
         cloneRoom,
         clearCurrentRoomContext,
-        archiveCurrentRoom,
-        dismissCurrentRoomArchive,
         setRoomWorkspace,
         setRoomInviteCode,
         loadAgents,
         addAgentToRoom,
         updateAgentInRoom,
         removeAgentFromRoom,
-        loadDiscussion,
-        beginDiscussion,
-        endDiscussion,
-        clearDiscussion,
-        refreshDocuments,
-        uploadDocument,
-        startDocumentReading,
-        fetchDocumentProgress,
         removeMemberFromRoom,
     }
 })
@@ -2461,6 +2506,16 @@ function mapGroupMessages(msgs: ChatMessage[], activeAgentNames = new Set<string
             continue
         }
 
+        const taskPlan = parseGroupTaskPlanMessage(msg)
+        if (taskPlan) {
+            result.push({ ...msg, role: 'assistant', content: '', taskPlan })
+            continue
+        }
+        const runUsage = parseGroupRunUsageMessage(msg)
+        if (runUsage) {
+            result.push({ ...msg, role: 'assistant', content: '', runUsage })
+            continue
+        }
         if (msg.role === 'tool') {
             const tcId = msg.tool_call_id || ''
             const pairKey = groupToolPairKey(msg, tcId)
@@ -2554,7 +2609,7 @@ export function groupAgentRunMessages(messages: ChatMessage[]): ChatMessage[] {
         result.push(grouped)
     }
     for (const grouped of groupedByRun.values()) {
-        grouped.runItems!.sort((left, right) => left.timestamp - right.timestamp)
+        grouped.runItems!.sort((left, right) => Number(Boolean(left.taskPlan)) - Number(Boolean(right.taskPlan)) || left.timestamp - right.timestamp)
     }
     return result
 }

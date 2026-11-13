@@ -4,7 +4,7 @@ Use the Studio Agents page for cross-platform installation. It detects the same 
 
 ## Prerequisites
 
-All four coding agents require Node.js and npm. Quanthermes Studio itself requires Node.js 23 or newer for npm/source installations.
+All four coding agents require Node.js and npm. Ekko Studio itself requires Node.js 23 or newer for npm/source installations.
 
 Before installing, inspect:
 
@@ -100,7 +100,7 @@ Studio builds its command PATH from its current Node directory, npm's global bin
 1. refresh the Agents page to force a new probe;
 2. compare `npm prefix -g` with the prefix used during installation;
 3. inspect all copies of the executable;
-4. fully restart Quanthermes Studio so it inherits the updated login-shell PATH;
+4. fully restart Ekko Studio so it inherits the updated login-shell PATH;
 5. reinstall only if the resolved executable or package is genuinely absent.
 
 Do not create Agent model or credential configuration during this installation workflow. Authentication is a separate task after installation succeeds.

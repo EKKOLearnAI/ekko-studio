@@ -1,6 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
+import { tmpdir } from 'os'
+import { mkdtemp } from 'fs/promises'
 
 // 用 vi.hoisted 保证 mock 在 vi.mock 工厂被提升后仍可引用。
 const mocks = vi.hoisted(() => ({
@@ -11,19 +13,22 @@ const mocks = vi.hoisted(() => ({
   fetchMock: vi.fn(),
 }))
 
-vi.mock('../../packages/server/src/services/hermes/agent-bridge/client', () => ({
-  AgentBridgeClient: mocks.AgentBridgeClientMock,
+vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', () => ({
+  createPrimaryAgentBridge: mocks.AgentBridgeClientMock,
 }))
 
 // 避免技能解析触碰真实文件系统 / 缓存。
-vi.mock('../../packages/server/src/services/meeting-asr/skill-resolver', () => ({
+vi.mock('../../packages/server/src/modules/studio/services/meeting-asr/skill-resolver', () => ({
   prepareAnalysisSkillSection: vi.fn().mockResolvedValue(''),
 }))
 
 // loadLLMConfig 会读 <cwd>/data/meeting-asr/config.json。历史上仓库里恰好
 // 提交过带真实 key 的该文件，测试隐式依赖它；设备侧清理密钥后此依赖断裂。
 // 现在测试自给自足：写一个假 key 的配置，结束后恢复原状（密钥永不入库）。
-const RUNTIME_CONFIG = join(process.cwd(), 'data', 'meeting-asr', 'config.json')
+const RUNTIME_DIR = await mkdtemp(join(tmpdir(), 'meeting-fallback-'))
+const RUNTIME_CONFIG = join(RUNTIME_DIR, 'config.json')
+const previousDataDir = process.env.MEETING_ASR_DATA_DIR
+process.env.MEETING_ASR_DATA_DIR = RUNTIME_DIR
 let originalConfig: string | null = null
 
 beforeAll(async () => {
@@ -50,8 +55,10 @@ afterEach(async () => {
 })
 
 afterAll(async () => {
+  if (previousDataDir === undefined) delete process.env.MEETING_ASR_DATA_DIR
+  else process.env.MEETING_ASR_DATA_DIR = previousDataDir
   if (originalConfig === null) {
-    await rm(RUNTIME_CONFIG, { force: true })
+    await rm(RUNTIME_DIR, { force: true, recursive: true })
   } else {
     await writeFile(RUNTIME_CONFIG, originalConfig, 'utf-8')
   }
@@ -119,7 +126,7 @@ describe('meeting report generation (agent-first with fallback)', () => {
     })
     stubDirectLLM('SHOULD NOT BE USED')
 
-    const { realtimeAssistService } = await import('../../packages/server/src/services/meeting-asr/realtime-assist')
+    const { realtimeAssistService } = await import('../../packages/server/src/modules/studio/services/meeting-asr/realtime-assist')
     const report = await collect(realtimeAssistService.generateReportStream('s1', 'transcript', 'general', 'default'))
 
     expect(report).toBe('Agent Report')
@@ -138,7 +145,7 @@ describe('meeting report generation (agent-first with fallback)', () => {
     mocks.chatMock.mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:18765'))
     stubDirectLLM('Direct LLM Report')
 
-    const { realtimeAssistService } = await import('../../packages/server/src/services/meeting-asr/realtime-assist')
+    const { realtimeAssistService } = await import('../../packages/server/src/modules/studio/services/meeting-asr/realtime-assist')
     const report = await collect(realtimeAssistService.generateReportStream('s2', 'transcript', 'general', 'default'))
 
     expect(report).toBe('Direct LLM Report')
@@ -159,7 +166,7 @@ describe('meeting report generation (agent-first with fallback)', () => {
     stubDirectLLM('Fresh LLM Report')
 
     const { realtimeAssistService, REPORT_FALLBACK_MARKER } = await import(
-      '../../packages/server/src/services/meeting-asr/realtime-assist'
+      '../../packages/server/src/modules/studio/services/meeting-asr/realtime-assist'
     )
 
     // 直接消费生成器，验证 sentinel 出现在 agent 部分与 LLM 部分之间。
@@ -185,7 +192,7 @@ describe('meeting report generation (agent-first with fallback)', () => {
     })
     stubDirectLLM('SHOULD NOT BE USED')
 
-    const { realtimeAssistService } = await import('../../packages/server/src/services/meeting-asr/realtime-assist')
+    const { realtimeAssistService } = await import('../../packages/server/src/modules/studio/services/meeting-asr/realtime-assist')
     const report = await collect(realtimeAssistService.generateReportStream('s4', 'transcript', 'general', 'default'))
 
     expect(report).toBe('Final Report Text')
@@ -209,7 +216,7 @@ describe('meeting report generation (agent-first with fallback)', () => {
     })
     vi.stubGlobal('fetch', mocks.fetchMock)
 
-    const { realtimeAssistService } = await import('../../packages/server/src/services/meeting-asr/realtime-assist')
+    const { realtimeAssistService } = await import('../../packages/server/src/modules/studio/services/meeting-asr/realtime-assist')
     const collected: string[] = []
     const gen = realtimeAssistService.generateReportStream('s5', 'transcript', 'general', 'default')
     await expect((async () => {
@@ -240,7 +247,7 @@ describe('meeting report generation (agent-first with fallback)', () => {
     })
     vi.stubGlobal('fetch', mocks.fetchMock)
 
-    const { realtimeAssistService } = await import('../../packages/server/src/services/meeting-asr/realtime-assist')
+    const { realtimeAssistService } = await import('../../packages/server/src/modules/studio/services/meeting-asr/realtime-assist')
     const report = await collect(realtimeAssistService.generateReportStream('s6', 'transcript', 'general', 'default'))
 
     expect(report).toBe('headtail')
@@ -260,7 +267,7 @@ describe('meeting report generation (agent-first with fallback)', () => {
     })
     vi.stubGlobal('fetch', mocks.fetchMock)
 
-    const { realtimeAssistService } = await import('../../packages/server/src/services/meeting-asr/realtime-assist')
+    const { realtimeAssistService } = await import('../../packages/server/src/modules/studio/services/meeting-asr/realtime-assist')
     const gen = realtimeAssistService.generateReportStream('s7', 'transcript', 'general', 'default')
     let captured: unknown = null
     try {
@@ -291,7 +298,7 @@ describe('meeting report generation (agent-first with fallback)', () => {
       .mockRejectedValueOnce(new Error('non-streaming fallback also down'))
     vi.stubGlobal('fetch', mocks.fetchMock)
 
-    const { realtimeAssistService } = await import('../../packages/server/src/services/meeting-asr/realtime-assist')
+    const { realtimeAssistService } = await import('../../packages/server/src/modules/studio/services/meeting-asr/realtime-assist')
     const gen = realtimeAssistService.generateReportStream('s8', 'transcript', 'general', 'default')
     let captured: unknown = null
     try {
@@ -327,7 +334,7 @@ describe('meeting report generation (agent-first with fallback)', () => {
     stubDirectLLM('Recovered via direct LLM')
 
     const { realtimeAssistService, REPORT_FALLBACK_MARKER } = await import(
-      '../../packages/server/src/services/meeting-asr/realtime-assist'
+      '../../packages/server/src/modules/studio/services/meeting-asr/realtime-assist'
     )
     const seen: Array<string | symbol> = []
     for await (const chunk of realtimeAssistService.generateReportStream('s9', 'transcript', 'general', 'default')) {

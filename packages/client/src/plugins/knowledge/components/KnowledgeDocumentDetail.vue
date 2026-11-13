@@ -204,13 +204,13 @@ async function requestIndex(): Promise<void> {
   gap: 16px;
 }
 .metadata-only-box {
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border-color, rgba(var(--text-primary-rgb), 0.08));
   border-radius: 8px;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--card-color, rgba(255, 255, 255, 0.02));
+  background: var(--card-color, rgba(var(--text-primary-rgb), 0.02));
 }
 .metadata-only-hint {
   margin: 0;
@@ -227,14 +227,14 @@ async function requestIndex(): Promise<void> {
   word-break: break-all;
 }
 .error-text {
-  color: var(--error-color, #d03050);
+  color: var(--error-color, var(--error));
   font-family: var(--font-family-mono, monospace);
   font-size: 12px;
 }
 .chunk-block {
   margin-bottom: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  border-bottom: 1px solid var(--border-color, rgba(var(--text-primary-rgb), 0.06));
 }
 .chunk-block:last-child {
   border-bottom: none;

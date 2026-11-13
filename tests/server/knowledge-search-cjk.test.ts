@@ -17,10 +17,10 @@ import {
   tokenizeForFts,
   buildFtsQuery,
   containsCjk,
-} from '../../packages/server/src/services/knowledge/fts-tokenizer'
-import { KnowledgeService } from '../../packages/server/src/services/knowledge/knowledge.service'
-import type { KnowledgeConfig } from '../../packages/server/src/services/knowledge/config'
-import type { Embedder } from '../../packages/server/src/services/knowledge/embedder'
+} from '../../packages/server/src/modules/studio/services/knowledge/fts-tokenizer'
+import { KnowledgeService } from '../../packages/server/src/modules/studio/services/knowledge/knowledge.service'
+import type { KnowledgeConfig } from '../../packages/server/src/modules/studio/services/knowledge/config'
+import type { Embedder } from '../../packages/server/src/modules/studio/services/knowledge/embedder'
 
 // --- SQLite setup (same pattern as knowledge-service.test.ts) -------------
 

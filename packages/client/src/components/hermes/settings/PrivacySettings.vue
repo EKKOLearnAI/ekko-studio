@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { NSwitch } from 'naive-ui'
+import { NSwitch, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import SettingRow from './SettingRow.vue'
-import { useMessage } from '@/composables/useAppMessage'
 
 const settingsStore = useSettingsStore()
 const message = useMessage()
@@ -21,6 +20,9 @@ async function save(values: Record<string, any>) {
 
 <template>
   <section class="settings-section">
+    <SettingRow :label="t('settings.privacy.policy')">
+      <a href="https://github.com/EKKOLearnAI/ekko-studio/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">{{ t('settings.privacy.policy') }}</a>
+    </SettingRow>
     <SettingRow :label="t('settings.privacy.redactPii')" :hint="t('settings.privacy.redactPiiHint')">
       <NSwitch :value="settingsStore.privacy.redact_pii" @update:value="v => save({ redact_pii: v })" />
     </SettingRow>

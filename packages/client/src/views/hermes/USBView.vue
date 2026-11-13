@@ -7,7 +7,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NEmpty, NSpin, NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { copyUSBFileToWorkspace, fetchUSBDevices, fetchUSBHistory } from '@/api/hermes/usb'
+import { copyUSBFileToWorkspace, fetchUSBDevices, fetchUSBHistory } from '@/api/studio/usb'
 import USBExplorer from '@/components/hermes/usb/explorer/USBExplorer.vue'
 import UsbHeaderBadge from '@/components/hermes/usb/UsbHeaderBadge.vue'
 import UsbDetailDrawer, { type UsbDetailSection } from '@/components/hermes/usb/UsbDetailDrawer.vue'
@@ -260,7 +260,7 @@ onMounted(() => {
   height: calc(100 * var(--vh));
 }
 
-// ── Page header ──────────────────────────────────────────────────────
+/* ── Page header ──────────────────────────────────────────────────────*/
 .header-title-block {
   display: flex;
   flex-direction: column;
@@ -302,7 +302,7 @@ onMounted(() => {
   gap: 10px;
 }
 
-// ── 内容区 ────────────────────────────────────────────────────────────
+/* ── 内容区 ────────────────────────────────────────────────────────────*/
 .usb-content {
   flex: 1;
   min-height: 0;
@@ -313,12 +313,12 @@ onMounted(() => {
   gap: 16px;
 }
 
-// ── Agent status banner ────────────────────────────────────────────
+/* ── Agent status banner ────────────────────────────────────────────*/
 .agent-status {
   padding: 10px 14px;
   border: 1px solid $border-light;
   border-radius: $radius-sm;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   font-size: 12.5px;
   color: $text-secondary;
 }
@@ -338,7 +338,7 @@ onMounted(() => {
   color: $error;
 }
 
-// ── Empty state ──────────────────────────────────────────────────────
+/* ── Empty state ──────────────────────────────────────────────────────*/
 .page-empty {
   flex: 1;
   min-height: 320px;

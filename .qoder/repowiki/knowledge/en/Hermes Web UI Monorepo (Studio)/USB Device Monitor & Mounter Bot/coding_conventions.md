@@ -1,5 +1,0 @@
-- Configuration is modeled as frozen dataclasses (`USBMonitorConfig`, `DeviceProbe`, `MountResult`) with properties exposing derived values like `log_file` and `mount_options_arg`.
-- Environment variable parsing uses small helpers (`_env_flag`, `_split_csv`) applied uniformly across every setting in `load_config`, with defaults falling back to module-level constants.
-- Each module supports both import and direct execution by guarding imports with try/except ImportError and providing a `main()` or `if __name__ == "__main__"` entry point.
-- External commands are always invoked through the centralized `run_command` wrapper in `mounter.py`, which optionally prefixes `sudo -n` based on the `use_sudo` flag.
-- All I/O and state mutations are wrapped in broad `except Exception` blocks that log the error and emit a structured error payload rather than propagating exceptions to the monitor loop.

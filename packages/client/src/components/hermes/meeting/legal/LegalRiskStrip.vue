@@ -38,7 +38,7 @@ const summary = computed(() => summarizeLegalRisks(meetingStore.activeSession?.a
   padding: 8px 16px;
   font-size: 11px;
 
-  &.alert { background: rgba(208, 48, 80, 0.06); }
+  &.alert { background: rgba(var(--error-rgb), 0.06); }
 
   .strip-left {
     display: flex;
@@ -50,16 +50,16 @@ const summary = computed(() => summarizeLegalRisks(meetingStore.activeSession?.a
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(var(--text-primary-rgb), 0.2);
   }
 
   .strip-label {
     font-weight: 600;
-    color: var(--text-secondary, #999);
+    color: var(--text-secondary, var(--text-primary));
   }
 
   .strip-risk {
-    color: #ff4d4f;
+    color: var(--error);
     font-weight: 700;
   }
 
@@ -67,7 +67,7 @@ const summary = computed(() => summarizeLegalRisks(meetingStore.activeSession?.a
     display: flex;
     align-items: center;
     gap: 12px;
-    color: var(--text-secondary, #999);
+    color: var(--text-secondary, var(--text-primary));
   }
 
   .strip-hint { opacity: 0.55; }

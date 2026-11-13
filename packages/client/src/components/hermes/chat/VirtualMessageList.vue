@@ -31,6 +31,7 @@ type BottomScrollOptions = number | {
 const props = withDefaults(defineProps<{
   messages: VirtualItem[];
   virtualized?: boolean;
+  showEmpty?: boolean;
   estimatedItemHeight?: number;
   overscan?: number;
   rowGap?: number;
@@ -38,6 +39,7 @@ const props = withDefaults(defineProps<{
   topThreshold?: number;
 }>(), {
   virtualized: true,
+  showEmpty: true,
   estimatedItemHeight: 180,
   overscan: 8,
   rowGap: 16,
@@ -68,6 +70,8 @@ let bottomFrameRemaining = 0;
 let bottomFrameAttempts = 0;
 let programmaticScrollUntil = 0;
 let userDetachedFromBottom = false;
+let mousePointerDown = false;
+let touchY: number | null = null;
 let anchorFrame: number | null = null;
 let anchorTimeout: ReturnType<typeof setTimeout> | null = null;
 const isAligningAnchor = ref(false);
@@ -115,26 +119,57 @@ function handleScroll() {
   const previousScrollTop = scrollTop.value;
   syncViewport();
   const delta = scrollTop.value - previousScrollTop;
-  if (delta < -1) {
-    userDetachedFromBottom = true;
-    cancelBottomScroll();
-  } else if (!activeAnchorTarget && !isProgrammaticScroll()) {
-    if (isNearBottom(32)) {
-      userDetachedFromBottom = false;
-    }
-    if (userDetachedFromBottom || !isNearBottom(96)) {
-      cancelBottomScroll();
-    }
+  // Scroll anchoring can move backwards and leave a gap while cards and replies
+  // resize together. Only actual reading gestures may stop following the tail.
+  if (delta < -1 && mousePointerDown) {
+    detachFromBottom();
+  } else if (delta > 0 && !activeAnchorTarget && !isProgrammaticScroll() && isNearBottom(2)) {
+    userDetachedFromBottom = false;
   }
   emit("scroll");
   if (!activeAnchorTarget && scrollTop.value <= props.topThreshold) emit("topReach");
 }
 
+function detachFromBottom() {
+  userDetachedFromBottom = true;
+  cancelBottomScroll();
+}
+
 function handleWheel(event: WheelEvent) {
   cancelAnchorAlignment();
-  if (event.deltaY < -1) {
-    userDetachedFromBottom = true;
-    cancelBottomScroll();
+  if (event.deltaY < -1) detachFromBottom();
+}
+
+function handleTouchStart(event: TouchEvent) {
+  cancelAnchorAlignment();
+  touchY = event.touches[0]?.clientY ?? null;
+}
+
+function handleTouchMove(event: TouchEvent) {
+  const nextY = event.touches[0]?.clientY ?? null;
+  if (touchY != null && nextY != null && nextY - touchY > 1) detachFromBottom();
+  touchY = nextY;
+}
+
+function handleTouchEnd() {
+  touchY = null;
+}
+
+function handlePointerDown(event: PointerEvent) {
+  cancelAnchorAlignment();
+  mousePointerDown = event.pointerType === 'mouse';
+}
+
+function handlePointerUp() {
+  mousePointerDown = false;
+}
+
+function handleKeyDown(event: KeyboardEvent) {
+  const target = event.target;
+  if (target instanceof Element && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+  if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey)) {
+    cancelAnchorAlignment();
+    detachFromBottom();
   }
 }
 
@@ -145,7 +180,7 @@ function handleResize() {
     scheduleAnchorAlignment(activeAnchorTarget.token);
     return;
   }
-  if (!userDetachedFromBottom || Date.now() < keepBottomUntil || isNearBottom(64)) {
+  if (!userDetachedFromBottom || Date.now() < keepBottomUntil) {
     scheduleScrollToBottom(2);
   }
 }
@@ -528,6 +563,9 @@ function restoreViewportPosition(snapshot: MessageViewportScrollSnapshot | null,
 let resizeObserver: ResizeObserver | null = null;
 
 onMounted(() => {
+  window.addEventListener('pointerup', handlePointerUp);
+  window.addEventListener('pointercancel', handlePointerUp);
+  window.addEventListener('blur', handlePointerUp);
   nextTick(() => {
     syncViewport();
     const el = getScrollerElement();
@@ -542,6 +580,9 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('pointerup', handlePointerUp);
+  window.removeEventListener('pointercancel', handlePointerUp);
+  window.removeEventListener('blur', handlePointerUp);
   cancelBottomScroll();
   cancelAnchorAlignment();
   if (viewportRestoreFrame != null) cancelAnimationFrame(viewportRestoreFrame);
@@ -593,13 +634,17 @@ defineExpose({
       :prerender="overscan"
       @scroll.passive="handleScroll"
       @wheel.passive="handleWheel"
-      @touchstart.passive="cancelAnchorAlignment"
-      @pointerdown="cancelAnchorAlignment"
+      @touchstart.passive="handleTouchStart"
+      @touchmove.passive="handleTouchMove"
+      @touchend.passive="handleTouchEnd"
+      @touchcancel.passive="handleTouchEnd"
+      @pointerdown="handlePointerDown"
+      @keydown="handleKeyDown"
       @resize="handleResize"
       @visible="syncViewport"
     >
       <template #before>
-        <slot v-if="messages.length > 0" name="before" />
+        <slot v-if="messages.length > 0 || !showEmpty" name="before" />
       </template>
       <template #default="{ item, index, active }">
         <!-- Recreate measurement observers when a row is recycled or reactivated,
@@ -618,7 +663,7 @@ defineExpose({
         </DynamicScrollerItem>
       </template>
       <template #after>
-        <slot v-if="messages.length > 0" name="after" />
+        <slot v-if="messages.length > 0 || !showEmpty" name="after" />
       </template>
     </DynamicScroller>
     <div
@@ -626,11 +671,15 @@ defineExpose({
       class="virtual-message-list"
       @scroll.passive="handleScroll"
       @wheel.passive="handleWheel"
-      @touchstart.passive="cancelAnchorAlignment"
-      @pointerdown="cancelAnchorAlignment"
+      @touchstart.passive="handleTouchStart"
+      @touchmove.passive="handleTouchMove"
+      @touchend.passive="handleTouchEnd"
+      @touchcancel.passive="handleTouchEnd"
+      @pointerdown="handlePointerDown"
+      @keydown="handleKeyDown"
     >
       <div ref="contentRef" class="virtual-message-list-content">
-        <slot v-if="messages.length > 0" name="before" />
+        <slot v-if="messages.length > 0 || !showEmpty" name="before" />
         <div
           v-for="(item, index) in messages"
           :key="messageKey(item)"
@@ -640,10 +689,10 @@ defineExpose({
         >
           <slot name="item" :message="item" />
         </div>
-        <slot v-if="messages.length > 0" name="after" />
+        <slot v-if="messages.length > 0 || !showEmpty" name="after" />
       </div>
     </div>
-    <div v-if="messages.length === 0 && $slots.empty" class="virtual-message-list-empty">
+    <div v-if="showEmpty && messages.length === 0 && $slots.empty" class="virtual-message-list-empty">
       <slot name="empty" />
     </div>
   </div>
@@ -671,7 +720,7 @@ defineExpose({
   scrollbar-width: thin;
   padding: var(--virtual-list-padding);
   box-sizing: border-box;
-  background-color: $bg-main-surface;
+  background-color: var(--theme-content-bg, $bg-main-surface);
 }
 
 .virtual-message-list-host--positioning .virtual-message-list {

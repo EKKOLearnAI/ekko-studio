@@ -9,9 +9,9 @@ import FileTreeToggle from '@/components/hermes/files/FileTreeToggle.vue'
 import FileContextMenu from '@/components/hermes/files/FileContextMenu.vue'
 import FileUploadModal from '@/components/hermes/files/FileUploadModal.vue'
 import FileRenameModal from '@/components/hermes/files/FileRenameModal.vue'
-import type { FileEntry } from '@/api/hermes/files'
-import { fetchSessionWorkspaceAttachmentBlob } from '@/api/hermes/sessions'
-import { fetchGroupWorkspaceAttachmentBlob } from '@/api/hermes/group-chat'
+import type { FileEntry } from '@/api/studio/files'
+import { fetchSessionWorkspaceAttachmentBlob } from '@/api/studio/sessions'
+import { fetchGroupWorkspaceAttachmentBlob } from '@/api/studio/group-chat'
 
 const FileEditor = defineAsyncComponent(async () => (await import('@/components/hermes/files/FileEditor.vue')).default)
 const FilePreview = defineAsyncComponent(async () => (await import('@/components/hermes/files/FilePreview.vue')).default)
@@ -46,6 +46,7 @@ const mobileMediaQuery = window.matchMedia(`(max-width: 768px)`)
 const isMobileLayout = ref(mobileMediaQuery.matches)
 const mobileFileOpen = ref(false)
 let stopSidebarResize: (() => void) | null = null
+let disposed = false
 const hasOpenFile = computed(() => Boolean(
   selectedDiffEntry.value || filesStore.editingFile || filesStore.previewFile,
 ))
@@ -128,13 +129,15 @@ function handleRename(entry: FileEntry) {
 
 async function handleAttach(entry: FileEntry) {
   if (entry.isDir) return
+  const sessionId = props.workspaceSessionId
+  const roomId = props.workspaceRoomId
   try {
     const blob = props.workspaceSessionId
       ? await fetchSessionWorkspaceAttachmentBlob(props.workspaceSessionId, entry.path)
       : props.workspaceRoomId
         ? await fetchGroupWorkspaceAttachmentBlob(props.workspaceRoomId, entry.path)
         : null
-    if (!blob) return
+    if (!blob || disposed || sessionId !== props.workspaceSessionId || roomId !== props.workspaceRoomId) return
     emit('attach', new File([blob], entry.name, {
       type: blob.type || 'application/octet-stream',
       lastModified: Date.parse(entry.modTime) || Date.now(),
@@ -226,6 +229,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   stopSidebarResize?.()
   mobileMediaQuery.removeEventListener('change', handleMobileLayoutChange)
 })
@@ -342,7 +346,7 @@ onBeforeUnmount(() => {
   width: 260px;
   min-width: 180px;
   max-width: 520px;
-  border-inline-end: 1px solid $border-color;
+  border-inline-end: var(--border-width, 1px) solid $border-color;
   overflow-y: auto;
   flex-shrink: 0;
   display: flex;
@@ -423,8 +427,8 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   flex-shrink: 0;
   min-height: 34px;
-  padding: 0 8px 0 12px;
-  border-bottom: 1px solid $border-color;
+  padding: 0 calc(8px * var(--spacing-scale, 1)) 0 calc(12px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 
   :deep(.file-toolbar) {
     padding: 0;
@@ -450,7 +454,7 @@ onBeforeUnmount(() => {
 
 .explorer-title {
   color: $text-secondary;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -468,9 +472,9 @@ onBeforeUnmount(() => {
 .main-toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border-bottom: 1px solid $border-color;
+  gap: calc(6px * var(--spacing-scale, 1));
+  padding: calc(5px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
   flex-shrink: 0;
   background: inherit;
 
@@ -479,8 +483,8 @@ onBeforeUnmount(() => {
   }
 
   @media (max-width: $breakpoint-mobile) {
-    gap: 4px;
-    padding: 4px 8px;
+    gap: calc(4px * var(--spacing-scale, 1));
+    padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     flex-wrap: wrap;
   }
 }
@@ -491,8 +495,8 @@ onBeforeUnmount(() => {
   }
 
   @media (max-width: $breakpoint-mobile) {
-    font-size: 12px;
-    padding: 0 8px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    padding: 0 calc(8px * var(--spacing-scale, 1));
     height: 32px;
   }
 }

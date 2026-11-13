@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { NButton, NSpace, NTooltip } from 'naive-ui'
+import { NButton, NSpace, NTooltip, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useFilesStore } from '@/stores/hermes/files'
-import { useMessage } from '@/composables/useAppMessage'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -115,10 +114,10 @@ async function handleRefresh() {
 @use '@/styles/variables' as *;
 
 .file-toolbar {
-  padding: 12px 16px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
 
   @media (max-width: $breakpoint-mobile) {
-    padding: 8px 4px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1));
   }
 }
 

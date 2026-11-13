@@ -1,0 +1,123 @@
+<script setup lang="ts">
+import PageHeader from '@/components/layout/PageHeader.vue'
+import { ref, watch } from 'vue'
+import { NTabPane, NTabs } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
+import AppConnectionsPanel from '@/components/hermes/connections/AppConnectionsPanel.vue'
+import McuDevicesPanel from '@/components/hermes/connections/McuDevicesPanel.vue'
+import RemoteDevicesPanel from '@/components/hermes/connections/RemoteDevicesPanel.vue'
+import { desktopBridge } from '@/utils/desktop-bridge'
+
+type ConnectionTab = 'app' | 'mcu' | 'remote'
+
+const route = useRoute()
+const router = useRouter()
+const { t } = useI18n()
+const hasRemoteDevices = desktopBridge()?.isDesktop === true && !!desktopBridge()?.remoteDevices
+
+function normalizeTab(value: unknown): ConnectionTab {
+  if (value === 'remote' && hasRemoteDevices) return value
+  if (value === 'mcu') return value
+  return 'app'
+}
+
+const activeTab = ref<ConnectionTab>(normalizeTab(route.query.tab))
+
+watch(
+  () => route.query.tab,
+  value => {
+    activeTab.value = normalizeTab(value)
+  },
+)
+
+function updateTab(value: string | number) {
+  const tab = normalizeTab(value)
+  activeTab.value = tab
+  void router.replace({
+    query: {
+      ...route.query,
+      tab: tab === 'app' ? undefined : tab,
+    },
+  })
+}
+</script>
+
+<template>
+  <div class="connections-panel">
+    <PageHeader>
+    <header class="page-header">
+      <div class="connections-header-left">
+        <h2 class="header-title">{{ t('connections.title') }}</h2>
+      </div>
+    </header>
+    </PageHeader>
+
+    <NTabs
+      :value="activeTab"
+      class="connections-tabs"
+      type="line"
+      animated
+      pane-class="connections-tab-pane"
+      @update:value="updateTab"
+    >
+      <NTabPane name="app" :tab="t('connections.tabs.app')" display-directive="if">
+        <AppConnectionsPanel />
+      </NTabPane>
+      <NTabPane name="mcu" :tab="t('connections.tabs.mcu')" display-directive="if">
+        <McuDevicesPanel />
+      </NTabPane>
+      <NTabPane v-if="hasRemoteDevices" name="remote" :tab="t('remoteDevices.title')" display-directive="if">
+        <RemoteDevicesPanel />
+      </NTabPane>
+    </NTabs>
+  </div>
+</template>
+
+<style scoped lang="scss">
+@use '@/styles/variables' as *;
+
+.connections-panel {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--theme-content-bg, $bg-main-surface);
+}
+
+.connections-header-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: calc(8px * var(--spacing-scale, 1));
+}
+
+.connections-tabs {
+  flex: 1 1 auto;
+  min-height: 0;
+
+  :deep(.n-tabs-nav) {
+    flex: 0 0 auto;
+    padding: 0 calc(20px * var(--spacing-scale, 1));
+    border-bottom: var(--border-width, 1px) solid var(--n-tab-border-color);
+    background: var(--theme-content-bg, $bg-main-surface);
+  }
+
+  :deep(.n-tabs-nav-scroll-content) {
+    width: 100%;
+    border-bottom: 0 !important;
+  }
+
+  :deep(.n-tabs-pane-wrapper),
+  :deep(.n-tab-pane) {
+    height: 100%;
+    min-height: 0;
+  }
+}
+
+@media (max-width: $breakpoint-mobile) {
+  .connections-tabs :deep(.n-tabs-nav) {
+    padding: 0 calc(12px * var(--spacing-scale, 1));
+  }
+}
+</style>

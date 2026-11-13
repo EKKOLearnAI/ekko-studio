@@ -29,27 +29,28 @@ const dbMock = vi.hoisted(() => {
   return { db: new DatabaseSync(':memory:') }
 })
 
-vi.mock('../../packages/server/src/db/index', () => ({ getDb: () => dbMock.db }))
+vi.mock('../../packages/server/src/modules/studio/infrastructure/database', () => ({ getDb: () => dbMock.db }))
 
-vi.mock('../../packages/server/src/services/hermes/group-chat/room-summary', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../packages/server/src/services/hermes/group-chat/room-summary')>()
+vi.mock('../../packages/server/src/modules/studio/services/group-chat/bare-model', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../packages/server/src/modules/studio/services/group-chat/bare-model')>()
   return {
     ...actual,
     runBareModelAgent: vi.fn(),
   }
 })
 
-vi.mock('../../packages/server/src/config', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../packages/server/src/config')>()
+vi.mock('../../packages/server/src/modules/studio/public/config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../packages/server/src/modules/studio/public/config')>()
   return {
     ...actual,
     config: { ...actual.config, appHome: TEST_HOME },
+    getWebUiHome: () => TEST_HOME,
   }
 })
 
-import { runBareModelAgent } from '../../packages/server/src/services/hermes/group-chat/room-summary'
-import { DocumentPipelineService } from '../../packages/server/src/services/hermes/group-chat/document-pipeline'
-import { initAllHermesTables } from '../../packages/server/src/db/hermes/schemas'
+import { runBareModelAgent } from '../../packages/server/src/modules/studio/services/group-chat/bare-model'
+import { DocumentPipelineService } from '../../packages/server/src/modules/studio/services/group-chat/document-pipeline'
+import { initAllHermesTables } from '../../packages/server/src/modules/studio/infrastructure/database/schemas'
 import {
   getDocument,
   getFacts,
@@ -58,8 +59,8 @@ import {
   insertChunks,
   insertFields,
   saveDocument,
-} from '../../packages/server/src/db/hermes/document-store'
-import { parseDocumentFile } from '../../packages/server/src/services/hermes/group-chat/document-parser'
+} from '../../packages/server/src/modules/studio/repositories/document-store'
+import { parseDocumentFile } from '../../packages/server/src/modules/studio/services/group-chat/document-parser'
 
 const modelMock = vi.mocked(runBareModelAgent)
 

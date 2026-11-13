@@ -9,7 +9,7 @@ import {
   removeOwnedBrokerDescriptor,
   writeBrokerDescriptor,
   type BrowserBrokerDescriptorFile,
-} from '../../packages/server/src/services/browser/broker-descriptor'
+} from '../../packages/server/src/modules/studio/services/browser/broker-descriptor'
 
 const tempDirs: string[] = []
 

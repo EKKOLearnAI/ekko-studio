@@ -7,9 +7,6 @@ on:
     paths:
       - package.json
       - package-lock.json
-      - packages/desktop/package.json
-      - packages/desktop/package-lock.json
-      - scripts/check-release-consistency.mjs
       - .github/workflows/npm-lockfile-check.yml
   pull_request:
     branches:
@@ -18,9 +15,6 @@ on:
     paths:
       - package.json
       - package-lock.json
-      - packages/desktop/package.json
-      - packages/desktop/package-lock.json
-      - scripts/check-release-consistency.mjs
       - .github/workflows/npm-lockfile-check.yml
 
 permissions:
@@ -43,17 +37,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24.22.1'
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            packages/desktop/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Verify release consistency
-        run: npm run check:release-consistency
-
-      - name: Verify root package-lock.json is in sync
+      - name: Verify package-lock.json is in sync
         run: npm ci --ignore-scripts
-
-      - name: Verify desktop package-lock.json is in sync
-        run: npm ci --prefix packages/desktop --ignore-scripts --no-audit --no-fund

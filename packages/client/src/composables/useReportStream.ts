@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getApiKey } from '@/api/client'
+import { getApiKey, getBaseUrl, getActiveProfileName } from '@/api/client'
 import { classifyReportError } from '@/components/hermes/meeting/report-error'
 
 export interface UseReportStreamDeps {
@@ -15,7 +15,7 @@ export interface UseReportStreamDeps {
 /**
  * 会议报告生成 SSE 流（拆分自 MeetingAgentPanel.vue，行为保持一致）。
  *
- * 覆盖：POST /api/meeting-asr/report/stream 的 SSE 解析、{ fallback: true }
+ * 覆盖：POST /api/studio/meeting-asr/report/stream 的 SSE 解析、{ fallback: true }
  * 帧清空累积内容（agent→direct LLM 切换）、{ error } 帧错误分类、无 [DONE]
  * 帧的截断检测，以及按最近一次 transcript 的 retry。
  */
@@ -43,10 +43,11 @@ export function useReportStream(deps: UseReportStreamDeps) {
     reportMarkdown.value = ''
 
     try {
-      const response = await fetch('/api/meeting-asr/report/stream', {
+      const response = await fetch(`${getBaseUrl()}/api/studio/meeting-asr/report/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(getActiveProfileName() ? { 'X-Hermes-Profile': getActiveProfileName()! } : {}),
           ...(getApiKey() ? { Authorization: `Bearer ${getApiKey()}` } : {}),
         },
         body: JSON.stringify({

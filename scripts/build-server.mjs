@@ -1,7 +1,9 @@
 import * as esbuild from 'esbuild'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'node:module'
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'fs'
+
 import { assertTerminalRuntimeBundle } from './verify-terminal-runtime.mjs'
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -32,7 +34,7 @@ await esbuild.build({
 assertTerminalRuntimeBundle(resolve(serverOutDir, 'index.js'), 'dist/server/index.js')
 
 const bridgeOutDir = resolve(serverOutDir, 'agent-bridge', 'python')
-const bridgeSrcDir = resolve(rootDir, 'packages/server/src/services/hermes/agent-bridge/python')
+const bridgeSrcDir = resolve(rootDir, 'packages/server/src/modules/hermes/services/bridge/python')
 mkdirSync(bridgeOutDir, { recursive: true })
 for (const fileName of readdirSync(bridgeSrcDir)) {
   if (fileName.endsWith('.py')) {
@@ -53,12 +55,12 @@ cpSync(
 
 // Bundle the meeting-asr Python backend (FastAPI app + requirements) into
 // dist/server/python-backend/ + dist/server/requirements.txt, matching the
-// runtime layout that packages/server/src/services/meeting-asr/index.ts
+// runtime layout that packages/server/src/modules/studio/services/meeting-asr/index.ts
 // expects via __dirname. Skip the platform-specific .venv/ and __pycache__/
 // artifacts that ship on the dev machine but cannot run on the target
 // device. The on-device runtime rebuilds .venv from requirements.txt via
 // ensureVirtualEnv().
-const meetingAsrSrcRoot = resolve(rootDir, 'packages/server/src/services/meeting-asr')
+const meetingAsrSrcRoot = resolve(rootDir, 'packages/server/src/modules/studio/services/meeting-asr')
 const meetingAsrPythonSrc = resolve(meetingAsrSrcRoot, 'python-backend')
 const meetingAsrPythonOut = resolve(serverOutDir, 'python-backend')
 if (existsSync(meetingAsrPythonSrc)) {
@@ -82,6 +84,20 @@ if (existsSync(meetingAsrPythonOut)) {
   console.log('[build-server] meeting-asr python-backend bundled into dist/server/')
 }
 
+const builtinPluginsOutDir = resolve(rootDir, 'dist/plugins/builtin')
+rmSync(builtinPluginsOutDir, { recursive: true, force: true })
+cpSync(resolve(rootDir, 'plugins/builtin'), builtinPluginsOutDir, { recursive: true })
+// Independent plugin repositories are pinned in package-lock.json and shipped
+// as ordinary bundled packages; production needs no Git or npm access.
+const require = createRequire(import.meta.url)
+const builtinPackages = JSON.parse(readFileSync(resolve(rootDir, 'plugins/builtin/packages.json'), 'utf8'))
+for (const [id, name] of Object.entries(builtinPackages)) {
+  const source = dirname(require.resolve(`${name}/plugin.json`))
+  const manifest = JSON.parse(readFileSync(resolve(source, 'plugin.json'), 'utf8'))
+  if (manifest.id !== id) throw new Error(`Bundled plugin ${name} declares ${manifest.id}, expected ${id}`)
+  cpSync(source, resolve(builtinPluginsOutDir, id), { recursive: true })
+}
+
 const skillsOutDir = resolve(rootDir, 'dist/skills')
 rmSync(skillsOutDir, { recursive: true, force: true })
 cpSync(
@@ -90,11 +106,19 @@ cpSync(
   { recursive: true },
 )
 
+const ekkoSkillsOutDir = resolve(rootDir, 'dist/ekko-skills')
+rmSync(ekkoSkillsOutDir, { recursive: true, force: true })
+cpSync(
+  resolve(rootDir, 'packages/ekko-agent/skills'),
+  ekkoSkillsOutDir,
+  { recursive: true },
+)
+
 const firmwareOutDir = resolve(rootDir, 'dist/mcu')
 const legacyFirmwareOutPath = resolve(firmwareOutDir, 'firmware.bin')
 for (const firmwareVersion of ['v1', 'v2']) {
-  const firmwareBuildSrc = resolve(rootDir, `packages/esp32-c3/${firmwareVersion}/.pio/build/esp32-c3-devkitm-1/firmware.bin`)
-  const firmwareReleaseSrc = resolve(rootDir, `packages/esp32-c3/release/${firmwareVersion}/firmware.bin`)
+  const firmwareBuildSrc = resolve(rootDir, `packages/mcu/esp32-c3/${firmwareVersion}/.pio/build/esp32-c3-devkitm-1/firmware.bin`)
+  const firmwareReleaseSrc = resolve(rootDir, `packages/mcu/esp32-c3/release/${firmwareVersion}/firmware.bin`)
   const firmwareVersionedOutDir = resolve(firmwareOutDir, firmwareVersion)
   const firmwareOutPath = resolve(firmwareVersionedOutDir, 'firmware.bin')
   let firmwareSrc = ''
@@ -120,3 +144,10 @@ for (const firmwareVersion of ['v1', 'v2']) {
   if (firmwareVersion === 'v1') cpSync(firmwareSrc, legacyFirmwareOutPath)
   console.log(`[build-server] ESP32-C3 ${firmwareVersion} firmware copied from ${sourceLabel}`)
 }
+
+// Ship the SDK with the CLI so independent projects do not need this checkout.
+const pluginSdkOutDir = resolve(rootDir, 'dist/plugin-sdk')
+rmSync(pluginSdkOutDir, { recursive: true, force: true })
+mkdirSync(pluginSdkOutDir, { recursive: true })
+cpSync(resolve(rootDir, 'packages/plugin-sdk/package.json'), resolve(pluginSdkOutDir, 'package.json'))
+for (const part of ['src', 'docs', 'harness', 'template']) cpSync(resolve(rootDir, 'packages/plugin-sdk', part), resolve(pluginSdkOutDir, part), { recursive: true })

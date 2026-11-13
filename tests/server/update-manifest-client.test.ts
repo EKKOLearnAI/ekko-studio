@@ -59,7 +59,7 @@ describe('update manifest client', () => {
   }
 
   it('builds a channel manifest URL from the configured base URL', async () => {
-    const { buildManifestUrl } = await import('../../packages/server/src/services/update/manifest-client')
+    const { buildManifestUrl } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
     expect(buildManifestUrl('https://updates.example.com/releases/', 'stable')).toBe(
       'https://updates.example.com/releases/stable/latest.json',
     )
@@ -76,7 +76,7 @@ describe('update manifest client', () => {
         packageType: 'device-package',
       }))),
     }))
-    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchManifestUpdateInfo({
       ...createUpdateConfig(),
@@ -106,7 +106,7 @@ describe('update manifest client', () => {
         }))),
       })
     vi.stubGlobal('fetch', fetchMock)
-    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchManifestUpdateInfo({
       ...createUpdateConfig(),
@@ -134,7 +134,7 @@ describe('update manifest client', () => {
         version: '1.2.4',
       }))),
     }))
-    const { resolveManifestCheckResult } = await import('../../packages/server/src/services/update/manifest-client')
+    const { resolveManifestCheckResult } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await resolveManifestCheckResult({
       ...createUpdateConfig(),
@@ -158,7 +158,7 @@ describe('update manifest client', () => {
       url: 'https://updates.example.com/custom.json',
       arrayBuffer: vi.fn().mockResolvedValue(Buffer.from(JSON.stringify({ sourceLabel: 'Broken' }))),
     }))
-    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     await expect(fetchManifestUpdateInfo({
       ...createUpdateConfig(),
@@ -187,7 +187,7 @@ describe('update manifest client', () => {
         minCurrentVersion: '1.2.0',
       }))),
     }))
-    const { fetchDevicePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchDevicePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchDevicePackageManifest({
       ...createUpdateConfig(),
@@ -215,7 +215,7 @@ describe('update manifest client', () => {
         packageType: 'device-package',
       }))
     }, async (baseUrl) => {
-      const { fetchManifestUpdateInfo } = await import('../../packages/server/src/services/update/manifest-client')
+      const { fetchManifestUpdateInfo } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
       const result = await fetchManifestUpdateInfo({
         ...createUpdateConfig(),
@@ -245,7 +245,7 @@ describe('update manifest client', () => {
     process.env.HERMES_WEBUI_STATE_DIR = isolatedHome
 
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(Object.assign(new TypeError('fetch failed'), { code: 'ETIMEDOUT' })))
-    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     try {
       await expect(fetchManifestUpdateInfo({
@@ -295,7 +295,7 @@ describe('update manifest client', () => {
     }))
 
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(Object.assign(new TypeError('fetch failed'), { code: 'ETIMEDOUT' })))
-    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchManifestUpdateInfo } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     try {
       const result = await fetchManifestUpdateInfo({
@@ -319,7 +319,7 @@ describe('update manifest client', () => {
   })
 
   it('rejects invalid manifest channels before building the latest.json URL', async () => {
-    const { buildManifestUrl } = await import('../../packages/server/src/services/update/manifest-client')
+    const { buildManifestUrl } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     expect(() => buildManifestUrl('https://updates.example.com/releases/', 'beta/canary')).toThrow(
       /Invalid update channel/,
@@ -343,7 +343,7 @@ describe('update manifest client', () => {
         minCurrentVersion: '1.2.0',
       }))),
     }))
-    const { fetchDevicePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchDevicePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchDevicePackageManifest({
       ...createUpdateConfig(),
@@ -379,7 +379,7 @@ describe('update manifest client', () => {
         },
       }))),
     }))
-    const { fetchDevicePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchDevicePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchDevicePackageManifest({
       ...createUpdateConfig(),
@@ -422,7 +422,7 @@ describe('update manifest client', () => {
         },
       }))),
     }))
-    const { fetchDevicePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchDevicePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchDevicePackageManifest({
       ...createUpdateConfig(),
@@ -455,7 +455,7 @@ describe('update manifest client', () => {
         environment: 'not-an-object',
       }))),
     }))
-    const { fetchDevicePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchDevicePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchDevicePackageManifest({
       ...createUpdateConfig(),
@@ -510,7 +510,7 @@ describe('manifest_pinned_stale guard (task-12 update hardening)', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.resetModules() })
 
   it('isPinnedManifestUrl classifies version/candidate paths', async () => {
-    const { isPinnedManifestUrl } = await import('../../packages/server/src/services/update/manifest-client')
+    const { isPinnedManifestUrl } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
     expect(isPinnedManifestUrl('https://x/releases/v0.8.6/manifest.json')).toBe(true)
     expect(isPinnedManifestUrl('https://x/candidates/stable/0.8.6.json')).toBe(true)
     expect(isPinnedManifestUrl('https://x/releases/stable/latest.json')).toBe(false)
@@ -521,7 +521,7 @@ describe('manifest_pinned_stale guard (task-12 update hardening)', () => {
       'https://raw.example/candidates/stable/0.8.6.json': '0.8.6',
       'https://raw.example/releases/stable/latest.json': '0.8.8',
     }))
-    const { resolveManifestCheckResultGuarded } = await import('../../packages/server/src/services/update/manifest-client')
+    const { resolveManifestCheckResultGuarded } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
     const result = await resolveManifestCheckResultGuarded({
       ...cfg,
       manifestUrls: ['https://raw.example/candidates/stable/0.8.6.json'],
@@ -538,7 +538,7 @@ describe('manifest_pinned_stale guard (task-12 update hardening)', () => {
       'https://raw.example/candidates/stable/0.8.6.json': '0.8.6',
       'https://raw.example/releases/stable/latest.json': null,
     }))
-    const { resolveManifestCheckResultGuarded } = await import('../../packages/server/src/services/update/manifest-client')
+    const { resolveManifestCheckResultGuarded } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
     const result = await resolveManifestCheckResultGuarded({
       ...cfg,
       manifestUrls: ['https://raw.example/candidates/stable/0.8.6.json'],
@@ -552,7 +552,7 @@ describe('manifest_pinned_stale guard (task-12 update hardening)', () => {
     vi.stubGlobal('fetch', urlKeyedFetch({
       'https://raw.example/releases/stable/latest.json': '0.8.8',
     }))
-    const { resolveManifestCheckResultGuarded } = await import('../../packages/server/src/services/update/manifest-client')
+    const { resolveManifestCheckResultGuarded } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
     const result = await resolveManifestCheckResultGuarded({
       ...cfg,
       manifestBaseUrl: 'https://raw.example/releases',

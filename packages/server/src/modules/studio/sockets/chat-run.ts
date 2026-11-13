@@ -1,0 +1,3853 @@
+import { respondAgentInteraction } from '../services/agents/interactions'
+import { personDisplayPage, personDisplayEvents, personDisplayBackgroundTasks, personDisplayEvent } from '../services/chat-run/person-display'
+import { personSessionIds } from '../repositories/person-session-store'
+import type { PersonResultDelivery } from '../public/person-runtime'
+import { personResultPrompt } from '../services/person/result-prompt'
+import { personUser } from '../services/person/catalog'
+import { personConversationFlows, personConversationTimeline } from '../services/person/flow-conversation'
+import { personBackgroundPendingCount } from '../repositories/person-store'
+import { personDeliveryCurrent, finishPersonDelivery, cancelPersonDelivery } from '../services/person/delivery'
+import { stageDeliveryContext, assertPersonStage } from '../repositories/person-stage-store'
+import { finishPersonStageDelivery } from '../services/person/stage-flows'
+import type { PersonRuntimePort } from '../public/person-runtime'
+import { onPersonUpdated, personUpdated } from '../repositories/person-updates'
+import { personChatInteraction, answerPersonChatInteraction } from '../services/person/chat-interactions'
+import { ownedPersonTaskSession } from '../services/person/task-chat'
+import { answerPersonTaskInteraction } from '../services/person/chat-interactions'
+import { isPersonSession, isPrivatePersonSession, ownsPersonSession, personNotificationRoom, personResultQueueId } from '../contracts/person-session'
+import { foregroundNotification, foregroundNotificationPreview } from '../services/chat-run/foreground-notification'
+import { chatCompletionText } from '../services/notifications/chat-completion-text'
+import { ensurePersonSession } from '../services/person/chat-agent'
+import { requirePersonAgents } from '../services/person/agents'
+import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
+import { withRunUsage, onRunUsageUpdated } from '../repositories/run-usage-store'
+import { savePersonTaskReturn, withPersonTaskReturns } from '../repositories/person-return-store'
+import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
+import { isBuiltinEkkoAgent, normalizeEkkoRunData } from '../contracts/history-source'
+import { recordSessionUploadAttachments } from '../services/files/session-uploads'
+import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
+import { bindSessionShareSocket } from '../services/session-shares/socket-access'
+import { codingAgentId } from '../services/chat-run/types'
+import { studioMcpCapabilities } from '../public/runs/mcp-capabilities'
+import { hermesStudioMcpCapabilities } from '../services/chat-run/studio-mcp'
+import { publishAppState, stateEvent, planStateEvent } from '../services/webhooks/app-event-state'
+import { pendingChatEkkoInteractions } from '../public/chat-agent-runtime'
+import { personNotificationSnapshot } from '../services/notifications/person-notification-state'
+import type { BusinessEvent } from '../services/webhooks/business-events'
+import { authenticatedPushActor, prepareRunPushSnapshot } from '../services/notifications/push-registration'
+import { bindRunPushTarget, type PushRunRef, getRunPushTarget } from '../repositories/run-push-store'
+import { ClarificationRuns } from '../services/clarification-runs'
+import { TaskPlanRuns, taskPlanRunInstruction } from '../services/task-plan-runs'
+import { runMcpCredentials } from '../services/auth/run-mcp-credentials'
+import { saveTaskPlan } from '../repositories/task-plan-store'
+import { getSessionTasks, updateSessionTasks, SessionTasksError } from '../services/session-tasks'
+import { getSessionTaskPlans } from '../services/task-plans'
+import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
+import { bindAppEventSubscription } from '../services/webhooks/app-events'
+import { mobileDeviceRoom, mobileDeviceId, sameMobileDevice, mobileEventAllowed, type MobileDeviceTarget } from '../services/chat-run/mobile-device-target'
+/**
+ * ChatRunSocket — Socket.IO namespace /chat-run.
+ *
+ * Thin orchestrator that delegates to specialized modules:
+ * - handle-bridge-run.ts → CLI bridge runs
+ * - abort.ts             → run cancellation
+ * - compression.ts       → context window management
+ */
+
+import type { Server, Socket } from 'socket.io'
+import { randomUUID } from 'crypto'
+import { logger } from '../public/logging'
+import { getSystemPrompt } from '../public/runs/prompt'
+import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
+import { deleteSessionMessageGroups } from '../repositories/session-message-deletion'
+import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
+import { getSessionCategory } from '../repositories/session-category-store'
+import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../public/profile-config'
+import {
+  getChatCodingAgentMcpServers,
+  resolveChatEkkoMcpServers,
+  chatCodingAgentRunManager as codingAgentRunManager,
+  createPrimaryAgentBridge,
+  getChatEkkoAgent as getGlobalEkkoAgent,
+  hasChatEkkoBackgroundTasks,
+  getPrimaryAgentBridgeManager as getAgentBridgeManager,
+  handleChatCodingAgentSessionCommand as handleCodingAgentSessionCommand,
+  parseChatCodingAgentSessionCommand as parseCodingAgentSessionCommand,
+  redactPrimaryAgentBridgeError as redactAgentBridgeError,
+  respondToChatEkkoClarification as respondToEkkoClarification,
+  respondToChatEkkoToolApproval as respondToEkkoToolApproval,
+} from '../public/chat-agent-runtime'
+import { handleBridgeRun, resumeBridgeRun } from '../services/chat-run/handle-bridge-run'
+import { handleCodingAgentRun } from '../services/chat-run/handle-coding-agent-run'
+import { handlePluginAgentRun } from '../services/chat-run/handle-plugin-agent-run'
+import { isPluginAgentId, closePluginAgentSession } from '../services/agents/registry'
+import { handleEkkoAgentRun, type EkkoAgentRunSocketData } from '../services/chat-run/handle-ekko-agent-run'
+import { handleEkkoSessionCommand, parseEkkoRunCommand } from '../services/chat-run/ekko-session-command'
+import { handleAbort } from '../services/chat-run/abort'
+import { getOrCreateSession } from '../services/chat-run/compression'
+import { loadSessionStateFromDb, resolveRunSource } from '../services/chat-run/load-state'
+import { getSessionContextOverhead, refreshContextUsageAfterDeletion } from '../services/chat-run/context-usage'
+import { handleSessionCommand, isSessionCommand, parseSessionCommand } from '../services/chat-run/session-command'
+import { contentBlocksToString } from '../services/chat-run/content-blocks'
+import {
+  buildAppResumeMessagePage,
+  buildOutboundRunEvent,
+  buildResumeEvents,
+  buildResumeMessagePage,
+} from '../services/chat-run/resume-payload'
+import type {
+  BackgroundContinuationContext,
+  ChatCodingAgentId,
+  ContentBlock,
+  QueueInsertionControl,
+  QueueInsertionPhase,
+  QueueInsertionRuntime,
+  QueuedRun,
+  SessionState,
+} from '../services/chat-run/types'
+import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
+import { userCanAccessProfile } from '../repositories/users-store'
+import { observeRunChatPetEvent } from '../public/pet-events'
+import { observePersonPresenceEvent } from '../services/person/presence'
+import { SessionStateSync } from '../services/session-state'
+import { personBackgroundTaskCount } from '../repositories/person-presence-store'
+import { personCollaborationPendingCount } from '../repositories/person-stage-store'
+import { observeChatRunWebhookEvent, type ChatRunWebhookAgent } from '../services/webhooks'
+import { getAgentStatusSnapshot } from '../public/agent-status-registry'
+import {
+  normalizeMobileCalendarRequest,
+  normalizeMobileCalendarResponse,
+  type MobileCalendarCapability,
+  type MobileCalendarResponse,
+  type MobileCalendarRequest,
+} from '../services/chat-run/mobile-calendar'
+import {
+  mobileHealthResponseSourceMatches,
+  normalizeMobileHealthRequest,
+  normalizeMobileHealthResponse,
+  type MobileHealthResponse,
+  type MobileHealthRequest,
+} from '../services/chat-run/mobile-health'
+
+type AgentBridgeBackgroundNotification = any
+type AgentBridgeBackgroundSession = any
+
+export type { ContentBlock } from '../services/chat-run/types'
+
+function currentProfileFromSocket(socket: Socket): string {
+  const socketProfile = typeof socket.handshake.query?.profile === 'string'
+    ? socket.handshake.query.profile.trim()
+    : ''
+  return socketProfile || getActiveProfileName() || 'default'
+}
+
+function persistHermesBackgroundResult(
+  sessionId: string,
+  state: SessionState,
+  delegationId: string,
+  event: Record<string, unknown>,
+) {
+  const delegation = state.backgroundDelegations?.[delegationId]
+  if (!delegation?.messageId) return
+  const dispatch = delegation.dispatchPayload || {}
+  const eventResults = Array.isArray(event.results)
+    ? event.results.filter(result => result && typeof result === 'object') as Array<Record<string, unknown>>
+    : [event]
+  const stateTasks = Object.values(state.backgroundTasks || {})
+    .filter(task => task.runtime !== 'ekko')
+  const dispatchGoals = Array.isArray(dispatch.goals)
+    ? dispatch.goals.map(value => String(value || '').trim())
+    : []
+  const tasks = eventResults.map((result, taskIndex) => {
+    const index = Number.isFinite(Number(result.task_index)) ? Number(result.task_index) : taskIndex
+    const goal = String(result.goal || dispatchGoals[index] || event.goal || dispatch.goal || '').trim()
+    const snapshot = stateTasks.find(task =>
+      Number(task.task_index ?? 0) === index
+      && (!goal || !String(task.goal || '').trim() || String(task.goal || '').trim() === goal),
+    ) || (eventResults.length === 1
+      ? stateTasks.find(task => !goal || String(task.goal || '').trim() === goal)
+      : undefined)
+    const summary = String(result.summary || snapshot?.summary || snapshot?.preview || '').trim()
+    return {
+      runtime: 'hermes',
+      mode: 'background',
+      delegation_id: delegationId,
+      subagent_id: String(snapshot?.subagent_id || result.subagent_id || `${delegationId}:${index}`),
+      task_index: index,
+      task_count: eventResults.length,
+      goal,
+      model: result.model || snapshot?.model || event.model,
+      status: String(result.status || snapshot?.status || event.status || 'completed'),
+      summary,
+      output: summary,
+      started_at: snapshot?.started_at || event.dispatched_at,
+      completed_at: snapshot?.completed_at || event.completed_at,
+      duration_seconds: result.duration_seconds || snapshot?.duration_seconds || event.duration_seconds || event.total_duration_seconds,
+      api_calls: result.api_calls || snapshot?.api_calls || event.api_calls,
+      input_tokens: result.input_tokens || snapshot?.input_tokens,
+      output_tokens: result.output_tokens || snapshot?.output_tokens,
+      cost_usd: result.cost_usd || snapshot?.cost_usd,
+    }
+  })
+  const displayPayload = tasks.length === 1
+    ? tasks[0]
+    : {
+        runtime: 'hermes',
+        mode: 'background',
+        delegation_id: delegationId,
+        status: String(event.status || 'completed'),
+        tasks,
+      }
+  const displayContent = JSON.stringify(displayPayload)
+  if (!updateMessageDisplayContent(sessionId, delegation.messageId, displayContent)) return
+  const message = state.messages.find(item =>
+    String(item.id) === String(delegation.messageId)
+    || (delegation.toolCallId && item.tool_call_id === delegation.toolCallId),
+  )
+  if (message) message.display_content = displayContent
+}
+
+function redactBridgeReadyError(error: string, endpoint?: string): string {
+  const normalized = error.replace(/^Error:\s*/, '').trim() || 'unknown error'
+  return redactAgentBridgeError(normalized, endpoint, 'configured endpoint') || 'unknown error'
+}
+
+function isBridgeStatusLookupTimeout(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /^Agent bridge request timed out after \d+ms$/.test(message.trim())
+}
+
+function isHermesWorkerBackedSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null }): boolean {
+  if (isPluginAgentId(session?.agent)) return false
+  const source = session?.source || undefined
+  // "api_server" is a legacy/default source value; Hermes sessions still use worker-backed runtime.
+  // coding_agent runs have a separate lifecycle.
+  if (!source || source === 'cli' || source === 'api_server') return true
+  if (source === 'workflow' || source === 'group_chat') {
+    const agent = String(session?.agent || '').trim()
+    return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && (agent !== 'antigravity' && !isNativeCodingAgent(agent))) && (agent !== 'opencode' && agent !== 'dsh') && agent !== 'ekko-agent' && !session?.agent_session_id
+  }
+  if (source !== 'global_agent') return false
+  const agent = String(session?.agent || '').trim()
+  return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && (agent !== 'antigravity' && !isNativeCodingAgent(agent))) && (agent !== 'opencode' && agent !== 'dsh') && agent !== 'ekko-agent' && !session?.agent_session_id
+}
+
+function isBridgeRunSource(source?: string): boolean {
+  return source === 'cli' || source === 'global_agent' || source === 'workflow' || source === 'group_chat'
+}
+
+function mobileLocationRunInstruction(sessionId: string | undefined, source: string | undefined): string {
+  if (!sessionId || source === 'workflow' || source === 'group_chat') return ''
+  return [
+    `The current Ekko Studio chat session id is ${JSON.stringify(sessionId)}.`,
+    'Only when the user explicitly asks to use their current mobile-device location, use ekko_studio_use_toolset to describe and call ekko_studio_use_mobile_location with this exact session_id.',
+    'The App will show a one-time confirmation before sharing WGS84 coordinates. Never request location proactively, in a delegated subtask, in a workflow node, or for background tracking.',
+  ].join(' ')
+}
+
+function mobileCalendarRunInstruction(sessionId: string | undefined, source: string | undefined): string {
+  if (!sessionId || source === 'workflow' || source === 'group_chat') return ''
+  return [
+    `The current Ekko Studio direct-chat session id is ${JSON.stringify(sessionId)}.`,
+    'Only when the user explicitly asks to read or change calendar events, use ekko_studio_use_toolset to describe and call ekko_studio_use_mobile_calendar with this exact session_id.',
+    'Only when the user explicitly asks to read or change reminders, use ekko_studio_use_toolset to describe and call ekko_studio_use_mobile_reminders with this exact session_id.',
+    'The App always asks the user to share once or confirm the write. Never use these tools proactively, in delegated/workflow/group tasks, or for background access. Delete only the exact listed item after fresh App confirmation; never delete a whole recurring series.',
+  ].join(' ')
+}
+
+function mobileHealthRunInstruction(sessionId: string | undefined, source: string | undefined): string {
+  if (!sessionId || source === 'workflow' || source === 'group_chat') return ''
+  return [
+    `The current Ekko Studio direct-chat session id is ${JSON.stringify(sessionId)}.`,
+    'Only when the user explicitly asks to read Apple Health data from their iPhone or iPad, use ekko_studio_use_toolset to describe and call ekko_studio_use_mobile_health with this exact session_id.',
+    'Health data access is available only on iOS through Apple HealthKit. The App asks the user to share once and requests system permission. This tool is read-only and limited to its allowlisted activity, sleep, heart, oxygen and body metrics for at most 31 days. Never use it proactively, for diagnosis, advertising, background collection, delegated tasks, workflows, or group chats.',
+  ].join(' ')
+}
+type ChatRunBridgeReadiness =
+  | { ok: true }
+  | { ok: false; error: string; runtimeUnavailable?: true }
+
+function runtimeUnavailableForChatRun(): ChatRunBridgeReadiness | null {
+  if (process.env.HERMES_RUNTIME_SOURCE?.trim() !== 'none') return null
+  const status = getAgentStatusSnapshot().agents.find(agent => agent.id === 'hermes')
+  return {
+    ok: false,
+    error: status?.error.trim()
+      || 'Hermes Runtime is not installed or is incomplete. Open Runtime Manager to repair or download a Runtime.',
+    runtimeUnavailable: true,
+  }
+}
+
+export async function ensureBridgeReadyForChatRun(): Promise<ChatRunBridgeReadiness> {
+  const runtimeUnavailable = runtimeUnavailableForChatRun()
+  if (runtimeUnavailable) return runtimeUnavailable
+
+  try {
+    const manager = getAgentBridgeManager()
+    await manager.start()
+    const readiness = await manager.ensureReady({ timeoutMs: 1000, connectRetryMs: 0, recover: false })
+    if (readiness.reachable) {
+      return { ok: true }
+    }
+    return {
+      ok: false,
+      error: redactBridgeReadyError(readiness.error || `Agent Bridge is ${readiness.status}`, readiness.endpoint),
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      error: redactBridgeReadyError(err instanceof Error ? err.message : String(err)),
+    }
+  }
+}
+
+function isProviderAgentExecution(source: string | undefined, data?: { coding_agent_id?: string; agent_id?: string }): boolean {
+  return isEkkoAgentExecution(data) || source === 'builtin_agent' || source === 'coding_agent'
+    || ((source === 'workflow' || source === 'group_chat') && Boolean(data?.coding_agent_id || data?.agent_id))
+}
+
+function resolveSessionCategoryId(value: unknown): number | null {
+  const categoryId = Number(value)
+  if (!Number.isSafeInteger(categoryId) || categoryId <= 0) return null
+  return getSessionCategory(categoryId) ? categoryId : null
+}
+
+function isEkkoAgentExecution(data?: { coding_agent_id?: string; agent_id?: string }): boolean {
+  return isBuiltinEkkoAgent(data?.coding_agent_id) || isBuiltinEkkoAgent(data?.agent_id)
+}
+
+function webhookAgentForRun(data?: { coding_agent_id?: string; agent_id?: string }): ChatRunWebhookAgent {
+  const agent = data?.coding_agent_id || data?.agent_id
+  if (isPluginAgentId(agent)) return agent
+  if (agent === 'ekko-agent') return 'ekko'
+  if (agent === 'codex') return 'codex'
+  if (agent === 'pi') return 'pi'
+  if (agent === 'grok') return 'grok'
+  if ((agent === 'antigravity' || isNativeCodingAgent(agent))) return 'antigravity'
+  if (agent === 'cursor') return 'cursor'
+  if (agent === 'dsh') return 'dsh'
+  if (agent === 'opencode') return 'opencode'
+  if (agent === 'claude-code') return 'claude-code'
+  return 'bridge'
+}
+
+export interface ChatRunAndWaitResult {
+  ok: boolean
+  event: 'run.completed' | 'run.failed'
+  session_id: string
+  run_id?: string
+  output?: string | null
+  reasoning?: string | null
+  error?: string
+  interrupted?: boolean
+  stop_reason?: string
+}
+
+type ChatRunAutoApprovalChoice = 'once' | 'session' | 'always'
+
+type MobileLocationAccuracy = 'coarse' | 'precise'
+
+type MobileLocationValue = {
+  latitude: number
+  longitude: number
+  accuracyMeters: number
+  altitudeMeters?: number
+  speedMetersPerSecond?: number
+  coordinateSystem: 'wgs84'
+  timestamp: number
+}
+
+export type MobileLocationResponse =
+  | { status: 'success'; location: MobileLocationValue }
+  | { status: 'denied' }
+  | { status: 'error'; error: { code: string } }
+
+type PendingMobileLocationRequest = {
+  sessionId: string
+  profile: string
+  resolve: (response: MobileLocationResponse) => void
+  timer: NodeJS.Timeout
+}
+
+const MOBILE_LOCATION_MIN_TIMEOUT_MS = 3_000
+const MOBILE_LOCATION_MAX_TIMEOUT_MS = 60_000
+const MOBILE_LOCATION_DEVICE_TIMEOUT_MS = 30_000
+const MOBILE_LOCATION_PURPOSE_MAX_LENGTH = 240
+const MOBILE_LOCATION_ERROR_CODES = new Set([
+  'location_permission_denied',
+  'location_timeout',
+  'location_service_unavailable',
+  'location_invalid_result',
+  'location_failed',
+])
+
+function boundedMobileLocationTimeout(value: unknown): number {
+  const numeric = Math.round(Number(value))
+  if (!Number.isFinite(numeric)) return 35_000
+  return Math.max(MOBILE_LOCATION_MIN_TIMEOUT_MS, Math.min(MOBILE_LOCATION_MAX_TIMEOUT_MS, numeric))
+}
+
+function finiteLocationNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function normalizeMobileLocationResponse(value: unknown): MobileLocationResponse | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const response = value as Record<string, any>
+  const status = String(response.status || '').trim()
+  if (status === 'denied') return { status: 'denied' }
+  if (status === 'error') {
+    const rawCode = String(response.error?.code || '').trim()
+    return {
+      status: 'error',
+      error: { code: MOBILE_LOCATION_ERROR_CODES.has(rawCode) ? rawCode : 'location_failed' },
+    }
+  }
+  if (status !== 'success' || !response.location || typeof response.location !== 'object') return null
+  // The App must supply WGS84 coordinates; relabeling another system does not convert it.
+  if (Array.isArray(response.location) || response.location.coordinateSystem !== 'wgs84') return null
+  const latitude = finiteLocationNumber(response.location.latitude)
+  const longitude = finiteLocationNumber(response.location.longitude)
+  if (
+    latitude == null
+    || longitude == null
+    || latitude < -90
+    || latitude > 90
+    || longitude < -180
+    || longitude > 180
+  ) return null
+  const location: MobileLocationValue = {
+    latitude,
+    longitude,
+    accuracyMeters: Math.max(0, finiteLocationNumber(response.location.accuracyMeters) || 0),
+    coordinateSystem: 'wgs84',
+    timestamp: Math.max(0, Math.round(finiteLocationNumber(response.location.timestamp) || Date.now())),
+  }
+  const altitude = finiteLocationNumber(response.location.altitudeMeters)
+  const speed = finiteLocationNumber(response.location.speedMetersPerSecond)
+  if (altitude != null) location.altitudeMeters = altitude
+  if (speed != null && speed >= 0) location.speedMetersPerSecond = speed
+  return { status: 'success', location }
+}
+
+type PendingMobileCalendarRequest = {
+  target: MobileDeviceTarget
+  sessionId: string
+  profile: string
+  request: MobileCalendarRequest
+  resolve: (response: MobileCalendarResponse) => void
+  timer: NodeJS.Timeout
+}
+type PendingMobileHealthRequest = {
+  target: MobileDeviceTarget
+  sessionId: string
+  profile: string
+  request: MobileHealthRequest
+  resolve: (response: MobileHealthResponse) => void
+  timer: NodeJS.Timeout
+}
+const MOBILE_CALENDAR_MIN_TIMEOUT_MS = 3_000
+const MOBILE_CALENDAR_MAX_TIMEOUT_MS = 300_000
+const MOBILE_CALENDAR_DEFAULT_TIMEOUT_MS = 300_000
+function boundedMobileCalendarTimeout(value: unknown): number {
+  const numeric = Math.round(Number(value))
+  if (value == null || !Number.isFinite(numeric) || numeric <= 0) return MOBILE_CALENDAR_DEFAULT_TIMEOUT_MS
+  return Math.max(MOBILE_CALENDAR_MIN_TIMEOUT_MS, Math.min(MOBILE_CALENDAR_MAX_TIMEOUT_MS, numeric))
+}
+export class ChatRunSocket {
+  private nsp: ReturnType<Server['of']>
+  private bridge = createPrimaryAgentBridge()
+  private backgroundBridge = createPrimaryAgentBridge({ timeoutMs: 1000, connectRetryMs: 0 })
+  /** sessionId → session state (messages, working status, events, run tracking) */
+  private sessionMap = new Map<string, SessionState>()
+  private readonly runAdmissions = new Map<string, Promise<void>>()
+  private readonly ekkoExecutions = new Map<string, symbol>()
+  private hermesQueueInsertionOperations = new Map<string, Promise<void>>()
+  private readonly taskPlanRuns = new TaskPlanRuns(saveTaskPlan, (sessionId, snapshot) => {
+    this.emitExternalEvent(sessionId, 'plan.updated', { event: 'plan.updated', ...snapshot })
+  })
+  private readonly clarificationRuns = new ClarificationRuns((sessionId, event, payload) => {
+    this.emitExternalEvent(sessionId, event, payload)
+    if (event === 'clarify.resolved') this.clearClarifyEventState(sessionId, String(payload.clarify_id))
+  })
+  private bridgeResumePolls = new Set<string>()
+  private readonly runWaiters = new Map<string, Set<(event: string, payload: any) => void>>()
+  private readonly runHandlers = new Map<string, Set<Promise<void>>>()
+  private readonly pendingMobileLocations = new Map<string, PendingMobileLocationRequest>()
+  private readonly mobileRunTargets = new Map<string, MobileDeviceTarget>()
+  private readonly pendingMobileCalendar = new Map<string, PendingMobileCalendarRequest>()
+  private readonly pendingMobileHealth = new Map<string, PendingMobileHealthRequest>()
+  private backgroundPollTimer?: NodeJS.Timeout
+  private backgroundPollInFlight = false
+  private backgroundRecoveryNeeded = true
+  private backgroundBrokerId?: string
+  private backgroundPollRetryAt = 0
+  private backgroundActivityGraceUntil = 0
+  private closing = false
+  private stopUsageUpdates: () => void
+  private stopPersonUpdates: () => void
+  private personQuestions = new Map<string, ReturnType<typeof personChatInteraction>>()
+  private readonly sessionStateSync: SessionStateSync
+
+  constructor(private readonly io: Server) {
+    this.nsp = io.of('/chat-run')
+    this.sessionStateSync = new SessionStateSync(sessionId => {
+      const state = this.sessionMap.get(sessionId)
+      const backgroundPending = state ? this.backgroundPendingCount(state, sessionId) : personBackgroundPendingCount(sessionId)
+      const owner = sessionId.startsWith('person-main-') ? Number(getSession(sessionId)?.studio_user_id) : 0
+      return { working: !!state?.isWorking,
+        collaborationPending: owner ? personCollaborationPendingCount(owner, sessionId) : 0,
+        backgroundPending: owner ? Math.max(backgroundPending, personBackgroundTaskCount(owner, sessionId)) : backgroundPending }
+    }, (user, profile) => this.canAccessProfile(user, profile))
+    this.stopPersonUpdates = onPersonUpdated(userId => this.syncPersonInteraction(userId))
+    this.stopUsageUpdates = onRunUsageUpdated((sessionId, summary) => {
+      const session = getSession(sessionId)
+      const isCoding = session && session.agent !== 'ekko-agent' && (session.source === 'coding_agent'
+        || (isAgentRuntime(session.agent) && agentFamilyForRuntime(session.agent) === 'coding')
+        || session.agent === 'claude' || session.agent === 'claude_code')
+      const totals = isCoding ? {
+        inputTokens: session.input_tokens, outputTokens: session.output_tokens,
+        cacheReadTokens: session.cache_read_tokens, cacheWriteTokens: session.cache_write_tokens,
+      } : undefined
+      const state = this.sessionMap.get(sessionId)
+      if (state && totals) Object.assign(state, totals)
+      this.emitExternalEvent(sessionId, 'run.usage.updated', {
+        event: 'run.usage.updated', session_id: sessionId, run_id: summary.runId,
+        message_id: summary.assistantMessageId, run_usage: summary, ...totals,
+      })
+    })
+  }
+
+  private syncPersonInteraction(userId: number) {
+    if (this.closing) return
+    this.sessionStateSync.refreshPerson(userId)
+    for (const sid of personSessionIds(userId)) {
+      this.nsp.to(`session:${sid}`).emit('person.updated', {
+        session_id: sid,
+        ...(this.nsp.adapter.rooms.get(`session:${sid}`)?.size ? { personFlows: personConversationFlows(userId, sid) } : {}),
+      })
+      if (this.isSessionRunning(sid)) continue
+      const before = this.personQuestions.get(sid)
+      const next = personChatInteraction(userId, sid)
+      if (JSON.stringify(before) === JSON.stringify(next)) continue
+      if (before) {
+        const event = before.event.replace('.requested', '.resolved')
+        this.emitExternalEvent(sid, event, { ...before.data, event, resolved: true, reason: 'response' })
+      }
+      this.personQuestions.set(sid, next)
+      if (next) this.emitExternalEvent(sid, next.event, next.data)
+    }
+    this.nsp.to(personNotificationRoom(userId)).emit('person.updated', { account_id: userId })
+  }
+
+  isSessionRunning(sessionId: string) { return !!this.sessionMap.get(sessionId)?.isWorking }
+
+  getLiveActivityPlans() {
+    return this.taskPlanRuns.activeSnapshots().filter(entry => {
+      const source = this.sessionMap.get(entry.snapshot.session_id)?.source || getSession(entry.snapshot.session_id)?.source
+      return source !== 'group_chat' && source !== 'workflow'
+    })
+  }
+
+  isLiveActivityRunActive(sessionId: string, profile: string, runId: string): boolean {
+    const state = this.sessionMap.get(sessionId)
+    return !!state?.isWorking && !state.isAborting && (state.activeRunMarker || state.responseRun?.runMarker || state.runId) === runId
+      && (state.profile || getSession(sessionId)?.profile || 'default') === profile
+  }
+
+  getLiveActivityStartedAt(sessionId: string, profile: string, runId: string): number | undefined {
+    if (!this.isLiveActivityRunActive(sessionId, profile, runId)) return undefined
+    const started = this.sessionMap.get(sessionId)?.runStartedAt
+    return typeof started === 'number' && Number.isFinite(started) && started > 0 ? started / 1000 : undefined
+  }
+
+  updateTaskPlan(contextId: string, profile: string, input: Record<string, unknown>) {
+    return this.taskPlanRuns.update(contextId, profile, input)
+  }
+
+  private sessionTasksContext(contextId: string, profile: string) {
+    const sessionId = this.taskPlanRuns.sessionForContext(contextId, profile)
+    const session = getSession(sessionId)
+    const state = this.sessionMap.get(sessionId)
+    if (!session || (session.profile || 'default') !== profile
+      || ['group_chat', 'workflow', 'global_agent'].includes(session.source || '')
+      || ['group_chat', 'workflow', 'global_agent'].includes(state?.source || '')) {
+      throw new SessionTasksError('Session goals are unavailable in this context', 409)
+    }
+    return sessionId
+  }
+
+  listSessionTasks(contextId: string, profile: string) {
+    return getSessionTasks(this.sessionTasksContext(contextId, profile))
+  }
+
+  updateSessionTasks(contextId: string, profile: string, input: Record<string, unknown>) {
+    return updateSessionTasks(this.sessionTasksContext(contextId, profile), profile, input)
+  }
+
+  requestClarification(contextId: string, profile: string, input: Record<string, unknown>, signal?: AbortSignal) {
+    return this.clarificationRuns.request(contextId, profile, input, signal)
+  }
+
+  beginGroupTaskPlanRun(sessionId: string, profile: string, runId: string, isCurrent: () => boolean, publish: (snapshot: import('../contracts/task-plan').TaskPlanSnapshot) => void) {
+    const contextId = this.taskPlanRuns.begin(sessionId, profile,
+      () => ({ isWorking: isCurrent(), activeRunMarker: runId }), publish)
+    return { contextId, finish: (state: 'ended' | 'interrupted' | 'failed') => this.taskPlanRuns.finish(contextId, state) }
+  }
+
+  private beginTaskPlanRun(sessionId: string | undefined, profile: string, sessionTasksEnabled = true) {
+    if (!sessionId) return undefined
+    runMcpCredentials.revoke(sessionId)
+    this.clarificationRuns.finishSession(sessionId)
+    return this.taskPlanRuns.begin(sessionId, profile, () => this.sessionMap.get(sessionId), undefined, sessionTasksEnabled)
+  }
+
+  private finishTaskPlanRun(sessionId: string, event: string, payload?: any, contextId?: string) {
+    if (!['run.completed', 'run.failed', 'abort.completed'].includes(event)) return
+    runMcpCredentials.revoke(sessionId, contextId)
+    this.clarificationRuns.finishSession(sessionId, contextId)
+    // A queue boundary can finish after its queued input was removed. Runtime
+    // interrupt flags alone do not mean the user pressed Stop.
+    const interrupted = event === 'abort.completed' || this.sessionMap.get(sessionId)?.isAborting
+    const executionState = interrupted ? 'interrupted' : event === 'run.failed' ? 'failed' : 'ended'
+    try {
+      if (contextId) this.taskPlanRuns.finish(contextId, executionState)
+      else this.taskPlanRuns.finishSession(sessionId, executionState)
+    } catch (err) {
+      // Keep terminal run delivery working even if persistence fails; startup recovery settles the stored plan.
+      logger.warn(err, '[chat-run-socket] failed to finish task plan for %s', sessionId)
+    }
+  }
+
+  private async acquireRunAdmission(sessionId?: string): Promise<() => void> {
+    if (!sessionId) return () => {}
+    const previous = this.runAdmissions.get(sessionId)
+    let release!: () => void
+    const current = new Promise<void>(resolve => { release = resolve })
+    this.runAdmissions.set(sessionId, current)
+    await previous
+    return () => {
+      release()
+      if (this.runAdmissions.get(sessionId) === current) this.runAdmissions.delete(sessionId)
+    }
+  }
+
+  emitSessionSettingsUpdated(sessionId: string, settings: {
+    model?: string
+    provider?: string
+    api_mode?: string
+    reasoning_effort?: string
+    push_enabled?: boolean
+  }): void {
+    this.nsp.to(`session:${sessionId}`).emit('session.settings.updated', {
+      event: 'session.settings.updated',
+      session_id: sessionId,
+      ...settings,
+    })
+  }
+
+  requestMobileLocation(options: {
+    sessionId: string
+    profile: string
+    purpose?: string
+    accuracy?: MobileLocationAccuracy
+    timeoutMs?: number
+  }): Promise<MobileLocationResponse> {
+    const sessionId = String(options.sessionId || '').trim()
+    const profile = String(options.profile || '').trim() || 'default'
+    const session = getSession(sessionId)
+    if (!session) throw new Error('Session not found')
+    if ((String(session.profile || '').trim() || 'default') !== profile) {
+      throw new Error('Session is not available for this profile')
+    }
+    if (session.source === 'group_chat' || session.source === 'workflow') {
+      throw new Error('Mobile location is available only in direct chats')
+    }
+    for (const pending of this.pendingMobileLocations.values()) {
+      if (pending.sessionId === sessionId) throw new Error('A mobile location request is already pending')
+    }
+
+    const locationRequestId = randomUUID()
+    const timeoutMs = boundedMobileLocationTimeout(options.timeoutMs)
+    const purpose = String(options.purpose || '').trim().slice(0, MOBILE_LOCATION_PURPOSE_MAX_LENGTH)
+    const accuracy: MobileLocationAccuracy = options.accuracy === 'precise' ? 'precise' : 'coarse'
+
+    return new Promise<MobileLocationResponse>((resolve) => {
+      const timer = setTimeout(() => {
+        this.finishMobileLocationRequest(locationRequestId, {
+          status: 'error',
+          error: { code: 'location_timeout' },
+        })
+      }, timeoutMs)
+      timer.unref?.()
+      this.pendingMobileLocations.set(locationRequestId, {
+        sessionId,
+        profile,
+        resolve,
+        timer,
+      })
+      this.emitMobileLocationEvent(profile, sessionId, 'location.requested', {
+        event: 'location.requested',
+        location_request_id: locationRequestId,
+        purpose,
+        accuracy,
+        timeout_ms: Math.min(timeoutMs, MOBILE_LOCATION_DEVICE_TIMEOUT_MS),
+        max_age_ms: 0,
+      })
+    })
+  }
+
+  requestMobileCalendar(options: {
+    sessionId: string
+    profile: string
+    capability: MobileCalendarCapability
+    action?: unknown
+    purpose?: unknown
+    startMs?: unknown
+    endMs?: unknown
+    includeCompleted?: unknown
+    limit?: unknown
+    item?: unknown
+    timeoutMs?: unknown
+  }): Promise<MobileCalendarResponse> {
+    const sessionId = String(options.sessionId || '').trim()
+    const profile = String(options.profile || '').trim() || 'default'
+    const session = getSession(sessionId)
+    if (!session) throw new Error('Session not found')
+    if ((String(session.profile || '').trim() || 'default') !== profile) {
+      throw new Error('Session is not available for this profile')
+    }
+    if (session.source === 'group_chat' || session.source === 'workflow') {
+      throw new Error('Mobile calendar and reminders are available only in direct chats')
+    }
+    for (const pending of this.pendingMobileCalendar.values()) {
+      if (pending.sessionId === sessionId) throw new Error('A mobile calendar or reminder request is already pending')
+    }
+    const target = this.mobileRunTargets.get(sessionId)
+    if (!target || target.profile !== profile) throw new Error('Mobile target unavailable; send a new message from the intended mobile device')
+    const room = this.nsp.adapter.rooms.get(mobileDeviceRoom(target))
+    if (!room?.size) throw new Error('Target mobile device is offline; reconnect the same device')
+    const request = normalizeMobileCalendarRequest({
+      capability: options.capability,
+      action: options.action,
+      purpose: options.purpose,
+      start_ms: options.startMs,
+      end_ms: options.endMs,
+      include_completed: options.includeCompleted,
+      limit: options.limit,
+      item: options.item,
+    })
+    const requestId = randomUUID()
+    const timeoutMs = boundedMobileCalendarTimeout(options.timeoutMs)
+    const event = request.capability === 'reminder' ? 'reminder.requested' : 'calendar.requested'
+    const idKey = request.capability === 'reminder' ? 'reminder_request_id' : 'calendar_request_id'
+    return new Promise<MobileCalendarResponse>((resolve) => {
+      const timer = setTimeout(() => {
+        this.finishMobileCalendarRequest(requestId, {
+          status: 'error',
+          error: { code: 'calendar_failed' },
+        })
+      }, timeoutMs)
+      timer.unref?.()
+      this.pendingMobileCalendar.set(requestId, { sessionId, profile, target, request, resolve, timer })
+      this.emitMobileCalendarEvent(profile, sessionId, event, {
+        event,
+        [idKey]: requestId,
+        ...request,
+        target_device_id: target.deviceCode,
+        target_user_id: target.userId,
+        target_profile: target.profile,
+        timeout_ms: timeoutMs,
+        expires_at_ms: Date.now() + timeoutMs,
+      })
+    })
+  }
+
+  requestMobileHealth(options: {
+    sessionId: string
+    profile: string
+    purpose?: unknown
+    metrics?: unknown
+    startMs?: unknown
+    endMs?: unknown
+    limit?: unknown
+    timeoutMs?: unknown
+  }): Promise<MobileHealthResponse> {
+    const sessionId = String(options.sessionId || '').trim()
+    const profile = String(options.profile || '').trim() || 'default'
+    const session = getSession(sessionId)
+    if (!session) throw new Error('Session not found')
+    if ((String(session.profile || '').trim() || 'default') !== profile) throw new Error('Session is not available for this profile')
+    if (session.source === 'group_chat' || session.source === 'workflow') throw new Error('Mobile health data is available only in direct chats')
+    for (const pending of this.pendingMobileHealth.values()) {
+      if (pending.sessionId === sessionId) throw new Error('A mobile health request is already pending')
+    }
+    const target = this.mobileRunTargets.get(sessionId)
+    if (!target || target.profile !== profile) throw new Error('Mobile target unavailable; send a new message from the intended mobile device')
+    if (target.platform !== 'ios') throw new Error('Mobile health data is available only on iPhone and iPad')
+    if (!this.nsp.adapter.rooms.get(mobileDeviceRoom(target))?.size) throw new Error('Target mobile device is offline; reconnect the same device')
+    const request = normalizeMobileHealthRequest({
+      purpose: options.purpose,
+      metrics: options.metrics,
+      start_ms: options.startMs,
+      end_ms: options.endMs,
+      limit: options.limit,
+    })
+    const requestId = randomUUID()
+    const timeoutMs = boundedMobileCalendarTimeout(options.timeoutMs)
+    return new Promise<MobileHealthResponse>((resolve) => {
+      const timer = setTimeout(() => this.finishMobileHealthRequest(requestId, {
+        status: 'error',
+        error: { code: 'health_timeout' },
+      }), timeoutMs)
+      timer.unref?.()
+      this.pendingMobileHealth.set(requestId, { sessionId, profile, target, request, resolve, timer })
+      this.emitMobileHealthEvent(sessionId, 'health.requested', {
+        event: 'health.requested',
+        health_request_id: requestId,
+        ...request,
+        target_device_id: target.deviceCode,
+        target_user_id: target.userId,
+        target_profile: target.profile,
+        timeout_ms: timeoutMs,
+        expires_at_ms: Date.now() + timeoutMs,
+      })
+    })
+  }
+  init() {
+    this.closing = false
+    this.nsp.use(this.authMiddleware.bind(this))
+    this.nsp.on('connection', this.onConnection.bind(this))
+    this.backgroundPollTimer = setInterval(() => void this.pollBackgroundWork(), 500)
+    this.backgroundPollTimer.unref?.()
+    void this.pollBackgroundWork()
+    logger.info('[chat-run-socket] Socket.IO ready at /chat-run')
+  }
+
+  // --- Auth middleware ---
+
+  private async authMiddleware(socket: Socket, next: (err?: Error) => void) {
+    const token = socket.handshake.auth?.token as string | undefined
+    const shareToken = socketShareToken(socket.handshake.auth)
+    if (shareToken) {
+      try {
+        const access = await authenticateSessionShare(shareToken, String(socket.handshake.auth?.appAccessToken || ''))
+        assertShareProfile(access, socket.handshake.query?.profile)
+        socket.handshake.query.profile = access.share.profile
+        socket.data.sessionShare = access
+        socket.data.user = sessionShareExecutionUser(access)
+        return next()
+      } catch (error) { return next(error instanceof Error ? error : new Error('share_access_denied')) }
+    }
+    const appToken = token ? await inspectAppUserToken(token) : null
+    if (appToken) {
+      if (appToken.status !== 'active' || !appToken.user) return next(new Error('App device authentication failed'))
+      const profile = String(socket.handshake.query?.profile || 'default')
+      if (!this.canAccessProfile(appToken.user, profile)) return next(new Error('Profile access denied'))
+      const rawPlatform = String(socket.handshake.query?.platform || '').trim().toLowerCase()
+      const platform = rawPlatform === 'ios' || rawPlatform === 'android' ? rawPlatform : 'unknown'
+      socket.data.mobileDeviceTarget = {
+        deviceCode: appToken.deviceCode,
+        userId: String(appToken.user.id),
+        profile,
+        platform,
+      }
+    }
+    if (!await isAuthEnabled()) {
+      next()
+      return
+    }
+
+    const user = await authenticateUserToken(token || '')
+    if (!user) {
+      return next(new Error('Authentication failed'))
+    }
+    const socketProfile = String(socket.handshake.query?.profile || 'default').trim() || 'default'
+    if (socketProfile && !this.canAccessProfile(user, socketProfile)) {
+      return next(new Error('Profile access denied'))
+    }
+    socket.data.user = user
+    next()
+  }
+
+  // --- Connection handler ---
+
+  private onConnection(socket: Socket) {
+    const shared = socket.data.sessionShare as SessionShareAccess | undefined
+    this.sessionStateSync.attach(socket)
+    if (shared) bindSessionShareSocket(socket, shared, () => {
+      const state = this.sessionMap.get(shared.share.session_id)
+      if (!state) return
+      state.queue = state.queue.filter(item => item.originSocketId !== socket.id)
+      if (state.queueInsertion && !state.queue.some(item => item.queue_id === state.queueInsertion?.queueId)) {
+        this.clearQueueInsertion(shared.share.session_id, state, 'share_access_denied')
+      }
+      this.nsp.to(`session:${shared.share.session_id}`).emit('run.queued', {
+        event: 'run.queued', session_id: shared.share.session_id,
+        queue_length: state.queue.length, queued_messages: this.serializeQueuedMessages(state.queue),
+      })
+    })
+    if (!shared) {
+      bindAppEventSubscription(socket, (_user, profile) => {
+        const result: BusinessEvent[] = personNotificationSnapshot(_user.id, this.sessionMap)
+        for (const [sessionId, state] of this.sessionMap) {
+          if (isPrivatePersonSession(sessionId) || !state.isWorking || (state.profile || getSession(sessionId)?.profile || 'default') !== profile) continue
+          const source = state.source || getSession(sessionId)?.source
+          if (source === 'group_chat') continue
+          // Task cards belong to a turn; coding-agent runId can span many turns.
+          const runId = state.activeRunMarker || state.responseRun?.runMarker || state.runId
+          const subject = { session_id: sessionId, run_id: runId, workflow_id: state.webhookWorkflowId }
+          if (source !== 'workflow') result.push(stateEvent('chat.run.updated', profile, subject,
+            { state: { session_id: sessionId, status: 'running', timestamp: Date.now(), started_at: state.runStartedAt } }))
+          const pending = new Map<string, BusinessEvent>()
+          for (const { event, data } of buildResumeEvents(state.events)) {
+            if (!['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)) continue
+            const id = data?.approval_id || data?.clarify_id
+            if (!id) continue
+            const key = `${event.split('.')[0]}:${id}`
+            if (event.endsWith('.resolved')) {
+              if (!data.stale && (data.resolved !== false || ['timeout', 'aborted', 'cancelled', 'canceled'].includes(data.reason))) pending.delete(key)
+              continue
+            }
+            if (data.remaining_timeout_ms === 0) continue
+            const type = `chat.${event.replace('clarify.', 'clarification.')}`
+            pending.set(key, stateEvent(type, profile, { ...subject,
+              ...(event.startsWith('approval.') ? { approval_id: id } : { clarification_id: id }) }, data))
+          }
+          result.push(...pending.values())
+          for (const card of getSessionTaskPlans(sessionId, [], true, runId)) {
+            if (card.run_id !== runId) continue
+            const event = planStateEvent(profile, subject, card)
+            if (event) result.push(event)
+          }
+        }
+        return result
+      })
+      bindLegacyAppEvents(socket, 'chat', event => {
+        const user = socket.data.user as AuthenticatedUser | undefined
+        return Boolean(user && this.canAccessProfile(user, event.profile)
+          && socket.rooms.has(`pending-interactions:${event.profile}`))
+      })
+    }
+    const socketUser = socket.data.user as AuthenticatedUser | undefined
+    if (socketUser && !shared) socket.join(personNotificationRoom(socketUser.id))
+    const socketProfile = (socket.handshake.query?.profile as string) || 'default'
+    const currentProfile = () => socketProfile || getActiveProfileName() || 'default'
+    const mobileTarget = socket.data.mobileDeviceTarget as MobileDeviceTarget | undefined
+    if (mobileTarget) socket.join(mobileDeviceRoom(mobileTarget))
+    if (!shared) { socket.join('studio-account'); socket.join(`pending-interactions:${currentProfile()}`) }
+    socket.emit('session.activity.snapshot', {
+      event: 'session.activity.snapshot',
+      profile: currentProfile(),
+      sessions: Array.from(this.sessionMap.entries()).flatMap(([sessionId, state]) => {
+        if (isPrivatePersonSession(sessionId) || !state.isWorking || (shared && sessionId !== shared.share.session_id)) return []
+        const profile = state.profile || getSession(sessionId)?.profile || 'default'
+        return profile === currentProfile() ? [{ session_id: sessionId, status: 'running' }] : []
+      }),
+      timestamp: Date.now(),
+    })
+    const profileExists = (profile: string) => {
+      if (!profile || profile === 'default') return true
+      return listProfileNamesFromDisk().includes(profile)
+    }
+    const resolveRunProfile = (sessionId?: string, requested?: string) => {
+      if (isPersonSession(sessionId)) {
+        const session = getSession(sessionId!)
+        if (shared || !ownsPersonSession(socketUser?.id, session)) throw new Error('Session not found')
+        return session!.profile || 'default'
+      }
+      if (sessionId?.startsWith('person-task-')) throw new Error('Session not found')
+      const requestedProfile = typeof requested === 'string' ? requested.trim() : ''
+      if (requestedProfile) {
+        if (!profileExists(requestedProfile)) throw new Error(`Profile "${requestedProfile}" does not exist`)
+        if (socketUser && !this.canAccessProfile(socketUser, requestedProfile)) {
+          throw new Error(`Profile "${requestedProfile}" is not available for this user`)
+        }
+        return requestedProfile
+      }
+      if (!sessionId) {
+        const profile = currentProfile()
+        if (socketUser && !this.canAccessProfile(socketUser, profile)) {
+          throw new Error(`Profile "${profile}" is not available for this user`)
+        }
+        return profile
+      }
+      const storedProfile = getSession(sessionId)?.profile || ''
+      const profile = storedProfile && profileExists(storedProfile) ? storedProfile : currentProfile()
+      if (socketUser && !this.canAccessProfile(socketUser, profile)) {
+        throw new Error(`Profile "${profile}" is not available for this user`)
+      }
+      return profile
+    }
+    const requireSocketSessionAccess = (sessionId: string, authorizedProfile = currentProfile()) => {
+      if (isPersonSession(sessionId)) {
+        const session = getSession(sessionId!)
+        if (shared || !ownsPersonSession(socketUser?.id, session)) throw new Error('Session not found')
+        return session!.profile || 'default'
+      }
+      if (sessionId.startsWith('person-task-')) throw new Error('Session not found')
+      const session = getSession(sessionId)
+      if (!session) throw new Error('Session not found')
+      const sessionProfile = String(session.profile || 'default').trim() || 'default'
+      if (sessionProfile !== authorizedProfile) {
+        throw new Error(`Profile "${sessionProfile}" is not available on this connection`)
+      }
+      if (!profileExists(sessionProfile)) {
+        throw new Error(`Profile "${sessionProfile}" does not exist`)
+      }
+      if (socketUser && !this.canAccessProfile(socketUser, sessionProfile)) {
+        throw new Error(`Profile "${sessionProfile}" is not available for this user`)
+      }
+      return sessionProfile
+    }
+    // Read-only access to a session. A connection may read sessions from any profile the
+    // user can access: the UI switches between profiles without always reconnecting (see
+    // #1884), so pinning every read to the handshake profile made `resume` fail and left
+    // the conversation permanently blank. Mutating operations keep the stricter
+    // connection-scoped check above; attachment runs pass their separately authorized run profile.
+    const requireSocketSessionReadAccess = (sessionId: string) => {
+      if (isPersonSession(sessionId)) {
+        const session = getSession(sessionId!)
+        if (shared || !ownsPersonSession(socketUser?.id, session)) throw new Error('Session not found')
+        return session!.profile || 'default'
+      }
+      if (sessionId.startsWith('person-task-')) {
+        if (shared) throw new Error('Session not found')
+        return ownedPersonTaskSession(socketUser?.id, sessionId).session.profile || 'default'
+      }
+      const session = getSession(sessionId)
+      if (!session) throw new Error('Session not found')
+      const sessionProfile = String(session.profile || 'default').trim() || 'default'
+      if (!profileExists(sessionProfile)) {
+        throw new Error(`Profile "${sessionProfile}" does not exist`)
+      }
+      if (socketUser && !this.canAccessProfile(socketUser, sessionProfile)) {
+        throw new Error(`Profile "${sessionProfile}" is not available for this user`)
+      }
+      return sessionProfile
+    }
+
+    socket.on('run', async (data: {
+      push_snapshot?: unknown
+      input: string | ContentBlock[]
+      display_input?: string | ContentBlock[] | null
+      display_role?: 'user' | 'command'
+      storage_message?: string
+      session_id?: string
+      model?: string
+      instructions?: string
+      group_system_prompt?: string
+      group_room_id?: string
+      group_agent_id?: string
+      workflow_id?: string
+      workflow_node_id?: string
+      provider?: string
+      model_groups?: Array<{ provider: string; models: string[] }>
+      queue_id?: string
+      workspace?: string | null
+      category_id?: number | null
+      source?: string
+      session_source?: 'global_agent' | 'workflow' | 'group_chat'
+      memory_input?: string | ContentBlock[]
+      memory_messages?: EkkoAgentRunSocketData['memory_messages']
+      memory_write_policy?: 'automatic' | 'explicit-only'
+      memory_origin?: EkkoAgentRunSocketData['memory_origin']
+      memory_recall_scopes?: EkkoAgentRunSocketData['memory_recall_scopes']
+      memory_write_scopes?: EkkoAgentRunSocketData['memory_write_scopes']
+      memory_default_write_scope?: EkkoAgentRunSocketData['memory_default_write_scope']
+      coding_agent_id?: ChatCodingAgentId
+      agent_id?: ChatCodingAgentId
+      mode?: 'scoped' | 'global'
+      baseUrl?: string
+      base_url?: string
+      apiKey?: string
+      api_key?: string
+      apiMode?: string
+      api_mode?: string
+      mcpServers?: Record<string, unknown>
+      mcp_servers?: Record<string, unknown>
+      profile?: string
+      allow_command_passthrough?: boolean
+      // Local patch (reasoning-effort): per-session reasoning effort override.
+      reasoning_effort?: string
+      push_enabled?: boolean
+    }) => {
+      const releaseAdmission = await this.acquireRunAdmission(data.session_id)
+      try {
+        const pushSnapshot = data.push_snapshot
+        delete data.push_snapshot
+        let pushTargetId: string | undefined
+        let runProfile: string
+        try {
+          runProfile = resolveRunProfile(data.session_id, data.profile)
+          if (isPersonSession(data.session_id)) {
+            requirePersonAgents(socketUser!.id)
+            const { session, settings } = await ensurePersonSession(socketUser!.id, data.session_id!)
+            if (!settings.model) throw new Error('No available Person model')
+            // Only input/queue identity comes from the client. Agent policy and resources are server-owned.
+            data = { session_id: session.id, input: data.input, queue_id: data.queue_id,
+              profile: settings.model.profile, model: settings.model.model, provider: settings.model.provider,
+              apiMode: settings.model.apiMode, reasoning_effort: settings.reasoningEffort,
+              source: 'builtin_agent', coding_agent_id: 'ekko-agent', mode: 'scoped' }
+            runProfile = settings.model.profile
+          }
+          normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
+          if (!shared && data.session_id && Array.isArray(data.input)) {
+            // New chats carry a client-generated id; the runtime persists them on the first run.
+            if (getSession(data.session_id)) requireSocketSessionAccess(data.session_id, runProfile)
+            await recordSessionUploadAttachments(data.session_id, runProfile, data.input, { allowPendingSession: true })
+          }
+        } catch (err) {
+          const payload = {
+            event: 'run.failed',
+            session_id: data.session_id,
+            queue_id: data.queue_id,
+            error: err instanceof Error ? err.message : String(err),
+          }
+          socket.emit('run.failed', payload)
+          return
+        }
+        if (data.category_id !== undefined) {
+          data.category_id = resolveSessionCategoryId(data.category_id)
+        }
+        if (data.session_id) {
+          const state = getOrCreateSession(this.sessionMap, data.session_id)
+          const source = resolveRunSource(data.source, data.session_id)
+          const storedSession = getSession(data.session_id)
+          if (!shared && socketUser && await handlePluginCommand(data.input, {
+            userId: socketUser.id, profile: runProfile, sessionId: data.session_id,
+            workspace: storedSession?.workspace || undefined, surface: 'chat',
+          }, state, payload => this.emitToSession(socket, data.session_id!, 'session.command', { ...payload, queue_id: data.queue_id }))) {
+            if (!state.isWorking) this.dequeueNextQueuedRun(socket, data.session_id, runProfile)
+            return
+          }
+          const ekkoExecution = isEkkoAgentExecution(data)
+          if (ekkoExecution) {
+            data.agent_id = 'ekko-agent'
+            const ekkoCommand = isPersonSession(data.session_id) ? null : parseEkkoRunCommand(data, storedSession?.source)
+            if (ekkoCommand) {
+              await handleEkkoSessionCommand(this.nsp, socket, data, ekkoCommand, runProfile, this.sessionMap, this.dequeueNextQueuedRun.bind(this))
+              return
+            }
+          }
+          const command = parseSessionCommand(data.input)
+          if (command && ((!ekkoExecution && isBridgeRunSource(source)) || command.name === 'branch')) {
+            try {
+              const handled = await handleSessionCommand(data.session_id, command, {
+                nsp: this.nsp,
+                socket,
+                sessionMap: this.sessionMap,
+                bridge: this.bridge,
+                profile: runProfile,
+                model: data.model,
+                provider: data.provider,
+                model_groups: data.model_groups,
+                instructions: data.instructions,
+                queueId: data.queue_id,
+                runQueuedItem: this.runQueuedItem.bind(this),
+              })
+              if (handled !== false) return
+              data.allow_command_passthrough = true
+            } catch (err) {
+              this.emitToSession(socket, data.session_id, 'session.command', {
+                event: 'session.command',
+                command: command.rawName,
+                ok: false,
+                action: 'error',
+                message: err instanceof Error ? err.message : String(err),
+              })
+            }
+            return
+          }
+          if (!ekkoExecution && !isPluginAgentId(data.coding_agent_id || data.agent_id) && isProviderAgentExecution(source, data)) {
+            if (typeof data.input === 'string') {
+              const codingAgentCommand = parseCodingAgentSessionCommand(data.input)
+              if (codingAgentCommand) {
+                await handleCodingAgentSessionCommand(this.nsp, socket, data, codingAgentCommand, runProfile, this.sessionMap)
+                return
+              }
+            }
+          }
+          try {
+            const actor = shared ? null : await authenticatedPushActor(socket.handshake.auth?.token)
+            if (actor) {
+              const target = bindRunPushTarget({ kind: 'chat', profile: runProfile, runId: randomUUID() }, data.session_id, actor, {
+                ciphertext: prepareRunPushSnapshot(actor, pushSnapshot),
+                platform: String((pushSnapshot as any)?.platform || 'unknown'),
+              })
+              pushTargetId = target.id
+              socket.emit('run.push.bound', { session_id: data.session_id, queue_id: data.queue_id, run_id: target.run_id })
+            }
+          } catch {
+            socket.emit('run.failed', { session_id: data.session_id, queue_id: data.queue_id, error: 'Run device binding failed' })
+            return
+          }
+          if (state.isWorking) {
+            const queueId = data.queue_id || `queue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+            state.queue.push({
+              queue_id: queueId,
+              input: data.input,
+              displayInput: data.display_input,
+              displayRole: data.display_role,
+              storageMessage: data.storage_message,
+              model: data.model,
+              provider: data.provider,
+              model_groups: data.model_groups,
+              instructions: data.instructions,
+              groupSystemPrompt: data.group_system_prompt,
+              groupRoomId: data.group_room_id,
+              groupAgentId: data.group_agent_id,
+              workflowId: data.workflow_id,
+              workflowNodeId: data.workflow_node_id,
+              profile: runProfile,
+              workspace: data.workspace,
+              source,
+              sessionSource: data.session_source,
+              codingAgentId: data.coding_agent_id,
+              agentId: data.agent_id,
+              mode: data.mode,
+              baseUrl: data.baseUrl,
+              base_url: data.base_url,
+              apiKey: data.apiKey,
+              api_key: data.api_key,
+              apiMode: data.apiMode,
+              api_mode: data.api_mode,
+              mcpServers: data.mcpServers,
+              mcp_servers: data.mcp_servers,
+              commandPassthrough: data.allow_command_passthrough,
+              reasoningEffort: data.reasoning_effort,
+              originSocketId: socket.id,
+              authorize: shared ? async () => { await refreshSessionShare(shared, 'input', data.session_id) } : undefined,
+              pushTargetId,
+            })
+            const queuedPayload = {
+              event: 'run.queued',
+              session_id: data.session_id,
+              queue_id: queueId,
+              queue_length: state.queue.length,
+              queued_messages: this.serializeQueuedMessages(state.queue),
+            }
+            observeChatRunWebhookEvent({
+              event: 'run.queued',
+              sessionId: data.session_id,
+              profile: runProfile,
+              source,
+              agent: webhookAgentForRun(data),
+              payload: queuedPayload,
+              roomId: data.group_room_id,
+              workflowId: data.workflow_id,
+              workflowNodeId: data.workflow_node_id,
+            })
+            this.nsp.to(`session:${data.session_id}`).emit('run.queued', queuedPayload)
+            logger.info('[chat-run-socket] queued run for session %s (queue: %d)', data.session_id, state.queue.length)
+            return
+          }
+          state.events = []
+          // Person setup awaits again inside handleRun. Reserve its slot before
+          // that await so later inputs queue instead of starting parallel turns.
+          state.isWorking = ekkoExecution || !isProviderAgentExecution(source, data)
+          state.runStartedAt = Date.now()
+          state.profile = runProfile
+          state.source = source
+        }
+        // Release admission after queueing/reserving, before the model run finishes.
+        releaseAdmission()
+        try {
+          await this.executeRun(socket, data, runProfile, false, undefined, pushTargetId)
+        } catch (err) {
+          const payload = {
+            event: 'run.failed',
+            session_id: data.session_id,
+            queue_id: data.queue_id,
+            error: err instanceof Error ? err.message : String(err),
+          }
+          if (data.session_id) {
+            observeChatRunWebhookEvent({
+              pushTargetId,
+              event: 'run.failed',
+              sessionId: data.session_id,
+              profile: runProfile,
+              source: resolveRunSource(data.source, data.session_id),
+              agent: webhookAgentForRun(data),
+              payload,
+              roomId: data.group_room_id,
+              workflowId: data.workflow_id,
+              workflowNodeId: data.workflow_node_id,
+            })
+          }
+          if (data.session_id) {
+            const state = this.sessionMap.get(data.session_id)
+            if (state && !state.runId && !state.abortController && !state.activeRunMarker) {
+              state.isWorking = false
+              state.profile = undefined
+            }
+          }
+          socket.emit('run.failed', payload)
+        }
+      } finally {
+        releaseAdmission()
+      }
+    })
+
+    socket.on('insert_queued_run', (data: { session_id?: string; queue_id?: string }) => {
+      if (!data.session_id || !data.queue_id) return
+      try {
+        requireSocketSessionAccess(data.session_id)
+      } catch {
+        return
+      }
+      void this.requestQueuedRunInsertion(data.session_id, data.queue_id)
+    })
+
+    socket.on('cancel_queued_run', (data: { session_id?: string; queue_id?: string }) => {
+      if (!data.session_id || !data.queue_id) return
+      try {
+        requireSocketSessionAccess(data.session_id)
+      } catch {
+        return
+      }
+      const state = this.sessionMap.get(data.session_id)
+      if (!state?.queue.length) return
+      const before = state.queue.length
+      state.queue = state.queue.filter(item => item.queue_id !== data.queue_id)
+      if (state.queue.length === before) return
+      if (state.queueInsertion?.queueId === data.queue_id) {
+        const nextVisible = state.queue.find(item => this.isQueueInsertionCandidate(item))
+        if (nextVisible) {
+          state.queueInsertion.queueId = nextVisible.queue_id
+          this.emitQueueInsertionUpdate(data.session_id, state.queueInsertion)
+        } else {
+          this.clearQueueInsertion(data.session_id, state, 'queued_message_removed')
+        }
+      }
+      this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
+        event: 'run.queued',
+        session_id: data.session_id,
+        queue_length: state.queue.length,
+        queued_messages: this.serializeQueuedMessages(state.queue),
+      })
+      logger.info('[chat-run-socket] cancelled queued run %s for session %s (queue: %d)',
+        data.queue_id, data.session_id, state.queue.length)
+    })
+
+    socket.on('resume', async (data: { session_id?: string }) => {
+      if (!data.session_id) return
+      const sid = data.session_id
+      try {
+        requireSocketSessionReadAccess(sid)
+      } catch (err) {
+        socket.emit('run.failed', {
+          event: 'run.failed',
+          session_id: sid,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        return
+      }
+      socket.join(`session:${sid}`)
+      await this.resumeSession(socket, sid)
+    })
+
+    socket.on('app.resume', async (data: { session_id?: string; id?: string; timeline?: boolean }) => {
+      if (!data.session_id || typeof data.id !== 'string' || data.id.length > 128) return
+      const sid = data.session_id
+      try {
+        requireSocketSessionReadAccess(sid)
+      } catch (err) {
+        socket.emit('run.failed', {
+          event: 'run.failed',
+          session_id: sid,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        return
+      }
+      socket.join(`session:${sid}`)
+      await this.resumeSession(socket, sid, { event: 'app.resumed', cachedId: data.id, timeline: data.timeline === true })
+    })
+
+    socket.on('abort', (data: { session_id?: string }) => {
+      if (data.session_id) {
+        const sessionId = data.session_id
+        let profile: string
+        try {
+          profile = requireSocketSessionAccess(sessionId)
+        } catch {
+          return
+        }
+        this.finishTaskPlanRun(sessionId, 'abort.completed')
+        void handleAbort(
+          this.nsp,
+          socket,
+          sessionId,
+          this.sessionMap,
+          this.bridge,
+          this.runQueuedItem.bind(this),
+        ).then(() => {
+          const state = this.sessionMap.get(sessionId)
+          this.emitSessionActivity(profile, state?.isWorking ? 'run.started' : 'abort.completed', {
+            session_id: sessionId,
+          })
+        }).catch(err => logger.warn(err, '[chat-run-socket] abort failed for session %s', sessionId))
+      }
+    })
+
+    socket.on('approval.respond', async (data: { session_id?: string; approval_id?: string; choice?: string }) => {
+      if (!data.session_id || !data.approval_id) return
+      try {
+        if (data.session_id.startsWith('person-task-')) {
+          requireSocketSessionReadAccess(data.session_id)
+          await answerPersonTaskInteraction(socketUser!.id, data.session_id, data.approval_id, data.choice || '', true)
+          this.syncPersonInteraction(socketUser!.id)
+          return
+        }
+        requireSocketSessionAccess(data.session_id)
+      } catch (err) {
+        socket.emit('approval.resolved', {
+          event: 'approval.resolved',
+          session_id: data.session_id,
+          approval_id: data.approval_id,
+          choice: data.choice || 'deny',
+          resolved: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        return
+      }
+      if (isPersonSession(data.session_id) && data.approval_id.startsWith('person-interaction:')) {
+        try {
+          await answerPersonChatInteraction(socketUser!.id, data.approval_id, data.choice || '', true, data.session_id!)
+          this.syncPersonInteraction(socketUser!.id)
+        } catch (error) {
+          socket.emit('approval.resolved', { event: 'approval.resolved', session_id: data.session_id, approval_id: data.approval_id, resolved: false, error: String(error) })
+        }
+        return
+      }
+      if (respondAgentInteraction(data.session_id, data.approval_id, 'approval', data.choice || 'deny').handled) return
+      const ekkoResult = respondToEkkoToolApproval(
+        data.session_id,
+        data.approval_id,
+        data.choice,
+      )
+      if (ekkoResult.handled) {
+        if (!ekkoResult.resolved) {
+          this.emitToSession(socket, data.session_id, 'approval.resolved', {
+            event: 'approval.resolved',
+            approval_id: data.approval_id,
+            choice: ekkoResult.choice,
+            resolved: false,
+            error: 'Approval does not belong to this session.',
+          })
+        }
+        return
+      }
+      const codingAgentResult = codingAgentRunManager.resolveApproval(
+        data.session_id,
+        data.approval_id,
+        data.choice,
+      )
+      if (codingAgentResult.handled) {
+        this.emitToSession(socket, data.session_id, 'approval.resolved', {
+          event: 'approval.resolved',
+          approval_id: data.approval_id,
+          choice: data.choice || 'deny',
+          resolved: codingAgentResult.resolved,
+          ...(!codingAgentResult.resolved ? { error: 'Approval could not be applied.' } : {}),
+        })
+        return
+      }
+      try {
+        if (shared && !buildResumeEvents(this.sessionMap.get(data.session_id)?.events || []).some(entry => entry.event === 'approval.requested' && entry.data?.approval_id === data.approval_id)) throw new Error('Approval does not belong to this session')
+        const result = await this.bridge.approvalRespond(data.approval_id, data.choice || 'deny')
+        const resolved = Boolean(result.resolved)
+        this.emitToSession(socket, data.session_id, 'approval.resolved', {
+          event: 'approval.resolved',
+          approval_id: data.approval_id,
+          choice: data.choice || 'deny',
+          resolved,
+          ...(!resolved ? {
+            stale: true,
+            error: 'Approval is no longer pending.',
+          } : {}),
+        })
+      } catch (err) {
+        this.emitToSession(socket, data.session_id, 'approval.resolved', {
+          event: 'approval.resolved',
+          approval_id: data.approval_id,
+          choice: data.choice || 'deny',
+          resolved: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    })
+
+    socket.on('clarify.respond', async (data: { session_id?: string; clarify_id?: string; response?: string }) => {
+      if (!data.session_id || !data.clarify_id) return
+      try {
+        if (data.session_id.startsWith('person-task-')) {
+          requireSocketSessionReadAccess(data.session_id)
+          await answerPersonTaskInteraction(socketUser!.id, data.session_id, data.clarify_id, data.response || '', false)
+          this.syncPersonInteraction(socketUser!.id)
+          return
+        }
+        requireSocketSessionAccess(data.session_id)
+      } catch (err) {
+        socket.emit('clarify.resolved', {
+          event: 'clarify.resolved',
+          session_id: data.session_id,
+          clarify_id: data.clarify_id,
+          resolved: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        return
+      }
+      if (isPersonSession(data.session_id) && data.clarify_id.startsWith('person-interaction:')) {
+        try {
+          await answerPersonChatInteraction(socketUser!.id, data.clarify_id, data.response || '', false, data.session_id!)
+          this.syncPersonInteraction(socketUser!.id)
+        } catch (error) {
+          socket.emit('clarify.resolved', { event: 'clarify.resolved', session_id: data.session_id, clarify_id: data.clarify_id, resolved: false, error: String(error) })
+        }
+        return
+      }
+      if (respondAgentInteraction(data.session_id, data.clarify_id, 'clarify', data.response || '').handled) return
+      const mcpResult = this.clarificationRuns.respond(data.session_id, data.clarify_id, data.response)
+      if (mcpResult.handled) {
+        if (!mcpResult.resolved) socket.emit('clarify.resolved', {
+          event: 'clarify.resolved', session_id: data.session_id, clarify_id: data.clarify_id,
+          resolved: false, error: 'Clarification could not be applied.',
+        })
+        return
+      }
+      const ekkoResult = respondToEkkoClarification(
+        data.session_id,
+        data.clarify_id,
+        data.response,
+      )
+      if (ekkoResult.handled) {
+        if (!ekkoResult.resolved) {
+          this.emitToSession(socket, data.session_id, 'clarify.resolved', {
+            event: 'clarify.resolved',
+            clarify_id: data.clarify_id,
+            resolved: false,
+            error: 'Clarification does not belong to this session.',
+          })
+        } else {
+          this.clearClarifyEventState(data.session_id, data.clarify_id)
+        }
+        return
+      }
+      const codingAgentResult = codingAgentRunManager.resolveClarification(
+        data.session_id,
+        data.clarify_id,
+        data.response,
+      )
+      if (codingAgentResult.handled) {
+        this.emitToSession(socket, data.session_id, 'clarify.resolved', {
+          event: 'clarify.resolved',
+          clarify_id: data.clarify_id,
+          resolved: codingAgentResult.resolved,
+          ...(!codingAgentResult.resolved ? { error: 'Clarification could not be applied.' } : {}),
+        })
+        if (codingAgentResult.resolved) {
+          this.clearClarifyEventState(data.session_id, data.clarify_id)
+        }
+        return
+      }
+      try {
+        if (shared && !buildResumeEvents(this.sessionMap.get(data.session_id)?.events || []).some(entry => entry.event === 'clarify.requested' && entry.data?.clarify_id === data.clarify_id)) throw new Error('Clarification does not belong to this session')
+        const result = await this.bridge.clarifyRespond(data.clarify_id, data.response || '')
+        const resolved = Boolean((result as any)?.resolved)
+        this.emitToSession(socket, data.session_id, 'clarify.resolved', {
+          event: 'clarify.resolved',
+          clarify_id: data.clarify_id,
+          resolved,
+          ...(!resolved ? {
+            stale: true,
+            error: 'Clarification is no longer pending.',
+          } : {}),
+        })
+        if (resolved) {
+          this.clearClarifyEventState(data.session_id, data.clarify_id)
+        }
+      } catch (err) {
+        this.emitToSession(socket, data.session_id, 'clarify.resolved', {
+          event: 'clarify.resolved',
+          clarify_id: data.clarify_id,
+          resolved: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    })
+
+    socket.on('location.respond', (data: {
+      session_id?: string
+      location_request_id?: string
+      status?: string
+      location?: unknown
+      error?: unknown
+    }) => {
+      if (!data.session_id || !data.location_request_id) return
+      try {
+        requireSocketSessionAccess(data.session_id)
+      } catch (err) {
+        socket.emit('location.resolved', {
+          event: 'location.resolved',
+          session_id: data.session_id,
+          location_request_id: data.location_request_id,
+          resolved: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        return
+      }
+      const pending = this.pendingMobileLocations.get(data.location_request_id)
+      if (!pending || pending.sessionId !== data.session_id) {
+        this.emitToSession(socket, data.session_id, 'location.resolved', {
+          event: 'location.resolved',
+          location_request_id: data.location_request_id,
+          resolved: false,
+          stale: true,
+          error: 'Location request is no longer pending.',
+        })
+        return
+      }
+      const response = normalizeMobileLocationResponse(data)
+      if (!response) {
+        this.finishMobileLocationRequest(data.location_request_id, {
+          status: 'error',
+          error: { code: 'location_invalid_result' },
+        })
+        return
+      }
+      this.finishMobileLocationRequest(data.location_request_id, response)
+    })
+    const respondMobileCalendar = (
+      capability: MobileCalendarCapability,
+      data: {
+        session_id?: string
+        calendar_request_id?: string
+        reminder_request_id?: string
+        status?: string
+        result?: unknown
+        error?: unknown
+      },
+    ) => {
+      const requestId = capability === 'reminder' ? data.reminder_request_id : data.calendar_request_id
+      const resolvedEvent = capability === 'reminder' ? 'reminder.resolved' : 'calendar.resolved'
+      const idKey = capability === 'reminder' ? 'reminder_request_id' : 'calendar_request_id'
+      if (!data.session_id || !requestId) return
+      try {
+        requireSocketSessionAccess(data.session_id)
+      } catch (err) {
+        socket.emit(resolvedEvent, {
+          event: resolvedEvent,
+          session_id: data.session_id,
+          [idKey]: requestId,
+          resolved: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        return
+      }
+      const pending = this.pendingMobileCalendar.get(requestId)
+      if (!pending || pending.sessionId !== data.session_id || pending.request.capability !== capability) {
+        this.emitToSession(socket, data.session_id, resolvedEvent, {
+          event: resolvedEvent,
+          [idKey]: requestId,
+          resolved: false,
+          stale: true,
+          error: 'Calendar or reminder request is no longer pending.',
+        })
+        return
+      }
+      if (!sameMobileDevice(pending.target, socket.data.mobileDeviceTarget)) {
+        socket.emit(resolvedEvent, { event: resolvedEvent, session_id: data.session_id, [idKey]: requestId, resolved: false, error: 'Response is not from the target device' })
+        return
+      }
+      const response = normalizeMobileCalendarResponse(data, pending.request)
+      if (!response) {
+        this.finishMobileCalendarRequest(requestId, {
+          status: 'error',
+          error: { code: 'calendar_invalid_request' },
+        })
+        return
+      }
+      this.finishMobileCalendarRequest(requestId, response)
+    }
+    socket.on('calendar.respond', data => respondMobileCalendar('calendar', data))
+    socket.on('reminder.respond', data => respondMobileCalendar('reminder', data))
+    socket.on('health.respond', (data: {
+      session_id?: string
+      health_request_id?: string
+      status?: string
+      result?: unknown
+      error?: unknown
+    }) => {
+      if (!data.session_id || !data.health_request_id) return
+      try {
+        requireSocketSessionAccess(data.session_id)
+      } catch (err) {
+        socket.emit('health.resolved', { event: 'health.resolved', session_id: data.session_id, health_request_id: data.health_request_id, resolved: false, error: err instanceof Error ? err.message : String(err) })
+        return
+      }
+      const pending = this.pendingMobileHealth.get(data.health_request_id)
+      if (!pending || pending.sessionId !== data.session_id) {
+        this.emitToSession(socket, data.session_id, 'health.resolved', { event: 'health.resolved', health_request_id: data.health_request_id, resolved: false, stale: true, error: 'Health request is no longer pending.' })
+        return
+      }
+      if (!sameMobileDevice(pending.target, socket.data.mobileDeviceTarget)) {
+        socket.emit('health.resolved', { event: 'health.resolved', session_id: data.session_id, health_request_id: data.health_request_id, resolved: false, error: 'Response is not from the target device' })
+        return
+      }
+      if (!mobileHealthResponseSourceMatches(data, pending.target.deviceCode)) {
+        this.finishMobileHealthRequest(data.health_request_id, { status: 'error', error: { code: 'health_invalid_request' } })
+        return
+      }
+      const response = normalizeMobileHealthResponse(data, pending.request)
+      if (!response) {
+        this.finishMobileHealthRequest(data.health_request_id, { status: 'error', error: { code: 'health_invalid_request' } })
+        return
+      }
+      this.finishMobileHealthRequest(data.health_request_id, response)
+    })
+  }
+
+  respondCodingAgentApproval(sessionId: string, approvalId: string, choice: string): boolean {
+    const plugin = respondAgentInteraction(sessionId, approvalId, 'approval', choice)
+    return plugin.handled ? plugin.resolved : codingAgentRunManager.resolveApproval(sessionId, approvalId, choice).resolved
+  }
+
+  respondCodingAgentClarification(sessionId: string, clarifyId: string, response: string): boolean {
+    const plugin = respondAgentInteraction(sessionId, clarifyId, 'clarify', response)
+    if (plugin.handled) return plugin.resolved
+    const result = this.clarificationRuns.respond(sessionId, clarifyId, response)
+    if (result.handled) return result.resolved
+    return codingAgentRunManager.resolveClarification(sessionId, clarifyId, response).resolved
+  }
+
+  /** Internal Person broker: callers authenticate the durable task/interaction before delivery. */
+  async respondPersonInteraction(sessionId: string, id: string, response: string, approval: boolean): Promise<boolean> {
+    const state = this.sessionMap.get(sessionId)
+    const eventName = approval ? 'approval.requested' : 'clarify.requested'
+    const pending = isPersonSession(sessionId) ? pendingChatEkkoInteractions(sessionId) : state?.events || []
+    if (!state || !pending.some(entry => entry.event === eventName && (entry.data?.approval_id === id || entry.data?.clarify_id === id))) return false
+    const plugin = respondAgentInteraction(sessionId, id, approval ? 'approval' : 'clarify', response)
+    if (plugin.handled) return plugin.resolved // The plugin broker emits its own resolution.
+    let resolved = false
+    if (approval) {
+      if (!['once', 'session', 'deny'].includes(response)) return false
+      const ekko = respondToEkkoToolApproval(sessionId, id, response)
+      const coding = ekko.handled ? ekko : codingAgentRunManager.resolveApproval(sessionId, id, response)
+      resolved = coding.handled ? coding.resolved : Boolean((await this.bridge.approvalRespond(id, response) as any)?.resolved)
+    } else {
+      const mcp = this.clarificationRuns.respond(sessionId, id, response)
+      if (mcp.handled) return mcp.resolved // Registry also removes its replay state.
+      const ekko = respondToEkkoClarification(sessionId, id, response)
+      const coding = ekko.handled ? ekko : codingAgentRunManager.resolveClarification(sessionId, id, response)
+      resolved = coding.handled ? coding.resolved : Boolean((await this.bridge.clarifyRespond(id, response) as any)?.resolved)
+    }
+    if (resolved) {
+      state.events = state.events.filter(entry => !(entry.event === eventName && (entry.data?.approval_id === id || entry.data?.clarify_id === id)))
+      this.emitExternalEvent(sessionId, approval ? 'approval.resolved' : 'clarify.resolved', {
+        ...(approval ? { approval_id: id, choice: response } : { clarify_id: id }), resolved: true,
+      })
+    }
+    return resolved
+  }
+
+  // --- Run dispatcher ---
+
+  private async executeRun(...args: Parameters<ChatRunSocket['handleRun']>): Promise<void> {
+    const [socket, data, profile, , , pushTargetId] = args
+    const sessionId = data.session_id
+    if (!sessionId) return this.handleRun(...args)
+    if (!isPersonSession(sessionId) && !isEkkoAgentExecution(data)) {
+      this.ekkoExecutions.delete(sessionId)
+      return this.handleRun(...args)
+    }
+    const state = getOrCreateSession(this.sessionMap, sessionId)
+    const execution = Symbol()
+    this.ekkoExecutions.set(sessionId, execution)
+    try {
+      await this.handleRun(...args)
+    } catch (err) {
+      // Setup can fail before the runtime's own try/finally, even after it
+      // installs a controller. Never release a replacement turn's reservation.
+      if (this.ekkoExecutions.get(sessionId) !== execution || this.sessionMap.get(sessionId) !== state) return
+      state.abortController?.abort()
+      state.abortController = undefined
+      state.runId = undefined
+      state.activeRunMarker = undefined
+      state.responseRun = undefined
+      state.ekkoBoundaryInterrupt = undefined
+      state.isAborting = false
+      state.events = []
+      state.isWorking = state.queue.length > 0
+      if (!state.isWorking) state.profile = undefined
+      const payload = {
+        event: 'run.failed', session_id: sessionId, queue_id: data.queue_id,
+        error: err instanceof Error ? err.message : String(err), queue_remaining: state.queue.length,
+      }
+      observeChatRunWebhookEvent({
+        pushTargetId, event: 'run.failed', sessionId, profile,
+        source: resolveRunSource(data.source, sessionId), agent: 'ekko', payload,
+        roomId: data.group_room_id, workflowId: data.workflow_id, workflowNodeId: data.workflow_node_id,
+      })
+      data.onEvent?.('run.failed', payload)
+      this.emitPendingInteraction(profile, 'run.failed', payload)
+      if (isPersonSession(sessionId)) {
+        this.personQuestions.delete(sessionId)
+        personUpdated(Number(socket.data.user?.id))
+      }
+      this.nsp.to(`session:${sessionId}`).emit('run.failed', payload)
+      if (!this.nsp.adapter.rooms.get(`session:${sessionId}`)?.has(socket.id)) socket.emit('run.failed', payload)
+      this.dequeueNextQueuedRun(socket, sessionId, profile)
+    } finally {
+      if (this.ekkoExecutions.get(sessionId) === execution) this.ekkoExecutions.delete(sessionId)
+    }
+  }
+
+  private async handleRun(
+    socket: Socket,
+    data: {
+      input: string | ContentBlock[]
+      display_input?: string | ContentBlock[] | null
+      display_role?: 'user' | 'command'
+      storage_message?: string
+      session_id?: string
+      model?: string
+      provider?: string
+      model_groups?: Array<{ provider: string; models: string[] }>
+      instructions?: string
+      group_system_prompt?: string
+      group_room_id?: string
+      group_agent_id?: string
+      workflow_id?: string
+      workflow_node_id?: string
+      workspace?: string | null
+      category_id?: number | null
+      source?: string
+      session_source?: 'global_agent' | 'workflow' | 'group_chat'
+      memory_input?: string | ContentBlock[]
+      memory_messages?: EkkoAgentRunSocketData['memory_messages']
+      memory_write_policy?: 'automatic' | 'explicit-only'
+      memory_origin?: EkkoAgentRunSocketData['memory_origin']
+      memory_recall_scopes?: EkkoAgentRunSocketData['memory_recall_scopes']
+      memory_write_scopes?: EkkoAgentRunSocketData['memory_write_scopes']
+      memory_default_write_scope?: EkkoAgentRunSocketData['memory_default_write_scope']
+      queue_id?: string
+      peerExcludeSocketId?: string
+      coding_agent_id?: ChatCodingAgentId
+      agent_id?: ChatCodingAgentId
+      mode?: 'scoped' | 'global'
+      baseUrl?: string
+      base_url?: string
+      apiKey?: string
+      api_key?: string
+      apiMode?: string
+      api_mode?: string
+      mcpServers?: Record<string, unknown>
+      mcp_servers?: Record<string, unknown>
+      one_shot_model?: boolean
+      allow_command_passthrough?: boolean
+      reasoning_effort?: string
+      push_enabled?: boolean
+      background_delegation_enabled?: boolean
+      context_compression_enabled?: boolean
+      background_delegation_id?: string
+      background_claim_id?: string
+      autonomous?: boolean
+      onEvent?: (event: string, payload: any) => void
+    },
+    profile: string,
+    skipUserMessage = false,
+    backgroundContinuationContext?: BackgroundContinuationContext,
+    pushTargetId?: string,
+  ) {
+    if (isPersonSession(data.session_id)) {
+      const userId = socket.data?.user?.id
+      if (!ownsPersonSession(userId, getSession(data.session_id!))) throw new Error('Session not found')
+      requirePersonAgents(userId)
+      const { settings } = await ensurePersonSession(userId, data.session_id!)
+      if (!settings.model) throw new Error('No available Person model')
+      data = { session_id: data.session_id, input: data.input, queue_id: data.queue_id, onEvent: data.onEvent,
+        ...(backgroundContinuationContext ? { background_delegation_id: data.background_delegation_id, autonomous: true,
+          display_input: null, storage_message: data.storage_message } : {}),
+        model: settings.model.model, provider: settings.model.provider, apiMode: settings.model.apiMode,
+        reasoning_effort: settings.reasoningEffort, source: 'builtin_agent', coding_agent_id: 'ekko-agent', mode: 'scoped' }
+      profile = settings.model.profile
+    }
+    normalizeEkkoRunData(data, data.session_id ? getSession(data.session_id) : undefined)
+    const source = resolveRunSource(data.source, data.session_id)
+    const pluginRuntime = data.coding_agent_id || data.agent_id || (data.session_id ? getSession(data.session_id)?.agent : '')
+    if (isPluginAgentId(pluginRuntime)) {
+      const planContext = this.beginTaskPlanRun(data.session_id, profile)
+      if (planContext && data.session_id) this.clarificationRuns.begin(planContext, data.session_id, profile, () => this.sessionMap.get(data.session_id!))
+      const onEvent = (event: string, payload: any) => {
+        if (data.session_id) this.finishTaskPlanRun(data.session_id, event, payload, planContext)
+        observeChatRunWebhookEvent({ pushTargetId, event, sessionId: String(data.session_id || ''), profile, source,
+          agent: pluginRuntime, payload, roomId: data.group_room_id, workflowId: data.workflow_id, workflowNodeId: data.workflow_node_id })
+        data.onEvent?.(event, payload)
+        this.emitPendingInteraction(profile, event, payload)
+      }
+      try { return await handlePluginAgentRun(this.nsp, socket, { ...data, onEvent, task_plan_context_id: planContext, agent_id: pluginRuntime }, profile, this.sessionMap, this.dequeueNextQueuedRun.bind(this)) }
+      finally { if (data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, planContext) }
+    }
+    const surface = data.session_source || source
+    if (data.session_id) getOrCreateSession(this.sessionMap, data.session_id).pushTargetId = pushTargetId
+    if (data.session_id) {
+      const target = socket.data?.mobileDeviceTarget as MobileDeviceTarget | undefined
+      if (target && target.profile === profile && surface !== 'workflow' && surface !== 'group_chat' && !backgroundContinuationContext) {
+        this.mobileRunTargets.set(data.session_id, { ...target })
+      } else this.mobileRunTargets.delete(data.session_id)
+    }
+    const ekkoMcpServers = isPersonSession(data.session_id) ? {} : isEkkoAgentExecution(data)
+      ? resolveChatEkkoMcpServers(profile, data.mcpServers || data.mcp_servers) || {}
+      : undefined
+    const mcpCapabilities = ekkoMcpServers
+      ? studioMcpCapabilities(ekkoMcpServers)
+      : isProviderAgentExecution(source, data)
+        ? studioMcpCapabilities(getChatCodingAgentMcpServers(codingAgentId(data), profile))
+        : await hermesStudioMcpCapabilities(profile)
+    const mobileTarget = data.session_id ? this.mobileRunTargets.get(data.session_id) : undefined
+    const mobileSessionId = mcpCapabilities.use && mobileTarget ? data.session_id : undefined
+    const locationInstruction = mobileLocationRunInstruction(mobileSessionId, surface)
+    if (locationInstruction) {
+      data.instructions = [String(data.instructions || '').trim(), locationInstruction]
+        .filter(Boolean)
+        .join('\n\n')
+    }
+    const calendarInstruction = mobileCalendarRunInstruction(mobileSessionId, surface)
+    if (calendarInstruction) {
+      data.instructions = [String(data.instructions || '').trim(), calendarInstruction]
+        .filter(Boolean)
+        .join('\n\n')
+    }
+    const healthInstruction = mobileHealthRunInstruction(mobileTarget?.platform === 'ios' ? mobileSessionId : undefined, surface)
+    if (healthInstruction) {
+      data.instructions = [String(data.instructions || '').trim(), healthInstruction].filter(Boolean).join('\n\n')
+    }
+    if (data.session_id) {
+      const state = getOrCreateSession(this.sessionMap, data.session_id)
+      if (!data.autonomous && !data.background_delegation_id) state.backgroundWakeStopped = false
+      state.webhookAgent = webhookAgentForRun(data)
+      state.webhookRoomId = data.group_room_id
+      state.webhookWorkflowId = data.workflow_id
+      state.webhookWorkflowNodeId = data.workflow_node_id
+    }
+    if (data.session_id && !isEkkoAgentExecution(data) && isBridgeRunSource(source) && isSessionCommand(data.input) && data.allow_command_passthrough !== true) return
+
+    if (!isProviderAgentExecution(source, data)) {
+      const bridgeReady = await ensureBridgeReadyForChatRun()
+      if (!bridgeReady.ok) {
+        let shouldDequeueNext = false
+        let queueRemaining = 0
+        if (data.session_id) {
+          const state = this.sessionMap.get(data.session_id)
+          queueRemaining = state?.queue?.length ?? 0
+          const canReleaseCurrentRun = state && !state.runId && !state.abortController && !state.activeRunMarker
+          if (canReleaseCurrentRun) {
+            if (queueRemaining > 0) {
+              const nextQueuedRun = state.queue[0]
+              state.isWorking = true
+              state.profile = nextQueuedRun?.profile || profile
+              state.source = nextQueuedRun?.source
+              shouldDequeueNext = true
+            } else {
+              state.isWorking = false
+              state.profile = undefined
+            }
+          }
+        }
+        const payload: {
+          event: 'run.failed'
+          session_id?: string
+          queue_id?: string
+          error: string
+          queue_remaining?: number
+        } = {
+          event: 'run.failed',
+          session_id: data.session_id,
+          queue_id: data.queue_id,
+          error: bridgeReady.runtimeUnavailable
+            ? `Hermes Runtime is unavailable: ${bridgeReady.error}`
+            : `Agent Bridge is not reachable: ${bridgeReady.error}`,
+        }
+        if (data.session_id) {
+          observeChatRunWebhookEvent({
+            pushTargetId,
+            event: 'run.failed',
+            sessionId: data.session_id,
+            profile,
+            source,
+            agent: webhookAgentForRun(data),
+            payload,
+            roomId: data.group_room_id,
+            workflowId: data.workflow_id,
+            workflowNodeId: data.workflow_node_id,
+          })
+        }
+        if (queueRemaining > 0) payload.queue_remaining = queueRemaining
+        socket.emit('run.failed', payload)
+        if (data.session_id && data.background_delegation_id && data.background_claim_id) {
+          void this.bridge.releaseBackgroundNotification(
+            data.session_id,
+            profile,
+            data.background_delegation_id,
+            data.background_claim_id,
+          ).catch((err: unknown) => logger.warn(err, '[chat-run-socket] failed to release undelivered background notification'))
+        }
+        if (data.session_id && shouldDequeueNext) {
+          this.dequeueNextQueuedRun(socket, data.session_id, profile)
+        }
+        return
+      }
+
+      const planContext = mcpCapabilities.interaction ? this.beginTaskPlanRun(data.session_id, profile, !data.background_delegation_id) : undefined
+      if (planContext) data.instructions = [data.instructions, taskPlanRunInstruction()].filter(Boolean).join('\n\n')
+      let fullInstructions = data.instructions
+        ? `${getSystemPrompt(undefined, { source, mcpCapabilities })}\n${data.instructions}`
+        : getSystemPrompt(undefined, { source, mcpCapabilities })
+
+      const onEvent = (event: string, payload: any) => {
+        if (data.session_id) this.observeQueueInsertionRunEvent(data.session_id, event, payload)
+        if (data.session_id) this.finishTaskPlanRun(data.session_id, event, payload, planContext)
+        observeChatRunWebhookEvent({
+          pushTargetId,
+          event,
+          sessionId: String(data.session_id || payload?.session_id || ''),
+          profile,
+          source,
+          agent: 'bridge',
+          payload,
+          roomId: data.group_room_id,
+          workflowId: data.workflow_id,
+          workflowNodeId: data.workflow_node_id,
+        })
+        data.onEvent?.(event, payload)
+        this.emitPendingInteraction(profile, event, payload)
+      }
+      try {
+        await handleBridgeRun(
+          this.nsp, socket, { ...data, task_plan_context_id: planContext, instructions: fullInstructions, onEvent }, profile,
+          this.sessionMap, this.bridge,
+          skipUserMessage,
+          loadSessionStateFromDb,
+          this.dequeueNextQueuedRun.bind(this),
+          backgroundContinuationContext,
+        )
+      } catch (err) {
+        if (data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, planContext)
+        throw err
+      } finally {
+        if (data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, planContext)
+      }
+      return
+    }
+
+    if (isEkkoAgentExecution(data)) {
+      const onEvent = (event: string, payload: any) => {
+        if (data.session_id) this.observeQueueInsertionRunEvent(data.session_id, event, payload)
+        observeChatRunWebhookEvent({
+          pushTargetId,
+          event,
+          sessionId: String(data.session_id || payload?.session_id || ''),
+          profile,
+          source,
+          agent: 'ekko',
+          payload,
+          roomId: data.group_room_id,
+          workflowId: data.workflow_id,
+          workflowNodeId: data.workflow_node_id,
+        })
+        data.onEvent?.(event, payload)
+        this.emitPendingInteraction(profile, event, payload)
+        if (isPersonSession(data.session_id) && ['run.completed','run.failed','abort.completed'].includes(event)) {
+          this.personQuestions.delete(data.session_id!)
+          personUpdated(Number(socket.data.user?.id))
+        }
+      }
+      await handleEkkoAgentRun(
+        this.nsp,
+        socket,
+        { ...data, onEvent, resolved_mcp_servers: ekkoMcpServers },
+        profile,
+        this.sessionMap,
+        this.dequeueNextQueuedRun.bind(this),
+        skipUserMessage,
+        backgroundContinuationContext,
+      )
+      return
+    }
+
+    const isCommand = typeof data.input === 'string' && parseCodingAgentSessionCommand(data.input)
+    const groupRun = source === 'group_chat' || data.session_source === 'group_chat'
+    const planContext = isCommand || !mcpCapabilities.interaction ? undefined : this.beginTaskPlanRun(data.session_id, profile)
+    const credentialContext = planContext || (groupRun && !isCommand ? this.beginTaskPlanRun(data.session_id, profile) : undefined)
+    const interactionContext = planContext && source !== 'workflow' && data.session_source !== 'workflow'
+      && source !== 'global_agent' && data.session_source !== 'global_agent' ? planContext : undefined
+    if (interactionContext && data.session_id) {
+      this.clarificationRuns.begin(interactionContext, data.session_id, profile, () => this.sessionMap.get(data.session_id!))
+    }
+    const instructions = planContext
+      ? [data.instructions, taskPlanRunInstruction()].filter(Boolean).join('\n\n')
+      : data.instructions
+    let started: Awaited<ReturnType<typeof handleCodingAgentRun>>
+    try {
+      const studioMcpTokenFile = groupRun && credentialContext && data.session_id
+        ? await runMcpCredentials.issue({
+          sessionId: data.session_id, contextId: credentialContext, profile,
+          roomId: String(data.group_room_id || ''), agentId: String(data.group_agent_id || ''),
+          // Only the internal group coordinator resolves a local requester.
+          // Client-supplied group metadata must not delegate a shared session's execution owner.
+          userId: typeof socket.data?.groupRunIsCurrent === 'function' ? socket.data?.user?.id : undefined,
+          isActive: () => this.taskPlanRuns.isActive(credentialContext, profile)
+            && (socket.data?.groupRunIsCurrent?.() ?? true),
+        })
+        : undefined
+      started = await handleCodingAgentRun(this.nsp, socket, { ...data, studio_mcp_token_file: studioMcpTokenFile, task_plan_context_id: planContext, interaction_context_id: interactionContext, instructions, studio_mcp_capabilities: mcpCapabilities }, profile, this.sessionMap)
+      if (!started && credentialContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, credentialContext)
+    } catch (err) {
+      if (credentialContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, credentialContext)
+      throw err
+    }
+    if (!started) return
+    if (data.session_id) {
+      const timestamp = Math.floor(Date.now() / 1000)
+      const role = data.display_role === 'command' ? 'command' : 'user'
+      const content = data.display_input === null
+        ? data.storage_message || contentBlocksToString(data.input)
+        : contentBlocksToString(data.display_input ?? data.input)
+      const messageId = data.queue_id || started.messageId
+      observeChatRunWebhookEvent({
+        pushTargetId,
+        event: 'message.created',
+        sessionId: data.session_id,
+        profile,
+        source,
+        agent: webhookAgentForRun(data),
+        payload: {
+          event: 'message.created',
+          queue_id: data.queue_id,
+          message_id: started.messageId,
+          role,
+          content,
+          timestamp,
+        },
+        roomId: data.group_room_id,
+        workflowId: data.workflow_id,
+        workflowNodeId: data.workflow_node_id,
+      })
+      const peerTarget = data.peerExcludeSocketId
+        ? this.nsp.to(`session:${data.session_id}`).except(data.peerExcludeSocketId)
+        : socket.to(`session:${data.session_id}`)
+      peerTarget.emit('run.peer_user_message', {
+        event: 'run.peer_user_message',
+        session_id: data.session_id,
+        message: {
+          id: messageId,
+          role,
+          content,
+          timestamp,
+          queued: false,
+        },
+      })
+      observeChatRunWebhookEvent({
+        pushTargetId,
+        event: 'run.started',
+        sessionId: data.session_id,
+        profile,
+        source,
+        agent: webhookAgentForRun(data),
+        payload: {
+          event: 'run.started',
+          run_id: started.runId,
+          queue_id: data.queue_id,
+        },
+        roomId: data.group_room_id,
+        workflowId: data.workflow_id,
+        workflowNodeId: data.workflow_node_id,
+      })
+    }
+  }
+
+  private backgroundPendingCount(state: SessionState, sessionId: string): number {
+    const personPending = personBackgroundPendingCount(sessionId)
+    const delegations = Object.values(state.backgroundDelegations || {})
+      .filter(item => item.status === 'running' || item.status === 'delivering')
+      .length
+    if (delegations > 0) return delegations + personPending
+    return Object.values(state.backgroundTasks || {})
+      .filter(task => task.status === 'running')
+      .length + personPending
+  }
+
+  private async sessionStateForBackground(sessionId: string): Promise<SessionState | null> {
+    const existing = this.sessionMap.get(sessionId)
+    if (existing) return existing
+    if (!getSession(sessionId)) return null
+    const loaded = await loadSessionStateFromDb(sessionId, this.sessionMap)
+    this.sessionMap.set(sessionId, loaded)
+    return loaded
+  }
+
+  private applyBackgroundSessionPoll(poll: AgentBridgeBackgroundSession, state: SessionState) {
+    const beforePending = this.backgroundPendingCount(state, poll.session_id)
+    if ((poll.events?.length || 0) > 0 || poll.running_count > 0) {
+      this.backgroundActivityGraceUntil = Date.now() + 30_000
+    }
+    state.backgroundTasks = state.backgroundTasks || {}
+    for (const task of poll.tasks || []) {
+      const subagentId = String(task.subagent_id || '').trim()
+      if (subagentId) state.backgroundTasks[subagentId] = { ...task }
+    }
+    for (const rawEvent of poll.events || []) {
+      const event = String(rawEvent.event || '')
+      if (!event.startsWith('subagent.')) continue
+      this.emitExternalEvent(poll.session_id, event, {
+        ...rawEvent,
+        event,
+        profile: poll.profile,
+        background: true,
+      })
+    }
+    const pending = this.backgroundPendingCount(state, poll.session_id)
+    if (pending !== beforePending) this.sessionStateSync.observe('delegation.updated', {
+      session_id: poll.session_id, background_pending: pending,
+    })
+  }
+
+  private socketForBackgroundRun(sessionId: string): Socket {
+    const room = this.nsp.adapter.rooms.get(`session:${sessionId}`)
+    if (room) {
+      for (const socketId of room) {
+        const socket = this.nsp.sockets.get(socketId)
+        if (socket) return socket
+      }
+    }
+    return {
+      id: `background-run-${sessionId}`,
+      connected: false,
+      data: {},
+      join: () => {},
+      emit: (event: string, payload: any) => this.nsp.to(`session:${sessionId}`).emit(event, payload),
+      to: (roomName: string) => ({
+        emit: (event: string, payload: any) => this.nsp.to(roomName).emit(event, payload),
+      }),
+    } as unknown as Socket
+  }
+
+  private async scheduleBackgroundNotification(notification: AgentBridgeBackgroundNotification) {
+    const sessionId = String(notification.session_id || '').trim()
+    const delegationId = String(notification.delegation_id || '').trim()
+    const claimId = String(notification.claim_id || '').trim()
+    if (!sessionId || !delegationId || !claimId || !notification.message) return
+
+    const releaseClaim = () => this.backgroundBridge.releaseBackgroundNotification(
+      sessionId,
+      notification.profile,
+      delegationId,
+      claimId,
+    )
+    if (this.closing) {
+      await releaseClaim()
+      return
+    }
+
+    const session = getSession(sessionId)
+    if (!session) {
+      logger.warn('[chat-run-socket] acknowledging orphaned background delegation %s for missing session %s', delegationId, sessionId)
+      await this.backgroundBridge.completeBackgroundNotification(
+        sessionId,
+        notification.profile,
+        delegationId,
+        claimId,
+      )
+      return
+    }
+
+    const state = await this.sessionStateForBackground(sessionId)
+    if (!state) {
+      await releaseClaim()
+      return
+    }
+    if (state.backgroundWakeStopped) {
+      await this.backgroundBridge.completeBackgroundNotification(sessionId, notification.profile, delegationId, claimId)
+      return
+    }
+    if (this.closing) {
+      await releaseClaim()
+      return
+    }
+    state.backgroundDelegations = state.backgroundDelegations || {}
+    persistHermesBackgroundResult(
+      sessionId,
+      state,
+      delegationId,
+      notification.event || {},
+    )
+    const previousDelegation = state.backgroundDelegations[delegationId]
+    state.backgroundDelegations[delegationId] = {
+      ...previousDelegation,
+      delegationId,
+      status: 'delivering',
+      profile: notification.profile,
+      updatedAt: Date.now(),
+    }
+    this.emitExternalEvent(sessionId, 'delegation.updated', {
+      event: 'delegation.updated',
+      profile: notification.profile,
+      delegation_id: delegationId,
+      status: notification.status || 'completed',
+      delivery_status: 'delivering',
+      background_pending: this.backgroundPendingCount(state, sessionId),
+    })
+
+    const next: QueuedRun = {
+      queue_id: `delegation_${delegationId}`,
+      input: notification.message,
+      displayInput: null,
+      storageMessage: notification.message,
+      model: session.model || undefined,
+      provider: session.provider || undefined,
+      profile: notification.profile || session.profile || 'default',
+      workspace: session.workspace,
+      source: resolveRunSource(session.source || undefined, sessionId),
+      backgroundDelegationId: delegationId,
+      backgroundClaimId: claimId,
+      autonomous: true,
+    }
+
+    if (state.isWorking) {
+      state.queue.push(next)
+      logger.info('[chat-run-socket] queued background delegation %s for busy session %s', delegationId, sessionId)
+      return
+    }
+
+    state.isWorking = true
+    state.profile = next.profile
+    state.source = next.source
+    this.runQueuedItem(this.socketForBackgroundRun(sessionId), sessionId, next, next.profile)
+  }
+
+  private needsBackgroundPoll(): boolean {
+    if (this.closing) return false
+    if (this.backgroundRecoveryNeeded) return true
+    if (Date.now() < this.backgroundActivityGraceUntil) return true
+    for (const state of this.sessionMap.values()) {
+      if (Object.values(state.backgroundDelegations || {})
+        .some(item => item.status === 'running' || item.status === 'delivering')) return true
+      if (Object.values(state.backgroundTasks || {})
+        .some(task => task.status === 'running' && task.runtime !== 'ekko')) return true
+    }
+    return false
+  }
+
+  private backgroundRecoveryRoutes() {
+    const cutoff = Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60
+    const sessionsByProfile = new Map<string, string[]>()
+    for (const session of listSessions(undefined, undefined, 10_000)) {
+      if (session.last_active < cutoff) continue
+      if (!isHermesWorkerBackedSession(session)) continue
+      const profile = session.profile || 'default'
+      const ids = sessionsByProfile.get(profile) || []
+      ids.push(session.id)
+      sessionsByProfile.set(profile, ids)
+    }
+    return [...sessionsByProfile.entries()].map(([profile, session_ids]) => ({ profile, session_ids }))
+  }
+
+  private async pollBackgroundWork() {
+    if (this.closing || this.backgroundPollInFlight || Date.now() < this.backgroundPollRetryAt || !this.needsBackgroundPoll()) return
+    this.backgroundPollInFlight = true
+    try {
+      const recovering = this.backgroundRecoveryNeeded
+      const routes = recovering ? this.backgroundRecoveryRoutes() : undefined
+      const result = await this.backgroundBridge.backgroundPoll(routes, { timeoutMs: recovering ? 120_000 : 1000 })
+      if (this.closing) {
+        await Promise.allSettled((result.notifications || []).map((notification: any) => (
+          this.backgroundBridge.releaseBackgroundNotification(
+            notification.session_id,
+            notification.profile,
+            notification.delegation_id,
+            notification.claim_id,
+          )
+        )))
+        return
+      }
+      const brokerChanged = Boolean(this.backgroundBrokerId && result.broker_id && result.broker_id !== this.backgroundBrokerId)
+      if (result.broker_id) this.backgroundBrokerId = result.broker_id
+      this.backgroundRecoveryNeeded = brokerChanged && !recovering
+      this.backgroundPollRetryAt = 0
+      if ((result.pending_count || 0) > 0) {
+        this.backgroundActivityGraceUntil = Date.now() + 310_000
+      }
+      for (const poll of result.sessions || []) {
+        const sessionId = String(poll.session_id || '').trim()
+        if (!sessionId) continue
+        const state = await this.sessionStateForBackground(sessionId)
+        if (state) this.applyBackgroundSessionPoll(poll, state)
+      }
+      for (const notification of result.notifications || []) {
+        await this.scheduleBackgroundNotification(notification)
+      }
+    } catch (err) {
+      this.backgroundPollRetryAt = Date.now() + 5000
+      logger.debug(err, '[chat-run-socket] background bridge poll unavailable')
+    } finally {
+      this.backgroundPollInFlight = false
+    }
+  }
+
+  // --- Resume ---
+
+  private async resumeSession(
+    socket: Socket,
+    sid: string,
+    options?: { event: 'app.resumed'; cachedId: string; timeline?: boolean },
+  ) {
+    let state = this.sessionMap.get(sid)
+    if (!state) {
+      state = await loadSessionStateFromDb(sid, this.sessionMap)
+      this.sessionMap.set(sid, state)
+    }
+    await this.reattachBridgeRun(socket, sid, state)
+    if (this.sessionMap.get(sid) !== state) {
+      state = this.sessionMap.get(sid) || await loadSessionStateFromDb(sid, this.sessionMap)
+      this.sessionMap.set(sid, state)
+    }
+    const resumeEvents = state.isWorking
+      ? isPersonSession(sid)
+        ? [...state.events.filter(entry => !['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(entry.event)), ...pendingChatEkkoInteractions(sid)]
+        : state.events
+      : (state.events || []).filter(evt => evt?.event === 'run.reattach_failed')
+    if (isPersonSession(sid) && !state.isWorking) {
+      const question = personChatInteraction(Number(socket.data.user.id), sid)
+      this.personQuestions.set(sid, question)
+      if (question && !resumeEvents.some(entry => entry.data?.approval_id === question.data.approval_id && entry.data?.clarify_id === question.data.clarify_id)) resumeEvents.push(question)
+    }
+    const sessionDetail = getSessionMetadata(sid)
+    const messagePage = (!options || options.timeline) && isPersonSession(sid) ? personConversationTimeline(Number(socket.data.user.id),sid) : buildResumeMessagePage(state.messages, {
+      limit: state.messagePageLimit,
+      messageTotal: state.messageTotal,
+      messageStateBaselineCount: state.messageStateBaselineCount,
+    })
+    const workspaceRunChanges = listWorkspaceRunChangesForAssistantMessages(
+      sid,
+      messagePage.messages
+        .filter(message => String(message.display_role || message.role || '') === 'assistant')
+        .map(message => message.id),
+    )
+    const taskPlans = getSessionTaskPlans(sid, messagePage.messages, true, state.runId)
+    const resumePage = personDisplayPage(sid, { ...messagePage, messages: withPersonTaskReturns(sid, withRunUsage(sid, messagePage.messages)), workspaceRunChanges, taskPlans })
+    const appMessagePage = options
+      ? buildAppResumeMessagePage(resumePage, options.cachedId)
+      : null
+    const outboundMessagePage = appMessagePage || resumePage
+    socket.emit(options?.event || 'resumed', {
+      session_id: sid,
+      ...outboundMessagePage,
+      taskPlans,
+      parentSessionId: sessionDetail?.parent_session_id || null,
+      forkPointMessageId: sessionDetail?.fork_point_message_id || null,
+      parentTitle: socket.data?.sessionShare ? null : sessionDetail?.parent_title || null,
+      parentLastMessage: socket.data?.sessionShare || isPersonSession(sid) ? null : sessionDetail?.parent_last_message || null,
+      parentLastMessageRole: socket.data?.sessionShare ? null : sessionDetail?.parent_last_message_role || null,
+      workspace: sessionDetail?.workspace || null,
+      model: sessionDetail?.model || '',
+      provider: sessionDetail?.provider || '',
+      api_mode: sessionDetail?.api_mode || '',
+      reasoning_effort: sessionDetail?.reasoning_effort || '',
+      push_enabled: Number(sessionDetail?.push_enabled || 0) !== 0,
+      isWorking: state.isWorking,
+      runStartedAt: state.runStartedAt,
+      isAborting: state.isAborting || false,
+      events: personDisplayEvents(sid, buildResumeEvents(resumeEvents.filter(entry =>
+        !['calendar.requested', 'reminder.requested', 'calendar.resolved', 'reminder.resolved', 'health.requested', 'health.resolved'].includes(entry.event)
+        || mobileEventAllowed(entry.data, socket.data.mobileDeviceTarget)))),
+      inputTokens: state.inputTokens,
+      outputTokens: state.outputTokens,
+      cacheReadTokens: state.cacheReadTokens,
+      cacheWriteTokens: state.cacheWriteTokens,
+      contextTokens: state.contextTokens,
+      queueLength: state.queue?.length || 0,
+      queueMessages: this.serializeQueuedMessages(state.queue || []),
+      queueInsertion: state.queueInsertion ? {
+        generation: state.queueInsertion.generation,
+        run_id: state.queueInsertion.runId,
+        queue_id: state.queueInsertion.queueId,
+        runtime: state.queueInsertion.runtime,
+        phase: state.queueInsertion.phase,
+        guarantee: state.queueInsertion.guarantee,
+        requested_at: state.queueInsertion.requestedAt,
+      } : null,
+      backgroundTasks: personDisplayBackgroundTasks(sid, Object.values(state.backgroundTasks || {})),
+      backgroundPending: this.backgroundPendingCount(state, sid),
+    })
+
+    logger.info('[chat-run-socket] socket %s resumed session %s (working: %s, messages: %d, app cache: %s)',
+      socket.id, sid, state.isWorking, state.messages.length,
+      appMessagePage ? (appMessagePage.messagesCached ? 'hit' : 'miss') : 'n/a')
+  }
+
+  private async reattachBridgeRun(socket: Socket, sid: string, state: SessionState) {
+    const session = getSession(sid)
+    const source = state.source || session?.source
+    if (!isHermesWorkerBackedSession({ source, agent: state.pluginAgent?.id || session?.agent, agent_session_id: session?.agent_session_id })) return
+    const profile = session?.profile || currentProfileFromSocket(socket)
+    const previousRunId = state.runId
+    const previousRunMarker = state.activeRunMarker
+    let pollKey: string | undefined
+    try {
+      const status = await this.bridge.statusIfLoaded(sid, profile, { timeoutMs: 1000 }) as Record<string, unknown>
+      if (this.sessionMap.get(sid) !== state || state.runId !== previousRunId || state.activeRunMarker !== previousRunMarker) return
+      // A live consumer may be finishing accounting after Hermes has already
+      // stopped. Let it deliver the terminal event; do not attach a second poll.
+      if (state.bridgeRunPollMarker && state.bridgeRunPollMarker === state.activeRunMarker) return
+      const running = status.running === true
+      const currentRunId = typeof status.current_run_id === 'string' ? status.current_run_id : ''
+      // Recover terminal output as well as running output when a cached run has
+      // lost its consumer. Unknown run ids become run.failed in resumeBridgeRun.
+      const runId = running && currentRunId ? currentRunId : state.isWorking ? previousRunId : undefined
+      if (!runId) return
+      pollKey = `${sid}:${runId}`
+      if (this.bridgeResumePolls.has(pollKey)) return
+      this.bridgeResumePolls.add(pollKey)
+      if (!state.isWorking || !(state.runStartedAt && state.runStartedAt > 0)) {
+        // The bridge does not expose the original start in its lightweight
+        // status response. Use one shared server-side fallback for every
+        // client attaching after this Web UI process discovers the run.
+        state.runStartedAt = Date.now()
+      }
+      state.isWorking = true
+      state.isAborting = state.isAborting === true
+      state.runId = runId
+      state.activeRunMarker = undefined
+      state.profile = profile
+      state.source = source === 'global_agent'
+        ? 'global_agent'
+        : source === 'group_chat'
+          ? 'group_chat'
+        : source === 'workflow'
+          ? 'workflow'
+          : 'cli'
+      state.events = []
+      const instructions = this.resumeInstructionsForSession(sid)
+      void resumeBridgeRun(
+        this.nsp,
+        socket,
+        {
+          sessionId: sid,
+          runId,
+          profile,
+          instructions,
+          model: session?.model,
+          provider: session?.provider,
+          workspace: session?.workspace,
+          source,
+          onEvent: (event, payload) => {
+            this.observeQueueInsertionRunEvent(sid, event, payload)
+            this.finishTaskPlanRun(sid, event, payload)
+            observeChatRunWebhookEvent({
+              event,
+              sessionId: sid,
+              profile,
+              source: String(source || 'cli'),
+              agent: 'bridge',
+              payload,
+            })
+          },
+        },
+        this.sessionMap,
+        this.bridge,
+        this.dequeueNextQueuedRun.bind(this),
+      ).finally(() => {
+        if (pollKey) this.bridgeResumePolls.delete(pollKey!)
+      })
+      logger.info('[chat-run-socket] reattached running bridge run %s for session %s', runId, sid)
+    } catch (err) {
+      if (pollKey) this.bridgeResumePolls.delete(pollKey)
+      if (this.sessionMap.get(sid) !== state || state.runId !== previousRunId || state.activeRunMarker !== previousRunMarker) return
+      if (isBridgeStatusLookupTimeout(err)) {
+        logger.debug(err, '[chat-run-socket] bridge status lookup timed out while resuming session %s', sid)
+        return
+      }
+      logger.warn(err, '[chat-run-socket] bridge status lookup failed while resuming session %s', sid)
+      const endpoint = getAgentBridgeManager().getRuntimeState?.().endpoint
+      const error = redactBridgeReadyError(err instanceof Error ? err.message : String(err), endpoint)
+      const payload = {
+        event: 'run.reattach_failed',
+        session_id: sid,
+        error,
+        message: `Unable to confirm Agent Bridge status while resuming: ${error}`,
+        text: `Unable to confirm Agent Bridge status while resuming: ${error}`,
+      }
+      const nextEvents = [...(state.events || [])]
+      const lastEvent = nextEvents[nextEvents.length - 1]
+      if (lastEvent?.event !== 'run.reattach_failed' || lastEvent?.data?.error !== error) {
+        nextEvents.push({ event: 'run.reattach_failed', data: payload })
+        state.events = nextEvents
+      }
+      this.emitToSession(socket, sid, 'run.reattach_failed', payload)
+    }
+  }
+
+  private resumeInstructionsForSession(sessionId: string): string {
+    const sessionRow = getSession(sessionId)
+    return getSystemPrompt(undefined, { source: sessionRow?.source })
+  }
+
+  // --- Queue insertion ---
+
+  private isQueueInsertionCandidate(item: QueuedRun): boolean {
+    return item.displayInput !== null
+      && item.goalContinuation !== true
+      && !item.backgroundDelegationId
+      && item.autonomous !== true
+  }
+
+  private queueInsertionRuntime(sessionId: string, state: SessionState, taskRun = false): QueueInsertionRuntime | null {
+    const storedAgent = String(getSession(sessionId)?.agent || '').trim()
+    const activeAgent = state.webhookAgent
+      || (storedAgent === 'ekko-agent' ? 'ekko' : storedAgent === 'claude' ? 'claude-code' : storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || (storedAgent === 'antigravity' || isNativeCodingAgent(storedAgent))) ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : 'bridge')
+    if (activeAgent === 'ekko') return 'ekko'
+    if (activeAgent === 'claude-code' || activeAgent === 'codex' || activeAgent === 'pi' || activeAgent === 'grok' || (activeAgent === 'cursor' || (activeAgent === 'antigravity' || isNativeCodingAgent(activeAgent))) || (activeAgent === 'opencode' || activeAgent === 'dsh')) return activeAgent
+    if (activeAgent !== 'bridge') return null
+    if (state.source === 'coding_agent' || state.source === 'builtin_agent') return null
+    return state.source === 'cli' || state.source === 'global_agent' || (taskRun && state.source === 'api_server') ? 'hermes' : null
+  }
+
+  /** Person owns the durable queue; this internal port only interrupts the fenced native turn. */
+  async interruptTaskRun(sessionId: string, expectedRunId: string, expectedRunMarker?: string): Promise<{ status: string; phase?: string }> {
+    const state = this.sessionMap.get(sessionId)
+    if (!sessionId.startsWith('person-task-') || !state?.isWorking || state.isAborting) return { status: 'not_running' }
+    const runtime = this.queueInsertionRuntime(sessionId, state, true)
+    if (!runtime) return { status: 'unsupported' }
+    if (runtime !== 'hermes' && runtime !== 'ekko') {
+      // Coding Agent run.started identifies a response/turn, whereas state.runId
+      // identifies a manager that can survive several turns in this session.
+      const turn = state.responseRun
+      if (!state.runId || !expectedRunId || turn?.responseId !== expectedRunId
+        || (expectedRunMarker && turn.runMarker !== expectedRunMarker)) return { status: 'run_mismatch' }
+      return codingAgentRunManager.interruptForQueueInsertion(sessionId, state.runId, {
+        responseId: expectedRunId, runMarker: expectedRunMarker || turn.runMarker,
+      })
+    }
+    if (state.runId !== expectedRunId) return { status: 'run_mismatch' }
+    if (runtime === 'hermes') return this.bridge.requestBoundaryInterrupt(sessionId, expectedRunId, state.profile)
+    return state.ekkoBoundaryInterrupt?.(expectedRunId)
+      ?? getGlobalEkkoAgent(state.profile || 'default').requestBoundaryInterrupt({ sessionId, expectedRunId })
+  }
+
+  async waitForRunTermination(sessionId: string): Promise<void> {
+    await Promise.all([codingAgentRunManager.waitForSessionExit(sessionId), ...(this.runHandlers.get(sessionId) || [])])
+  }
+
+  private emitQueueInsertionUpdate(
+    sessionId: string,
+    control: QueueInsertionControl,
+    phase: QueueInsertionPhase | 'cancelled' = control.phase,
+    reason?: string,
+  ) {
+    this.nsp.to(`session:${sessionId}`).emit('run.queue_insertion.updated', {
+      event: 'run.queue_insertion.updated',
+      session_id: sessionId,
+      generation: control.generation,
+      run_id: control.runId,
+      queue_id: control.queueId,
+      runtime: control.runtime,
+      phase,
+      guarantee: control.guarantee,
+      requested_at: control.requestedAt,
+      ...(reason ? { reason } : {}),
+    })
+  }
+
+  private clearQueueInsertion(sessionId: string, state: SessionState, reason: string) {
+    const control = state.queueInsertion
+    if (!control) return
+    state.queueInsertion = undefined
+    if (reason === 'queued_message_removed' && control.runtime === 'hermes' && control.runId) {
+      const runId = control.runId
+      const profile = state.profile
+      void this.serializeHermesQueueInsertion(sessionId, () =>
+        this.bridge.cancelBoundaryInterrupt(sessionId, runId, profile))
+        .catch((err: unknown) => logger.warn(err, '[chat-run-socket] failed to recall queue boundary for %s', sessionId))
+    }
+    this.emitQueueInsertionUpdate(sessionId, control, 'cancelled', reason)
+  }
+
+  private emitQueuedRunSnapshot(sessionId: string, state: SessionState) {
+    this.nsp.to(`session:${sessionId}`).emit('run.queued', {
+      event: 'run.queued',
+      session_id: sessionId,
+      queue_length: state.queue.length,
+      queued_messages: this.serializeQueuedMessages(state.queue),
+    })
+  }
+
+  private async requestQueuedRunInsertion(sessionId: string, queueId: string) {
+    const state = this.sessionMap.get(sessionId)
+    if (!state?.isWorking) return
+    const selectedIndex = state.queue.findIndex(item => item.queue_id === queueId && this.isQueueInsertionCandidate(item))
+    if (selectedIndex < 0) return
+
+    if (state.queueInsertion) {
+      this.emitQueueInsertionUpdate(sessionId, state.queueInsertion)
+      return
+    }
+
+    const runtime = this.queueInsertionRuntime(sessionId, state)
+    if (!runtime) return
+
+    if (selectedIndex > 0) {
+      const [selected] = state.queue.splice(selectedIndex, 1)
+      state.queue.unshift(selected)
+      this.emitQueuedRunSnapshot(sessionId, state)
+    }
+
+    const control: QueueInsertionControl = {
+      generation: randomUUID(),
+      queueId,
+      runId: state.runId,
+      runtime,
+      phase: 'requesting',
+      guarantee: runtime === 'hermes' || runtime === 'ekko' ? 'strict' : 'immediate',
+      requestedAt: Date.now(),
+    }
+    state.queueInsertion = control
+    this.emitQueueInsertionUpdate(sessionId, control)
+    logger.info({ sessionId, queueId, runtime, runId: control.runId }, '[chat-run-socket] queue insertion requested')
+
+    if (control.runId) {
+      await this.activateQueueInsertion(sessionId, control.generation)
+    }
+  }
+
+  private async activateQueueInsertion(sessionId: string, generation: string) {
+    if (this.sessionMap.get(sessionId)?.queueInsertion?.runtime === 'hermes') {
+      // Each bridge request uses a separate connection. Keep recalls and new
+      // requests ordered, including the cleanup of a late acknowledgement.
+      return this.serializeHermesQueueInsertion(sessionId, () => this.activateQueueInsertionNow(sessionId, generation))
+    }
+    return this.activateQueueInsertionNow(sessionId, generation)
+  }
+
+  private serializeHermesQueueInsertion<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.hermesQueueInsertionOperations.get(sessionId) || Promise.resolve()
+    const result = previous.then(operation)
+    const settled = result.then(() => {}, () => {})
+    this.hermesQueueInsertionOperations.set(sessionId, settled)
+    void settled.then(() => {
+      if (this.hermesQueueInsertionOperations.get(sessionId) === settled) {
+        this.hermesQueueInsertionOperations.delete(sessionId)
+      }
+    })
+    return result
+  }
+
+  private async activateQueueInsertionNow(sessionId: string, generation: string) {
+    const state = this.sessionMap.get(sessionId)
+    const control = state?.queueInsertion
+    if (!state || !control || control.generation !== generation || control.phase !== 'requesting' || !control.runId) return
+
+    try {
+      if (control.runtime === 'claude-code' || control.runtime === 'codex' || control.runtime === 'pi' || control.runtime === 'grok' || (control.runtime === 'cursor' || (control.runtime === 'antigravity' || isNativeCodingAgent(control.runtime))) || (control.runtime === 'opencode' || control.runtime === 'dsh')) {
+        control.phase = 'stopping_current_turn'
+        this.emitQueueInsertionUpdate(sessionId, control)
+        const result = await codingAgentRunManager.interruptForQueueInsertion(sessionId, control.runId)
+        if (result.status !== 'interrupted') {
+          const currentState = this.sessionMap.get(sessionId)
+          if (currentState?.queueInsertion?.generation === generation) {
+            this.clearQueueInsertion(sessionId, currentState, result.status)
+          }
+        }
+        return
+      }
+
+      const result = control.runtime === 'ekko'
+        ? state.ekkoBoundaryInterrupt?.(control.runId) ?? getGlobalEkkoAgent(state.profile || 'default').requestBoundaryInterrupt({
+            sessionId,
+            expectedRunId: control.runId,
+          })
+        : await this.bridge.requestBoundaryInterrupt(sessionId, control.runId, state.profile)
+
+      const current = this.sessionMap.get(sessionId)?.queueInsertion
+      if (!current || current.generation !== generation) {
+        // Cancellation may race the asynchronous request acknowledgement.
+        if (!current && control.runtime === 'hermes' && control.runId
+          && (result.status === 'accepted' || result.status === 'already_pending')) {
+          await this.bridge.cancelBoundaryInterrupt(sessionId, control.runId, state.profile)
+        }
+        return
+      }
+      if (result.status !== 'accepted' && result.status !== 'already_pending') {
+        this.clearQueueInsertion(sessionId, state, result.status === 'unsupported'
+          ? String('reason' in result && result.reason ? result.reason : 'runtime_unsupported')
+          : result.status)
+        return
+      }
+
+      current.phase = result.phase === 'tool_batch'
+        ? 'waiting_for_tool_batch'
+        : 'stopping_current_turn'
+      this.emitQueueInsertionUpdate(sessionId, current)
+      logger.info({
+        sessionId,
+        queueId: current.queueId,
+        runtime: current.runtime,
+        runId: current.runId,
+        phase: current.phase,
+      }, '[chat-run-socket] queue insertion armed')
+    } catch (err) {
+      const currentState = this.sessionMap.get(sessionId)
+      if (currentState?.queueInsertion?.generation !== generation) return
+      const reason = err instanceof Error ? err.message : String(err)
+      this.clearQueueInsertion(sessionId, currentState, reason)
+      logger.warn(err, '[chat-run-socket] failed to request queue insertion for session %s', sessionId)
+    }
+  }
+
+  private observeQueueInsertionRunEvent(sessionId: string, event: string, payload: any) {
+    const state = this.sessionMap.get(sessionId)
+    const control = state?.queueInsertion
+    if (!state || !control) return
+
+    if (event === 'run.started') {
+      const runId = typeof payload?.run_id === 'string' ? payload.run_id : ''
+      if (!runId || control.phase !== 'requesting') return
+      if (control.runId && control.runId !== runId) return
+      control.runId = runId
+      this.emitQueueInsertionUpdate(sessionId, control)
+      void this.activateQueueInsertion(sessionId, control.generation)
+      return
+    }
+
+    if (event !== 'run.completed' && event !== 'run.failed') return
+    const runId = typeof payload?.run_id === 'string' ? payload.run_id : ''
+    if (control.runId && runId && control.runId !== runId) return
+    if (control.phase !== 'requesting') {
+      payload.interrupted = true
+      payload.stop_reason = 'queue_insertion'
+      if (control.guarantee === 'strict') payload.boundary_guarantee = 'strict'
+      else payload.interruption_mode = 'immediate'
+    }
+    if (state.queue.length === 0) this.clearQueueInsertion(sessionId, state, 'queue_empty')
+  }
+
+  /** Reuse Ekko's queue and origin-context callback path for every Person worker. */
+  async deliverPersonResult(result: PersonResultDelivery) {
+    const { origin, user, executionId } = result
+    if (!ownsPersonSession(user.id, getSession(origin.sessionId))) throw new Error('Session not found')
+    const state = await this.sessionStateForBackground(origin.sessionId)
+    if (!state || !ownsPersonSession(user.id, getSession(origin.sessionId))) throw new Error('Session not found')
+    if (state.backgroundWakeStopped) throw new Error('Background reporting is paused until the next user message')
+    const queueId = personResultQueueId(executionId, origin.acceptanceReturnId)
+    if (state.queue.some(item => item.queue_id === queueId)) return
+    const session = getSession(origin.sessionId)!
+    const { receipt, processing, input, messages } = personResultPrompt(result)
+    state.queue.push({ queue_id: queueId, profile: session.profile || 'default', source: 'builtin_agent', codingAgentId: 'ekko-agent',
+      displayInput: null, storageMessage: `Person background task result:\n${receipt}${processing ? `\nSaved return instructions:\n${processing}` : ''}`,
+      input,
+      backgroundDelegationId: queueId, autonomous: true,
+      backgroundContinuationContext: { runtime: 'ekko', version: 1, subagentId: queueId, originRunId: origin.runId,
+        originStep: 0, messages, memoryPolicy: 'disabled' },
+      personDelivery: { userId: user.id, executionId,acceptanceReturnId:origin.acceptanceReturnId },
+    })
+    if (!state.isWorking) this.dequeueNextQueuedRun(this.socketForBackgroundRun(origin.sessionId), origin.sessionId)
+  }
+
+  async deliverPersonStage(input: Parameters<NonNullable<PersonRuntimePort['deliverStage']>>[0]) {
+    const { user,context,sessionId } = input
+    assertPersonStage(user.id,context,sessionId)
+    const state = await this.sessionStateForBackground(sessionId)
+    assertPersonStage(user.id,context,sessionId)
+    if (!state || state.backgroundWakeStopped) throw new Error('Background reporting is paused until the next user message')
+    const id = context.deliveryId!
+    const queueId = `person-stage:${id}`
+    if (state.queue.some(item=>item.queue_id === queueId)) return
+    state.queue.push({ queue_id:queueId,profile:getSession(sessionId)!.profile || 'default',source:'builtin_agent',codingAgentId:'ekko-agent',
+      displayInput:null,input:input.input,backgroundDelegationId:queueId,autonomous:true,
+      backgroundContinuationContext:{ runtime:'ekko',version:1,subagentId:queueId,originRunId:'',originStep:0,messages:[],memoryPolicy:'disabled' },
+      personStageDelivery:{ userId:user.id,deliveryId:id },
+    })
+    if (!state.isWorking) this.dequeueNextQueuedRun(this.socketForBackgroundRun(sessionId),sessionId)
+  }
+
+  // --- Queue ---
+
+  private dequeueNextQueuedRun(socket: Socket, sessionId: string, fallbackProfile = 'default') {
+    const state = this.sessionMap.get(sessionId)
+    if (!state?.queue.length) return false
+
+    const next = state.queue.shift()!
+    if (state.queueInsertion) {
+      state.queueInsertion.phase = 'starting_queued_message'
+      state.queueInsertion.queueId = next.queue_id
+      this.emitQueueInsertionUpdate(sessionId, state.queueInsertion)
+      state.queueInsertion = undefined
+    }
+    state.isWorking = true
+    state.profile = next.profile || fallbackProfile
+    state.source = next.source
+    logger.info('[chat-run-socket] dequeuing queued run for session %s (remaining: %d)', sessionId, state.queue.length)
+    this.nsp.to(`session:${sessionId}`).emit('run.queued', {
+      event: 'run.queued',
+      session_id: sessionId,
+      queue_length: state.queue.length,
+      dequeued_queue_id: next.queue_id,
+      queued_messages: this.serializeQueuedMessages(state.queue),
+    })
+    this.runQueuedItem(socket, sessionId, next, fallbackProfile)
+    return true
+  }
+
+  private runQueuedItem(socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile = 'default') {
+    if (next.personStageDelivery) {
+      const { userId,deliveryId } = next.personStageDelivery
+      try {
+        assertPersonStage(userId,stageDeliveryContext(userId,deliveryId),sessionId)
+        const user = personUser(userId)
+        socket = { id:`person-stage-${deliveryId}`,connected:false,data:{ user },join:()=>{},
+          emit:(event:string,payload:any)=>this.nsp.to(`session:${sessionId}`).emit(event,payload),
+          to:(room:string)=>({ emit:(event:string,payload:any)=>this.nsp.to(room).emit(event,payload) }),
+        } as unknown as Socket
+      } catch (error) {
+        finishPersonStageDelivery(userId,deliveryId,false,String(error))
+        const state = this.sessionMap.get(sessionId)
+        if (state) state.isWorking = false
+        this.dequeueNextQueuedRun(socket,sessionId,fallbackProfile)
+        return
+      }
+    }
+    if (next.personDelivery) {
+      const { userId, executionId } = next.personDelivery
+      try {
+        const user = personUser(userId)
+        if (!ownsPersonSession(userId, getSession(sessionId)) || !personDeliveryCurrent(userId, executionId,next.personDelivery.acceptanceReturnId || '')) throw new Error('Background result is no longer current')
+        // Never inherit the identity of a disconnected or unrelated draining socket.
+        socket = { id: `person-result-${executionId}`, connected: false, data: { user }, join: () => {},
+          emit: (event: string, payload: any) => this.nsp.to(`session:${sessionId}`).emit(event, payload),
+          to: (room: string) => ({ emit: (event: string, payload: any) => this.nsp.to(room).emit(event, payload) }),
+        } as unknown as Socket
+      } catch (error) {
+        finishPersonDelivery(userId, executionId, false, String(error),next.personDelivery.acceptanceReturnId)
+        const state = this.sessionMap.get(sessionId)
+        if (state) state.isWorking = false
+        this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
+        return
+      }
+    }
+    if (next.authorize) {
+      const authorize = next.authorize
+      void authorize().then(() => this.runQueuedItem(socket, sessionId, { ...next, authorize: undefined }, fallbackProfile)).catch(() => {
+        const state = this.sessionMap.get(sessionId)
+        if (state) state.isWorking = false
+        this.nsp.to(`session:${sessionId}`).emit('run.failed', { event: 'run.failed', session_id: sessionId, queue_id: next.queue_id, error: 'share_access_denied' })
+        this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
+      })
+      return
+    }
+    const state = this.sessionMap.get(sessionId)
+    if (state) state.runStartedAt = Date.now()
+    const skipUserMessage = next.displayInput === null
+    const backgroundContinuationContext = next.backgroundContinuationContext
+      || (next.backgroundDelegationId
+        ? this.sessionMap.get(sessionId)?.backgroundContinuationContexts?.[next.backgroundDelegationId]
+        : undefined)
+    const runProfile = backgroundContinuationContext?.runtime === 'hermes'
+      ? backgroundContinuationContext.profile
+      : next.profile || fallbackProfile
+    let deliverySettled = false
+    const execution = this.executeRun(socket, {
+      onEvent: next.personStageDelivery ? (event:string,payload:any) => {
+        if (event !== 'run.completed' && event !== 'run.failed') return
+        deliverySettled = true
+        finishPersonStageDelivery(next.personStageDelivery!.userId,next.personStageDelivery!.deliveryId,event === 'run.completed',String(payload?.error || ''))
+      } : next.personDelivery ? (event: string, payload: any) => {
+        if (event !== 'run.completed' && event !== 'run.failed') return
+        if (!payload.waiting_for_tasks) payload.person_task_return = savePersonTaskReturn(next.personDelivery!.userId, next.personDelivery!.executionId,
+          sessionId, payload.message_id || payload.run_usage?.assistantMessageId)
+        deliverySettled = true
+        finishPersonDelivery(next.personDelivery!.userId, next.personDelivery!.executionId, event === 'run.completed', String(payload?.error || ''),next.personDelivery!.acceptanceReturnId)
+      } : undefined,
+      input: next.input,
+      display_input: next.displayInput,
+      display_role: next.displayRole,
+      storage_message: next.storageMessage,
+      session_id: sessionId,
+      model: next.model,
+      provider: next.provider,
+      model_groups: next.model_groups,
+      instructions: next.instructions,
+      group_system_prompt: next.groupSystemPrompt,
+      group_room_id: next.groupRoomId,
+      group_agent_id: next.groupAgentId,
+      workflow_id: next.workflowId,
+      workflow_node_id: next.workflowNodeId,
+      workspace: next.workspace,
+      source: next.source,
+      session_source: next.sessionSource,
+      queue_id: next.queue_id,
+      peerExcludeSocketId: next.originSocketId,
+      coding_agent_id: next.codingAgentId,
+      agent_id: next.agentId,
+      mode: next.mode,
+      baseUrl: next.baseUrl,
+      base_url: next.base_url,
+      apiKey: next.apiKey,
+      api_key: next.api_key,
+      apiMode: next.apiMode,
+      api_mode: next.api_mode,
+      mcpServers: next.mcpServers,
+      mcp_servers: next.mcp_servers,
+      one_shot_model: next.oneShotModel,
+      allow_command_passthrough: next.commandPassthrough,
+      reasoning_effort: next.reasoningEffort,
+      background_delegation_id: next.backgroundDelegationId,
+      background_claim_id: next.backgroundClaimId,
+      autonomous: next.autonomous,
+    }, runProfile, skipUserMessage, backgroundContinuationContext, next.pushTargetId)
+    void execution.catch(error => {
+      if (!next.personDelivery && !next.personStageDelivery) { logger.warn(error, 'Queued run failed'); return }
+      const state = this.sessionMap.get(sessionId)
+      if (state) state.isWorking = false
+      this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
+    }).finally(() => {
+      if (next.personStageDelivery && !deliverySettled) finishPersonStageDelivery(next.personStageDelivery.userId,next.personStageDelivery.deliveryId,false,'Stage reporting interrupted')
+      if (next.personDelivery && !deliverySettled) {
+        if (this.sessionMap.get(sessionId)?.backgroundWakeStopped) cancelPersonDelivery(next.personDelivery.userId, next.personDelivery.executionId,next.personDelivery.acceptanceReturnId)
+        else finishPersonDelivery(next.personDelivery.userId, next.personDelivery.executionId, false, 'Result reporting interrupted',next.personDelivery.acceptanceReturnId)
+      }
+    })
+  }
+
+  // --- Helpers ---
+
+  async runAndWait(
+    data: {
+      input: string | ContentBlock[]
+      display_input?: string | ContentBlock[] | null
+      display_role?: 'user' | 'command'
+      storage_message?: string
+      session_id: string
+      model?: string
+      provider?: string
+      model_groups?: Array<{ provider: string; models: string[] }>
+      instructions?: string
+      group_system_prompt?: string
+      group_room_id?: string
+      group_agent_id?: string
+      workflow_id?: string
+      workflow_node_id?: string
+      workspace?: string | null
+      source?: string
+      session_source?: 'global_agent' | 'workflow' | 'group_chat'
+      memory_input?: string | ContentBlock[]
+      memory_messages?: EkkoAgentRunSocketData['memory_messages']
+      memory_write_policy?: 'automatic' | 'explicit-only'
+      memory_origin?: EkkoAgentRunSocketData['memory_origin']
+      memory_recall_scopes?: EkkoAgentRunSocketData['memory_recall_scopes']
+      memory_write_scopes?: EkkoAgentRunSocketData['memory_write_scopes']
+      memory_default_write_scope?: EkkoAgentRunSocketData['memory_default_write_scope']
+      queue_id?: string
+      coding_agent_id?: ChatCodingAgentId
+      agent_id?: ChatCodingAgentId
+      mode?: 'scoped' | 'global'
+      baseUrl?: string
+      base_url?: string
+      apiKey?: string
+      api_key?: string
+      apiMode?: string
+      api_mode?: string
+      mcpServers?: Record<string, unknown>
+      mcp_servers?: Record<string, unknown>
+      profile?: string
+      reasoning_effort?: string
+      /** Hermes Agent creation policy used by internal orchestration callers. */
+      background_delegation_enabled?: boolean
+      context_compression_enabled?: boolean
+      one_shot_model?: boolean
+    },
+    options: {
+      profile?: string
+      user?: AuthenticatedUser
+      groupRunIsCurrent?: () => boolean
+      timeoutMs?: number
+      approvalChoice?: ChatRunAutoApprovalChoice
+      pushRoot?: PushRunRef
+      onEvent?: (event: string, payload: any) => void
+    } = {},
+  ): Promise<ChatRunAndWaitResult> {
+    const sessionId = String(data.session_id || '').trim()
+    if (!sessionId) throw new Error('session_id is required')
+    const profile = options.profile || data.profile || getSession(sessionId)?.profile || getActiveProfileName() || 'default'
+    const source = resolveRunSource(data.source, sessionId)
+    const pushTargetId = options.pushRoot ? getRunPushTarget(options.pushRoot)?.id : undefined
+    const state = getOrCreateSession(this.sessionMap, sessionId)
+    state.events = []
+    state.isWorking = !isProviderAgentExecution(source, data)
+    state.runStartedAt = Date.now()
+    state.profile = profile
+    state.source = source
+
+    return new Promise<ChatRunAndWaitResult>((resolve) => {
+      let settled = false
+      let output = ''
+      let reasoning = ''
+      let runId = ''
+      const timeoutMs = options.timeoutMs && options.timeoutMs > 0 ? options.timeoutMs : null
+      const waiters = this.runWaiters.get(sessionId) || new Set<(event: string, payload: any) => void>()
+      const finish = (result: Omit<ChatRunAndWaitResult, 'session_id'>) => {
+        if (settled) return
+        settled = true
+        if (timer) clearTimeout(timer)
+        waiters.delete(onEvent)
+        if (waiters.size === 0) this.runWaiters.delete(sessionId)
+        resolve({
+          session_id: sessionId,
+          run_id: runId || result.run_id,
+          output: output || result.output,
+          reasoning: reasoning || result.reasoning,
+          ...result,
+        })
+      }
+      const automaticApprovals = new Set<string>()
+      const respondToApproval = async (payload: any = {}) => {
+        const choice = options.approvalChoice
+        if (!choice || settled || state.isAborting || state.abortController?.signal.aborted) return
+        const approvalId = typeof payload.approval_id === 'string' ? payload.approval_id : ''
+        const rawChoices = Array.isArray(payload.choices) ? payload.choices.map((item: unknown) => String(item)) : []
+        const choices = rawChoices.length > 0 ? rawChoices : ['once', 'session', 'deny']
+        try {
+          if (!approvalId) throw new Error('approval required')
+          if (automaticApprovals.has(approvalId)) return
+          automaticApprovals.add(approvalId)
+          if (!choices.includes(choice)) throw new Error(`approval choice "${choice}" is not available`)
+          const pluginResult = respondAgentInteraction(sessionId, approvalId, 'approval', choice)
+          if (pluginResult.handled) {
+            if (!pluginResult.resolved) throw new Error('Automatic tool approval could not be applied')
+            return // The plugin broker publishes its own resolved event.
+          }
+          const ekkoResult = respondToEkkoToolApproval(sessionId, approvalId, choice)
+          const codingAgentResult = ekkoResult.handled ? ekkoResult : codingAgentRunManager.resolveApproval(sessionId, approvalId, choice)
+          const result = codingAgentResult.handled
+            ? codingAgentResult
+            : await this.bridge.approvalRespond(approvalId, choice)
+          if (!(result as any)?.resolved) throw new Error('Automatic tool approval could not be applied')
+          const resolvedPayload = {
+            event: 'approval.resolved',
+            session_id: sessionId,
+            approval_id: approvalId,
+            choice,
+            resolved: Boolean((result as any)?.resolved),
+          }
+          observeChatRunWebhookEvent({
+            event: 'approval.resolved',
+            pushTargetId,
+            sessionId,
+            profile,
+            source,
+            agent: webhookAgentForRun(data),
+            payload: resolvedPayload,
+            roomId: data.group_room_id,
+            workflowId: data.workflow_id,
+            workflowNodeId: data.workflow_node_id,
+          })
+          this.nsp.to(`session:${sessionId}`).emit('approval.resolved', resolvedPayload)
+          onEvent('approval.resolved', resolvedPayload)
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err)
+          this.nsp.to(`session:${sessionId}`).emit('approval.resolved', {
+            event: 'approval.resolved',
+            session_id: sessionId,
+            approval_id: approvalId,
+            choice,
+            resolved: false,
+            error,
+          })
+          finish({ ok: false, event: 'run.failed', output, reasoning, error })
+          void this.abortSession(sessionId, error).catch(abortError => {
+            logger.warn(abortError, '[chat-run-socket] failed to abort after automatic approval failure for session %s', sessionId)
+          })
+        }
+      }
+      const onEvent = (event: string, payload: any = {}) => {
+        // Tag task boundary stops before the shared emitters serialize the event for the drawer.
+        if (sessionId.startsWith('person-task-') && (payload.boundary_interrupt === true || payload.result?.boundary_interrupt === true)) {
+          payload.interrupted = true
+          payload.stop_reason = 'queue_insertion'
+        }
+        if (typeof payload.run_id === 'string' && payload.run_id) runId = payload.run_id
+        if (event === 'message.delta' && typeof payload.delta === 'string') output += payload.delta
+        if ((event === 'reasoning.delta' || event === 'thinking.delta') && typeof payload.delta === 'string') reasoning += payload.delta
+        try {
+          options.onEvent?.(event, payload)
+        } catch (err) {
+          logger.warn(err, '[chat-run-socket] runAndWait event observer failed for session %s', sessionId)
+        }
+        if (event === 'approval.requested') {
+          // Native brokers can resolve synchronously. Let the requested event reach
+          // clients first so a late request cannot overwrite its resolved state.
+          void Promise.resolve().then(() => respondToApproval(payload))
+        } else if (event === 'run.completed') {
+          finish({
+            ok: true,
+            event: 'run.completed',
+            run_id: payload.run_id,
+            output: typeof payload.output === 'string' && payload.output ? payload.output : output,
+            reasoning: typeof payload.reasoning === 'string' && payload.reasoning ? payload.reasoning : reasoning,
+            interrupted: payload.interrupted === true || payload.boundary_interrupt === true || payload.result?.boundary_interrupt === true || payload.result?.interrupted === true,
+            stop_reason: payload.stop_reason,
+          })
+        } else if (event === 'run.failed') {
+          finish({
+            ok: false,
+            event: 'run.failed',
+            run_id: payload.run_id,
+            output,
+            reasoning,
+            error: payload.error ? String(payload.error) : 'chat-run failed',
+            interrupted: payload.interrupted === true || payload.result?.boundary_interrupt === true || payload.result?.interrupted === true,
+            stop_reason: payload.stop_reason,
+          })
+        }
+      }
+      const timer = timeoutMs
+        ? setTimeout(() => {
+            const error = `chat-run timed out after ${timeoutMs}ms`
+            finish({ ok: false, event: 'run.failed', error })
+            void this.abortSession(sessionId, error).catch(err => {
+              logger.warn(err, '[chat-run-socket] failed to abort timed-out session %s', sessionId)
+            })
+          }, timeoutMs)
+        : null
+      waiters.add(onEvent)
+      this.runWaiters.set(sessionId, waiters)
+
+      const fakeSocket = {
+        id: `workflow-run-${sessionId}`,
+        connected: true,
+        data: { user: options.user, groupRunIsCurrent: options.groupRunIsCurrent, internalToolApprovalChoice: options.approvalChoice },
+        join: () => {},
+        to: (room: string) => ({
+          emit: (event: string, payload: any) => {
+            this.nsp.to(room).emit(event, payload)
+            onEvent(event, payload)
+          },
+        }),
+        emit: (event: string, payload: any) => onEvent(event, payload),
+      } as unknown as Socket
+
+      const handlers = this.runHandlers.get(sessionId) || new Set<Promise<void>>()
+      this.runHandlers.set(sessionId, handlers)
+      const handler = this.executeRun(fakeSocket, { ...data, onEvent }, profile, false, undefined, pushTargetId)
+        .catch(err => {
+          const error = err instanceof Error ? err.message : String(err)
+          const payload = { event: 'run.failed', session_id: sessionId, error }
+          observeChatRunWebhookEvent({
+            event: 'run.failed',
+            pushTargetId,
+            sessionId,
+            profile,
+            source,
+            agent: webhookAgentForRun(data),
+            payload,
+            roomId: data.group_room_id,
+            workflowId: data.workflow_id,
+            workflowNodeId: data.workflow_node_id,
+          })
+          finish({ ok: false, event: 'run.failed', error })
+        })
+        .finally(() => {
+          handlers.delete(handler)
+          if (!handlers.size && this.runHandlers.get(sessionId) === handlers) this.runHandlers.delete(sessionId)
+        })
+      handlers.add(handler)
+    })
+  }
+
+  async abortSession(sessionId: string, reason = 'Run canceled', options: { waitForTermination?: boolean } = {}): Promise<void> {
+    const sid = String(sessionId || '').trim()
+    if (!sid) return
+    // Capture native handles before handleAbort unregisters them and emits a
+    // terminal event. Those events release runAndWait before execution unwinds.
+    const termination = options.waitForTermination
+      ? Promise.all([codingAgentRunManager.waitForSessionExit(sid), ...(this.runHandlers.get(sid) || [])])
+      : undefined
+    // Retain the rejection until it can be propagated after abort dispatch.
+    void termination?.catch(() => {})
+    this.mobileRunTargets.delete(sid)
+    const fakeSocket = {
+      id: `workflow-abort-${sid}`,
+      connected: false,
+      data: {},
+      emit: () => {},
+      join: () => {},
+      to: (room: string) => ({ emit: (event: string, payload: any) => this.nsp.to(room).emit(event, payload) }),
+    } as unknown as Socket
+    this.finishTaskPlanRun(sid, 'abort.completed')
+    await handleAbort(
+      this.nsp,
+      fakeSocket,
+      sid,
+      this.sessionMap,
+      this.bridge,
+      this.runQueuedItem.bind(this),
+    )
+    this.emitExternalEvent(sid, 'run.failed', {
+      event: 'run.failed',
+      error: reason,
+    })
+    await termination
+  }
+
+  async disposeSession(sessionId: string): Promise<void> {
+    const sid = String(sessionId || '').trim()
+    if (!sid) return
+    this.personQuestions.delete(sid)
+    for (const [requestId, pending] of this.pendingMobileLocations.entries()) {
+      if (pending.sessionId !== sid) continue
+      this.finishMobileLocationRequest(requestId, {
+        status: 'error',
+        error: { code: 'location_failed' },
+      })
+    }
+    for (const [requestId, pending] of this.pendingMobileCalendar.entries()) {
+      if (pending.sessionId !== sid) continue
+      this.finishMobileCalendarRequest(requestId, {
+        status: 'error',
+        error: { code: 'calendar_failed' },
+      })
+    }
+    for (const [requestId, pending] of this.pendingMobileHealth.entries()) {
+      if (pending.sessionId !== sid) continue
+      this.finishMobileHealthRequest(requestId, { status: 'error', error: { code: 'health_failed' } })
+    }
+    codingAgentRunManager.stop(sid, { reportClosed: false })
+    const state = this.sessionMap.get(sid)
+    this.finishTaskPlanRun(sid, 'abort.completed')
+    state?.abortController?.abort()
+    await closePluginAgentSession(sid)
+    this.sessionMap.delete(sid)
+    this.runWaiters.delete(sid)
+    deleteSession(sid)
+  }
+
+  emitExternalEvent(sessionId: string, event: string, payload: any) {
+    this.finishTaskPlanRun(sessionId, event, payload)
+    const tagged = { ...payload, session_id: sessionId }
+    const profile = this.resolvePetEventProfile(sessionId, tagged)
+    const state = this.sessionMap.get(sessionId)
+    const session = getSession(sessionId)
+    const storedAgent = String(session?.agent || '')
+    observeChatRunWebhookEvent({
+      pushTargetId: state?.isWorking ? state.pushTargetId : undefined,
+      event,
+      sessionId,
+      profile,
+      source: state?.source || session?.source || 'coding_agent',
+      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || (storedAgent === 'antigravity' || isNativeCodingAgent(storedAgent))) ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : storedAgent === 'ekko-agent' ? 'ekko' : 'claude-code'),
+      payload: tagged,
+      roomId: state?.webhookRoomId,
+      workflowId: state?.webhookWorkflowId,
+      workflowNodeId: state?.webhookWorkflowNodeId,
+    })
+    if (!isPrivatePersonSession(sessionId)) this.observePetEvent(profile, event, tagged)
+    observePersonPresenceEvent(sessionId, event, tagged)
+    this.emitPendingInteraction(profile, event, tagged)
+    if (state?.isWorking) {
+      state.events.push({ event, data: tagged })
+      if (state.events.length > 200) state.events.splice(0, state.events.length - 200)
+    }
+    const display = personDisplayEvent(sessionId, event, tagged)
+    if (display !== null) this.nsp.to(`session:${sessionId}`).emit(event, buildOutboundRunEvent(event, display))
+    const waiters = this.runWaiters.get(sessionId)
+    if (waiters) {
+      for (const waiter of waiters) waiter(event, tagged)
+    }
+  }
+
+  markExternalRunCompleted(sessionId: string, event: string) {
+    const state = this.sessionMap.get(sessionId)
+    if (!state) return
+    state.isWorking = false
+    state.abortController = undefined
+    state.runId = undefined
+    state.activeRunMarker = undefined
+    state.events = []
+    state.responseRun = undefined
+    state.profile = undefined
+    logger.info('[chat-run-socket] external run completed for session %s (%s)', sessionId, event)
+    if (state.queue.length > 0) {
+      const socket = this.socketForQueuedRun(sessionId, state.queue[0])
+      if (socket) this.dequeueNextQueuedRun(socket, sessionId)
+    }
+  }
+
+  private assertSessionMessageEditIdle(sessionId: string) {
+    const state = this.sessionMap.get(sessionId)
+    if (hasChatEkkoBackgroundTasks(sessionId)
+      || (state && (state.isWorking || state.isAborting || state.isCompressing || state.queue.length > 0 || this.backgroundPendingCount(state, sessionId) > 0))) {
+      throw Object.assign(new Error('Wait for the run and pending tasks to finish before selecting or deleting messages.'), { status: 409 })
+    }
+  }
+
+  async assertSessionMessagesEditable(sessionId: string) {
+    this.assertSessionMessageEditIdle(sessionId)
+    const session = getSession(sessionId)
+    if (session && isHermesWorkerBackedSession(session)) {
+      const status = await this.bridge.statusIfLoaded(sessionId, session.profile, { timeoutMs: 1000 })
+      if (status.running) throw Object.assign(new Error('Wait for the run to finish before selecting or deleting messages.'), { status: 409 })
+    }
+    this.assertSessionMessageEditIdle(sessionId)
+  }
+
+  async deleteSessionMessages(sessionId: string, messageIds: number[], historyRevision: number) {
+    await this.assertSessionMessagesEditable(sessionId)
+    // No await between the final idle check, transaction, and cache invalidation.
+    this.assertSessionMessageEditIdle(sessionId)
+    const fixedTokens = getSessionContextOverhead(sessionId, this.sessionMap.get(sessionId))
+    const deletion = deleteSessionMessageGroups(sessionId, messageIds, historyRevision)
+    const contextTokens = refreshContextUsageAfterDeletion(sessionId, fixedTokens)
+    const result = { ...deletion, contextTokens: contextTokens ?? null }
+    this.sessionMap.delete(sessionId)
+    logger.info({
+      sessionId,
+      requestedMessageIds: messageIds,
+      deletedMessageIds: deletion.messageIds,
+      deletedGroups: deletion.deletedGroups,
+      previousHistoryRevision: historyRevision,
+      historyRevision: deletion.historyRevision,
+    }, '[chat-run-socket] session messages deleted')
+    this.nsp.to(`session:${sessionId}`).emit('session.command', {
+      event: 'session.command', session_id: sessionId, action: 'messages_deleted', ok: true, ...result,
+    })
+    return result
+  }
+
+  clearSessionHistory(sessionId: string, options: { historyAlreadyCleared?: boolean } = {}): { deleted: number; hadMemoryState: boolean } {
+    this.finishTaskPlanRun(sessionId, 'abort.completed')
+    const deleted = options.historyAlreadyCleared ? 0 : clearSessionMessages(sessionId)
+    const state = this.sessionMap.get(sessionId)
+    const hadMemoryState = Boolean(state)
+    const messagePageLimit = state?.messagePageLimit
+    if (state) {
+      state.abortController?.abort()
+      if (state.isWorking && isBridgeRunSource(state.source)) {
+        const profile = state.profile
+        void this.bridge.interrupt(sessionId, 'Session cleared', profile)
+          .catch((err: unknown) => logger.warn(err, '[chat-run-socket] failed to interrupt bridge run while clearing session %s', sessionId))
+      }
+      state.messages = []
+      state.finalizeRunUsage = undefined
+      state.nativeUsageSource = undefined
+      state.messageTotal = 0
+      state.messageLoadedCount = 0
+      state.messageStateBaselineCount = 0
+      state.hasMoreBefore = false
+      state.inputTokens = 0
+      state.outputTokens = 0
+      state.cacheReadTokens = 0
+      state.cacheWriteTokens = 0
+      state.contextTokens = 0
+      state.events = []
+      state.queue = []
+      state.queueInsertion = undefined
+      state.bridgePendingAssistantContent = undefined
+      state.bridgePendingReasoningContent = undefined
+      state.bridgePendingToolCallMarkup = undefined
+      state.bridgeOutput = undefined
+      state.bridgePendingTools = undefined
+      state.bridgeCompressionResults = undefined
+      state.responseRun = undefined
+      state.activeRunMarker = undefined
+      state.runId = undefined
+      state.abortController = undefined
+      state.isAborting = false
+      state.isWorking = false
+      state.profile = undefined
+      this.sessionMap.delete(sessionId)
+    }
+    this.nsp.to(isPrivatePersonSession(sessionId) ? `session:${sessionId}` : ['studio-account', `session:${sessionId}`]).emit('session.command', {
+      event: 'session.command',
+      session_id: sessionId,
+      command: 'clear',
+      ok: true,
+      action: 'clear',
+      clearHistory: true,
+      source: 'mcu',
+      deleted,
+      memory_cleared: hadMemoryState,
+    })
+    this.nsp.to(isPrivatePersonSession(sessionId) ? `session:${sessionId}` : ['studio-account', `session:${sessionId}`]).emit('resumed', {
+      session_id: sessionId,
+      ...(isPersonSession(sessionId) ? { personFlows: personConversationTimeline(Number(getSessionMetadata(sessionId)?.studio_user_id), sessionId).personFlows } : {}),
+      messages: [],
+      messageTotal: 0,
+      messageLoadedCount: 0,
+      messagePageLimit,
+      hasMoreBefore: false,
+      isWorking: false,
+      isAborting: false,
+      events: [],
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      contextTokens: 0,
+      queueLength: 0,
+      queueMessages: [],
+      queueInsertion: null,
+    })
+    this.nsp.to(isPrivatePersonSession(sessionId) ? `session:${sessionId}` : ['studio-account', `session:${sessionId}`]).emit('run.queued', {
+      event: 'run.queued',
+      session_id: sessionId,
+      queue_length: 0,
+      queued_messages: [],
+    })
+    logger.info({ sessionId, deleted, hadMemoryState }, '[chat-run-socket] cleared session history and memory state')
+    return { deleted, hadMemoryState }
+  }
+
+  private socketForQueuedRun(sessionId: string, next?: QueuedRun): Socket | null {
+    if (next?.personDelivery || next?.personStageDelivery) return this.socketForBackgroundRun(sessionId)
+    if (next?.originSocketId) {
+      const origin = this.nsp.sockets.get(next.originSocketId)
+      if (origin) return origin
+    }
+    const room = this.nsp.adapter.rooms.get(`session:${sessionId}`)
+    if (room) {
+      for (const socketId of room) {
+        const socket = this.nsp.sockets.get(socketId)
+        if (socket) return socket
+      }
+    }
+    return this.nsp.sockets.values().next().value || null
+  }
+
+  private clearClarifyEventState(sessionId: string, clarifyId: string) {
+    const state = this.sessionMap.get(sessionId)
+    if (!state?.events.length) return
+
+    const nextEvents = state.events.filter(({ event, data }) => {
+      if (event !== 'clarify.requested' && event !== 'clarify.resolved') return true
+      return data?.clarify_id !== clarifyId
+    })
+    if (nextEvents.length !== state.events.length) {
+      state.events = nextEvents
+    }
+  }
+
+  private finishMobileLocationRequest(
+    locationRequestId: string,
+    response: MobileLocationResponse,
+  ): boolean {
+    const pending = this.pendingMobileLocations.get(locationRequestId)
+    if (!pending) return false
+    this.pendingMobileLocations.delete(locationRequestId)
+    clearTimeout(pending.timer)
+    this.clearMobileLocationEventState(pending.sessionId, locationRequestId)
+    this.emitMobileLocationEvent(pending.profile, pending.sessionId, 'location.resolved', {
+      event: 'location.resolved',
+      location_request_id: locationRequestId,
+      status: response.status,
+      resolved: true,
+      ...(response.status === 'error' ? { error: response.error } : {}),
+    })
+    pending.resolve(response)
+    return true
+  }
+
+  private clearMobileLocationEventState(sessionId: string, locationRequestId: string): void {
+    const state = this.sessionMap.get(sessionId)
+    if (!state?.events.length) return
+    state.events = state.events.filter(({ event, data }) => {
+      if (event !== 'location.requested' && event !== 'location.resolved') return true
+      return data?.location_request_id !== locationRequestId
+    })
+  }
+
+  private emitMobileLocationEvent(
+    profile: string,
+    sessionId: string,
+    event: 'location.requested' | 'location.resolved',
+    payload: Record<string, unknown>,
+  ): void {
+    const tagged = { ...payload, session_id: sessionId }
+    const state = this.sessionMap.get(sessionId)
+    if (event === 'location.requested' && state) {
+      state.events = state.events.filter(({ event: current }) =>
+        current !== 'location.requested' && current !== 'location.resolved')
+      state.events.push({ event, data: tagged })
+    }
+    this.nsp.to(`session:${sessionId}`).emit(event, tagged)
+    this.emitPendingInteraction(profile, event, tagged)
+  }
+
+  private finishMobileCalendarRequest(requestId: string, response: MobileCalendarResponse): boolean {
+    const pending = this.pendingMobileCalendar.get(requestId)
+    if (!pending) return false
+    this.pendingMobileCalendar.delete(requestId)
+    clearTimeout(pending.timer)
+    this.clearMobileCalendarEventState(pending.sessionId, requestId)
+    const event = pending.request.capability === 'reminder' ? 'reminder.resolved' : 'calendar.resolved'
+    const idKey = pending.request.capability === 'reminder' ? 'reminder_request_id' : 'calendar_request_id'
+    this.emitMobileCalendarEvent(pending.profile, pending.sessionId, event, {
+      event,
+      [idKey]: requestId,
+      target_device_id: pending.target.deviceCode,
+      target_user_id: pending.target.userId,
+      target_profile: pending.target.profile,
+      status: response.status,
+      resolved: true,
+      ...(response.status === 'error' ? { error: response.error } : {}),
+    })
+    pending.resolve({ ...response, device_id: mobileDeviceId(pending.target) })
+    return true
+  }
+  private finishMobileHealthRequest(requestId: string, response: MobileHealthResponse): boolean {
+    const pending = this.pendingMobileHealth.get(requestId)
+    if (!pending) return false
+    this.pendingMobileHealth.delete(requestId)
+    clearTimeout(pending.timer)
+    this.clearMobileHealthEventState(pending.sessionId, requestId)
+    this.emitMobileHealthEvent(pending.sessionId, 'health.resolved', {
+      event: 'health.resolved',
+      health_request_id: requestId,
+      target_device_id: pending.target.deviceCode,
+      target_user_id: pending.target.userId,
+      target_profile: pending.target.profile,
+      status: response.status,
+      resolved: true,
+      ...(response.status === 'error' ? { error: response.error } : {}),
+    })
+    pending.resolve({ ...response, device_id: mobileDeviceId(pending.target) })
+    return true
+  }
+  private clearMobileHealthEventState(sessionId: string, requestId: string): void {
+    const state = this.sessionMap.get(sessionId)
+    if (!state?.events.length) return
+    state.events = state.events.filter(({ event, data }) =>
+      !['health.requested', 'health.resolved'].includes(event) || data?.health_request_id !== requestId)
+  }
+  private emitMobileHealthEvent(sessionId: string, event: 'health.requested' | 'health.resolved', payload: any): void {
+    const tagged = { ...payload, session_id: sessionId }
+    if (event === 'health.requested') {
+      const state = getOrCreateSession(this.sessionMap, sessionId)
+      state.events = state.events.filter(({ event: current }) => !['health.requested', 'health.resolved'].includes(current))
+      state.events.push({ event, data: tagged })
+    }
+    const target: MobileDeviceTarget = { deviceCode: payload.target_device_id, userId: payload.target_user_id, profile: payload.target_profile }
+    this.nsp.to(mobileDeviceRoom(target)).emit(event, tagged)
+  }
+  private clearMobileCalendarEventState(sessionId: string, requestId: string): void {
+    const state = this.sessionMap.get(sessionId)
+    if (!state?.events.length) return
+    state.events = state.events.filter(({ event, data }) => {
+      if (!['calendar.requested', 'calendar.resolved', 'reminder.requested', 'reminder.resolved'].includes(event)) return true
+      return data?.calendar_request_id !== requestId && data?.reminder_request_id !== requestId
+    })
+  }
+  private emitMobileCalendarEvent(profile: string, sessionId: string, event: string, payload: any): void {
+    const tagged = { ...payload, session_id: sessionId }
+    if (event === 'calendar.requested' || event === 'reminder.requested') {
+      const state = getOrCreateSession(this.sessionMap, sessionId)
+      state.events = state.events.filter(({ event: current }) =>
+        !['calendar.requested', 'calendar.resolved', 'reminder.requested', 'reminder.resolved'].includes(current))
+      state.events.push({ event, data: tagged })
+    }
+    const target: MobileDeviceTarget = { deviceCode: payload.target_device_id, userId: payload.target_user_id, profile: payload.target_profile }
+    this.nsp.to(mobileDeviceRoom(target)).emit(event, tagged)
+  }
+  private emitToSession(socket: Socket, sessionId: string, event: string, payload: any) {
+    const tagged = { ...payload, session_id: sessionId }
+    const profile = this.resolvePetEventProfile(sessionId, tagged)
+    const state = this.sessionMap.get(sessionId)
+    const session = getSession(sessionId)
+    const storedAgent = String(session?.agent || '')
+    observeChatRunWebhookEvent({
+      pushTargetId: state?.isWorking ? state.pushTargetId : undefined,
+      event,
+      sessionId,
+      profile,
+      source: state?.source || session?.source || 'chat',
+      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : (storedAgent === 'cursor' || (storedAgent === 'antigravity' || isNativeCodingAgent(storedAgent))) ? storedAgent : storedAgent === 'dsh' ? 'dsh' : storedAgent === 'opencode' ? 'opencode' : storedAgent === 'ekko-agent' ? 'ekko' : 'bridge'),
+      payload: tagged,
+      roomId: state?.webhookRoomId,
+      workflowId: state?.webhookWorkflowId,
+      workflowNodeId: state?.webhookWorkflowNodeId,
+    })
+    if (!isPrivatePersonSession(sessionId)) this.observePetEvent(profile, event, tagged)
+    observePersonPresenceEvent(sessionId, event, tagged)
+    this.emitPendingInteraction(profile, event, tagged)
+    const display = personDisplayEvent(sessionId, event, tagged)
+    if (display === null) return
+    this.nsp.to(`session:${sessionId}`).emit(event, display)
+    if (!this.nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
+      socket.emit(event, display)
+    }
+  }
+
+  private emitPendingInteraction(profile: string, event: string, payload: any) {
+    if (isPrivatePersonSession(payload?.session_id)) {
+      const session = getSession(payload.session_id)
+      const userId = Number(session?.studio_user_id)
+      if (session?.id !== payload.session_id || !ownsPersonSession(userId, session) || payload.replayed || payload.restored || payload.background_snapshot) return
+      // Silent state must reach the App even when there is no visible notice.
+      this.emitSessionActivity(profile, event, payload)
+      const interaction = ['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)
+      const notice = foregroundNotification(event, payload)
+      if (!interaction && (!notice || ['cancelled', 'canceled'].includes(payload.stop_reason))) return
+      const name = `person.${event.replace('clarify.', 'clarification.')}`
+      const display = personDisplayEvent(payload.session_id, event, payload) || {}
+      const preview = event === 'run.completed' ? { ...display, output: chatCompletionText({ type: name,
+        subject: { session_id: session!.id, message_id: payload.message_id }, payload: display }) } : display
+      const data = interaction ? { ...display, event: name }
+        : { event: name, session_id: session!.id, run_id: payload.run_id, notification_id: notice!.id,
+          timestamp: Date.now(), output: foregroundNotificationPreview(notice!.kind, session, preview).content }
+      // Reuse the authenticated chat transports and their existing notification handlers.
+      for (const namespace of ['/chat-run', '/global-agent']) {
+        this.io.of(namespace).to(personNotificationRoom(userId)).emit(name, data)
+      }
+      return
+    }
+    this.emitSessionActivity(profile, event, payload)
+    if (event !== 'approval.requested' && event !== 'approval.resolved'
+      && event !== 'clarify.requested' && event !== 'clarify.resolved'
+      && event !== 'location.requested' && event !== 'location.resolved'
+      && event !== 'calendar.requested' && event !== 'calendar.resolved'
+      && event !== 'reminder.requested' && event !== 'reminder.resolved'
+      && event !== 'health.requested' && event !== 'health.resolved') return
+    const sessionId = typeof payload?.session_id === 'string' ? payload.session_id : ''
+    const source = sessionId
+      ? this.sessionMap.get(sessionId)?.source || getSession(sessionId)?.source
+      : undefined
+    if (source === 'group_chat') return
+    this.nsp.to(`pending-interactions:${profile}`).emit(event, payload)
+  }
+
+  private emitSessionActivity(profile: string, event: string, payload: any) {
+    this.sessionStateSync.observe(event, payload)
+    const sessionId = typeof payload?.session_id === 'string' ? payload.session_id : ''
+    if (!sessionId) return
+
+    let status: 'running' | 'completed' | 'failed' | null = null
+    if (event === 'run.started' || (event === 'session.command' && payload.started === true && payload.terminal !== true)) {
+      status = 'running'
+    } else if (event === 'run.completed') {
+      status = Number(payload.queue_remaining || 0) > 0 ? 'running' : 'completed'
+    } else if (event === 'run.failed') {
+      status = Number(payload.queue_remaining || 0) > 0 ? 'running' : 'failed'
+    } else if (event === 'abort.completed') {
+      status = Number(payload.queue_length || 0) > 0 ? 'running' : 'completed'
+    } else if (event === 'session.command' && payload.terminal === true) {
+      status = payload.ok === false || payload.action === 'error' ? 'failed' : 'completed'
+    }
+    if (!status) return
+
+    const state = this.sessionMap.get(sessionId)
+    const source = state?.source || getSession(sessionId)?.source
+    const runId = state?.activeRunMarker || state?.responseRun?.runMarker || payload.run_marker || state?.runId || payload.run_id
+    if (isPersonSession(sessionId)) publishAppState({ ...stateEvent('person.run.updated', profile,
+      { session_id: sessionId, run_id: runId },
+      { state: { session_id: sessionId, status, timestamp: Date.now(), started_at: state?.runStartedAt,
+        reset_progress: event === 'run.started' } }), source: 'person' })
+    if (!isPrivatePersonSession(sessionId) && source !== 'group_chat' && source !== 'workflow') publishAppState(stateEvent('chat.run.updated', profile,
+      { session_id: sessionId, run_id: runId },
+      { state: { session_id: sessionId, status, timestamp: Date.now(), started_at: state?.runStartedAt,
+        reset_progress: event === 'run.started' } }))
+
+    this.nsp.to(isPrivatePersonSession(sessionId) ? `session:${sessionId}` : [`pending-interactions:${profile}`, `session:${sessionId}`]).emit('session.activity', {
+      event: 'session.activity',
+      session_id: sessionId,
+      status,
+      timestamp: Date.now(),
+    })
+  }
+
+  private serializeQueuedMessages(queue: QueuedRun[]) {
+    return queue.filter(item => item.displayInput !== null).map(item => ({
+      id: item.queue_id,
+      role: item.displayRole || (typeof item.displayInput === 'string' && item.displayInput.trim().startsWith('/') ? 'command' : 'user'),
+      content: contentBlocksToString(item.displayInput ?? item.input),
+      timestamp: Math.floor(Date.now() / 1000),
+      queued: true,
+    }))
+  }
+
+  private canAccessProfile(user: AuthenticatedUser, profile: string): boolean {
+    return user.role === 'super_admin' || userCanAccessProfile(user.id, profile)
+  }
+
+  /** Close all active upstream response streams */
+  async close() {
+    if (this.closing) return
+    this.closing = true
+    this.stopUsageUpdates()
+    this.stopPersonUpdates()
+    this.sessionStateSync.close()
+    for (const sessionId of this.sessionMap.keys()) this.finishTaskPlanRun(sessionId, 'abort.completed')
+    if (this.backgroundPollTimer) {
+      clearInterval(this.backgroundPollTimer)
+      this.backgroundPollTimer = undefined
+    }
+    for (const requestId of [...this.pendingMobileLocations.keys()]) {
+      this.finishMobileLocationRequest(requestId, {
+        status: 'error',
+        error: { code: 'location_failed' },
+      })
+    }
+    for (const requestId of [...this.pendingMobileCalendar.keys()]) {
+      this.finishMobileCalendarRequest(requestId, {
+        status: 'error',
+        error: { code: 'calendar_failed' },
+      })
+    }
+    for (const requestId of [...this.pendingMobileHealth.keys()]) {
+      this.finishMobileHealthRequest(requestId, { status: 'error', error: { code: 'health_failed' } })
+    }
+    const releaseClaims: Array<Promise<unknown>> = []
+    for (const [sessionId, state] of this.sessionMap.entries()) {
+      if (state.abortController) {
+        try {
+          state.abortController.abort()
+        } catch (e) {
+          logger.warn(e, '[chat-run-socket] failed to abort controller for session %s', sessionId)
+        }
+      }
+      for (const queued of state.queue) {
+        if (!queued.backgroundDelegationId || !queued.backgroundClaimId) continue
+        releaseClaims.push(this.backgroundBridge.releaseBackgroundNotification(
+          sessionId,
+          queued.profile,
+          queued.backgroundDelegationId,
+          queued.backgroundClaimId,
+        ))
+      }
+    }
+    this.sessionMap.clear()
+    const releaseResults = await Promise.allSettled(releaseClaims)
+    for (const result of releaseResults) {
+      if (result.status === 'rejected') {
+        logger.warn(result.reason, '[chat-run-socket] failed to release queued background notification on close')
+      }
+    }
+    await Promise.allSettled([this.bridge.close(), this.backgroundBridge.close()])
+    logger.info('[chat-run-socket] closed all connections and cleared state')
+  }
+
+  private resolvePetEventProfile(sessionId: string, payload: Record<string, unknown>): string {
+    const payloadProfile = typeof payload.profile === 'string' ? payload.profile.trim() : ''
+    if (payloadProfile) return payloadProfile
+    const stateProfile = this.sessionMap.get(sessionId)?.profile
+    if (stateProfile) return stateProfile
+    const storedProfile = getSession(sessionId)?.profile
+    return storedProfile || 'default'
+  }
+
+  private observePetEvent(profile: string, event: string, payload: Record<string, unknown>): void {
+    try {
+      observeRunChatPetEvent(profile, event, payload)
+    } catch (err) {
+      logger.debug(err, '[chat-run-socket] failed to update pet state')
+    }
+  }
+}
+import { handlePluginCommand } from '../services/plugins/command'

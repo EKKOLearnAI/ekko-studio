@@ -1,0 +1,347 @@
+import { join } from 'path'
+import { readFileSync, existsSync } from 'fs'
+import yaml from 'js-yaml'
+import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
+import { readModelContextRecord } from '../../../studio/public/provider-context'
+import { getModelCatalog as loadModelsDevCache, resolveCatalogModel, catalogReasoningEfforts } from '../../../studio/public/model-catalog'
+import { resolveConfiguredModelEndpoint } from './endpoint'
+import { detectHermesHome } from '../runtime/path'
+
+const HERMES_BASE = detectHermesHome()
+const DEFAULT_CONTEXT_LENGTH = 256_000
+
+function fallbackContextLength(options: ModelContextLengthOptions): number {
+  return options.fallbackContextLength && options.fallbackContextLength > 0
+    ? Math.floor(options.fallbackContextLength)
+    : DEFAULT_CONTEXT_LENGTH
+}
+
+export interface ModelContextLengthOptions {
+  profile?: string
+  model?: string | null
+  provider?: string | null
+  baseUrl?: string | null
+  fallbackContextLength?: number
+}
+
+interface ModelLimit {
+  context?: number
+  output?: number
+  input?: number
+}
+
+interface ModelEntry {
+  id?: string
+  name?: string
+  limit?: ModelLimit
+  reasoning?: boolean
+  reasoning_options?: Array<{ type: string; values?: string[]; min?: number; max?: number }>
+  attachment?: boolean
+  modalities?: {
+    input?: string[]
+    output?: string[]
+  }
+}
+
+interface CustomProviderEntry {
+  name?: string
+  base_url?: string
+  model?: string
+  models?: Record<string, { context_length?: number }>
+}
+
+type ConfigProviderModels = Record<string, { context_length?: number } | string> | string[]
+
+interface ConfigProviderEntry {
+  context_length?: number
+  default_model?: string
+  model?: string
+  models?: ConfigProviderModels
+}
+
+// --- Config YAML helpers (js-yaml) ---
+
+function loadConfig(profileDir: string): any | null {
+  const configPath = join(profileDir, 'config.yaml')
+  if (!existsSync(configPath)) return null
+  try {
+    return yaml.load(readFileSync(configPath, 'utf-8'), { json: true }) as any
+  } catch {
+    return null
+  }
+}
+
+// --- Profile helpers ---
+
+function getProfileDir(profile?: string): string {
+  if (!profile || profile === 'default') return HERMES_BASE
+  const dir = join(HERMES_BASE, 'profiles', profile)
+  return existsSync(dir) ? dir : HERMES_BASE
+}
+
+function getDefaultModel(config: any): string | null {
+  const model = config?.model
+  if (!model || typeof model !== 'object') return null
+  return typeof model.default === 'string' ? model.default.trim() || null : null
+}
+
+function getDefaultProvider(config: any): string | null {
+  const model = config?.model
+  if (!model || typeof model !== 'object') return null
+  return typeof model.provider === 'string' ? model.provider.trim() || null : null
+}
+
+function resolveMoaAggregator(config: any, presetName: string): { model: string; provider: string } | null {
+  const moa = config?.moa
+  if (!moa || typeof moa !== 'object' || Array.isArray(moa)) return null
+  const presets = moa.presets
+  if (!presets || typeof presets !== 'object' || Array.isArray(presets)) return null
+  const preset = presets[presetName]
+  if (!preset || typeof preset !== 'object' || Array.isArray(preset)) return null
+  const aggregator = preset.aggregator
+  if (!aggregator || typeof aggregator !== 'object' || Array.isArray(aggregator)) return null
+  const model = typeof aggregator.model === 'string' ? aggregator.model.trim() : ''
+  const provider = typeof aggregator.provider === 'string' ? aggregator.provider.trim() : ''
+  return model && provider ? { model, provider } : null
+}
+
+/**
+ * Read context_length from config.yaml, only as a sibling of default.
+ * e.g. model:\n  default: gpt-5.4\n  context_length: 256000
+ */
+function getConfigContextLength(config: any): number | null {
+  const model = config?.model
+  if (!model || typeof model !== 'object') return null
+  const val = model.context_length
+  if (typeof val !== 'number' || !Number.isFinite(val) || val <= 0) return null
+  return val
+}
+
+function getConfigProvider(config: any, provider: string | null): ConfigProviderEntry | null {
+  if (!provider) return null
+  const providers = config?.providers
+  if (!providers || typeof providers !== 'object') return null
+  const exact = providers[provider]
+  if (exact && typeof exact === 'object') return exact as ConfigProviderEntry
+  const lower = provider.toLowerCase()
+  const match = Object.entries(providers).find(([name]) => name.toLowerCase() === lower)
+  const value = match?.[1]
+  return value && typeof value === 'object' ? value as ConfigProviderEntry : null
+}
+
+function getPositiveNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function providerHasModel(provider: ConfigProviderEntry, modelName: string): boolean {
+  if (provider.default_model === modelName || provider.model === modelName) return true
+  const models = provider.models
+  if (Array.isArray(models)) return models.includes(modelName)
+  return !!models && typeof models === 'object' && Object.prototype.hasOwnProperty.call(models, modelName)
+}
+
+function lookupProviderConfigContextLength(config: any, modelName: string, provider: string | null): number | null {
+  const providerEntry = getConfigProvider(config, provider)
+  if (!providerEntry) return null
+
+  const models = providerEntry.models
+  if (models && !Array.isArray(models) && typeof models === 'object') {
+    const modelEntry = models[modelName]
+    if (modelEntry && typeof modelEntry === 'object') {
+      const modelCtx = getPositiveNumber(modelEntry.context_length)
+      if (modelCtx) return modelCtx
+    }
+  }
+
+  if (!providerHasModel(providerEntry, modelName)) return null
+  return getPositiveNumber(providerEntry.context_length)
+}
+
+function normalizeCustomProviderName(name: string): string {
+  return name.trim().toLowerCase().replace(/ /g, '-')
+}
+
+function normalizeBaseUrl(url: string): string {
+  return url.trim().toLowerCase().replace(/\/+$/, '')
+}
+
+function getModelBaseUrl(config: any): string | null {
+  const model = config?.model
+  if (!model || typeof model !== 'object') return null
+  return typeof model.base_url === 'string' ? model.base_url.trim() || null : null
+}
+
+function getCustomProviders(config: any): CustomProviderEntry[] {
+  // Read from both legacy `custom_providers:` list and v12+ `providers:` dict
+  // so context-length resolution stays correct after a v11→v12 migration.
+  return getCompatibleCustomProviders(config) as unknown as CustomProviderEntry[]
+}
+
+function resolveCustomProviderEntry(config: any, modelName: string, provider: string | null): CustomProviderEntry | null {
+  if (!provider || !provider.startsWith('custom')) return null
+
+  const providers = getCustomProviders(config)
+  if (provider !== 'custom') {
+    const suffix = normalizeCustomProviderName(provider.slice('custom:'.length))
+    return providers.find((cp) => normalizeCustomProviderName(String(cp?.name || '')) === suffix) || null
+  }
+
+  const modelBaseUrl = getModelBaseUrl(config)
+  if (modelBaseUrl) {
+    const normalizedBaseUrl = normalizeBaseUrl(modelBaseUrl)
+    const exactByBaseUrl = providers.find((cp) =>
+      normalizeBaseUrl(String(cp?.base_url || '')) === normalizedBaseUrl
+      && String(cp?.model || '').trim() === modelName,
+    )
+    if (exactByBaseUrl) return exactByBaseUrl
+  }
+
+  const matchesByModel = providers.filter((cp) => String(cp?.model || '').trim() === modelName)
+  return matchesByModel.length === 1 ? matchesByModel[0] : null
+}
+
+/**
+ * Lookup context_length from custom_providers in config.yaml.
+ * - "custom:xxx" → strip prefix, match by name
+ * - "custom" → match by model name
+ */
+function lookupCustomProviderContextLength(config: any, modelName: string, provider: string | null): number | null {
+  const matched = resolveCustomProviderEntry(config, modelName, provider)
+  if (!matched) return null
+
+  const models = matched.models
+  if (!models || typeof models !== 'object') return null
+
+  const modelEntry = models[modelName]
+  if (!modelEntry || typeof modelEntry !== 'object') return null
+
+  const val = modelEntry.context_length
+  if (typeof val !== 'number' || !Number.isFinite(val) || val <= 0) return null
+  return val
+}
+
+// --- Context lookup ---
+
+function getCachedContext(entry: ModelEntry | undefined): number | null {
+  const context = entry?.limit?.context
+  return typeof context === 'number' && Number.isFinite(context) && context > 0 ? context : null
+}
+
+function lookupModelFromCache(config: any, model: string, provider: string | null, options: ModelContextLengthOptions): ModelEntry | undefined {
+  const catalog = loadModelsDevCache()
+  if (!catalog) return undefined
+  let envContent = ''
+  try { envContent = readFileSync(join(getProfileDir(options.profile), '.env'), 'utf8') } catch {}
+  const baseUrl = options.baseUrl?.trim() || resolveConfiguredModelEndpoint(config, provider, model, envContent)
+  return resolveCatalogModel(catalog, { provider, baseUrl, model })?.model
+}
+
+/**
+ * Get the context length for the current profile's default model.
+ * Resolution order:
+ *   1. model_context database override
+ *   2. provider/model-specific providers.<provider>.models.<model>.context_length
+ *   3. provider-level providers.<provider>.context_length when the model belongs to that provider
+ *   4. custom_providers models.<model>.context_length
+ *   5. top-level model.context_length fallback
+ *   6. Studio's shared models.dev catalog: provider, endpoint, then model ID
+ *   7. DEFAULT_CONTEXT_LENGTH
+ */
+/**
+ * 从数据库 model_context 表查找上下文长度（最高优先级）
+ */
+function lookupContextFromDatabase(modelName: string, provider: string | null, profile = 'default'): number | null {
+  try {
+    const result = readModelContextRecord(profile || 'default', provider || 'default', modelName)
+    return result.available ? result.row?.context_limit || null : null
+  } catch {
+    return null
+  }
+}
+
+export function getModelContextLength(input?: string | ModelContextLengthOptions): number {
+  const options: ModelContextLengthOptions = typeof input === 'string'
+    ? { profile: input }
+    : input || {}
+  const profile = options.profile
+  const profileDir = getProfileDir(profile)
+  // Explicit model/database overrides are valid even before config.yaml exists.
+  const config = loadConfig(profileDir) || {}
+
+  let model = String(options.model || '').trim() || getDefaultModel(config)
+  if (!model) return fallbackContextLength(options)
+
+  let provider = String(options.provider || '').trim() || getDefaultProvider(config)
+
+  // 0. Database model_context table (highest priority). Keep a virtual MoA
+  // preset override addressable as moa/<preset> before resolving its acting
+  // aggregator model.
+  const dbCtx = lookupContextFromDatabase(model, provider, profile)
+  if (dbCtx && dbCtx > 0) return dbCtx
+
+  if (provider?.toLowerCase() === 'moa') {
+    const aggregator = resolveMoaAggregator(config, model)
+    if (!aggregator) return fallbackContextLength(options)
+    model = aggregator.model
+    provider = aggregator.provider
+
+    const aggregatorDbCtx = lookupContextFromDatabase(model, provider, profile)
+    if (aggregatorDbCtx && aggregatorDbCtx > 0) return aggregatorDbCtx
+  }
+
+  // 1. Provider-specific context_length in config.yaml
+  const providerConfigCtx = lookupProviderConfigContextLength(config, model, provider)
+  if (providerConfigCtx && providerConfigCtx > 0) return providerConfigCtx
+
+  // 2. Custom provider context_length
+  const customCtx = lookupCustomProviderContextLength(config, model, provider)
+  if (customCtx && customCtx > 0) return customCtx
+
+  // 3. Global context_length fallback in config.yaml
+  const configCtx = getConfigContextLength(config)
+  if (configCtx && configCtx > 0) return configCtx
+
+  // 4. Shared local models.dev catalog
+  const cached = getCachedContext(lookupModelFromCache(config, model, provider, options))
+  if (cached) return cached
+
+  // 5. Fallback
+  return fallbackContextLength(options)
+}
+
+export function getModelRuntimeCapabilities(input: ModelContextLengthOptions): {
+  contextWindow: number
+  outputLimit: number
+  /** False when outputLimit is the generic fallback, not model metadata. */
+  outputLimitKnown: boolean
+  reasoning: boolean
+  reasoningEfforts?: string[]
+  input: Array<'text' | 'image'>
+} {
+  const contextWindow = getModelContextLength(input)
+  const config = loadConfig(getProfileDir(input.profile)) || {}
+  let model = String(input.model || '').trim() || getDefaultModel(config) || ''
+  let provider = String(input.provider || '').trim() || getDefaultProvider(config) || ''
+  if (provider.toLowerCase() === 'moa') {
+    const aggregator = resolveMoaAggregator(config, model)
+    model = aggregator?.model || ''
+    provider = aggregator?.provider || ''
+  }
+  const entry = model ? lookupModelFromCache(config, model, provider, input) : undefined
+  const reasoningEfforts = catalogReasoningEfforts(entry)
+  const knownOutputLimit = getPositiveNumber(entry?.limit?.output)
+  const outputLimit = knownOutputLimit || Math.min(32_000, contextWindow)
+  // Unknown custom models must remain usable. A missing models.dev entry is
+  // absence of metadata, not evidence that reasoning or image input is
+  // unsupported. Keep the runtime permissive and let the upstream provider
+  // return a capability error if it truly cannot accept the requested mode.
+  const imageInput = !entry || entry.attachment === true || entry.modalities?.input?.includes('image') === true
+  return {
+    contextWindow,
+    outputLimit: Math.min(outputLimit, contextWindow),
+    outputLimitKnown: Boolean(knownOutputLimit),
+    reasoning: entry ? entry.reasoning === true : true,
+    ...(reasoningEfforts !== undefined ? { reasoningEfforts } : {}),
+    input: imageInput ? ['text', 'image'] : ['text'],
+  }
+}

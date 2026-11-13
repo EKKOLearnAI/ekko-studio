@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: bin
-title: Hermes Web UI CLI & MCP Server Entrypoints
-scope:
-    - bin/
-source_files: []
-depends_on: []
-related_to: []

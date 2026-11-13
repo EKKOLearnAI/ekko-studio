@@ -1,6 +1,6 @@
 import { app } from 'electron'
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { homedir, platform } from 'node:os'
 import {
   resolveRuntimeResourceDir,
@@ -10,7 +10,7 @@ import {
 import { hermesAgentVersionFromRuntimeTag } from './runtime-version'
 
 const isWin = platform() === 'win32'
-const DEFAULT_HERMES_AGENT_VERSION = '0.20.6'
+const DEFAULT_HERMES_AGENT_VERSION = '0.22.5'
 const PACKAGED_RUNTIME_RELEASE_NAME = 'runtime-release.json'
 const ACTIVE_RUNTIME_VERSION_NAME = 'active-version.json'
 let incompleteActiveWebUiWarningPath = ''
@@ -32,6 +32,7 @@ type RuntimeReleaseMetadata = {
 }
 
 type ActiveRuntimeVersion = {
+  schema?: unknown
   desktopAppVersion?: unknown
   platform?: unknown
   webUiVersion?: unknown
@@ -40,8 +41,17 @@ type ActiveRuntimeVersion = {
   pendingRuntimeRootDirectory?: unknown
   runtimeMigrationError?: unknown
   runtimeActivationError?: unknown
+  runtimeValidationFailures?: RuntimeValidationFailure[]
   webUiDirectory?: unknown
   updatedAt?: unknown
+}
+
+type RuntimeValidationFailure = {
+  version: string
+  platform: string
+  directory: string
+  reason: string
+  failedAt: string
 }
 
 function runtimeRequiredFileGroups(root: string): string[][] {
@@ -55,7 +65,11 @@ function runtimeRequiredFileGroups(root: string): string[][] {
       ]
     : [join(environmentRoot, 'bin', 'hermes')]
   const node = isWin ? join(root, 'node', 'node.exe') : join(root, 'node', 'bin', 'node')
-  const groups = [[python], hermes, [node]]
+  const groups = [
+    [python],
+    hermes,
+    [node],
+  ]
   if (isWin) groups.push([join(root, 'git', 'cmd', 'git.exe')])
   return groups
 }
@@ -91,12 +105,17 @@ function installedRuntimeDirectories(): Array<{ directory: string; version: stri
   const root = join(runtimeStorageRoot(), 'hermes')
   const currentPlatform = runtimePlatformKey()
   if (!existsSync(root)) return []
+  const failedDirectories = new Set(
+    (readActiveRuntimeVersion()?.runtimeValidationFailures || [])
+      .map(failure => resolve(failure.directory)),
+  )
 
   const runtimes: Array<{ directory: string; version: string }> = []
   try {
     for (const versionEntry of readdirSync(root, { withFileTypes: true })) {
       if (!versionEntry.isDirectory()) continue
       const platformDir = join(root, versionEntry.name, currentPlatform)
+      if (failedDirectories.has(resolve(platformDir))) continue
       if (!runtimeDirectoryReady(platformDir)) continue
       runtimes.push({
         directory: platformDir,
@@ -124,7 +143,9 @@ function readActiveRuntimeVersion(): ActiveRuntimeVersion | null {
   }
 }
 
-function recordRuntimeActivationError(active: ActiveRuntimeVersion, error: string): void {
+export function recordRuntimeActivationError(error: string): void {
+  const active = readActiveRuntimeVersion()
+  if (!active) return
   const file = activeRuntimeVersionFile()
   if (active.runtimeActivationError === error) return
   try {
@@ -136,6 +157,60 @@ function recordRuntimeActivationError(active: ActiveRuntimeVersion, error: strin
   } catch (err) {
     console.warn(
       `[runtime] failed to persist Runtime activation error: `
+      + `${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
+
+export function recordRuntimeSelectionResult(
+  failures: Array<{ directory: string; reason: string; version?: string }>,
+  selected?: { directory: string; version: string },
+): void {
+  if (failures.length === 0) return
+  const active = readActiveRuntimeVersion() || { schema: 1 }
+  const detail = failures
+    .map(failure => `Runtime "${failure.directory}" failed: ${failure.reason}`)
+    .join(' ')
+  const failedAt = new Date().toISOString()
+  const failedDirectories = new Set(failures.map(failure => resolve(failure.directory)))
+  const selectedDirectory = selected ? resolve(selected.directory) : ''
+  const runtimeValidationFailures: RuntimeValidationFailure[] = [
+    ...(active.runtimeValidationFailures || []).filter(failure => {
+      const directory = resolve(failure.directory)
+      return directory !== selectedDirectory && !failedDirectories.has(directory)
+    }),
+    ...failures.map(failure => ({
+      version: failure.version || basename(dirname(failure.directory)),
+      platform: runtimePlatformKey(),
+      directory: failure.directory,
+      reason: failure.reason,
+      failedAt,
+    })),
+  ]
+  const next: Record<string, unknown> = {
+    ...active,
+    schema: 1,
+    runtimeActivationError: selected
+      ? `${detail} Using fallback Runtime "${selected.directory}".`
+      : `${detail} No usable installed Runtime was found.`,
+    runtimeValidationFailures,
+    updatedAt: failedAt,
+  }
+  if (selected) {
+    next.runtimeDirectory = selected.directory
+    next.hermesRuntimeVersion = selected.version
+    next.platform = runtimePlatformKey()
+  } else {
+    delete next.runtimeDirectory
+    delete next.hermesRuntimeVersion
+  }
+  const file = activeRuntimeVersionFile()
+  try {
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, JSON.stringify(next, null, 2) + '\n')
+  } catch (err) {
+    console.warn(
+      `[runtime] failed to persist Runtime selection result: `
       + `${err instanceof Error ? err.message : String(err)}`,
     )
   }
@@ -292,7 +367,7 @@ export function desktopRuntimeDir(): string {
       ? `${activationError} Falling back to "${fallback}".`
       : `${activationError} No usable installed Runtime was found.`
     console.warn(`[runtime] ${detail}`)
-    recordRuntimeActivationError(active, detail)
+    recordRuntimeActivationError(detail)
   }
   if (fallback) return resolve(fallback)
 
@@ -368,6 +443,7 @@ export function gitPathDirs(): string[] {
   return [
     join(dir, 'cmd'),
     join(dir, 'mingw64', 'bin'),
+    join(dir, 'clangarm64', 'bin'),
     // Do not expose Git for Windows' Unix toolchain on PATH. Its usr/bin
     // includes GNU tools like du.exe/find.exe, which can be picked up by
     // Hermes or subprocesses and recursively scan Windows profile/AppData
@@ -437,8 +513,9 @@ export function hermesBinExists(): boolean {
 }
 
 export function desktopIcon(): string {
-  if (isPackaged()) return resolve(process.resourcesPath, 'build', 'icon.png')
-  return resolve(desktopAppPath(), 'build', 'icon.png')
+  const filename = process.platform === 'linux' ? 'iconLinux.png' : 'icon.png'
+  if (isPackaged()) return resolve(process.resourcesPath, 'build', filename)
+  return resolve(desktopAppPath(), 'build', filename)
 }
 
 export function desktopWindowsTrayIcon(): string {
@@ -451,6 +528,11 @@ export function desktopMacTrayIcon(): string {
   return resolve(desktopAppPath(), 'build', 'trayMac.png')
 }
 
+export function desktopLinuxTrayIcon(): string {
+  if (isPackaged()) return resolve(process.resourcesPath, 'build', 'trayLinux.png')
+  return resolve(desktopAppPath(), 'build', 'trayLinux.png')
+}
+
 export function webUiHome(): string {
   return process.env.HERMES_WEB_UI_HOME?.trim() || resolve(homedir(), '.hermes-web-ui')
 }
@@ -459,23 +541,8 @@ export function hermesHome(): string {
   const override = process.env.HERMES_HOME?.trim()
   if (override) return resolve(override)
 
-  const defaultHome = resolve(homedir(), '.hermes')
-
-  if (isWin) {
-    const candidates = [
-      process.env.LOCALAPPDATA,
-      process.env.APPDATA,
-    ]
-      .map(value => value?.trim())
-      .filter((value): value is string => !!value)
-      .map(value => resolve(value, 'hermes'))
-
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) return candidate
-    }
-  }
-
-  return defaultHome
+  const userHome = isWin ? process.env.USERPROFILE?.trim() || homedir() : homedir()
+  return resolve(userHome, '.hermes')
 }
 
 export function tokenFile(): string {

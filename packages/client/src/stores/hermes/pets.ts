@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import * as petsApi from '@/api/pets'
-import type { ActivePet, WebPetPosition } from '@/api/pets'
+import * as petsApi from '@/api/studio/pets'
+import type { ActivePet, WebPetPosition } from '@/api/studio/pets'
 
 export const usePetsStore = defineStore('pets', () => {
   const activePet = ref<ActivePet | null>(null)
@@ -40,11 +40,7 @@ export const usePetsStore = defineStore('pets', () => {
     }
   }
 
-  async function savePreferences(input: {
-    scale?: number
-    position?: WebPetPosition
-    enabled?: boolean
-  }): Promise<void> {
+  async function savePreferences(input: { scale?: number; position?: WebPetPosition; enabled?: boolean }): Promise<void> {
     if (!activePet.value) return
     activePet.value = {
       ...activePet.value,

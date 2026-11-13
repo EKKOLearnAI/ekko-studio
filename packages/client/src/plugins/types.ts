@@ -18,7 +18,7 @@ import type { I18n } from 'vue-i18n'
 
 export type SupportedLocale =
   | 'ar' | 'de' | 'en' | 'es' | 'fr' | 'ja' | 'ko'
-  | 'pt' | 'ru' | 'zh' | 'zh-TW'
+  | 'pt' | 'ru' | 'zh' | 'zh-TW' | 'tr'
 
 export interface PluginSidebarItem {
   /** 路由 name，与插件注册 addRoute() 的 name 对应。 */
@@ -96,7 +96,9 @@ export function readPluginEnabledMap(): Record<string, boolean> {
 
 export function writePluginEnabledMap(map: Record<string, boolean>): void {
   if (typeof localStorage === 'undefined') return
-  localStorage.setItem(PLUGIN_STATE_STORAGE_KEY, JSON.stringify(map))
+  try { localStorage.setItem(PLUGIN_STATE_STORAGE_KEY, JSON.stringify(map)) } catch (error) {
+    console.warn('[plugins] Failed to persist enabled state', error)
+  }
 }
 
 export function isPluginEnabled(pluginId: string, enabledByDefault: boolean): boolean {

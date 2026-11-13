@@ -1,3 +1,4 @@
+import { meetingWebSocketUrl } from '@/utils/meeting-websocket'
 import { computed, nextTick, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMeetingStore } from '@/stores/hermes/meeting'
@@ -217,7 +218,7 @@ export function useMeetingAudio(deps: UseMeetingAudioDeps) {
         }
 
         // 创建新的 ASR WebSocket
-        ws = new WebSocket(ASR_URL)
+        ws = new WebSocket(meetingWebSocketUrl(ASR_URL))
 
         ws.onopen = () => {
           console.log('[meeting] ASR WebSocket reconnected')
@@ -361,7 +362,7 @@ export function useMeetingAudio(deps: UseMeetingAudioDeps) {
       if (isSaveMode) {
         // 节省模式：只连接 Diarize WebSocket，不走实时ASR
         console.log('[meeting] Save mode: only connecting to Diarize WebSocket:', DIARIZE_URL)
-        diarizeWs = new WebSocket(DIARIZE_URL)
+        diarizeWs = new WebSocket(meetingWebSocketUrl(DIARIZE_URL))
 
         diarizeWs.onopen = () => {
           console.log('Diarize WebSocket connected (save mode)')
@@ -405,7 +406,7 @@ export function useMeetingAudio(deps: UseMeetingAudioDeps) {
 
         // 连接 ASR WebSocket (实时转写)
         console.log('[meeting] Connecting to ASR WebSocket:', ASR_URL)
-        ws = new WebSocket(ASR_URL)
+        ws = new WebSocket(meetingWebSocketUrl(ASR_URL))
 
         ws.onopen = () => {
           console.log('ASR WebSocket connected')
@@ -444,7 +445,7 @@ export function useMeetingAudio(deps: UseMeetingAudioDeps) {
 
         // 同时连接 Diarize WebSocket (说话人分离)
         console.log('[meeting] Connecting to Diarize WebSocket:', DIARIZE_URL)
-        diarizeWs = new WebSocket(DIARIZE_URL)
+        diarizeWs = new WebSocket(meetingWebSocketUrl(DIARIZE_URL))
 
         diarizeWs.onopen = () => {
           console.log('Diarize WebSocket connected')
@@ -479,7 +480,7 @@ export function useMeetingAudio(deps: UseMeetingAudioDeps) {
 
         const asrUrl = ASR_URL
         console.log('[meeting] Connecting to ASR WebSocket:', asrUrl)
-        ws = new WebSocket(asrUrl)
+        ws = new WebSocket(meetingWebSocketUrl(asrUrl))
 
         ws.onopen = () => {
           console.log('ASR WebSocket connected')

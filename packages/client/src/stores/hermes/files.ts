@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import * as filesApi from '@/api/hermes/files'
+import * as filesApi from '@/api/studio/files'
 import {
   copySessionWorkspaceFile,
   deleteSessionWorkspaceFile,
@@ -10,8 +10,8 @@ import {
   readSessionWorkspaceFile,
   renameSessionWorkspaceFile,
   writeSessionWorkspaceFile,
-} from '@/api/hermes/sessions'
-import type { FileEntry, FileListResult } from '@/api/hermes/files'
+} from '@/api/studio/sessions'
+import type { FileEntry, FileListResult } from '@/api/studio/files'
 import {
   copyGroupWorkspaceFile,
   deleteGroupWorkspaceFile,
@@ -21,13 +21,13 @@ import {
   readGroupWorkspaceFile,
   renameGroupWorkspaceFile,
   writeGroupWorkspaceFile,
-} from '@/api/hermes/group-chat'
+} from '@/api/studio/group-chat'
 import {
   getFilePreviewKind,
   getTextPreviewLanguage,
   type FilePreviewKind,
 } from '@/utils/hermes/file-preview'
-import { fetchAuthenticatedBlob } from '@/api/hermes/binary-content'
+import { fetchAuthenticatedBlob } from '@/api/studio/binary-content'
 
 export { isImageFile, isMarkdownFile, isPreviewableFile, isTextFile } from '@/utils/hermes/file-preview'
 
@@ -373,7 +373,12 @@ export const useFilesStore = defineStore('files', () => {
     commitPreview(requestSeq, common)
   }
 
-  async function openRemotePreview(sourceUrl: string, fileName: string, size = -1): Promise<boolean> {
+  async function openRemotePreview(
+    sourceUrl: string,
+    fileName: string,
+    size = -1,
+    context: { workspaceSessionId?: string | null; workspaceRoomId?: string | null } = {},
+  ): Promise<boolean> {
     const type = getFilePreviewKind(fileName)
     if (!type) return false
     const common = {
@@ -383,6 +388,7 @@ export const useFilesStore = defineStore('files', () => {
       profile: null,
       sourceUrl,
       type,
+      ...context,
     }
     if (type === 'markdown' || type === 'text') {
       const blob = await fetchAuthenticatedBlob(sourceUrl, { profile: null })

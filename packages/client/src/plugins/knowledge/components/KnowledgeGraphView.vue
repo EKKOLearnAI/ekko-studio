@@ -141,11 +141,11 @@ function onNodeClick(node: PositionedNode): void {
 
     <div class="graph-legend">
       <span class="legend-item">
-        <span class="legend-dot" style="background:#2080f0"></span>
+        <span class="legend-dot" style="background:var(--accent-info)"></span>
         {{ t('knowledge.graph.legend.vault') }}
       </span>
       <span class="legend-item">
-        <span class="legend-dot" style="background:#18a058"></span>
+        <span class="legend-dot" style="background:var(--success)"></span>
         {{ t('knowledge.graph.legend.document') }}
       </span>
     </div>
@@ -160,7 +160,7 @@ function onNodeClick(node: PositionedNode): void {
   width: 100%;
   height: 480px;
   overflow: hidden;
-  background: var(--card-color-2, rgba(255, 255, 255, 0.02));
+  background: var(--card-color-2, rgba(var(--text-primary-rgb), 0.02));
   border-radius: 6px;
 }
 .graph-svg {
@@ -169,7 +169,7 @@ function onNodeClick(node: PositionedNode): void {
   display: block;
 }
 .graph-edge {
-  stroke: var(--border-color, rgba(255, 255, 255, 0.15));
+  stroke: var(--border-color, rgba(var(--text-primary-rgb), 0.15));
   stroke-width: 1.5;
 }
 .graph-node {
@@ -184,7 +184,7 @@ function onNodeClick(node: PositionedNode): void {
 }
 .graph-node-label {
   font-size: 12px;
-  fill: var(--text-color, rgba(255, 255, 255, 0.85));
+  fill: var(--text-color, rgba(var(--text-primary-rgb), 0.85));
   pointer-events: none;
 }
 .graph-legend {

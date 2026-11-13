@@ -1,5 +1,5 @@
 /**
- * POST /api/hermes/speech-practice/omni-analysis controller tests.
+ * POST /api/studio/speech-practice/omni-analysis controller tests.
  *
  * The DashScope call itself is covered with an injected fetch in
  * speech-practice-omni.test.ts; here the service is mocked so the
@@ -8,21 +8,21 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../packages/server/src/services/speech-practice-omni', () => ({
+vi.mock('../../packages/server/src/modules/studio/services/speech-practice-omni', () => ({
   generateOmniPracticeAnalysis: vi.fn(),
   streamOmniPracticeAnalysis: vi.fn(),
   validateOmniAnalysisInput: vi.fn((input: unknown) => input),
   OMNI_ANALYSIS_DEFAULT_MODEL: 'qwen3.5-omni-flash',
 }))
 
-import { generateOmniPracticeAnalysis, streamOmniPracticeAnalysis, validateOmniAnalysisInput } from '../../packages/server/src/services/speech-practice-omni'
+import { generateOmniPracticeAnalysis, streamOmniPracticeAnalysis, validateOmniAnalysisInput } from '../../packages/server/src/modules/studio/services/speech-practice-omni'
 
 const generateMock = vi.mocked(generateOmniPracticeAnalysis)
 const streamMock = vi.mocked(streamOmniPracticeAnalysis)
 const validateMock = vi.mocked(validateOmniAnalysisInput)
 
 async function dispatch(body: unknown): Promise<{ status: number; body: unknown }> {
-  const { generateOmniAnalysis } = await import('../../packages/server/src/controllers/hermes/speech-practice')
+  const { generateOmniAnalysis } = await import('../../packages/server/src/modules/studio/controllers/speech-practice')
   const ctx: any = {
     request: { body },
     status: 0,
@@ -50,7 +50,7 @@ beforeEach(() => {
   validateMock.mockImplementation((input: unknown) => input as never)
 })
 
-describe('POST /api/hermes/speech-practice/omni-analysis controller', () => {
+describe('POST /api/studio/speech-practice/omni-analysis controller', () => {
   it('returns the generated markdown on success', async () => {
     generateMock.mockResolvedValue('## 四、AI 全模态深度分析\n\n正文')
     const res = await dispatch(sampleBody())
@@ -90,7 +90,7 @@ describe('POST /api/hermes/speech-practice/omni-analysis controller', () => {
   })
 })
 
-describe('POST /api/hermes/speech-practice/omni-analysis controller (SSE stream)', () => {
+describe('POST /api/studio/speech-practice/omni-analysis controller (SSE stream)', () => {
   function sseCtx(body: unknown) {
     const writes: string[] = []
     const ctx: any = {
@@ -118,7 +118,7 @@ describe('POST /api/hermes/speech-practice/omni-analysis controller (SSE stream)
       yield { type: 'done' }
     })
     const { ctx, writes } = sseCtx({ ...sampleBody(), stream: true })
-    const { generateOmniAnalysis } = await import('../../packages/server/src/controllers/hermes/speech-practice')
+    const { generateOmniAnalysis } = await import('../../packages/server/src/modules/studio/controllers/speech-practice')
     await generateOmniAnalysis(ctx)
     expect(writes.length).toBeGreaterThanOrEqual(3)
     expect(writes[0]).toContain('"type":"delta"')
@@ -132,7 +132,7 @@ describe('POST /api/hermes/speech-practice/omni-analysis controller (SSE stream)
       yield { type: 'error', message: 'upstream boom' }
     })
     const { ctx, writes } = sseCtx({ ...sampleBody(), stream: true })
-    const { generateOmniAnalysis } = await import('../../packages/server/src/controllers/hermes/speech-practice')
+    const { generateOmniAnalysis } = await import('../../packages/server/src/modules/studio/controllers/speech-practice')
     await generateOmniAnalysis(ctx)
     expect(writes.some((w) => w.includes('upstream boom'))).toBe(true)
   })

@@ -8,7 +8,7 @@ import {
   onUSBSocketDisconnect,
   subscribeUSBStream,
   unsubscribeUSBStream,
-} from '@/api/hermes/usb-socket'
+} from '@/api/studio/usb-socket'
 import { useUSBStore } from '@/stores/hermes/usb'
 
 let started = false

@@ -1,11 +1,13 @@
-import { getApiKey } from '@/api/client'
+import { getApiKey, getBaseUrl, getActiveProfileName } from '@/api/client'
 
-const API_BASE = '/api/meeting-asr'
+const API_BASE = '/api/studio/meeting-asr'
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
+  const profile = getActiveProfileName()
+  if (profile) headers['X-Hermes-Profile'] = profile
   const apiKey = getApiKey()
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`
@@ -97,14 +99,14 @@ export interface MeetingASRConfig {
 
 export const meetingASRApi = {
   async getStatus(): Promise<MeetingASRStatus> {
-    const response = await fetch(`${API_BASE}/status`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/status`, {
       headers: getAuthHeaders(),
     })
     return response.json()
   },
 
   async start(config: MeetingASRConfig = {}): Promise<{ status: string } & MeetingASRStatus> {
-    const response = await fetch(`${API_BASE}/start`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/start`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(config),
@@ -113,7 +115,7 @@ export const meetingASRApi = {
   },
 
   async stop(): Promise<{ status: string }> {
-    const response = await fetch(`${API_BASE}/stop`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/stop`, {
       method: 'POST',
       headers: getAuthHeaders(),
     })
@@ -121,7 +123,7 @@ export const meetingASRApi = {
   },
 
   async updateConfig(config: Partial<MeetingASRConfig>): Promise<{ status: string; message: string }> {
-    const response = await fetch(`${API_BASE}/config`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/config`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(config),
@@ -142,7 +144,7 @@ export const meetingASRApi = {
     /** Hash of the sources the running process actually imported. */
     code_hash?: string
   }> {
-    const response = await fetch(`${API_BASE}/healthz`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/healthz`, {
       headers: getAuthHeaders(),
     })
     return response.json()
@@ -156,7 +158,7 @@ export const meetingASRApi = {
     const payload = typeof intervalSecondsOrConfig === 'object'
       ? intervalSecondsOrConfig
       : { interval_seconds: intervalSecondsOrConfig, custom_prompt: customPrompt }
-    const response = await fetch(`${API_BASE}/analysis/start`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/analysis/start`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(payload),
@@ -165,7 +167,7 @@ export const meetingASRApi = {
   },
 
   async stopAnalysis(): Promise<any> {
-    const response = await fetch(`${API_BASE}/analysis/stop`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/analysis/stop`, {
       method: 'POST',
       headers: getAuthHeaders(),
     })
@@ -173,7 +175,7 @@ export const meetingASRApi = {
   },
 
   async triggerAnalysis(): Promise<any> {
-    const response = await fetch(`${API_BASE}/analysis/trigger`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/analysis/trigger`, {
       method: 'POST',
       headers: getAuthHeaders(),
     })
@@ -181,21 +183,21 @@ export const meetingASRApi = {
   },
 
   async getAnalysisStatus(): Promise<any> {
-    const response = await fetch(`${API_BASE}/analysis/status`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/analysis/status`, {
       headers: getAuthHeaders(),
     })
     return response.json()
   },
 
   async getAnalysisResult(): Promise<any> {
-    const response = await fetch(`${API_BASE}/analysis/result`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/analysis/result`, {
       headers: getAuthHeaders(),
     })
     return response.json()
   },
 
   async getAnalysisHTML(): Promise<string> {
-    const response = await fetch(`${API_BASE}/analysis/html`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/analysis/html`, {
       headers: getAuthHeaders(),
     })
     return response.text()
@@ -231,10 +233,12 @@ export const meetingASRApi = {
     const headers: Record<string, string> = {
       'Content-Type': file.type || 'application/octet-stream',
     }
-    const apiKey = getApiKey()
+    const profile = getActiveProfileName()
+  if (profile) headers['X-Hermes-Profile'] = profile
+  const apiKey = getApiKey()
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
 
-    const response = await fetch(`${API_BASE}/transcribe/file?${params.toString()}`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/transcribe/file?${params.toString()}`, {
       method: 'POST',
       headers,
       body: file,
@@ -251,7 +255,7 @@ export const meetingASRApi = {
   },
 
   async getFileTranscriptionStatus(jobId: string): Promise<FileTranscriptionJob> {
-    const response = await fetch(`${API_BASE}/transcribe/status/${encodeURIComponent(jobId)}`, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}/transcribe/status/${encodeURIComponent(jobId)}`, {
       headers: getAuthHeaders(),
     })
     if (!response.ok) {

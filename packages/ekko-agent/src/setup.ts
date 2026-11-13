@@ -606,6 +606,7 @@ export class EkkoAgentSetup {
       disabledSkillNames,
       authorizer: (name, input, context) => this.toolApprovals.authorize(name, input, context),
       executionTimeoutMs: config.tools.executionTimeoutMs,
+      computerUse: config.tools.computerUse,
       codeExec: {
         enabled: config.tools.codeExec.enabled,
         allowedLanguages: config.tools.codeExec.languages,

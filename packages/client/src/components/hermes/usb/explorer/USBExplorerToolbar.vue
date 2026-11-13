@@ -235,7 +235,7 @@ function openAdvanced() {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
 }
 
 .toolbar-nav {

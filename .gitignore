@@ -8,53 +8,48 @@ pnpm-debug.log*
 lerna-debug.log*
 node_modules
 dist
-
-# Local dev TLS certs (never commit private keys)
-packages/certs/
 playwright-report
+blob-report
+all-blob-reports
 test-results
 dist-ssr
 coverage
 __pycache__/
 *.py[cod]
-# Python virtual environments (NEVER commit Windows/Linux venv into repo)
-*.venv/
-.venv/
-packages/server/src/services/meeting-asr/python-backend/.venv/
-packages/server/src/services/meeting-asr/python-backend/**/.venv/
 server/dist
 packages/server/dist
 *.local
 ROADMAP.md
+!/packages/mcu/m5stack-stackchan/docs/ROADMAP.md
 pnpm-lock.yaml
 pnpm-workspace.yaml
 # Server data
 packages/server/data/
 packages/server/node_modules/
-
-# Meeting ASR runtime state — contains API keys, never commit
-data/meeting-asr/config.env
-data/meeting-asr/config.json
-
-# Local meeting recordings (user data — never commit)
-meetings/
 .hermes-web-ui/
 packages/desktop/dist/
 packages/desktop/release/
+packages/desktop/release-update-test/
 packages/desktop/resources/
 packages/desktop/resources/python/
 packages/desktop/node_modules/
 packages/*/.pio/
 packages/*/*/.pio/
+packages/mcu/*/*/.pio/
 
 # Hermes config files (should be in user data directory, not project root)
 config.yaml
 .env
-hermes_data/
-config/experts-marketplace.yaml
-!config/experts-marketplace.yaml.example
+# Only the bundled USB monitor belongs in Git; leave device/user state local.
+/hermes_data/*
+!/hermes_data/bots/
+/hermes_data/bots/*
+!/hermes_data/bots/usb/
+/hermes_data/bots/usb/*
+!/hermes_data/bots/usb/config.py
+!/hermes_data/bots/usb/mounter.py
+!/hermes_data/bots/usb/usb_monitor.py
 hermes-dependencies.md
-.curator_state
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -66,59 +61,17 @@ hermes-dependencies.md
 *.sln
 *.sw?
 .superpowers/
-.opencode/
 CLAUDE.md
 # Client source map artifacts
 packages/client/src/**/*.js
-.runtime-hermes/state.db-wal
-
 .hermes/
-.runtime-hermes/
-.runtime-home/
-pip/cache/
-/logs.txt
-/e --abbrev-ref HEAD
-/tatus --short
+# Local npm release tarballs
+/release/npm/
+/release/tos/
 
-# Local error logs and scratch artifacts under docs/.
-# The catch-all `docs/` ignore was removed so source documents
-# (architecture, plans, user-guide, knowledge plugin, etc.) can be
-# tracked. Add explicit entries here for any generated or local-only
-# artifact under docs/.
-docs/erro.txt
-docs/discussion-*.docx
-docs/hermes-web-ui-manual-update-guide.docx
-!hermes_data/
-
-# Local merge-analysis scratch files (never commit)
-tmp/
-.tmp/
-
-# Tool-generated repo knowledge base (not source)
-.qoder/repowiki/
-
-# Studio MCP auto-inject self-test artifacts (never commit)
-.studio-mcp-*/
-
-# Local dev data (cache, tokens, profiles — never commit)
-.dev-data/
-.dev-data/**
-hermes_data/*
-!hermes_data/bots/
-hermes_data/bots/*
-!hermes_data/bots/usb/
-!hermes_data/bots/usb/config.py
-!hermes_data/bots/usb/mounter.py
-!hermes_data/bots/usb/usb_monitor.py
-
-# Local agent workspace (ttyd deploy scripts, JWT derivations, logs)
-.zcode/
-
-# Local TTS / audio research notes and vendor README dumps (never commit)
-.tts-research/
-
-# Local deploy staging (tarballs + extracted src — never commit)
-.deploy-staging/
-
-# Local ops notes (device IPs, SSH details — never commit)
-.ops/
+# Generated certificates and retained legacy meeting state can contain secrets.
+/certs/
+/packages/certs/
+/packages/server/certs/
+/data/meeting-asr/
+/.dev-data/

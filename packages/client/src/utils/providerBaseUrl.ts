@@ -7,10 +7,10 @@ export function isApiKeyFunBaseUrl(baseUrl: string): boolean {
   try {
     const parsed = new URL(value)
     const hostname = parsed.hostname.toLowerCase()
-    return hostname === 'apikey.fun' || hostname.endsWith('.apikey.fun')
+    return hostname === 'apikey.fan' || hostname.endsWith('.apikey.fan')
   } catch {
     // Fall back to a string match so partially typed values still route on submit.
-    return /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*apikey\.fun(?:\/|$)/i.test(value)
+    return /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)*apikey\.fan(?:\/|$)/i.test(value)
   }
 }
 

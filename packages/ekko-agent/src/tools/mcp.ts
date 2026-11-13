@@ -8,6 +8,7 @@ interface StdioMcpServerConfig {
   args: string[]
   env: Record<string, string>
   supportsParallelToolCalls: boolean
+  requestTimeoutMs?: number
 }
 
 interface StreamableHttpMcpServerConfig {
@@ -15,6 +16,7 @@ interface StreamableHttpMcpServerConfig {
   url: string
   headers: Record<string, string>
   supportsParallelToolCalls: boolean
+  requestTimeoutMs?: number
 }
 
 type McpServerConfig = StdioMcpServerConfig | StreamableHttpMcpServerConfig
@@ -43,6 +45,8 @@ function normalizeServerType(value: unknown): string {
 function normalizeServerConfig(value: unknown): McpServerConfig | null {
   if (!isRecord(value) || value.enabled === false) return null
   const supportsParallelToolCalls = value.supports_parallel_tool_calls === true
+  const requestTimeoutMs = typeof value.requestTimeoutMs === 'number'
+    && Number.isInteger(value.requestTimeoutMs) && value.requestTimeoutMs > 0 ? value.requestTimeoutMs : undefined
   const configuredType = normalizeServerType(value.type)
   const command = typeof value.command === 'string' ? value.command.trim() : ''
   const rawUrl = typeof value.url === 'string' ? value.url.trim() : ''
@@ -57,6 +61,7 @@ function normalizeServerConfig(value: unknown): McpServerConfig | null {
         url: url.toString(),
         headers: normalizeStringRecord(value.headers),
         supportsParallelToolCalls,
+        requestTimeoutMs,
       }
     } catch {
       return null
@@ -71,6 +76,7 @@ function normalizeServerConfig(value: unknown): McpServerConfig | null {
     args: Array.isArray(value.args) ? value.args.map(arg => String(arg)) : [],
     env: normalizeProcessEnv(value.env),
     supportsParallelToolCalls,
+    requestTimeoutMs,
   }
 }
 
@@ -141,7 +147,7 @@ class McpClientSession {
   async callTool(name: string, input: Record<string, unknown>, timeoutMs: number): Promise<AgentToolResult> {
     try {
       const client = await this.ensureConnected(timeoutMs)
-      const result = await client.callTool({ name, arguments: input }, { timeout: timeoutMs })
+      const result = await client.callTool({ name, arguments: input }, { timeout: this.server.requestTimeoutMs ?? timeoutMs })
       const content = responseContentToText(result)
       return {
         ok: result.isError !== true,

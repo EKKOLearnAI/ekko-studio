@@ -132,27 +132,27 @@ function exportAllSections() {
 </template>
 
 <style scoped lang="scss">
-// --- 累积评价块 + 点评卡（自 SpeechEvaluationPanel 原样搬出） ---
+/* --- 累积评价块 + 点评卡（自 SpeechEvaluationPanel 原样搬出） ---*/
 .eval-block {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--text-primary-rgb), 0.03);
   min-width: 0;
   max-width: 100%;
 }
 
-.eval-block-title { font-size: 12px; font-weight: 600; color: var(--n-text-color3, #bbb); }
+.eval-block-title { font-size: 12px; font-weight: 600; color: var(--n-text-color3, var(--text-primary)); }
 
 .speaker-modules-actions {
   display: flex;
   justify-content: flex-end;
 }
 
-// NTag 默认 white-space: nowrap——长英文高亮/提升点会把右栏整条撑出横向溢出
-// （KPI/Tab 全部跟着超宽）。允许标签内换行并钳制宽度。
+/* NTag 默认 white-space: nowrap——长英文高亮/提升点会把右栏整条撑出横向溢出*/
+/* （KPI/Tab 全部跟着超宽）。允许标签内换行并钳制宽度。*/
 .eval-tags {
   display: flex;
   flex-wrap: wrap;
@@ -171,5 +171,5 @@ function exportAllSections() {
   }
 }
 
-// round-card 样式已拆至 SpeechRoundCard.vue（平铺/折叠两视图共用）
+/* round-card 样式已拆至 SpeechRoundCard.vue（平铺/折叠两视图共用）*/
 </style>

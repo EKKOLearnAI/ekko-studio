@@ -1,10 +1,10 @@
-import { request } from '@/api/client'
+import { request, getBaseUrl } from '@/api/client'
 
 /**
  * 扫描 OCR 插件的前端 API 封装。
  *
  * 与服务端 packages/server/src/services/scanner/* + controllers/scanner.ts
- * 协议对齐：所有请求走 `/api/scanner/*`，多页文档统一用 `pages: [...]`
+ * 协议对齐：所有请求走 `/api/studio/scanner/*`，多页文档统一用 `pages: [...]`
  * 数组传递，便于后续扩展（批量识别、多页合并）。
  */
 
@@ -75,14 +75,14 @@ export interface ScannerSaveResponse {
 }
 
 export function runScannerOcr(input: ScannerOcrRequest): Promise<ScannerOcrResponse> {
-  return request<ScannerOcrResponse>('/api/scanner/ocr', {
+  return request<ScannerOcrResponse>('/api/studio/scanner/ocr', {
     method: 'POST',
     body: JSON.stringify(input),
   })
 }
 
 export function saveScannerDocument(input: ScannerSaveRequest): Promise<ScannerSaveResponse> {
-  return request<ScannerSaveResponse>('/api/scanner/save', {
+  return request<ScannerSaveResponse>('/api/studio/scanner/save', {
     method: 'POST',
     body: JSON.stringify(input),
   })
@@ -98,13 +98,13 @@ export async function exportScannerPdf(
 ): Promise<{ blob: Blob; url: string; filename: string }> {
   const apiKey = (typeof localStorage !== 'undefined' ? localStorage.getItem('hermes_api_key') : '') || ''
   const profile = (typeof localStorage !== 'undefined' ? localStorage.getItem('hermes_active_profile_name') : '') || ''
-  const baseUrl = (typeof localStorage !== 'undefined' ? (localStorage.getItem('hermes_server_url') || '') : '') || ''
+  const baseUrl = getBaseUrl()
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`
   if (profile) headers['X-Hermes-Profile'] = profile
 
-  const response = await fetch(`${baseUrl}/api/scanner/pdf`, {
+  const response = await fetch(`${baseUrl}/api/studio/scanner/pdf`, {
     method: 'POST',
     headers,
     body: JSON.stringify({

@@ -8,6 +8,10 @@ Use this checklist before pushing or updating a pull request.
 - The diff is limited to the requested task and required harness updates.
 - Unrelated formatting or refactors are not bundled into the change.
 - User-facing text has locale coverage.
+- New UI surfaces follow `frontend-ui.md`; review any style exception and reject
+  additions to the legacy theme baseline. Verify wallpaper, regional opacity,
+  light/dark, reset and interactive states on the actual affected surface.
+- JEV consumers are registered with independent switches and frontend configuration; configuration-only status must not imply an active evaluation policy.
 
 ## Architecture
 
@@ -16,13 +20,15 @@ Use this checklist before pushing or updating a pull request.
 - Web UI state uses `config.appHome` or documented helpers.
 - Hermes Agent state and Web UI state remain separate.
 - Subprocess calls use argument arrays instead of shell string construction.
-- In-app update changes do not silently expand into bootstrap or Hermes Agent lifecycle work.
-- Update, deploy, and release contract fields stay aligned across workflow, controller, runner, and scripts.
 
 ## Tests And Validation
 
-- A focused test was added or updated for behavior changes.
-- Browser-visible flows have e2e coverage when the risk justifies it.
+- Every new feature includes small tests scoped to the new behavior, and those
+  tests have been run locally.
+- New browser journeys include focused e2e coverage that has been run; do not require
+  blanket coverage or restore the legacy regression suites.
+- Independent Test and E2E checks run the current Vitest and Playwright suites;
+  an empty suite during the reset does not waive the requirement to test new features.
 - `npm run harness:check` passes.
 - The PR body lists validation commands that actually ran.
 - Known limitations or follow-ups are called out.
@@ -35,7 +41,6 @@ Use this checklist before pushing or updating a pull request.
   own expected artifact list.
 - Package manifest changes have matching lockfile changes when dependencies
   change.
-- Update/deploy changes call out rollback behavior, affected product boundary, and any required operator action.
 
 ## Before Merge
 

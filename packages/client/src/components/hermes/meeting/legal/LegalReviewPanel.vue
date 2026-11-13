@@ -53,7 +53,7 @@ watch(() => props.isRecording, async (recording) => {
   if (recording) {
     connect()
     try {
-      await request('/api/meeting-asr/assist/start', {
+      await request('/api/studio/meeting-asr/assist/start', {
         method: 'POST',
         body: JSON.stringify({
           sessionId: props.sessionId,
@@ -64,7 +64,7 @@ watch(() => props.isRecording, async (recording) => {
     } catch { /* best effort */ }
   } else {
     try {
-      await request('/api/meeting-asr/assist/stop', {
+      await request('/api/studio/meeting-asr/assist/stop', {
         method: 'POST',
         body: JSON.stringify({ sessionId: props.sessionId }),
       })
@@ -76,7 +76,7 @@ watch(() => props.isRecording, async (recording) => {
 // 立即分析：触发一次服务端分析
 function analyzeNow() {
   if (isAnalyzing.value) return
-  request('/api/meeting-asr/assist/analyze', {
+  request('/api/studio/meeting-asr/assist/analyze', {
     method: 'POST',
     body: JSON.stringify({ sessionId: props.sessionId }),
   }).catch(() => {})
@@ -252,17 +252,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--n-text-color3, #888);
+  color: var(--n-text-color3, var(--text-primary));
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #555;
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
 
-  &.connected { background: #18a058; }
-  &.analyzing { background: #f0a020; animation: pulse 1s infinite; }
+  &.connected { background: var(--success); }
+  &.analyzing { background: var(--warning); animation: pulse 1s infinite; }
 }
 
 @keyframes pulse {
@@ -275,7 +275,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(var(--text-primary-rgb), 0.04);
 }
 
 .section-title {
@@ -286,21 +286,21 @@ onUnmounted(() => {
 
 .section-name { font-size: 13px; font-weight: 600; color: $text-primary; }
 .section-desc { font-size: 11px; color: $text-secondary; line-height: 1.5; }
-.empty-hint { font-size: 11px; color: var(--n-text-color3, #666); }
+.empty-hint { font-size: 11px; color: var(--n-text-color3, var(--text-primary)); }
 
-// 风险雷达
+/* 风险雷达*/
 .risk-item {
-  border-left: 3px solid rgba(99, 99, 99, 0.3);
+  border-left: 3px solid rgba(var(--text-primary-rgb), 0.3);
   padding: 6px 8px;
   border-radius: 0 8px 8px 0;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--text-primary-rgb), 0.03);
   display: flex;
   flex-direction: column;
   gap: 4px;
 
-  &.level-high { border-left-color: #d03050; }
-  &.level-medium { border-left-color: #f0a020; }
-  &.level-low { border-left-color: #18a058; }
+  &.level-high { border-left-color: var(--error); }
+  &.level-medium { border-left-color: var(--warning); }
+  &.level-low { border-left-color: var(--success); }
 }
 
 .risk-head {
@@ -315,17 +315,17 @@ onUnmounted(() => {
   padding: 1px 6px;
   border-radius: 6px;
 
-  &.level-high { background: rgba(208, 48, 80, 0.15); color: #ff8a8a; }
-  &.level-medium { background: rgba(240, 160, 32, 0.15); color: #f0c060; }
-  &.level-low { background: rgba(24, 160, 88, 0.15); color: #63e2b7; }
+  &.level-high { background: rgba(var(--error-rgb), 0.15); color: var(--warning); }
+  &.level-medium { background: rgba(var(--warning-rgb), 0.15); color: var(--warning); }
+  &.level-low { background: rgba(var(--success-rgb), 0.15); color: var(--success); }
 }
 
-.risk-time { font-size: 10px; color: var(--n-text-color3, #777); font-variant-numeric: tabular-nums; }
-.risk-text { font-size: 12px; color: #d8d8d8; line-height: 1.5; }
-.risk-quote { font-size: 11px; color: #9fd4f0; padding-left: 6px; border-left: 2px solid rgba(112, 192, 232, 0.4); }
-.risk-law { font-size: 11px; color: var(--n-text-color3, #999); }
+.risk-time { font-size: 10px; color: var(--n-text-color3, var(--text-primary)); font-variant-numeric: tabular-nums; }
+.risk-text { font-size: 12px; color: var(--text-primary); line-height: 1.5; }
+.risk-quote { font-size: 11px; color: var(--accent-info); padding-left: 6px; border-left: 2px solid rgba(var(--accent-info-rgb), 0.4); }
+.risk-law { font-size: 11px; color: var(--n-text-color3, var(--text-primary)); }
 
-// 各方立场
+/* 各方立场*/
 .position-item {
   display: flex;
   gap: 8px;
@@ -336,13 +336,13 @@ onUnmounted(() => {
 .position-party {
   flex-shrink: 0;
   font-weight: 600;
-  color: #70c0e8;
+  color: var(--accent-info);
   min-width: 48px;
 }
 
-.position-stance { color: #c8c8c8; line-height: 1.5; }
+.position-stance { color: var(--text-primary); line-height: 1.5; }
 
-// 法条依据
+/* 法条依据*/
 .law-item {
   font-size: 12px;
   padding: 4px 0;
@@ -352,25 +352,25 @@ onUnmounted(() => {
   gap: 6px;
 }
 
-.law-name { color: #c8c8c8; font-weight: 500; }
+.law-name { color: var(--text-primary); font-weight: 500; }
 
 .law-verify {
   font-size: 10px;
   padding: 0 6px;
   border-radius: 8px;
-  background: rgba(240, 160, 32, 0.12);
-  color: #f0c060;
+  background: rgba(var(--warning-rgb), 0.12);
+  color: var(--warning);
 
-  &.verified { background: rgba(24, 160, 88, 0.12); color: #63e2b7; }
+  &.verified { background: rgba(var(--success-rgb), 0.12); color: var(--success); }
 }
 
-.law-note { width: 100%; font-size: 11px; color: var(--n-text-color3, #999); }
+.law-note { width: 100%; font-size: 11px; color: var(--n-text-color3, var(--text-primary)); }
 
-// 报告（与全局报告区一致）
+/* 报告（与全局报告区一致）*/
 .report-generate-row { display: flex; gap: 8px; }
 .report-generate-row .n-button { flex: 1; }
-.report-error { font-size: 12px; color: #d03050; padding: 6px 8px; background: rgba(208, 48, 80, 0.08); border-radius: 6px; }
-.report-loading { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--n-text-color3, #888); }
+.report-error { font-size: 12px; color: var(--error); padding: 6px 8px; background: rgba(var(--error-rgb), 0.08); border-radius: 6px; }
+.report-loading { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--n-text-color3, var(--text-primary)); }
 .report-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .report-content { font-size: 13px; line-height: 1.6; }
 </style>

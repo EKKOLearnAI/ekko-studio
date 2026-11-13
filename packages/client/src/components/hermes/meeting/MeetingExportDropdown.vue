@@ -144,7 +144,7 @@ function toggleDropdown() {
 .meeting-export-dropdown :deep(.meeting-export-dropdown__split) {
   border-top-right-radius: 3px;
   border-bottom-right-radius: 3px;
-  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  border-left: 1px solid rgba(var(--text-primary-rgb), 0.18);
   padding: 0 8px;
   display: inline-flex;
   align-items: center;

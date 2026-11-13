@@ -6,8 +6,8 @@
  * 409 not retryable.
  */
 import { describe, expect, it } from 'vitest'
-import { UpdateError } from '../../packages/server/src/services/update/errors'
-import { applyPreflightFailureResponse, preflightFailureShape } from '../../packages/server/src/services/update/preflight-error-response'
+import { UpdateError } from '../../packages/server/src/modules/studio/services/update/errors'
+import { applyPreflightFailureResponse, preflightFailureShape } from '../../packages/server/src/modules/studio/services/update/preflight-error-response'
 
 function ctx() {
   return { status: 500, body: { success: false, message: 'x' } as Record<string, unknown> }

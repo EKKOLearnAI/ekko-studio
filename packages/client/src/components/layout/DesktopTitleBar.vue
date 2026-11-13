@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 type WindowControlAction = 'minimize' | 'toggle-maximize' | 'close'
 
@@ -7,6 +7,7 @@ interface HermesDesktopBridge {
   platform?: string
   getWindowState?: () => Promise<{ isMaximized: boolean }>
   windowControl?: (action: WindowControlAction) => Promise<{ isMaximized: boolean }>
+  onWindowStateChange?: (callback: (state: { isMaximized: boolean }) => void) => () => void
 }
 
 type WindowWithHermesDesktop = Window & typeof globalThis & {
@@ -16,11 +17,13 @@ type WindowWithHermesDesktop = Window & typeof globalThis & {
 const desktop = (window as WindowWithHermesDesktop).hermesDesktop
 const props = defineProps<{
   standalone?: boolean
+  flush?: boolean
   leftOffset?: number
 }>()
-const showWindowButtons = computed(() => desktop?.platform === 'win32')
-const titleBarStyle = computed(() => props.standalone ? undefined : { left: `${props.leftOffset ?? 260}px` })
+const showWindowButtons = computed(() => desktop?.platform === 'win32' || desktop?.platform === 'linux')
+const titleBarStyle = computed(() => props.standalone || props.flush ? undefined : { left: `${props.leftOffset ?? 240}px` })
 const isMaximized = ref(false)
+let stopWindowStateListener: (() => void) | undefined
 
 async function refreshWindowState() {
   if (!desktop?.getWindowState) return
@@ -44,19 +47,24 @@ async function controlWindow(action: WindowControlAction) {
 
 onMounted(() => {
   void refreshWindowState()
+  stopWindowStateListener = desktop?.onWindowStateChange?.((state) => {
+    isMaximized.value = !!state.isMaximized
+  })
 })
+
+onUnmounted(() => stopWindowStateListener?.())
 </script>
 
 <template>
   <div
     v-if="showWindowButtons"
     class="desktop-titlebar"
-    :class="{ standalone }"
+    :class="{ standalone, 'desktop-titlebar--flush': flush }"
     :style="titleBarStyle"
     @dblclick="controlWindow('toggle-maximize')"
   >
     <div v-if="standalone" class="desktop-titlebar__standalone-drag" @dblclick="controlWindow('toggle-maximize')" />
-    <div v-else class="desktop-titlebar__drag" />
+    <div v-else-if="!flush" class="desktop-titlebar__drag" />
     <div class="desktop-titlebar__controls" @dblclick.stop>
       <button class="desktop-window-btn" type="button" aria-label="Minimize" @click.stop="controlWindow('minimize')">
         <svg viewBox="0 0 12 12" aria-hidden="true">
@@ -94,8 +102,8 @@ onMounted(() => {
   align-items: center;
   direction: ltr;
   border: 0;
-  border-radius: 12px;
-  background: $bg-main-surface;
+  border-radius: var(--radius-component, 12px);
+  background: var(--theme-content-bg, $bg-main-surface);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
   color: $text-primary;
   user-select: none;
@@ -109,7 +117,7 @@ onMounted(() => {
     position: absolute;
     z-index: 2;
     inset: 0;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: inherit;
     pointer-events: none;
   }
@@ -151,7 +159,7 @@ onMounted(() => {
   align-items: stretch;
   overflow: hidden;
   contain: paint;
-  border-inline-start: 1px solid $border-color;
+  border-inline-start: var(--border-width, 1px) solid $border-color;
   border-radius: 0 12px 12px 0;
   clip-path: inset(0 round 0 12px 12px 0);
   -webkit-app-region: no-drag;
@@ -214,13 +222,37 @@ onMounted(() => {
   }
 
   &:last-child {
-    border-top-right-radius: 11px;
-    border-bottom-right-radius: 11px;
+    border-top-right-radius: var(--radius-component, 11px);
+    border-bottom-right-radius: var(--radius-component, 11px);
   }
 
   .standalone &:first-child {
-    border-top-left-radius: 11px;
-    border-bottom-left-radius: 11px;
+    border-top-left-radius: var(--radius-component, 11px);
+    border-bottom-left-radius: var(--radius-component, 11px);
   }
+}
+
+// Header controls share its surface; override the floating bar's decoration.
+.desktop-titlebar--flush {
+  background: transparent;
+  // Inside the shared Header, occupy only the controls at its physical right.
+  left: auto;
+  width: var(--desktop-window-controls-width, 138px);
+  height: var(--studio-header-height, 40px);
+  top: 0;
+  right: 0;
+  border-radius: 0;
+  box-shadow: none;
+  clip-path: none;
+
+  &::after { display: none; }
+
+  .desktop-titlebar__controls {
+    border: 0;
+    border-radius: 0;
+    clip-path: none;
+  }
+
+  .desktop-window-btn { border-radius: 0; }
 }
 </style>

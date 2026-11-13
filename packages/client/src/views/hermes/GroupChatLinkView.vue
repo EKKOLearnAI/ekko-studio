@@ -1,4 +1,11 @@
 <script setup lang="ts">
+import type { ChatCodingAgentId } from '@/api/coding-agents'
+import { agentMetadata, agentSupportsSurface } from '@/utils/agent-catalog'
+
+import { deploymentUrl } from '@/utils/deployment-url'
+import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import PageLoading from '@/components/common/PageLoading.vue'
+import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -10,7 +17,8 @@ import {
   defaultGroupAgentAvatar,
   parseStoredAvatar,
 } from '@/utils/group-agent-avatar'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { nextCodingAgentMode, storedPriorAgentMode, submittedCodingAgentSelection } from '@/utils/coding-agent-mode'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import {
   inferCodingAgentApiMode,
   normalizeCodingAgentApiMode,
@@ -25,7 +33,12 @@ import {
   updateLocalGroupAgent,
   type LocalGroupAgentConnection,
   type RemoteGroupAgentDescriptor,
-} from '@/api/hermes/group-chat-agent-link'
+} from '@/api/studio/group-chat-agent-link'
+import {
+  fetchAgentStatusSnapshot,
+  isAgentStatusAvailable,
+  type AgentStatusSnapshot,
+} from '@/api/agent-status'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -33,9 +46,12 @@ const appStore = useAppStore()
 const profilesStore = useProfilesStore()
 const profileAgents = ref<RemoteGroupAgentDescriptor[]>([])
 const connections = ref<LocalGroupAgentConnection[]>([])
+const agentStatusSnapshot = ref<AgentStatusSnapshot | null>(null)
 type GroupAgentType = RemoteGroupAgentDescriptor['agent']
 const selectedAgentType = ref<GroupAgentType>('hermes')
 const selectedProfile = ref('')
+const selectedAgentMode = ref<'scoped' | 'global'>('scoped')
+const priorAgentMode = ref<'scoped' | 'global' | undefined>()
 const selectedAgentProvider = ref('')
 const selectedAgentModel = ref('')
 const selectedAgentApiMode = ref<CodingAgentApiMode>('codex_responses')
@@ -90,13 +106,18 @@ const hasServerHandoff = computed(() => (
   && !!handoffRequestSecret.value
   && !!handoffPairingTicket.value
 ))
-const groupAgentTypeOptions = computed<Array<{ label: string; value: GroupAgentType }>>(() => [
-  { label: 'Hermes', value: 'hermes' },
-  { label: 'Ekko', value: 'ekko' },
-  { label: 'Claude', value: 'claude' },
-  { label: 'Codex', value: 'codex' },
-  { label: 'Pi', value: 'pi' },
-])
+const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
+const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.filter(option => agentSupportsSurface(option.value, 'group-chat')).map((option) => {
+  const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
+  return {
+    ...option,
+    disabled,
+    label: disabled ? `${option.label} · ${t('codingAgents.notInstalled')}` : option.label,
+  }
+}))
+const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
+  groupAgentTypeOptions.value.find(option => !option.disabled)?.value || null,
+)
 const profileOptions = computed(() => profileAgents.value.map(agent => ({
   label: agent.profile,
   value: agent.profile,
@@ -107,13 +128,7 @@ function getAgentModelGroups(profile: string) {
     .filter((group) => {
       if (group.provider === 'moa') return selectedAgentType.value === 'hermes'
       if (selectedAgentType.value === 'hermes') return true
-      const codingAgentId = selectedAgentType.value === 'ekko'
-        ? 'ekko-agent'
-        : selectedAgentType.value === 'claude'
-          ? 'claude-code'
-          : selectedAgentType.value === 'pi'
-            ? 'pi'
-            : 'codex'
+      const codingAgentId = (agentMetadata(selectedAgentType.value)?.id || selectedAgentType.value) as ChatCodingAgentId
       return canScopedCodingAgentUseProvider(codingAgentId, group.provider)
     })
 }
@@ -145,33 +160,57 @@ const agentModelOptions = computed(() => (selectedAgentProviderGroup.value?.mode
   label: appStore.displayModelName(model, selectedAgentProvider.value),
   value: model,
 })))
+const configuredAgentApiMode = computed(() => configuredProviderApiMode(selectedAgentProviderGroup.value, selectedAgentModel.value))
+watch([configuredAgentApiMode, selectedAgentApiMode], ([mode]) => {
+  if (mode && selectedAgentApiMode.value !== mode) selectedAgentApiMode.value = mode
+}, { flush: 'sync' })
 const agentApiModeOptions = computed(() => [
   { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
   { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
   { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
-const agentReasoningEffortOptions = computed(() => [
-  { label: t('chat.reasoningEffort.options.default'), value: '' },
-  { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-  { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-  { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-  { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-  { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-  { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-  { label: t('chat.reasoningEffort.options.max'), value: 'max' },
+const agentReasoningEffortOptions = computed(() => reasoningOptions([
+  { label: t('chat.reasoningEffort.options.none'), value: '' },
+  ...modelReasoningEfforts(
+    getAgentModelGroups(selectedProfile.value),
+    selectedAgentProvider.value,
+    selectedAgentModel.value,
+  ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
+]))
+const agentReasoningEffortValue = computed({
+  get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
+  set: (value: string) => { selectedAgentReasoningEffort.value = value },
+})
+const supportsGlobalAgentMode = computed(() => Boolean(agentMetadata(selectedAgentType.value)?.modes.includes('global')) || ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
+const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
+const agentModeOptions = computed(() => [
+  { label: t('codingAgents.launchModeGlobal'), value: 'global' },
+  { label: t('codingAgents.launchModeScoped'), value: 'scoped' },
 ])
+
+watch([agentReasoningEffortOptions, selectedAgentReasoningEffort], ([options, effort]) => {
+  if (!usesGlobalAgentMode.value && effort && !options.some(option => option.value === effort)) {
+    selectedAgentReasoningEffort.value = ''
+  }
+})
 const agentAvatarPreview = computed(() => (
   agentAvatar.value || defaultGroupAgentAvatar(selectedAgentType.value)
 ))
 const selectedAgent = computed<RemoteGroupAgentDescriptor | null>(() => {
-  if (!selectedProfile.value || !selectedAgentProvider.value || !selectedAgentModel.value) return null
+  if (!isAgentStatusAvailable(agentStatusSnapshot.value, selectedAgentType.value)) return null
+  if (!selectedProfile.value || (!usesGlobalAgentMode.value && (!selectedAgentProvider.value || !selectedAgentModel.value))) return null
   return {
-    agent: selectedAgentType.value,
+    ...submittedCodingAgentSelection({
+      agent: selectedAgentType.value,
+      agentMode: selectedAgentMode.value,
+      priorAgentMode: priorAgentMode.value,
+      provider: selectedAgentProvider.value,
+      model: selectedAgentModel.value,
+      usesGlobal: usesGlobalAgentMode.value,
+    }),
     profile: selectedProfile.value,
-    provider: selectedAgentProvider.value,
-    model: selectedAgentModel.value,
-    apiMode: selectedAgentType.value === 'hermes' ? '' : selectedAgentApiMode.value,
-    reasoningEffort: selectedAgentReasoningEffort.value,
+    apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
+    reasoningEffort: usesGlobalAgentMode.value ? '' : agentReasoningEffortValue.value,
     name: agentName.value.trim() || selectedProfile.value,
     description: agentDescription.value.trim(),
     avatar: agentAvatar.value ? JSON.stringify(agentAvatar.value) : '',
@@ -237,7 +276,7 @@ function closeWindow(): void {
 function syncAgentApiMode(): void {
   const group = selectedAgentProviderGroup.value
   selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-    group?.api_mode,
+    configuredAgentApiMode.value,
     inferCodingAgentApiMode(group?.provider || selectedAgentProvider.value, group?.base_url),
   )
 }
@@ -251,7 +290,21 @@ function syncAgentModelSelection(profile: string): void {
 }
 
 function handleAgentTypeChange(agent: GroupAgentType): void {
+  if (!isAgentStatusAvailable(agentStatusSnapshot.value, agent)) {
+    const name = groupAgentTypeDefinitions.find(option => option.value === agent)?.label || agent
+    error.value = t('codingAgents.installRequired', { agent: name })
+    return
+  }
+  error.value = ''
+  const switched = nextCodingAgentMode({
+    previousAgent: selectedAgentType.value,
+    nextAgent: agent,
+    agentMode: selectedAgentMode.value,
+    priorAgentMode: priorAgentMode.value,
+  })
   selectedAgentType.value = agent
+  selectedAgentMode.value = switched.agentMode
+  priorAgentMode.value = switched.priorAgentMode
   syncAgentModelSelection(selectedProfile.value)
 }
 
@@ -274,11 +327,13 @@ function handleAgentModelChange(model: string): void {
 
 function applyAgentConfiguration(agent: RemoteGroupAgentDescriptor): void {
   selectedAgentType.value = agent.agent
+  selectedAgentMode.value = agent.agentMode === 'global' ? 'global' : 'scoped'
+  priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)
   selectedProfile.value = agent.profile
   selectedAgentProvider.value = agent.provider
   selectedAgentModel.value = agent.model
   selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-    agent.apiMode,
+    configuredAgentApiMode.value || agent.apiMode,
     inferCodingAgentApiMode(agent.provider),
   )
   selectedAgentReasoningEffort.value = agent.reasoningEffort
@@ -468,6 +523,7 @@ function sameAgentDescriptor(left: unknown, right: RemoteGroupAgentDescriptor): 
   const candidate = left as Record<string, unknown>
   return (
     candidate.agent === right.agent
+    && (candidate.agentMode === 'global' ? 'global' : 'scoped') === right.agentMode
     && candidate.profile === right.profile
     && candidate.provider === right.provider
     && candidate.model === right.model
@@ -521,14 +577,16 @@ onMounted(async () => {
   window.addEventListener('message', handleParentMessage)
   scheduleParentHandshake()
   try {
-    const [localAgents, localConnections] = await Promise.all([
+    const [localAgents, localConnections, , , agentStatus] = await Promise.all([
       listLocalGroupAgents(),
       listLocalGroupAgentConnections(),
       profilesStore.fetchProfiles(),
       appStore.loadModels(),
+      fetchAgentStatusSnapshot(),
     ])
     profileAgents.value = localAgents.agents
     connections.value = localConnections.connections
+    agentStatusSnapshot.value = agentStatus
     if (editingMode.value) {
       const connection = editingConnection.value
       if (!connection) {
@@ -537,6 +595,7 @@ onMounted(async () => {
         applyAgentConfiguration(connection.agent)
       }
     } else {
+      selectedAgentType.value = firstAvailableGroupAgentType.value || 'hermes'
       selectedProfile.value =
         profilesStore.activeProfileName
         || profilesStore.profiles.find(profile => profile.active)?.name
@@ -566,9 +625,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="group-chat-link-view">
+  <PageLoading :show="loading" class="group-chat-link-view">
     <section class="link-card">
-      <img src="/logo.png" alt="" class="link-logo">
+      <img :src="deploymentUrl('/logo.png')" alt="" class="link-logo">
       <h1>
         {{ editingConnection
           ? t('groupChat.editAgentTitle', { name: editingConnection.agent.name })
@@ -579,7 +638,7 @@ onUnmounted(() => {
         {{ editingConnection?.cloudOrigin || parentOrigin }}
       </code>
 
-      <div v-if="loading" class="link-status">{{ t('common.loading') }}</div>
+      <div v-if="loading" class="link-status"></div>
       <div v-else-if="connected" class="link-success">
         <strong>{{ t('groupChat.agentLinkConnected') }}</strong>
         <NButton type="primary" @click="closeWindow">{{ t('groupChat.agentLinkClose') }}</NButton>
@@ -632,7 +691,15 @@ onUnmounted(() => {
               @update:value="handleAgentProfileChange"
             />
           </div>
-          <div class="field">
+          <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="field">
+            <label>{{ t('codingAgents.launchModeScope') }}</label>
+            <NSelect
+              v-model:value="selectedAgentMode"
+              :options="agentModeOptions"
+              :disabled="waitingForApproval"
+            />
+          </div>
+          <div v-if="!usesGlobalAgentMode" class="field">
             <label>{{ t('models.provider') }}</label>
             <NSelect
               :value="selectedAgentProvider"
@@ -643,7 +710,7 @@ onUnmounted(() => {
               @update:value="handleAgentProviderChange"
             />
           </div>
-          <div class="field">
+          <div v-if="!usesGlobalAgentMode" class="field">
             <label>{{ t('models.models') }}</label>
             <NSelect
               :value="selectedAgentModel"
@@ -654,7 +721,7 @@ onUnmounted(() => {
               @update:value="handleAgentModelChange"
             />
           </div>
-          <div v-if="selectedAgentType !== 'hermes'" class="field">
+          <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode && !configuredAgentApiMode" class="field">
             <label>{{ t('codingAgents.protocolScope') }}</label>
             <NSelect
               v-model:value="selectedAgentApiMode"
@@ -662,10 +729,10 @@ onUnmounted(() => {
               :disabled="waitingForApproval"
             />
           </div>
-          <div class="field">
+          <div v-if="!usesGlobalAgentMode" class="field">
             <label>{{ t('chat.reasoningEffort.tooltip') }}</label>
             <NSelect
-              v-model:value="selectedAgentReasoningEffort"
+              v-model:value="agentReasoningEffortValue"
               :options="agentReasoningEffortOptions"
               :disabled="waitingForApproval"
             />
@@ -718,7 +785,10 @@ onUnmounted(() => {
             <div v-if="manualPairingAgent" class="manual-agent-preview">
               <strong>{{ manualPairingAgent.name }}</strong>
               <span>{{ manualPairingAgent.profile }}</span>
-              <span>{{ manualPairingAgent.provider }} / {{ manualPairingAgent.model }}</span>
+              <span v-if="manualPairingAgent.agentMode === 'global'">
+                {{ t('codingAgents.launchModeGlobal') }}
+              </span>
+              <span v-else>{{ manualPairingAgent.provider }} / {{ manualPairingAgent.model }}</span>
             </div>
             <NButton
               secondary
@@ -735,57 +805,63 @@ onUnmounted(() => {
       <p v-if="error" class="link-error" role="alert">{{ error }}</p>
       <p class="link-security">{{ t('groupChat.agentLinkSecurityHint') }}</p>
     </section>
-  </main>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .group-chat-link-view {
-  min-height: calc(100 * var(--vh));
+  min-height: 100%;
   box-sizing: border-box;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: calc(24px * var(--spacing-scale, 1));
   background: $bg-primary;
+}
+
+.group-chat-link-view > :deep(.page-loading-content) {
+  width: 100%;
+  display: grid;
+  place-items: center;
 }
 
 .link-card {
   width: min(100%, 480px);
   box-sizing: border-box;
-  padding: 36px;
-  border: 1px solid $border-color;
-  border-radius: 20px;
-  background: $bg-card;
+  padding: calc(36px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 20px);
+  background: var(--theme-card-bg, $bg-card);
   box-shadow: 0 22px 70px rgba(0, 0, 0, 0.16);
 
   h1 {
     margin: 16px 0 8px;
     color: $text-primary;
-    font-size: 25px;
+    font-size: calc(var(--font-size-base, 14px) * 25 / 14);
   }
 
   > p {
     color: $text-secondary;
-    line-height: 1.6;
+    line-height: var(--line-height, 1.6);
   }
 }
 
 .link-logo {
   width: 48px;
   height: 48px;
-  border-radius: 13px;
+  border-radius: var(--radius-component, 13px);
 }
 
 .requesting-origin {
   display: block;
   overflow: hidden;
-  padding: 8px 10px;
-  border: 1px solid $border-color;
-  border-radius: 8px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
   color: $text-secondary;
   background: $bg-primary;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -793,24 +869,24 @@ onUnmounted(() => {
 .link-form,
 .link-success {
   display: grid;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-top: 22px;
 }
 
 .agent-config-form {
-  padding: 14px;
-  border: 1px solid $border-color;
-  border-radius: 12px;
+  padding: calc(14px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 12px);
   background: $bg-primary;
 }
 
 .field {
   display: grid;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 
   > label {
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     font-weight: 600;
   }
 }
@@ -818,13 +894,13 @@ onUnmounted(() => {
 .group-agent-avatar-editor {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .group-agent-avatar-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .group-agent-avatar-file {
@@ -833,28 +909,28 @@ onUnmounted(() => {
 
 .link-form label {
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-weight: 600;
 }
 
 .link-status {
-  padding: 30px 0;
+  padding: calc(30px * var(--spacing-scale, 1)) 0;
   color: $text-muted;
   text-align: center;
 }
 
 .link-success strong {
   color: $success;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
 }
 
 .manual-divider {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-top: 24px;
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
   &::before,
   &::after {
@@ -867,21 +943,21 @@ onUnmounted(() => {
 
 .manual-agent-preview {
   display: grid;
-  gap: 2px;
-  padding: 10px;
-  border: 1px solid $border-color;
-  border-radius: 8px;
+  gap: calc(2px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid $border-color;
+  border-radius: var(--radius-component, 8px);
   background: $bg-primary;
 
   strong {
     color: $text-primary;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   }
 
   span {
     overflow: hidden;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -889,12 +965,12 @@ onUnmounted(() => {
 
 .link-error {
   color: $error !important;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .link-security {
   margin: 22px 0 0;
   color: $text-muted !important;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 </style>

@@ -1,5 +1,6 @@
 export type FilePreviewKind =
   | 'image'
+  | 'video'
   | 'markdown'
   | 'text'
   | 'html'
@@ -10,6 +11,7 @@ export type FilePreviewKind =
   | 'csv'
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico'])
+const VIDEO_EXTS = new Set(['.mp4', '.mov', '.m4v', '.webm'])
 const MARKDOWN_EXTS = new Set(['.md', '.markdown'])
 const HTML_EXTS = new Set(['.html', '.htm'])
 
@@ -159,6 +161,7 @@ export function getTextPreviewLanguage(name: string): string | null {
 export function getFilePreviewKind(name: string): FilePreviewKind | null {
   const extension = getFileExtension(name)
   if (IMAGE_EXTS.has(extension)) return 'image'
+  if (VIDEO_EXTS.has(extension)) return 'video'
   if (MARKDOWN_EXTS.has(extension)) return 'markdown'
   if (HTML_EXTS.has(extension)) return 'html'
   if (extension === '.pdf') return 'pdf'
@@ -176,6 +179,7 @@ export function isPreviewableFile(name: string): boolean {
 export function previewMimeMatches(kind: FilePreviewKind, mime: string): boolean {
   const normalized = mime.split(';')[0].trim().toLowerCase()
   if (kind === 'image') return normalized.startsWith('image/')
+  if (kind === 'video') return normalized.startsWith('video/')
   if (kind === 'html') return normalized === 'text/html'
   if (kind === 'pdf') return normalized === 'application/pdf'
   if (kind === 'docx') return normalized === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'

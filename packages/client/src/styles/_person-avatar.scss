@@ -1,0 +1,10 @@
+@mixin person-avatar($size: null) {
+  /* theme-exception: artwork -- Transparent Bot artwork uses the user-requested white matte in both themes. */
+  background: #fff;
+  border: 0;
+  border-radius: 4px;
+  object-fit: contain;
+  @if $size != null {
+    object-position: calc(50% + var(--person-avatar-offset-x, 0) * #{$size}) calc(50% + var(--person-avatar-offset-y, 0) * #{$size});
+  }
+}

@@ -1677,7 +1677,7 @@ const cameraHintTone = computed(() => {
   gap: 10px;
   border: 1px solid $border-light;
   border-radius: $radius-md;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   padding: 12px;
 }
 
@@ -1685,6 +1685,8 @@ const cameraHintTone = computed(() => {
   position: relative;
   width: 100%;
   aspect-ratio: 16 / 9;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: #0d0d10;
   border-radius: $radius-sm;
   overflow: hidden;
@@ -1697,6 +1699,8 @@ const cameraHintTone = computed(() => {
   width: 100%;
   height: 100%;
   object-fit: contain;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: #0d0d10;
   display: block;
 }
@@ -1733,7 +1737,11 @@ const cameraHintTone = computed(() => {
   position: absolute;
   inset: 0;
   border-radius: 50%;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   border: 3px solid #fff;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
 }
 
@@ -1741,6 +1749,8 @@ const cameraHintTone = computed(() => {
   position: absolute;
   inset: 8px;
   border-radius: 50%;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: #fff;
   transition: transform 120ms ease;
 }
@@ -1757,7 +1767,11 @@ const cameraHintTone = computed(() => {
   height: 40px;
   border-radius: 50%;
   border: 0;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: rgba(0, 0, 0, 0.45);
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -1770,6 +1784,8 @@ const cameraHintTone = computed(() => {
 }
 
 .camera-flip-btn:active {
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: rgba(0, 0, 0, 0.7);
 }
 
@@ -1815,7 +1831,7 @@ const cameraHintTone = computed(() => {
   padding: 8px 10px;
   border: 1px dashed $border-light;
   border-radius: $radius-sm;
-  background: var(--bg-elevated);
+  background: var(--theme-card-bg, var(--bg-card));
 }
 
 .smart-preset-select {
@@ -1843,11 +1859,11 @@ const cameraHintTone = computed(() => {
   font-size: 12px;
   padding: 1px 8px;
   border-radius: 999px;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
 
-  &.tone-success { color: var(--color-success, #18a058); }
-  &.tone-info { color: var(--color-info, #2080f0); }
-  &.tone-error { color: var(--color-error, #d03050); }
+  &.tone-success { color: var(--color-success, var(--success)); }
+  &.tone-info { color: var(--color-info, var(--accent-info)); }
+  &.tone-error { color: var(--color-error, var(--error)); }
 }
 
 .smart-unavailable {
@@ -1858,7 +1874,7 @@ const cameraHintTone = computed(() => {
 .page-strip {
   border: 1px solid $border-light;
   border-radius: $radius-md;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -1882,7 +1898,7 @@ const cameraHintTone = computed(() => {
   font-size: 12px;
   color: $text-muted;
   padding: 0 6px;
-  background: var(--bg-elevated);
+  background: var(--theme-card-bg, var(--bg-card));
   border-radius: 999px;
 }
 
@@ -1908,7 +1924,7 @@ const cameraHintTone = computed(() => {
   aspect-ratio: 3 / 4;
   border: 1px solid $border-light;
   border-radius: $radius-sm;
-  background: var(--bg-elevated);
+  background: var(--theme-card-bg, var(--bg-card));
   padding: 0;
   cursor: pointer;
   overflow: hidden;
@@ -1938,7 +1954,11 @@ const cameraHintTone = computed(() => {
   padding: 1px 6px;
   font-size: 11px;
   border-radius: 999px;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: rgba(0, 0, 0, 0.6);
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   color: #fff;
 }
 
@@ -1955,7 +1975,11 @@ const cameraHintTone = computed(() => {
   width: 22px;
   height: 22px;
   border-radius: 999px;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: rgba(0, 0, 0, 0.55);
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   color: #fff;
   border: 0;
   cursor: pointer;
@@ -1986,7 +2010,11 @@ const cameraHintTone = computed(() => {
   width: 20px;
   height: 20px;
   border-radius: 999px;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: rgba(0, 0, 0, 0.55);
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   color: #fff;
   border: 0;
   cursor: pointer;
@@ -1998,6 +2026,8 @@ const cameraHintTone = computed(() => {
 }
 
 .page-thumb-move:hover:not(.is-disabled) {
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: rgba(0, 0, 0, 0.8);
 }
 
@@ -2012,7 +2042,7 @@ const cameraHintTone = computed(() => {
   flex-shrink: 0;
   border: 1px solid $border-light;
   border-radius: $radius-md;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
@@ -2048,7 +2078,7 @@ const cameraHintTone = computed(() => {
   height: 76px;
   border: 1px solid $border-light;
   border-radius: $radius-sm;
-  background: var(--bg-elevated);
+  background: var(--theme-card-bg, var(--bg-card));
   padding: 0;
   cursor: pointer;
   overflow: hidden;
@@ -2075,7 +2105,11 @@ const cameraHintTone = computed(() => {
   padding: 0 5px;
   font-size: 10px;
   border-radius: 999px;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: rgba(0, 0, 0, 0.6);
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   color: #fff;
   line-height: 14px;
 }
@@ -2104,7 +2138,7 @@ const cameraHintTone = computed(() => {
   gap: 12px;
   border: 1px solid $border-light;
   border-radius: $radius-md;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   padding: 12px;
   min-height: 0;
   overflow-y: auto;
@@ -2123,7 +2157,7 @@ const cameraHintTone = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-elevated);
+  background: var(--theme-card-bg, var(--bg-card));
   border-radius: $radius-sm;
   overflow: hidden;
 
@@ -2131,8 +2165,8 @@ const cameraHintTone = computed(() => {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
-    background: #fff;
-    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.3);
+    background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
+    box-shadow: 0 1px 8px rgba(var(--text-primary-rgb), 0.3);
   }
 }
 
@@ -2144,8 +2178,8 @@ const cameraHintTone = computed(() => {
   border-radius: 999px;
   font-size: 11px;
   line-height: 16px;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.45);
+  color: var(--text-primary);
+  background: rgba(var(--text-primary-rgb), 0.45);
   pointer-events: none;
 }
 
@@ -2291,7 +2325,7 @@ const cameraHintTone = computed(() => {
 .mobile-detail-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(var(--text-primary-rgb), 0.5);
   opacity: 0;
   transition: opacity 180ms ease;
   pointer-events: none;
@@ -2308,10 +2342,10 @@ const cameraHintTone = computed(() => {
   right: 0;
   bottom: 0;
   max-height: 88vh;
-  background: var(--bg-primary);
+  background: var(--theme-card-bg, var(--bg-card));
   border-top-left-radius: 14px;
   border-top-right-radius: 14px;
-  box-shadow: 0 -10px 32px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 -10px 32px rgba(var(--text-primary-rgb), 0.28);
   display: flex;
   flex-direction: column;
   transform: translateY(100%);
@@ -2368,7 +2402,7 @@ const cameraHintTone = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-elevated);
+  background: var(--theme-card-bg, var(--bg-card));
   border-radius: $radius-sm;
   overflow: hidden;
   flex-shrink: 0;
@@ -2378,7 +2412,7 @@ const cameraHintTone = computed(() => {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
-    background: #fff;
+    background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
   }
 }
 

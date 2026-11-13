@@ -24,8 +24,8 @@ defineProps<{
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 0;
-  border-bottom: 1px solid $border-light;
+  padding: calc(10px * var(--spacing-scale, 1)) 0;
+  border-bottom: var(--border-width, 1px) solid $border-light;
 
   &:last-child {
     border-bottom: none;
@@ -38,13 +38,13 @@ defineProps<{
 }
 
 .setting-label {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-primary;
   display: block;
 }
 
 .setting-hint {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   margin-top: 2px;
 }
@@ -57,7 +57,7 @@ defineProps<{
   .setting-row {
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
   }
 
   .setting-info {

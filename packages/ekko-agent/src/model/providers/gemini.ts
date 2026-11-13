@@ -112,20 +112,26 @@ export class GeminiContentsModelClient implements ModelClient {
     )
 
     const streamedParts: GeminiPart[] = []
+    let finishReason: string | undefined
+    let toolCallIndex = 0
     for await (const event of readServerSentEvents(response)) {
       const chunk = parseJson<GeminiResponse>(event)
       if (!chunk) continue
       streamedParts.push(...(chunk.candidates?.[0]?.content?.parts ?? []))
       const normalized = normalizeGeminiResponse(chunk, request.model ?? this.config.defaultModel)
+      finishReason = normalized.finishReason ?? finishReason
       if (normalized.content) yield { type: 'text-delta', text: normalized.content }
       const reasoningText = agentReasoningText(normalized.reasoning)
       if (reasoningText) yield { type: 'reasoning-delta', text: reasoningText }
-      for (const toolCall of normalized.toolCalls ?? []) yield { type: 'tool-call', toolCall }
+      for (const toolCall of normalized.toolCalls ?? []) {
+        yield { type: 'tool-call', toolCall: { ...toolCall, id: `gemini_call_${toolCallIndex++}` } }
+      }
       if (normalized.usage) yield { type: 'usage', usage: normalized.usage }
     }
     yield {
       type: 'done',
       response: {
+        finishReason,
         reasoning: normalizeAgentReasoning(
           undefined,
           geminiReasoningDetails(streamedParts),

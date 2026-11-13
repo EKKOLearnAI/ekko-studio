@@ -1,8 +1,9 @@
+import { desktopListeningPort } from './desktop-listening-message'
 import { ChildProcess, execFile, execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, chmodSync, existsSync, readdirSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { homedir } from 'node:os'
-import { dirname, delimiter, join, resolve } from 'node:path'
+import { basename, dirname, delimiter, join, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { promisify } from 'node:util'
 import { app } from 'electron'
@@ -14,6 +15,7 @@ import {
   gitPathDirs,
   clearActiveWebUiDirectory,
   defaultWebuiDir,
+  desktopRuntimeDir,
   webuiServerEntryFor,
   webuiDir,
   hermesBin,
@@ -23,8 +25,18 @@ import {
   tokenFile,
   pythonDir,
   pythonEnvironmentDir,
+  recordRuntimeSelectionResult,
+  runtimePlatformKey,
+  runtimeStorageRoot,
 } from './paths'
+import {
+  resolveDesktopHermesSelection,
+  withDesktopHermesSelection,
+  type DesktopManagedHermesRuntime,
+} from './hermes-environment-selection'
+import { canBindTcpPort, releaseOccupiedWebUiPort } from './webui-port'
 import { WebUiStartupDiagnostics } from './webui-startup-diagnostics'
+import { resolveWebUiNodeExecutable } from './webui-node-executable'
 
 const DEFAULT_PORT = 8748
 const DEFAULT_READY_TIMEOUT_MS = 120_000
@@ -34,11 +46,32 @@ const DEFAULT_GRACEFUL_STOP_TIMEOUT_MS = 18_000
 const FORCE_KILL_COMMAND_TIMEOUT_MS = 5_000
 const AGENT_BRIDGE_STARTED_MARKER = '[bootstrap] agent bridge started'
 const AGENT_BRIDGE_FAILED_MARKER = '[bootstrap] agent bridge failed to start'
+const DESKTOP_RESTART_REQUEST = 'hermes-desktop:restart-app'
 const execFileAsync = promisify(execFile)
 
 let serverProc: ChildProcess | null = null
 let cachedToken: string | null = null
 let currentServerPort = DEFAULT_PORT
+let unexpectedExitHandler: ((details: { code: number | null; signal: NodeJS.Signals | null }) => void) | null = null
+let restartRequestHandler: (() => void) | null = null
+
+export function setWebUiUnexpectedExitHandler(
+  handler: ((details: { code: number | null; signal: NodeJS.Signals | null }) => void) | null,
+): void {
+  unexpectedExitHandler = handler
+}
+
+export function setWebUiRestartRequestHandler(handler: (() => void) | null): void {
+  restartRequestHandler = handler
+}
+
+function isDesktopRestartRequest(message: unknown): boolean {
+  return Boolean(
+    message
+    && typeof message === 'object'
+    && (message as { type?: unknown }).type === DESKTOP_RESTART_REQUEST,
+  )
+}
 
 function posixDescendantPids(rootPid: number): number[] {
   try {
@@ -214,6 +247,7 @@ function ensureNativeModules() {
 const COMMON_USER_BIN_DIRS = process.platform === 'win32'
   ? []
   : [
+      join(homedir(), '.local', 'bin'),
       '/opt/homebrew/bin',
       '/usr/local/bin',
       '/usr/bin',
@@ -239,6 +273,201 @@ function mergePathEntries(...paths: Array<string | undefined | null>): string {
     }
   }
   return entries.join(delimiter)
+}
+
+type ManagedRuntimeCandidate = DesktopManagedHermesRuntime & {
+  agentBrowserBin: string
+  agentBrowserHome: string
+  nodeBin: string
+  nodePath: string
+  gitBin?: string
+  gitPath: string
+  playwrightBrowsers: string
+}
+
+type RuntimeManifestSummary = {
+  schema?: number
+  platform?: string
+  hermesAgentVersion?: string
+  hermesSource?: {
+    repository?: string
+    ref?: string
+    commit?: string
+    installMethod?: string
+  }
+  asset?: { name?: string }
+}
+
+function readRuntimeManifestSummary(directory: string): RuntimeManifestSummary | null {
+  try {
+    return JSON.parse(readFileSync(join(directory, 'runtime-manifest.json'), 'utf8')) as RuntimeManifestSummary
+  } catch {
+    return null
+  }
+}
+
+function runtimeVersionFromManifest(directory: string, fallback = ''): string {
+  const manifest = readRuntimeManifestSummary(directory)
+  if (manifest?.hermesAgentVersion?.trim()) return manifest.hermesAgentVersion.trim()
+  const assetName = manifest?.asset?.name || ''
+  return assetName.match(/hermes-agent-([^-]+)-/)?.[1] || fallback
+}
+
+function validateManagedRuntimeCandidate(
+  candidate: ManagedRuntimeCandidate,
+  requireManifest: boolean,
+): string {
+  const requiredGroups: Array<{ label: string; paths: string[] }> = [
+    { label: 'Python executable', paths: [candidate.pythonPath] },
+    { label: 'Hermes executable', paths: [candidate.path] },
+    { label: 'Node executable', paths: [candidate.nodePath] },
+  ]
+  if (process.platform === 'win32') {
+    requiredGroups.push({ label: 'Git executable', paths: [candidate.gitBin || join(candidate.directory, 'git', 'cmd', 'git.exe')] })
+  }
+  const missing = requiredGroups.filter(group => !group.paths.some(existsSync))
+  if (missing.length > 0) {
+    return missing.map(group => `${group.label} is missing: ${group.paths.join(' or ')}`).join('; ')
+  }
+  if (!requireManifest) return ''
+
+  const manifest = readRuntimeManifestSummary(candidate.directory)
+  if (!manifest) return `Runtime manifest is missing or invalid: ${join(candidate.directory, 'runtime-manifest.json')}`
+  const expectedPlatform = runtimePlatformKey()
+  if (manifest.platform && manifest.platform !== expectedPlatform) {
+    return `Runtime platform mismatch: expected ${expectedPlatform}, received ${manifest.platform}`
+  }
+  if ((manifest.schema || 0) >= 2) {
+    const sourceFiles = [
+      join(candidate.agentRoot, '.git', 'HEAD'),
+      join(candidate.agentRoot, 'pyproject.toml'),
+    ]
+    const missingSourceFiles = sourceFiles.filter(file => !existsSync(file))
+    if (missingSourceFiles.length > 0) {
+      return `Runtime updateable source files are missing: ${missingSourceFiles.join(', ')}`
+    }
+    if (manifest.hermesSource?.installMethod !== 'git'
+      || !manifest.hermesSource.repository
+      || !manifest.hermesSource.ref
+      || !/^[0-9a-f]{40}$/i.test(manifest.hermesSource.commit || '')) {
+      return 'Runtime Hermes Git source metadata is invalid'
+    }
+  }
+  return ''
+}
+
+function directManagedRuntimeCandidate(
+  directory: string,
+  version: string,
+  userSearchPath: string,
+): ManagedRuntimeCandidate {
+  const agentRoot = join(directory, 'python')
+  const venvRoot = join(agentRoot, 'venv')
+  const environmentRoot = process.platform === 'win32'
+    ? [join(venvRoot, 'Scripts', 'python.exe'), join(venvRoot, 'python.exe')].some(existsSync) ? venvRoot : agentRoot
+    : existsSync(join(venvRoot, 'bin', 'python3')) ? venvRoot : agentRoot
+  const pythonPath = process.platform === 'win32'
+    ? existsSync(join(environmentRoot, 'Scripts', 'python.exe'))
+      ? join(environmentRoot, 'Scripts', 'python.exe')
+      : join(environmentRoot, 'python.exe')
+    : join(environmentRoot, 'bin', 'python3')
+  const commandWrapper = join(environmentRoot, 'Scripts', 'hermes.cmd')
+  const executable = join(environmentRoot, 'Scripts', 'hermes.exe')
+  const path = process.platform === 'win32'
+    ? existsSync(commandWrapper) || !existsSync(executable) ? commandWrapper : executable
+    : join(environmentRoot, 'bin', 'hermes')
+  const nodeBin = process.platform === 'win32' ? join(directory, 'node') : join(directory, 'node', 'bin')
+  const nodePath = process.platform === 'win32' ? join(nodeBin, 'node.exe') : join(nodeBin, 'node')
+  const gitBin = process.platform === 'win32' ? join(directory, 'git', 'cmd', 'git.exe') : undefined
+  const gitPath = process.platform === 'win32'
+    ? [join(directory, 'git', 'cmd'), join(directory, 'git', 'mingw64', 'bin'), join(directory, 'git', 'clangarm64', 'bin')].filter(existsSync).join(delimiter)
+    : ''
+  const agentBrowserHome = join(agentRoot, 'agent-browser')
+  const agentBrowserBin = process.platform === 'win32'
+    ? join(agentRoot, 'node')
+    : join(agentRoot, 'node', 'bin')
+  const candidate: ManagedRuntimeCandidate = {
+    directory,
+    path,
+    pythonPath,
+    agentRoot,
+    environmentRoot,
+    managedRuntimeVersion: runtimeVersionFromManifest(directory, version),
+    agentBrowserBin,
+    agentBrowserHome,
+    nodeBin,
+    nodePath,
+    gitBin,
+    gitPath,
+    playwrightBrowsers: join(agentRoot, 'ms-playwright'),
+    probePath: mergePathEntries(dirname(path), dirname(pythonPath), agentBrowserBin, nodeBin, gitPath, userSearchPath),
+  }
+  candidate.validationError = validateManagedRuntimeCandidate(candidate, true)
+  return candidate
+}
+
+function managedRuntimeCandidates(
+  primary: ManagedRuntimeCandidate,
+  userSearchPath: string,
+): ManagedRuntimeCandidate[] {
+  if (process.env.HERMES_DESKTOP_RUNTIME_DIR?.trim()) return [primary]
+
+  const currentPlatform = runtimePlatformKey()
+  const root = join(runtimeStorageRoot(), 'hermes')
+  let versionDirectories: Array<{ version: string; directory: string }> = []
+  try {
+    versionDirectories = readdirSync(root, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => ({ version: entry.name, directory: join(root, entry.name, currentPlatform) }))
+      .filter(item => existsSync(item.directory))
+      .sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true }))
+  } catch {
+    // Missing Runtime storage is a normal first-launch state.
+  }
+
+  const candidates: ManagedRuntimeCandidate[] = []
+  const seen = new Set<string>()
+  const validationFailures = new Map<string, string>()
+  try {
+    const active = JSON.parse(readFileSync(join(webUiHome(), 'desktop-runtime', 'active-version.json'), 'utf8')) as {
+      runtimeDirectory?: string
+      hermesRuntimeVersion?: string
+      platform?: string
+      runtimeValidationFailures?: Array<{ directory?: string; reason?: string }>
+    }
+    for (const failure of active.runtimeValidationFailures || []) {
+      if (failure.directory?.trim()) {
+        validationFailures.set(resolve(failure.directory), failure.reason || 'Runtime validation failed')
+      }
+    }
+    const activeDirectory = active.runtimeDirectory?.trim()
+    if (activeDirectory) {
+      const activeCandidate = directManagedRuntimeCandidate(
+        activeDirectory,
+        active.hermesRuntimeVersion || basename(dirname(activeDirectory)),
+        userSearchPath,
+      )
+      activeCandidate.validationError ||= validationFailures.get(resolve(activeDirectory))
+      candidates.push(activeCandidate)
+      seen.add(resolve(activeCandidate.directory))
+    }
+  } catch {
+    // A missing active selection is a normal first-launch state.
+  }
+  if (!seen.has(resolve(primary.directory))) {
+    primary.validationError ||= validationFailures.get(resolve(primary.directory))
+    candidates.push(primary)
+    seen.add(resolve(primary.directory))
+  }
+  for (const item of versionDirectories) {
+    const key = resolve(item.directory)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const candidate = directManagedRuntimeCandidate(item.directory, item.version, userSearchPath)
+    candidate.validationError ||= validationFailures.get(key)
+    candidates.push(candidate)
+  }
+  return candidates
 }
 
 function extractMarkedPath(output: string): string | null {
@@ -324,21 +553,12 @@ async function getFreeTcpPort(): Promise<number> {
   })
 }
 
-async function canBindTcpPort(port: number): Promise<boolean> {
-  return await new Promise((resolveCanBind) => {
-    const server = createServer()
-    server.unref()
-    server.once('error', () => resolveCanBind(false))
-    server.listen(port, '127.0.0.1', () => {
-      server.close(() => resolveCanBind(true))
-    })
-  })
-}
-
 async function getFreeTcpPortInRange(min: number, max: number): Promise<number> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const port = min + (randomBytes(2).readUInt16BE(0) % (max - min + 1))
-    if (await canBindTcpPort(port)) return port
+    // Bridge workers use tcp://127.0.0.1, so keep the probe on the same
+    // loopback address instead of reserving an IPv4 wildcard port.
+    if (await canBindTcpPort(port, '127.0.0.1')) return port
   }
   return getFreeTcpPort()
 }
@@ -358,61 +578,122 @@ export async function startWebUiServer(port = DEFAULT_PORT): Promise<string> {
   mkdirSync(home, { recursive: true })
   mkdirSync(agentHome, { recursive: true })
 
-  // Tell agent-bridge to use the bundled Python directly. Otherwise the
-  // bridge auto-detects Python from HERMES_BIN's shebang — which on our
-  // setup is a #!/bin/sh wrapper, not a python interpreter, so detection
-  // resolves to /bin/sh and the bridge crashes (exit code 2) immediately.
   const isWin = process.platform === 'win32'
-  const bundledPythonPath = bundledPython()
-  const bundledPythonEnvironment = pythonEnvironmentDir()
-  const bundledAgentBrowserBin = isWin
-    ? join(pythonDir(), 'node')
-    : join(pythonDir(), 'node', 'bin')
-  const bundledNodeBin = nodeBinDir()
-  const bundledGitPath = gitPathDirs().join(delimiter)
   const bridgePort = await getFreeTcpPort()
   const workerPortBase = await getFreeTcpPortInRange(20000, 59000)
   const loginShellPath = await getLoginShellPath()
   const nvmNodeBinPaths = getNvmNodeBinPaths()
-  const runtimePath = mergePathEntries(
-    dirname(hermesBin()),
-    bundledAgentBrowserBin,
-    bundledNodeBin,
-    bundledGitPath,
+  const userSearchPath = mergePathEntries(
     loginShellPath,
     nvmNodeBinPaths,
     process.env.PATH,
     process.env.Path,
     COMMON_USER_BIN_DIRS.join(delimiter),
   )
+  const primaryRuntimeDirectory = desktopRuntimeDir()
+  const primaryPythonRoot = pythonDir()
+  const primaryPythonEnvironment = pythonEnvironmentDir()
+  const primaryPythonPath = bundledPython()
+  const primaryHermesPath = hermesBin()
+  const bundledNodeBin = nodeBinDir()
+  const primaryNodePath = bundledNode()
+  const primaryGitBin = bundledGit()
+  const primaryGitPath = gitPathDirs().join(delimiter)
+  const primaryAgentBrowserHome = bundledAgentBrowserHome()
+  const primaryAgentBrowserBin = isWin
+    ? join(primaryPythonRoot, 'node')
+    : join(primaryPythonRoot, 'node', 'bin')
+  const primaryRuntime: ManagedRuntimeCandidate = {
+    directory: primaryRuntimeDirectory,
+    path: primaryHermesPath,
+    pythonPath: primaryPythonPath,
+    agentRoot: primaryPythonRoot,
+    environmentRoot: primaryPythonEnvironment,
+    managedRuntimeVersion: runtimeVersionFromManifest(
+      primaryRuntimeDirectory,
+      basename(dirname(primaryRuntimeDirectory)),
+    ),
+    agentBrowserBin: primaryAgentBrowserBin,
+    agentBrowserHome: primaryAgentBrowserHome,
+    nodeBin: bundledNodeBin,
+    nodePath: primaryNodePath,
+    gitBin: primaryGitBin,
+    gitPath: primaryGitPath,
+    playwrightBrowsers: join(primaryPythonRoot, 'ms-playwright'),
+    probePath: mergePathEntries(
+      dirname(primaryHermesPath),
+      dirname(primaryPythonPath),
+      primaryAgentBrowserBin,
+      bundledNodeBin,
+      primaryGitPath,
+      userSearchPath,
+    ),
+  }
+  primaryRuntime.validationError = validateManagedRuntimeCandidate(
+    primaryRuntime,
+    app.isPackaged || Boolean(process.env.HERMES_DESKTOP_RUNTIME_DIR?.trim()),
+  )
+  const runtimeCandidates = managedRuntimeCandidates(primaryRuntime, userSearchPath)
+  const hermesSelection = await resolveDesktopHermesSelection({
+    env: process.env,
+    searchPath: userSearchPath,
+    hermesHome: agentHome,
+    managedRuntimes: runtimeCandidates,
+  })
+  const selectedManagedRuntime = hermesSelection.source === 'managed-runtime'
+    ? runtimeCandidates.find(candidate => resolve(candidate.path) === resolve(hermesSelection.path))
+    : undefined
+  const runtimeSupport = hermesSelection.source === 'none'
+    ? undefined
+    : selectedManagedRuntime || runtimeCandidates.find(candidate => !candidate.validationError)
+  const runtimeFailures = hermesSelection.managedRuntimeFailures || []
+  if (runtimeFailures.length > 0) {
+    for (const failure of runtimeFailures) {
+      console.warn(`[runtime] rejected Runtime "${failure.directory}": ${failure.reason}`)
+    }
+    recordRuntimeSelectionResult(runtimeFailures, selectedManagedRuntime
+      ? {
+          directory: selectedManagedRuntime.directory,
+          version: selectedManagedRuntime.managedRuntimeVersion || hermesSelection.version,
+        }
+      : undefined)
+  }
+  const runtimePath = mergePathEntries(
+    hermesSelection.path ? dirname(hermesSelection.path) : '',
+    hermesSelection.pythonPath ? dirname(hermesSelection.pythonPath) : '',
+    runtimeSupport?.agentBrowserBin,
+    runtimeSupport?.nodeBin,
+    runtimeSupport?.gitPath,
+    userSearchPath,
+  )
   const browserExecutableOverride = process.env.AGENT_BROWSER_EXECUTABLE_PATH?.trim()
-  const gitBin = bundledGit()
+  console.log(
+    `[desktop] Hermes source=${hermesSelection.source} `
+    + `version=${hermesSelection.version || '-'} path=${hermesSelection.path || '-'}`,
+  )
 
-  // Run via Electron's "run as Node" mode — Electron binary doubles as Node.
-  const env: NodeJS.ProcessEnv = {
+  // Use Node mode for the macOS Helper and the Electron executable elsewhere.
+  const env = withDesktopHermesSelection({
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
     NODE_ENV: 'production',
     HERMES_DESKTOP: 'true',
-    HERMES_BIN: hermesBin(),
-    // The bridge and its per-profile workers need working stdout/stderr for
-    // ready handshakes. Use python.exe on Windows and hide windows at the
-    // process creation layer instead of switching the bridge to pythonw.exe.
-    HERMES_AGENT_BRIDGE_PYTHON: bundledPythonPath,
-    HERMES_AGENT_CLI_PYTHON: bundledPythonPath,
-    HERMES_AGENT_ROOT: pythonDir(),
-    VIRTUAL_ENV: bundledPythonEnvironment,
-    UV_PROJECT_ENVIRONMENT: bundledPythonEnvironment,
-    // Keep uv pinned to the bundled interpreter when a terminal subprocess
-    // deliberately strips VIRTUAL_ENV to protect unrelated user projects.
-    UV_PYTHON: bundledPythonPath,
-    ...(isWin ? {} : { UV_SYSTEM_PYTHON: '1' }),
-    HERMES_AGENT_NODE: bundledNode(),
-    HERMES_AGENT_NODE_ROOT: isWin ? bundledNodeBin : dirname(bundledNodeBin),
-    AGENT_BROWSER_HOME: process.env.AGENT_BROWSER_HOME?.trim() || bundledAgentBrowserHome(),
+    ...(runtimeSupport && existsSync(runtimeSupport.nodePath) ? {
+      HERMES_AGENT_NODE: runtimeSupport.nodePath,
+      HERMES_AGENT_NODE_ROOT: isWin ? runtimeSupport.nodeBin : dirname(runtimeSupport.nodeBin),
+    } : {}),
+    ...(process.env.AGENT_BROWSER_HOME?.trim()
+      ? { AGENT_BROWSER_HOME: process.env.AGENT_BROWSER_HOME.trim() }
+      : runtimeSupport && existsSync(runtimeSupport.agentBrowserHome)
+        ? { AGENT_BROWSER_HOME: runtimeSupport.agentBrowserHome }
+        : {}),
     ...(browserExecutableOverride ? { AGENT_BROWSER_EXECUTABLE_PATH: browserExecutableOverride } : {}),
-    PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH || join(pythonDir(), 'ms-playwright'),
-    ...(gitBin ? { HERMES_AGENT_GIT: gitBin } : {}),
+    ...(process.env.PLAYWRIGHT_BROWSERS_PATH
+      ? { PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH }
+      : runtimeSupport && existsSync(runtimeSupport.playwrightBrowsers)
+        ? { PLAYWRIGHT_BROWSERS_PATH: runtimeSupport.playwrightBrowsers }
+        : {}),
+    ...(runtimeSupport?.gitBin && existsSync(runtimeSupport.gitBin) ? { HERMES_AGENT_GIT: runtimeSupport.gitBin } : {}),
     // Force TCP loopback for the agent bridge. The default `ipc:///tmp/...`
     // unix socket is rejected on macOS in some EDR/sandbox setups (silent
     // SIGKILL of the bridge child within ~150ms). TCP on 127.0.0.1 works
@@ -439,16 +720,20 @@ export async function startWebUiServer(port = DEFAULT_PORT): Promise<string> {
     // HERMES_HOME/.env or by configuring per-platform allowlists.
     GATEWAY_ALLOW_ALL_USERS: process.env.GATEWAY_ALLOW_ALL_USERS ?? 'true',
     // Keep the bundled Hermes Agent, bridge, gateway, and Web UI path helpers
-    // on the same data directory. Native Windows uses an existing
-    // %LOCALAPPDATA%\hermes or %APPDATA%\hermes; otherwise all platforms keep
-    // the standard ~/.hermes layout.
+    // on the same ~/.hermes data directory on every platform.
     HERMES_HOME: agentHome,
     HERMES_WEB_UI_HOME: home,
     HERMES_WEBUI_STATE_DIR: home,
     AUTH_TOKEN: token,
     PORT: String(port),
-    // Prepend bundled Python's bin to PATH so any incidental `python` resolution lands on ours
+    // The selected Hermes/Python pair is first. Bundled auxiliary tools remain
+    // available after selection without influencing which Hermes wins.
     PATH: runtimePath,
+  }, hermesSelection)
+
+  const released = port > 0 && await releaseOccupiedWebUiPort(port, token)
+  if (released) {
+    console.warn(`[webui] released an orphaned Desktop Web UI on port ${port}`)
   }
 
   const fallbackWebUiDir = defaultWebuiDir()
@@ -467,21 +752,25 @@ export async function startWebUiServer(port = DEFAULT_PORT): Promise<string> {
 }
 
 async function launchWebUiServer(webUiDirectory: string, entry: string, env: NodeJS.ProcessEnv, port: number): Promise<string> {
+  const executable = resolveWebUiNodeExecutable()
   const diagnostics = new WebUiStartupDiagnostics(
     join(webUiHome(), 'logs', 'desktop-startup.log'),
     `Desktop ${app.getVersion()} ${process.platform}-${process.arch}; `
     + `Electron ${process.versions.electron || '-'}; Node ${process.versions.node}\n`
-    + `Executable: ${process.execPath}\nWeb UI: ${webUiDirectory}\nEntry: ${entry}`,
+    + `Executable: ${executable}\nWeb UI: ${webUiDirectory}\nEntry: ${entry}`,
   )
-  serverProc = spawn(process.execPath, [entry], {
+  serverProc = spawn(executable, [entry], {
     cwd: webUiDirectory,
     env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     windowsHide: true,
   })
 
   const launchedProc = serverProc
   const bridgeStartup = createAgentBridgeStartupTracker()
+  let startupReady = false
+  let resolveListening!: (value: number) => void
+  const listening = port === 0 ? new Promise<number>(resolve => { resolveListening = resolve }) : Promise.resolve(port)
 
   launchedProc.stdout?.on('data', (chunk: Buffer) => {
     diagnostics.observeStdout(chunk)
@@ -503,11 +792,21 @@ async function launchWebUiServer(webUiDirectory: string, entry: string, env: Nod
     }
   })
   launchedProc.stderr?.on('error', () => { /* EPIPE: ignore */ })
+  launchedProc.on('message', message => {
+    const selected = desktopListeningPort(message)
+    if (serverProc === launchedProc && port === 0 && selected) { resolveListening(selected); return }
+    if (serverProc !== launchedProc || !isDesktopRestartRequest(message)) return
+    if (!restartRequestHandler) {
+      console.warn('[desktop] Web UI requested an App restart before a handler was registered')
+      return
+    }
+    restartRequestHandler()
+  })
   launchedProc.on('exit', (code, signal) => {
     console.error(`[webui] server exited code=${code} signal=${signal}`)
     if (serverProc === launchedProc) serverProc = null
-    if (!app.isReady() || code !== 0) {
-      // Best-effort: if server dies abnormally during startup, surface to user
+    if (startupReady && code !== 0 && app.isReady()) {
+      unexpectedExitHandler?.({ code, signal })
     }
   })
 
@@ -523,7 +822,15 @@ async function launchWebUiServer(webUiDirectory: string, entry: string, env: Nod
     })
   })
   try {
+    let listeningTimer: ReturnType<typeof setTimeout> | undefined
+    try {
+      port = await Promise.race([listening, exitBeforeReady, new Promise<never>((_, reject) => {
+        listeningTimer = setTimeout(() => reject(new Error('Desktop server did not report its bound port')), timeoutMs)
+      })])
+    } finally { clearTimeout(listeningTimer) }
+    currentServerPort = port
     await Promise.race([waitForReady(port, timeoutMs), exitBeforeReady])
+    startupReady = true
   } catch (err) {
     await terminateLaunchedProcess(launchedProc)
     if (serverProc === launchedProc) serverProc = null
@@ -560,7 +867,7 @@ async function terminateLaunchedProcess(proc: ChildProcess): Promise<void> {
 
 async function waitForReady(port: number, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs
-  const url = `http://127.0.0.1:${port}/`
+  const url = `http://127.0.0.1:${port}/health/ready`
   while (Date.now() < deadline) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(1000) })

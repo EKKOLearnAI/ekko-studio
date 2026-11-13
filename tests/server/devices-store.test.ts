@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { LanDeviceInfo } from '../../packages/server/src/services/lan-discovery'
+import type { LanDeviceInfo } from '../../packages/server/src/modules/studio/services/network/lan-pairing-discovery'
 
 describe('devices store', () => {
   let db: any = null
@@ -29,18 +29,18 @@ describe('devices store', () => {
     vi.resetModules()
     const { DatabaseSync } = await import('node:sqlite')
     db = new DatabaseSync(':memory:')
-    vi.doMock('../../packages/server/src/db/index', () => ({
+    vi.doMock('../../packages/server/src/modules/studio/infrastructure/database/index', () => ({
       getDb: () => db,
       getStoragePath: () => ':memory:',
     }))
-    const { initAllHermesTables } = await import('../../packages/server/src/db/hermes/schemas')
+    const { initAllHermesTables } = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
     initAllHermesTables()
   })
 
   afterEach(() => {
     db?.close()
     db = null
-    vi.doUnmock('../../packages/server/src/db/index')
+    vi.doUnmock('../../packages/server/src/modules/studio/infrastructure/database/index')
     vi.resetModules()
   })
 
@@ -49,7 +49,7 @@ describe('devices store', () => {
       getDeviceRelation,
       requestInboundDeviceLink,
       updateInboundStatus,
-    } = await import('../../packages/server/src/db/hermes/devices-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/devices-store')
 
     requestInboundDeviceLink(device)
     expect(getDeviceRelation(device.id)).toMatchObject({
@@ -69,7 +69,7 @@ describe('devices store', () => {
       DuplicateDeviceRequestError,
       getDeviceRelation,
       requestInboundDeviceLink,
-    } = await import('../../packages/server/src/db/hermes/devices-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/devices-store')
 
     requestInboundDeviceLink(device)
     expect(() => requestInboundDeviceLink(device)).toThrow(DuplicateDeviceRequestError)
@@ -86,7 +86,7 @@ describe('devices store', () => {
       listInboundRequestHistory,
       requestInboundDeviceLink,
       updateInboundStatus,
-    } = await import('../../packages/server/src/db/hermes/devices-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/devices-store')
 
     requestInboundDeviceLink(device)
     updateInboundStatus(device.id, 'approved')
@@ -107,7 +107,7 @@ describe('devices store', () => {
       getDeviceRelation,
       listInboundRequestHistory,
       requestInboundDeviceLink,
-    } = await import('../../packages/server/src/db/hermes/devices-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/devices-store')
 
     requestInboundDeviceLink(device)
     expect(deleteDeviceRelation(device.id)).toBe(true)
@@ -120,7 +120,7 @@ describe('devices store', () => {
     const {
       listInboundRequestHistory,
       updateInboundStatus,
-    } = await import('../../packages/server/src/db/hermes/devices-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/devices-store')
 
     updateInboundStatus(device.id, 'blocked', device)
 
@@ -136,7 +136,7 @@ describe('devices store', () => {
       getDeviceRelation,
       listDeviceRelations,
       requestInboundDeviceLink,
-    } = await import('../../packages/server/src/db/hermes/devices-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/devices-store')
 
     requestInboundDeviceLink(device)
     db.prepare('UPDATE devices SET inbound_history_deleted_at = ? WHERE id = ?').run(Date.now(), device.id)

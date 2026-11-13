@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { NDropdown, type DropdownOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { USBFileEntry } from '@/api/hermes/usb'
+import type { USBFileEntry } from '@/api/studio/usb'
 
 export type ContextMenuEntry = USBFileEntry
 

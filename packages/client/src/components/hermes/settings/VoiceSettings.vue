@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { NButton, NInput, NSelect } from 'naive-ui'
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import { useModelCatalogNotice } from '@/composables/useModelCatalogNotice'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { NButton, NInput, NSelect, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSpeech, type MimoTtsOptions, type OpenaiTtsOptions } from '@/composables/useSpeech'
 import { usePcmStreamRecorder } from '@/composables/usePcmStreamRecorder'
-import { transcribeSpeech } from '@/api/hermes/stt'
-import { isServerTtsProvider } from '@/api/hermes/tts'
+import { transcribeSpeech } from '@/api/studio/stt'
+import { isServerTtsProvider } from '@/api/studio/tts'
 import { useVoiceApiConnections } from '@/composables/useVoiceApiConnections'
 import { useVoiceSettings } from '@/composables/useVoiceSettings'
 import { speedToEdgeRate, hzToEdgePitch } from '@/utils/ttsHelpers'
@@ -15,8 +17,7 @@ import VoiceApiConfigurator from './voice/VoiceApiConfigurator.vue'
 import HermesVoiceConfigSummary from './voice/HermesVoiceConfigSummary.vue'
 import LocalSttModelCard from './voice/LocalSttModelCard.vue'
 import type { VoiceApiConnection, VoiceApiKind, VoiceApiProvider, VoiceApiSavePayload } from '@/types/voice-api'
-import type { StoredSttProvider } from '@/api/hermes/stt-settings'
-import { useMessage } from '@/composables/useAppMessage'
+import type { StoredSttProvider } from '@/api/studio/stt-settings'
 
 interface VoiceApiFormSavedPayload extends VoiceApiSavePayload {
   preset: {
@@ -40,6 +41,7 @@ const testText = ref(t('settings.voice.testTextDefault'))
 const showAddModal = ref(false)
 const addModalKind = ref<VoiceApiKind>('tts')
 const showConfigurator = ref(false)
+const catalogChanged = useModelCatalogNotice(() => showAddModal.value || showConfigurator.value)
 const editingConnection = ref<VoiceApiConnection | null>(null)
 const sttRecorder = usePcmStreamRecorder({ voiceActivityThreshold: 0.02 })
 const cardTestStates = ref<Record<string, VoiceApiCardTestState>>({})
@@ -58,8 +60,15 @@ const sttStudioAvailable = computed(() => {
   return !!connection && connection.provider !== 'browser' && (connection.provider === 'local' ? connection.available === true : connection.hasSecret)
 })
 
+const initializing = ref(true)
+usePageLoadingTask(() => initializing.value)
+
 onMounted(async () => {
-  await voiceApi.refresh()
+  try {
+    await voiceApi.refresh()
+  } finally {
+    initializing.value = false
+  }
 })
 
 onBeforeUnmount(() => {
@@ -95,6 +104,7 @@ async function handleAddSaved(data: VoiceApiFormSavedPayload) {
       secrets: data.secrets,
     })
     hermesConfigRevision.value += 1
+    catalogChanged()
     showAddModal.value = false
     message.success(t('settings.voice.ttsSaved'))
   } catch (err) {
@@ -111,6 +121,7 @@ async function handleConfigSave(conn: VoiceApiConnection, payload: VoiceApiSaveP
   try {
     await voiceApi.saveConnection(conn.kind, conn.provider, payload)
     hermesConfigRevision.value += 1
+    catalogChanged()
     showConfigurator.value = false
     message.success(t('settings.voice.ttsSaved'))
   } catch (err) {
@@ -122,6 +133,7 @@ async function handleRemove(conn: VoiceApiConnection) {
   try {
     await voiceApi.deleteSecret(conn.kind, conn.provider)
     hermesConfigRevision.value += 1
+    catalogChanged()
     setCardTestState(conn.id, 'idle')
     message.success(t('settings.voice.ttsCleared'))
   } catch (err) {
@@ -132,22 +144,26 @@ async function handleRemove(conn: VoiceApiConnection) {
 async function handleSetActive(conn: VoiceApiConnection) {
   await voiceApi.setActiveConnection(conn.kind, conn.id)
   hermesConfigRevision.value += 1
+  catalogChanged()
 }
 
 async function handleActiveTtsUpdate(id: string) {
   await voiceApi.setActiveConnection('tts', id)
   hermesConfigRevision.value += 1
+  catalogChanged()
 }
 
 async function handleActiveSttUpdate(id: string) {
   await voiceApi.setActiveConnection('stt', id)
   hermesConfigRevision.value += 1
+  catalogChanged()
 }
 
 async function handleActivateStudio(kind: VoiceApiKind) {
   const id = kind === 'tts' ? voiceApi.activeTtsId.value : voiceApi.activeSttId.value
   await voiceApi.setActiveConnection(kind, id)
   hermesConfigRevision.value += 1
+  catalogChanged()
 }
 
 function ttsOptionsFor(connection: VoiceApiConnection): Record<string, unknown> {
@@ -423,7 +439,7 @@ async function handleLocalTest() {
 @use '@/styles/variables' as *;
 
 .voice-settings {
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .settings-section {
@@ -432,15 +448,15 @@ async function handleLocalTest() {
 
 .voice-provider-section + .voice-provider-section {
   margin-top: 28px;
-  padding-top: 20px;
-  border-top: 1px solid $border-color;
+  padding-top: calc(20px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-color;
 }
 
 .section-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
+  gap: calc(20px * var(--spacing-scale, 1));
   margin-bottom: 14px;
 }
 
@@ -451,7 +467,7 @@ async function handleLocalTest() {
 .section-title {
   margin: 0 0 6px;
   color: $text-primary;
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 600;
 }
 
@@ -459,15 +475,15 @@ async function handleLocalTest() {
   margin: 0;
   max-width: 620px;
   color: $text-muted;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, 1.6);
 }
 
 .section-controls {
   display: grid;
   grid-template-columns: 220px 112px;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   flex-shrink: 0;
 
   > .n-button {
@@ -477,7 +493,7 @@ async function handleLocalTest() {
 
 .active-select {
   display: grid;
-  gap: 5px;
+  gap: calc(5px * var(--spacing-scale, 1));
   width: 220px;
   min-width: 0;
 }
@@ -485,8 +501,8 @@ async function handleLocalTest() {
 .active-label,
 .active-summary {
   color: $text-muted;
-  font-size: 11px;
-  line-height: 1.3;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  line-height: var(--line-height, 1.3);
 }
 
 .active-summary {
@@ -503,7 +519,7 @@ async function handleLocalTest() {
 .provider-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 
 @media (max-width: 860px) {

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { arch as osArch, platform as osPlatform, tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { desktopNodeVersion } from './node-runtime-config.mjs'
+import { checkPreparedRuntime } from './check-prepared-runtime.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -32,6 +33,7 @@ const url = `${baseUrl}/v${NODE_VERSION}/${file}`
 const marker = TARGET_OS === 'win32' ? 'node.exe' : join('bin', 'node')
 
 if (existsSync(resolve(OUT_DIR, marker))) {
+  checkPreparedRuntime(resolve(OUT_DIR, marker), ['--version'], NODE_VERSION, 'Node.js')
   console.log(`Node.js already present at ${OUT_DIR}, skipping`)
   process.exit(0)
 }

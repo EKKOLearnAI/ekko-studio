@@ -1,4 +1,6 @@
+import { deploymentBasePath } from '@/utils/deployment-url'
 import router from '@/router'
+import { invalidateAuth } from './auth-invalidation'
 
 const DEFAULT_BASE_URL = ''
 const ACTIVE_PROFILE_STORAGE_KEY = 'hermes_active_profile_name'
@@ -18,10 +20,12 @@ export async function ensureDesktopAuthReady(): Promise<void> {
   }
 }
 
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
   if (import.meta.env.VITE_HERMES_PREVIEW === '1') return DEFAULT_BASE_URL
   if (isDesktopShell()) return DEFAULT_BASE_URL
-  return localStorage.getItem('hermes_server_url') || DEFAULT_BASE_URL
+  const deploymentBase = deploymentBasePath()
+  return localStorage.getItem('hermes_server_url') ||
+    (deploymentBase ? `${window.location.origin}${deploymentBase}` : DEFAULT_BASE_URL)
 }
 
 export function getApiKey(): string {
@@ -29,15 +33,20 @@ export function getApiKey(): string {
 }
 
 export function setServerUrl(url: string) {
+  const previousBase = getBaseUrl()
   localStorage.setItem('hermes_server_url', url)
+  if (getBaseUrl() !== previousBase) invalidateAuth()
 }
 
 export function setApiKey(key: string) {
+  const changed = getApiKey() !== key
   localStorage.setItem('hermes_api_key', key)
+  if (changed) invalidateAuth()
 }
 
 export function clearApiKey() {
   localStorage.removeItem('hermes_api_key')
+  invalidateAuth()
 }
 
 function clearAuthSessionState() {
@@ -113,7 +122,7 @@ export function getModelsPageProfile(): string | null {
 function modelSettingsRequestProfile(path: string): string | null {
   const pathname = path.split('?')[0]
   const isModelSettings = /^\/api\/hermes\/(?:config(?:\/|$)|auth\/|provider-models(?:\/|$)|model-alias$|model-visibility$|custom-model$)/.test(pathname)
-    || /^\/api\/hermes\/(?:stt|tts)\/(?:settings|local-model)(?:\/|$)/.test(pathname)
+    || /^\/api\/studio\/(?:stt|tts)\/(?:settings|local-model)(?:\/|$)/.test(pathname)
     || pathname === '/api/voice/providers/probe'
   return isModelSettings ? getModelsPageProfile() : null
 }
@@ -133,6 +142,8 @@ function shouldAttachProfileHeader(path: string, options: RequestInit): boolean 
     const url = new URL(path, 'http://hermes.local')
     if (url.searchParams.has('profile')) return false
     if (url.pathname.startsWith('/api/hermes/profiles')) return false
+    if (url.pathname.startsWith('/api/studio/person')) return false
+    if (url.pathname.startsWith('/api/studio/jev/')) return false
     if (url.pathname.startsWith('/api/theme')) return false
     if (isProfileWideSessionCollection(url.pathname)) return false
   } catch {
@@ -144,11 +155,11 @@ function shouldAttachProfileHeader(path: string, options: RequestInit): boolean 
 }
 
 function isProfileWideSessionCollection(pathname: string): boolean {
-  return pathname === '/api/hermes/sessions' ||
-    pathname === '/api/hermes/sessions/batch-delete' ||
-    pathname === '/api/hermes/search/sessions' ||
-    pathname === '/api/hermes/sessions/search' ||
-    pathname === '/api/hermes/sessions/conversations'
+  return pathname === '/api/studio/sessions' ||
+    pathname === '/api/studio/sessions/batch-delete' ||
+    pathname === '/api/studio/search/sessions' ||
+    pathname === '/api/studio/sessions/search' ||
+    pathname === '/api/studio/sessions/conversations'
 }
 
 function emitAuthNotice(kind: 'expired' | 'forbidden') {
@@ -189,19 +200,14 @@ function responseErrorMessage(text: string, statusText: string): string {
   }
 }
 
-function responseErrorPayload(text: string): { code?: string; raw?: string; detail?: string } {
+function responseErrorCode(text: string): string | undefined {
   const trimmed = text.trim()
-  if (!trimmed) return {}
+  if (!trimmed) return undefined
   try {
-    const parsed = JSON.parse(trimmed) as { code?: unknown; raw?: unknown; detail?: unknown; message?: unknown }
-    const out: { code?: string; raw?: string; detail?: string } = {}
-    if (typeof parsed.code === 'string' && parsed.code) out.code = parsed.code
-    if (typeof parsed.raw === 'string') out.raw = parsed.raw
-    // 服务端自有的校验原因（枚举短串），用于给出更具体的失败提示。
-    if (typeof parsed.detail === 'string' && parsed.detail) out.detail = parsed.detail
-    return out
+    const parsed = JSON.parse(trimmed) as { code?: unknown }
+    return typeof parsed?.code === 'string' && parsed.code ? parsed.code : undefined
   } catch {
-    return {}
+    return undefined
   }
 }
 
@@ -257,10 +263,9 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
         emitAuthNotice('forbidden')
       }
     }
-    const payload = responseErrorPayload(text)
     throw Object.assign(
       new Error(`API Error ${res.status}: ${responseErrorMessage(text, res.statusText)}`),
-      { status: res.status, code: payload.code, ...(payload.raw !== undefined ? { raw: payload.raw } : {}), ...(payload.detail !== undefined ? { detail: payload.detail } : {}) },
+      { status: res.status, code: responseErrorCode(text) },
     )
   }
 
@@ -269,41 +274,4 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
 
 export function getBaseUrlValue(): string {
   return getBaseUrl()
-}
-
-/**
- * Fetch an endpoint that returns a non-JSON body (for example `text/markdown`).
- * Mirrors `request()`'s auth, profile header and 401 handling so plugin pages
- * cannot silently skip authentication by reaching for `fetch` directly.
- */
-export async function requestText(path: string, options: RequestInit = {}): Promise<string> {
-  await ensureDesktopAuthReady()
-  const headers: Record<string, string> = { ...options.headers as Record<string, string> }
-  const apiKey = getApiKey()
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
-  const profileName = getActiveProfileName()
-  if (profileName && shouldAttachProfileHeader(path, options)) headers['X-Hermes-Profile'] = profileName
-
-  const res = await fetch(`${getBaseUrl()}${path}`, { ...options, headers })
-
-  const isLocalBff = !path.startsWith('/api/hermes/v1/') && !path.startsWith('/v1/')
-  if (res.status === 401 && isLocalBff) {
-    clearAuthSessionState()
-    emitAuthNotice('expired')
-    if (router.currentRoute.value.name !== 'login') {
-      router.replace({ name: 'login' })
-    }
-    throw new Error('Unauthorized')
-  }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    const payload = responseErrorPayload(text)
-    throw Object.assign(
-      new Error(`API Error ${res.status}: ${responseErrorMessage(text, res.statusText)}`),
-      { status: res.status, code: payload.code, ...(payload.raw !== undefined ? { raw: payload.raw } : {}), ...(payload.detail !== undefined ? { detail: payload.detail } : {}) },
-    )
-  }
-
-  return res.text()
 }

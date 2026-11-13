@@ -156,8 +156,13 @@ function endDrag(event: PointerEvent) {
   width: 14px;
   height: 14px;
   border-radius: 50%;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   border: 2px solid #fff;
+
   background: var(--accent-info, #4a90d9);
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
   box-sizing: border-box;
 }

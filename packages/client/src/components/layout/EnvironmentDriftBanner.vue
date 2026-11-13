@@ -129,18 +129,18 @@ function onDismiss() {
   align-items: flex-start;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid #f0ad4e;
-  background: #fff8e6;
-  color: #5d4406;
+  border: 1px solid var(--warning);
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
+  color: var(--warning);
   border-radius: 6px;
   margin: 8px;
   font-size: 13px;
   line-height: 1.5;
 }
 .environment-drift-banner--info {
-  border-color: #d0d7de;
-  background: #f6f8fa;
-  color: #57606a;
+  border-color: var(--border-color);
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
+  color: var(--text-primary);
 }
 .environment-drift-banner__icon {
   font-size: 20px;
@@ -178,8 +178,8 @@ function onDismiss() {
   font-size: 13px;
 }
 .environment-drift-banner__btn--primary {
-  background: #f0ad4e;
-  color: #fff;
+  background: var(--warning);
+  color: var(--text-primary);
   border-radius: 4px;
 }
 .environment-drift-banner__btn--primary:disabled {
@@ -187,7 +187,7 @@ function onDismiss() {
   cursor: not-allowed;
 }
 .environment-drift-banner__btn--link {
-  color: #5d4406;
+  color: var(--warning);
   text-decoration: underline;
 }
 </style>

@@ -1,13 +1,14 @@
+import '../../packages/server/src/bootstrap/agent-profile-adapter'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sharp from 'sharp'
-vi.mock('../../packages/server/src/services/scanner/ocr', async importOriginal => ({ ...await importOriginal<any>(), resolveScannerDashScopeKey: vi.fn(async () => 'test-key') }))
-import { readSubmission, readSettings, writeSettings, gradingDirectory } from '../../packages/server/src/services/grading/store'
-import { capture, step, validateResults, validateWords } from '../../packages/server/src/services/grading/pipeline'
-import { applyEdits, groupLines, summarize } from '../../packages/server/src/services/grading/annotation-engine'
-import { gradingRequest } from '../../packages/server/src/controllers/grading'
+vi.mock('../../packages/server/src/modules/studio/services/scanner/ocr', async importOriginal => ({ ...await importOriginal<any>(), resolveScannerDashScopeKey: vi.fn(async () => 'test-key') }))
+import { readSubmission, readSettings, writeSettings, gradingDirectory } from '../../packages/server/src/modules/studio/services/grading/store'
+import { capture, step, validateResults, validateWords } from '../../packages/server/src/modules/studio/services/grading/pipeline'
+import { applyEdits, groupLines, summarize } from '../../packages/server/src/modules/studio/services/grading/annotation-engine'
+import { gradingRequest } from '../../packages/server/src/modules/studio/controllers/grading'
 let home: string
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'grading-test-'))

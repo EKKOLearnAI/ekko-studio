@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { createServer, type Server } from 'node:http'
 import { readFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
-import { MeetingASRService } from '../../packages/server/src/services/meeting-asr'
+import { MeetingASRService } from '../../packages/server/src/modules/studio/services/meeting-asr/index'
 
 /**
  * The whole-file transcription dialog lets the user pick either ASR engine per
@@ -155,7 +155,7 @@ describe('MeetingASRService crash diagnostics', () => {
 
   it('reports the tail through status.error when the child exits unexpectedly', () => {
     const source = readFileSync(
-      'packages/server/src/services/meeting-asr/index.ts',
+      'packages/server/src/modules/studio/services/meeting-asr/index.ts',
       'utf8',
     )
     expect(source).toContain('_recordMainLog(data)')

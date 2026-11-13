@@ -7,11 +7,11 @@
  */
 
 import { mkdtempSync, rmSync } from 'fs'
-import { tmpdir } from 'os'
+import { homedir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as ctrl from '../../packages/server/src/controllers/knowledge'
-import { KnowledgeService } from '../../packages/server/src/services/knowledge/knowledge.service'
+import * as ctrl from '../../packages/server/src/modules/studio/controllers/knowledge'
+import { KnowledgeService } from '../../packages/server/src/modules/studio/services/knowledge/knowledge.service'
 
 // --- Mock service ---------------------------------------------------------
 
@@ -52,7 +52,7 @@ describe('knowledge controller', () => {
   beforeEach(() => {
     // Reset the service singleton.
     ctrl.setKnowledgeService(null as unknown as KnowledgeService)
-    tempDir = mkdtempSync(join(tmpdir(), 'knowledge-ctrl-'))
+    tempDir = mkdtempSync(join(homedir(), '.knowledge-ctrl-test-'))
   })
 
   afterEach(() => {

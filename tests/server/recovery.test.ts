@@ -14,19 +14,19 @@ const mocks = vi.hoisted(() => {
   }
 })
 
-vi.mock('../../packages/server/src/services/login-limiter', () => ({
+vi.mock('../../packages/server/src/modules/studio/services/auth/login-limiter', () => ({
   unlockAll: mocks.unlockAll,
   extractIp: mocks.extractIp,
 }))
 
-vi.mock('../../packages/server/src/db/hermes/users-store', () => ({
+vi.mock('../../packages/server/src/modules/studio/repositories/users-store', () => ({
   DEFAULT_USERNAME: 'quanthermes',
   DEFAULT_PASSWORD: '12345678',
   findUserByUsername: mocks.findUserByUsername,
   updateUserPassword: mocks.updateUserPassword,
 }))
 
-vi.mock('../../packages/server/src/services/logger', () => ({
+vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({
   logger: {
     info: mocks.loggerInfo,
     warn: mocks.loggerWarn,
@@ -39,13 +39,13 @@ vi.mock('fs', () => ({
   unlinkSync: mocks.unlinkSync,
 }))
 
-vi.mock('../../packages/server/src/config', () => ({
+vi.mock('../../packages/server/src/modules/studio/public/config', () => ({
   config: { appHome: '/tmp/hermes-web-ui-test' },
 }))
 
 async function loadRecovery() {
   vi.resetModules()
-  return import('../../packages/server/src/services/recovery')
+  return import('../../packages/server/src/modules/studio/services/recovery')
 }
 
 describe('recovery service', () => {
@@ -62,10 +62,10 @@ describe('recovery service', () => {
   })
 
   describe('getRecoveryPassword', () => {
-    it('falls back to DEFAULT_PASSWORD when env is unset', async () => {
+    it('disables recovery when no secret is configured', async () => {
       delete process.env.HERMES_WEB_UI_RECOVERY_PASSWORD
       const svc = await loadRecovery()
-      expect(svc.getRecoveryPassword()).toBe('12345678')
+      expect(svc.getRecoveryPassword()).toBeNull()
     })
 
     it('uses trimmed env value when set', async () => {
@@ -74,14 +74,20 @@ describe('recovery service', () => {
       expect(svc.getRecoveryPassword()).toBe('my-secret')
     })
 
-    it('falls back when env is empty whitespace', async () => {
+    it('disables recovery for a blank secret', async () => {
       process.env.HERMES_WEB_UI_RECOVERY_PASSWORD = '   '
       const svc = await loadRecovery()
-      expect(svc.getRecoveryPassword()).toBe('12345678')
+      expect(svc.getRecoveryPassword()).toBeNull()
     })
   })
 
   describe('verifyRecoveryPassword', () => {
+    it('rejects the published login password even if it is explicitly configured', async () => {
+      process.env.HERMES_WEB_UI_RECOVERY_PASSWORD = '12345678'
+      const svc = await loadRecovery()
+      expect(svc.verifyRecoveryPassword('12345678')).toBe(false)
+    })
+
     it('accepts the configured env value', async () => {
       process.env.HERMES_WEB_UI_RECOVERY_PASSWORD = 'topsecret'
       const svc = await loadRecovery()

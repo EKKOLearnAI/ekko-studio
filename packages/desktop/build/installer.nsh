@@ -1,15 +1,22 @@
-!macro stopHermesStudioProcesses
-  IfFileExists "$INSTDIR\Hermes Studio.exe" 0 hermesStudioStopDone
-    DetailPrint "Stopping Hermes Studio..."
-    nsExec::ExecToLog '"$INSTDIR\Hermes Studio.exe" --quit'
-    Pop $0
-
+!macro stopStudioExecutable EXE_NAME LABEL
+  IfFileExists "$INSTDIR\${EXE_NAME}" 0 studioStopDone_${LABEL}
+    DetailPrint "Stopping Ekko Studio..."
     InitPluginsDir
     FileOpen $0 "$PLUGINSDIR\stop-hermes-studio.ps1" w
     FileWrite $0 "$$ErrorActionPreference = 'SilentlyContinue'$\r$\n"
     FileWrite $0 "$$target = [System.IO.Path]::GetFullPath($$env:HERMES_STUDIO_EXE)$\r$\n"
     FileWrite $0 "$$installDir = [System.IO.Path]::GetFullPath($$env:HERMES_STUDIO_INSTALL_DIR)$\r$\n"
     FileWrite $0 "$$webUiHome = Join-Path $$env:USERPROFILE '.hermes-web-ui'$\r$\n"
+    ; Older Desktop versions can show an installation warning even for --quit.
+    ; Bound that helper's lifetime wait before continuing the existing cleanup.
+    FileWrite $0 "function Request-StudioQuit {$\r$\n"
+    FileWrite $0 "  try {$\r$\n"
+    FileWrite $0 "    $$quitProcess = Start-Process -FilePath $$target -ArgumentList '--quit' -PassThru -ErrorAction Stop$\r$\n"
+    FileWrite $0 "    try {$\r$\n"
+    FileWrite $0 "      if (-not $$quitProcess.WaitForExit(5000)) { Write-Output 'Quit helper is still running; continuing process cleanup.' }$\r$\n"
+    FileWrite $0 "    } finally { $$quitProcess.Dispose() }$\r$\n"
+    FileWrite $0 "  } catch { Write-Output 'Could not send the quit request; continuing process cleanup.' }$\r$\n"
+    FileWrite $0 "}$\r$\n"
     FileWrite $0 "function Normalize-Path([string]$$path) {$\r$\n"
     FileWrite $0 "  try { if ($$path) { return [System.IO.Path]::GetFullPath($$path) } } catch {}$\r$\n"
     FileWrite $0 "  return ''$\r$\n"
@@ -52,7 +59,7 @@
     FileWrite $0 "  return $$roots | Select-Object -Unique$\r$\n"
     FileWrite $0 "}$\r$\n"
     FileWrite $0 "function Get-HermesStudioProcess {$\r$\n"
-    FileWrite $0 "  Get-CimInstance Win32_Process -Filter $\"Name = 'Hermes Studio.exe'$\" | Where-Object {$\r$\n"
+    FileWrite $0 "  Get-CimInstance Win32_Process -Filter $\"Name = '${EXE_NAME}'$\" | Where-Object {$\r$\n"
     FileWrite $0 "    try { $$_.ExecutablePath -and ([System.IO.Path]::GetFullPath($$_.ExecutablePath) -ieq $$target) } catch { $$false }$\r$\n"
     FileWrite $0 "  }$\r$\n"
     FileWrite $0 "}$\r$\n"
@@ -65,11 +72,12 @@
     FileWrite $0 "    if ($$exe -and $$exe -ieq $$target) { return $$true }$\r$\n"
     FileWrite $0 "    if ($$cmd -and $$cmd.IndexOf($$installDir, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $$true }$\r$\n"
     FileWrite $0 "    foreach ($$root in $$runtimeRoots) {$\r$\n"
-    FileWrite $0 "      if ((Test-UnderPath $$exe $$root) -and ($$cmd -match 'hermes-studio-mcp|hermes_bridge\.py|hermes_cli\.main gateway run')) { return $$true }$\r$\n"
+    FileWrite $0 "      if ((Test-UnderPath $$exe $$root) -and ($$cmd -match '(?:ekko|hermes)-studio-mcp|hermes_bridge\.py|hermes_cli\.main gateway run')) { return $$true }$\r$\n"
     FileWrite $0 "    }$\r$\n"
     FileWrite $0 "    return $$false$\r$\n"
     FileWrite $0 "  }$\r$\n"
     FileWrite $0 "}$\r$\n"
+    FileWrite $0 "Request-StudioQuit$\r$\n"
     FileWrite $0 "Get-HermesStudioProcess | ForEach-Object {$\r$\n"
     FileWrite $0 "  try {$\r$\n"
     FileWrite $0 "    $$process = Get-Process -Id $$_.ProcessId$\r$\n"
@@ -93,20 +101,26 @@
     FileWrite $0 "exit 1$\r$\n"
     FileClose $0
 
-    System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_EXE", t "$INSTDIR\Hermes Studio.exe") i .r0'
+    System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_EXE", t "$INSTDIR\${EXE_NAME}") i .r0'
     System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_INSTALL_DIR", t "$INSTDIR") i .r0'
     nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-hermes-studio.ps1"'
     Pop $0
     System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_EXE", t "") i .r0'
     System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_INSTALL_DIR", t "") i .r0'
-    nsExec::ExecToLog 'taskkill.exe /IM "Hermes Studio.exe" /T /F'
+    nsExec::ExecToLog 'taskkill.exe /IM "${EXE_NAME}" /T /F'
     Pop $0
-  hermesStudioStopDone:
+  studioStopDone_${LABEL}:
+!macroend
+
+!macro stopHermesStudioProcesses
+  ; Close either installed product name when upgrading across the rename.
+  !insertmacro stopStudioExecutable "Ekko Studio.exe" ekko
+  !insertmacro stopStudioExecutable "Hermes Studio.exe" hermes
 !macroend
 
 !macro repairHermesStudioUninstaller
   IfFileExists "$INSTDIR\${UNINSTALL_FILENAME}" 0 hermesStudioRepairDone
-    DetailPrint "Repairing Hermes Studio uninstaller..."
+    DetailPrint "Repairing Ekko Studio uninstaller..."
     SetOutPath "$INSTDIR"
     Delete "$INSTDIR\${UNINSTALL_FILENAME}.hermes-repair"
     ClearErrors

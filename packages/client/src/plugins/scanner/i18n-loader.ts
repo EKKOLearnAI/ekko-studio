@@ -8,6 +8,7 @@ const LOADERS: Record<SupportedLocale, () => Promise<Record<string, unknown>>> =
   ar: () => import('./locales/ar'),
   de: () => import('./locales/de'),
   en: () => import('./locales/en'),
+  tr: () => import('./locales/en'),
   es: () => import('./locales/es'),
   fr: () => import('./locales/fr'),
   ja: () => import('./locales/ja'),

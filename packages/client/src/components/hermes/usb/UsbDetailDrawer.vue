@@ -7,7 +7,7 @@
 import { computed, watch } from 'vue'
 import { NButton, NDrawer, NDrawerContent, NEmpty, NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { USBDeviceRecord, USBEventRecord, USBServiceRuntimeStatus } from '@/api/hermes/usb-socket'
+import type { USBDeviceRecord, USBEventRecord, USBServiceRuntimeStatus } from '@/api/studio/usb-socket'
 import USBEventHistory from './USBEventHistory.vue'
 
 export type UsbDetailSection = 'details' | 'runtime' | 'activity' | 'errors'
@@ -234,7 +234,7 @@ initSection()
   transition: background $transition-fast, color $transition-fast;
 
   &:hover {
-    background: var(--bg-secondary);
+    background: var(--theme-card-bg, var(--bg-card));
     color: $text-primary;
   }
 
@@ -249,7 +249,7 @@ initSection()
 }
 
 .drawer-nav-badge {
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   color: $text-muted;
   padding: 1px 6px;
   border-radius: 999px;
@@ -308,7 +308,7 @@ initSection()
 .drawer-error {
   margin: 0;
   padding: 12px;
-  background: var(--bg-input);
+  background: var(--theme-input-bg, var(--bg-input));
   border: 1px solid rgba(var(--error-rgb), 0.3);
   border-radius: $radius-sm;
   color: $error;

@@ -1,8 +1,0 @@
-schema_version: 1
-module_path: hermes_data
-title: USB Device Monitor & Mounter Bot
-scope:
-    - hermes_data/
-source_files: []
-depends_on: []
-related_to: []

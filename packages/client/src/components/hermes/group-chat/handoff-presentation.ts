@@ -1,4 +1,4 @@
-import type { RoomAgentHandoffChain } from '@/api/hermes/group-chat'
+import type { RoomAgentHandoffChain } from '@/api/studio/group-chat'
 
 export function handoffErrorTranslationKey(error: unknown): string | null {
     const normalized = String(error || '').trim()

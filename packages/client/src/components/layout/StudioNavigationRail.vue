@@ -1,0 +1,154 @@
+<script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { NTooltip } from 'naive-ui'
+import { isStoredSuperAdmin } from '@/api/client'
+import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
+import PageSidebarFooter from './PageSidebarFooter.vue'
+import { useMobileNavigation } from '@/composables/usePageSidebar'
+import { pluginPages, pluginNavigation, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
+import PluginNavigationIcon from '@/components/plugins/PluginNavigationIcon.vue'
+import PluginSymbol from '@/components/common/PluginIcon.vue'
+import { listSidebarItems } from '@/plugins'
+
+const route = useRoute()
+const { t } = useI18n()
+const { snapshot } = usePluginCatalog()
+const pluginEntries = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginNavigation(plugin).map(view => ({ plugin, view }))))
+function pluginActive(id: string, view: { id: string; slot: string }) {
+  if (route.params.pluginId !== id) return false
+  const plugin = snapshot.value.plugins.find(plugin => plugin.manifest.id === id)
+  const current = plugin && pluginPages(plugin).find(item => item.id === (route.params.viewId || pluginNavigation(plugin)[0]?.id))
+  const workspaceEntries = plugin ? pluginNavigation(plugin).filter(entry => entry.slot === 'workspace') : []
+  return current?.slot === 'workspace' && workspaceEntries.length === 1 ? view.slot === 'workspace' : current?.id === view.id
+}
+const canManageAgents = computed(() => isStoredSuperAdmin())
+const entries = computed<Array<{ key: string; route: string; label: string; path?: string; avatar?: string }>>(() => [
+  { key: 'person', route: 'hermes.person', label: 'person.subtitle', avatar: deploymentUrl('/person/idle.gif') },
+  { key: 'chat', route: 'hermes.chat', label: 'sidebar.singleChat', path: 'M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
+  { key: 'group', route: 'hermes.groupChat', label: 'sidebar.groupChat', path: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' },
+  { key: 'workflow', route: 'hermes.workflow', label: 'sidebar.workflow', path: 'M8 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0M22 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0M22 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0M8 12h3a4 4 0 0 0 4-4V6M8 12h3a4 4 0 0 1 4 4v2' },
+  { key: 'meeting', route: 'hermes.meeting', label: 'sidebar.meeting', path: 'M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8' },
+  { key: 'usb', route: 'hermes.usb', label: 'sidebar.usb', path: 'M12 2v16M8 6l4-4 4 4M12 12H7V8M12 16h5v-4M15 10h4v4h-4M9 20a3 3 0 1 0 6 0 3 3 0 0 0-6 0' },
+  ...listSidebarItems().filter(item => !item.requiresSuperAdmin || canManageAgents.value).map(item => ({ key: item.routeName, route: item.routeName, label: item.labelKey, path: item.iconPath })),
+  { key: 'history', route: 'hermes.history', label: 'sidebar.history', path: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 7v5l3 2' },
+  { key: 'connections', route: 'hermes.connections', label: 'sidebar.connections', path: 'M3 4h14a1 1 0 0 1 1 1v4M3 4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h9M7 16v4M5 20h7M15 9h6a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1M17 18h2' },
+  ...(canManageAgents.value ? [{ key: 'agents', route: 'hermes.agentManager', label: 'sidebar.agentManager', path: 'M12 8V4H8M7 8h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-6a3 3 0 0 1 3-3M2 14h2M20 14h2M9 13v2M15 13v2' }] : []),
+  { key: 'models', route: 'hermes.models', label: 'sidebar.models', path: 'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1' },
+  { key: 'usage', route: 'hermes.usage', label: 'sidebar.usage', path: 'M3 12h4v9H3zM10 7h4v14h-4zM17 3h4v18h-4z' },
+  { key: 'studioPlugins', route: 'studio.plugins', label: 'studioPlugins.title' },
+])
+const activeKey = computed(() => {
+  const name = String(route.name || '')
+  if (route.meta.hermesConfig || route.meta.ekkoConfig || route.meta.codingAgentConfig || route.name === 'studio.pluginAgentSettings') return 'agents'
+  if (['hermes.chat', 'hermes.session', 'hermes.globalAgent', 'hermes.globalAgentSession'].includes(name)) return 'chat'
+  if (name.startsWith('hermes.groupChat')) return 'group'
+  if (name.startsWith('hermes.history')) return 'history'
+  if (name === 'hermes.apiRelay') return 'apiRelay'
+  if (name === 'studio.pluginPage') return 'plugin:' + String(route.params.pluginId)
+  return entries.value.find(entry => entry.route === name)?.key || 'settings'
+})
+const mobileNavigation = useMobileNavigation()
+function handleNavigate(key: string) {
+  if (mobileNavigation && (key.startsWith('plugin:') || ['studioPlugins', 'connections', 'agents', 'models', 'usage', 'apiRelay', 'usb', 'meeting', 'plugin-scanner.scanner', 'plugin-knowledge.vaults', 'plugin-paper-grading.grading-batch'].includes(key))) {
+    mobileNavigation.open.value = false
+  }
+}
+</script>
+
+<template>
+  <aside class="studio-navigation-rail">
+    <PageSidebarFooter rail collapsed />
+    <nav class="studio-navigation-rail__nav">
+      <template v-for="entry in entries" :key="entry.key">
+      <NTooltip placement="right" trigger="hover">
+        <template #trigger>
+          <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: entry.route }" :active="activeKey === entry.key" :aria-label="t(entry.label)" @click="handleNavigate(entry.key)">
+            <PluginSymbol v-if="entry.key === 'studioPlugins'" :size="22" />
+            <img v-else-if="entry.avatar" class="studio-navigation-rail__avatar" :src="entry.avatar" width="32" height="32" alt="" aria-hidden="true" />
+            <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="entry.path" /></svg>
+          </RouteLinkItem>
+        </template>
+        {{ t(entry.label) }}
+      </NTooltip>
+      <div v-if="entry.key === 'studioPlugins' && pluginEntries.length" class="studio-navigation-rail__plugins" role="group" :aria-label="t('studioPlugins.workspace')">
+        <NTooltip v-for="{ plugin, view } in pluginEntries" :key="plugin.manifest.id + ':' + view.id" placement="right" trigger="hover">
+          <template #trigger><RouteLinkItem class="studio-navigation-rail__item" :to="pluginPageLocation(plugin, view.id)" :active="pluginActive(plugin.manifest.id, view)" :aria-label="view.title" @click="handleNavigate('plugin:' + plugin.manifest.id)"><PluginNavigationIcon :icon="view.icon" :size="22" /></RouteLinkItem></template>
+          {{ view.title }}
+        </NTooltip>
+      </div>
+      </template>
+      <NTooltip placement="right" trigger="hover">
+        <template #trigger>
+          <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: 'hermes.apiRelay' }" :active="activeKey === 'apiRelay'" :aria-label="t('sidebar.apiRelay')" @click="handleNavigate('apiRelay')">
+            <img class="api-relay-logo" :src="deploymentUrl('/relay-logo.png')" width="24" height="24" alt="" aria-hidden="true" />
+          </RouteLinkItem>
+        </template>
+        {{ t('sidebar.apiRelay') }}
+      </NTooltip>
+    </nav>
+    <div class="studio-navigation-rail__bottom">
+      <NTooltip placement="right" trigger="hover">
+        <template #trigger>
+          <RouteLinkItem class="studio-navigation-rail__item" :to="{ name: 'hermes.settings' }" :active="activeKey === 'settings'" :aria-label="t('sidebar.settings')">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </RouteLinkItem>
+        </template>
+        {{ t('sidebar.settings') }}
+      </NTooltip>
+    </div>
+  </aside>
+</template>
+
+<style scoped lang="scss">
+@use '@/styles/variables' as *;
+
+.studio-navigation-rail {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 0 0 $navigation-rail-width;
+  flex-direction: column;
+  align-items: center;
+  width: $navigation-rail-width;
+  min-height: 0;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  background: transparent;
+
+  :deep(.page-sidebar-bottom) { width: 100%; padding: 0 0 calc(16px * var(--spacing-scale, 1)); }
+  :deep(.page-sidebar-account-btn) { height: 44px; padding: calc(4px * var(--spacing-scale, 1)); }
+}
+.studio-navigation-rail__nav {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(8px * var(--spacing-scale, 1));
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.studio-navigation-rail__bottom { display: flex; flex-direction: column; gap: calc(8px * var(--spacing-scale, 1)); padding-top: 12px; }
+.studio-navigation-rail__plugins { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid $border-color; }
+.api-relay-logo { border-radius: var(--radius-component, 4px); }
+.studio-navigation-rail__avatar { aspect-ratio: 1; flex-shrink: 0; border-radius: 4px; object-fit: contain; }
+.studio-navigation-rail__item {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  color: $text-muted;
+  border-radius: $radius-sm;
+  text-decoration: none;
+  transition: background-color $transition-fast, color $transition-fast;
+  -webkit-app-region: no-drag;
+
+  &:hover { color: $text-primary; background: rgba(var(--accent-primary-rgb), 0.06); }
+  &.active { color: $accent-primary; background: rgba(var(--accent-primary-rgb), 0.12); }
+  &:focus-visible { outline: 2px solid $accent-primary; outline-offset: -2px; }
+}
+</style>

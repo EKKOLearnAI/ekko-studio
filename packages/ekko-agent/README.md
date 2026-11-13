@@ -10,6 +10,11 @@ creates one `EkkoProfileAgent` per configured Profile, so modules are used as
 `ekko.agent.get('work').tool`. See the complete field, method, parameter, and
 configuration reference in [docs/API.md](docs/API.md).
 
+Native desktop control is available through the built-in `computer_use` tool.
+Its Cua native SDK installs with the agent; a separate driver app is not required.
+See [Computer Use](docs/computer-use.md) for Studio settings, native dependencies,
+operation discovery, screenshots, approvals and host permissions.
+
 Ekko includes its own optional JEV evaluator through `ekko.jev` and `runtime.jev`.
 Persist defaults in `config.jev`, or pass a `jev` object to the constructor/runtime
 to override fields in memory without rewriting the local configuration. The host
@@ -243,7 +248,12 @@ configured profile uses
 `<base>/.ekko/logs/<profile>` for its log. Its default per-session workspace is
 `<base>/.ekko/workspace/<profile>/<session-id>`; an explicitly supplied
 `workspaceRoot` or `cwd` takes precedence. The server supplies its Web UI home as
-the base directory. Quanthermes preserves existing Ekko skills and repository metadata. When the skills root is absent, the server imports Hermes profile skills once without modifying their source. Bundled skills are synchronized without resetting user-owned directories.
+the base directory. Ekko never imports or synchronizes Hermes Skills. During the
+first startup after upgrading from the legacy import behavior, the server supplies
+the Hermes root only as a read-only inventory: matching non-built-in copies are
+removed from Ekko-owned Profile directories, while the Hermes source directories
+are never changed. A migration marker prevents later startups from repeating the
+cleanup or removing Skills installed afterward.
 
 Skills and persistent SQLite are optional capabilities around a minimal Core.
 If bundled Skill synchronization fails, Ekko records a process-local incident,

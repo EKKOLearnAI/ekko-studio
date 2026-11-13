@@ -2,12 +2,6 @@ import type { VoiceApiPreset } from '@/types/voice-api'
 import { DOUBAO_TTS_2_RESOURCE_ID } from './doubaoTtsVoices'
 
 export const VOICE_API_PRESETS: VoiceApiPreset[] = [
-  { id: 'stt-qwen', kind: 'stt', provider: 'qwen', label: 'Qwen ASR',
-    descriptionKey: 'settings.voice.qwenSharedKey', defaultModel: 'qwen3-asr-flash',
-    isSecretRequired: false, capabilities: { models: true, language: true } },
-  { id: 'tts-qwen', kind: 'tts', provider: 'qwen', label: 'Qwen TTS',
-    descriptionKey: 'settings.voice.qwenSharedKey', defaultModel: 'qwen3-tts-flash', defaultVoice: 'Cherry',
-    isSecretRequired: false, capabilities: { models: true, voices: true, language: true } },
   // TTS Presets
   {
     id: 'tts-edge',

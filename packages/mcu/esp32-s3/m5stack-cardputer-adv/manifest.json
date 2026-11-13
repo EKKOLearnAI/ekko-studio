@@ -1,0 +1,62 @@
+{
+  "name": "M5Stack Cardputer-Adv — Ekko Studio LAN firmware",
+  "firmwareVersion": "cardputer-adv-v9.0.0-dev.10-ram-lan",
+  "version": "v9.0.0-dev.10-lan",
+  "releaseStage": "development-preview",
+  "chip": "esp32s3",
+  "flashSize": "8MB",
+  "flashMode": "dio",
+  "flashFrequency": "80m",
+  "hardware": {
+    "manufacturer": "M5Stack",
+    "board": "M5Stack Cardputer-Adv",
+    "module": "Stamp-S3A",
+    "soc": "ESP32-S3FN8",
+    "psram": false
+  },
+  "artifact": {
+    "path": "firmware/ekko-stock-lan-update-0x10000.bin",
+    "kind": "application-update-only",
+    "offset": 65536,
+    "bytes": 3284000,
+    "sha256": "e753a1b04f22b249c962ad9fb304a5f193a6cd067bf41deedf6654eb0d8b2fb5"
+  },
+  "installation": {
+    "manualOnly": true,
+    "blankDeviceSupported": false,
+    "eraseFlash": false,
+    "requiresExistingProjectDualFirmwareLayout": true,
+    "partitionTableOffset": 32768,
+    "partitionTableBytes": 3072,
+    "partitionTableSha256": "ca0c296c78733ef25a84d9077f534dc90adf32d510a9d6d0704e4b86a39ee479",
+    "applicationOffset": 65536,
+    "applicationPartitionBytes": 3342336,
+    "factoryOffset": 3407872
+  },
+  "compatibility": {
+    "officialStudioBaseline": "0.7.36",
+    "studioPatchRequired": false,
+    "transport": "lan-standard",
+    "remoteSupported": false,
+    "studioOtaSupported": false,
+    "agentCatalogCount": 16,
+    "sdCardRequiredForChatVoice": false,
+    "maximumRecordingSeconds": 5
+  },
+  "validation": {
+    "m5TextAndVoiceUserConfirmedOn0736": true,
+    "m5TextUserConfirmedOn0737": true,
+    "m5VoiceRetestedOn0737": false,
+    "fiveSecondAutoStopUserConfirmed": true,
+    "fullFiveSecondByteCountIndependentlyObserved": false,
+    "fullAcceptanceMatrixComplete": false
+  },
+  "source": {
+    "repository": "https://github.com/thursdaycapital/ekko-cardputer-adv-stock-lan",
+    "commit": "473f3daec09da9cf829c6168a4c346279a5ec6ea",
+    "release": "https://github.com/thursdaycapital/ekko-cardputer-adv-stock-lan/releases/tag/v9.0.0-dev.10-lan",
+    "tree": "https://github.com/thursdaycapital/ekko-cardputer-adv-stock-lan/tree/473f3daec09da9cf829c6168a4c346279a5ec6ea/source",
+    "relink": "https://github.com/thursdaycapital/ekko-cardputer-adv-stock-lan/blob/473f3daec09da9cf829c6168a4c346279a5ec6ea/RELINK.md",
+    "thirdPartyNotices": "https://github.com/thursdaycapital/ekko-cardputer-adv-stock-lan/blob/473f3daec09da9cf829c6168a4c346279a5ec6ea/THIRD_PARTY_NOTICES.md"
+  }
+}

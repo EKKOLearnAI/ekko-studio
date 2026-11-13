@@ -5,6 +5,7 @@ import {
   type MessageApi,
   type NotificationApi,
 } from 'naive-ui'
+import { useTheme } from '@/composables/useTheme'
 import { getThemeOverrides } from '@/styles/theme'
 
 type DiscreteFeedbackApis = {
@@ -15,31 +16,17 @@ type DiscreteFeedbackApis = {
 let cachedApis: DiscreteFeedbackApis | null = null
 let cachedThemeKey = ''
 
-function readThemePrefs() {
-  if (typeof window === 'undefined') {
-    return { isDark: false, isComic: false }
-  }
-  const savedBrightness = localStorage.getItem('hermes_brightness') || 'system'
-  const savedStyle = localStorage.getItem('hermes_style') || 'ink'
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  const isDark = savedBrightness === 'dark' || (savedBrightness === 'system' && prefersDark)
-  return {
-    isDark,
-    isComic: savedStyle === 'comic',
-  }
-}
-
 function themeKey(): string {
-  const { isDark, isComic } = readThemePrefs()
-  return `${isDark ? 'dark' : 'light'}:${isComic ? 'comic' : 'ink'}`
+  const theme = useTheme()
+  return JSON.stringify([theme.isDark.value, theme.isComic.value, theme.customization.value, theme.hasCustomBackground.value])
 }
 
 function discreteConfig(): { configProviderProps: ConfigProviderProps } {
-  const { isDark, isComic } = readThemePrefs()
+  const theme = useTheme()
   return {
     configProviderProps: {
-      theme: isDark ? darkTheme : null,
-      themeOverrides: getThemeOverrides(isDark, isComic),
+      theme: theme.isDark.value ? darkTheme : null,
+      themeOverrides: getThemeOverrides(theme.isDark.value, theme.isComic.value, theme.customization.value, theme.hasCustomBackground.value),
     },
   }
 }

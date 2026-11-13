@@ -12,7 +12,7 @@ import {
   createTongyiProvider,
   KnowledgeEmbedError,
   type EmbedConfig,
-} from '../../packages/server/src/services/knowledge/embedder'
+} from '../../packages/server/src/modules/studio/services/knowledge/embedder'
 
 // --- Test helpers ---------------------------------------------------------
 

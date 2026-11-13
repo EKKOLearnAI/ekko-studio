@@ -30,7 +30,7 @@ function makeDeployTree(home: string, version: string): string {
 
 async function repair(deployDir: string, home: string): Promise<{ status?: number; body: any }> {
   process.env.HERMES_WEB_UI_HOME = home
-  const { repairUpdateIdentity } = await import('../../packages/server/src/controllers/update')
+  const { repairUpdateIdentity } = await import('../../packages/server/src/modules/studio/controllers/update')
   const ctx: any = {}
   ;(global as any).__testDeployDir = deployDir
   // getDeployDir resolves DEPLOY_DIR env first.

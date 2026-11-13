@@ -1,4 +1,4 @@
-import type { GroupChatMention } from '@/api/hermes/group-chat'
+import type { GroupChatMention } from '@/api/studio/group-chat'
 
 export const GROUP_CHAT_ROOM_DRAFT_STORAGE_KEY = 'hermes_group_chat_room_drafts_v1'
 export const GROUP_CHAT_ROOM_DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000

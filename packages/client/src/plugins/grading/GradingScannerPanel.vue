@@ -673,38 +673,40 @@ watch(() => props.sessionId, () => { void loadSessionScans() })
 <style scoped lang="scss">
 .grading-scanner { width: 100%; height: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 12px; }
 .gs-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
-.gs-camera { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #0d0d10; border-radius: 8px; overflow: hidden; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; }
+.gs-camera { position: relative; width: 100%; aspect-ratio: 4 / 3;
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
+  background: #0d0d10; border-radius: 8px; overflow: hidden; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; }
 .gs-camera video { transition: transform 0.15s ease; }
 .gs-video { width: 100%; height: 100%; object-fit: contain; display: block; }
 .gs-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .gs-smart { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
 .gs-option { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-color-2); }
 .gs-status { font-size: 12px; color: var(--text-color-2); }
-.gs-error { color: #e88080; font-size: 12px; margin: 4px 0; }
+.gs-error { color: var(--warning); font-size: 12px; margin: 4px 0; }
 .gs-colls { margin-bottom: 8px; }
 .gs-ocr { display: flex; flex-direction: column; gap: 8px; }
 .gs-ocr-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
 .gs-ocr-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.gs-preview { position: relative; width: 100%; height: 320px; background: #0d0d10; border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.gs-preview { position: relative; width: 100%; height: 320px; background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))); border-radius: 8px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .gs-preview img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
-.gs-rotate { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; background: rgba(0,0,0,0.35); border-radius: 999px; padding: 2px; }
-.gs-ocr-text { width: 100%; min-height: 110px; resize: vertical; border-radius: 8px; border: 1px solid #5555; background: transparent; color: inherit; padding: 10px; font: inherit; }
+.gs-rotate { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; background: rgba(var(--text-primary-rgb), 0.35); border-radius: 999px; padding: 2px; }
+.gs-ocr-text { width: 100%; min-height: 110px; resize: vertical; border-radius: 8px; border: 1px solid rgba(var(--text-primary-rgb), 0.333); background: transparent; color: inherit; padding: 10px; font: inherit; }
 .gs-send { margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
 .gs-scanid { display: flex; align-items: center; gap: 8px; }
 .gs-scanid-code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-color-2); }
 .gs-pdf { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .gs-reset { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.gs-no-scan { font-size: 12.5px; color: var(--text-color-2); padding: 12px; border: 1px dashed #5555; border-radius: 8px; text-align: center; margin: 8px 0; }
-.gs-queue { display: flex; flex-direction: column; gap: 0; border: 1px solid #4444; border-radius: 8px; overflow: hidden; margin-top: 8px; }
-.gs-queue article { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #4444; cursor: pointer; }
+.gs-no-scan { font-size: 12.5px; color: var(--text-color-2); padding: 12px; border: 1px dashed rgba(var(--text-primary-rgb), 0.333); border-radius: 8px; text-align: center; margin: 8px 0; }
+.gs-queue { display: flex; flex-direction: column; gap: 0; border: 1px solid rgba(var(--text-primary-rgb), 0.267); border-radius: 8px; overflow: hidden; margin-top: 8px; }
+.gs-queue article { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid rgba(var(--text-primary-rgb), 0.267); cursor: pointer; }
 .gs-queue article:last-child { border-bottom: none; }
-.gs-queue article:hover { background: #8882; }
-.gs-queue .selected { background: #8882; font-weight: 600; }
+.gs-queue article:hover { background: rgba(var(--text-primary-rgb), 0.133); }
+.gs-queue .selected { background: rgba(var(--text-primary-rgb), 0.133); font-weight: 600; }
 
 /* 全屏预览：覆盖右侧栏位（top/left/width/height 由面板 rect 提供），而非整屏 */
-.gs-fullscreen { position: fixed; z-index: 3000; background: rgba(0,0,0,0.94); display: flex; flex-direction: column; border-radius: 8px; }
+.gs-fullscreen { position: fixed; z-index: 3000; background: rgba(var(--text-primary-rgb), 0.94); display: flex; flex-direction: column; border-radius: 8px; }
 .gs-fullscreen-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; flex-shrink: 0; }
-.gs-fullscreen-title { flex: 1; font-weight: 600; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs-fullscreen-title { flex: 1; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gs-fullscreen-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0 16px 16px; }
 .gs-fullscreen-body img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; border-radius: 8px; }
 </style>

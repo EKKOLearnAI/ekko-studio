@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { NButton } from 'naive-ui'
@@ -32,7 +34,7 @@ interface ChartSegment {
 }
 
 const selectedDays = ref(7)
-const loading = ref(false)
+const loading = ref(true)
 const error = ref('')
 const statsByPeriod = ref<Record<number, SkillUsageStats | undefined>>({})
 let requestSeq = 0
@@ -127,15 +129,15 @@ function hideTooltip(day: SkillUsageDailyRow) {
 
 async function loadStats(days = selectedDays.value, force = false) {
   selectedDays.value = days
-  if (!profilesStore.activeProfileName || profilesStore.profiles.length === 0) {
-    await profilesStore.fetchProfiles()
-  }
   const seq = ++requestSeq
   latestRequestByPeriod[days] = seq
   loading.value = true
   if (!statsByPeriod.value[days] || force) error.value = ''
 
   try {
+    if (!profilesStore.activeProfileName || profilesStore.profiles.length === 0) {
+      await profilesStore.fetchProfiles()
+    }
     const next = await fetchSkillUsageStats(days)
     if (latestRequestByPeriod[days] === seq) {
       statsByPeriod.value = {
@@ -157,11 +159,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="skills-usage-view">
+  <PageLoading :show="loading && !stats" class="skills-usage-view">
+    <PageHeader>
     <header class="page-header">
       <div class="header-text">
         <h2 class="header-title">{{ t('skillsUsage.title') }}</h2>
-        <p class="header-subtitle">{{ t('skillsUsage.subtitle') }}</p>
       </div>
       <div class="skills-usage-toolbar">
         <div class="period-selector" role="group" :aria-label="t('skillsUsage.periodSelector')">
@@ -183,13 +185,14 @@ onMounted(() => {
         </NButton>
       </div>
     </header>
+    </PageHeader>
 
     <div class="skills-usage-content">
       <div v-if="error && !stats" class="skills-usage-state error">
         {{ error }}
       </div>
       <div v-else-if="loading && !stats" class="skills-usage-state">
-        {{ t('common.loading') }}
+
       </div>
       <template v-else-if="stats">
         <div v-if="error" class="inline-error">
@@ -301,7 +304,7 @@ onMounted(() => {
         </section>
       </template>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
@@ -316,33 +319,27 @@ onMounted(() => {
 .header-text {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-}
-
-.header-subtitle {
-  margin: 4px 0 0;
-  color: $text-muted;
-  font-size: 13px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .skills-usage-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
 .period-selector {
   display: flex;
-  gap: 4px;
+  gap: calc(4px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 
 .skills-usage-content {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
   max-width: 1120px;
   margin: 0 auto;
   width: 100%;
@@ -357,25 +354,25 @@ onMounted(() => {
 .overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.9fr);
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   margin-bottom: 16px;
 }
 
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
 }
 
 .summary-card,
 .usage-panel {
-  background: $bg-card;
-  border: 1px solid $border-color;
+  background: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
 }
 
 .summary-card {
-  padding: 14px;
+  padding: calc(14px * var(--spacing-scale, 1));
 
   &.primary {
     grid-column: span 2;
@@ -384,18 +381,18 @@ onMounted(() => {
 
 .summary-label {
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .summary-value {
   margin-top: 6px;
   color: $text-primary;
-  font-size: 24px;
+  font-size: calc(var(--font-size-base, 14px) * 24 / 14);
   font-weight: 700;
 }
 
 .usage-panel {
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   position: relative;
 
   &.is-refreshing::after {
@@ -426,31 +423,31 @@ onMounted(() => {
 .inline-error {
   margin-bottom: 12px;
   color: $error;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .panel-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(12px * var(--spacing-scale, 1));
   margin-bottom: 12px;
 
   h3 {
     margin: 0;
-    font-size: 16px;
+    font-size: calc(var(--font-size-base, 14px) * 16 / 14);
     color: $text-primary;
   }
 
   span {
     color: $text-muted;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 }
 
 .skill-bar-chart {
   display: flex;
-  gap: 3px;
+  gap: calc(3px * var(--spacing-scale, 1));
   min-height: 180px;
   align-items: flex-end;
 }
@@ -470,7 +467,7 @@ onMounted(() => {
   height: 180px;
   display: flex;
   align-items: flex-end;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   border-radius: 3px 3px 0 0;
   overflow: hidden;
 }
@@ -497,11 +494,11 @@ onMounted(() => {
   overflow-y: auto;
   background: $bg-secondary;
   color: $text-primary;
-  border: 1px solid $border-color;
+  border: var(--border-width, 1px) solid $border-color;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
-  padding: 8px 10px;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   white-space: nowrap;
   z-index: 20;
   pointer-events: none;
@@ -526,10 +523,10 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 7px;
+  gap: calc(7px * var(--spacing-scale, 1));
   color: $text-secondary;
-  font-size: 10px;
-  line-height: 1.6;
+  font-size: calc(var(--font-size-base, 14px) * 10 / 14);
+  line-height: var(--line-height, 1.6);
 
   span {
     overflow: hidden;
@@ -544,22 +541,22 @@ onMounted(() => {
   &.total {
     grid-template-columns: minmax(0, 1fr) auto;
     margin-top: 4px;
-    padding-top: 4px;
-    border-top: 1px solid $border-color;
+    padding-top: calc(4px * var(--spacing-scale, 1));
+    border-top: var(--border-width, 1px) solid $border-color;
   }
 }
 
 .tooltip-dot {
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-component, 2px);
 }
 
 .bar-dates {
   display: flex;
   justify-content: space-between;
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   margin-top: 8px;
 }
 
@@ -572,27 +569,27 @@ onMounted(() => {
 
 .skills-table {
   display: grid;
-  gap: 2px;
+  gap: calc(2px * var(--spacing-scale, 1));
 }
 
 .skills-row {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) 80px 80px minmax(120px, 160px) minmax(160px, 1fr);
   align-items: center;
-  gap: 12px;
-  padding: 10px 8px;
-  border-radius: 8px;
+  gap: calc(12px * var(--spacing-scale, 1));
+  padding: calc(10px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 8px);
   color: $text-secondary;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 
   &:not(.table-head):hover {
-    background: $bg-card-hover;
+    background: var(--theme-card-bg, $bg-card-hover);
   }
 }
 
 .table-head {
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   font-weight: 600;
   text-transform: uppercase;
 }
@@ -600,7 +597,7 @@ onMounted(() => {
 .skill-name {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   color: $text-primary;
   font-weight: 600;
   overflow: hidden;
@@ -611,13 +608,13 @@ onMounted(() => {
 .share-cell {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .share-bar {
   width: 54px;
   height: 6px;
-  background: $bg-card;
+  background: var(--theme-card-bg, $bg-card);
   border-radius: 999px;
   overflow: hidden;
 
@@ -636,10 +633,10 @@ onMounted(() => {
   text-align: center;
   padding: 60px 0;
   color: $text-muted;
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
 
   &.compact {
-    padding: 24px 0;
+    padding: calc(24px * var(--spacing-scale, 1)) 0;
   }
 
   &.error {

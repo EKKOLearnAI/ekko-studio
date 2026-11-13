@@ -124,7 +124,7 @@ function formatMeta(s: SidebarSession): string {
 </template>
 
 <style scoped lang="scss">
-// 列表项内层样式（颜色直接走主题变量，dark/comic 自动适配）
+/* 列表项内层样式（颜色直接走主题变量，dark/comic 自动适配）*/
 .meeting-item-title {
   font-size: 13px;
   font-weight: 500;
@@ -145,7 +145,7 @@ function formatMeta(s: SidebarSession): string {
   margin-left: 4px;
   padding: 0 4px;
   border-radius: 4px;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   font-size: 10px;
   color: var(--accent-primary);
 }

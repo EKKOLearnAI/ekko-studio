@@ -4,8 +4,8 @@ import {
   CONSOLE_BUFFER_LIMIT,
   MAX_BROWSER_TEXT_READ_LIMIT,
   SCROLL_PIXELS,
-} from '../../packages/server/src/services/browser/automation'
-import { STALE_SNAPSHOT_MESSAGE } from '../../packages/server/src/services/browser/snapshot'
+} from '../../packages/server/src/modules/studio/services/browser/automation'
+import { STALE_SNAPSHOT_MESSAGE } from '../../packages/server/src/modules/studio/services/browser/snapshot'
 
 const TAB_ID = 'tab-1'
 

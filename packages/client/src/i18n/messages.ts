@@ -1,6 +1,6 @@
 export type LocaleMessages = Record<string, any>
 
-export const supportedLocales = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'es', 'de', 'pt', 'ru', 'ar'] as const
+export const supportedLocales = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'es', 'de', 'pt', 'ru', 'ar', 'tr'] as const
 export type SupportedLocale = (typeof supportedLocales)[number]
 
 function isPlainObject(value: unknown): value is LocaleMessages {
@@ -35,13 +35,24 @@ const localeLoaders: Record<SupportedLocale, () => Promise<{ default: LocaleMess
   pt: () => import('./locales/pt'),
   ru: () => import('./locales/ru'),
   ar: () => import('./locales/ar'),
+  tr: () => import('./locales/tr'),
+}
+
+const additionalMessages = new Map<SupportedLocale, LocaleMessages>()
+
+export function registerAdditionalLocaleMessages(locale: SupportedLocale, messages: LocaleMessages): void {
+  additionalMessages.set(locale, mergeMessagesWithFallback(additionalMessages.get(locale) || {}, messages))
+}
+
+function includeAdditionalMessages(locale: SupportedLocale, messages: LocaleMessages): LocaleMessages {
+  return mergeMessagesWithFallback(messages, additionalMessages.get(locale) || {})
 }
 
 const localeMessagePromises = new Map<SupportedLocale, Promise<LocaleMessages>>()
 
 export function loadLocaleMessages(locale: SupportedLocale): Promise<LocaleMessages> {
   const existing = localeMessagePromises.get(locale)
-  if (existing) return existing
+  if (existing) return existing.then(messages => includeAdditionalMessages(locale, messages))
 
   const pending = localeLoaders[locale]()
     .then(module => module.default)
@@ -50,5 +61,5 @@ export function loadLocaleMessages(locale: SupportedLocale): Promise<LocaleMessa
       throw error
     })
   localeMessagePromises.set(locale, pending)
-  return pending
+  return pending.then(messages => includeAdditionalMessages(locale, messages))
 }

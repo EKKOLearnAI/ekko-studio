@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-vi.mock('../../packages/server/src/services/hermes/hermes-profile', () => ({ getActiveProfileDir: () => '/tmp' }))
-vi.mock('../../packages/server/src/services/hermes/file-provider', () => ({ getTerminalConfig: () => ({ cwd: '/tmp' }) }))
-import { runRealtimeCommand } from '../../packages/server/src/services/terminal/realtime-command'
+vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({ getActiveProfileDir: () => '/tmp' }))
+vi.mock('../../packages/server/src/modules/studio/services/files/file-provider', () => ({ getTerminalConfig: () => ({ cwd: '/tmp' }) }))
+import { runRealtimeCommand } from '../../packages/server/src/modules/studio/services/terminal/realtime-command'
 describe('direct command process', () => {
   it('passes metacharacters literally, without shell evaluation', async () => {
     const literal = '$(whoami); echo unsafe | cat'

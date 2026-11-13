@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { NetworkInterfaceInfo } from 'node:os'
-import { selectXiaozhiLanAddress } from '../../packages/server/src/services/xiaozhi-provisioning'
+import { selectXiaozhiLanAddress } from '../../packages/server/src/modules/studio/services/xiaozhi-provisioning'
 
 const address = (value: string): NetworkInterfaceInfo => ({
   address: value, family: 'IPv4', internal: false, mac: '00:00:00:00:00:00',

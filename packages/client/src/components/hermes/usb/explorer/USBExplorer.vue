@@ -5,8 +5,8 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listUSBFiles, downloadUSBFile, type USBFileEntry } from '@/api/hermes/usb'
-import type { USBDeviceRecord } from '@/api/hermes/usb-socket'
+import { listUSBFiles, downloadUSBFile, type USBFileEntry } from '@/api/studio/usb'
+import type { USBDeviceRecord } from '@/api/studio/usb-socket'
 import { copyToClipboard } from '@/utils/clipboard'
 import { normalizeExplorerPath, parentExplorerPath } from '@/utils/usb-format'
 import { useMessage } from '@/composables/useAppMessage'
@@ -354,7 +354,7 @@ watch(
   gap: 0;
   min-height: 0;
   flex: 1;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid $border-light;
   border-radius: $radius-md;
   overflow: hidden;
@@ -387,13 +387,13 @@ watch(
   background: transparent;
 }
 
-// ── Status bar (底部状态行) ─────────────────────────────────────────
+/* ── Status bar (底部状态行) ─────────────────────────────────────────*/
 .explorer-status-bar {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 6px 14px;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid $border-light;
   border-radius: $radius-md;
   font-size: 11.5px;
@@ -430,7 +430,7 @@ watch(
   font-family: $font-code;
   font-size: 11px;
   color: $text-secondary;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   padding: 1px 6px;
   border-radius: $radius-sm;
 }
@@ -448,7 +448,7 @@ watch(
   &.is-removed { background: $warning; }
 }
 
-// ── Slide-over preview (Teleport) ────────────────────────────────────
+/* ── Slide-over preview (Teleport) ────────────────────────────────────*/
 .preview-slide-enter-active,
 .preview-slide-leave-active {
   transition: transform $transition-normal, opacity $transition-normal;
@@ -467,7 +467,7 @@ watch(
   bottom: 0;
   width: min(420px, 38vw);
   z-index: 1000;
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+  box-shadow: -8px 0 24px rgba(var(--text-primary-rgb), 0.18);
 }
 
 @media (max-width: $breakpoint-mobile) {

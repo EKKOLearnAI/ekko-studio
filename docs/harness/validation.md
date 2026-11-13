@@ -1,67 +1,113 @@
 # Validation Guide
 
-Run the smallest relevant checks while iterating. Escalate to the broad checks
-when touching shared behavior, release automation, auth, persistence, or chat.
+Task reports and temporary verification files belong outside all checkouts.
+`npm run harness:check` includes the read-only artifact guard; use
+`npm run artifacts:check` for a standalone check and
+`npm test -- tests/harness/task-artifacts.test.ts` when changing the policy.
+See [task artifacts](task-artifacts.md) for report defaults, exemptions and limits.
+
+The legacy automated tests and fixtures have been removed. Every new feature
+must include small, focused tests; run the relevant files locally. See
+`tests/README.md`.
+Do not restore full coverage, browser sweeps or cross-platform test matrices as a
+routine PR requirement.
 
 ## Always Run For PRs
 
 ```bash
 npm run harness:check
-```
-
-For broad or shared changes, also run:
-
-```bash
-npm run test:coverage
-npm run test:e2e
 npm run build
 ```
 
-## Meeting / ASR Changes
+For a new feature, add and run focused Vitest tests for that behavior. New browser
+journeys must also have focused Playwright tests, run locally before the PR.
+The generic test commands allow an empty suite during the reset; existing
+assertions still fail. This does not exempt new features from adding tests.
 
-When touching any file under `packages/client/src/views/hermes/MeetingView.vue`,
-`packages/client/src/audio/`, `packages/client/public/audio/`,
-`packages/server/src/services/meeting-asr/**`, or
-`packages/server/src/security.ts`, run:
+## Keep new tests small
+
+- Cover behavior with local fixtures, mocked external APIs/sockets and temporary state.
+- Keep setup local to the feature; avoid loading complete business runtimes for
+  simple cases and duplicating source-level architecture checks.
+- Avoid exact source-string/CSS assertions and exhaustive OS/theme/viewport products.
+- Test and E2E CI automatically run all current Vitest and Playwright tests;
+  adding new feature tests does not require editing either workflow.
+- For workflow changes, run `actionlint` when available. For dependency changes,
+  run `npm ci --ignore-scripts` and keep the lockfile synchronized.
+
+## Managed MCP launch environment
+
+Every MCP definition injected by Studio (Hermes, Ekko, or Coding Agent) must
+include `ELECTRON_RUN_AS_NODE: '1'` in that MCP subprocess's `env`. Independent
+Node ignores the flag; the Electron executable fallback requires it to execute
+the MCP script instead of opening another desktop instance. External Gateway
+processes may not inherit the desktop server's environment.
+
+`npm run harness:check` inspects all three configuration factories. New managed
+MCP injection paths must be added to that check. Keep configuration comparison
+and migration aware of the flag so previously injected entries are repaired;
+do not overwrite user-owned MCP definitions or globally enable Node mode for
+the desktop app. Validate changes with the MCP injection and launch tests.
+
+Long-running external Gateways may keep older MCP definitions in memory. The
+packaged entrypoint must route the exact bundled MCP script invocation before
+loading GUI or updater code, even when Node mode is absent. Test the real package:
 
 ```bash
-npm run build && node scripts/guard-no-inline-data-urls.mjs
-npm run test:coverage -- tests/server/security-policy.test.ts
-npm run test:e2e -- tests/e2e/meeting-audio-rate.spec.ts
-pytest tests/python/test_meeting_asr_fallback.py
+node scripts/verify-desktop-mcp.mjs '<packaged executable>' '<resources directory>'
 ```
 
-See [meeting-asr-safety-audit.md](./meeting-asr-safety-audit.md) for the
-incident-driven checklist (B-1 worklet, B-3 CSP, R-5 storage, R-7 UI feedback).
-
-## Change-Type Matrix
-
-| Change | Minimum local validation |
-| --- | --- |
-| Docs only | `npm run harness:check` |
-| Client component/store/API | focused `npm run test -- <pattern>`, then `npm run build` |
-| User-visible browser flow | focused Vitest plus `npm run test:e2e` |
-| Server controller/service/db | focused `npm run test -- tests/server/<file>` |
-| Update/deploy/release contract | focused update tests, `npm run harness:check`, then `npm run build` |
-| `scripts/install-device-package.sh`, `scripts/hermes-web-ui-update-runner.sh`, or `scripts/deploy-source-armbian.sh` (i.e. any script in `.github/device-package-release.json#packageAllowlist`) | focused update tests + `npm run test:device-package-release`, then locally run `npm run build:device-package` (or `node scripts/build-device-package.mjs --tag <x.y.z>`) and verify the produced `manifest.json` contains `installerScriptPath` and `installerScriptSha256`. Devices will compare the on-disk install script against this fingerprint and refuse the update if they do not match |
-| Auth, profile, or credential behavior | focused server tests plus relevant e2e auth tests |
-| Chat, Socket.IO, group chat | focused server tests plus relevant e2e chat tests |
-| Chat session chain, Agent Bridge, compression, or Group Chat | Add one `docs/chat-chain-changes/*.md` fragment with date, PR/commit, touched feature, and behavior impact; then run `npm run harness:check` plus focused chat/bridge/group-chat tests |
-| Desktop packaging | `npm run harness:check`, `npm run build`, and a platform-specific desktop build when practical |
-| GitHub workflow | `npm run harness:check` and `actionlint` when available |
-| Package manifests | `npm ci --ignore-scripts` and lockfile workflow expectations |
+This checks all five toolsets with Node mode deliberately removed, validates the
+JSON-RPC initialize response, and checks clean exit on stdin EOF. It uses temporary
+state and does not require a running Gateway.
 
 ## CI Mapping
 
-- Build workflow: installs dependencies, runs coverage, and builds production
-  assets on pushes and pull requests.
-- Playwright workflow: runs browser e2e tests.
-- NPM lockfile workflow: verifies `package-lock.json` is synchronized.
-- Desktop release and manual desktop build workflows build and upload
-  platform-specific desktop artifacts.
-- Docker workflow: builds and publishes release images.
+- Build (`build.yml`) runs `npm run harness:check` and the production build.
+- Test (`test.yml`) runs `npm test` and reports its own Test check.
+- E2E (`playwright.yml`) runs `npm run test:e2e` across four Chromium shards,
+  each with one worker. Shards finish independently after failures and upload
+  blob reports plus available screenshots/traces. A final `E2E` check merges
+  reports into one HTML artifact and requires all four shards and reports to
+  succeed. Chromium is installed only when browser test files are present.
+- All three workflows run independently on pushes to `main` and pull requests
+  targeting `main` or `base`. Test and E2E also support manual dispatch. Any test
+  failure fails its own check. Coverage is not required.
+- The old coding-agent, P2P and desktop-isolation test matrices remain removed.
+- The NPM lockfile workflow still verifies dependency lockfile synchronization.
+- Desktop/runtime/release workflows retain packaging, signing, artifact and
+  isolated update-feed verification, without calls into the removed test suites.
+- Docker publishing remains unchanged.
 
 ## Desktop startup failure evidence
+
+On macOS, Desktop starts the Web UI in Node mode using the bundle's generic
+Electron Helper (`LSUIElement=true`). Native Computer Use focus protection can
+register the backend with AppKit; using the GUI executable creates a second Dock
+icon that never finishes launching. Keep focus protection enabled and preserve
+the existing executable on Windows, Linux, and plain Node hosts. Do not silently
+fall back to the GUI executable if the Helper is missing. Startup diagnostics
+record the selected executable.
+
+Before release, verify real Helper IPC, SQLite, nested Node execution, and
+Computer Use input, permissions, focus preservation and Dock registration, plus
+backend restart, PTY, local STT and managed MCP launches from an isolated state
+directory. Mocked tests do not establish OS permission or input compatibility.
+
+The macOS Computer Use permission guide reads Electron's host-app permissions via
+trusted local-window IPC. Reads must use `isTrustedAccessibilityClient(false)` and
+`getMediaAccessStatus('screen')`; only the user's Authorize action may request a
+grant or open a fixed System Settings pane. Remote-server pages must not query or
+change local permissions. Verify missing/granted/restricted/error states, returning from Settings,
+light/dark and wallpaper themes, and narrow windows. On a disposable macOS install,
+also verify first-time grants and any system-requested restart; never reset a user's
+TCC database to simulate a fresh install.
+
+The chat reminder uses only live tool-start events from the active Ekko session,
+never replayed history. Its native claim must stay atomic across all windows and
+renderer reloads, with one reminder per desktop launch. Verify both new runs and reattached live runs,
+standalone chat windows, dismissal, settings navigation, and silence in other
+agents/platforms/remote mode. No reminder check may request an OS grant.
 
 `Web UI server exited before becoming ready code=1 signal=null` reports a
 failed backend process, without identifying its cause. Desktop captures the
@@ -86,12 +132,8 @@ the child-process exception to distinguish missing modules, native DLL loading,
 permissions, and port conflicts. This check preserves the original data and is
 not a complete reset of Electron userData, Hermes profiles, or system environment.
 
-Focused regression coverage:
-
-```bash
-npm run test -- tests/desktop/webui-startup-diagnostics.test.ts tests/desktop/runtime-bootstrap-lazy.test.ts tests/server/crash-isolation.test.ts
-npm --prefix packages/desktop run build:main
-```
+Build the desktop main process with `npm --prefix packages/desktop run build:main`
+and inspect startup diagnostics from an isolated state directory.
 
 ## Release Workflow Guardrail
 
@@ -113,9 +155,41 @@ Expected desktop release outputs:
 | Target | Required release globs |
 | --- | --- |
 | macOS | `*.dmg`, `*.dmg.blockmap`, `*.zip`, `*.zip.blockmap`, `latest*.yml` |
-| Windows | `*.exe`, `*.exe.blockmap`, `latest*.yml` |
+| Windows x64 | `*-x64.exe`, `*-x64.exe.blockmap`, `latest.yml` |
+| Windows ARM64 | `*-arm64.exe`, `*-arm64.exe.blockmap`, `latest-arm64.yml` |
 | Linux x64 | `*.AppImage`, `*.deb`, `latest*.yml` |
 | Linux arm64 | `*.AppImage`, `latest*.yml` |
+
+### Desktop updater changes
+
+For Windows ARM64 packaging changes, build `win32` / `arm64` through the manual
+workflow without a release tag. Follow
+[Windows ARM64 acceptance](../../packages/desktop/WINDOWS-ARM64.md) before
+publishing; the installer and its first-launch Hermes runtime ship separately.
+
+The legacy `test:updater` suite has been removed from desktop packaging workflows.
+Build the desktop main process and validate actual update artifacts and manual
+upgrade behavior for the affected platform.
+
+The updater's request-cancellation adapter accesses the upstream HTTP executor
+because its cancellation token alone does not abort a full-download request.
+Verify cancellation when upgrading `electron-updater`. macOS must wait
+for Electron's native `update-downloaded` event before stopping local services;
+the `electron-updater` event only indicates that the ZIP can be served to Squirrel.
+
+Before release, also exercise a signed old-to-new macOS upgrade and an installed
+Windows NSIS and Linux AppImage upgrade (download, stop/retry, Later/quit, restart, and installer
+failure) on disposable installations. Local tests do not verify actual signing,
+OS permissions, installer replacement, or relaunch into the new version.
+
+Use the [isolated desktop update test workflow](../../packages/desktop/UPDATE-TESTING.md)
+to produce A/B packages without publishing a production GitHub Release. The test
+workflow's built-in token has read-only repository permissions, forces the builder's
+`--publish never`, and requires macOS signing and notarization. It retains verified
+Actions artifacts and uses a dedicated secret to upload to fixed per-target
+prereleases in the public test repository. A test
+feed failure or invalid packaged test configuration must never fall back to a
+production feed; keep integration coverage for that invariant.
 
 ## Failure Handling
 
@@ -128,10 +202,97 @@ When a command fails:
 4. Update docs or `scripts/harness-check.mjs` when the same class of mistake
    should be prevented next time.
 
-For update/deploy/release work, the focused test set should usually include:
+## DSH module boundary
 
-```bash
-npm run test -- tests/server/source-deploy-strategy.test.ts
-npm run test -- tests/server/device-package-strategy.test.ts
-npm run test -- tests/server/update-controller.test.ts
-```
+DSH source discovery, Web composition, plugin commands, permission policy, ACP
+lifecycle and protocol translation belong in
+`packages/server/src/modules/coding-agents/services/dsh/`. Shared registry and
+runtime files may pass configuration and generic callbacks, but must not own
+DSH Web patches, permission defaults or ACP construction. DSH modules receive
+platform helpers rather than importing the shared agent registry.
+`npm run harness:check` runs `scripts/dsh-module-harness.mjs` to enforce this.
+
+For Web/ACP adapter upgrades, verify supported installed DSH versions, including new/resumed presets,
+scoped/global model routing, Web bundle tool execution, child inheritance and
+unrestricted filesystem/shell access. Do not reject an otherwise compatible
+installation by version number or whole-file hash. Validate the required adapter integration points and dependencies before
+writing the private copy, and report the specific missing/ambiguous capability.
+Keep the source hash as diagnostic metadata. Test an unlisted version with an
+unrelated artifact change as well as incompatible integration points.
+
+DSH plugin management has two client tabs under `components/coding-agents/dsh`
+and one DSH API module under `api/coding-agents/dsh.ts`. Shared views may render
+the entry component; they must not implement DSH transport or plugin forms.
+The harness rejects obsolete `managedPluginPatches` / `getDshPluginStore` runtime
+references. Keep native profile operations, the owned settings host and plugin
+adapters in server `services/dsh`.
+
+For new settings features, add focused tests for the new behavior and inspect the
+real native slot through the production HTTP/WebSocket transport from isolated
+state. Verify form saving, engine-dependent fields, tab navigation and native
+package removal as applicable.
+
+For packaging changes run the Web build and `npm --prefix packages/desktop run
+build`. The slot browser code must also be exercised from a minified server
+bundle; runtime serialization must not capture build-generated helper closures.
+
+The DSH Agent presets page is a Studio Vue component, separate from the native
+plugin configuration iframe. Preset operations stay in `services/dsh/agent-presets.ts`
+and use the existing management host. For new preset features, verify native RPC,
+source directory persistence, default updates, restart retention, read-only
+shipped presets and plugin UI startup with isolated state.
+
+For DSH chat, group-member and workflow modes, keep the selector and roster API
+in the DSH client module, and validation/ACP metadata in `services/dsh`. Shared
+chat code may carry and store only the generic preset identifier. For new preset
+behavior, add focused tests and verify a non-default preset, session tool
+isolation, resume and default changes.
+
+For new shared Coding Agent skill permissions, add focused tests for read-only
+shared aliases, rejected deletion without Hermes fallback and writable DSH-private
+skills. Register native skill formats from bootstrap; agent modules must not
+import another agent's implementation.
+
+## Plugin development documentation
+
+When Studio changes plugin structures, context capabilities or return contracts,
+directly edit the relevant Markdown under `packages/plugin-sdk/docs` in the same
+change. Explain compatibility or defaults in the affected section. The scaffolder
+copies these guides and SDK types into each new project; there is no documentation
+generation command, digest or change-record bookkeeping.
+
+`npm run harness:check` and `npm run build` require the guides/types and inspect
+Git changes: SDK edits must include architecture, context or return documentation.
+Local checks inspect staged/unstaged/untracked work; Build CI uses the PR base or
+push-before commit with full checkout history. Source archives without Git can
+only check file presence. This detects missing companion documentation, not its
+semantic correctness; reviewers and boundary tests must assess that.
+
+The generated project harness checks declared fields, model references and required
+files. Markdown remains directly editable. Run the focused tests when changing
+this flow:
+
+`npm test -- tests/server/studio-plugin-harness.test.ts tests/server/studio-plugin-development.test.ts tests/server/studio-plugin-manifest.test.ts`
+
+Verify the packed CLI creates a standalone project with docs, SDK, harness and
+working tests from a node_modules layout.
+
+## Preserved local capability migration
+
+For a broad upstream architecture sync also run `npm run test:coverage`,
+`npm run test:e2e`, `npm run build:verify` and `npm run check:release-consistency`.
+Bound workers when running coverage beside local build/browser jobs to avoid
+unrelated timeout cascades: `npm run test:coverage -- --maxWorkers=2`.
+
+Meeting/USB/knowledge/scanner/grading changes have focused tests under
+`tests/server` and `tests/client/local-capabilities.test.ts`, with browser
+journeys in `tests/e2e/local-capabilities.spec.ts`. Preserve static audio worklet
+URLs and run `npm run build && npm run build:verify`. Python meeting/USB tests
+live under `tests/python`; install requirements in an isolated external venv.
+The ASR backend is now `modules/studio/services/meeting-asr/python-backend`.
+
+For distribution changes run `npm run test:device-package-release` and
+`npm run build:device-package` after the production build. Keep output outside
+the checkout with the builder's `--out-dir` option. Inspect generated installer
+path/SHA, source URL/SHA and archive executable modes. This verification does
+not publish a candidate or advance the release channel.

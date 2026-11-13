@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
 import {
@@ -14,7 +14,7 @@ import {
   isAppEntitlementRequired,
   sanitizeConfigValue,
   shouldCreateWebUiDataDir,
-} from '../../packages/server/src/config'
+} from '../../packages/server/src/modules/studio/public/config'
 
 describe('server config', () => {
   it('defaults to an IPv4 bind host', () => {
@@ -122,5 +122,20 @@ describe('server config', () => {
     expect(isAppEntitlementRequired({})).toBe(true)
     expect(isAppEntitlementRequired({ HERMES_APP_ENTITLEMENT_REQUIRED: 'true' })).toBe(true)
     expect(isAppEntitlementRequired({ HERMES_APP_ENTITLEMENT_REQUIRED: 'off' })).toBe(false)
+  })
+})
+
+
+describe('independent update defaults', () => {
+  it('keeps Hermes Agent upgrades opt-in', async () => {
+    vi.resetModules()
+    vi.stubEnv('WEBUI_UPDATE_INCLUDE_AGENT_UPGRADE', undefined)
+    try {
+      const { config } = await import('../../packages/server/src/modules/studio/public/config')
+      expect(config.update.includeAgentUpgrade).toBe(false)
+    } finally {
+      vi.unstubAllEnvs()
+      vi.resetModules()
+    }
   })
 })

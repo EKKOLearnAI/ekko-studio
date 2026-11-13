@@ -9,7 +9,7 @@ import {
   extractFields,
   parseDocumentFile,
   type ParsedChunk,
-} from '../../packages/server/src/services/hermes/group-chat/document-parser'
+} from '../../packages/server/src/modules/studio/services/group-chat/document-parser'
 
 function buildContract(): string {
   const lines: string[] = ['房屋租赁合同', '', '甲方：张三', '乙方：北京某某科技有限公司', '']

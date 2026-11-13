@@ -1,42 +1,30 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NTag, NSpin, useDialog } from 'naive-ui'
+import { NSpin, NButton, NTag, useMessage, useDialog } from 'naive-ui'
 import type { HermesProfile, HermesProfileDetail } from '@/api/hermes/profiles'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { useExpertsStore } from '@/stores/hermes/experts'
 import { useI18n } from 'vue-i18n'
 import ProfileAvatar from './ProfileAvatar.vue'
 import ProfileDisplayNameModal from './ProfileDisplayNameModal.vue'
-import { useMessage } from '@/composables/useAppMessage'
-import { unbindSuperAdmin } from '@/api/auth'
-import { isStoredSuperAdmin, setApiKey } from '@/api/client'
-import { getProfileDisplayName } from '@/utils/hermes/profile-display'
 
 const props = defineProps<{ profile: HermesProfile }>()
 const emit = defineEmits<{}>()
 
 const { t } = useI18n()
 const profilesStore = useProfilesStore()
-const expertsStore = useExpertsStore()
 const message = useMessage()
 const dialog = useDialog()
 const router = useRouter()
 
+const editingDisplayName = ref(false)
 const expanded = ref(false)
 const detailLoading = ref(false)
 const exporting = ref(false)
-const unbinding = ref(false)
 const switching = ref(false)
-const editingDisplayName = ref(false)
 const detail = ref<HermesProfileDetail | null>(null)
 
 const isDefault = computed(() => props.profile.name === 'default')
-const isCurrentSuperAdmin = computed(() => isStoredSuperAdmin())
-
-const expertBinding = computed(() => expertsStore.bindingsForProfile(props.profile.name))
-const isExpert = computed(() => !!expertBinding.value)
-const expertRole = computed(() => expertBinding.value?.role || '')
 
 async function toggleDetail() {
   if (expanded.value) {
@@ -111,30 +99,6 @@ async function handleExport() {
   }
 }
 
-function handleUnbindSuperAdmin() {
-  dialog.warning({
-    title: t('profiles.unbindSuperAdmin'),
-    content: t('profiles.unbindSuperAdminConfirm'),
-    positiveText: t('common.confirm'),
-    negativeText: t('common.cancel'),
-    onPositiveClick: performUnbindSuperAdmin,
-  })
-}
-
-async function performUnbindSuperAdmin() {
-  unbinding.value = true
-  try {
-    const result = await unbindSuperAdmin()
-    setApiKey(result.token)
-    message.success(t('profiles.unbindSuperAdminSuccess'))
-    setTimeout(() => window.location.reload(), 600)
-  } catch (err: any) {
-    message.error(err?.message || t('profiles.unbindSuperAdminFailed'))
-  } finally {
-    unbinding.value = false
-  }
-}
-
 function handleEditConfig() {
   void router.push({
     name: 'hermes.files',
@@ -147,21 +111,13 @@ function handleEditConfig() {
 </script>
 
 <template>
+  <ProfileDisplayNameModal v-if="editingDisplayName" :profile-name="profile.name" :current-display-name="profile.displayName" @close="editingDisplayName = false" @saved="editingDisplayName = false" />
   <div class="profile-card" :class="{ active: profile.active }">
     <div class="card-header">
       <div class="profile-title">
         <ProfileAvatar :name="profile.name" :avatar="profile.avatar" :size="28" />
-        <h3 class="profile-name">{{ getProfileDisplayName(profile) }}</h3>
-        <NTag
-          v-if="isExpert"
-          size="tiny"
-          type="info"
-          :bordered="false"
-          class="expert-badge"
-          :title="`${t('experts.source.badge')}: ${expertRole}`"
-        >
-          {{ t('experts.source.badge') }}
-        </NTag>
+        <h3 class="profile-name">{{ profile.displayName || profile.name }}</h3>
+        <NButton quaternary size="tiny" :aria-label="t('profiles.editDisplayName')" @click="editingDisplayName = true">{{ t('profiles.editDisplayName') }}</NButton>
       </div>
       <NTag v-if="profile.active" size="tiny" type="primary" :bordered="false">
         {{ t('profiles.active') }}
@@ -215,14 +171,12 @@ function handleEditConfig() {
     </div>
 
     <div class="card-actions">
-      <NButton size="tiny" quaternary @click="editingDisplayName = true">
-        {{ t('profiles.editDisplayName') }}
-      </NButton>
       <NButton size="tiny" quaternary @click="handleEditConfig">
         {{ t('profiles.editConfig') }}
       </NButton>
       <NButton
-        v-if="!profile.active"
+        v-if="profilesStore.hermesAvailable && !profile.active"
+        data-testid="switch-hermes-profile"
         size="tiny"
         :loading="switching"
         quaternary
@@ -243,25 +197,7 @@ function handleEditConfig() {
       <NButton size="tiny" quaternary :loading="exporting" @click="handleExport">
         {{ t('profiles.export') }}
       </NButton>
-      <NButton
-        v-if="isDefault && isCurrentSuperAdmin"
-        size="tiny"
-        quaternary
-        type="warning"
-        :loading="unbinding"
-        @click="handleUnbindSuperAdmin"
-      >
-        {{ t('profiles.unbindSuperAdmin') }}
-      </NButton>
     </div>
-
-    <ProfileDisplayNameModal
-      v-if="editingDisplayName"
-      :profile-name="profile.name"
-      :current-display-name="profile.displayName"
-      @close="editingDisplayName = false"
-      @saved="editingDisplayName = false"
-    />
   </div>
 </template>
 
@@ -269,10 +205,10 @@ function handleEditConfig() {
 @use '@/styles/variables' as *;
 
 .profile-card {
-  background-color: $bg-card;
-  border: 1px solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
+  border: var(--border-width, 1px) solid $border-color;
   border-radius: $radius-md;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   transition: border-color $transition-fast;
 
   &:hover {
@@ -288,19 +224,19 @@ function handleEditConfig() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   margin-bottom: 12px;
 }
 
 .profile-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .profile-name {
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 600;
   color: $text-primary;
   overflow: hidden;
@@ -313,18 +249,18 @@ function handleEditConfig() {
 .card-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(6px * var(--spacing-scale, 1));
   margin-bottom: 8px;
 }
 
 .card-detail-toggle {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 0;
+  gap: calc(4px * var(--spacing-scale, 1));
+  padding: calc(6px * var(--spacing-scale, 1)) 0;
   cursor: pointer;
   color: $text-muted;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   user-select: none;
 
   &:hover {
@@ -341,8 +277,8 @@ function handleEditConfig() {
 }
 
 .card-detail {
-  padding: 8px 0;
-  border-top: 1px solid $border-light;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
+  border-top: var(--border-width, 1px) solid $border-light;
   margin-bottom: 8px;
 }
 
@@ -350,18 +286,18 @@ function handleEditConfig() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 2px 0;
+  padding: calc(2px * var(--spacing-scale, 1)) 0;
 }
 
 .info-label {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   flex-shrink: 0;
   margin-inline-end: 12px;
 }
 
 .info-value {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-secondary;
   text-align: end;
   overflow: hidden;
@@ -370,8 +306,8 @@ function handleEditConfig() {
 }
 
 .mono {
-  font-family: $font-code;
-  font-size: 12px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 }
 
 .detail-path {
@@ -380,9 +316,9 @@ function handleEditConfig() {
 
 .card-actions {
   display: flex;
-  gap: 8px;
-  border-top: 1px solid $border-light;
-  padding-top: 10px;
+  gap: calc(8px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid $border-light;
+  padding-top: calc(10px * var(--spacing-scale, 1));
   flex-wrap: wrap;
 }
 </style>

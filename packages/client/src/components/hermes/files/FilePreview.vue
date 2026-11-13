@@ -1,18 +1,17 @@
 <script setup lang="ts">
-import { NButton, NIcon, NAlert, NSpin } from 'naive-ui'
+import { NSpin, NAlert, NButton, NIcon, useMessage } from 'naive-ui'
 import { computed, defineAsyncComponent, h, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 
 import { useI18n } from 'vue-i18n'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import { useFilesStore } from '@/stores/hermes/files'
-import { fetchFilePreviewBlob } from '@/api/hermes/files'
-import { fetchAuthenticatedBlob, saveBlob } from '@/api/hermes/binary-content'
-import { downloadFile } from '@/api/hermes/download'
-import { downloadSessionWorkspaceFile, fetchSessionWorkspaceFileBlob } from '@/api/hermes/sessions'
-import { downloadGroupWorkspaceFile, fetchGroupWorkspaceFileBlob } from '@/api/hermes/group-chat'
+import { fetchFilePreviewBlob } from '@/api/studio/files'
+import { fetchAuthenticatedBlob, saveBlob } from '@/api/studio/binary-content'
+import { downloadFile } from '@/api/studio/download'
+import { downloadSessionWorkspaceFile, fetchSessionWorkspaceFileBlob } from '@/api/studio/sessions'
+import { downloadGroupWorkspaceFile, fetchGroupWorkspaceFileBlob } from '@/api/studio/group-chat'
 import { handleCodeBlockCopyClick, renderHighlightedCodeBlock } from '@/components/hermes/chat/highlight'
-import { useMessage } from '@/composables/useAppMessage'
 import { previewMimeMatches } from '@/utils/hermes/file-preview'
 import { openHtmlInDesktopBrowser } from '@/utils/desktop-browser'
 import FileTreeToggle from './FileTreeToggle.vue'
@@ -43,22 +42,21 @@ const downloading = ref(false)
 const previewError = ref('')
 const previewText = ref('')
 const previewBuffer = shallowRef<ArrayBuffer | null>(null)
-const imageUrl = ref('')
+const mediaUrl = ref('')
 const previewContent = ref<HTMLElement | null>(null)
-
 let requestController: AbortController | null = null
 let requestGeneration = 0
 let sourceRevealGeneration = 0
 
-function revokeImageUrl(): void {
-  if (imageUrl.value) URL.revokeObjectURL(imageUrl.value)
-  imageUrl.value = ''
+function revokeMediaUrl(): void {
+  if (mediaUrl.value) URL.revokeObjectURL(mediaUrl.value)
+  mediaUrl.value = ''
 }
 
 function resetLoadedPreview(): void {
   requestController?.abort()
   requestController = null
-  revokeImageUrl()
+  revokeMediaUrl()
   previewText.value = ''
   previewBuffer.value = null
   previewError.value = ''
@@ -84,8 +82,8 @@ async function loadPreview(): Promise<void> {
     if (!previewMimeMatches(file.type, blob.type)) {
       throw new Error(t('files.previewMimeMismatch'))
     }
-    if (file.type === 'image') {
-      imageUrl.value = URL.createObjectURL(blob)
+    if (file.type === 'image' || file.type === 'video') {
+      mediaUrl.value = URL.createObjectURL(blob)
     } else if (file.type === 'html' || file.type === 'csv') {
       const text = await blob.text()
       if (generation !== requestGeneration) return
@@ -107,6 +105,10 @@ async function loadPreview(): Promise<void> {
 
 function handleRendererError(error: Error): void {
   previewError.value = error.message || t('files.previewFailed')
+}
+
+function handleVideoError(): void {
+  previewError.value = t('files.previewFailed')
 }
 
 async function handleDownload(): Promise<void> {
@@ -300,10 +302,19 @@ onBeforeUnmount(() => {
         </div>
       </NAlert>
       <img
-        v-else-if="filesStore.previewFile.type === 'image' && imageUrl"
-        :src="imageUrl"
+        v-else-if="filesStore.previewFile.type === 'image' && mediaUrl"
+        :src="mediaUrl"
         class="preview-image"
         :alt="filesStore.previewFile.path"
+      />
+      <video
+        v-else-if="filesStore.previewFile.type === 'video' && mediaUrl"
+        :src="mediaUrl"
+        class="preview-video"
+        controls
+        playsinline
+        preload="metadata"
+        @error="handleVideoError"
       />
       <RecycleScroller
         v-else-if="locatedSourceLines.length"
@@ -329,7 +340,6 @@ onBeforeUnmount(() => {
           </div>
         </template>
       </RecycleScroller>
-
       <div v-else-if="filesStore.previewFile.type === 'markdown'" class="preview-markdown">
         <MarkdownRenderer :content="filesStore.previewFile.content || ''" />
       </div>
@@ -390,20 +400,20 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
-  border-bottom: 1px solid $border-color;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
 }
 
 .preview-file-info,
 .preview-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .preview-filename {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -412,25 +422,25 @@ onBeforeUnmount(() => {
 
 .preview-size {
   flex: none;
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
 }
 
 .preview-location {
   flex: none;
-  padding: 1px 6px;
-  border: 1px solid rgba(var(--accent-primary-rgb), 0.24);
+  padding: calc(1px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.24);
   border-radius: 999px;
   color: var(--accent-primary);
   background: rgba(var(--accent-primary-rgb), 0.08);
-  font-family: $font-code;
-  font-size: 11px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .preview-content {
   flex: 1;
   overflow: auto;
-  padding: 16px;
+  padding: calc(16px * var(--spacing-scale, 1));
   display: flex;
   justify-content: center;
   width: 100%;
@@ -454,6 +464,15 @@ onBeforeUnmount(() => {
   object-fit: contain;
 }
 
+.preview-video {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+  object-fit: contain;
+}
+
 .preview-markdown {
   max-width: 800px;
   width: 100%;
@@ -465,9 +484,9 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   overflow: auto;
-  font-family: $font-code;
-  font-size: 13px;
-  line-height: 1.55;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, 1.55);
   scrollbar-width: none;
 
   // Let long rows contribute to the scroller's horizontal overflow.
@@ -490,8 +509,8 @@ onBeforeUnmount(() => {
   grid-template-columns: 52px minmax(max-content, 1fr);
   min-width: max-content;
   height: 20px;
-  border-radius: 3px;
-  line-height: 20px;
+  border-radius: var(--radius-component, 3px);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 20 / 14));
   white-space: pre;
 }
 
@@ -503,7 +522,7 @@ onBeforeUnmount(() => {
 .preview-source-line-number {
   position: sticky;
   left: 0;
-  padding-inline: 8px 12px;
+  padding-inline: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
   color: $text-muted;
   background: $bg-secondary;
   text-align: end;
@@ -516,7 +535,7 @@ onBeforeUnmount(() => {
 }
 
 .preview-source-line-text {
-  padding-inline: 12px;
+  padding-inline: calc(12px * var(--spacing-scale, 1));
   color: $text-primary;
   font: inherit;
 }

@@ -1,6 +1,0 @@
-Three executable scripts under `bin/` form two distinct entry points:
-- `hermes-web-ui.mjs` is the main CLI daemon manager. It spawns `dist/server/index.js` as a detached child process, manages PID/log/token files under `~/.hermes-web-ui`, handles start/stop/restart/status/update commands, auto-detects ports via `lsof`/`netstat`/`ss`, rotates logs, opens the browser, and supports a `client` mode that disables gateway autostart and allows all CORS.
-- `hermes-studio-mcp.mjs` implements the MCP stdio server: it reads JSON-RPC messages on stdin/stdout, exposes tools grouped by toolset (`api`, `devices`, `use`), authenticates against the Web UI via Bearer tokens resolved from environment, profile-scoped token files, or `~/.hermes-web-ui/.token`, and proxies calls through `requestEnvelope()` which fetches `/api/openapi.json` to validate endpoints and build input schemas.
-- `hermes-web-ui-mcp.mjs` is a thin re-export shim that simply imports `./hermes-studio-mcp.mjs` so both names resolve to the same MCP server.
-
-Dependency direction is one-way: the MCP server depends on the running Web UI HTTP API; the CLI daemon only spawns and supervises the server process. There is no shared library — each script is self-contained with its own argument parsing and environment handling.

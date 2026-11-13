@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { join, resolve } from 'path'
 import { homedir } from 'os'
-import { resolveUpdateRuntimePaths } from '../../packages/server/src/services/update/runtime-paths'
+import { resolveUpdateRuntimePaths } from '../../packages/server/src/modules/studio/services/update/runtime-paths'
 
 describe('update runtime paths', () => {
   it('resolves default runtime paths from cwd and default app home', () => {

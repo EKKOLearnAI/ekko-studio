@@ -1,1 +1,0 @@
-Comprehensive test suite covering client-side UI, server-side APIs, desktop runtime, Playwright end-to-end flows, Ekko agent internals, and Python USB monitoring utilities.

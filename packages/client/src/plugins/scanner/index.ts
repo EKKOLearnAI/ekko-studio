@@ -1,5 +1,6 @@
 import type { HermesClientPlugin } from '../types'
-import ScannerView from './ScannerView.vue'
+import { defineAsyncComponent } from 'vue'
+const ScannerView = defineAsyncComponent(() => import('./ScannerView.vue'))
 import { loadPluginMessages, SUPPORTED_LOCALES } from './i18n-loader'
 
 /**

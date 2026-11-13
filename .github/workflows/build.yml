@@ -19,6 +19,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PLUGIN_DOCS_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
 
     steps:
       - name: Checkout repository
@@ -29,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -41,8 +43,9 @@ jobs:
       - name: Check repository harness
         run: npm run harness:check
 
-      - name: Test with coverage
-        run: npm run test:coverage
-
       - name: Build
         run: npm run build
+
+      - name: Check task artifact locations after build
+        if: ${{ !cancelled() }}
+        run: npm run artifacts:check

@@ -7,8 +7,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NEmpty, NSpin, NTag } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { copyToClipboard } from '@/utils/clipboard'
-import { downloadUSBFile, fetchUSBFileBlob, statUSBPath, type USBFileStat } from '@/api/hermes/usb'
-import type { USBDeviceRecord } from '@/api/hermes/usb-socket'
+import { downloadUSBFile, fetchUSBFileBlob, statUSBPath, type USBFileStat } from '@/api/studio/usb'
+import type { USBDeviceRecord } from '@/api/studio/usb-socket'
 import { formatExplorerBytes, formatExplorerTime, getExplorerEntryKind, isImageKind, isTextPreviewKind } from '@/utils/usb-format'
 import { useMessage } from '@/composables/useAppMessage'
 
@@ -220,7 +220,7 @@ function handleReadWithAgent() {
   flex-direction: column;
   gap: 10px;
   height: 100%;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
   border-left: 1px solid $border-light;
   border-radius: 0;
   padding: 14px 16px;
@@ -285,7 +285,7 @@ function handleReadWithAgent() {
     padding: 8px 10px;
     border: 1px solid $border-light;
     border-radius: $radius-sm;
-    background: var(--bg-secondary);
+    background: var(--theme-card-bg, var(--bg-card));
   }
 
   dt {
@@ -325,7 +325,7 @@ function handleReadWithAgent() {
   padding: 10px 12px;
   border: 1px solid $border-light;
   border-radius: $radius-sm;
-  background: var(--bg-input);
+  background: var(--theme-input-bg, var(--bg-input));
   color: $text-primary;
   font-family: $font-code;
   font-size: 12px;

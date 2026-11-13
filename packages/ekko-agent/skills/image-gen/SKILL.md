@@ -1,6 +1,6 @@
 ---
 name: image-gen
-description: Generate or edit images through Quanthermes Studio using the current Profile's configured image provider.
+description: Generate or edit images through Ekko Studio using the current Profile's configured image provider.
 metadata:
   keywords:
     - image generation
@@ -10,7 +10,7 @@ metadata:
 
 # Studio image generation
 
-Use this Skill when the user wants to generate a new image, transform a reference image, or edit selected visual content through Quanthermes Studio's configured image provider.
+Use this Skill when the user wants to generate a new image, transform a reference image, or edit selected visual content through Ekko Studio's configured image provider.
 
 Always use the Studio media endpoint through the bundled helper. Do not call an upstream image API directly, request an API key in chat, or fall back to a different image-generation tool when Studio reports an error. The server owns provider selection and credentials.
 

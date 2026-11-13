@@ -1,6 +1,6 @@
 ---
 name: hermes-studio-installation
-description: Install, detect, validate, update, remove, recover, or migrate Quanthermes Studio, its managed Hermes Runtime, or the Claude Code, Codex, Pi, and Grok coding-agent CLIs. Use for installation status, version checks, Runtime downloads and storage moves, PATH problems, or upgrade failures; do not use for model, Provider, credential, MCP, memory, or Skill configuration.
+description: Install, detect, validate, update, remove, recover, or migrate Ekko Studio, its managed Hermes Runtime, or the Claude Code, Codex, Pi, and Grok coding-agent CLIs. Use for installation status, version checks, Runtime downloads and storage moves, PATH problems, or upgrade failures; do not use for model, Provider, credential, MCP, memory, or Skill configuration.
 metadata:
   keywords:
     - hermes studio installation
@@ -11,9 +11,9 @@ metadata:
     - grok installation
 ---
 
-# Quanthermes Studio installation
+# Ekko Studio installation
 
-Handle installation and Runtime lifecycle work for Quanthermes Studio and every Agent shown on its Agents page.
+Handle installation and Runtime lifecycle work for Ekko Studio and every Agent shown on its Agents page.
 
 ## Keep the boundary narrow
 
@@ -25,7 +25,7 @@ Handle installation and Runtime lifecycle work for Quanthermes Studio and every 
 
 ## Load only the relevant reference
 
-- Read [references/studio.md](references/studio.md) for installing, verifying, or upgrading the Desktop, npm, Docker, or source form of Quanthermes Studio.
+- Read [references/studio.md](references/studio.md) for installing, verifying, or upgrading the Desktop, npm, Docker, or source form of Ekko Studio.
 - Read [references/hermes-runtime.md](references/hermes-runtime.md) for Hermes CLI detection, managed Runtime downloads, validation, activation, upgrades, recovery, or storage migration.
 - Read [references/coding-agents.md](references/coding-agents.md) for Claude Code, Codex, Pi, or Grok installation, update checks, removal, PATH diagnosis, and success criteria.
 

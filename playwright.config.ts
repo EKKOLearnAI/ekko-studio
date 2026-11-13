@@ -1,28 +1,33 @@
 /// <reference types="node" />
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { defineConfig, devices } from '@playwright/test'
+import { taskArtifactPath, assertExternalArtifactPath } from './scripts/task-artifacts.mjs'
+
+// Reporter environment variables also cover CLI --reporter=list,html/blob,
+// which replaces the reporter options in this configuration.
+for (const [variable, category] of [
+  ['PLAYWRIGHT_HTML_OUTPUT_DIR', 'playwright-html'],
+  ['PLAYWRIGHT_BLOB_OUTPUT_DIR', 'playwright-blob'],
+]) {
+  process.env[variable] = assertExternalArtifactPath(__dirname,
+    process.env[variable] || taskArtifactPath(__dirname, category))
+}
 
 const PORT = Number(process.env.PLAYWRIGHT_PORT || 4173)
-// vite.config.ts serves HTTPS whenever the local dev certs exist, so the e2e
-// webServer health check must follow the same protocol or it times out waiting
-// for an HTTP URL that never answers. CI has no certs, so it stays on HTTP.
-const HAS_TLS = existsSync(resolve('packages/certs/server.crt')) && existsSync(resolve('packages/certs/server.key'))
-const BASE_URL = `${HAS_TLS ? 'https' : 'http'}://127.0.0.1:${PORT}`
+const BASE_URL = `http://127.0.0.1:${PORT}`
 // Allow environments without managed Playwright Chromium to use a local browser.
 // Example: PLAYWRIGHT_CHANNEL=chrome npx playwright test
 const BROWSER_CHANNEL = process.env.PLAYWRIGHT_CHANNEL as 'chrome' | 'msedge' | undefined
 
 export default defineConfig({
   testDir: './tests/e2e',
+  outputDir: taskArtifactPath(__dirname, 'playwright-results'),
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? [['dot'], ['html', { open: 'never' }]] : [['list']],
+  reporter: [['list']],
   use: {
     baseURL: BASE_URL,
-    ignoreHTTPSErrors: HAS_TLS,
     locale: 'en-US',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
@@ -30,9 +35,9 @@ export default defineConfig({
     video: BROWSER_CHANNEL ? 'off' : 'retain-on-failure',
   },
   webServer: {
+    env: { NODE_ENV: 'development', HERMES_WEB_UI_VITE_CACHE_DIR: `node_modules/.vite/playwright-${PORT}` },
     command: `npx vite --host 127.0.0.1 --port ${PORT}`,
     url: BASE_URL,
-    ignoreHTTPSErrors: HAS_TLS,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
@@ -42,7 +47,6 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         ...(BROWSER_CHANNEL ? { channel: BROWSER_CHANNEL } : {}),
-        ignoreHTTPSErrors: HAS_TLS,
       },
     },
   ],

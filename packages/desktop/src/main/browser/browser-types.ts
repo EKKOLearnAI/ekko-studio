@@ -1,3 +1,5 @@
+export const MAX_BROWSER_TABS = 12
+
 export type BrowserAgentControl = 'idle' | 'active' | 'waiting-for-user'
 export type BrowserProxyMode = 'direct' | 'system' | 'fixed_servers'
 
@@ -44,6 +46,7 @@ export interface DesktopBrowserProfile {
   rootPath: string
   sessionPath: string
   downloadPath: string
+  lastDownloadDirectory?: string
   proxyMode: BrowserProxyMode
   proxyRules: string
   askBeforeDownload: boolean
@@ -59,6 +62,7 @@ export interface DesktopBrowserDownload {
   fileName: string
   sourceUrl: string
   savePath?: string
+  fileAvailable?: boolean
   receivedBytes: number
   totalBytes: number
   state: 'blocked' | 'progressing' | 'completed' | 'cancelled' | 'interrupted'
@@ -94,6 +98,42 @@ export interface BrowserSnapshotNode {
   description?: string
   disabled?: boolean
   focused?: boolean
+  checked?: boolean | 'mixed'
+  selected?: boolean
+  expanded?: boolean
+  pressed?: boolean | 'mixed'
+}
+
+/** Observations are evidence, not a semantic assertion that the user's goal was met. */
+export interface BrowserObservation {
+  tabId?: string
+  status: 'observed' | 'unavailable'
+  changed?: boolean
+  changeCount?: number
+  changes?: Array<{ before?: BrowserSnapshotNode; after?: BrowserSnapshotNode }>
+  targets?: Array<{ before?: BrowserSnapshotNode; after?: BrowserSnapshotNode; valueMatches?: boolean }>
+  navigation?: 'same_document' | 'new_document'
+  openedTabs?: Array<Pick<DesktopBrowserTab, 'id' | 'title' | 'url'>>
+  dialog?: BrowserPageDialog
+  fileChooser?: { multiple: boolean }
+  /** Main-viewport CSS point where mouse input was dispatched. */
+  pointer?: { x: number; y: number; to_x?: number; to_y?: number }
+  hint: string
+}
+
+export interface BrowserInteractionResult extends DesktopBrowserTab {
+  snapshot?: BrowserSnapshot
+  snapshotError?: string
+  observation?: BrowserObservation
+}
+
+export interface BrowserSnapshotOptions {
+  snapshotId?: string
+  selector?: string
+  query?: string
+  interactiveOnly?: boolean
+  offset?: number
+  limit?: number
 }
 
 export interface BrowserSnapshot {
@@ -103,6 +143,15 @@ export interface BrowserSnapshot {
   title: string
   nodes: BrowserSnapshotNode[]
   text: string
+  totalNodes?: number
+  matchedNodes?: number
+  offset?: number
+  limit?: number
+  hasMore?: boolean
+  nextOffset?: number
+  truncated?: boolean
+  scope?: { selector?: string; query?: string; interactiveOnly?: boolean }
+  hint?: string
 }
 
 export type BrowserTextMode = 'innerText' | 'textContent'
@@ -189,8 +238,70 @@ export interface BrowserBrokerDescriptor {
   createdAt: string
 }
 
-export type BrowserInteractAction =
-  | { action: 'click'; ref: string; snapshot_id: string }
-  | { action: 'type'; ref: string; snapshot_id: string; text: string }
+export type BrowserMouseButton = 'left' | 'right' | 'middle'
+
+/** Actions that do not address a snapshot element. Coordinates are CSS pixels of the viewport screenshot. */
+type BrowserFreeAction =
   | { action: 'press'; key: string }
   | { action: 'scroll'; direction: 'up' | 'down' | 'left' | 'right'; pixels?: number }
+  | { action: 'click_at'; x: number; y: number; button?: BrowserMouseButton; click_count?: number }
+  | { action: 'drag_at'; x: number; y: number; to_x: number; to_y: number }
+
+type BrowserRefAction =
+  | { action: 'click'; ref: string }
+  | { action: 'double_click'; ref: string }
+  | { action: 'right_click'; ref: string }
+  | { action: 'type'; ref: string; text: string }
+  | { action: 'hover'; ref: string }
+  | { action: 'select'; ref: string; value: string }
+  | { action: 'drag'; ref: string; target_ref: string }
+
+export type BrowserInteractAction = (BrowserRefAction & { snapshot_id: string }) | BrowserFreeAction
+
+export type BrowserBatchAction = BrowserRefAction | BrowserFreeAction
+
+export interface BrowserPageDialog {
+  type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'
+  message: string
+  defaultPrompt?: string
+  url: string
+  openedAt: string
+}
+
+export interface BrowserNetworkEntry {
+  method: string
+  url: string
+  type: string
+  startedAt: string
+  status?: number
+  mimeType?: string
+  durationMs?: number
+  encodedBytes?: number
+  fromCache?: boolean
+  failed?: boolean
+  error?: string
+  frame?: 'iframe'
+}
+
+export interface BrowserWaitOptions {
+  text?: string
+  textGone?: string
+  timeoutMs: number
+}
+
+export interface BrowserWaitResult {
+  tabId: string
+  matched: boolean
+  elapsedMs: number
+  url: string
+}
+
+export interface BrowserBatchResult {
+  tabId: string
+  completed: number
+  total: number
+  results: Array<{ index: number; action: BrowserBatchAction['action']; status: 'completed' | 'failed' | 'skipped'; error?: string }>
+  snapshot?: BrowserSnapshot
+  snapshotError?: string
+  observation?: BrowserObservation
+}

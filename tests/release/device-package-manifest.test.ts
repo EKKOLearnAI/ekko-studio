@@ -67,6 +67,8 @@ function seedRepo(prefix: string, options: FixtureOptions = {}) {
   mkdirSync(resolvePath(repoRoot, 'release'), { recursive: true })
   mkdirSync(resolvePath(repoRoot, 'scripts'), { recursive: true })
   mkdirSync(resolvePath(repoRoot, 'packages'), { recursive: true })
+  mkdirSync(resolvePath(repoRoot, 'plugins', 'builtin'), { recursive: true })
+  writeFileSync(resolvePath(repoRoot, 'plugins', 'builtin', 'packages.json'), '{}\n')
   mkdirSync(resolvePath(repoRoot, 'docs'), { recursive: true })
   mkdirSync(resolvePath(repoRoot, '.github'), { recursive: true })
   writeFileSync(resolvePath(repoRoot, 'packages', 'README.md'), '# packages placeholder\n', 'utf-8')
@@ -129,6 +131,8 @@ function seedRepo(prefix: string, options: FixtureOptions = {}) {
     sourcePathAllowlist: [
       'package.json',
       'packages',
+      'plugins',
+      'hermes_data/bots/usb',
       'scripts',
       'docs',
       'tsconfig.json',
@@ -309,6 +313,8 @@ describe('device-package manifest contract', () => {
     })
     for (const required of [
       'hermes-web-ui-1.2.3/docs/openapi.json',
+      'hermes-web-ui-1.2.3/plugins/builtin/packages.json',
+      'hermes-web-ui-1.2.3/hermes_data/bots/usb/usb_monitor.py',
       'hermes-web-ui-1.2.3/tsconfig.app.json',
       'hermes-web-ui-1.2.3/tsconfig.node.json',
       'hermes-web-ui-1.2.3/vite.config.ts',

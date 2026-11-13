@@ -6,8 +6,10 @@ import { useGroupChatStore } from '@/stores/hermes/group-chat'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { useToolTraceVisibility } from '@/composables/useToolTraceVisibility'
 import { extractClipboardFiles } from '@/utils/clipboard-files'
+import ImagePreviewOverlay from '@/components/hermes/chat/ImagePreviewOverlay.vue'
+import ScreenshotButton from '@/components/hermes/chat/ScreenshotButton.vue'
 import { buildMentionOptions, type MentionOption } from './mention-options'
-import type { GroupChatMention } from '@/api/hermes/group-chat'
+import type { GroupChatMention } from '@/api/studio/group-chat'
 import type { Attachment } from '@/stores/hermes/chat'
 import { clampChatInputHeight, isMobileChatInputViewport } from '@/utils/chat-input-height'
 import VoiceDialogueControls from '@/components/hermes/chat/VoiceDialogueControls.vue'
@@ -49,6 +51,7 @@ const textareaRef = ref<HTMLTextAreaElement>()
 const dropdownRef = ref<HTMLDivElement>()
 const fileInputRef = ref<HTMLInputElement>()
 const attachments = ref<Attachment[]>([])
+const previewAttachment = ref<Attachment | null>(null)
 const isSending = ref(false)
 const pendingSendRoomId = ref<string | null>(null)
 const isDragging = ref(false)
@@ -240,6 +243,7 @@ const filteredMentionOptions = computed(() => buildMentionOptions(
 const canSend = computed(() => !!inputText.value.trim() || (props.allowAttachments && attachments.value.length > 0))
 
 function resetTransientComposerState() {
+    previewAttachment.value = null
     for (const attachment of attachments.value) URL.revokeObjectURL(attachment.url)
     attachments.value = []
     mentionActive.value = false
@@ -702,6 +706,7 @@ function removeAttachment(id: string) {
     if (isSending.value) return
     const idx = attachments.value.findIndex(a => a.id === id)
     if (idx !== -1) {
+        if (previewAttachment.value?.id === id) previewAttachment.value = null
         URL.revokeObjectURL(attachments.value[idx].url)
         attachments.value.splice(idx, 1)
     }
@@ -716,13 +721,26 @@ function formatSize(bytes: number): string {
 function isImage(type: string): boolean {
     return type.startsWith('image/')
 }
+
+function openAttachmentPreview(attachment: Attachment) {
+    if (!isImage(attachment.type)) return
+    previewAttachment.value = attachment
+}
 </script>
 
 <template>
     <div class="chat-input-area">
         <div v-if="attachments.length > 0" class="attachment-previews">
             <div v-for="att in attachments" :key="att.id" class="attachment-preview" :class="{ image: isImage(att.type) }">
-                <img v-if="isImage(att.type)" :src="att.url" :alt="att.name" class="attachment-thumb" />
+                <button
+                    v-if="isImage(att.type)"
+                    type="button"
+                    class="attachment-thumb-button"
+                    :aria-label="att.name"
+                    @click="openAttachmentPreview(att)"
+                >
+                    <img :src="att.url" :alt="att.name" class="attachment-thumb" />
+                </button>
                 <div v-else class="attachment-file">
                     <span class="file-name">{{ att.name }}</span>
                     <span class="file-size">{{ formatSize(att.size) }}</span>
@@ -732,6 +750,12 @@ function isImage(type: string): boolean {
                 </button>
             </div>
         </div>
+        <ImagePreviewOverlay
+            v-if="previewAttachment"
+            :src="previewAttachment.url"
+            :alt="previewAttachment.name"
+            @close="previewAttachment = null"
+        />
         <div v-if="activeMessageReference" class="message-reference-preview">
             <span class="message-reference-text">{{ messageReferencePreview }}</span>
             <button
@@ -774,17 +798,8 @@ function isImage(type: string): boolean {
             />
             <div class="input-toolbar">
                 <div class="input-top-bar">
+                    <NButton v-if="allowAttachments" quaternary size="tiny" @click="emit('request-discussion')">{{ t('groupChat.discussion.quickStartButton') }}</NButton>
                     <NTooltip v-if="props.allowAttachments" trigger="hover" :disabled="isMobileViewport">
-                        <template #trigger>
-                            <NButton quaternary size="tiny" circle class="toolbar-icon-button" @click="emit('request-discussion')">
-                                <template #icon>
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                                </template>
-                            </NButton>
-                        </template>
-                        {{ t('groupChat.discussion.quickStartButton') }}
-                    </NTooltip>
-                    <NTooltip trigger="hover" :disabled="isMobileViewport">
                         <template #trigger>
                             <NButton quaternary size="tiny" circle class="toolbar-icon-button" @click="handleAttachClick">
                                 <template #icon>
@@ -794,6 +809,7 @@ function isImage(type: string): boolean {
                         </template>
                         {{ t('chat.attachFiles') }}
                     </NTooltip>
+                    <ScreenshotButton v-if="props.allowAttachments" :key="props.roomId || 'new'" :mobile="isMobileViewport" :disabled="isSending" @capture="file => addFiles([file])" />
                     <NDropdown
                         v-if="props.showSettings"
                         trigger="click"
@@ -877,16 +893,16 @@ function isImage(type: string): boolean {
 @use "@/styles/variables" as *;
 
 .chat-input-area {
-    padding: 8px 20px 14px;
+    padding: calc(6px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border-top: 0;
-    background-color: $bg-main-surface;
+    background-color: var(--theme-content-bg, $bg-main-surface);
     flex-shrink: 0;
 }
 
 .input-top-bar {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: calc(7px * var(--spacing-scale, 1));
     min-width: 0;
     flex: 1;
     padding: 0;
@@ -895,8 +911,8 @@ function isImage(type: string): boolean {
 .auto-play-speech-switch {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding-inline-start: 2px;
+    gap: calc(5px * var(--spacing-scale, 1));
+    padding-inline-start: calc(2px * var(--spacing-scale, 1));
     margin-inline-start: 0;
 
     .switch-label {
@@ -905,7 +921,7 @@ function isImage(type: string): boolean {
         justify-content: center;
         width: 16px;
         height: 16px;
-        color: #999999;
+        color: var(--text-muted);
     }
 }
 
@@ -913,7 +929,7 @@ function isImage(type: string): boolean {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #999999;
+    color: var(--text-muted);
     width: 24px;
     min-width: 24px;
     height: 22px;
@@ -937,10 +953,10 @@ function isImage(type: string): boolean {
 .input-settings-button {
     color: $text-secondary;
     border-radius: 999px;
-    padding: 0 7px 0 6px;
+    padding: 0 calc(7px * var(--spacing-scale, 1)) 0 calc(6px * var(--spacing-scale, 1));
 
     :deep(.n-button__content) {
-        gap: 4px;
+        gap: calc(4px * var(--spacing-scale, 1));
     }
 
     :deep(.n-button__state-border),
@@ -959,8 +975,8 @@ function isImage(type: string): boolean {
     width: 100%;
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 0 0 10px;
+    gap: calc(8px * var(--spacing-scale, 1));
+    padding: 0 0 calc(10px * var(--spacing-scale, 1));
 }
 
 .attachment-preview {
@@ -968,18 +984,35 @@ function isImage(type: string): boolean {
     border-radius: $radius-sm;
     overflow: hidden;
     background-color: $bg-secondary;
-    border: 1px solid $border-color;
+    border: var(--border-width, 1px) solid $border-color;
 
     &.image {
-        width: 64px;
-        height: 64px;
+        width: 112px;
+        height: 72px;
     }
 }
 
 .attachment-thumb {
+    display: block;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+}
+
+.attachment-thumb-button {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background:
+        linear-gradient(45deg, rgba(127, 127, 127, 0.08) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(127, 127, 127, 0.08) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, rgba(127, 127, 127, 0.08) 75%),
+        linear-gradient(-45deg, transparent 75%, rgba(127, 127, 127, 0.08) 75%);
+    background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+    background-size: 12px 12px;
+    cursor: zoom-in;
 }
 
 .attachment-file {
@@ -987,14 +1020,14 @@ function isImage(type: string): boolean {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
-    padding: 8px 12px;
+    gap: calc(2px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
     min-width: 80px;
     max-width: 140px;
     color: $text-secondary;
 
     .file-name {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -1002,7 +1035,7 @@ function isImage(type: string): boolean {
     }
 
     .file-size {
-        font-size: 10px;
+        font-size: calc(var(--font-size-base, 14px) * 10 / 14);
         color: $text-muted;
     }
 }
@@ -1036,7 +1069,7 @@ function isImage(type: string): boolean {
 .typing-dots {
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: calc(2px * var(--spacing-scale, 1));
 
     span {
         display: block;
@@ -1059,11 +1092,11 @@ function isImage(type: string): boolean {
 .message-reference-preview {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     min-width: 0;
     margin: 0 8px 8px;
-    padding: 4px 8px;
-    border-radius: 8px;
+    padding: calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 8px);
     background: rgba(var(--accent-primary-rgb), 0.07);
     cursor: default;
 }
@@ -1073,8 +1106,8 @@ function isImage(type: string): boolean {
     min-width: 0;
     overflow: hidden;
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 24px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 24 / 14));
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -1088,7 +1121,7 @@ function isImage(type: string): boolean {
     height: 24px;
     padding: 0;
     border: 0;
-    border-radius: 7px;
+    border-radius: var(--radius-component, 7px);
     background: transparent;
     color: $text-muted;
     cursor: pointer;
@@ -1103,13 +1136,13 @@ function isImage(type: string): boolean {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     width: 100%;
     min-height: 150px;
-    background-color: $bg-card;
-    border: 1px solid var(--input-border-color);
-    border-radius: 18px;
-    padding: 14px 12px 9px;
+    background-color: var(--theme-card-bg, $bg-card);
+    border: var(--border-width, 1px) solid var(--input-border-color);
+    border-radius: $radius-md;
+    padding: calc(12px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     position: relative;
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.08);
     transition: border-color $transition-fast, box-shadow $transition-fast;
@@ -1129,7 +1162,7 @@ function isImage(type: string): boolean {
     }
 
     .dark & {
-        background-color: #333333;
+        background-color: var(--theme-content-bg, $bg-main-surface);
         box-shadow: 0 8px 28px rgba(0, 0, 0, 0.32);
     }
 }
@@ -1145,7 +1178,7 @@ function isImage(type: string): boolean {
 
     &:hover {
         background: rgba($accent-primary, 0.15);
-        border-radius: 4px;
+        border-radius: var(--radius-component, 4px);
     }
 }
 
@@ -1158,8 +1191,8 @@ function isImage(type: string): boolean {
     outline: none;
     color: $text-primary;
     font-family: $font-ui;
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
+    line-height: var(--line-height, 1.5);
     resize: none;
     max-height: 400px;
     min-height: 24px;
@@ -1167,7 +1200,7 @@ function isImage(type: string): boolean {
     overflow-y: auto;
 
     @media (max-width: 768px) {
-        font-size: 16px;
+        font-size: calc(var(--font-size-base, 14px) * 16 / 14);
     }
 
     &::placeholder {
@@ -1181,7 +1214,7 @@ function isImage(type: string): boolean {
 
 .input-actions {
     display: flex;
-    gap: 7px;
+    gap: calc(7px * var(--spacing-scale, 1));
     flex-shrink: 0;
     align-items: center;
 }
@@ -1190,7 +1223,7 @@ function isImage(type: string): boolean {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: calc(12px * var(--spacing-scale, 1));
     min-height: 32px;
 }
 
@@ -1242,11 +1275,11 @@ function isImage(type: string): boolean {
 
 @media (max-width: 768px) {
     .chat-input-area {
-        padding: 8px 12px 12px;
+        padding: 6px 8px calc(12px + env(safe-area-inset-bottom, 0px));
     }
 
     .input-top-bar {
-        gap: 5px;
+        gap: calc(5px * var(--spacing-scale, 1));
     }
 
     .auto-play-speech-switch {
@@ -1258,24 +1291,24 @@ function isImage(type: string): boolean {
 
 .mention-dropdown {
     position: fixed;
-    background: $bg-card;
-    border: 1px solid $border-color;
-    border-radius: 8px;
+    background: var(--theme-card-bg, $bg-card);
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 8px);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     min-width: 200px;
     max-height: 240px;
     overflow-y: auto;
     z-index: 9999;
-    padding: 4px;
+    padding: calc(4px * var(--spacing-scale, 1));
 }
 
 .mention-dropdown-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 8px 12px;
-    border-radius: 6px;
+    gap: calc(12px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+    border-radius: var(--radius-component, 6px);
     cursor: pointer;
     transition: background 0.1s;
 
@@ -1286,13 +1319,13 @@ function isImage(type: string): boolean {
 
     .mention-name {
         color: $text-primary;
-        font-size: 14px;
+        font-size: calc(var(--font-size-base, 14px) * 14 / 14);
         font-weight: 500;
     }
 
     .mention-profile {
         color: $text-muted;
-        font-size: 12px;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     }
 
     &.mention-all-option .mention-name {
@@ -1323,15 +1356,21 @@ function isImage(type: string): boolean {
 
 @media (max-width: 768px) {
     .input-wrapper {
-        min-height: 118px;
+        min-height: 96px;
+        gap: calc(6px * var(--spacing-scale, 1));
+        padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
+    }
+
+    .input-textarea {
+        flex: 1 1 auto;
     }
 
     .input-settings-button {
         min-width: 36px;
-        padding: 0 4px 0 6px;
+        padding: 0 calc(4px * var(--spacing-scale, 1)) 0 calc(6px * var(--spacing-scale, 1));
 
         :deep(.n-button__content) {
-            gap: 2px;
+            gap: calc(2px * var(--spacing-scale, 1));
         }
 
         :deep(.n-button__icon) {
@@ -1344,8 +1383,8 @@ function isImage(type: string): boolean {
     }
 
     .input-textarea::placeholder {
-        font-size: 13px;
-        line-height: 1.35;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+        line-height: var(--line-height, 1.35);
     }
 }
 </style>

@@ -120,14 +120,16 @@ describe('recover-interrupted-update', () => {
     // lastgood lives NEXT TO the deploy link (atomic-swap.sh contract —
     // revert_to_lastgood reads dirname(deploy)/lastgood, never state/swap);
     // deploy -> a deleted staging dir.
-    execFileSync('bash', ['-c', `ln -s '${env.deployDir}' '${join(env.home, 'lastgood')}'`])
+    const lastgood = join(env.home, 'good-deploy')
+    require('fs').renameSync(env.deployDir, lastgood)
+    execFileSync('bash', ['-c', `ln -s '${lastgood}' '${join(env.home, 'lastgood')}'`])
     const gone = join(env.home, 'cache', 'staging-gone')
     mkdirSync(gone, { recursive: true })
     execFileSync('bash', ['-c', `ln -s '${gone}' '${env.deployDir}'`])
     rmSync(gone, { recursive: true, force: true })
     const res = runRecovery(env)
     expect(res.status).toBe(0)
-    expect(readlinkSafe(env.deployDir)).toBe(env.deployDir)
+    expect(readlinkSafe(env.deployDir)).toBe(lastgood)
     expect(recoveryJournalMessages(env.home).join('\n')).toContain('broken_deploy_reverted')
   })
 

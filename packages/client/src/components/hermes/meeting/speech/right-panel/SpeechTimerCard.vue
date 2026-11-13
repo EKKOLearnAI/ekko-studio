@@ -38,11 +38,11 @@ const timer = injectSpeechTimer()
 </template>
 
 <style scoped lang="scss">
-// --- 计时员卡（去重后：仅保留浮层没有的记录与管理功能） ---
+/* --- 计时员卡（去重后：仅保留浮层没有的记录与管理功能） ---*/
 
 
 .time-records { display: flex; flex-direction: column; gap: 4px; }
-.records-title { font-size: 11px; color: var(--n-text-color3, #888); }
+.records-title { font-size: 11px; color: var(--n-text-color3, var(--text-primary)); }
 
 .record-item {
   display: flex;
@@ -51,22 +51,22 @@ const timer = injectSpeechTimer()
   font-size: 12px;
   padding: 4px 6px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(var(--text-primary-rgb), 0.03);
 }
 
 .record-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .record-duration { font-variant-numeric: tabular-nums; }
-.record-overtime { color: #ff4d4f; }
+.record-overtime { color: var(--error); }
 
 .record-remove {
   background: none;
   border: none;
-  color: #888;
+  color: var(--text-primary);
   cursor: pointer;
   font-size: 14px;
   padding: 0 2px;
   line-height: 1;
 
-  &:hover { color: #ff4d4f; }
+  &:hover { color: var(--error); }
 }
 </style>

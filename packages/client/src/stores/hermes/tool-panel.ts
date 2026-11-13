@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import {
   fetchWorkspaceRunChangeFile,
   type WorkspaceRunChangeFileSummary,
-} from '@/api/hermes/sessions'
+} from '@/api/studio/sessions'
 
 export interface WorkspaceDiffPanelState {
   file: WorkspaceRunChangeFileSummary | {

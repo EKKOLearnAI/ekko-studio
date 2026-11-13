@@ -1,18 +1,12 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import type { ProxyOptions } from 'vite'
-import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import pkg from './package.json'
 
-const FRONTEND_PORT = Number(process.env.HERMES_WEB_UI_FRONTEND_PORT || 6060)
-const BACKEND_PORT = process.env.HERMES_WEB_UI_BACKEND_PORT || '6060'
+const FRONTEND_PORT = Number(process.env.HERMES_WEB_UI_FRONTEND_PORT || 8649)
+const BACKEND_PORT = process.env.HERMES_WEB_UI_BACKEND_PORT || '8648'
 const BACKEND = `http://127.0.0.1:${BACKEND_PORT}`
-
-const CERT_DIR = resolve(__dirname, 'packages/certs')
-const CERT_PATH = resolve(CERT_DIR, 'server.crt')
-const KEY_PATH = resolve(CERT_DIR, 'server.key')
-const HAS_TLS = existsSync(CERT_PATH) && existsSync(KEY_PATH)
 
 function createProxyConfig(): ProxyOptions {
   return {
@@ -38,7 +32,9 @@ function createProxyConfig(): ProxyOptions {
 
 export default defineConfig({
   root: 'packages/client',
-  base: '/',
+  base: process.env.STUDIO_BASE_PATH || '/',
+  // Concurrent test/dev servers must not replace each other's optimized Vue runtime.
+  cacheDir: resolve(__dirname, process.env.HERMES_WEB_UI_VITE_CACHE_DIR || 'node_modules/.vite/client'),
   plugins: [vue()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
@@ -61,9 +57,6 @@ export default defineConfig({
     // CSS code splitting for better caching
     cssCodeSplit: true,
     rollupOptions: {
-      input: {
-        main: resolve(__dirname, 'packages/client/index.html'),
-      },
       output: {
         // Optimize chunk file names for better caching
         chunkFileNames: 'assets/js/[name]-[hash].js',
@@ -81,19 +74,16 @@ export default defineConfig({
       'vue-router',
       'pinia',
       'naive-ui',
+      // Worker-only imports must be ready before opening a workbook, without a page reload.
+      'read-excel-file/web-worker',
     ],
   },
   server: {
     port: FRONTEND_PORT,
     strictPort: true,
-    https: HAS_TLS
-      ? {
-          key: readFileSync(KEY_PATH),
-          cert: readFileSync(CERT_PATH),
-        }
-      : undefined,
     proxy: {
-      '/ws': createProxyConfig(),
+      // Preserve the browser Origin/Host for the meeting upgrade auth check.
+      '/ws': { target: BACKEND, ws: true },
       '/api': createProxyConfig(),
       '/v1': createProxyConfig(),
       '/health': createProxyConfig(),

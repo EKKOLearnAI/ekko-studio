@@ -1,16 +1,31 @@
 <script setup lang="ts">
+import GroupDiscussionPanel from './GroupDiscussionPanel.vue'
+import type { ChatCodingAgentId } from '@/api/coding-agents'
+import { agentMetadata, agentSupportsSurface } from '@/utils/agent-catalog'
+
+import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
+import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
+import type { CodingAgentId } from '@/api/coding-agents'
+import { isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import PageSidebar from "@/components/layout/PageSidebar.vue"
+import SidebarResizeHandle from "@/components/layout/SidebarResizeHandle.vue"
+import { usePageSidebarState } from "@/composables/usePageSidebar"
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
+import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
+import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue"
 import { ref, computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, provide, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { NInput, NButton, NSpace, NSelect, NPopover, NPopconfirm, NInputNumber, NDropdown, NModal, NDrawer, NDrawerContent, NProgress, NSwitch, NCheckbox, type DropdownOption } from 'naive-ui'
+import { NSpin, useMessage, NInput, NButton, NSpace, NSelect, NPopconfirm, NInputNumber, NDropdown, NModal, NPopover, NDrawer, NDrawerContent, NSwitch, type DropdownOption } from 'naive-ui'
+import { nextCodingAgentMode, storedPriorAgentMode, submittedCodingAgentSelection } from '@/utils/coding-agent-mode'
 import { useGroupChatStore } from '@/stores/hermes/group-chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import {
     createGroupAgentPreset,
     deleteGroupAgentPreset,
-    exportRoom,
-    importRooms,
     getRoomSummary,
     groupAgentPresetToRoomAgentInput,
     listGroupAgentPresets,
@@ -19,11 +34,7 @@ import {
     updateGroupAgentPreset,
     updateRoomConfig,
     updateRoomSummary,
-    downloadGroupWorkspaceFile,
-    fetchDeliveryUsage,
-    cleanupDeliveryFiles,
-    type DeliveryUsage,
-} from '@/api/hermes/group-chat'
+} from '@/api/studio/group-chat'
 import {
     decideGroupAgentPairing,
     leaveLocalGroupAgentRoom,
@@ -33,25 +44,22 @@ import {
     updateGuestAgentPolicy,
     type GroupAgentPairingRequest,
     type LocalGroupAgentConnection,
-} from '@/api/hermes/group-chat-agent-link'
-
+} from '@/api/studio/group-chat-agent-link'
 import GroupMessageList from './GroupMessageList.vue'
 import GroupChatInput from './GroupChatInput.vue'
 import GroupRoomAgentAvatar from './GroupRoomAgentAvatar.vue'
 import MessageQueueFloatPanel from '@/components/hermes/chat/MessageQueueFloatPanel.vue'
+import PendingInteractionCountdown from '@/components/hermes/chat/PendingInteractionCountdown.vue'
 import FolderPicker from '@/components/hermes/chat/FolderPicker.vue'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
+import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { copyToClipboard } from '@/utils/clipboard'
-import { getProfileDisplayName } from '@/utils/hermes/profile-display'
-import { useDiscussionReportDownload } from '@/composables/useDiscussionReportDownload'
-import { useMessage } from '@/composables/useAppMessage'
 import type { Attachment } from '@/stores/hermes/chat'
 import type {
     GroupAgentPreset,
     GroupAgentPresetInput,
     GroupChatMention,
-    GroupDocumentInfo,
     MemberInfo,
     RoomAgent,
     RoomAgentInput,
@@ -59,7 +67,8 @@ import type {
     RoomSummaryAnchor,
     RoomSummaryConfig,
     RoomSummaryState,
-} from '@/api/hermes/group-chat'
+    RoomSummaryReview,
+} from '@/api/studio/group-chat'
 import { useFilesStore } from '@/stores/hermes/files'
 import { useToolPanelStore } from '@/stores/hermes/tool-panel'
 import { hasDesktopBrowserBridge } from '@/utils/desktop-bridge'
@@ -68,7 +77,7 @@ import {
     createBrowserAnnotationAttachment,
     type BrowserAnnotationSubmission,
 } from '@/utils/browser-annotation-submit'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import {
     inferCodingAgentApiMode,
     normalizeCodingAgentApiMode,
@@ -84,8 +93,14 @@ import { generateGroupChatInviteCode } from '@/utils/group-chat-invite-code'
 import { buildRemoteGroupChatRooms, type RemoteGroupChatRoom } from '@/utils/group-chat-remote-rooms'
 import { handoffErrorTranslationKey } from './handoff-presentation'
 import { clearGroupChatRoomDraft } from './group-chat-room-drafts'
+import {
+    fetchAgentAvailabilitySnapshot,
+    isAgentAvailable,
+    type AgentAvailabilitySnapshot,
+} from '@/api/agent-status'
 
 const FilesPanel = defineAsyncComponent(async () => (await import('@/components/hermes/chat/FilesPanel.vue')).default)
+const FilePreview = defineAsyncComponent(async () => (await import('@/components/hermes/files/FilePreview.vue')).default)
 const WorkspaceDiffPreview = defineAsyncComponent(async () => (await import('@/components/hermes/files/WorkspaceDiffPreview.vue')).default)
 const DesktopBrowserPanel = defineAsyncComponent(async () => (await import('@/components/hermes/chat/DesktopBrowserPanel.vue')).default)
 const TerminalPanel = defineAsyncComponent(async () => (await import('@/components/hermes/chat/TerminalPanel.vue')).default)
@@ -109,26 +124,26 @@ const profilesStore = useProfilesStore()
 const filesStore = useFilesStore()
 const toolPanelStore = useToolPanelStore()
 
-const showSidebar = ref(!props.standalone && window.innerWidth > 768)
+const { expanded: showSidebar } = usePageSidebarState(!props.standalone)
 watch(
     showSidebar,
     expanded => appStore.setPageSidebarExpanded(expanded),
     { immediate: true },
 )
 const showCreateModal = ref(false)
+const showDiscussionPanel = ref(false)
 const showCloneModal = ref(false)
-const showImportModal = ref(false)
-const importFile = ref<File | null>(null)
-const importInputRef = ref<HTMLInputElement | null>(null)
-const isImporting = ref(false)
-const showAddAgentModal = ref(false)
-const showGroupChatRefactorNotice = ref(false)
+const showAddAgentDrawer = ref(false)
 const showManualRoomLinkModal = ref(false)
 const manualRoomLink = ref('')
 const manualRoomLinkInput = ref<HTMLInputElement | null>(null)
 const showMemberRail = ref(true)
 const editingAgent = ref<RoomAgent | null>(null)
 const isSavingAgent = ref(false)
+const isLoadingAgentForm = ref(false)
+let agentDrawerLoadSequence = 0
+const agentAvailabilitySnapshot = ref<AgentAvailabilitySnapshot | null>(null)
+let agentStatusRequest: Promise<void> | null = null
 const showRoomSettingsModal = ref(false)
 const showUserProfileModal = ref(false)
 const userProfileName = ref('')
@@ -148,6 +163,7 @@ const agentHandoffRecommendation = computed(() => Math.max(4, store.agents.lengt
 const isContinuingHandoff = ref(false)
 const roomSummaryState = ref<RoomSummaryState | null>(null)
 const roomSummaryAnchor = ref<RoomSummaryAnchor | null>(null)
+const roomSummaryReview = ref<RoomSummaryReview | null>(null)
 const roomSummaryDraft = ref('')
 const isLoadingRoomSummary = ref(false)
 const isSavingRoomSummary = ref(false)
@@ -174,11 +190,15 @@ const isSavingGuestAgentPolicy = ref(false)
 let agentPairingRefreshTimer: ReturnType<typeof setInterval> | null = null
 let remoteRoomRefreshTimer: ReturnType<typeof setInterval> | null = null
 const selectedAgentType = ref<GroupAgentType>('hermes')
+const selectedAgentMode = ref<'scoped' | 'global'>('scoped')
+const priorAgentMode = ref<'scoped' | 'global' | undefined>()
 const selectedProfile = ref<string | null>(null)
 const selectedAgentProvider = ref('')
 const selectedAgentModel = ref('')
 const selectedAgentApiMode = ref<CodingAgentApiMode>('codex_responses')
 const selectedAgentReasoningEffort = ref('')
+const selectedRuntimePreset = ref<string>()
+const selectedRuntimePresetReady = ref(false)
 const agentName = ref('')
 const agentDescription = ref('')
 const agentAvatar = ref<ProfileAvatarData | null>(null)
@@ -214,446 +234,6 @@ const groupChatInputRef = ref<(InstanceType<typeof GroupChatInput> & {
     completeSend?: (success: boolean) => void
 }) | null>(null)
 const summarySettingsSectionRef = ref<HTMLElement | null>(null)
-
-// ─── Free Discussion Mode ───────────────────────────────────
-const discussionFormVisible = ref(false)
-const discussionGoal = ref('')
-const discussionMaxRounds = ref(20)
-const discussionMinRounds = ref(0)
-const discussionMaxMessages = ref(200)
-const discussionLongRunMode = ref(false)
-const discussionAgentOrder = ref<string[]>([])
-const discussionReporterId = ref('')
-const isStartingDiscussion = ref(false)
-const isStoppingDiscussion = ref(false)
-const discussionAttachmentInputRef = ref<HTMLInputElement | null>(null)
-const discussionAttachments = ref<string[]>([])
-
-/** 长任务模式（无人值守通宵跑）默认参数。 */
-const LONG_RUN_DEFAULTS = { maxRounds: 40, minRounds: 15, maxMessages: 600 } as const
-
-/** 长任务模式自动附加的护栏文案：约束 agent 行为，避免无人值守时翻车。 */
-const LONG_RUN_GUARDRAILS = [
-    '【阶段划分】请将任务拆分为多个阶段（如：盘点材料 → 逐项分析 → 方案制定 → 汇总交付），每阶段集中深化后再进入下一阶段，不要跳阶段。',
-    '【阶段落盘】每个阶段完成时，立即把该阶段成果保存为 Markdown 文件到交付目录（绝对路径已由【交付要求】给出），文件名带阶段号（如「阶段1-xxx.md」）。中途断电/重启也不丢失已落盘成果。',
-    '【完成标准】当且仅当所有阶段成果均已落盘、且任务目标涉及的问题全部得到实质性解答、并产出可直接使用的最终交付物时，才算完成；条件不满足前，即使意见一致也不得结束。',
-    '【禁止事项】不要反问用户、不要等待用户决策、不要请求用户介入；材料无法读取时标注"需人工核实"而不是编造内容；不要输出空回复。',
-].join('\n')
-
-function applyLongRunDefaults(): void {
-    discussionMaxRounds.value = LONG_RUN_DEFAULTS.maxRounds
-    discussionMinRounds.value = LONG_RUN_DEFAULTS.minRounds
-    discussionMaxMessages.value = LONG_RUN_DEFAULTS.maxMessages
-}
-
-function toggleLongRunMode(enabled: boolean): void {
-    discussionLongRunMode.value = enabled
-    if (enabled) applyLongRunDefaults()
-}
-
-function openDiscussionAttachmentPicker(): void {
-    discussionAttachmentInputRef.value?.click()
-}
-
-function handleDiscussionAttachmentChange(event: Event): void {
-    const input = event.target as HTMLInputElement
-    const files = Array.from(input.files || [])
-    input.value = ''
-    for (const file of files) {
-        if (!discussionAttachments.value.includes(file.name)) {
-            discussionAttachments.value.push(file.name)
-        }
-    }
-}
-
-function removeDiscussionAttachment(name: string): void {
-    discussionAttachments.value = discussionAttachments.value.filter(n => n !== name)
-}
-
-const liveDiscussion = computed(() => {
-    const roomId = store.currentRoomId
-    if (!roomId) return null
-    return store.discussionStates.get(roomId) || null
-})
-const deliveryUsage = ref<DeliveryUsage | null>(null)
-// 打开/切换房间时拉取该房间的讨论状态（含交付文件清单 deliverables），
-// 否则刷新页面后报告消息下方无法呈现本场交付文件。
-watch(
-    () => store.currentRoomId,
-    (roomId) => {
-        if (roomId) {
-            store.loadDiscussion(roomId)
-            loadDeliveryUsage()
-        }
-    },
-    { immediate: true },
-)
-
-// ─── 交付目录用量统计与清理提醒 ─────────────────────────────
-async function loadDeliveryUsage(): Promise<void> {
-    const roomId = store.currentRoomId
-    if (!roomId || store.inviteGuest) return
-    try {
-        deliveryUsage.value = await fetchDeliveryUsage(roomId)
-    } catch {
-        deliveryUsage.value = null
-    }
-}
-function deliveryFormatBytes(value: number | null | undefined): string {
-    if (value == null || !Number.isFinite(value)) return '0 B'
-    const units = ['B', 'KB', 'MB', 'GB']
-    let next = value
-    let unitIndex = 0
-    while (next >= 1024 && unitIndex < units.length - 1) {
-        next /= 1024
-        unitIndex += 1
-    }
-    return `${next.toFixed(next >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
-}
-async function handleCleanupDelivery(): Promise<void> {
-    const roomId = store.currentRoomId
-    if (!roomId || !deliveryUsage.value) return
-    if (!window.confirm(t('groupChat.discussion.delivery.cleanupConfirm'))) return
-    try {
-        await cleanupDeliveryFiles(roomId)
-        await loadDeliveryUsage()
-        message.success(t('groupChat.discussion.delivery.cleanupDone'))
-    } catch (err: any) {
-        message.error(err?.message || t('groupChat.discussion.delivery.cleanupFailed'))
-    }
-}
-const discussionIsActive = computed(() => {
-    const state = liveDiscussion.value
-    return state ? state.status === 'pending' || state.status === 'running' || state.status === 'paused' : false
-})
-const lastJudgeNote = computed(() => {
-    const notes = liveDiscussion.value?.judgeNotes
-    return notes && notes.length ? notes[notes.length - 1] : null
-})
-const discussionAgentOptions = computed(() =>
-    store.agents.map(agent => ({ label: agent.name, value: agent.agentId })),
-)
-function discussionStatusLabel(status: string): string {
-    return t(`groupChat.discussion.status.${status}`)
-}
-function openDiscussionForm(): void {
-    discussionFormVisible.value = true
-    discussionGoal.value = ''
-    discussionMaxRounds.value = 20
-    discussionMinRounds.value = 0
-    discussionMaxMessages.value = 200
-    discussionLongRunMode.value = false
-    discussionAgentOrder.value = store.agents.map(agent => agent.agentId)
-    discussionReporterId.value = store.agents[0]?.agentId || ''
-}
-async function handleStartDiscussion(): Promise<void> {
-    const rawGoal = discussionGoal.value.trim()
-    if (!rawGoal) return
-    // 长任务模式：自动附加护栏文案（阶段划分/落盘/完成标准/禁止事项），
-    // 用户只需提供任务目标与材料路径。
-    const goal = discussionLongRunMode.value
-        ? `${rawGoal}\n\n${LONG_RUN_GUARDRAILS}`
-        : rawGoal
-    isStartingDiscussion.value = true
-    try {
-        const ok = await startDiscussionViaUI({
-            goal,
-            attachments: discussionAttachments.value.length > 0 ? [...discussionAttachments.value] : undefined,
-            agentOrder: discussionAgentOrder.value.length >= 2 ? [...discussionAgentOrder.value] : undefined,
-            maxRounds: discussionMaxRounds.value,
-            minRounds: discussionMinRounds.value,
-            maxMessages: discussionMaxMessages.value,
-            reporterId: discussionReporterId.value || undefined,
-        })
-        if (ok) discussionFormVisible.value = false
-    } finally {
-        isStartingDiscussion.value = false
-    }
-}
-async function handleStopDiscussion(): Promise<void> {
-    const roomId = store.currentRoomId
-    if (!roomId) return
-    isStoppingDiscussion.value = true
-    try {
-        await store.endDiscussion(roomId)
-    } catch (err: any) {
-        message.error(err?.message || t('groupChat.discussion.stopFailed'))
-    } finally {
-        isStoppingDiscussion.value = false
-    }
-}
-
-/**
- * Unified discussion launcher shared by all three entry points (settings form,
- * quick-start toolbar button, and /讨论 command). Applies common guards and
- * passes the full parameter set (goal, attachments, order, rounds, reporter).
- */
-async function startDiscussionViaUI(
-    input: {
-        goal: string
-        agentOrder?: string[]
-        attachments?: string[]
-        attachmentsFiles?: Attachment[]
-        maxRounds?: number
-        minRounds?: number
-        maxMessages?: number
-        reporterId?: string
-    },
-): Promise<boolean> {
-    const roomId = store.currentRoomId
-    const goal = (input.goal || '').trim()
-    if (!roomId || !goal) return false
-    if (!currentRoomCanManage.value) {
-        message.error(t('groupChat.discussion.managerOnly'))
-        return false
-    }
-    if (discussionIsActive.value) {
-        message.warning(t('groupChat.discussion.inProgress'))
-        return false
-    }
-    try {
-        await store.beginDiscussion(roomId, {
-            goal,
-            attachments: input.attachments?.length ? [...input.attachments] : undefined,
-            agentOrder: input.agentOrder && input.agentOrder.length >= 2 ? input.agentOrder : undefined,
-            maxRounds: input.maxRounds,
-            minRounds: input.minRounds,
-            maxMessages: input.maxMessages,
-            reporterId: input.reporterId || undefined,
-        }, input.attachmentsFiles)
-        return true
-    } catch (err: any) {
-        message.error(err?.message || t('groupChat.discussion.startFailed'))
-        return false
-    }
-}
-
-// ─── Report download (Word + Markdown) ─────────────────────
-const { isDownloading: isDownloadingReport, downloadReport: handleDownloadDiscussionReport } = useDiscussionReportDownload()
-
-// ─── 讨论结束后自动生成的总结文件下载（服务端落盘到房间工作区「交付」目录）───
-const isDownloadingSummary = ref(false)
-async function handleDownloadDiscussionSummary(): Promise<void> {
-    const roomId = store.currentRoomId
-    const state = roomId ? store.discussionStates.get(roomId) : null
-    const filePath = state?.summaryFilePath
-    if (!roomId || !filePath) return
-    isDownloadingSummary.value = true
-    try {
-        const fileName = filePath.split('/').pop() || '讨论总结.md'
-        await downloadGroupWorkspaceFile(roomId, filePath, fileName)
-    } catch (err: any) {
-        message.error(err?.message || t('groupChat.discussion.summaryDownloadFailed'))
-    } finally {
-        isDownloadingSummary.value = false
-    }
-}
-
-// ─── 本场讨论交付文件下载（工作区「交付」目录）───
-async function handleDownloadDeliverable(filePath: string): Promise<void> {
-    const roomId = store.currentRoomId
-    if (!roomId || !filePath) return
-    try {
-        const fileName = filePath.split('/').pop() || '交付文件'
-        await downloadGroupWorkspaceFile(roomId, filePath, fileName)
-    } catch (err: any) {
-        message.error(err?.message || t('groupChat.discussion.summaryDownloadFailed'))
-    }
-}
-
-// ─── Quick start from the chat input toolbar ───────────────
-const discussionQuickVisible = ref(false)
-const discussionQuickGoal = ref('')
-const discussionQuickOrder = ref<string[]>([])
-const discussionQuickMaxRounds = ref(20)
-const discussionQuickMinRounds = ref(0)
-const discussionQuickMaxMessages = ref(200)
-const discussionQuickLongRunMode = ref(false)
-const discussionQuickReporterId = ref('')
-const discussionQuickAttachmentInputRef = ref<HTMLInputElement | null>(null)
-const discussionQuickAttachments = ref<string[]>([])
-const isQuickStarting = ref(false)
-
-function openDiscussionQuick(): void {
-    discussionQuickVisible.value = true
-    discussionQuickGoal.value = ''
-    discussionQuickOrder.value = store.agents.map(agent => agent.agentId)
-    discussionQuickMaxRounds.value = 20
-    discussionQuickMinRounds.value = 0
-    discussionQuickMaxMessages.value = 200
-    discussionQuickLongRunMode.value = false
-    discussionQuickReporterId.value = store.agents[0]?.agentId || ''
-    discussionQuickAttachments.value = []
-}
-
-function toggleQuickLongRunMode(enabled: boolean): void {
-    discussionQuickLongRunMode.value = enabled
-    if (enabled) {
-        discussionQuickMaxRounds.value = LONG_RUN_DEFAULTS.maxRounds
-        discussionQuickMinRounds.value = LONG_RUN_DEFAULTS.minRounds
-        discussionQuickMaxMessages.value = LONG_RUN_DEFAULTS.maxMessages
-    }
-}
-
-function openDiscussionQuickAttachmentPicker(): void {
-    discussionQuickAttachmentInputRef.value?.click()
-}
-
-function handleDiscussionQuickAttachmentChange(event: Event): void {
-    const input = event.target as HTMLInputElement
-    const files = Array.from(input.files || [])
-    input.value = ''
-    for (const file of files) {
-        if (!discussionQuickAttachments.value.includes(file.name)) {
-            discussionQuickAttachments.value.push(file.name)
-        }
-    }
-}
-
-function removeDiscussionQuickAttachment(name: string): void {
-    discussionQuickAttachments.value = discussionQuickAttachments.value.filter(n => n !== name)
-}
-
-async function handleDiscussionQuickStart(): Promise<void> {
-    const rawGoal = discussionQuickGoal.value.trim()
-    if (!rawGoal) return
-    const goal = discussionQuickLongRunMode.value
-        ? `${rawGoal}\n\n${LONG_RUN_GUARDRAILS}`
-        : rawGoal
-    isQuickStarting.value = true
-    try {
-        const ok = await startDiscussionViaUI({
-            goal,
-            attachments: discussionQuickAttachments.value.length > 0 ? [...discussionQuickAttachments.value] : undefined,
-            agentOrder: discussionQuickOrder.value.length >= 2 ? [...discussionQuickOrder.value] : undefined,
-            maxRounds: discussionQuickMaxRounds.value,
-            minRounds: discussionQuickMinRounds.value,
-            maxMessages: discussionQuickMaxMessages.value,
-            reporterId: discussionQuickReporterId.value || undefined,
-        })
-        if (ok) discussionQuickVisible.value = false
-    } finally {
-        isQuickStarting.value = false
-    }
-}
-
-// ─── Chat input command: /讨论 <goal> [@member...] [长任务] ─────
-function tryParseDiscussionCommand(content: string): { goal: string; agentOrder?: string[]; longRun?: boolean } | null {
-    const match = content.trim().match(/^\/(?:讨论|discuss)\s+(.+)$/s)
-    if (!match) return null
-    const rest = match[1].trim()
-    // 长任务 关键词：无人值守通宵模式（自动应用长跑参数 + 护栏文案）。
-    const longRun = /长任务|通宵|overnight|long[-\s]?run/i.test(rest)
-    const withoutLongRun = rest.replace(/长任务|通宵|overnight|long[-\s]?run/gi, '')
-    // @全体 / @all are reserved: they mean "all agents" (fall back to every
-    // room agent). Other @names resolve to specific agents.
-    const mentionsAll = /@(?:全体|所有人|all)\b/i.test(withoutLongRun)
-    const mentionNames = [...withoutLongRun.matchAll(/@([^\s@]+)/g)].map(entry => entry[1])
-    const goal = withoutLongRun.replace(/@[^\s@]+/g, '').replace(/\s+/g, ' ').trim()
-    if (!goal) return null
-    if (mentionsAll) {
-        const all = store.agents.map(agent => agent.agentId)
-        return { goal, agentOrder: all.length >= 2 ? all : undefined, longRun }
-    }
-    const order = mentionNames
-        .map(name => store.agents.find(agent => agent.name === name)?.agentId)
-        .filter((id): id is string => !!id)
-    return { goal, agentOrder: order.length >= 2 ? order : undefined, longRun }
-}
-
-async function handleDiscussionCommand(command: { goal: string; agentOrder?: string[]; longRun?: boolean }, attachments?: Attachment[]): Promise<void> {
-    // Re-resolve @全体/@all into the full agent set; fall back to parsed order.
-    const mentionsAll = /@(?:全体|所有人|all)\b/i.test(command.goal + (command.agentOrder || []).join(' '))
-    const agentOrder = mentionsAll
-        ? store.agents.map(agent => agent.agentId)
-        : command.agentOrder
-    const goal = command.longRun ? `${command.goal}\n\n${LONG_RUN_GUARDRAILS}` : command.goal
-    await startDiscussionViaUI({
-        goal,
-        agentOrder,
-        attachmentsFiles: attachments,
-        ...(command.longRun
-            ? { maxRounds: LONG_RUN_DEFAULTS.maxRounds, minRounds: LONG_RUN_DEFAULTS.minRounds, maxMessages: LONG_RUN_DEFAULTS.maxMessages }
-            : {}),
-    })
-}
-// ─── Large Document Pipeline ───────────────────────────────────
-const docUploadInputRef = ref<HTMLInputElement | null>(null)
-const isUploadingDocument = ref(false)
-const docAgentSelection = ref<string[]>([])
-const isStartingDocument = ref(false)
-
-const roomDocuments = computed(() => {
-    const roomId = store.currentRoomId
-    if (!roomId) return []
-    return Array.from(store.documentStates.values())
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .filter(doc => store.documentProgress.has(doc.fileId) || doc.status === 'chunked' || doc.status === 'done')
-})
-const documentAgentOptions = computed(() =>
-    store.agents.map(agent => ({ label: agent.name, value: agent.agentId }))
-)
-const activeDocumentCount = computed(() => roomDocuments.value.filter(doc => doc.status === 'reading' || doc.status === 'aggregating').length)
-
-function openDocumentUpload(): void {
-    docUploadInputRef.value?.click()
-}
-
-async function handleDocumentFileChange(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement
-    const file = input.files?.[0]
-    input.value = ''
-    if (!file) return
-    const roomId = store.currentRoomId
-    if (!roomId) return
-    isUploadingDocument.value = true
-    try {
-        await store.uploadDocument(roomId, file)
-        message.success(t('groupChat.document.uploaded'))
-    } catch (err: any) {
-        message.error(err?.message || t('groupChat.document.uploadFailed'))
-    } finally {
-        isUploadingDocument.value = false
-    }
-}
-
-async function handleStartDocumentReading(doc: GroupDocumentInfo): Promise<void> {
-    const roomId = store.currentRoomId
-    if (!roomId) return
-    const selected = docAgentSelection.value.length > 0
-        ? docAgentSelection.value
-        : store.agents.map(a => a.agentId)
-    if (selected.length === 0) {
-        message.warning(t('groupChat.document.needsAgents'))
-        return
-    }
-    isStartingDocument.value = true
-    try {
-        await store.startDocumentReading(roomId, doc.fileId, selected)
-        message.success(t('groupChat.document.started'))
-    } catch (err: any) {
-        message.error(err?.message || t('groupChat.document.startFailed'))
-    } finally {
-        isStartingDocument.value = false
-    }
-}
-
-function documentStatusLabel(status: string): string {
-    return t(`groupChat.document.status.${status}`)
-}
-
-function documentProgressOf(doc: GroupDocumentInfo): { pct: number; done: number; total: number } | null {
-    const progress = store.documentProgress.get(doc.fileId)
-    if (!progress) return null
-    return { pct: progress.progressPct, done: progress.chunksRead, total: progress.chunksTotal }
-}
-
-function formatDocumentSize(bytes: number): string {
-    if (!bytes) return ''
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
 const chatDropCounter = ref(0)
 const isChatDropActive = ref(false)
 const groupChatContentWrapperRef = ref<HTMLElement | null>(null)
@@ -664,7 +244,6 @@ const toolPanelTransitionReady = ref(false)
 const activeWorkspacePanel = ref<'files' | 'terminal' | 'browser'>('files')
 const desktopBrowserAvailable = hasDesktopBrowserBridge()
 const workspacePanelMobile = ref(window.innerWidth <= 768)
-const GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY = 'hermes.groupChat.refactorNotice.v1.acknowledged'
 const WORKSPACE_PANEL_MIN_WIDTH = 360
 const WORKSPACE_PANEL_DEFAULT_WIDTH = 560
 const WORKSPACE_PANEL_STORAGE_KEY = 'hermes.groupChat.workspacePanelWidth'
@@ -675,31 +254,67 @@ const workspacePanelStyle = computed(() => ({
 }))
 
 const profileOptions = computed(() =>
-    profilesStore.profiles.map(p => ({ label: getProfileDisplayName(p), value: p.name }))
+    profilesStore.profiles.map(p => ({ label: p.name, value: p.name }))
 )
 
-type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi'
+type GroupAgentType = `plugin:${string}/${string}` | 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
 
-const groupAgentTypeOptions = computed<Array<{ label: string; value: GroupAgentType }>>(() => [
-    { label: 'Hermes', value: 'hermes' },
-    { label: 'Ekko', value: 'ekko' },
-    { label: 'Claude', value: 'claude' },
-    { label: 'Codex', value: 'codex' },
-    { label: 'Pi', value: 'pi' },
+const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
+
+const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.filter(option =>
+    isAgentAvailable(agentAvailabilitySnapshot.value, option.value) && agentSupportsSurface(option.value, 'group-chat')
+))
+
+const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
+    groupAgentTypeOptions.value[0]?.value || null
+)
+const supportsGlobalAgentMode = computed(() => Boolean(agentMetadata(selectedAgentType.value)?.modes.includes('global')) || ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
+const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
+const nativeAgentSelections = ref<Record<string, { model: string; reasoningEffort: string }>>({})
+const nativeAgentId = computed(() => (selectedAgentType.value === 'claude' ? 'claude-code' : selectedAgentType.value) as CodingAgentId)
+const nativeAgentSelection = computed(() => nativeAgentSelections.value[selectedAgentType.value] || { model: '', reasoningEffort: '' })
+function updateNativeAgentSelection(selection: { model: string; reasoningEffort: string }) {
+    nativeAgentSelections.value[selectedAgentType.value] = selection
+}
+function handleNativeAgentSelection(selection: { model: string; reasoningEffort: string }) {
+    selectedAgentPresetId.value = null
+    updateNativeAgentSelection(selection)
+}
+const agentModeOptions = computed(() => [
+    { label: t('codingAgents.modelScope'), value: 'scoped' },
+    { label: t('codingAgents.launchModeGlobalShort'), value: 'global' },
 ])
+
+function groupAgentDisplayName(agent: GroupAgentType): string {
+    return groupAgentTypeDefinitions.find(option => option.value === agent)?.label || agent
+}
+
+function isGroupAgentAvailable(agent: GroupAgentType): boolean {
+    return isAgentAvailable(agentAvailabilitySnapshot.value, agent)
+}
+
+function warnAgentUnavailable(agent: GroupAgentType) {
+    message.warning(t('codingAgents.installRequired', { agent: groupAgentDisplayName(agent) }))
+}
+
+function refreshAgentAvailability(): Promise<void> {
+    if (agentStatusRequest) return agentStatusRequest
+    agentStatusRequest = (async () => {
+        try {
+            agentAvailabilitySnapshot.value = await fetchAgentAvailabilitySnapshot()
+        } catch {
+            agentAvailabilitySnapshot.value = null
+        }
+    })().finally(() => { agentStatusRequest = null })
+    return agentStatusRequest
+}
 
 function getAgentModelGroups(profile: string) {
     return (appStore.profileModelGroups.find(entry => entry.profile === profile)?.groups || [])
         .filter((group) => {
             if (group.provider === 'moa') return selectedAgentType.value === 'hermes'
             if (selectedAgentType.value === 'hermes') return true
-            const codingAgentId = selectedAgentType.value === 'ekko'
-                ? 'ekko-agent'
-                : selectedAgentType.value === 'claude'
-                    ? 'claude-code'
-                    : selectedAgentType.value === 'pi'
-                        ? 'pi'
-                        : 'codex'
+            const codingAgentId = (agentMetadata(selectedAgentType.value)?.id || selectedAgentType.value) as ChatCodingAgentId
             return canScopedCodingAgentUseProvider(codingAgentId, group.provider)
         })
 }
@@ -724,27 +339,17 @@ function getDefaultAgentModel(profile: string) {
     }
 }
 
-const agentProviderOptions = computed(() =>
-    getAgentModelGroups(selectedProfile.value || '').map(group => ({
-        label: group.label || group.provider,
-        value: group.provider,
-    }))
-)
-
-const agentModelOptions = computed(() => {
-    const group = getAgentModelGroups(selectedProfile.value || '')
-        .find(item => item.provider === selectedAgentProvider.value)
-    return (group?.models || []).map(modelId => ({
-        label: appStore.displayModelName(modelId, group?.provider),
-        value: modelId,
-    }))
-})
+const agentModelGroups = computed(() => getAgentModelGroups(selectedProfile.value || ''))
 
 const selectedAgentProviderGroup = computed(() =>
     getAgentModelGroups(selectedProfile.value || '')
         .find(item => item.provider === selectedAgentProvider.value)
 )
 
+const configuredAgentApiMode = computed(() => configuredProviderApiMode(selectedAgentProviderGroup.value, selectedAgentModel.value))
+watch([configuredAgentApiMode, selectedAgentApiMode], ([mode]) => {
+  if (mode && selectedAgentApiMode.value !== mode) selectedAgentApiMode.value = mode
+}, { flush: 'sync' })
 const agentApiModeOptions = computed(() => [
     { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
     { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
@@ -769,17 +374,24 @@ const pendingAgentPreset = computed(() =>
     agentPresets.value.find(preset => preset.id === pendingAgentPresetId.value) || null
 )
 
-const agentReasoningEffortOptions = computed(() => [
-    { label: t('chat.reasoningEffort.options.default'), value: '' },
-    { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-    { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-    { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-    { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-    { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-    { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-    { label: t('chat.reasoningEffort.options.max'), value: 'max' },
-])
+const agentReasoningEffortOptions = computed(() => reasoningOptions([
+    { label: t('chat.reasoningEffort.options.none'), value: '' },
+    ...modelReasoningEfforts(
+      getAgentModelGroups(selectedProfile.value || ''),
+      selectedAgentProvider.value,
+      selectedAgentModel.value,
+    ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
+]))
+const agentReasoningEffortValue = computed({
+  get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
+  set: (value: string) => { selectedAgentReasoningEffort.value = value },
+})
 
+watch([agentReasoningEffortOptions, selectedAgentReasoningEffort], ([options, effort]) => {
+  if (!usesGlobalAgentMode.value && effort && !options.some(option => option.value === effort)) {
+    selectedAgentReasoningEffort.value = ''
+  }
+})
 const summaryModelGroups = computed(() =>
     (appStore.profileModelGroups.find(entry => entry.profile === summaryConfig.value.summaryProfile)?.groups || [])
         .filter(group => group.provider !== 'moa' && canScopedCodingAgentUseProvider('ekko-agent', group.provider))
@@ -797,14 +409,23 @@ const summaryModelOptions = computed(() =>
         value: model,
     }))
 )
+const configuredSummaryApiMode = computed(() => configuredProviderApiMode(selectedSummaryProviderGroup.value, summaryConfig.value.summaryModel))
+watch([configuredSummaryApiMode, () => summaryConfig.value.summaryApiMode], ([mode]) => {
+  if (mode && summaryConfig.value.summaryApiMode !== mode) summaryConfig.value.summaryApiMode = mode
+}, { flush: 'sync' })
 const summaryApiModeOptions = computed(() => [
     { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
     { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
     { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
+const liveRoomSummaryReview = computed(() => {
+    const roomId = store.currentRoomId
+    return roomId ? store.roomSummaryReviews.get(roomId) || roomSummaryReview.value : roomSummaryReview.value
+})
 const liveRoomSummaryState = computed(() => {
     const roomId = store.currentRoomId
-    return (roomId && store.roomSummaryStates.get(roomId)) || roomSummaryState.value
+    return (roomId && store.roomSummaryStates.get(roomId))
+        || (roomSummaryState.value?.roomId === roomId ? roomSummaryState.value : null)
 })
 
 function clearInlineSummaryStatusTimer() {
@@ -836,6 +457,8 @@ watch(
                 status: 'summarizing',
                 error: '',
             }
+        } else if (state.status === 'idle') {
+            hideInlineSummaryStatus()
         } else if (
             (state.status === 'success' || state.status === 'failed')
             && inlineSummaryStatus.value?.roomId === state.roomId
@@ -848,18 +471,21 @@ watch(
             }
             clearInlineSummaryStatusTimer()
             const completedRoomId = state.roomId
-            inlineSummaryStatusTimer = setTimeout(() => {
+            const timer = setTimeout(() => {
+                if (inlineSummaryStatusTimer !== timer) return
                 if (inlineSummaryStatus.value?.roomId === completedRoomId) {
                     inlineSummaryStatus.value = null
                 }
                 inlineSummaryStatusTimer = null
             }, state.status === 'failed' ? 6000 : 3000)
+            inlineSummaryStatusTimer = timer
         }
         if (!showRoomSettingsModal.value) return
         roomSummaryState.value = state
         if (state.status === 'success') roomSummaryDraft.value = state.summary
         try {
-            roomSummaryAnchor.value = (await getRoomSummary(state.roomId)).anchor
+            const result = await getRoomSummary(state.roomId)
+            if (store.currentRoomId === state.roomId) roomSummaryAnchor.value = result.anchor
         } catch { /* the next settings open refreshes it */ }
     },
     { flush: 'sync' },
@@ -881,17 +507,22 @@ const agentAvatarPreview = computed(() =>
 
 const canConfirmAddAgent = computed(() =>
     Boolean(
+        !isLoadingAgentForm.value &&
+        isGroupAgentAvailable(selectedAgentType.value) &&
+        (selectedAgentType.value !== 'dsh' || (selectedRuntimePreset.value && selectedRuntimePresetReady.value)) &&
         selectedProfile.value &&
-        selectedAgentProvider.value &&
-        selectedAgentModel.value &&
-        (selectedAgentType.value === 'hermes' || selectedAgentApiMode.value),
+        (usesGlobalAgentMode.value || (
+            selectedAgentProvider.value &&
+            selectedAgentModel.value &&
+            (selectedAgentType.value === 'hermes' || selectedAgentApiMode.value)
+        )),
     )
 )
 
 function syncAgentApiMode() {
     const group = selectedAgentProviderGroup.value
     selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-        group?.api_mode,
+        configuredAgentApiMode.value,
         inferCodingAgentApiMode(group?.provider || selectedAgentProvider.value, group?.base_url),
     )
 }
@@ -910,20 +541,36 @@ function handleAgentProfileChange(profile: string) {
 }
 
 function handleAgentTypeChange(agent: GroupAgentType) {
+    if (!isGroupAgentAvailable(agent)) {
+        warnAgentUnavailable(agent)
+        return
+    }
+    selectedRuntimePreset.value = undefined
+    selectedRuntimePresetReady.value = false
+    const switched = nextCodingAgentMode({
+        previousAgent: selectedAgentType.value,
+        nextAgent: agent,
+        agentMode: selectedAgentMode.value,
+        priorAgentMode: priorAgentMode.value,
+    })
     selectedAgentType.value = agent
+    selectedAgentMode.value = switched.agentMode
+    priorAgentMode.value = switched.priorAgentMode
     if (selectedProfile.value) syncAgentModelSelection(selectedProfile.value)
 }
 
-function handleAgentProviderChange(provider: string) {
-    selectedAgentProvider.value = provider
-    selectedAgentModel.value = agentModelOptions.value[0]?.value || ''
-    selectedAgentReasoningEffort.value = ''
-    syncAgentApiMode()
+function handleAgentModeChange(mode: 'scoped' | 'global') {
+    selectedAgentMode.value = mode
+    selectedAgentPresetId.value = null
+    if (mode === 'scoped' && !selectedAgentProvider.value && selectedProfile.value) syncAgentModelSelection(selectedProfile.value)
 }
 
-function handleAgentModelChange(model: string) {
-    selectedAgentModel.value = model
+function handleAgentModelSelect(selection: { provider: string; model: string }) {
+    selectedAgentProvider.value = selection.provider
+    selectedAgentModel.value = selection.model
     selectedAgentReasoningEffort.value = ''
+    selectedAgentPresetId.value = null
+    syncAgentApiMode()
 }
 
 function agentAvatarName(agent: RoomAgent): string {
@@ -995,42 +642,7 @@ function canManageRoom(room: Pick<RoomInfo, 'canManage'> | null | undefined): bo
     return room?.canManage === true
 }
 const currentRoomCanManage = computed(() => !props.standalone && canManageRoom(currentRoom.value))
-const archivePrompt = computed(() => {
-    if (!store.currentRoomId) return null
-    return store.archivePromptStates.get(store.currentRoomId) || null
-})
-const isArchiving = ref(false)
-const archivePromptVisible = computed({
-    get: () => !!archivePrompt.value,
-    set: (visible: boolean) => {
-        if (!visible && archivePrompt.value) void handleArchiveDismiss('later')
-    },
-})
-
-async function handleArchiveNow() {
-    if (!store.currentRoomId) return
-    isArchiving.value = true
-    try {
-        const res = await store.archiveCurrentRoom()
-        message.success(t('groupChat.archiveSuccess', { count: res?.deletedMessages ?? 0 }))
-    } catch (err: any) {
-        message.error(err.message || t('groupChat.archiveFailed'))
-    } finally {
-        isArchiving.value = false
-    }
-}
-
-async function handleArchiveDismiss(mode: 'ignore' | 'later') {
-    if (!store.currentRoomId) return
-    try {
-        await store.dismissCurrentRoomArchive(mode)
-        if (mode === 'ignore') message.info(t('groupChat.archiveIgnored'))
-    } catch (err: any) {
-        message.error(err.message || t('groupChat.archiveFailed'))
-    }
-}
 provide('hermesWorkspaceFilePreview', currentRoomCanManage)
-
 const currentRoomCanMentionAll = computed(() => !props.standalone && currentRoom.value?.canMentionAll === true)
 const currentRoomNeedsSummaryConfiguration = computed(() => {
     if (props.standalone) return false
@@ -1091,7 +703,6 @@ watch(
 const visibleAgentPairing = computed(() =>
     currentRoomCanManage.value ? pendingAgentPairings.value[0] || null : null,
 )
-const currentWorkspaceLabel = computed(() => workspaceBasename(currentRoom.value?.workspace || ''))
 const groupToolPanelTitle = computed(() => desktopBrowserAvailable
     ? `${t('drawer.files')} / ${t('drawer.terminal')} / ${t('browser.title')}`
     : `${t('drawer.files')} / ${t('drawer.terminal')}`
@@ -1144,12 +755,6 @@ async function handleRemoveMember(member: MemberInfo) {
 function formatTokens(tokens: number): string {
     const value = tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens)
     return `${value} ${t('usage.tokens')}`
-}
-
-function workspaceBasename(path: string): string {
-    const trimmed = String(path || '').trim().replace(/[\\/]+$/, '')
-    if (!trimmed) return ''
-    return trimmed.split(/[\\/]/).pop() || trimmed
 }
 
 function toggleSidebar() {
@@ -1229,22 +834,6 @@ function toggleWorkspacePanel(): void {
         return
     }
     showWorkspacePanel.value = true
-    // bfcache 恢复或从单聊返回后，files store 可能停留在旧的 workspace 上下文
-    // （单聊 session 模式或错误房间），导致群聊文件列表不刷新。每次打开面板都
-    // 强制以当前房间重新拉取群聊工作区文件，确保列表始终对应当前房间。
-    void refreshWorkspaceFilesForCurrentRoom()
-}
-
-/** 以当前房间强制刷新群聊工作区文件列表（修复 bfcache/路由切换后文件列表不显示）。 */
-async function refreshWorkspaceFilesForCurrentRoom(): Promise<void> {
-    const roomId = store.currentRoomId
-    const workspace = currentRoom.value?.workspace
-    if (!roomId || !workspace) return
-    try {
-        await filesStore.fetchEntries('', { workspaceSessionId: null, workspaceRoomId: roomId })
-    } catch (err) {
-        console.warn('[GroupChat] refresh workspace files failed:', err)
-    }
 }
 
 function handleToolPanelBeforeEnter(): void {
@@ -1261,15 +850,6 @@ function handleToolPanelBeforeLeave(): void {
 
 function handleToolPanelLeaveCancelled(): void {
     toolPanelTransitionReady.value = true
-}
-
-function openWorkspaceFilesPanel(): void {
-    if (!currentRoom.value?.workspace) return
-    if (showWorkspacePanel.value && activeWorkspacePanel.value === 'files') {
-        closeWorkspacePanel()
-        return
-    }
-    selectWorkspacePanel('files')
 }
 
 function selectWorkspacePanel(panel: 'files' | 'terminal' | 'browser'): void {
@@ -1355,22 +935,27 @@ function handleWorkspaceFilePreviewRequest(event: Event): void {
     })
 }
 
-function openPageSidebar() {
-    if (props.standalone) return
-    showSidebar.value = true
-}
-
-function acknowledgeGroupChatRefactorNotice() {
-    try {
-        window.localStorage.setItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY, '1')
-    } catch {
-        // The notice can still be dismissed when persistent browser storage is unavailable.
-    }
-    showGroupChatRefactorNotice.value = false
-}
-
-function openSettingsPage() {
-    router.push({ name: 'hermes.settings' })
+function handleGroupAttachmentPreviewRequest(event: Event): void {
+    const customEvent = event as CustomEvent<{ sourceUrl?: string; fileName?: string; size?: number }>
+    const roomId = store.currentRoomId
+    const sourceUrl = String(customEvent.detail?.sourceUrl || '').trim()
+    const fileName = String(customEvent.detail?.fileName || '').trim()
+    if (!roomId || !sourceUrl || !fileName) return
+    customEvent.preventDefault()
+    toolPanelStore.closeWorkspaceDiff()
+    filesStore.closePreview()
+    void filesStore.openRemotePreview(
+        sourceUrl,
+        fileName,
+        Number(customEvent.detail?.size ?? -1),
+        { workspaceRoomId: roomId },
+    ).then(opened => {
+        if (!opened) return
+        activeWorkspacePanel.value = 'files'
+        showWorkspacePanel.value = true
+    }).catch(error => {
+        message.error(error instanceof Error ? error.message : t('files.previewFailed'))
+    })
 }
 
 const remoteRooms = computed(() => buildRemoteGroupChatRooms(
@@ -1388,19 +973,6 @@ async function refreshRemoteRooms() {
 
 function handleWindowFocus() {
     void refreshRemoteRooms()
-}
-
-/** bfcache（前进/后退缓存）恢复回调：persisted=true 表示页面从缓存恢复而非
- *  重新加载。此时 WebSocket 已断开、files store 可能停留在旧 workspace 上下文
- *  （单聊 session 模式），强制重新同步群聊上下文，保证工作区文件列表刷新。 */
-function handlePageShow(event: PageTransitionEvent): void {
-    if (!event.persisted) return
-    if (store.currentRoomId) {
-        void refreshWorkspaceFilesForCurrentRoom()
-        if (!props.standalone) void loadRoomSummaryState(store.currentRoomId)
-    }
-    void refreshRemoteRooms()
-    void refreshPendingAgentPairings()
 }
 
 function handleSelectRemoteRoom(room: RemoteGroupChatRoom) {
@@ -1521,41 +1093,6 @@ async function handleDeleteRoom(roomId: string) {
     }
 }
 
-function handleFileSelected(event: Event) {
-    const input = event.target as HTMLInputElement
-    importFile.value = input.files?.[0] || null
-}
-
-function formatImportFailureSummary(results: Array<{ name: string; error?: string }>): string {
-    return results
-        .filter(result => result.error)
-        .slice(0, 3)
-        .map(result => `${result.name}: ${result.error}`)
-        .join('; ')
-}
-
-async function confirmImport() {
-    if (!importFile.value) return
-    isImporting.value = true
-    try {
-        const result = await importRooms(importFile.value)
-        showImportModal.value = false
-        importFile.value = null
-        await store.loadRooms()
-        if (result.success) {
-            message.success(t('groupChat.importSuccess', { count: result.importedCount }))
-        } else {
-            const details = formatImportFailureSummary(result.results)
-            const summary = t('groupChat.importPartialSuccess', { success: result.importedCount, failed: result.failedCount })
-            message.warning(details ? `${summary}: ${details}` : summary)
-        }
-    } catch (err: any) {
-        message.error(err?.message || t('common.saveFailed'))
-    } finally {
-        isImporting.value = false
-    }
-}
-
 function buildRoomUrl(roomId: string) {
     const room = store.rooms.find(candidate => candidate.id === roomId)
     const href = room?.inviteCode
@@ -1592,9 +1129,6 @@ const roomContextMenuOptions = computed<DropdownOption[]>(() => {
     if (canManageRoom(contextRoom.value)) {
         options.push({ label: t('chat.setWorkspace'), key: 'set-workspace' })
         options.push({ label: t('groupChat.cloneRoom'), key: 'clone-room' })
-        options.push({ type: 'divider', key: 'd1' })
-        options.push({ label: t('groupChat.exportRoomJson'), key: 'export-json' })
-        options.push({ label: t('groupChat.exportRoomTxt'), key: 'export-txt' })
     }
     return options
 })
@@ -1697,10 +1231,6 @@ function handleRoomContextSelect(key: string) {
     } else if (key === 'clone-room') {
         if (!canManageRoom(contextRoom.value)) return
         handleOpenCloneRoom(roomId)
-    } else if (key === 'export-json') {
-        exportRoom(roomId, 'json').then(() => message.success(t('groupChat.exportSuccess'))).catch(() => message.error(t('common.saveFailed')))
-    } else if (key === 'export-txt') {
-        exportRoom(roomId, 'txt').then(() => message.success(t('groupChat.exportSuccess'))).catch(() => message.error(t('common.saveFailed')))
     }
 }
 
@@ -1758,14 +1288,16 @@ async function handleSelectRoom(roomId: string) {
 }
 
 async function handleSendMessage(content: string, attachments?: Attachment[], mentions?: GroupChatMention[]) {
-    const discussionCommand = tryParseDiscussionCommand(content)
-    if (discussionCommand) {
-        await handleDiscussionCommand(discussionCommand, attachments)
-        return
-    }
     const submittedRoomId = store.currentRoomId
     try {
-        await store.sendMessage(content, attachments, mentions)
+        if (submittedRoomId && /^\/discuss(?:\s|$)/i.test(content)) {
+            if (!currentRoomCanManage.value) throw new Error(t('groupChat.discussion.managerOnly'))
+            const goal = content.replace(/^\/discuss\s*/i, '').trim()
+            if (!goal) { showDiscussionPanel.value = true; groupChatInputRef.value?.completeSend?.(false); return }
+            const agentOrder = mentions?.filter(item => item.type === 'agent').map(item => item.participantId!).filter(Boolean)
+            await store.beginDiscussion(submittedRoomId, { goal, agentOrder: agentOrder && agentOrder.length >= 2 ? agentOrder : undefined }, attachments)
+            showDiscussionPanel.value = true
+        } else await store.sendMessage(content, attachments, mentions)
         if (submittedRoomId) clearGroupChatRoomDraft(submittedRoomId)
         groupChatInputRef.value?.completeSend?.(true)
     } catch (err: any) {
@@ -1794,9 +1326,14 @@ async function handleSummaryConfigurationRequired() {
 }
 
 function resetAgentForm() {
+    nativeAgentSelections.value = {}
     selectedAgentPresetId.value = null
     selectedProfile.value = null
-    selectedAgentType.value = 'hermes'
+    selectedRuntimePreset.value = undefined
+    selectedRuntimePresetReady.value = false
+    selectedAgentType.value = firstAvailableGroupAgentType.value || 'hermes'
+    selectedAgentMode.value = 'scoped'
+    priorAgentMode.value = undefined
     selectedAgentProvider.value = ''
     selectedAgentModel.value = ''
     selectedAgentApiMode.value = 'codex_responses'
@@ -1809,12 +1346,19 @@ function resetAgentForm() {
 function currentAgentPresetInput(): GroupAgentPresetInput | null {
     if (!canConfirmAddAgent.value || !selectedProfile.value) return null
     return {
-        agent: selectedAgentType.value,
+        ...submittedCodingAgentSelection({
+            agent: selectedAgentType.value,
+            agentMode: selectedAgentMode.value,
+            priorAgentMode: priorAgentMode.value,
+            provider: selectedAgentProvider.value,
+            model: selectedAgentModel.value,
+            usesGlobal: usesGlobalAgentMode.value,
+            nativeModel: nativeAgentSelection.value.model,
+        }),
         profile: selectedProfile.value,
-        provider: selectedAgentProvider.value,
-        model: selectedAgentModel.value,
-        apiMode: selectedAgentType.value === 'hermes' ? '' : selectedAgentApiMode.value,
-        reasoningEffort: selectedAgentReasoningEffort.value,
+        apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
+        reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
+        agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
         name: agentName.value.trim() || selectedProfile.value,
         description: agentDescription.value.trim(),
         avatar: agentAvatar.value ? JSON.stringify(agentAvatar.value) : '',
@@ -1822,6 +1366,7 @@ function currentAgentPresetInput(): GroupAgentPresetInput | null {
 }
 
 async function loadAgentPresets() {
+    if (isLoadingAgentPresets.value) return
     isLoadingAgentPresets.value = true
     agentPresetLoadError.value = ''
     try {
@@ -1839,6 +1384,7 @@ function openAgentPresetSelection() {
     pendingAgentPresetId.value = selectedAgentPresetId.value
     agentPresetSearch.value = ''
     showAgentPresetDialog.value = true
+    void loadAgentPresets()
 }
 
 function openAgentPresetManager() {
@@ -1846,6 +1392,7 @@ function openAgentPresetManager() {
     pendingAgentPresetId.value = null
     agentPresetSearch.value = ''
     showAgentPresetDialog.value = true
+    void loadAgentPresets()
 }
 
 function closeAgentPresetDialog() {
@@ -1860,6 +1407,7 @@ function selectAgentPresetForDialog(preset: GroupAgentPreset) {
 }
 
 function confirmAgentPresetSelection() {
+    if (isLoadingAgentForm.value || isLoadingAgentPresets.value) return
     const preset = pendingAgentPreset.value
     if (!preset?.available) return
     applyAgentPreset(preset.id)
@@ -1876,14 +1424,18 @@ function applyAgentPreset(presetId: string | null) {
     }
     const input = groupAgentPresetToRoomAgentInput(preset)
     selectedAgentType.value = input.agent
+    selectedAgentMode.value = input.agentMode === 'global' ? 'global' : 'scoped'
+    priorAgentMode.value = storedPriorAgentMode(input.priorAgentMode)
     selectedProfile.value = input.profile
     selectedAgentProvider.value = input.provider || ''
     selectedAgentModel.value = input.model || ''
     selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-        input.apiMode,
+        configuredAgentApiMode.value || input.apiMode,
         inferCodingAgentApiMode(input.provider),
     )
-    selectedAgentReasoningEffort.value = input.reasoningEffort || ''
+    selectedAgentReasoningEffort.value = usesGlobalAgentMode.value ? '' : input.reasoningEffort || ''
+    if (usesGlobalAgentMode.value) updateNativeAgentSelection({ model: input.model || '', reasoningEffort: input.reasoningEffort || '' })
+    selectedRuntimePreset.value = input.agentPreset
     agentName.value = input.name || ''
     agentDescription.value = input.description || ''
     agentAvatar.value = parseStoredAvatar(input.avatar)
@@ -1940,31 +1492,49 @@ async function deleteAgentPreset() {
     }
 }
 
-function closeAgentModal() {
+function closeAgentDrawer() {
+    agentDrawerLoadSequence++
+    isLoadingAgentForm.value = false
     closeAgentPresetDialog()
-    showAddAgentModal.value = false
+    showAddAgentDrawer.value = false
     editingAgent.value = null
     resetAgentForm()
 }
 
-async function handleAddAgent() {
-    if (!currentRoomCanManage.value) return
-    await Promise.all([
-        profilesStore.fetchProfiles(),
-        appStore.loadModels(),
-        loadAgentPresets(),
-    ])
-    editingAgent.value = null
-    resetAgentForm()
-    selectedAgentType.value = 'hermes'
+function initializeNewAgentSelection() {
+    selectedAgentType.value = firstAvailableGroupAgentType.value || 'hermes'
     selectedProfile.value =
         profilesStore.activeProfileName ||
         profilesStore.profiles.find(profile => profile.active)?.name ||
         profilesStore.profiles[0]?.name ||
         'default'
     syncAgentModelSelection(selectedProfile.value)
-    selectedAgentReasoningEffort.value = ''
-    showAddAgentModal.value = true
+}
+
+async function loadAgentFormOptions() {
+    const sequence = ++agentDrawerLoadSequence
+    const roomId = store.currentRoomId
+    isLoadingAgentForm.value = true
+    try {
+        await Promise.all([
+            profilesStore.fetchProfiles(),
+            appStore.loadModels(),
+            refreshAgentAvailability(),
+        ])
+        if (sequence !== agentDrawerLoadSequence || !showAddAgentDrawer.value || roomId !== store.currentRoomId) return
+        if (!editingAgent.value) initializeNewAgentSelection()
+    } finally {
+        if (sequence === agentDrawerLoadSequence) isLoadingAgentForm.value = false
+    }
+}
+
+function handleAddAgent() {
+    if (!currentRoomCanManage.value || showAddAgentDrawer.value) return
+    editingAgent.value = null
+    resetAgentForm()
+    initializeNewAgentSelection()
+    showAddAgentDrawer.value = true
+    void loadAgentFormOptions()
 }
 
 function randomAgentAvatarSeed() {
@@ -2009,47 +1579,37 @@ async function handleAgentAvatarFileChange(event: Event) {
     }
 }
 
-async function handleEditAgent(agent: RoomAgent) {
-    if (!currentRoomCanManage.value) return
-    await Promise.all([
-        profilesStore.fetchProfiles(),
-        appStore.loadModels(),
-        loadAgentPresets(),
-    ])
-    selectedAgentPresetId.value = null
+function handleEditAgent(agent: RoomAgent) {
+    if (!currentRoomCanManage.value || showAddAgentDrawer.value) return
+    resetAgentForm()
     editingAgent.value = agent
     selectedAgentType.value = agent.agent || 'hermes'
+    selectedAgentMode.value = agent.agentMode === 'global' ? 'global' : 'scoped'
+    priorAgentMode.value = storedPriorAgentMode(agent.priorAgentMode)
     selectedProfile.value = agent.profile
     selectedAgentProvider.value = agent.provider || ''
     selectedAgentModel.value = agent.model || ''
     selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-        agent.apiMode,
+        configuredAgentApiMode.value || agent.apiMode,
         inferCodingAgentApiMode(agent.provider),
     )
-    selectedAgentReasoningEffort.value = agent.reasoningEffort || ''
+    selectedAgentReasoningEffort.value = usesGlobalAgentMode.value ? '' : agent.reasoningEffort || ''
+    if (usesGlobalAgentMode.value) updateNativeAgentSelection({ model: agent.model || '', reasoningEffort: agent.reasoningEffort || '' })
+    selectedRuntimePreset.value = agent.agentPreset
     agentName.value = agent.name || ''
     agentDescription.value = agent.description || ''
     agentAvatar.value = parseStoredAvatar(agent.avatar)
-    showAddAgentModal.value = true
+    showAddAgentDrawer.value = true
+    void loadAgentFormOptions()
 }
 
 onMounted(() => {
-    if (!props.standalone) {
-        try {
-            showGroupChatRefactorNotice.value = window.localStorage.getItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY) !== '1'
-        } catch {
-            showGroupChatRefactorNotice.value = true
-        }
-    }
-    window.addEventListener('hermes:open-page-sidebar', openPageSidebar)
+    if (!props.standalone) void refreshAgentAvailability()
     window.addEventListener('hermes:preview-workspace-file', handleWorkspaceFilePreviewRequest)
+    window.addEventListener('hermes:preview-group-attachment', handleGroupAttachmentPreviewRequest)
     window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest)
     window.addEventListener('resize', handleWorkspacePanelResize)
     window.addEventListener('focus', handleWindowFocus)
-    // bfcache（前进/后退缓存）恢复时，WebSocket 与 files store 状态可能停留在
-    // 冻结前的快照（如单聊 session 模式），导致群聊工作区文件列表不刷新。
-    // pageshow 的 persisted 标志能识别 bfcache 恢复，强制重新同步群聊上下文。
-    window.addEventListener('pageshow', handlePageShow)
     handleWorkspacePanelResize()
     if (!props.standalone && profilesStore.profiles.length === 0) {
         void profilesStore.fetchProfiles()
@@ -2063,13 +1623,13 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+    agentDrawerLoadSequence++
     hideInlineSummaryStatus()
-    window.removeEventListener('hermes:open-page-sidebar', openPageSidebar)
     window.removeEventListener('hermes:preview-workspace-file', handleWorkspaceFilePreviewRequest)
+    window.removeEventListener('hermes:preview-group-attachment', handleGroupAttachmentPreviewRequest)
     window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest)
     window.removeEventListener('resize', handleWorkspacePanelResize)
     window.removeEventListener('focus', handleWindowFocus)
-    window.removeEventListener('pageshow', handlePageShow)
     stopWorkspaceResize()
     roomFadeAnimation?.cancel()
     if (showWorkspacePanel.value) closeWorkspacePanel()
@@ -2084,13 +1644,12 @@ onUnmounted(() => {
 async function loadRoomSummaryState(roomId: string) {
     try {
         const result = await getRoomSummary(roomId)
-        const existing = store.roomSummaryStates.get(roomId)
-        if (!existing || result.summary.version >= existing.version) {
-            store.roomSummaryStates.set(roomId, result.summary)
-        }
+        store.applyRoomSummaryState(result.summary)
         if (store.currentRoomId !== roomId) return
         roomSummaryState.value = store.roomSummaryStates.get(roomId) || result.summary
         roomSummaryAnchor.value = result.anchor
+        roomSummaryReview.value = result.review
+        if (result.review) store.applyRoomSummaryReview(result.review)
         roomSummaryDraft.value = roomSummaryState.value.summary
     } catch {
         // A missing summary should not block entering or reading the room.
@@ -2099,14 +1658,16 @@ async function loadRoomSummaryState(roomId: string) {
 
 watch(() => store.currentRoomId, (roomId, previousRoomId) => {
     if (roomId === previousRoomId) return
-    hideInlineSummaryStatus()
+    if (showAddAgentDrawer.value) closeAgentDrawer()
+    showDiscussionPanel.value = false
+    if (inlineSummaryStatus.value?.roomId !== roomId) hideInlineSummaryStatus()
     roomSummaryState.value = null
     roomSummaryAnchor.value = null
     roomSummaryDraft.value = ''
     if (filesStore.previewFile || toolPanelStore.workspaceDiff || showWorkspacePanel.value) closeWorkspacePanel()
     if (roomId && !props.standalone) void loadRoomSummaryState(roomId)
     if (!props.standalone) void refreshPendingAgentPairings()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 
 watch(() => store.agentPairingRevision, () => {
     if (!props.standalone) void refreshPendingAgentPairings()
@@ -2161,22 +1722,33 @@ async function confirmAddAgent() {
         message.warning(t('groupChat.selectRoomFirst'))
         return
     }
+    if (!isGroupAgentAvailable(selectedAgentType.value)) {
+        warnAgentUnavailable(selectedAgentType.value)
+        return
+    }
     if (!canConfirmAddAgent.value || !selectedProfile.value || isSavingAgent.value) return
     isSavingAgent.value = true
     try {
         await store.addAgentToRoom(store.currentRoomId, {
             presetId: selectedAgentPresetId.value || undefined,
-            agent: selectedAgentType.value,
+            ...submittedCodingAgentSelection({
+                agent: selectedAgentType.value,
+                agentMode: selectedAgentMode.value,
+                priorAgentMode: priorAgentMode.value,
+                provider: selectedAgentProvider.value,
+                model: selectedAgentModel.value,
+                usesGlobal: usesGlobalAgentMode.value,
+                nativeModel: nativeAgentSelection.value.model,
+            }),
             profile: selectedProfile.value,
-            provider: selectedAgentProvider.value,
-            model: selectedAgentModel.value,
-            apiMode: selectedAgentType.value === 'hermes' ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: selectedAgentReasoningEffort.value,
+            apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
+            agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
             avatar: agentAvatar.value ? JSON.stringify(agentAvatar.value) : '',
         })
-        closeAgentModal()
+        closeAgentDrawer()
         message.success(t('groupChat.agentAdded'))
     } catch (err: any) {
         if (err.message?.includes('already')) {
@@ -2191,21 +1763,32 @@ async function confirmAddAgent() {
 
 async function confirmUpdateAgent() {
     if (!store.currentRoomId || !editingAgent.value) return
+    if (!isGroupAgentAvailable(selectedAgentType.value)) {
+        warnAgentUnavailable(selectedAgentType.value)
+        return
+    }
     if (!canConfirmAddAgent.value || !selectedProfile.value || isSavingAgent.value) return
     isSavingAgent.value = true
     try {
         await store.updateAgentInRoom(store.currentRoomId, editingAgent.value.id, {
-            agent: selectedAgentType.value,
+            ...submittedCodingAgentSelection({
+                agent: selectedAgentType.value,
+                agentMode: selectedAgentMode.value,
+                priorAgentMode: priorAgentMode.value,
+                provider: selectedAgentProvider.value,
+                model: selectedAgentModel.value,
+                usesGlobal: usesGlobalAgentMode.value,
+                nativeModel: nativeAgentSelection.value.model,
+            }),
             profile: selectedProfile.value,
-            provider: selectedAgentProvider.value,
-            model: selectedAgentModel.value,
-            apiMode: selectedAgentType.value === 'hermes' ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: selectedAgentReasoningEffort.value,
+            apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
+            agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
             avatar: agentAvatar.value ? JSON.stringify(agentAvatar.value) : '',
         })
-        closeAgentModal()
+        closeAgentDrawer()
         message.success(t('common.saved'))
     } catch (err: any) {
         message.error(extractApiErrorMessage(err))
@@ -2296,14 +1879,18 @@ async function handleOpenRoomSettings() {
         store.handoffChains = new Map()
     }
     if (!store.currentRoomId) return
+    const summaryRoomId = store.currentRoomId
     void refreshPendingAgentPairings()
     isLoadingRoomSummary.value = true
     try {
-        const result = await getRoomSummary(store.currentRoomId)
-        roomSummaryState.value = result.summary
+        const result = await getRoomSummary(summaryRoomId)
+        store.applyRoomSummaryState(result.summary)
+        if (store.currentRoomId !== summaryRoomId) return
+        roomSummaryState.value = store.roomSummaryStates.get(summaryRoomId) || result.summary
         roomSummaryAnchor.value = result.anchor
-        roomSummaryDraft.value = result.summary.summary
-        store.roomSummaryStates.set(store.currentRoomId, result.summary)
+        roomSummaryReview.value = result.review
+        if (result.review) store.applyRoomSummaryReview(result.review)
+        roomSummaryDraft.value = roomSummaryState.value.summary
     } catch (err: any) {
         message.error(err?.message || t('groupChat.summaryLoadFailed'))
     } finally {
@@ -2493,7 +2080,7 @@ async function handleRemoveAgent(agent: RoomAgent) {
     try {
         await store.removeAgentFromRoom(store.currentRoomId, agent.id)
         if (editingAgent.value && (editingAgent.value.id === agent.id || editingAgent.value.agentId === agent.agentId)) {
-            closeAgentModal()
+            closeAgentDrawer()
         }
     } catch {
         message.error(t('common.deleteFailed'))
@@ -2542,11 +2129,12 @@ function handleClarifyKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
+    <GroupDiscussionPanel v-if="showDiscussionPanel && store.currentRoomId" :can-manage="currentRoomCanManage" @close="showDiscussionPanel = false" />
     <div class="group-chat-panel">
-        <!-- Mobile backdrop -->
-        <div v-if="!props.standalone" class="sidebar-backdrop" :class="{ active: showSidebar }" @click="showSidebar = false" />
         <!-- Room sidebar -->
+        <PageSidebar>
         <div v-if="!props.standalone && showSidebar" class="room-sidebar">
+            <SidebarResizeHandle />
             <div class="sidebar-header">
                 <PageSidebarNav
                     active="group"
@@ -2639,16 +2227,9 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     </div>
                 </section>
             </div>
-            <div class="page-sidebar-bottom">
-                <button class="page-sidebar-menu-btn" type="button" @click="openSettingsPage">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="3" />
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                    </svg>
-                    <span>{{ t('sidebar.settings') }}</span>
-                </button>
-            </div>
+            <PageSidebarFooter />
         </div>
+        </PageSidebar>
 
         <NDropdown
             v-if="!props.standalone"
@@ -2677,56 +2258,41 @@ function handleClarifyKeydown(event: KeyboardEvent) {
         <!-- Main chat area -->
         <div
             class="chat-main"
-            :class="{ 'chat-main--drop-active': isChatDropActive, 'chat-main--sidebar-collapsed': !showSidebar }"
-            @dragover.capture="handleChatDragOver"
-            @dragenter.capture="handleChatDragEnter"
-            @dragleave.capture="handleChatDragLeave"
-            @drop.capture="handleChatDrop"
+            :class="{ 'chat-main--sidebar-collapsed': !showSidebar, 'chat-main--with-room': hasRoom }"
+            @dragover="handleChatDragOver"
+            @dragenter="handleChatDragEnter"
+            @dragleave="handleChatDragLeave"
+            @drop="handleChatDrop"
         >
-            <div v-if="isChatDropActive" class="chat-drop-overlay" aria-hidden="true">
-                <div class="chat-drop-overlay__card">
-                    <div class="chat-drop-overlay__icon">
-                        <svg
-                            width="24"
-                            height="24"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path d="M12 3v12" />
-                            <path d="m7 10 5 5 5-5" />
-                            <path d="M5 19h14" />
-                        </svg>
-                    </div>
-                    <div class="chat-drop-overlay__title">{{ t('chat.attachFiles') }}</div>
-                    <div class="chat-drop-overlay__hint">{{ t('chat.dragDropHint') }}</div>
-                </div>
-            </div>
+            <PageHeader :disabled="props.standalone">
             <div class="chat-header">
                 <div class="header-left">
-                    <button v-if="!props.standalone" class="icon-btn header-sidebar-toggle" @click="toggleSidebar">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="9" y1="3" x2="9" y2="21" />
-                        </svg>
-                    </button>
+                    <HeaderSidebarToggle
+                      v-if="!props.standalone"
+                      class="header-sidebar-toggle"
+                      :expanded="showSidebar"
+                      @toggle="toggleSidebar"
+                    />
                     <span class="room-title-text">{{ store.roomName || (store.currentRoomId || t('groupChat.title')) }}</span>
-                    <button
-                        v-if="currentRoom?.workspace"
-                        class="workspace-badge"
-                        type="button"
-                        :title="currentRoom.workspace"
-                        @click="openWorkspaceFilesPanel"
-                    >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                        </svg>
-                        <span>{{ currentWorkspaceLabel }}</span>
-                    </button>
                 </div>
                 <div class="header-info">
+                    <NButton v-if="currentRoomCanManage" size="small" quaternary @click="showDiscussionPanel = true">{{ t('groupChat.discussion.title') }}</NButton>
+                    <NButton
+                        v-if="currentRoomCanManage"
+                        class="header-workspace-button"
+                        quaternary
+                        size="small"
+                        circle
+                        :title="currentRoom?.workspace || t('chat.setWorkspace')"
+                        :aria-label="t('chat.setWorkspace')"
+                        @click="handleOpenWorkspacePicker()"
+                    >
+                        <template #icon>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                            </svg>
+                        </template>
+                    </NButton>
                     <button
                         v-if="currentRoomCanManage && pendingAgentPairings.length"
                         class="agent-pairing-header-button"
@@ -2779,6 +2345,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     <span class="connection-dot" :class="{ connected: store.connected, disconnected: !store.connected }"></span>
                 </div>
             </div>
+            </PageHeader>
 
             <div
                 v-if="hasRoom"
@@ -2920,25 +2487,11 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     </button>
                 </aside>
                 <div ref="groupChatSurfaceRef" class="group-chat-surface">
-                    <Transition name="discussion-banner">
-                        <div v-if="discussionIsActive" class="discussion-banner">
-                            <span class="discussion-banner-dot" aria-hidden="true"></span>
-                            <div class="discussion-banner-info">
-                                <span class="discussion-banner-title">{{ t('groupChat.discussion.inProgress') }}</span>
-                                <span class="discussion-banner-round">
-                                    {{ t('groupChat.discussion.round', { current: liveDiscussion?.currentRound || 0, max: liveDiscussion?.maxRounds || 0 }) }}
-                                </span>
-                                <span v-if="lastJudgeNote" class="discussion-banner-note">{{ lastJudgeNote.assessment }}</span>
-                            </div>
-                            <NButton size="small" type="error" secondary :loading="isStoppingDiscussion" @click="handleStopDiscussion">
-                                {{ t('groupChat.discussion.stop') }}
-                            </NButton>
-                        </div>
-                    </Transition>
                     <div class="group-message-shell">
                         <GroupMessageList
                             :allow-speech="!props.standalone"
                             :can-manage-handoff="currentRoomCanManage"
+                            :allow-message-deletion="currentRoomCanManage"
                             @mention-agent="handleMentionAgent"
                             @continue-handoff="handleContinueHandoff"
                             @adjust-handoff-settings="handleOpenRoomSettings"
@@ -2994,6 +2547,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                         </svg>
                                     </span>
                                     <span>{{ t('chat.approvalKicker') }}</span>
+                                    <PendingInteractionCountdown :deadline="visibleApproval.countdownDeadline" />
                                 </div>
                                 <div class="approval-float-title">
                                     <span v-if="visibleApproval.agentName">@{{ visibleApproval.agentName }} · </span>{{ t('chat.approvalTitle') }}
@@ -3027,6 +2581,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                         </svg>
                                     </span>
                                     <span>{{ t('chat.clarifyKicker') }}</span>
+                                    <PendingInteractionCountdown :deadline="visibleClarify.countdownDeadline" />
                                 </div>
                                 <div class="approval-float-title">
                                     <span v-if="visibleClarify.agentName">@{{ visibleClarify.agentName }} · </span>{{ t('chat.clarifyTitle') }}
@@ -3119,8 +2674,8 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                         :show-settings="!props.standalone"
                         :allow-all-mention="currentRoomCanMentionAll"
                         @send="handleSendMessage"
+                        @request-discussion="showDiscussionPanel = true"
                         @send-blocked="handleSummaryConfigurationRequired"
-                        @request-discussion="openDiscussionQuick"
                     />
                 </div>
                 <Transition
@@ -3130,7 +2685,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     @before-leave="handleToolPanelBeforeLeave"
                     @leave-cancelled="handleToolPanelLeaveCancelled"
                 >
-
                     <aside
                         v-if="showWorkspacePanel && (
                             activeWorkspacePanel === 'files'
@@ -3143,7 +2697,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                         class="group-workspace-panel"
                         :style="workspacePanelStyle"
                     >
-
                         <div class="group-workspace-resize-handle" @pointerdown="startWorkspaceResize" />
                         <div class="group-workspace-panel-inner">
                             <WorkspaceDiffPreview
@@ -3202,21 +2755,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                 </div>
                                 <div class="group-tool-content">
                                     <template v-if="currentRoom?.workspace">
-                                        <div v-if="deliveryUsage" class="delivery-usage-bar" :class="{ over: deliveryUsage.overLimit }">
-                                            <span class="delivery-usage-text">
-                                                {{ t('groupChat.discussion.delivery.usage', {
-                                                    used: deliveryFormatBytes(deliveryUsage.totalBytes),
-                                                    limit: deliveryFormatBytes(deliveryUsage.limitBytes),
-                                                    count: deliveryUsage.fileCount,
-                                                }) }}
-                                            </span>
-                                            <template v-if="deliveryUsage.overLimit">
-                                                <span class="delivery-usage-warn">{{ t('groupChat.discussion.delivery.overLimit') }}</span>
-                                                <NButton size="tiny" secondary type="warning" @click="handleCleanupDelivery">
-                                                    {{ t('groupChat.discussion.delivery.cleanup') }}
-                                                </NButton>
-                                            </template>
-                                        </div>
                                         <FilesPanel
                                             v-show="activeWorkspacePanel === 'files'"
                                             :workspace-room-id="store.currentRoomId"
@@ -3224,6 +2762,10 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                             @attach="handleWorkspaceFileAttach"
                                         />
                                     </template>
+                                    <FilePreview
+                                        v-else-if="filesStore.previewFile?.workspaceRoomId === store.currentRoomId"
+                                        :custom-close="closeWorkspacePanel"
+                                    />
                                     <div v-else-if="activeWorkspacePanel === 'files'" class="group-workspace-empty">
                                         <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
                                             <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -3241,7 +2783,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                     <DesktopBrowserPanel
                                         v-if="desktopBrowserAvailable && activeWorkspacePanel === 'browser'"
                                         class="group-browser-panel"
-
                                         :visible="toolPanelTransitionReady"
                                         :submit="submitBrowserAnnotations"
                                     />
@@ -3250,7 +2791,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                         </div>
                     </aside>
                 </Transition>
-
             </div>
 
             <div v-else class="no-room">
@@ -3263,16 +2803,29 @@ function handleClarifyKeydown(event: KeyboardEvent) {
             </div>
         </div>
 
-        <NDrawer v-model:show="showCreateModal" placement="right" :width="workspacePanelMobile ? '100%' : 520">
+        <NDrawer v-model:show="showCreateModal" placement="right" width="var(--studio-drawer-width)">
             <NDrawerContent :title="t('groupChat.createRoom')" closable>
                 <CreateRoomForm @submit="handleCreateRoom" @cancel="showCreateModal = false" />
             </NDrawerContent>
         </NDrawer>
 
-        <Teleport to="body">
-            <div v-if="showAddAgentModal" class="modal-backdrop" @click.self="closeAgentModal">
-                <div class="modal">
-                    <h3>{{ editingAgent ? t('groupChat.editAgentTitle', { name: editingAgent.name }) : t('groupChat.addAgent') }}</h3>
+        <NDrawer
+            :show="showAddAgentDrawer"
+            placement="right"
+            width="var(--studio-drawer-width)"
+            :z-index="1100"
+            :mask-closable="!isSavingAgent"
+            :close-on-esc="!isSavingAgent && !showAgentPresetDialog"
+            @update:show="!$event && closeAgentDrawer()"
+        >
+            <NDrawerContent
+                :title="editingAgent ? t('groupChat.editAgentTitle', { name: editingAgent.name }) : t('groupChat.addAgent')"
+                :closable="!isSavingAgent"
+            >
+                    <div v-if="isLoadingAgentForm" class="agent-form-loading" role="status">
+                        <NSpin size="small" />
+                        <span>{{ t('common.loading') }}</span>
+                    </div>
                     <div v-if="!editingAgent" class="agent-preset-entry">
                         <NButton secondary block @click="openAgentPresetSelection">
                             {{ t('groupChat.chooseAgentPreset') }}
@@ -3319,6 +2872,8 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                         <NSelect
                             :value="selectedAgentType"
                             :options="groupAgentTypeOptions"
+                            :loading="isLoadingAgentForm"
+                            :disabled="isLoadingAgentForm"
                             @update:value="handleAgentTypeChange"
                         />
                     </div>
@@ -3328,44 +2883,57 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             :value="selectedProfile"
                             :options="profileOptions"
                             :placeholder="t('groupChat.selectProfile')"
+                            :loading="isLoadingAgentForm"
+                            :disabled="isLoadingAgentForm"
                             filterable
                             @update:value="handleAgentProfileChange"
                         />
                     </div>
-                    <div class="form-group">
-                        <label class="form-label">{{ t('models.provider') }}</label>
+                    <DshSessionPresetSelect v-if="selectedAgentType === 'dsh'" class="form-group"
+                        v-model="selectedRuntimePreset" :disabled="isSavingAgent || isLoadingAgentForm"
+                        @valid="selectedRuntimePresetReady = $event" />
+                    <div v-if="supportsGlobalAgentMode && !isGlobalOnlyCodingAgent(selectedAgentType)" class="form-group">
+                        <label class="form-label">{{ t('codingAgents.launchModeScope') }}</label>
                         <NSelect
-                            :value="selectedAgentProvider"
-                            :options="agentProviderOptions"
-                            :placeholder="t('models.selectProvider')"
-                            filterable
-                            @update:value="handleAgentProviderChange"
+                            :value="selectedAgentMode"
+                            :options="agentModeOptions"
+                            :disabled="isLoadingAgentForm"
+                            @update:value="handleAgentModeChange"
                         />
                     </div>
-                    <div class="form-group">
+                    <div v-if="usesGlobalAgentMode" class="form-group">
                         <label class="form-label">{{ t('models.models') }}</label>
-                        <NSelect
-                            :value="selectedAgentModel"
-                            :options="agentModelOptions"
-                            :placeholder="t('models.selectModel')"
-                            :disabled="!selectedAgentProvider"
-                            filterable
-                            @update:value="handleAgentModelChange"
-                        />
+                        <NativeCodingAgentModelFields :key="nativeAgentId" :agent="nativeAgentId" :profile="selectedProfile || undefined"
+                            :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
+                            :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                     </div>
-                    <div v-if="selectedAgentType !== 'hermes'" class="form-group">
+                    <div v-if="!usesGlobalAgentMode" class="form-group">
+                        <label class="form-label">{{ t('models.models') }}</label>
+                        <ScopedModelSelector :provider="selectedAgentProvider" :model="selectedAgentModel"
+                            :groups="agentModelGroups" :allow-moa="selectedAgentType === 'hermes'"
+                            :disabled="isLoadingAgentForm || isSavingAgent"
+                            @select="handleAgentModelSelect" />
+                    </div>
+                    <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode && !configuredAgentApiMode" class="form-group">
                         <label class="form-label">{{ t('codingAgents.protocolScope') }}</label>
                         <NSelect
                             v-model:value="selectedAgentApiMode"
                             :options="agentApiModeOptions"
+                            :disabled="isLoadingAgentForm"
                         />
                     </div>
                     <div class="form-group">
                         <label class="form-label">{{ t('chat.reasoningEffort.tooltip') }}</label>
+                        <NativeCodingAgentModelFields v-if="usesGlobalAgentMode" :key="nativeAgentId" :agent="nativeAgentId" :profile="selectedProfile || undefined"
+                            field="reasoning-effort" :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
+                            :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                         <NSelect
-                            v-model:value="selectedAgentReasoningEffort"
+                            v-else
+                            v-model:value="agentReasoningEffortValue"
                             :options="agentReasoningEffortOptions"
+                            :aria-label="t('chat.reasoningEffort.tooltip')"
                             :placeholder="t('chat.reasoningEffort.tooltip')"
+                            :disabled="isLoadingAgentForm"
                         />
                     </div>
                     <div class="form-group">
@@ -3384,7 +2952,8 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             :placeholder="t('groupChat.agentDescPlaceholder')"
                         />
                     </div>
-                    <div class="modal-actions" :class="{ 'agent-modal-actions': editingAgent }">
+                <template #footer>
+                    <div class="agent-drawer-actions" :class="{ 'is-editing': editingAgent }">
                         <NButton
                             v-if="editingAgent"
                             type="error"
@@ -3395,7 +2964,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             {{ t('common.delete') }}
                         </NButton>
                         <NSpace justify="end">
-                            <NButton :disabled="isSavingAgent" @click="closeAgentModal">{{ t('common.cancel') }}</NButton>
+                            <NButton :disabled="isSavingAgent" @click="closeAgentDrawer">{{ t('common.cancel') }}</NButton>
                             <NButton
                                 type="primary"
                                 :disabled="!canConfirmAddAgent"
@@ -3406,14 +2975,23 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             </NButton>
                         </NSpace>
                     </div>
-                </div>
-            </div>
-            <div
-                v-if="showAgentPresetDialog"
-                class="modal-backdrop agent-preset-dialog-backdrop"
-                @click.self="closeAgentPresetDialog"
-            >
-                <div class="modal agent-preset-dialog">
+                </template>
+            </NDrawerContent>
+        </NDrawer>
+
+        <NModal
+            :show="showAgentPresetDialog"
+            :z-index="1110"
+            @update:show="!$event && closeAgentPresetDialog()"
+        >
+                <div
+                    class="modal agent-preset-dialog"
+                    role="dialog"
+                    aria-modal="true"
+                    :aria-label="agentPresetDialogMode === 'select'
+                        ? t('groupChat.chooseAgentPreset')
+                        : t('groupChat.manageAgentPresets')"
+                >
                     <h3>
                         {{ agentPresetDialogMode === 'select'
                             ? t('groupChat.chooseAgentPreset')
@@ -3425,7 +3003,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                         :placeholder="t('groupChat.searchAgentPresets')"
                     />
                     <div v-if="isLoadingAgentPresets" class="agent-preset-dialog-state">
-                        {{ t('groupChat.agentPresetsLoading') }}
+                        <NSpin size="small" :description="t('groupChat.agentPresetsLoading')" />
                     </div>
                     <div v-else-if="agentPresetLoadError" class="agent-preset-dialog-state is-error">
                         <span>{{ agentPresetLoadError }}</span>
@@ -3455,7 +3033,9 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                         >
                             <span class="agent-preset-dialog-row-name">{{ preset.name }}</span>
                             <span class="agent-preset-dialog-row-config">
-                                {{ preset.profile }} · {{ preset.provider }}/{{ preset.model }}
+                                {{ preset.profile }} · {{ preset.agentMode === 'global'
+                                    ? t('codingAgents.launchModeGlobal')
+                                    : `${preset.provider}/${preset.model}` }}
                             </span>
                             <span v-if="!preset.available" class="agent-preset-dialog-row-error">
                                 {{ preset.validationError || t('groupChat.agentPresetUnavailable') }}
@@ -3466,7 +3046,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     <div v-if="agentPresetDialogMode === 'manage'" class="agent-preset-management-actions">
                         <NButton
                             secondary
-                            :disabled="!canConfirmAddAgent || isSavingAgentPreset"
+                            :disabled="!canConfirmAddAgent || isSavingAgentPreset || isLoadingAgentPresets"
                             :loading="isSavingAgentPreset && !pendingAgentPresetId"
                             @click="createAgentPresetFromCurrent"
                         >
@@ -3499,14 +3079,15 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                         <NButton
                             v-if="agentPresetDialogMode === 'select'"
                             type="primary"
-                            :disabled="!pendingAgentPreset?.available"
+                            :disabled="isLoadingAgentForm || isLoadingAgentPresets || !pendingAgentPreset?.available"
                             @click="confirmAgentPresetSelection"
                         >
                             {{ t('groupChat.applyAgentPreset') }}
                         </NButton>
                     </div>
                 </div>
-            </div>
+        </NModal>
+        <Teleport to="body">
             <div v-if="showCloneModal" class="modal-backdrop" @click.self="showCloneModal = false">
                 <div class="modal">
                     <h3>{{ t('groupChat.cloneRoom') }}</h3>
@@ -3541,47 +3122,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     </div>
                 </div>
             </div>
-            <div v-if="showImportModal" class="modal-backdrop" @click.self="showImportModal = false">
-                <div class="modal">
-                    <h3>{{ t('groupChat.import') }}</h3>
-                    <div class="form-group">
-                        <label class="form-label">{{ t('groupChat.selectFile') }}</label>
-                        <input
-                            ref="importInputRef"
-                            type="file"
-                            accept=".json"
-                            class="file-input"
-                            @change="handleFileSelected"
-                        />
-                        <NButton size="small" @click="importInputRef?.click()">
-                            {{ importFile ? importFile.name : t('groupChat.chooseFile') }}
-                        </NButton>
-                        <p class="form-hint">{{ t('groupChat.importHint') }}</p>
-                    </div>
-                    <div class="modal-actions">
-                        <NSpace justify="end">
-                            <NButton @click="showImportModal = false">{{ t('common.cancel') }}</NButton>
-                            <NButton type="primary" :disabled="!importFile || isImporting" :loading="isImporting" @click="confirmImport">{{ t('groupChat.import') }}</NButton>
-                        </NSpace>
-                    </div>
-                </div>
-            </div>
-            <NModal
-                v-model:show="showWorkspaceModal"
-                preset="dialog"
-                :title="t('chat.setWorkspaceTitle')"
-                class="workspace-modal"
-                style="width: 520px; max-width: 92vw"
-            >
-                <FolderPicker v-model="workspaceValue" />
-                <template #action>
-                    <NSpace justify="end">
-                        <NButton @click="showWorkspaceModal = false">{{ t('common.cancel') }}</NButton>
-                        <NButton @click="handleClearWorkspace">{{ t('workflow.workspace.clear') }}</NButton>
-                        <NButton type="primary" @click="handleSaveWorkspace">{{ t('common.save') }}</NButton>
-                    </NSpace>
-                </template>
-            </NModal>
             <NModal
                 v-model:show="showRemoteRoomRenameModal"
                 preset="dialog"
@@ -3660,29 +3200,11 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                 </template>
             </NModal>
             <NModal
-                v-model:show="showGroupChatRefactorNotice"
-                preset="dialog"
-                :title="t('groupChat.refactorNoticeTitle')"
-                :mask-closable="false"
-                :close-on-esc="false"
-                :closable="false"
-                style="width: 480px; max-width: 92vw"
-            >
-                <p class="group-chat-refactor-notice">
-                    {{ t('groupChat.refactorNoticeMessage') }}
-                </p>
-                <template #action>
-                    <NButton type="primary" @click="acknowledgeGroupChatRefactorNotice">
-                        {{ t('common.confirm') }}
-                    </NButton>
-                </template>
-            </NModal>
-            <NModal
                 v-model:show="showWorkspaceModal"
                 preset="dialog"
                 :title="t('chat.setWorkspaceTitle')"
                 class="workspace-modal"
-                style="width: 520px; max-width: 92vw"
+                style="width: var(--studio-workspace-picker-width)"
             >
                 <FolderPicker v-model="workspaceValue" />
                 <template #action>
@@ -3735,7 +3257,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
             <NDrawer
                 v-model:show="showRoomSettingsModal"
                 placement="right"
-                :width="workspacePanelMobile ? '100%' : 520"
+                width="var(--studio-drawer-width)"
             >
                 <NDrawerContent :title="t('groupChat.roomSettings')" closable>
                     <div class="room-settings-drawer">
@@ -3899,7 +3421,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                     :disabled="!summaryConfig.summaryProvider"
                                 />
                             </div>
-                            <div class="form-group">
+                            <div v-if="!configuredSummaryApiMode" class="form-group">
                                 <label class="form-label">{{ t('groupChat.summaryApiMode') }}</label>
                                 <NSelect v-model:value="summaryConfig.summaryApiMode" :options="summaryApiModeOptions" />
                             </div>
@@ -3948,7 +3470,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                 {{ roomSummaryStatusLabel(liveRoomSummaryState?.status) }}
                             </span>
                         </div>
-                        <div v-if="isLoadingRoomSummary" class="summary-loading">{{ t('common.loading') }}</div>
+                        <div v-if="isLoadingRoomSummary" class="summary-loading"><NSpin size="small" :description="t('common.loading')" /></div>
                         <template v-else>
                             <div class="summary-meta">
                                 <span>
@@ -3959,6 +3481,13 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                     <span>{{ t('groupChat.summarizedTurns') }}</span>
                                     <strong>{{ liveRoomSummaryState?.summarizedTurnCount || 0 }}</strong>
                                 </span>
+                            </div>
+                            <div v-if="liveRoomSummaryReview" class="summary-review" :class="`is-${liveRoomSummaryReview.decision}`">
+                                <strong>{{ t('groupChat.summaryQuality') }} · {{ t(`groupChat.summaryQualityDecision.${liveRoomSummaryReview.decision}`) }}</strong>
+                                <span>{{ t('groupChat.summaryQualityVersion', { version: liveRoomSummaryReview.sourceVersion }) }}</span>
+                                <ul v-if="liveRoomSummaryReview.ruleResults.length">
+                                    <li v-for="rule in liveRoomSummaryReview.ruleResults" :key="rule.id">{{ t(`groupChat.summaryQualityRule.${rule.id}`) }} · {{ t(`groupChat.summaryQualityDecision.${rule.decision}`) }}</li>
+                                </ul>
                             </div>
                             <div v-if="liveRoomSummaryState?.lastError" class="summary-error">
                                 {{ liveRoomSummaryState.lastError }}
@@ -3994,348 +3523,10 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             </NButton>
                         </template>
                     </section>
-                    <section class="settings-section discussion-settings-section">
-                        <div class="summary-state-heading">
-                            <h4>{{ t('groupChat.discussion.title') }}</h4>
-                            <span v-if="liveDiscussion" class="discussion-status" :class="`is-${liveDiscussion.status}`">
-                                {{ discussionStatusLabel(liveDiscussion.status) }}
-                            </span>
-                        </div>
-                        <p class="form-hint">{{ t('groupChat.discussion.desc') }}</p>
-                        <template v-if="!discussionFormVisible">
-                            <NButton
-                                block
-                                :disabled="discussionIsActive || store.agents.length < 2"
-                                @click="openDiscussionForm"
-                            >
-                                {{ t('groupChat.discussion.start') }}
-                            </NButton>
-                            <p v-if="store.agents.length < 2" class="form-hint discussion-needs-agents">
-                                {{ t('groupChat.discussion.needsAgents') }}
-                            </p>
-                        </template>
-                        <template v-else>
-                            <div class="form-group">
-                                <label class="form-label">{{ t('groupChat.discussion.goal') }}</label>
-                                <NInput
-                                    v-model:value="discussionGoal"
-                                    type="textarea"
-                                    :rows="3"
-                                    :placeholder="t('groupChat.discussion.goalPlaceholder')"
-                                />
-                            </div>
-                            <div class="form-group">
-                                <NCheckbox
-                                    :checked="discussionLongRunMode"
-                                    @update:checked="toggleLongRunMode"
-                                >
-                                    {{ t('groupChat.discussion.longRun') }}
-                                </NCheckbox>
-                                <p class="form-hint">{{ t('groupChat.discussion.longRunHint') }}</p>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">{{ t('groupChat.discussion.agentOrder') }}</label>
-                                <NSelect
-                                    v-model:value="discussionAgentOrder"
-                                    multiple
-                                    :options="discussionAgentOptions"
-                                    :placeholder="t('groupChat.discussion.agentOrderPlaceholder')"
-                                />
-                                <p class="form-hint">{{ t('groupChat.discussion.agentOrderDesc') }}</p>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">{{ t('groupChat.discussion.reporter') }}</label>
-                                <NSelect v-model:value="discussionReporterId" :options="discussionAgentOptions" />
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">{{ t('groupChat.discussion.attachments') }}</label>
-                                <input
-                                    ref="discussionAttachmentInputRef"
-                                    type="file"
-                                    multiple
-                                    style="display: none"
-                                    @change="handleDiscussionAttachmentChange"
-                                />
-                                <NSpace>
-                                    <NButton size="small" secondary @click="openDiscussionAttachmentPicker">
-                                        {{ t('groupChat.discussion.pickAttachments') }}
-                                    </NButton>
-                                    <NButton
-                                        v-if="discussionAttachments.length > 0"
-                                        size="small"
-                                        tertiary
-                                        @click="discussionAttachments = []"
-                                    >
-                                        {{ t('common.clear') }}
-                                    </NButton>
-                                </NSpace>
-                                <div v-if="discussionAttachments.length > 0" class="discussion-attachment-list">
-                                    <div v-for="name in discussionAttachments" :key="name" class="discussion-attachment-chip">
-                                        <span :title="name">{{ name }}</span>
-                                        <span class="discussion-attachment-remove" @click="removeDiscussionAttachment(name)">×</span>
-                                    </div>
-                                </div>
-                                <p class="form-hint">{{ t('groupChat.discussion.attachmentsHint') }}</p>
-                            </div>
-                            <div class="discussion-limit-row">
-                                <div class="form-group">
-                                    <label class="form-label">{{ t('groupChat.discussion.maxRounds') }}</label>
-                                    <NInputNumber v-model:value="discussionMaxRounds" :min="1" :max="50" style="width: 100%" />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">{{ t('groupChat.discussion.minRounds') }}</label>
-                                    <NInputNumber v-model:value="discussionMinRounds" :min="0" :max="50" style="width: 100%" />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">{{ t('groupChat.discussion.maxMessages') }}</label>
-                                    <NInputNumber v-model:value="discussionMaxMessages" :min="2" :max="1000" style="width: 100%" />
-                                </div>
-                            </div>
-                            <p class="form-hint">{{ t('groupChat.discussion.judgeDesc') }}</p>
-                            <NSpace justify="end">
-                                <NButton @click="discussionFormVisible = false">{{ t('common.cancel') }}</NButton>
-                                <NButton
-                                    type="primary"
-                                    :disabled="!discussionGoal.trim() || discussionAgentOrder.length < 2"
-                                    :loading="isStartingDiscussion"
-                                    @click="handleStartDiscussion"
-                                >
-                                    {{ t('groupChat.discussion.start') }}
-                                </NButton>
-                            </NSpace>
-                        </template>
-                        <div v-if="liveDiscussion && !discussionIsActive" class="discussion-result">
-                            <div class="discussion-meta">
-                                <span>{{ t('groupChat.discussion.roundsDone', { rounds: liveDiscussion.currentRound }) }}</span>
-                                <span v-if="liveDiscussion.status === 'converged'" class="discussion-converged">
-                                    {{ t('groupChat.discussion.convergedLabel') }}
-                                </span>
-                            </div>
-                            <div v-if="lastJudgeNote" class="discussion-note">{{ lastJudgeNote.assessment }}</div>
-                            <div v-if="liveDiscussion.lastError" class="summary-error">{{ liveDiscussion.lastError }}</div>
-                            <div class="discussion-actions">
-                                <NButton
-                                    size="small"
-                                    secondary
-                                    type="primary"
-                                    :loading="isDownloadingReport"
-                                    @click="handleDownloadDiscussionReport"
-                                >
-                                    {{ t('groupChat.discussion.downloadReport') }}
-                                </NButton>
-                                <NButton
-                                    v-if="liveDiscussion.summaryFilePath"
-                                    size="small"
-                                    secondary
-                                    type="success"
-                                    :loading="isDownloadingSummary"
-                                    @click="handleDownloadDiscussionSummary"
-                                >
-                                    {{ t('groupChat.discussion.downloadSummary') }}
-                                </NButton>
-                            </div>
-                            <div v-if="liveDiscussion.deliverables && liveDiscussion.deliverables.length" class="discussion-deliverables">
-                                <div class="deliverables-title">{{ t('groupChat.discussion.deliverablesLabel') }}</div>
-                                <div v-for="file in liveDiscussion.deliverables" :key="file" class="deliverable-item">
-                                    <span class="deliverable-name" :title="file">{{ file.split('/').pop() }}</span>
-                                    <NButton size="tiny" secondary @click="handleDownloadDeliverable(file)">
-                                        {{ t('groupChat.discussion.downloadSummary') }}
-                                    </NButton>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-                    <section class="settings-section document-settings-section">
-                        <div class="summary-state-heading">
-                            <h4>{{ t('groupChat.document.title') }}</h4>
-                            <span v-if="activeDocumentCount > 0" class="document-status is-reading">
-                                {{ t('groupChat.document.active') }}
-                            </span>
-                        </div>
-                        <p class="form-hint">{{ t('groupChat.document.desc') }}</p>
-                        <input
-                            ref="docUploadInputRef"
-                            type="file"
-                            accept=".txt,.md,.docx"
-                            style="display: none"
-                            @change="handleDocumentFileChange"
-                        />
-                        <NButton block :loading="isUploadingDocument" @click="openDocumentUpload">
-                            {{ t('groupChat.document.upload') }}
-                        </NButton>
-                        <p class="form-hint">{{ t('groupChat.document.uploadHint') }}</p>
-
-                        <div v-if="roomDocuments.length > 0" class="document-list">
-                            <div v-for="doc in roomDocuments" :key="doc.fileId" class="document-card">
-                                <div class="document-card-header">
-                                    <span class="document-name" :title="doc.name">{{ doc.name }}</span>
-                                    <span class="document-status" :class="`is-${doc.status}`">
-                                        {{ documentStatusLabel(doc.status) }}
-                                    </span>
-                                </div>
-                                <div class="document-meta">
-                                    <span>{{ formatDocumentSize(doc.sizeBytes) }}</span>
-                                    <span>{{ doc.chunkCount }} {{ t('groupChat.document.chunks') }}</span>
-                                    <span v-if="doc.docType">{{ doc.docType }}</span>
-                                </div>
-                                <template v-if="documentProgressOf(doc)">
-                                    <NProgress
-                                        :percentage="documentProgressOf(doc)!.pct"
-                                        :height="6"
-                                        :show-indicator="false"
-                                        class="document-progress"
-                                    />
-                                    <div class="document-progress-label">
-                                        {{ t('groupChat.document.progress', { done: documentProgressOf(doc)!.done, total: documentProgressOf(doc)!.total }) }}
-                                    </div>
-                                </template>
-                                <div v-if="doc.status === 'chunked'" class="document-actions">
-                                    <NSelect
-                                        v-model:value="docAgentSelection"
-                                        multiple
-                                        size="small"
-                                        :options="documentAgentOptions"
-                                        :placeholder="t('groupChat.document.agentsPlaceholder')"
-                                    />
-                                    <NButton
-                                        size="small"
-                                        type="primary"
-                                        secondary
-                                        :disabled="store.agents.length === 0"
-                                        :loading="isStartingDocument"
-                                        @click="handleStartDocumentReading(doc)"
-                                    >
-                                        {{ t('groupChat.document.start') }}
-                                    </NButton>
-                                </div>
-                                <div v-if="doc.status === 'failed'" class="document-error">
-                                    {{ t('groupChat.document.failedHint') }}
-                                </div>
-                            </div>
-                        </div>
-                    </section>
                     </div>
                 </NDrawerContent>
             </NDrawer>
         </Teleport>
-
-        <NModal
-            v-model:show="discussionQuickVisible"
-            preset="card"
-            :title="t('groupChat.discussion.quickStartTitle')"
-            style="max-width: 480px"
-        >
-            <div class="discussion-quick-form">
-                <div class="form-group">
-                    <label class="form-label">{{ t('groupChat.discussion.quickStartGoal') }}</label>
-                    <NInput
-                        v-model:value="discussionQuickGoal"
-                        type="textarea"
-                        :rows="3"
-                        :placeholder="t('groupChat.discussion.quickStartGoalPlaceholder')"
-                    />
-                </div>
-                <div class="form-group">
-                    <NCheckbox
-                        :checked="discussionQuickLongRunMode"
-                        @update:checked="toggleQuickLongRunMode"
-                    >
-                        {{ t('groupChat.discussion.longRun') }}
-                    </NCheckbox>
-                    <p class="form-hint">{{ t('groupChat.discussion.longRunHint') }}</p>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">{{ t('groupChat.discussion.quickStartParticipants') }}</label>
-                    <NSelect
-                        v-model:value="discussionQuickOrder"
-                        multiple
-                        :options="discussionAgentOptions"
-                        :placeholder="t('groupChat.discussion.agentOrderPlaceholder')"
-                    />
-                </div>
-                <div class="form-group">
-                    <label class="form-label">{{ t('groupChat.discussion.attachments') }}</label>
-                    <input
-                        ref="discussionQuickAttachmentInputRef"
-                        type="file"
-                        multiple
-                        style="display: none"
-                        @change="handleDiscussionQuickAttachmentChange"
-                    />
-                    <NSpace>
-                        <NButton size="small" secondary @click="openDiscussionQuickAttachmentPicker">
-                            {{ t('groupChat.discussion.pickAttachments') }}
-                        </NButton>
-                        <NButton
-                            v-if="discussionQuickAttachments.length > 0"
-                            size="small"
-                            tertiary
-                            @click="discussionQuickAttachments = []"
-                        >
-                            {{ t('common.clear') }}
-                        </NButton>
-                    </NSpace>
-                    <div v-if="discussionQuickAttachments.length > 0" class="discussion-attachment-list">
-                        <div v-for="name in discussionQuickAttachments" :key="name" class="discussion-attachment-chip">
-                            <span :title="name">{{ name }}</span>
-                            <span class="discussion-attachment-remove" @click="removeDiscussionQuickAttachment(name)">×</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="discussion-limit-row">
-                    <div class="form-group">
-                        <label class="form-label">{{ t('groupChat.discussion.maxRounds') }}</label>
-                        <NInputNumber v-model:value="discussionQuickMaxRounds" :min="1" :max="50" style="width: 100%" />
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">{{ t('groupChat.discussion.minRounds') }}</label>
-                        <NInputNumber v-model:value="discussionQuickMinRounds" :min="0" :max="50" style="width: 100%" />
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">{{ t('groupChat.discussion.maxMessages') }}</label>
-                        <NInputNumber v-model:value="discussionQuickMaxMessages" :min="2" :max="1000" style="width: 100%" />
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">{{ t('groupChat.discussion.reporter') }}</label>
-                    <NSelect v-model:value="discussionQuickReporterId" :options="discussionAgentOptions" />
-                </div>
-                <p class="form-hint">{{ t('groupChat.discussion.quickStartHint') }}</p>
-                <NSpace justify="end">
-                    <NButton @click="discussionQuickVisible = false">{{ t('common.cancel') }}</NButton>
-                    <NButton
-                        type="primary"
-                        :disabled="!discussionQuickGoal.trim() || discussionQuickOrder.length < 2"
-                        :loading="isQuickStarting"
-                        @click="handleDiscussionQuickStart"
-                    >
-                        {{ t('groupChat.discussion.quickStartStart') }}
-                    </NButton>
-                </NSpace>
-            </div>
-        </NModal>
-
-        <NModal
-            v-model:show="archivePromptVisible"
-            preset="card"
-            :title="t('groupChat.archivePromptTitle')"
-            :closable="true"
-            style="max-width: 440px"
-        >
-            <div v-if="archivePrompt" class="archive-prompt-body">
-                <p class="archive-prompt-desc">
-                    {{ t('groupChat.archivePromptDesc', { count: archivePrompt.count, threshold: archivePrompt.threshold }) }}
-                </p>
-                <p class="form-hint">{{ t('groupChat.archivePromptHint') }}</p>
-                <NSpace justify="end">
-                    <NButton @click="handleArchiveDismiss('later')">{{ t('groupChat.archiveLater') }}</NButton>
-                    <NButton @click="handleArchiveDismiss('ignore')">{{ t('groupChat.archiveIgnore') }}</NButton>
-                    <NButton type="primary" :loading="isArchiving" @click="handleArchiveNow">
-                        {{ t('groupChat.archiveNow') }}
-                    </NButton>
-                </NSpace>
-            </div>
-        </NModal>
 
     </div>
 </template>
@@ -4357,7 +3548,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     position: relative;
     min-width: 0;
     max-width: 100%;
-    background-color: $bg-card;
+    background-color: var(--theme-card-bg, $bg-card);
 }
 
 .group-execution-queue-float-stack {
@@ -4378,22 +3569,6 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 1;
     min-height: 0;
     display: flex;
-}
-
-.group-chat-refactor-notice {
-    margin: 0;
-    line-height: 1.7;
-}
-
-.archive-prompt-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.archive-prompt-desc {
-    margin: 0;
-    line-height: 1.7;
 }
 
 @media (max-width: $breakpoint-mobile) {
@@ -4420,9 +3595,9 @@ export default defineComponent({ components: { CreateRoomForm } })
     bottom: 16px;
     z-index: 8;
     width: min(720px, calc(100% - 32px));
-    padding: 10px;
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.24);
-    border-radius: 16px;
+    padding: calc(10px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.24);
+    border-radius: var(--radius-component, 16px);
     background: #ffffff;
     box-shadow: 0 14px 40px rgba(0, 0, 0, 0.14);
     backdrop-filter: blur(14px);
@@ -4435,12 +3610,12 @@ export default defineComponent({ components: { CreateRoomForm } })
 .approval-float-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 2px 4px 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
+    padding: calc(2px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     color: var(--accent-primary);
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     font-weight: 700;
-    line-height: 1.2;
+    line-height: var(--line-height, 1.2);
     letter-spacing: 0.08em;
     text-transform: uppercase;
 }
@@ -4454,22 +3629,22 @@ export default defineComponent({ components: { CreateRoomForm } })
     justify-content: center;
     color: var(--accent-primary);
     background: rgba(var(--accent-primary-rgb), 0.12);
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.24);
+    border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.24);
 }
 
 .approval-float-title {
-    padding: 0 4px;
-    font-size: 14px;
+    padding: 0 calc(4px * var(--spacing-scale, 1));
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     font-weight: 700;
-    line-height: 1.3;
+    line-height: var(--line-height, 1.3);
     color: $text-primary;
 }
 
 .approval-float-desc {
-    padding: 0 4px;
+    padding: 0 calc(4px * var(--spacing-scale, 1));
     margin-top: 5px;
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.45);
     color: $text-secondary;
 }
 
@@ -4481,13 +3656,13 @@ export default defineComponent({ components: { CreateRoomForm } })
     white-space: pre-wrap;
     word-break: break-word;
     font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
-    font-size: 11px;
-    line-height: 1.45;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+    line-height: var(--line-height, 1.45);
     color: $text-primary;
     background: rgba(255, 255, 255, 0.68);
-    border: 1px solid $border-color;
-    border-radius: 11px;
-    padding: 8px 10px;
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 11px);
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
 
     .dark & {
         background: rgba(255, 255, 255, 0.08);
@@ -4498,19 +3673,19 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-start;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     margin-top: 10px;
-    padding: 10px 4px 0;
-    border-top: 1px solid $border-color;
+    padding: calc(10px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) 0;
+    border-top: var(--border-width, 1px) solid $border-color;
 }
 
 .clarify-float-input-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     margin-top: 10px;
-    padding: 10px 4px 0;
-    border-top: 1px solid $border-color;
+    padding: calc(10px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) 0;
+    border-top: var(--border-width, 1px) solid $border-color;
 }
 
 @media (max-width: 640px) {
@@ -4519,8 +3694,8 @@ export default defineComponent({ components: { CreateRoomForm } })
         right: 8px;
         bottom: 8px;
         width: auto;
-        padding: 7px;
-        border-radius: 14px;
+        padding: calc(7px * var(--spacing-scale, 1));
+        border-radius: var(--radius-component, 14px);
     }
 
     .approval-float-actions {
@@ -4547,14 +3722,13 @@ export default defineComponent({ components: { CreateRoomForm } })
 // ─── Room Sidebar ────────────────────────────────────────
 
 .room-sidebar {
+    position: relative;
     width: $sidebar-width;
     min-height: 0;
     align-self: stretch;
-    margin: 10px;
-    background: $bg-sidebar-surface;
-    border: 1px solid $border-color;
-    border-radius: 14px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    margin: 0;
+    background: var(--theme-sidebar-bg, $bg-sidebar-surface);
+    border-inline-end: var(--border-width, 1px) solid $border-color;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -4562,7 +3736,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .sidebar-header {
-    padding: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
     flex-shrink: 0;
 }
 
@@ -4577,8 +3751,8 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: inline-flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 8px;
-    padding: 7px 10px;
+    gap: calc(8px * var(--spacing-scale, 1));
+    padding: calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     cursor: pointer;
     transition:
         background-color $transition-fast,
@@ -4593,8 +3767,8 @@ export default defineComponent({ components: { CreateRoomForm } })
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 13px;
-        line-height: 18px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+        line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
     }
 
     &:hover {
@@ -4607,9 +3781,9 @@ export default defineComponent({ components: { CreateRoomForm } })
 .conversation-switch {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 2px;
+    gap: calc(2px * var(--spacing-scale, 1));
     margin: 0 12px 8px;
-    padding: 2px;
+    padding: calc(2px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     background: rgba(var(--accent-primary-rgb), 0.05);
     flex-shrink: 0;
@@ -4619,11 +3793,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     height: 28px;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-component, 5px);
     background: transparent;
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 16px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
     cursor: pointer;
     transition:
         background-color $transition-fast,
@@ -4634,7 +3808,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
     &.active {
-        background: $bg-card;
+        background: var(--theme-card-bg, $bg-card);
         color: $text-primary;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
     }
@@ -4643,16 +3817,16 @@ export default defineComponent({ components: { CreateRoomForm } })
 .manual-room-link-hint {
     margin: 0 0 12px;
     color: var(--text-secondary);
-    line-height: 1.6;
+    line-height: var(--line-height, 1.6);
 }
 
 .manual-room-link-input {
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
-    padding: 9px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
+    padding: calc(9px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid var(--border-color);
+    border-radius: var(--radius-component, 6px);
     outline: none;
     background: var(--bg-secondary);
     color: var(--text-primary);
@@ -4667,7 +3841,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 .room-list {
     flex: 1;
     overflow-y: auto;
-    padding: 8px;
+    padding: 0 calc(8px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
 }
 
 .room-section + .room-section {
@@ -4680,11 +3854,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     justify-content: space-between;
     box-sizing: border-box;
     width: 100%;
-    padding: 4px 10px 6px;
+    padding: calc(4px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
     border: 0;
     background: transparent;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-align: start;
@@ -4707,8 +3881,8 @@ export default defineComponent({ components: { CreateRoomForm } })
 .room-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
+    padding: calc(10px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     cursor: pointer;
     transition: background-color $transition-fast;
@@ -4738,7 +3912,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
     .room-name {
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         color: $text-primary;
         white-space: nowrap;
         overflow: hidden;
@@ -4746,13 +3920,13 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
     .room-code {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
-        font-family: $font-code;
+        font-family: var(--font-code, $font-code);
     }
 
     .room-tokens {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
     }
 
@@ -4803,8 +3977,8 @@ export default defineComponent({ components: { CreateRoomForm } })
     .room-origin {
         overflow: hidden;
         color: $text-muted;
-        font-family: $font-code;
-        font-size: 11px;
+        font-family: var(--font-code, $font-code);
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         text-overflow: ellipsis;
         white-space: nowrap;
     }
@@ -4813,7 +3987,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 .remote-room-state {
     flex-shrink: 0;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
     &.online {
         color: $success;
@@ -4821,52 +3995,10 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .empty-rooms {
-    padding: 20px 12px;
+    padding: calc(20px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
     text-align: center;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     color: $text-muted;
-}
-
-.page-sidebar-bottom {
-    flex-shrink: 0;
-    padding: 10px 12px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.page-sidebar-menu-btn {
-    flex: 1 1 auto;
-    width: auto;
-    min-width: 0;
-    height: 36px;
-    border: none;
-    border-radius: $radius-sm;
-    background: transparent;
-    color: $text-secondary;
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 8px;
-    padding: 8px 10px;
-    cursor: pointer;
-    transition:
-        background-color $transition-fast,
-        color $transition-fast;
-
-    &:hover {
-        background: rgba(var(--accent-primary-rgb), 0.06);
-        color: $text-primary;
-    }
-
-    span {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 13px;
-        line-height: 18px;
-    }
 }
 
 // ─── Chat Main ──────────────────────────────────────────
@@ -4878,14 +4010,20 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     margin: 10px 10px 10px 0;
     overflow: hidden;
-    background-color: $bg-main-surface;
-    border: 1px solid $border-color;
-    border-radius: 14px;
+    background-color: var(--theme-content-bg, $bg-main-surface);
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 14px);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
     position: relative;
 
     &--sidebar-collapsed {
         margin-inline-start: 10px;
+    }
+
+    // The member rail and conversation paint their own regional surfaces.
+    // Do not tint the sidebar rail with another content background beneath it.
+    &--with-room {
+        background-color: transparent;
     }
 }
 
@@ -4906,11 +4044,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     align-items: center;
     width: 72px;
     min-height: 0;
-    padding: 12px 0;
+    padding: calc(12px * var(--spacing-scale, 1)) 0;
     overflow: hidden;
     box-sizing: border-box;
-    border-inline-end: 1px solid $border-color;
-    background: rgba(var(--bg-main-surface-rgb), 0.55);
+    border-inline-end: var(--border-width, 1px) solid $border-color;
+    background: var(--theme-sidebar-bg, $bg-sidebar-surface);
 }
 
 .agent-avatar-rail-trigger {
@@ -4920,7 +4058,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 1;
     width: 100%;
     min-height: 0;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     overflow-x: hidden;
     overflow-y: auto;
     scrollbar-width: none;
@@ -4928,64 +4066,6 @@ export default defineComponent({ components: { CreateRoomForm } })
     &::-webkit-scrollbar {
         display: none;
     }
-}
-
-.chat-main--drop-active::after {
-    content: "";
-    position: absolute;
-    inset: 12px;
-    z-index: 30;
-    pointer-events: none;
-    border: 2px dashed var(--accent-info);
-    border-radius: 8px;
-    background: rgba(var(--accent-info-rgb), 0.05);
-}
-
-.chat-drop-overlay {
-    position: absolute;
-    inset: 12px;
-    z-index: 31;
-    pointer-events: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-}
-
-.chat-drop-overlay__card {
-    min-width: 220px;
-    max-width: min(360px, 100%);
-    padding: 18px 22px;
-    border-radius: 16px;
-    border: 1px solid rgba(var(--accent-info-rgb), 0.25);
-    background: rgba(15, 23, 42, 0.9);
-    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.24);
-    backdrop-filter: blur(8px);
-    text-align: center;
-}
-
-.chat-drop-overlay__icon {
-    width: 48px;
-    height: 48px;
-    margin: 0 auto 10px;
-    border-radius: 14px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(var(--accent-info-rgb), 0.14);
-    color: var(--accent-info);
-}
-
-.chat-drop-overlay__title {
-    font-size: 15px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.96);
-}
-
-.chat-drop-overlay__hint {
-    margin-top: 6px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.72);
 }
 
 .agent-avatar-rail-item {
@@ -4999,7 +4079,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     padding: 0;
     overflow: visible;
     box-sizing: border-box;
-    border: 1px solid rgba(var(--text-primary-rgb), 0.12);
+    border: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.12);
     border-radius: 50%;
     background: $bg-secondary;
     cursor: pointer;
@@ -5028,7 +4108,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .agent-avatar-rail-agent .agent-avatar {
     box-sizing: border-box;
-    border: 1px solid #fff;
+    border: var(--border-width, 1px) solid #fff;
 }
 
 .agent-owner-avatar-badge {
@@ -5045,7 +4125,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     box-sizing: border-box;
     border: 2px solid $bg-main-surface;
     border-radius: 50%;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
     pointer-events: none;
 }
@@ -5076,14 +4156,14 @@ export default defineComponent({ components: { CreateRoomForm } })
 .agent-avatar-activity-popover {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     max-width: 280px;
 }
 
 .agent-avatar-activity-text {
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.4);
 }
 
 .agent-avatar-stop {
@@ -5091,16 +4171,16 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    gap: 5px;
+    gap: calc(5px * var(--spacing-scale, 1));
     height: 26px;
-    padding: 0 9px;
-    border: 1px solid rgba(var(--error-rgb), 0.24);
+    padding: 0 calc(9px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid rgba(var(--error-rgb), 0.24);
     border-radius: $radius-sm;
     color: $error;
     background: rgba(var(--error-rgb), 0.08);
     cursor: pointer;
-    font-size: 12px;
-    line-height: 1;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1);
     transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
 
     &:hover {
@@ -5206,7 +4286,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     height: 34px;
     margin-top: 10px;
     padding: 0;
-    border: 1px dashed rgba(var(--accent-primary-rgb), 0.65);
+    border: var(--border-width, 1px) dashed rgba(var(--accent-primary-rgb), 0.65);
     border-radius: 50%;
     color: var(--accent-primary);
     background: rgba(var(--accent-primary-rgb), 0.08);
@@ -5227,7 +4307,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     display: flex;
     flex-direction: column;
-    background-color: $bg-main-surface;
+    background-color: var(--theme-content-bg, $bg-main-surface);
     animation: group-chat-surface-fade-in 1.5s ease both;
 }
 
@@ -5235,17 +4315,17 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     align-items: center;
     align-self: flex-start;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     width: 520px;
     max-width: calc(100% - 40px);
     min-width: 0;
     box-sizing: border-box;
     margin: 0 20px;
-    padding: 3px 8px;
+    padding: calc(3px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     color: $text-secondary;
     background: rgba(0, 0, 0, 0.03);
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
     &.is-success {
         color: #52c41a;
@@ -5260,7 +4340,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 0 1 auto;
     min-width: 0;
     color: $text-secondary;
-    font-family: $font-code;
+    font-family: var(--font-code, $font-code);
     white-space: nowrap;
 }
 
@@ -5312,8 +4392,8 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-height: 0;
     overflow: visible;
     display: flex;
-    background: $bg-card;
-    border-inline-start: 1px solid $border-color;
+    background: var(--theme-card-bg, $bg-card);
+    border-inline-start: var(--border-width, 1px) solid $border-color;
 }
 
 .tool-panel-enter-active,
@@ -5365,8 +4445,8 @@ export default defineComponent({ components: { CreateRoomForm } })
         width: 12px;
         height: 38px;
         transform: translateY(-50%);
-        border-radius: 6px;
-        border: 1px solid $border-color;
+        border-radius: var(--radius-component, 6px);
+        border: var(--border-width, 1px) solid $border-color;
         background:
             linear-gradient($text-muted, $text-muted) center 12px / 6px 1px no-repeat,
             linear-gradient($text-muted, $text-muted) center 19px / 6px 1px no-repeat,
@@ -5391,7 +4471,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .group-tool-tabs {
@@ -5402,10 +4482,10 @@ export default defineComponent({ components: { CreateRoomForm } })
     order: 2;
     width: 48px;
     height: 100%;
-    gap: 4px;
-    padding: 8px 6px;
-    border-inline-start: 1px solid $border-color;
-    background: $bg-sidebar-surface;
+    gap: calc(4px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+    border-inline-start: var(--border-width, 1px) solid $border-color;
+    background: var(--theme-sidebar-bg, $bg-sidebar-surface);
     box-sizing: border-box;
 }
 
@@ -5461,34 +4541,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
 
     > * {
         height: 100%;
         min-height: 0;
-    }
-
-    .delivery-usage-bar {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-wrap: wrap;
-        padding: 6px 10px;
-        font-size: 12px;
-        border-bottom: 1px solid rgba(127, 127, 127, 0.15);
-
-        .delivery-usage-text {
-            color: var(--text-secondary, #888);
-        }
-
-        .delivery-usage-warn {
-            color: $warning;
-            font-weight: 600;
-        }
-
-        &.over {
-            background-color: rgba(240, 160, 32, 0.08);
-        }
     }
 }
 
@@ -5497,11 +4554,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    padding: 24px;
+    gap: calc(12px * var(--spacing-scale, 1));
+    padding: calc(24px * var(--spacing-scale, 1));
     color: $text-muted;
     text-align: center;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 
     > svg {
         color: $text-secondary;
@@ -5570,16 +4627,16 @@ export default defineComponent({ components: { CreateRoomForm } })
     z-index: 30;
     pointer-events: none;
     border: 2px dashed var(--accent-info);
-    border-radius: 8px;
+    border-radius: var(--radius-component, 8px);
     background: rgba(var(--accent-info-rgb), 0.05);
 }
 
 .chat-header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 21px 20px;
-    border-bottom: 1px solid $border-color;
+    gap: calc(12px * var(--spacing-scale, 1));
+    padding: calc(21px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
+    border-bottom: var(--border-width, 1px) solid $border-color;
 
     .icon-btn {
         width: 28px;
@@ -5593,14 +4650,14 @@ export default defineComponent({ components: { CreateRoomForm } })
     .header-left {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: calc(8px * var(--spacing-scale, 1));
         overflow: hidden;
         flex: 1;
         min-width: 0;
     }
 
     .room-title-text {
-        font-size: 16px;
+        font-size: calc(var(--font-size-base, 14px) * 16 / 14);
         font-weight: 600;
         color: $text-primary;
         white-space: nowrap;
@@ -5612,53 +4669,20 @@ export default defineComponent({ components: { CreateRoomForm } })
     .header-info {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: calc(8px * var(--spacing-scale, 1));
         flex-shrink: 0;
-    }
-
-    .workspace-badge {
-        border: 0;
-        font-size: 11px;
-        line-height: 16px;
-        color: $text-muted;
-        background: rgba(255, 255, 255, 0.05);
-        padding: 2px 8px;
-        border-radius: 4px;
-        max-width: 160px;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        overflow: hidden;
-        cursor: pointer;
-        flex-shrink: 0;
-
-        svg {
-            flex: 0 0 auto;
-        }
-
-        span {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        &:hover {
-            color: $text-secondary;
-            background: rgba(var(--accent-primary-rgb), 0.06);
-        }
     }
 
     .member-count {
-        font-size: 12px;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
         color: $text-muted;
     }
 
     .member-count-toggle {
         display: inline-flex;
         align-items: center;
-        gap: 3px;
-        padding: 3px 5px;
+        gap: calc(3px * var(--spacing-scale, 1));
+        padding: calc(3px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
         border: 0;
         border-radius: $radius-sm;
         background: transparent;
@@ -5702,7 +4726,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
+    gap: calc(16px * var(--spacing-scale, 1));
     color: $text-muted;
 
     .no-room-icon {
@@ -5710,7 +4734,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
     p {
-        font-size: 14px;
+        font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     }
 }
 
@@ -5746,9 +4770,9 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .modal {
-    background: $bg-card;
+    background: var(--theme-card-bg, $bg-card);
     border-radius: $radius-lg;
-    padding: 24px;
+    padding: calc(24px * var(--spacing-scale, 1));
     width: 400px;
     max-width: 90vw;
     max-height: calc(100vh - 32px);
@@ -5757,23 +4781,28 @@ export default defineComponent({ components: { CreateRoomForm } })
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
 
     h3 {
-        font-size: 16px;
+        font-size: calc(var(--font-size-base, 14px) * 16 / 14);
         font-weight: 600;
         color: $text-primary;
         margin: 0 0 20px;
     }
 }
 
-.file-input {
-    display: none;
+.agent-form-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: calc(10px * var(--spacing-scale, 1));
+    padding: calc(12px * var(--spacing-scale, 1));
+    margin-bottom: 18px;
+    border-radius: $radius-md;
+    background: rgba(var(--text-primary-rgb), 0.03);
+    color: $text-secondary;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .agent-preset-entry {
     margin-bottom: 18px;
-}
-
-.agent-preset-dialog-backdrop {
-    z-index: 1010;
 }
 
 .agent-preset-dialog {
@@ -5783,7 +4812,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 .agent-preset-dialog-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     max-height: 320px;
     margin-top: 12px;
     overflow-y: auto;
@@ -5793,13 +4822,13 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 3px;
+    gap: calc(3px * var(--spacing-scale, 1));
     width: 100%;
-    padding: 11px 12px;
-    border: 1px solid $border-color;
+    padding: calc(11px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-md;
     color: $text-primary;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
     text-align: start;
     cursor: pointer;
     transition:
@@ -5823,14 +4852,14 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .agent-preset-dialog-row-name {
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     font-weight: 600;
 }
 
 .agent-preset-dialog-row-config,
 .agent-preset-dialog-row-error {
-    font-size: 11px;
-    line-height: 1.45;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+    line-height: var(--line-height, 1.45);
     overflow-wrap: anywhere;
 }
 
@@ -5846,10 +4875,10 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     margin-top: 12px;
-    padding: 28px 16px;
-    border: 1px dashed $border-color;
+    padding: calc(28px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) dashed $border-color;
     border-radius: $radius-md;
     color: $text-muted;
     text-align: center;
@@ -5862,7 +4891,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 .agent-preset-management-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     margin-top: 14px;
 }
 
@@ -5875,24 +4904,24 @@ export default defineComponent({ components: { CreateRoomForm } })
 
     h4 {
         margin: 0 0 12px;
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         font-weight: 600;
         color: $text-primary;
     }
 }
 
 .pending-agent-pairings-section {
-    padding: 12px;
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.3);
-    border-radius: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.3);
+    border-radius: var(--radius-component, 12px);
     background: rgba(var(--accent-primary-rgb), 0.06);
 }
 
 .pending-agent-pairing-card {
-    padding: 10px;
-    border: 1px solid $border-color;
-    border-radius: 10px;
-    background: $bg-main-surface;
+    padding: calc(10px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 10px);
+    background: var(--theme-content-bg, $bg-main-surface);
 
     & + & {
         margin-top: 10px;
@@ -5905,8 +4934,8 @@ export default defineComponent({ components: { CreateRoomForm } })
     p {
         margin: 6px 0 10px;
         color: $text-secondary;
-        font-size: 12px;
-        line-height: 1.5;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+        line-height: var(--line-height, 1.5);
         overflow-wrap: anywhere;
     }
 }
@@ -5914,19 +4943,19 @@ export default defineComponent({ components: { CreateRoomForm } })
 .agent-pairing-header-button {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     min-height: 30px;
-    padding: 0 9px;
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.32);
+    padding: 0 calc(9px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.32);
     border-radius: 999px;
     color: var(--accent-primary);
     background: rgba(var(--accent-primary-rgb), 0.08);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     cursor: pointer;
 
     strong {
         min-width: 18px;
-        padding: 1px 5px;
+        padding: calc(1px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
         border-radius: 999px;
         color: #fff;
         background: var(--accent-primary);
@@ -5946,12 +4975,12 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 18px;
+    gap: calc(18px * var(--spacing-scale, 1));
     margin-bottom: 14px;
 
     strong {
         color: $text-primary;
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         font-weight: 600;
     }
 
@@ -5968,7 +4997,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: calc(12px * var(--spacing-scale, 1));
 
     h4 {
         margin-bottom: 0;
@@ -5977,18 +5006,18 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .summary-config-required {
     margin: 0 0 10px;
-    padding: 8px 10px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     color: #d97706;
     background: rgba(217, 119, 6, 0.1);
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.5);
 }
 
 .summary-status {
-    padding: 3px 8px;
+    padding: calc(3px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     border-radius: 999px;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     background: rgba(var(--text-primary-rgb), 0.06);
 
@@ -6008,181 +5037,18 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 }
 
-.discussion-banner {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin: 0 0 8px;
-    padding: 8px 12px;
-    border-radius: $radius-sm;
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.25);
-    background: rgba(var(--accent-primary-rgb), 0.08);
-
-    .discussion-banner-dot {
-        width: 8px;
-        height: 8px;
-        flex: none;
-        border-radius: 50%;
-        background: var(--accent-primary);
-        animation: discussion-pulse 1.6s ease-in-out infinite;
-    }
-
-    .discussion-banner-info {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 12px;
-        line-height: 1.5;
-    }
-
-    .discussion-banner-title {
-        flex: none;
-        font-weight: 600;
-        color: var(--accent-primary);
-    }
-
-    .discussion-banner-round {
-        flex: none;
-        color: $text-muted;
-    }
-
-    .discussion-banner-note {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: $text-secondary;
-    }
-}
-
-@keyframes discussion-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
-}
-
-.discussion-status {
-    padding: 3px 8px;
-    border-radius: 999px;
-    font-size: 11px;
-    color: $text-muted;
-    background: rgba(var(--text-primary-rgb), 0.06);
-
-    &.is-running,
-    &.is-pending {
-        color: var(--accent-primary);
-        background: rgba(var(--accent-primary-rgb), 0.12);
-    }
-
-    &.is-converged {
-        color: #36ad6a;
-        background: rgba(54, 173, 106, 0.12);
-    }
-
-    &.is-stopped,
-    &.is-max_rounds,
-    &.is-failed {
-        color: #d03050;
-        background: rgba(208, 48, 80, 0.12);
-    }
-}
-
-.discussion-limit-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-}
-
-.discussion-attachment-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
-}
-
-.discussion-attachment-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    max-width: 100%;
-    padding: 2px 8px;
-    border-radius: 6px;
-    background: rgba(var(--accent-primary-rgb), 0.12);
-    font-size: 12px;
-    line-height: 20px;
-
-    span:first-child {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-}
-
-.discussion-attachment-remove {
-    cursor: pointer;
-    color: $text-muted;
-    font-weight: bold;
-    padding: 0 2px;
-
-    &:hover {
-        color: #d03050;
-    }
-}
-
-.discussion-result {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid rgba(var(--text-primary-rgb), 0.08);
-
-    .discussion-meta {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 6px;
-        color: $text-muted;
-        font-size: 11px;
-    }
-
-    .discussion-converged {
-        color: #36ad6a;
-        font-weight: 600;
-    }
-
-    .discussion-note {
-        color: $text-secondary;
-        font-size: 12px;
-        line-height: 1.6;
-    }
-}
-
-.discussion-needs-agents {
-    margin-top: 8px;
-    text-align: center;
-}
-
-.discussion-banner-enter-active,
-.discussion-banner-leave-active {
-    transition: opacity 0.2s ease, transform 0.2s ease;
-}
-
-.discussion-banner-enter-from,
-.discussion-banner-leave-to {
-    opacity: 0;
-    transform: translateY(-4px);
-}
-
 .summary-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 14px;
+    gap: calc(6px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
     margin: 10px 0;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
     > span {
         display: inline-flex;
         align-items: baseline;
-        gap: 4px;
+        gap: calc(4px * var(--spacing-scale, 1));
     }
 
     strong {
@@ -6197,11 +5063,11 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .summary-error {
     margin-bottom: 12px;
-    padding: 8px 10px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     color: #d03050;
     background: rgba(208, 48, 80, 0.08);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     overflow-wrap: anywhere;
 }
 
@@ -6209,13 +5075,13 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     margin-bottom: 14px;
-    padding: 10px;
-    border: 1px solid $border-color;
+    padding: calc(10px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-sm;
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
     strong,
     span {
@@ -6238,7 +5104,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .summary-loading {
-    padding: 20px 0;
+    padding: calc(20px * var(--spacing-scale, 1)) 0;
     color: $text-muted;
     text-align: center;
 }
@@ -6250,10 +5116,10 @@ export default defineComponent({ components: { CreateRoomForm } })
 .group-agent-avatar-editor {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: calc(14px * var(--spacing-scale, 1));
     margin-bottom: 18px;
-    padding: 12px;
-    border: 1px solid $border-color;
+    padding: calc(12px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-md;
     background: rgba(var(--text-primary-rgb), 0.02);
 }
@@ -6270,14 +5136,14 @@ export default defineComponent({ components: { CreateRoomForm } })
 .group-agent-avatar-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .group-agent-avatar-hint {
     display: block;
     margin-top: 6px;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .group-agent-avatar-file {
@@ -6286,7 +5152,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .form-label {
     display: block;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     font-weight: 500;
     color: $text-secondary;
     margin-bottom: 6px;
@@ -6294,7 +5160,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .code-row {
     display: flex;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     align-items: center;
 }
 
@@ -6306,15 +5172,22 @@ export default defineComponent({ components: { CreateRoomForm } })
     margin-top: 12px;
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
 }
 
-.agent-modal-actions {
-    justify-content: space-between;
+.agent-drawer-actions {
+    display: flex;
+    width: 100%;
+    justify-content: flex-end;
+    gap: calc(8px * var(--spacing-scale, 1));
+
+    &.is-editing {
+        justify-content: space-between;
+    }
 }
 
 .form-hint {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     margin: 4px 0 0;
 }
@@ -6359,16 +5232,16 @@ export default defineComponent({ components: { CreateRoomForm } })
 
     .room-sidebar {
         position: absolute;
-        left: 10px;
-        top: 10px;
-        bottom: 10px;
+        left: 0;
+        top: 0;
+        bottom: 0;
         height: auto;
         margin: 0;
         z-index: 100;
     }
 
     .chat-header {
-        padding: 16px 12px 16px 52px;
+        padding: calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) 52px;
     }
 
     .group-summary-inline-status {
@@ -6379,7 +5252,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     .agent-avatar-rail {
         flex-basis: 68px;
         width: 68px;
-        padding: 10px 0;
+        padding: calc(10px * var(--spacing-scale, 1)) 0;
     }
 
     .agent-avatar-rail-item {
@@ -6407,4 +5280,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
 }
+</style>
+
+<style scoped lang="scss">
+.summary-review { margin: 12px 0; padding: calc(12px * var(--spacing-scale, 1)); border: var(--border-width, 1px) solid var(--border-color); border-radius: var(--radius-component, 8px); display: grid; gap: calc(6px * var(--spacing-scale, 1)); }
+.summary-review.is-pass { border-color: #18a058; }
+.summary-review.is-needs_improvement { border-color: #f0a020; }
+.summary-review ul { margin: 0; padding-inline-start: calc(20px * var(--spacing-scale, 1)); }
 </style>

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { runUpdatePreflight } from '../../packages/server/src/services/update/preflight'
+import { runUpdatePreflight } from '../../packages/server/src/modules/studio/services/update/preflight'
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'hermes-preflight-test-'))

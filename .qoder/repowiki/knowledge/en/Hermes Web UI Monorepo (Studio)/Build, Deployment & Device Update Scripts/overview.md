@@ -1,1 +1,0 @@
-Node.js, Bash, and Python scripts that build the server/desktop packages, generate OpenAPI specs, package and deploy Hermes Web UI to Armbian devices, manage device images, and orchestrate in-place updates via systemd services.

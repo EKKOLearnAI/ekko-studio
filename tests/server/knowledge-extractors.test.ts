@@ -23,7 +23,7 @@ import {
   extract,
   getExtractor,
   registerExtractor,
-} from '../../packages/server/src/services/knowledge/extractors'
+} from '../../packages/server/src/modules/studio/services/knowledge/extractors/index'
 
 let tempDir: string
 

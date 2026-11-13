@@ -61,8 +61,8 @@ defineProps<{
   display: flex;
   max-width: 360px;
   flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  line-height: 1.5;
+  gap: calc(4px * var(--spacing-scale, 1));
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+  line-height: var(--line-height, 1.5);
 }
 </style>

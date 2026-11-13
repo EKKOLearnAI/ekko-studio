@@ -25,7 +25,7 @@ const status = {
   error: null as string | null,
 }
 
-vi.mock('../../packages/server/src/services/meeting-asr', () => ({
+vi.mock('../../packages/server/src/modules/studio/services/meeting-asr', () => ({
   meetingASRService: {
     get status() {
       return status
@@ -37,7 +37,7 @@ import {
   getFileTranscriptionStatus,
   startFileTranscription,
   proxyHealthCheck,
-} from '../../packages/server/src/controllers/hermes/meeting-asr'
+} from '../../packages/server/src/modules/studio/controllers/meeting-asr'
 
 const captured: { path: string; body: Buffer }[] = []
 let server: Server

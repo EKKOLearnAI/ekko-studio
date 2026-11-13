@@ -1,4 +1,5 @@
-import { mkdtempSync, tmpdir } from 'os'
+import { tmpdir } from 'os'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -6,14 +7,15 @@ const realtimeStoreMock = vi.hoisted(() => ({
   getRealtimeModelSetting: vi.fn(),
 }))
 
-vi.mock('../../packages/server/src/db/hermes/realtime-settings-store', () => realtimeStoreMock)
+vi.mock('../../packages/server/src/modules/studio/repositories/realtime-settings-store', () => realtimeStoreMock)
 
 import {
   callScannerOcr,
   SCANNER_DEFAULT_MODEL,
   SCANNER_IMAGE_MAX_CHARS,
   validateScannerInput,
-} from '../../packages/server/src/services/scanner/ocr'
+  resolveScannerDashScopeKey,
+} from '../../packages/server/src/modules/studio/services/scanner/ocr'
 
 const TINY_JPEG_BASE64 =
   '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAr/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AL+AB//Z'
@@ -190,4 +192,27 @@ describe('scanner ocr key resolution', () => {
       realtimeStoreMock.getRealtimeModelSetting.mockReset()
     }
   })
+})
+
+
+it('recovers the shared ASR key from the canonical state alias when no data-dir override exists', async () => {
+  const stateDir = mkdtempSync(join(tmpdir(), 'scanner-state-key-'))
+  const original = { ...process.env }
+  realtimeStoreMock.getRealtimeModelSetting.mockReturnValue(null)
+  delete process.env.MEETING_ASR_DATA_DIR
+  delete process.env.HERMES_WEB_UI_HOME
+  delete process.env.DASHSCOPE_API_KEY
+  process.env.HERMES_WEBUI_STATE_DIR = stateDir
+  mkdirSync(join(stateDir, 'meeting-asr'))
+  writeFileSync(join(stateDir, 'meeting-asr', 'config.env'), 'DASHSCOPE_API_KEY=sk-state-alias-test\n')
+  try {
+    expect(await resolveScannerDashScopeKey(undefined, 'default')).toBe('sk-state-alias-test')
+  } finally {
+    for (const key of ['MEETING_ASR_DATA_DIR', 'HERMES_WEB_UI_HOME', 'HERMES_WEBUI_STATE_DIR', 'DASHSCOPE_API_KEY']) {
+      if (original[key] === undefined) delete process.env[key]
+      else process.env[key] = original[key]
+    }
+    realtimeStoreMock.getRealtimeModelSetting.mockReset()
+    rmSync(stateDir, { recursive: true, force: true })
+  }
 })

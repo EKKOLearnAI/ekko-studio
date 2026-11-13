@@ -1,11 +1,13 @@
-import { getApiKey } from '@/api/client'
+import { getApiKey, getBaseUrl, getActiveProfileName } from '@/api/client'
 
-const API_BASE = '/api/meeting-storage'
+const API_BASE = '/api/studio/meeting-storage'
 
 function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
+  const profile = getActiveProfileName()
+  if (profile) headers['X-Hermes-Profile'] = profile
   const apiKey = getApiKey()
   if (apiKey) {
     headers['Authorization'] = `Bearer ${apiKey}`
@@ -36,7 +38,7 @@ export const meetingStorageApi = {
   // Meeting metadata
   async getMeeting(meetingId: string): Promise<MeetingData | null> {
     try {
-      const response = await fetch(`${API_BASE}/${meetingId}`, {
+      const response = await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}`, {
         headers: getAuthHeaders(),
       })
       if (response.status === 404) return null
@@ -47,7 +49,7 @@ export const meetingStorageApi = {
   },
 
   async saveMeeting(meetingId: string, data: MeetingData): Promise<void> {
-    await fetch(`${API_BASE}/${meetingId}`, {
+    await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
@@ -55,14 +57,14 @@ export const meetingStorageApi = {
   },
 
   async deleteMeeting(meetingId: string): Promise<void> {
-    await fetch(`${API_BASE}/${meetingId}`, {
+    await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
     })
   },
 
   async listMeetings(): Promise<string[]> {
-    const response = await fetch(API_BASE, {
+    const response = await fetch(`${getBaseUrl()}${API_BASE}`, {
       headers: getAuthHeaders(),
     })
     const data = await response.json()
@@ -89,7 +91,7 @@ export const meetingStorageApi = {
     const headers = getAuthHeaders()
     delete headers['Content-Type'] // Let browser set it with boundary
     
-    await fetch(`${API_BASE}/${meetingId}/audio`, {
+    await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}/audio`, {
       method: 'POST',
       headers,
       body: audioBlob,
@@ -98,7 +100,7 @@ export const meetingStorageApi = {
 
   async downloadAudio(meetingId: string): Promise<Blob | null> {
     try {
-      const response = await fetch(`${API_BASE}/${meetingId}/audio`, {
+      const response = await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}/audio`, {
         headers: getAuthHeaders(),
       })
       if (response.status === 404) return null
@@ -110,7 +112,7 @@ export const meetingStorageApi = {
 
   // Transcript
   async saveTranscript(meetingId: string, sentences: any[]): Promise<void> {
-    await fetch(`${API_BASE}/${meetingId}/transcript`, {
+    await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}/transcript`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify(sentences),
@@ -119,7 +121,7 @@ export const meetingStorageApi = {
 
   async getTranscript(meetingId: string): Promise<any[]> {
     try {
-      const response = await fetch(`${API_BASE}/${meetingId}/transcript`, {
+      const response = await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}/transcript`, {
         headers: getAuthHeaders(),
       })
       const data = await response.json()
@@ -131,7 +133,7 @@ export const meetingStorageApi = {
 
   // JSON report
   async saveJsonReport(meetingId: string, data: any): Promise<void> {
-    await fetch(`${API_BASE}/${meetingId}/json`, {
+    await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}/json`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
@@ -140,7 +142,7 @@ export const meetingStorageApi = {
 
   async downloadJsonReport(meetingId: string): Promise<any | null> {
     try {
-      const response = await fetch(`${API_BASE}/${meetingId}/json`, {
+      const response = await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}/json`, {
         headers: getAuthHeaders(),
       })
       if (response.status === 404) return null
@@ -152,7 +154,7 @@ export const meetingStorageApi = {
 
   // HTML report
   async saveHtmlReport(meetingId: string, html: string): Promise<void> {
-    await fetch(`${API_BASE}/${meetingId}/html`, {
+    await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}/html`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify({ html }),
@@ -161,7 +163,7 @@ export const meetingStorageApi = {
 
   async downloadHtmlReport(meetingId: string): Promise<string | null> {
     try {
-      const response = await fetch(`${API_BASE}/${meetingId}/html`, {
+      const response = await fetch(`${getBaseUrl()}${API_BASE}/${meetingId}/html`, {
         headers: getAuthHeaders(),
       })
       if (response.status === 404) return null

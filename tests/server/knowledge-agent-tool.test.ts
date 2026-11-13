@@ -14,8 +14,8 @@ import {
   KNOWLEDGE_SEARCH_TOOL,
   getKnowledgeToolDefinition,
   KnowledgeToolError,
-} from '../../packages/server/src/services/knowledge/knowledge-tool'
-import type { KnowledgeService } from '../../packages/server/src/services/knowledge/knowledge.service'
+} from '../../packages/server/src/modules/studio/services/knowledge/knowledge-tool'
+import type { KnowledgeService } from '../../packages/server/src/modules/studio/services/knowledge/knowledge.service'
 
 // --- Tool definition tests ------------------------------------------------
 

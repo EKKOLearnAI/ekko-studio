@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NSelect, NSwitch } from 'naive-ui'
+import { NSelect, NSwitch, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import SettingRow from './SettingRow.vue'
-import { useMessage } from '@/composables/useAppMessage'
-import { getProfileDisplayName } from '@/utils/hermes/profile-display'
 
 const settingsStore = useSettingsStore()
 const profilesStore = useProfilesStore()
 const message = useMessage()
 const { t } = useI18n()
+withDefaults(defineProps<{ standalone?: boolean }>(), {
+  standalone: false,
+})
 
-const enabled = computed(() => settingsStore.gatewayAutoStart.enabled !== false)
+const enabled = computed(() => settingsStore.gatewayAutoStart.enabled === true)
 const mode = computed(() => Array.isArray(settingsStore.gatewayAutoStart.include) ? 'include' : 'all')
 const managementEnabled = computed(() => settingsStore.gatewayAutoStart.management === 'unified')
 const includeProfiles = computed(() => settingsStore.gatewayAutoStart.include || [])
@@ -21,7 +22,7 @@ const excludeProfiles = computed(() => settingsStore.gatewayAutoStart.exclude ||
 const isDefaultProfile = computed(() => (profilesStore.activeProfileName || profilesStore.activeProfile?.name || 'default') === 'default')
 const profileOptions = computed(() =>
   profilesStore.profiles.map(profile => ({
-    label: getProfileDisplayName(profile),
+    label: profile.name,
     value: profile.name,
   })),
 )
@@ -74,7 +75,7 @@ function saveExclude(value: string[]) {
 </script>
 
 <template>
-  <section class="settings-section gateway-auto-start-settings">
+  <section class="settings-section gateway-auto-start-settings" :class="{ standalone }">
     <h3 class="section-title">{{ t('settings.gatewayAutoStart.title') }}</h3>
     <p class="section-hint">{{ t('settings.gatewayAutoStart.description') }}</p>
 
@@ -144,13 +145,19 @@ function saveExclude(value: string[]) {
 }
 
 .gateway-auto-start-settings {
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color);
+  padding-top: calc(16px * var(--spacing-scale, 1));
+  border-top: var(--border-width, 1px) solid var(--border-color);
+
+  &.standalone {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+  }
 }
 
 .section-title {
   margin: 0 0 6px;
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 600;
   color: var(--text-color);
 }
@@ -158,7 +165,7 @@ function saveExclude(value: string[]) {
 .section-hint {
   margin: 0 0 12px;
   color: var(--text-color-secondary);
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 }
 
 .input-md {

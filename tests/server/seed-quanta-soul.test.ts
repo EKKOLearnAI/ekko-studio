@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { seedQuantaSoul, QUANTA_SOUL_TEMPLATE } from '../../packages/server/src/services/hermes/profiles/seed-quanta-soul'
+import { seedQuantaSoul, QUANTA_SOUL_TEMPLATE } from '../../packages/server/src/modules/hermes/services/profiles/seed-quanta-soul'
 
 /**
  * Quanta 人格种子写入守卫：

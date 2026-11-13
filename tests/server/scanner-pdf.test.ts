@@ -6,7 +6,7 @@ import {
   encodeUtf16BeHex,
   isBilevelGray,
   packBilevel,
-} from '../../packages/server/src/services/scanner/pdf'
+} from '../../packages/server/src/modules/studio/services/scanner/pdf'
 
 /**
  * 1x1 white JPEG（编码后约 600 字节）。

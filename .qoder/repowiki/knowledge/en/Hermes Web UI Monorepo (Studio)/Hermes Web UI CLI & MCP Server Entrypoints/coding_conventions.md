@@ -1,6 +1,0 @@
-- CLI scripts use a shebang `#!/usr/bin/env node` and top-level `import` statements with `fileURLToPath(import.meta.url)` to derive `__dirname` for relative resource resolution.
-- Environment variables follow the `HERMES_WEB_UI_*` prefix convention (e.g. `HERMES_WEB_UI_HOME`, `HERMES_WEB_UI_URL`, `HERMES_WEB_UI_TOKEN`, `HERMES_WEB_UI_PROFILE`) with documented fallback chains in help text.
-- Token resolution follows a fixed priority: explicit function argument → `HERMES_WEB_UI_TOKEN` → `AUTH_TOKEN` → per-profile `.model-run-token` file → global `~/.hermes-web-ui/.token` file.
-- MCP tool definitions declare an `inputSchema` using a shared `inputSchema(properties, required)` helper that automatically injects `token` and `profile` auth fields into every tool's schema.
-- HTTP requests go through the centralized `requestEnvelope()` / `request()` helpers which normalize public headers against `ALLOWED_PUBLIC_REQUEST_HEADERS`, attach `Authorization` and `X-Hermes-Profile`, and throw typed errors on non-2xx responses.
-- Process management uses PID files under `~/.hermes-web-ui/server.pid`, log rotation at 3 MB keeping the last 2000 lines, and graceful shutdown via SIGTERM/SIGUSR2 with configurable grace periods polled through `Atomics.wait`.

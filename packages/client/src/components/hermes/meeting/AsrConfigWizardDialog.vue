@@ -327,8 +327,8 @@ defineExpose({ reset, collectConfig })
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
 
-// 与 MeetingView 同名规则保持一致（scoped 样式无法跨组件复用，
-// 后续可抽成共享 SCSS partial）。
+/* 与 MeetingView 同名规则保持一致（scoped 样式无法跨组件复用，*/
+/* 后续可抽成共享 SCSS partial）。*/
 .form-section {
   padding: 12px;
   background: rgba(var(--accent-primary-rgb), 0.03);
@@ -363,8 +363,8 @@ defineExpose({ reset, collectConfig })
   align-items: center;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
+  background: rgba(var(--success-rgb), 0.1);
+  color: var(--success);
   font-size: 11px;
   font-weight: 600;
 }
@@ -372,7 +372,7 @@ defineExpose({ reset, collectConfig })
 .form-tutorial-link {
   font-size: 12px;
   font-weight: 400;
-  color: var(--color-primary, #667eea);
+  color: var(--color-primary, var(--accent-info));
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;

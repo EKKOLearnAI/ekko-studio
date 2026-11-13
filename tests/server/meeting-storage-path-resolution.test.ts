@@ -7,7 +7,7 @@
  * `HERMES_WEBUI_STATE_DIR`, the service silently wrote meetings into the deploy
  * tree (/opt/hermes-web-ui/src/meetings) while the audio had been uploaded into
  * the real home (/home/hermesui/.hermes-web-ui/meetings) — producing 404s on
- * /api/meeting-storage/:id/audio with zero log trail.
+ * /api/studio/meeting-storage/:id/audio with zero log trail.
  *
  * This test pins:
  *   - HERMES_WEB_UI_HOME takes priority when set
@@ -48,7 +48,7 @@ describe('MeetingStorageService baseDir resolution', () => {
     const home = mkdtempSync(join(tmpdir(), 'ms-home-'))
     process.env.HERMES_WEB_UI_HOME = home
 
-    const mod = await import('../../packages/server/src/services/meeting-storage/index')
+    const mod = await import('../../packages/server/src/modules/studio/services/meeting-storage/index')
     const svc = mod.MeetingStorageService.getInstance() as unknown as { baseDir: string }
     expect(svc.baseDir).toBe(join(home, 'meetings'))
     expect(existsSync(join(home, 'meetings'))).toBe(true)
@@ -60,7 +60,7 @@ describe('MeetingStorageService baseDir resolution', () => {
     const state = mkdtempSync(join(tmpdir(), 'ms-state-'))
     process.env.HERMES_WEBUI_STATE_DIR = state
 
-    const mod = await import('../../packages/server/src/services/meeting-storage/index')
+    const mod = await import('../../packages/server/src/modules/studio/services/meeting-storage/index')
     const svc = mod.MeetingStorageService.getInstance() as unknown as { baseDir: string }
     expect(svc.baseDir).toBe(join(state, 'meetings'))
     expect(existsSync(join(state, 'meetings'))).toBe(true)
@@ -74,7 +74,7 @@ describe('MeetingStorageService baseDir resolution', () => {
     process.env.HERMES_WEB_UI_HOME = home
     process.env.HERMES_WEBUI_STATE_DIR = state
 
-    const mod = await import('../../packages/server/src/services/meeting-storage/index')
+    const mod = await import('../../packages/server/src/modules/studio/services/meeting-storage/index')
     const svc = mod.MeetingStorageService.getInstance() as unknown as { baseDir: string }
     expect(svc.baseDir).toBe(join(home, 'meetings'))
     expect(existsSync(join(home, 'meetings'))).toBe(true)
@@ -89,7 +89,7 @@ describe('MeetingStorageService baseDir resolution', () => {
     // WorkingDirectory=/opt/hermes-web-ui — a deploy tree, not a state dir.
     const expectedHome = join(homedir(), '.hermes-web-ui', 'meetings')
 
-    const mod = await import('../../packages/server/src/services/meeting-storage/index')
+    const mod = await import('../../packages/server/src/modules/studio/services/meeting-storage/index')
     const svc = mod.MeetingStorageService.getInstance() as unknown as { baseDir: string }
     expect(svc.baseDir).toBe(expectedHome)
     // cwd should NOT be used; verify by pointing cwd at a throwaway dir
@@ -105,7 +105,7 @@ describe('MeetingStorageService baseDir resolution', () => {
     const originalCwd = process.cwd()
     process.chdir(throwaway)
     try {
-      const mod = await import('../../packages/server/src/services/meeting-storage/index')
+      const mod = await import('../../packages/server/src/modules/studio/services/meeting-storage/index')
       const svc = mod.MeetingStorageService.getInstance()
       await svc.saveMeetingMetadata('meeting-test-1', {
         id: 'meeting-test-1',

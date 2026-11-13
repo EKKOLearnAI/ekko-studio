@@ -1,1 +1,0 @@
-A background bot that watches Linux USB block devices via pyudev, auto-mounts supported filesystems under a configurable mount root, and emits structured device events over stdout for the Hermes web UI.

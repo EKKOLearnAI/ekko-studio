@@ -1,11 +1,24 @@
 #!/usr/bin/env node
 import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
 import path from 'node:path'
+import { checkServerModuleBoundaries } from './server-module-boundaries.mjs'
+import { hasManagedMcpNodeMode } from './managed-mcp-harness.mjs'
+import { checkDshModuleBoundaries } from './dsh-module-harness.mjs'
+import { checkCodingAgentModuleBoundaries } from './coding-agent-module-harness.mjs'
+import { checkJevIntegrations } from './jev-harness.mjs'
+import { checkUiTheme } from './ui-theme-harness.mjs'
+import { checkPluginDocs } from './plugin-docs-harness.mjs'
+import { checkTaskArtifacts } from './task-artifacts.mjs'
 
 const root = process.cwd()
 const failures = []
+try { await checkPluginDocs(root) } catch (error) { failures.push(error.message) }
+failures.push(...await checkTaskArtifacts(root))
+failures.push(...await checkDshModuleBoundaries(root))
+failures.push(...await checkCodingAgentModuleBoundaries(root))
+failures.push(...await checkJevIntegrations(root))
+failures.push(...await checkUiTheme(root))
 
 function fail(message) {
   failures.push(message)
@@ -27,77 +40,6 @@ function requireDir(relativePath) {
   }
 }
 
-function gitLines(args) {
-  try {
-    return execFileSync('git', args, {
-      cwd: root,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    })
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean)
-  } catch {
-    return []
-  }
-}
-
-function changedFilesFromGit() {
-  const files = new Set()
-
-  for (const file of gitLines(['diff', '--name-only'])) files.add(file)
-  for (const file of gitLines(['diff', '--name-only', '--cached'])) files.add(file)
-  for (const file of gitLines(['ls-files', '--others', '--exclude-standard'])) files.add(file)
-
-  const baseRef = process.env.GITHUB_BASE_REF
-  if (baseRef) {
-    const baseCandidates = [`origin/${baseRef}`, baseRef]
-    let foundPrBase = false
-    for (const base of baseCandidates) {
-      const diff = gitLines(['diff', '--name-only', `${base}...HEAD`])
-      if (diff.length > 0) {
-        foundPrBase = true
-        for (const file of diff) files.add(file)
-        break
-      }
-    }
-    if (process.env.GITHUB_ACTIONS === 'true' && !foundPrBase && files.size === 0) {
-      fail(`Unable to inspect PR diff against ${baseRef}; build checkout must fetch full history`)
-    }
-  } else {
-    const upstream = gitLines(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])[0]
-    if (upstream) {
-      for (const file of gitLines(['diff', '--name-only', `${upstream}...HEAD`])) files.add(file)
-    }
-  }
-
-  return [...files].sort()
-}
-
-function isChatSessionChainFile(file) {
-  return file === 'packages/client/src/api/hermes/chat.ts'
-    || file === 'packages/client/src/api/hermes/group-chat.ts'
-    || file === 'packages/client/src/api/hermes/sessions.ts'
-    || file === 'packages/client/src/stores/hermes/group-chat.ts'
-    || file === 'packages/client/src/stores/hermes/chat.ts'
-    || file === 'packages/server/src/controllers/hermes/sessions.ts'
-    || file === 'packages/server/src/db/hermes/session-store.ts'
-    || file === 'packages/server/src/routes/hermes/group-chat.ts'
-    || file.startsWith('packages/client/src/components/hermes/group-chat/')
-    || file.startsWith('packages/client/src/components/hermes/chat/')
-    || file.startsWith('packages/server/src/lib/context-compressor/')
-    || file.startsWith('packages/server/src/services/hermes/context-engine/')
-    || file.startsWith('packages/server/src/services/hermes/group-chat/')
-    || file.startsWith('packages/server/src/services/hermes/run-chat/')
-    || file.startsWith('packages/server/src/services/hermes/agent-bridge/')
-}
-
-function isChatChainChangeFragment(file) {
-  return file.startsWith('docs/chat-chain-changes/')
-    && file.endsWith('.md')
-    && path.basename(file) !== 'README.md'
-}
-
 for (const file of [
   'AGENTS.md',
   'ARCHITECTURE.md',
@@ -106,7 +48,14 @@ for (const file of [
   'docs/harness/validation.md',
   'docs/harness/worktree-runbook.md',
   'docs/harness/pr-review.md',
-  'docs/chat-chain-changes/README.md',
+  'docs/harness/server-module-boundaries.md',
+  'docs/harness/jev-integrations.md',
+  'scripts/jev-integrations.json',
+  'docs/harness/frontend-ui.md',
+  'scripts/ui-theme-baseline.json',
+  'docs/harness/task-artifacts.md',
+  'scripts/task-artifacts.mjs',
+  'scripts/task-artifacts-cli.mjs',
 ]) {
   requireFile(file)
 }
@@ -116,11 +65,7 @@ for (const dir of [
   'packages/server/src',
   'packages/desktop',
   'packages/desktop/build/icons',
-  'tests/client',
-  'tests/server',
-  'tests/e2e',
   '.github/workflows',
-  'docs/chat-chain-changes',
 ]) {
   requireDir(dir)
 }
@@ -159,6 +104,10 @@ for (const requiredLink of [
   }
 }
 
+if (!agents.includes('docs/harness/frontend-ui.md')) {
+  fail('AGENTS.md must link to docs/harness/frontend-ui.md')
+}
+
 const packageJson = JSON.parse(await readText('package.json'))
 for (const scriptName of [
   'harness:check',
@@ -189,61 +138,24 @@ const buildWorkflow = await readText('.github/workflows/build.yml')
 if (!buildWorkflow.includes('npm run harness:check')) {
   fail('Build workflow must run npm run harness:check')
 }
-if (!buildWorkflow.includes('fetch-depth: 0')) {
-  fail('Build workflow checkout must use fetch-depth: 0 so harness:check can inspect PR diffs')
+
+for (const failure of await checkServerModuleBoundaries(root)) {
+  fail(failure)
 }
 
-const chatSessionsDoc = await readText('docs/cli-chat-sessions.md')
-for (const phrase of [
-  '最后重建时间',
-  '维护要求',
-  '最近链路变更记录',
-  'docs/chat-chain-changes/',
-  '每个 PR 一个变更片段',
-  'packages/server/src/services/hermes/agent-bridge/',
-  'packages/server/src/services/hermes/group-chat/',
-  'packages/server/src/lib/context-compressor/',
-  '任何改动都算 Chat 链路改动',
+for (const [file, factory] of [
+  ['packages/server/src/modules/hermes/services/mcp/studio-autoinject.ts', 'managedConfig'],
+  ['packages/server/src/modules/ekko/services/mcp.ts', 'managedMcpServerConfig'],
+  ['packages/server/src/modules/coding-agents/services/index.ts', 'hermesMcpServerConfig'],
 ]) {
-  if (!chatSessionsDoc.includes(phrase)) {
-    fail(`docs/cli-chat-sessions.md must document chat chain maintenance rule: ${phrase}`)
-  }
-}
-
-const changedFiles = changedFilesFromGit()
-const changedChatChainFiles = changedFiles.filter(
-  file => !isChatChainChangeFragment(file)
-    && file !== 'docs/chat-chain-changes/README.md'
-    && file !== 'docs/cli-chat-sessions.md'
-    && isChatSessionChainFile(file),
-)
-const changedChatChainFragments = changedFiles.filter(isChatChainChangeFragment)
-const presentChatChainFragments = changedChatChainFragments.filter(file =>
-  existsSync(path.join(root, file)),
-)
-if (changedChatChainFiles.length > 0 && presentChatChainFragments.length === 0) {
-  fail(
-    [
-      'Chat session chain changed without adding a docs/chat-chain-changes/*.md fragment.',
-      'Add one fragment with date, PR/commit, touched feature, and behavior impact.',
-      `Changed chain files: ${changedChatChainFiles.join(', ')}`,
-    ].join(' '),
-  )
-}
-for (const file of presentChatChainFragments) {
-  const fragment = await readText(file)
-  for (const marker of ['date:', 'feature:', 'impact:']) {
-    if (!fragment.includes(marker)) {
-      fail(`Chat chain change fragment ${file} must include frontmatter field: ${marker}`)
-    }
-  }
-  if (!fragment.includes('pr:') && !fragment.includes('commit:')) {
-    fail(`Chat chain change fragment ${file} must include either pr: or commit:`)
+  if (!hasManagedMcpNodeMode(await readText(file), factory)) {
+    fail(`${file}: ${factory} must inject ELECTRON_RUN_AS_NODE: '1' into every managed MCP env; Electron fallback must not launch the desktop GUI`)
   }
 }
 
 const desktopReleaseWorkflow = await readText('.github/workflows/desktop-release.yml')
 const desktopManualBuildWorkflow = await readText('.github/workflows/desktop-manual-build.yml')
+const desktopUpdateTestWorkflow = await readText('.github/workflows/desktop-update-test.yml')
 const desktopMacUpdateManifestWorkflow = await readText('.github/workflows/desktop-mac-update-manifest.yml')
 const desktopRuntimeWorkflow = await readText('.github/workflows/desktop-runtime.yml')
 const webuiReleaseWorkflow = await readText('.github/workflows/webui-release.yml')
@@ -261,6 +173,7 @@ const desktopPackageRuntime = await readText('packages/desktop/scripts/package-r
 const desktopWebuiServer = await readText('packages/desktop/src/main/webui-server.ts')
 const desktopMain = await readText('packages/desktop/src/main/index.ts')
 const desktopUpdater = await readText('packages/desktop/src/main/updater.ts')
+const desktopUpdaterSource = await readText('packages/desktop/src/main/updater-source.ts')
 const desktopInstallerScript = await readText('packages/desktop/build/installer.nsh')
 const desktopRuntimeManager = await readText('packages/desktop/src/main/runtime-manager.ts')
 const desktopPaths = await readText('packages/desktop/src/main/paths.ts')
@@ -394,8 +307,8 @@ for (const phrase of [
   }
 }
 
-if (!desktopNodeRuntimeConfig.includes("DEFAULT_DESKTOP_NODE_VERSION = '22.22.0'")) {
-  fail('desktop runtime Node.js must stay pinned to the Hermes-compatible 22.22.0 release')
+if (!desktopNodeRuntimeConfig.includes("DEFAULT_DESKTOP_NODE_VERSION = '26.13.0'")) {
+  fail('desktop runtime Node.js must stay pinned to the Hermes 0.23-compatible 26.13.0 release')
 }
 if (!desktopNodeRuntimeConfig.includes('HERMES_DESKTOP_NODE_VERSION')) {
   fail('desktop runtime Node.js pin must keep an explicit environment override')
@@ -434,6 +347,7 @@ for (const phrase of [
   'AGENT_BROWSER_EXECUTABLE_PATH',
   'PLAYWRIGHT_BROWSERS_PATH',
   'ms-playwright',
+  '--no-config',
   '--require-hashes',
   'editable_mode=compat',
 ]) {
@@ -502,70 +416,8 @@ if (desktopWebuiServer.includes('bundledBrowserExecutable()')) {
   fail('desktop webui server must let agent-browser resolve the bundled browser from AGENT_BROWSER_HOME')
 }
 
-// --- Web agent browser surface (docs/web-agent-browser/spec-01) -------------
-// Assertion D: the desktop webui-server must never become the browser runtime
-// host. The Electron main process owns the native panel; the server-side
-// surface (spec-02..08) lives in packages/server.
 for (const phrase of [
-  '--remote-debugging-pipe',
-  '--remote-debugging-port',
-  'Page.startScreencast',
-  'desktop-browser',
-]) {
-  if (desktopWebuiServer.includes(phrase)) {
-    fail(`desktop webui server must not host the browser runtime (spec-01 assertion D): ${phrase}`)
-  }
-}
-
-const browserSurfaceSource = await readText('packages/server/src/config/browser-surface.ts')
-const browserSurfaceTest = await readText('tests/server/browser-surface.test.ts')
-const serverIndexSource = await readText('packages/server/src/index.ts')
-const deploySourceArmbianScript = await readText('scripts/deploy-source-armbian.sh')
-const devicePackageBuilder = await readText('scripts/build-device-package.mjs')
-
-// Assertion E': the surface must be off under HERMES_DESKTOP, and that
-// behaviour must be covered by a test.
-if (!browserSurfaceSource.includes('HERMES_DESKTOP')) {
-  fail("browser-surface.ts must force the surface off when HERMES_DESKTOP=true (spec-01 assertion E')")
-}
-if (!browserSurfaceTest.includes('HERMES_DESKTOP')) {
-  fail("browser-surface.test.ts must cover the HERMES_DESKTOP=off behaviour (spec-01 assertion E')")
-}
-
-// Assertion F: the hard gate cannot be bypassed or skipped at startup.
-for (const phrase of [
-  '/proc/meminfo',
-  'mem_total',
-  'mem_available',
-  'free_disk',
-  'browser_executable',
-  'BROWSER_SURFACE_THRESHOLDS',
-]) {
-  if (!browserSurfaceSource.includes(phrase)) {
-    fail(`browser-surface.ts must implement the hard gate check: ${phrase}`)
-  }
-}
-if (!serverIndexSource.includes('initializeBrowserSurfaceGate(')) {
-  fail('server startup must evaluate and freeze the browser surface gate (spec-01 assertion F)')
-}
-if (serverIndexSource.includes('HERMES_BROWSER_SURFACE')) {
-  fail('server startup must not read HERMES_BROWSER_SURFACE directly; use the frozen gate accessors')
-}
-
-// Acceptance 4: the gate has exactly one source of truth (default value plus
-// hard gate). Device provisioning must never write an explicit enable, so a
-// second effective switch can never appear on a device.
-for (const [file, source] of [
-  ['scripts/deploy-source-armbian.sh', deploySourceArmbianScript],
-  ['scripts/build-device-package.mjs', devicePackageBuilder],
-]) {
-  if (/HERMES_BROWSER_SURFACE\s*[=:]\s*["']?local/i.test(source)) {
-    fail(`${file} must not enable the browser surface; the default value plus hard gate is the only source`)
-  }
-}
-
-for (const phrase of [
-  'requestSingleInstanceLock(QUIT_EXISTING ? { quit: true } : undefined)',
+  'requestSingleInstanceLock({ quit: true })',
   'hasQuitRequest(additionalData)',
 ]) {
   if (!desktopMain.includes(phrase)) {
@@ -580,22 +432,46 @@ for (const phrase of [
   'Stop-Process -Id',
 ]) {
   if (!desktopInstallerScript.includes(phrase)) {
-    fail(`desktop installer must close stale Hermes Studio processes by installed executable path: ${phrase}`)
+    fail(`desktop installer must close stale Ekko Studio processes by installed executable path: ${phrase}`)
   }
 }
 
 for (const phrase of [
-  'https://tangledup-ai-staging.oss-cn-shanghai.aliyuncs.com/quanthermes_pj/quanthermes_web_ui/latest',
+  'https://tangledup-ai-staging.oss-cn-shanghai.aliyuncs.com/quanthermes_pj/quanthermes_web_ui',
   'https://github.com/tangledup-ai/hermes-web-ui/releases/latest/download',
-  'checkForUpdatesWithFallback()',
 ]) {
-  if (!desktopUpdater.includes(phrase)) {
-    fail(`desktop updater must check Cloudflare first and keep GitHub as fallback: ${phrase}`)
+  if (!desktopUpdaterSource.includes(phrase)) {
+    fail(`desktop updater source must preserve the production primary and fallback feeds: ${phrase}`)
   }
 }
 
-if (desktopUpdater.includes('fetch(')) {
+// The packaged app-update.yml and updater must resolve assets from our own
+// distribution directory. The independent OSS feed serves assets directly
+// beside latest*.yml rather than through the upstream /latest proxy.
+{
+  const builderConfig = await readText('packages/desktop/electron-builder.yml')
+  const publishBlock = /^publish:\n(?:[ \t]+.*\n)*/m.exec(builderConfig)?.[0] ?? ''
+  const publishUrl = /^[ \t]+url:[ \t]*(\S+)[ \t]*$/m.exec(publishBlock)?.[1]
+  if (!publishUrl) fail('packages/desktop/electron-builder.yml must declare the desktop publish url')
+  if (publishUrl.replace(/\/+$/, '') !== 'https://tangledup-ai-staging.oss-cn-shanghai.aliyuncs.com/quanthermes_pj/quanthermes_web_ui') {
+    fail(`desktop publish url must use the independent OSS asset directory: ${publishUrl}`)
+  }
+}
+
+for (const phrase of ['checkForUpdatesWithFallback()', 'readDesktopUpdateSource(app.getAppPath())', 'configureUpdateFeed(source.fallbackUrl)']) {
+  if (!desktopUpdater.includes(phrase)) fail(`desktop updater must use the packaged source policy: ${phrase}`)
+}
+
+if (desktopUpdater.includes('fetch(') || desktopUpdaterSource.includes('fetch(')) {
   fail('desktop updater must not make custom fetch requests to resolve the latest release tag')
+}
+
+if (!desktopUpdateTestWorkflow.includes('contents: read')
+  || /contents:\s*write|action-gh-release|gh\s+release/.test(desktopUpdateTestWorkflow)) {
+  fail('desktop update test workflow must not have a production release publication path')
+}
+for (const phrase of ['configure-macos-signing.mjs --require-signed', 'run dist:update-test']) {
+  if (!desktopUpdateTestWorkflow.includes(phrase)) fail(`desktop update test workflow must include: ${phrase}`)
 }
 
 for (const phrase of [

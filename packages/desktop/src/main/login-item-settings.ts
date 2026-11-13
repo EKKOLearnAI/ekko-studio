@@ -12,8 +12,8 @@ interface LoginItemOptions {
   executablePath?: string
 }
 
-const AUTOSTART_FILENAME = 'com.quanthermes.hermeswebui.desktop'
-const MANAGED_KEY = 'X-Quanthermes-Studio-Autostart'
+const AUTOSTART_FILENAME = 'com.hermeswebui.studio.desktop'
+const MANAGED_KEY = 'X-Ekko-Studio-Autostart'
 
 function autostartPath(options: LoginItemOptions): string {
   const configHome = (options.env ?? process.env).XDG_CONFIG_HOME
@@ -109,7 +109,7 @@ export function setOpenAtLogin(app: LoginItemApp, openAtLogin: boolean, options:
   writeAutostartEntry(options, [
     '[Desktop Entry]',
     'Type=Application',
-    'Name=Quanthermes Studio',
+    'Name=Ekko Studio',
     `Exec=${command}`,
     'Terminal=false',
     'StartupNotify=false',

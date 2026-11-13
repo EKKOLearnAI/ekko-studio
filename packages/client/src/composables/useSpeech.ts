@@ -5,7 +5,7 @@ import {
   playAudioBlob,
   synthesizeSpeech,
   type TtsProviderId,
-} from '@/api/hermes/tts'
+} from '@/api/studio/tts'
 
 export interface SpeechOptions {
   lang?: string      // 语言 'zh-CN', 'en-US' 等

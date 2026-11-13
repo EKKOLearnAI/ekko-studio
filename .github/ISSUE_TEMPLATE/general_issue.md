@@ -16,7 +16,7 @@ assignees: ''
 
 ## Environment (if applicable)
 
-- Hermes Web UI Version:
-- Hermes Agent Version:
+- Ekko Studio Version:
+- Agent Runtime and Version (if applicable):
 - Operating System:
 - Node Version:

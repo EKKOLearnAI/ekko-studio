@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { NEmpty, NSpin } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import type { USBFileEntry } from '@/api/hermes/usb'
+import type { USBFileEntry } from '@/api/studio/usb'
 import { formatExplorerBytes, formatExplorerTime } from '@/utils/usb-format'
 
 const props = defineProps<{
@@ -144,7 +144,7 @@ function handleRowClick(entry: USBFileEntry, event: MouseEvent) {
   min-height: 0;
 }
 
-// 显式 grid 列宽：名称 | 大小 | 修改时间
+/* 显式 grid 列宽：名称 | 大小 | 修改时间*/
 $list-grid: minmax(0, 1fr) 110px 200px;
 
 .list-row {
@@ -173,7 +173,7 @@ $list-grid: minmax(0, 1fr) 110px 200px;
 }
 
 .list-row:hover {
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
 }
 
 .list-row.active {
@@ -187,7 +187,7 @@ $list-grid: minmax(0, 1fr) 110px 200px;
 }
 
 .list-row--head {
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   color: $text-muted;
   font-size: 11px;
   font-weight: 600;
@@ -200,7 +200,7 @@ $list-grid: minmax(0, 1fr) 110px 200px;
   z-index: 1;
 
   &:hover {
-    background: var(--bg-secondary);
+    background: var(--theme-card-bg, var(--bg-card));
   }
 }
 
@@ -275,7 +275,7 @@ $list-grid: minmax(0, 1fr) 110px 200px;
   outline: none;
 
   &:hover {
-    background: var(--bg-secondary);
+    background: var(--theme-card-bg, var(--bg-card));
     border-color: $border-light;
   }
 

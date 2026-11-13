@@ -7,7 +7,7 @@ import {
   MAX_TABS_PER_SESSION,
   browserTabCapMessage,
   type BrowserSessionCdp,
-} from '../../packages/server/src/services/browser/session'
+} from '../../packages/server/src/modules/studio/services/browser/session'
 
 type Handler = (params: any, meta: { sessionId?: string, method: string }) => void
 

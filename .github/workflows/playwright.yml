@@ -1,4 +1,4 @@
-name: Playwright
+name: E2E
 
 on:
   push:
@@ -7,17 +7,26 @@ on:
   pull_request:
     branches:
       - main
+      - base
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: playwright-${{ github.event.pull_request.number || github.ref }}
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  e2e:
-    runs-on: ubuntu-latest
+  e2e-shard:
+    name: E2E shard ${{ matrix.shard }}/4
+    # Keep the runner on an OS supported by the locked Playwright release.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -26,7 +35,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -35,18 +44,122 @@ jobs:
           npm ci --ignore-scripts
           npm rebuild node-pty
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright browser
+        run: |
+          if find tests/e2e -type f \( -name '*.spec.*' -o -name '*.test.*' \) -print -quit | grep -q .; then
+            npx playwright install --with-deps chromium
+          fi
 
       - name: Run Playwright tests
-        run: npm run test:e2e
+        env:
+          STUDIO_TASK_ARTIFACTS_DIR: ${{ runner.temp }}/studio-artifacts
+        run: npm run test:e2e -- --shard=${{ matrix.shard }}/4 --workers=1 --reporter=list,blob
 
-      - name: Upload Playwright report
+      - name: Upload shard report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: |
-            playwright-report/
-            test-results/
+          name: e2e-blob-${{ matrix.shard }}
+          path: ${{ runner.temp }}/studio-artifacts/playwright-blob/
+          if-no-files-found: error
           retention-days: 7
+
+      - name: Upload browser test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/studio-artifacts/playwright-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Check task artifact locations
+        if: ${{ !cancelled() }}
+        run: npm run artifacts:check
+
+  e2e:
+    name: E2E
+    needs: e2e-shard
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install report dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Download shard reports
+        id: shard-reports
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-blob-*
+          path: ${{ runner.temp }}/studio-artifacts/playwright-blob/
+          merge-multiple: true
+
+      # The download Action can fail to extract a valid artifact with an
+      # unexpected EOF. The REST download used by gh handles that archive.
+      - name: Recover shard reports through GitHub API
+        if: steps.shard-reports.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPORT_DIR: ${{ runner.temp }}/studio-artifacts/playwright-blob
+        shell: bash
+        run: |
+          download_dir="$RUNNER_TEMP/studio-artifacts/shard-download"
+          gh run download "$GITHUB_RUN_ID" --pattern 'e2e-blob-*' --dir "$download_dir"
+          mkdir -p "$REPORT_DIR"
+          for shard in 1 2 3 4; do
+            cp "$download_dir/e2e-blob-$shard/report-$shard.zip" "$REPORT_DIR/report-$shard.zip"
+          done
+
+      - name: Merge browser reports
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: ${{ runner.temp }}/studio-artifacts/playwright-html
+          PLAYWRIGHT_HTML_OPEN: never
+        run: npx playwright merge-reports --reporter=html "${{ runner.temp }}/studio-artifacts/playwright-blob"
+
+      - name: Upload combined browser report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: ${{ runner.temp }}/studio-artifacts/playwright-html/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Require all shards and reports
+        if: ${{ always() }}
+        env:
+          SHARD_RESULT: ${{ needs.e2e-shard.result }}
+          REPORT_DIR: ${{ runner.temp }}/studio-artifacts/playwright-blob
+        shell: bash
+        run: |
+          if [[ "$SHARD_RESULT" != "success" ]]; then
+            echo "::error::E2E shards ended with $SHARD_RESULT"
+            exit 1
+          fi
+          shopt -s nullglob
+          reports=("$REPORT_DIR"/*.zip)
+          if [[ "${#reports[@]}" -ne 4 ]]; then
+            echo "::error::Expected 4 shard reports, found ${#reports[@]}"
+            exit 1
+          fi
+
+      - name: Check task artifact locations
+        if: ${{ !cancelled() }}
+        run: npm run artifacts:check

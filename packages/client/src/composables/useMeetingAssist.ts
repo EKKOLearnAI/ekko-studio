@@ -1,6 +1,7 @@
 import { ref, onUnmounted } from 'vue'
 import { io, type Socket } from 'socket.io-client'
 import { getApiKey, getBaseUrlValue } from '@/api/client'
+import { socketEndpoint } from '@/utils/deployment-url'
 
 export interface FillerWord {
   word: string
@@ -65,7 +66,9 @@ export function useMeetingAssist(sessionId: string) {
   function connect() {
     if (socket?.connected) return
 
-    socket = io(`${getBaseUrlValue()}/meeting-assist`, {
+    const endpoint = socketEndpoint(getBaseUrlValue(), '/meeting-assist')
+    socket = io(endpoint.url, {
+      path: endpoint.path,
       auth: { token: getApiKey() },
       transports: ['websocket', 'polling'],
       reconnection: true,

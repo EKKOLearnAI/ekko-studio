@@ -2,6 +2,63 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ARCH_NAMES = ['ia32', 'x64', 'armv7l', 'arm64', 'universal']
+const EKKO_BUILTIN_SKILLS = [
+  '1password',
+  'apple-notes',
+  'apple-reminders',
+  'document-to-action-items',
+  'docx',
+  'gh-issues',
+  'github',
+  'grok-image-to-video',
+  'hermes-studio-installation',
+  'image-gen',
+  'node-inspect-debugger',
+  'obsidian',
+  'ocr-and-documents',
+  'pdf',
+  'powerpoint',
+  'python-debugpy',
+  'skill-creator',
+  'spike',
+  'tmux',
+  'video-frames',
+  'weather',
+  'xlsx',
+]
+
+const EKKO_REQUIRED_SKILL_FILES = [
+  ['hermes-studio-installation', 'references', 'coding-agents.md'],
+  ['hermes-studio-installation', 'references', 'hermes-runtime.md'],
+  ['hermes-studio-installation', 'references', 'studio.md'],
+  ['document-to-action-items', 'LICENSE'],
+  ['docx', 'LICENSE'],
+  ['docx', 'references', 'revisions-and-comments.md'],
+  ['docx', 'scripts', 'docx_create.py'],
+  ['docx', 'scripts', 'docx_edit.py'],
+  ['docx', 'scripts', 'docx_read.py'],
+  ['docx', 'scripts', 'docx_validate.py'],
+  ['grok-image-to-video', 'scripts', 'grok-image-to-video.mjs'],
+  ['image-gen', 'scripts', 'studio-image-gen.mjs'],
+  ['ocr-and-documents', 'LICENSE'],
+  ['ocr-and-documents', 'scripts', 'extract_marker.py'],
+  ['ocr-and-documents', 'scripts', 'extract_pymupdf.py'],
+  ['pdf', 'LICENSE'],
+  ['pdf', 'references', 'forms.md'],
+  ['pdf', 'scripts', 'pdf_create.py'],
+  ['pdf', 'scripts', 'pdf_page_image.py'],
+  ['pdf', 'scripts', 'pdf_read.py'],
+  ['pdf', 'scripts', 'pdf_secure.py'],
+  ['powerpoint', 'LICENSE'],
+  ['powerpoint', 'scripts', 'pptx_create.py'],
+  ['powerpoint', 'scripts', 'pptx_read.py'],
+  ['powerpoint', 'scripts', 'pptx_render.py'],
+  ['xlsx', 'LICENSE'],
+  ['xlsx', 'references', 'restructuring.md'],
+  ['xlsx', 'scripts', 'xlsx_create.py'],
+  ['xlsx', 'scripts', 'xlsx_read.py'],
+  ['xlsx', 'scripts', 'xlsx_recalc.py'],
+]
 
 function packagedResourcesDirectory(context) {
   if (context.electronPlatformName === 'darwin') {
@@ -80,6 +137,13 @@ export default async function verifyPackagedWebUi(context) {
     join(webUiRoot, 'package.json'),
     join(webUiRoot, 'bin', 'hermes-web-ui.mjs'),
     join(webUiRoot, 'dist', 'server', 'index.js'),
+    join(webUiRoot, 'dist', 'ekko-skills', 'THIRD_PARTY_NOTICES.md'),
+    ...EKKO_BUILTIN_SKILLS.map(skill => (
+      join(webUiRoot, 'dist', 'ekko-skills', skill, 'SKILL.md')
+    )),
+    ...EKKO_REQUIRED_SKILL_FILES.map(parts => (
+      join(webUiRoot, 'dist', 'ekko-skills', ...parts)
+    )),
     join(nodePtyRoot, 'package.json'),
     join(webUiRoot, 'node_modules', 'socket.io', 'package.json'),
     join(webUiRoot, 'node_modules', 'sharp', 'package.json'),

@@ -1,18 +1,16 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue'
-import { NButton, NDataTable, NForm, NFormItem, NInput, NModal, NPopconfirm, NSelect, NSpace, NTag, type DataTableColumns } from 'naive-ui'
+import { NButton, NDataTable, NForm, NFormItem, NInput, NModal, NPopconfirm, NSelect, NSpace, NTag, useMessage, type DataTableColumns } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import {
   createManagedUser,
   deleteManagedUser,
-  exportManagedUser,
   fetchManagedUsers,
   updateManagedUser,
   type ManagedUser,
   type UserRole,
   type UserStatus,
-} from '@/api/auth'
-import { useMessage } from '@/composables/useAppMessage'
+} from '@/api/studio/auth'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -27,7 +25,6 @@ const editingUser = ref<ManagedUser | null>(null)
 const form = reactive({
   username: '',
   password: '',
-  phone: '',
   role: 'admin' as UserRole,
   status: 'active' as UserStatus,
   profiles: [] as string[],
@@ -43,19 +40,12 @@ const statusOptions = computed(() => [
   { label: t('users.status.disabled'), value: 'disabled' },
 ])
 
-// Hide per-WeChat personal profiles (u_<id>) from the UI — they exist on
-// disk only as agent workspaces, not as user-facing "可访问配置".
-const profileOptions = computed(() =>
-  profiles.value
-    .filter(p => !/^u_\d+$/.test(p))
-    .map(profile => ({ label: profile, value: profile })),
-)
+const profileOptions = computed(() => profiles.value.map(profile => ({ label: profile, value: profile })))
 
 function resetForm() {
   editingUser.value = null
   form.username = ''
   form.password = ''
-  form.phone = ''
   form.role = 'admin'
   form.status = 'active'
   form.profiles = []
@@ -83,7 +73,6 @@ function openEdit(user: ManagedUser) {
   editingUser.value = user
   form.username = user.username
   form.password = ''
-  form.phone = user.phone_number || ''
   form.role = user.role
   form.status = user.status
   form.profiles = [...user.profiles]
@@ -109,7 +98,6 @@ async function submit() {
     const payload = {
       username: form.username.trim(),
       password: form.password || undefined,
-      phone: form.phone.trim() || null,
       role: form.role,
       status: form.status,
       profiles: form.role === 'super_admin' ? [] : form.profiles,
@@ -158,27 +146,6 @@ async function removeUser(user: ManagedUser) {
   }
 }
 
-const exportingId = ref<number | null>(null)
-
-async function handleExportUser(user: ManagedUser) {
-  exportingId.value = user.id
-  try {
-    const data = await exportManagedUser(user.id)
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `user-${user.username}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-    message.success(t('users.exportSuccess', { username: user.username }))
-  } catch (err: any) {
-    message.error(err.message || t('users.exportFailed'))
-  } finally {
-    exportingId.value = null
-  }
-}
-
 function formatTime(value: number | null): string {
   if (!value) return '-'
   return new Date(value).toLocaleString()
@@ -189,14 +156,6 @@ const columns = computed<DataTableColumns<ManagedUser>>(() => [
     title: t('users.username'),
     key: 'username',
     minWidth: 140,
-  },
-  {
-    title: t('users.phone'),
-    key: 'phone_number',
-    width: 130,
-    render: (row) => row.phone_number
-      ? h('span', row.phone_number)
-      : h('span', { class: 'muted' }, '-'),
   },
   {
     title: t('users.role'),
@@ -235,11 +194,10 @@ const columns = computed<DataTableColumns<ManagedUser>>(() => [
   {
     title: t('common.edit'),
     key: 'actions',
-    width: 340,
+    width: 280,
     fixed: 'right',
     render: (row) => h(NSpace, { size: 8 }, {
       default: () => [
-        h(NButton, { size: 'small', loading: exportingId.value === row.id, onClick: () => handleExportUser(row) }, { default: () => t('users.export') }),
         h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
         h(NButton, {
           size: 'small',
@@ -285,9 +243,6 @@ onMounted(loadUsers)
         <NFormItem :label="t('users.username')">
           <NInput v-model:value="form.username" :placeholder="t('login.usernamePlaceholder')" />
         </NFormItem>
-        <NFormItem :label="t('users.phone')">
-          <NInput v-model:value="form.phone" :placeholder="t('settings.phone.placeholder')" />
-        </NFormItem>
         <NFormItem :label="editingUser ? t('users.newPasswordOptional') : t('login.newPassword')">
           <NInput v-model:value="form.password" type="password" show-password-on="click" :placeholder="t('login.passwordPlaceholder')" />
         </NFormItem>
@@ -319,27 +274,27 @@ onMounted(loadUsers)
 @use "@/styles/variables" as *;
 
 .user-management {
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .toolbar {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   margin-bottom: 16px;
 }
 
 .section-title {
   margin: 0 0 6px;
-  font-size: 16px;
+  font-size: calc(var(--font-size-base, 14px) * 16 / 14);
   font-weight: 600;
   color: $text-primary;
 }
 
 .section-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-muted;
 }
 

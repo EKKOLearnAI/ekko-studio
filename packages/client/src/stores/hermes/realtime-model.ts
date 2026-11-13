@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import * as realtimeModelApi from '@/api/hermes/realtime-model'
+import * as realtimeModelApi from '@/api/studio/realtime-model'
 import { useProfilesStore } from './profiles'
 
 /**

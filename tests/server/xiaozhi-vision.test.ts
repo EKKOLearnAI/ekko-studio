@@ -1,9 +1,9 @@
 import { expect, it, vi } from 'vitest'
-vi.mock('../../packages/server/src/services/speech-practice-omni', () => ({
+vi.mock('../../packages/server/src/modules/studio/services/speech-practice-omni', () => ({
   resolveDashScopeKey: async () => 'private-key',
   OMNI_ANALYSIS_BASE_URL: 'https://vision.example/v1', OMNI_ANALYSIS_DEFAULT_MODEL: 'vision-model',
 }))
-import { describeXiaozhiFrame } from '../../packages/server/src/services/xiaozhi-vision'
+import { describeXiaozhiFrame } from '../../packages/server/src/modules/studio/services/xiaozhi-vision'
 
 it('sends image pixels and the question to the multimodal model and decodes split SSE text', async () => {
   const encoded = new TextEncoder().encode('data: {"choices":[{"delta":{"content":"红色物体"}}]}\n\ndata: [DONE]\n')

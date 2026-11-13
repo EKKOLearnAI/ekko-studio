@@ -562,7 +562,7 @@ export const useMeetingStore = defineStore('meeting', () => {
   }
 
   // --- 服务端会议同步 (触摸屏设备端创建的会议) ---
-  // 触摸屏 (keli) 把会议写入服务端 /api/meeting-storage, Web UI 本地
+  // 触摸屏 (keli) 把会议写入服务端 /api/studio/meeting-storage, Web UI 本地
   // localStorage 列表看不到这些会议; 这里把服务端会议合并进列表,
   // 让会议模式能直接点开查看触摸屏上启动的对话内容。
   async function syncSessionsFromServer(): Promise<void> {

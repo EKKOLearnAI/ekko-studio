@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createServer, type Server } from 'node:net'
 import type { AddressInfo } from 'node:net'
-import { checkPortAvailable, pickFreePort } from '../../packages/server/src/services/meeting-asr'
+import { checkPortAvailable, pickFreePort } from '../../packages/server/src/modules/studio/services/meeting-asr/index'
 
 /**
  * Orphaned-backend port recovery.
@@ -38,8 +38,10 @@ describe('ASR backend port selection', () => {
 
   it('returns the requested port when it is free', async () => {
     const base = await occupy()
-    const chosen = await pickFreePort(base + 1)
-    expect(chosen).toBe(base + 1)
+    const reserved = servers.pop()!
+    await new Promise<void>(resolve => reserved.close(() => resolve()))
+    const chosen = await pickFreePort(base)
+    expect(chosen).toBe(base)
   })
 
   it('skips an occupied port instead of handing it to the child', async () => {

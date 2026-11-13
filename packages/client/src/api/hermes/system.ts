@@ -1,208 +1,5 @@
 import { request } from '../client'
-
-export interface HealthResponse {
-  status: string
-  platform?: string
-  version?: string
-  gateway?: string
-  webui_version?: string
-  webui_latest?: string
-  webui_update_enabled?: boolean
-  webui_update_available?: boolean
-  webui_update_source_label?: string
-  webui_update_channel?: string
-  webui_update_strategy?: 'npm-package' | 'source-deploy' | 'device-package' | string
-  webui_update_package_type?: 'npm-package' | 'source-deploy' | 'device-package' | string
-  node_version?: string
-  is_docker?: boolean
-  agent_bridge?: {
-    status: string
-    reachable: boolean
-    ready?: boolean
-    running?: boolean
-    attached?: boolean
-    starting?: boolean
-    stopping?: boolean
-    restart_scheduled?: boolean
-    restart_attempts?: number
-    endpoint_kind?: 'ipc' | 'tcp' | 'unknown'
-    pid?: number
-    error?: string
-  }
-  environment?: {
-    status: 'ok' | 'drift_detected' | 'unavailable'
-    capturedAt?: string | null
-    manifestVersion?: string | null
-    actualVersion?: string | null
-    nodeVersion?: string | null
-    agentVersion?: string | null
-    drift?: Array<{
-      gate: 'requiredNodeRange' | 'requiredHermesAgentRange' | 'requiredSystemFiles' | 'installerScriptSha256'
-      expected: string
-      actual: string
-      detail?: string
-    }>
-    reconcileSupported?: boolean
-    checkedAt?: string | null
-  }
-}
-
-export type UpdateTaskStatus = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed'
-
-export type UpdateTaskStage =
-  | 'idle'
-  | 'queued'
-  | 'preflighting'
-  | 'checking'
-  | 'resolving_version'
-  | 'downloading'
-  | 'verifying'
-  | 'backing_up'
-  | 'starting'
-  | 'installing_dependencies'
-  | 'installing'
-  | 'stopping_runtime'
-  | 'restarting'
-  | 'starting_runtime'
-  | 'health_checking'
-  | 'succeeded'
-  | 'failed'
-  | 'rolled_back'
-
-export interface UpdateTaskRecord {
-  id: string
-  strategy: 'npm-package' | 'source-deploy' | 'device-package'
-  owner?: 'controller' | 'runtime'
-  status: UpdateTaskStatus
-  stage: UpdateTaskStage
-  message: string
-  targetVersion: string
-  warning: string
-  error: string
-  logPath?: string
-  rollbackMessage?: string
-  healthcheckUrl?: string
-  heartbeatAt?: string
-  startedAt: string
-  finishedAt: string | null
-}
-
-export interface UpdateStatusResponse {
-  currentTask: UpdateTaskRecord | null
-  lastTask: UpdateTaskRecord | null
-  webui_version?: string
-  webui_latest?: string
-  webui_update_available?: boolean
-}
-
-export type UpdateRiskLevel = 'low' | 'medium' | 'high'
-
-export interface UpdatePreflightIssue {
-  code: string
-  level: UpdateRiskLevel
-  path: string
-  message: string
-}
-
-export interface UpdatePreflightResult {
-  strategy: 'npm-package' | 'source-deploy' | 'device-package' | string
-  riskLevel: UpdateRiskLevel
-  issues: UpdatePreflightIssue[]
-  shouldBlock: boolean
-  warningText: string
-  blockingText: string
-}
-
-export interface UpdateCapabilitiesResponse {
-  enabled: boolean
-  strategy: 'npm-package' | 'source-deploy' | 'device-package' | string
-  packageType: 'npm-package' | 'source-deploy' | 'device-package' | string
-  channel: string
-  sourceLabel: string
-  currentVersion: string
-  latestVersion: string
-  updateAvailable: boolean
-  detectionSource: 'manifest' | 'npm-registry' | 'none'
-  remoteError: string
-  supports: {
-    versionCheck: boolean
-    fullPackage: boolean
-    deltaPackage: boolean
-    resumableDownload: boolean
-    checksumVerification: boolean
-    rollback: boolean
-    healthcheck: boolean
-    silentInstall: boolean
-    promptedInstall: boolean
-    crossPlatformShell: boolean
-  }
-  runtime: {
-    manifestConfigured: boolean
-    executionConfigured: boolean
-    runnerManaged: boolean
-    autoInstallDependencies: boolean
-    includeAgentUpgrade: boolean
-    stateFile: string
-    logDir: string
-    stagingDir: string
-    backupDir: string
-    minFreeSpaceBytes: number
-  }
-  preflight: UpdatePreflightResult
-}
-
-export interface TriggerUpdateResponse {
-  success: boolean
-  message: string
-  taskId?: string
-  status?: UpdateTaskStatus
-  stage?: UpdateTaskStage
-  warning?: string
-}
-
-export interface ClearStaleUpdateStatusResponse extends UpdateStatusResponse {
-  success: boolean
-  message: string
-  clearedTaskId?: string
-  code?: string
-}
-
-export interface PreviewTag {
-  name: string
-  sha: string
-}
-
-export interface PreviewStatus {
-  preview_dir: string
-  exists: boolean
-  has_package: boolean
-  installed: boolean
-  running: boolean
-  pid: number | null
-  current_tag: string
-  frontend_url: string
-  agent_bridge_endpoint: string
-  log_path: string
-  webui_home: string
-  action_log_path: string
-  dev_log_path: string
-  active_action: string | null
-  active_action_started_at: string | null
-  last_action: string | null
-  last_action_completed_at: string | null
-  last_action_success: boolean | null
-  last_action_message: string
-  last_action_code: string
-  action_log: string
-  dev_log: string
-}
-
-export interface PreviewActionResponse extends PreviewStatus {
-  success: boolean
-  accepted?: boolean
-  message?: string
-  code?: string
-}
+import type { ProviderApiMode } from '../studio/provider-api-mode'
 
 // Config-based model types
 export interface ModelInfo {
@@ -227,17 +24,17 @@ export interface ModelVisibilityRule {
 
 export type ModelVisibility = Record<string, ModelVisibilityRule>
 export type CustomModels = Record<string, string[]>
-export type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
-
 export interface AvailableModelGroup {
   provider: string   // credential pool key (e.g. "zai", "custom:subrouter.ai")
   label: string      // display name (e.g. "zai", "subrouter.ai")
   base_url: string
   models: string[]
-  /** Full unfiltered model catalog for this provider, used to restore hidden WUI models. */
+  /** Legacy server field. Full directories are now fetched with fetchProviderModelCatalog. */
   available_models?: string[]
+  model_count?: number
   api_key: string
   api_mode?: ProviderApiMode
+  api_mode_by_model?: Record<string, ProviderApiMode | null>
   builtin?: boolean
   /** Env var used by Hermes to override this provider's base URL. If present, the preset URL is editable. */
   base_url_env?: string
@@ -249,8 +46,8 @@ export interface AvailableModelGroup {
   model_refreshable?: boolean
   model_refresh_reason?: string
   model_restore_available?: boolean
-  /** 可选：模型 ID -> 元数据（preview/disabled/alias）。alias 仅用于 Web UI 展示。 */
-  model_meta?: Record<string, { preview?: boolean; disabled?: boolean; alias?: string }>
+  /** 可选：模型 ID -> 展示与能力元数据。alias 仅用于 Web UI 展示。 */
+  model_meta?: Record<string, { preview?: boolean; disabled?: boolean; alias?: string; reasoning?: boolean; reasoning_efforts?: string[] }>
 }
 
 export interface ProfileAvailableModels {
@@ -278,8 +75,9 @@ export interface CustomProvider {
   api_key: string
   model: string
   context_length?: number
-  api_mode?: ProviderApiMode
+  api_mode?: ProviderApiMode | null
   providerKey?: string | null
+  create_only?: boolean
 }
 
 export type ProviderEditableField =
@@ -322,7 +120,7 @@ export interface ProviderEditorDetail {
 export interface ProviderEditorPatch {
   label?: string
   base_url?: string
-  api_mode?: ProviderApiMode
+  api_mode?: ProviderApiMode | null
   preferred_model?: string
   credential_action?: ProviderCredentialAction
   api_key?: string
@@ -339,100 +137,6 @@ export interface ProviderEditorResponse {
   changed?: string[]
 }
 
-
-// ---------------------------------------------------------------------------
-// Update identity (phase a): docs/harness/source-deploy-refactor.md
-// ---------------------------------------------------------------------------
-
-export type ManifestCacheFreshness = 'green' | 'yellow' | 'orange' | 'red'
-
-export interface UpdateIdentity {
-  schema: number
-  capturedAt: string
-  version: string
-  distSha256: string
-  installerScriptSha256: string
-  agentManifestSha: string
-  commitSha?: string
-}
-
-export interface UpdateIdentityResponse {
-  success: boolean
-  installed: boolean
-  identity: UpdateIdentity | null
-  manifestCache: {
-    freshness: ManifestCacheFreshness
-    cachedAt: string | null
-    version: string | null
-  }
-}
-
-export interface RepairIdentityResponse {
-  success: boolean
-  identity?: UpdateIdentity
-  code?: string
-  message?: string
-}
-
-export async function repairUpdateIdentity(): Promise<RepairIdentityResponse> {
-  return request<RepairIdentityResponse>('/api/update/identity/repair', { method: 'POST' })
-}
-export async function fetchUpdateIdentity(): Promise<UpdateIdentityResponse> {
-  return request<UpdateIdentityResponse>('/api/update/identity')
-}
-
-export async function checkHealth(): Promise<HealthResponse> {
-  return request<HealthResponse>('/health')
-}
-
-export async function triggerUpdate(): Promise<TriggerUpdateResponse> {
-  return request<TriggerUpdateResponse>('/api/hermes/update', { method: 'POST' })
-}
-
-export async function fetchUpdateStatus(): Promise<UpdateStatusResponse> {
-  return request<UpdateStatusResponse>('/api/hermes/update/status')
-}
-
-export async function fetchUpdateCapabilities(): Promise<UpdateCapabilitiesResponse> {
-  return request<UpdateCapabilitiesResponse>('/api/hermes/update/capabilities')
-}
-
-export async function clearStaleUpdateStatus(): Promise<ClearStaleUpdateStatusResponse> {
-  return request<ClearStaleUpdateStatusResponse>('/api/hermes/update/status/clear-stale', {
-    method: 'POST',
-  })
-}
-
-export async function fetchPreviewStatus(): Promise<PreviewStatus> {
-  return request<PreviewStatus>('/api/hermes/update/preview')
-}
-
-export async function fetchPreviewTags(): Promise<{ tags: PreviewTag[] }> {
-  return request<{ tags: PreviewTag[] }>('/api/hermes/update/preview/tags')
-}
-
-export async function preparePreview(tag: string): Promise<PreviewActionResponse> {
-  return request<PreviewActionResponse>('/api/hermes/update/preview/prepare', {
-    method: 'POST',
-    body: JSON.stringify({ tag }),
-  })
-}
-
-export async function installPreview(): Promise<PreviewActionResponse> {
-  return request<PreviewActionResponse>('/api/hermes/update/preview/install', { method: 'POST' })
-}
-
-export async function startPreview(tag?: string): Promise<PreviewActionResponse> {
-  return request<PreviewActionResponse>('/api/hermes/update/preview/start', {
-    method: 'POST',
-    body: JSON.stringify({ tag }),
-  })
-}
-
-export async function stopPreview(): Promise<PreviewActionResponse> {
-  return request<PreviewActionResponse>('/api/hermes/update/preview/stop', { method: 'POST' })
-}
-
 export async function fetchConfigModels(): Promise<ConfigModelsResponse> {
   return request<ConfigModelsResponse>('/api/hermes/config/models')
 }
@@ -441,10 +145,23 @@ export async function fetchAvailableModels(): Promise<AvailableModelsResponse> {
   return request<AvailableModelsResponse>('/api/hermes/available-models')
 }
 
-export async function fetchAvailableModelsForProfile(profile: string): Promise<AvailableModelsResponse> {
+export async function fetchAvailableModelsForProfile(profile: string, signal?: AbortSignal): Promise<AvailableModelsResponse> {
   const params = new URLSearchParams()
   params.set('profile', profile || 'default')
-  return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`)
+  return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`, { signal })
+}
+
+export interface ProviderModelCatalog {
+  provider: string
+  models: string[]
+  visible_models: string[]
+  model_aliases: Record<string, string>
+}
+
+export async function fetchProviderModelCatalog(provider: string, profile?: string): Promise<ProviderModelCatalog> {
+  const params = new URLSearchParams({ provider })
+  if (profile) params.set('profile', profile)
+  return request<ProviderModelCatalog>(`/api/hermes/provider-models?${params}`)
 }
 
 export async function fetchProviderModels(data: {
@@ -490,9 +207,10 @@ export async function updateModelAlias(data: {
   })
 }
 
-export async function addCustomProvider(data: CustomProvider): Promise<void> {
+export async function addCustomProvider(data: CustomProvider, profile?: string): Promise<void> {
   await request('/api/hermes/config/providers', {
     method: 'POST',
+    ...(profile ? { headers: { 'X-Hermes-Profile': profile } } : {}),
     body: JSON.stringify(data),
   })
 }
@@ -632,34 +350,4 @@ export async function removeCustomModel(data: {
   return request<{ success: boolean; custom_models: CustomModels }>(`/api/hermes/custom-model?${params.toString()}`, {
     method: 'DELETE',
   })
-}
-
-export type EnvironmentStatus = 'ok' | 'drift_detected' | 'unavailable'
-
-export interface EnvironmentDriftEntry {
-  gate: 'requiredNodeRange' | 'requiredHermesAgentRange' | 'requiredSystemFiles' | 'installerScriptSha256'
-  expected: string
-  actual: string
-  detail?: string
-}
-
-export interface EnvironmentCheckResponse {
-  success: boolean
-  status: EnvironmentStatus
-  lastCapturedAt: string | null
-  manifestVersion: string | null
-  actualVersion: string | null
-  nodeVersion: string | null
-  agentVersion: string | null
-  drift: EnvironmentDriftEntry[]
-  reconcileSupported: boolean
-  checkedAt: string | null
-}
-
-export async function fetchUpdateEnvironment(): Promise<EnvironmentCheckResponse> {
-  return request<EnvironmentCheckResponse>('/api/hermes/update/environment', { method: 'GET' })
-}
-
-export async function reconcileUpdate(): Promise<{ success: boolean; status?: string; taskId?: string; message?: string }> {
-  return request('/api/hermes/update/reconcile', { method: 'POST' })
 }

@@ -10,13 +10,13 @@ execution is intentionally not wired yet.
 - Client view: `packages/client/src/views/hermes/WorkflowView.vue`
 - Agent node component:
   `packages/client/src/components/hermes/workflow/WorkflowAgentNode.vue`
-- Client API helper: `packages/client/src/api/hermes/workflows.ts`
-- Server routes: `packages/server/src/routes/hermes/workflows.ts`
-- Server controller: `packages/server/src/controllers/hermes/workflows.ts`
-- Server service singleton: `packages/server/src/services/workflow-manager.ts`
-- Server socket: `packages/server/src/services/workflow-socket.ts`
-- Store: `packages/server/src/db/hermes/workflow-store.ts`
-- Schema: `packages/server/src/db/hermes/schemas.ts`
+- Client API helper: `packages/client/src/api/studio/workflows.ts`
+- Server routes: `packages/server/src/modules/studio/routes/workflows.ts`
+- Server controller: `packages/server/src/modules/studio/controllers/workflows.ts`
+- Server service singleton: `packages/server/src/modules/studio/services/workflow/manager.ts`
+- Server socket: `packages/server/src/modules/studio/sockets/workflow.ts`
+- Store: `packages/server/src/modules/studio/repositories/workflow-store.ts`
+- Schema: `packages/server/src/modules/studio/infrastructure/database/schemas.ts`
 
 The Workflow page is opened from the same left page sidebar used by chat,
 history, and group chat. The workflow list also lives in the left sidebar.
@@ -170,13 +170,13 @@ nodes and edges.
 
 Routes:
 
-- `GET /api/hermes/workflows`
-- `GET /api/hermes/workflows?profile=<profile>`
-- `POST /api/hermes/workflows`
-- `GET /api/hermes/workflows/:id`
-- `PATCH /api/hermes/workflows/:id`
-- `DELETE /api/hermes/workflows/:id`
-- `POST /api/hermes/workflows/batch-delete`
+- `GET /api/studio/workflows`
+- `GET /api/studio/workflows?profile=<profile>`
+- `POST /api/studio/workflows`
+- `GET /api/studio/workflows/:id`
+- `PATCH /api/studio/workflows/:id`
+- `DELETE /api/studio/workflows/:id`
+- `POST /api/studio/workflows/batch-delete`
 
 Socket namespace:
 
@@ -249,8 +249,8 @@ runtime paths.
     understand `workflow` as an execution source.
   - Claude Code and Codex nodes are workflow sessions but execute through the
     existing coding-agent path with the matching `coding_agent_id`.
-- `POST /api/hermes/workflows/:id/run` starts a run asynchronously.
-- `packages/server/src/services/workflow-manager.ts` owns immediate execution,
+- `POST /api/studio/workflows/:id/run` starts a run asynchronously.
+- `packages/server/src/modules/studio/services/workflow/manager.ts` owns immediate execution,
   run status, stop/delete behavior, run snapshots, and node session cleanup.
 - Each run persists a `workflow_runs` row and a
   `workflow_run_node_sessions` row per executed node.
@@ -258,7 +258,7 @@ runtime paths.
   failure rule documented below.
 - Each node receives one assembled user message containing upstream outputs,
   selected skill content, the current node task, and current node images.
-- `packages/server/src/lib/llm-prompt.ts` injects workflow-specific context
+- `packages/server/src/modules/studio/public/runs/prompt.ts` injects workflow-specific context
   when the run source is `workflow`.
 - Workflow node sessions are hidden from normal chat/history lists by default.
 - Workflow runs can be listed, selected, stopped, deleted, and inspected from
@@ -316,7 +316,7 @@ Rules:
 ### Workflow System Context
 
 Workflow runs inject a small system context when `source` is `workflow`.
-The injection point is `packages/server/src/lib/llm-prompt.ts`.
+The injection point is `packages/server/src/modules/studio/public/runs/prompt.ts`.
 
 The system context tells the model that it is executing one workflow node,
 that upstream results are context, and that it should focus only on the current

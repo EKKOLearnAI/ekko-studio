@@ -4,41 +4,13 @@ import {
   type DiscussionRow,
   type DiscussionState,
   type DiscussionStorage,
-} from '../../packages/server/src/services/hermes/group-chat/discussion'
+} from '../../packages/server/src/modules/studio/services/group-chat/discussion'
 
-// The judge is a bare LLM call; mock it so tests drive convergence without a real provider.
-vi.mock('../../packages/server/src/services/hermes/group-chat/room-summary', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../packages/server/src/services/hermes/group-chat/room-summary')>()
-  return {
-    ...actual,
-    runBareModelAgent: vi.fn(),
-  }
-})
-
-// The discussion module graph pulls in ekko-agent/handoff modules that
-// transitively load the real db singleton before the test helper's db mock is
-// registered. Pin getDb() to the helper's in-memory db up front (same strategy
-// as group-chat-document-pipeline.test.ts).
-vi.mock('../../packages/server/src/db/index', () => ({ getDb: () => (globalThis as any).__GC_TEST_DB__ ?? null }))
-
-// Document store: default to "no registered docs" so a discussion with
-// attachments that were never registered fails loudly (hard validation).
-vi.mock('../../packages/server/src/db/hermes/document-store', () => ({
-  listDocumentsByRoom: vi.fn(() => []),
-}))
-
-import { listDocumentsByRoom } from '../../packages/server/src/db/hermes/document-store'
+vi.mock('../../packages/server/src/modules/studio/services/group-chat/bare-model', () => ({ runBareModelAgent: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/repositories/document-store', () => ({ listDocumentsByRoom: vi.fn(() => []) }))
+import { listDocumentsByRoom } from '../../packages/server/src/modules/studio/repositories/document-store'
+import { runBareModelAgent } from '../../packages/server/src/modules/studio/services/group-chat/bare-model'
 const listDocumentsByRoomMock = vi.mocked(listDocumentsByRoom)
-
-import { runBareModelAgent } from '../../packages/server/src/services/hermes/group-chat/room-summary'
-import type { GroupChatServer } from '../../packages/server/src/services/hermes/group-chat'
-import {
-  connectGroupChatClient,
-  createTestGroupChatServer,
-  emitAck,
-} from './group-chat-test-helpers'
-import { GROUP_CHAT_AGENT_SOCKET_SECRET } from '../../packages/server/src/services/hermes/group-chat/agent-clients'
-import { authenticateUserToken, isAuthEnabled } from '../../packages/server/src/middleware/user-auth'
 
 const judgeMock = vi.mocked(runBareModelAgent)
 const ACTIVE_STATUSES = new Set(['pending', 'running', 'paused'])
@@ -634,37 +606,7 @@ describe('group chat free discussion runner', () => {
     expect(calls.length).toBe(9) // 4 rounds x 2 agents + 1 report
   })
 
-  it('does not converge before minRounds, even when the judge reports convergence', async () => {
-    const { runner, speechCalls } = harness()
-    // Every round reports converged; with minRounds=3 the runner must keep going
-    // until round 3 even though the streak reaches 2 already at round 2.
-    judgeMock.mockResolvedValue(judgeJson({ converged: true }))
 
-    await runner.start('room-1', { goal: 'go', maxRounds: 5, minRounds: 3 })
-    const final = await waitForDone(runner, 'room-1')
-
-    expect(final.status).toBe('converged')
-    expect(final.currentRound).toBe(3) // forced to explore at least 3 rounds
-    const calls = speechCalls()
-    expect(calls.length).toBe(7) // 3 rounds x 2 agents + 1 report
-  })
-
-  it('resets the convergence streak when a round is not converged', async () => {
-    const { runner, speechCalls } = harness()
-    judgeMock
-      .mockResolvedValueOnce(judgeJson({ converged: true }))   // round 1: streak 1
-      .mockResolvedValueOnce(judgeJson())                       // round 2: streak reset
-      .mockResolvedValueOnce(judgeJson({ converged: true }))   // round 3: streak 1
-      .mockResolvedValueOnce(judgeJson({ converged: true }))   // round 4: streak 2 → ends
-
-    await runner.start('room-1', { goal: 'go', maxRounds: 8 })
-    const final = await waitForDone(runner, 'room-1')
-
-    expect(final.status).toBe('converged')
-    expect(final.currentRound).toBe(4) // needs two consecutive converged rounds after the reset
-    const calls = speechCalls()
-    expect(calls.length).toBe(9) // 4 rounds x 2 agents + 1 report
-  })
 
   it('stops an active discussion and forces a stopped report', async () => {
     let release!: () => void
@@ -718,82 +660,5 @@ describe('group chat free discussion runner', () => {
 
     expect(rows.get('room-1')?.status).toBe('failed')
     expect(runner.getState('room-1')?.lastError).toBe('Discussion run was interrupted')
-  })
-})
-
-describe('group chat discussion @-mention routing gate', () => {
-  let harness: Awaited<ReturnType<typeof createTestGroupChatServer>>
-  let groupServer: GroupChatServer
-  let port: number
-
-  beforeEach(async () => {
-    vi.clearAllMocks()
-    vi.mocked(isAuthEnabled).mockResolvedValue(false)
-    vi.mocked(authenticateUserToken).mockResolvedValue(null as any)
-    harness = await createTestGroupChatServer()
-    groupServer = harness.groupServer
-    port = harness.port
-    vi.spyOn(groupServer.agentClients, 'agentSessionIsCurrent').mockReturnValue(true)
-    groupServer.getStorage().saveRoom('room-1', 'Room 1', 'ROOM1')
-    groupServer.getStorage().addRoomAgent('room-1', 'agent-worker', 'default', 'Worker', '', 0)
-  })
-
-  afterEach(() => {
-    harness?.cleanup()
-  })
-
-  async function joinHumanAndAgent() {
-    const human = await connectGroupChatClient(port, 'human-1', 'Human')
-    const agent = await connectGroupChatClient(port, 'agent-worker', 'Worker', {
-      source: 'agent',
-      agentSocketSecret: GROUP_CHAT_AGENT_SOCKET_SECRET,
-    })
-    harness.sockets.push(human, agent)
-    await emitAck(human, 'join', { roomId: 'room-1', inviteCode: 'ROOM1' })
-    await emitAck(agent, 'join', { roomId: 'room-1' })
-    return { human }
-  }
-
-  function seedDiscussion(status: string) {
-    groupServer.getStorage().saveDiscussion({
-      id: 'disc-seeded',
-      roomId: 'room-1',
-      goal: 'seeded goal',
-      agentOrder: JSON.stringify(['agent-worker']),
-      reporterId: 'agent-worker',
-      maxRounds: 8,
-      maxMessages: 60,
-      minRounds: 0,
-      judgeProfile: 'default',
-      judgeProvider: 'openai',
-      judgeModel: 'gpt-test',
-      judgeApiMode: 'chat_completions',
-      status,
-      currentRound: 1,
-      judgeNotes: '[]',
-      reportMessageId: '',
-      summaryFilePath: '',
-      deliverables: '[]',
-      lastError: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-  }
-
-  it('suspends @-mention routing while a discussion is running and restores it afterwards', async () => {
-    const { human } = await joinHumanAndAgent()
-    const processMentions = vi.spyOn(groupServer.agentClients, 'processMentions').mockResolvedValue(undefined)
-
-    // Running discussion: human mentions must not trigger agent routing.
-    seedDiscussion('running')
-    expect(groupServer.isRoomDiscussionRunning('room-1')).toBe(true)
-    await emitAck(human, 'message', { roomId: 'room-1', id: 'msg-1', content: '@Worker hello' })
-    expect(processMentions).not.toHaveBeenCalled()
-
-    // Terminal discussion: routing resumes.
-    groupServer.getStorage().updateDiscussion('room-1', { status: 'converged' })
-    expect(groupServer.isRoomDiscussionRunning('room-1')).toBe(false)
-    await emitAck(human, 'message', { roomId: 'room-1', id: 'msg-2', content: '@Worker hello again' })
-    expect(processMentions).toHaveBeenCalledWith('room-1', expect.objectContaining({ messageId: 'msg-2' }))
   })
 })

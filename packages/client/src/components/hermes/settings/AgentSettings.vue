@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { NInputNumber, NSelect } from 'naive-ui'
+import { NInputNumber, NSelect, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import SettingRow from './SettingRow.vue'
-import { useMessage } from '@/composables/useAppMessage'
 
 const settingsStore = useSettingsStore()
 const message = useMessage()

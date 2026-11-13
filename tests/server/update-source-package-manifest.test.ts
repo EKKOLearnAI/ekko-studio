@@ -66,7 +66,7 @@ describe('source-deploy manifest client', () => {
       }))),
     }))
 
-    const { fetchSourcePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchSourcePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchSourcePackageManifest({
       ...createUpdateConfig(),
@@ -101,7 +101,7 @@ describe('source-deploy manifest client', () => {
       }))),
     }))
 
-    const { fetchSourcePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchSourcePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchSourcePackageManifest({
       ...createUpdateConfig(),
@@ -130,7 +130,7 @@ describe('source-deploy manifest client', () => {
       }))),
     }))
 
-    const { fetchSourcePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchSourcePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     await expect(fetchSourcePackageManifest({
       ...createUpdateConfig(),
@@ -157,7 +157,7 @@ describe('source-deploy manifest client', () => {
       }))),
     }))
 
-    const { fetchSourcePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchSourcePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     await expect(fetchSourcePackageManifest({
       ...createUpdateConfig(),
@@ -185,7 +185,7 @@ describe('source-deploy manifest client', () => {
       }))),
     }))
 
-    const { fetchSourcePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchSourcePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     await expect(fetchSourcePackageManifest({
       ...createUpdateConfig(),
@@ -197,7 +197,7 @@ describe('source-deploy manifest client', () => {
   })
 
   it('injects source URLs and sha256 into the runner environment via buildSourceDeployEnv', async () => {
-    const { buildSourceDeployEnv } = await import('../../packages/server/src/services/update/strategies/source-deploy')
+    const { buildSourceDeployEnv } = await import('../../packages/server/src/modules/studio/services/update/strategies/source-deploy')
 
     const env = buildSourceDeployEnv(
       createUpdateConfig(),
@@ -243,7 +243,7 @@ describe('source-deploy manifest client', () => {
   })
 
   it('produces empty source fields when no manifest is supplied (legacy path)', async () => {
-    const { buildSourceDeployEnv } = await import('../../packages/server/src/services/update/strategies/source-deploy')
+    const { buildSourceDeployEnv } = await import('../../packages/server/src/modules/studio/services/update/strategies/source-deploy')
 
     const env = buildSourceDeployEnv(
       createUpdateConfig(),
@@ -281,7 +281,7 @@ describe('source-deploy manifest client', () => {
       }))),
     }))
 
-    const { fetchSourcePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchSourcePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchSourcePackageManifest({
       ...createUpdateConfig(),
@@ -315,7 +315,7 @@ describe('source-deploy manifest client', () => {
       }))),
     }))
 
-    const { fetchSourcePackageManifest } = await import('../../packages/server/src/services/update/manifest-client')
+    const { fetchSourcePackageManifest } = await import('../../packages/server/src/modules/studio/services/update/manifest-client')
 
     const result = await fetchSourcePackageManifest({
       ...createUpdateConfig(),
@@ -331,7 +331,7 @@ describe('source-deploy manifest client', () => {
   })
 
   it('blocks updates when current version is below manifest minCurrentVersion', async () => {
-    const { assertSourcePackageCompatibility } = await import('../../packages/server/src/services/update/strategies/source-package')
+    const { assertSourcePackageCompatibility } = await import('../../packages/server/src/modules/studio/services/update/strategies/source-package')
 
     expect(() => assertSourcePackageCompatibility({
       version: '1.4.0',

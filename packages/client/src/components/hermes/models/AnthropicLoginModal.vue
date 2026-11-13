@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NModal, NButton, NInput, NSpin } from 'naive-ui'
+import { NSpin, NModal, NButton, NInput, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { startAnthropicLogin, submitAnthropicLogin } from '@/api/hermes/anthropic-auth'
 import { copyToClipboard } from '@/utils/clipboard'
-import { useMessage } from '@/composables/useAppMessage'
 
 const { t } = useI18n()
 const emit = defineEmits<{ close: []; success: [] }>()
@@ -147,24 +146,24 @@ startLogin()
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px 0;
+  padding: calc(8px * var(--spacing-scale, 1)) 0;
 }
 
 .oauth-login__state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: calc(14px * var(--spacing-scale, 1));
   min-height: 140px;
   justify-content: center;
   width: 100%;
 }
 
 .oauth-login__hint {
-  font-size: 14px;
+  font-size: calc(var(--font-size-base, 14px) * 14 / 14);
   color: var(--n-text-color, inherit);
   text-align: center;
-  line-height: 1.6;
+  line-height: var(--line-height, 1.6);
 }
 
 .oauth-login__state--success {

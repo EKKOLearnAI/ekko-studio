@@ -4,62 +4,93 @@
 </p>
 
 <p align="center">
-  面向 Hermes Agent 的桌面应用、本地运行时和 Web 控制台。<br/>
-  聊天、模型与 Profile 管理、平台渠道接入、任务自动化、<br/>
-  文件查看、Coding Agent 和本地运行环境都在一个界面中完成。
+  本地优先的 AI 工作区，支持多 Agent 聊天、编码和可视化工作流。<br/>
+  提供桌面应用和可自托管的 Web 控制台，支持<br/>
+  <a href="https://github.com/NousResearch/hermes-agent">Hermes Agent</a>、Ekko Agent，以及包含 Claude Code、Codex 在内的 14 种 Coding Agent 集成。<br/>
+  在同一个工作区中管理对话、群组协作、语音、文件和设备。
 </p>
 
 <p align="center">
+  <a href="https://github.com/tangledup-ai/hermes-web-ui/releases/latest">下载 Quanthermes Studio 桌面版</a>
+  ·
+  <a href="https://ekkostudio.xyz/#/docs/getting-started">使用文档</a>
+  ·
   <code>npm install -g @quanthermes/hermes-web-ui && hermes-web-ui start</code>
 </p>
 
-## Quanthermes 上游整合（2026-10-08）
+<p align="center">
+  <img src="./docs/screenshots/overview/new-chat.png" alt="Ekko Studio 新建聊天页面：Agent 轮播卡片与统一输入框" width="960"/>
+</p>
 
-本仓库保留 **Quanthermes Studio**、`@quanthermes/hermes-web-ui` 和独立更新渠道。基于 [Ekko Studio 母仓库](https://github.com/EKKOLearnAI/ekko-studio) 的 `86f60d24` 选择性移植有价值的功能和修复，不引入上游品牌替换、购买推广、发布源替换或默认 Agent 接管。
+<p align="center">
+  <a href="https://www.npmjs.com/package/@quanthermes/hermes-web-ui"><img src="https://img.shields.io/npm/v/@quanthermes/hermes-web-ui?style=flat-square&color=blue" alt="npm 版本"/></a>
+  <a href="https://github.com/tangledup-ai/hermes-web-ui/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@quanthermes/hermes-web-ui?style=flat-square" alt="许可证"/></a>
+  <a href="https://github.com/tangledup-ai/hermes-web-ui/stargazers"><img src="https://img.shields.io/github/stars/tangledup-ai/hermes-web-ui?style=flat-square" alt="Star"/></a>
+</p>
 
-- 长会话搜索与分页、统一会话菜单、工作区下载、文件预览和源码行号定位。
-- 按页面所选 Profile 隔离模型与语音配置；启动恢复 TTS 配置，支持豆包语速。
-- Hermes bridge 启动、凭证、worker 生命周期、MCP 实例隔离，以及 Coding Agent 上下文恢复、流式输出和 TOML 配置修复。
-- 更新可选 Ekko runtime：工具输出限额、记忆恢复、并行工具调用和 MCP 兼容；额外 JEV 评估默认关闭，已有技能目录保留。
-- 保留专家中心、专家市场、USB 识别、会议/扫描插件、实时语音和本地设备更新系统。
+Quanthermes Studio 采用 [Ekko Studio](https://github.com/EKKOLearnAI/ekko-studio) 的模块架构。
+本项目独立发布 `@quanthermes/hermes-web-ui`，使用 `hermes-web-ui` 命令启动，
+保留 USB、局域网设备、小智、会议转写、知识库、扫描批改和独立更新渠道。
 
-**小智默认使用本仓库的 Hermes OTA / `/global-agent` 链路。** `agentRuntime` 缺省或无效时选择 `hermes`；显式传入 `agentRuntime: "ekko"` 才使用备选方案，两套运行时的会话相互隔离。保留 OTA 摄像头、上传和分析接口。 ESP32-C3 v1/v2 源码出厂默认同步选择 Hermes，已保存的设备选择继续保留；本次不发布固件二进制，已刷入设备可能仍需在配置页选择 Hermes。本机另一套 `/ws/device` 固件服务不会替换这条链路；真实设备仍需联调验收。
+## 界面预览
 
-[整合审查与验证记录](docs/harness/upstream-sync-20261008-review.md) 说明了移植范围、排除项、性能测量及测试限制。本次更新源码，不发布设备版本、不修改 OTA manifest。
+以下截图于 2026-11-03 从本地运行的 **v0.8.13** 源码版本截取，使用隔离数据目录。工作流示例通过界面创建，尚未执行；Agent 状态来自本机实际检测。详见[截图说明](./docs/screenshots/overview/README.md)。
+
+| 可视化工作流 | Agent 管理 |
+| --- | --- |
+| [![未执行的工作流示例：Claude、Codex 与开启人工审批的审核节点](./docs/screenshots/overview/workflow.png)](./docs/screenshots/overview/workflow.png) | [![Agent 管理器：完整展示 16 张内置 Agent 与 Coding Agent 卡片](./docs/screenshots/overview/agent-manager.png)](./docs/screenshots/overview/agent-manager.png) |
+| 连接多个 Agent 节点，并设置人工审批；此示例尚未执行。 | 在同一界面管理 Agent 安装、设置和更新。 |
 
 ## 核心能力
 
-| 模块 | Hermes Studio 能做什么 |
+| 模块 | Ekko Studio 能做什么 |
 |---|---|
-| Agent 聊天 | 运行 Hermes Agent 对话，支持流式回复、工具调用轨迹、文件上传下载和本地持久化会话。 |
-| 本地控制台 | 在一个仪表盘中管理 Profile、Provider、模型、凭证、记忆、技能、插件、日志和运行时设置。 |
-| 自动化 | 围绕同一套 Hermes Profile 配置平台渠道、Cron 任务、Kanban 任务、群聊房间和 MCP Server。 |
-| 工作区工具 | 提供文件浏览器、Web 终端、语音输入输出、Coding Agent、设备发现和性能视图。 |
-| 会议插件 | 内置跑团助手（角色卡、高光、编年史、长篇小说流水线、古籍阅读页）和摄像头文档扫描插件，均在会议模式中加载。 |
-| 语音设备 | 通过本地网关把离线 XiaoZhi（小智）AI 音箱桥接到 Hermes Agent —— STT → Agent → TTS，凭证与当前 profile 共享。 |
+| 多 Agent 运行时 | 接入下表所列的 Agent，支持流式回复、工具调用轨迹、生成文件预览、持久化会话和桌面独立聊天窗口。 |
+| Studio 工作区 | 为不同 Agent 运行时提供统一的单聊、群聊、Global Agent、工作流、文件、语音、媒体、设备、主题、日志、用量和 App 连接能力。 |
+| Agent 控制面 | 将 Hermes 的 Profile、Provider、模型、记忆、技能、插件、任务、Kanban、渠道和运行时管理保留在对应的 Agent 模块内。 |
+| 自动化 | 构建可执行的可视化工作流，通过定时任务、审批节点、群聊房间、平台渠道和 MCP Server 连接受支持的 Agent 运行时。 |
+| 工作区工具 | 提供文件浏览器、Web 终端、桌面 Agent 浏览器、截图、语音输入输出、Coding Agent、设备发现、学习轨迹和性能视图。 |
 | 分发形态 | 支持 Windows/macOS/Linux 桌面应用、npm CLI 包和 Docker 镜像。 |
+
+## 支持的 Agent
+
+单聊、群聊和工作流共用同一份 Agent 列表。Coding Agent 在运行 Studio 后端的机器上执行，CLI 也需要安装在这台机器上。
+
+| Agent | 配置与安装方式 |
+|---|---|
+| Ekko Agent、Hermes Agent | Ekko 为内置运行时。桌面版和 Docker 内置 Hermes Runtime；npm 安装会发现已有的 Hermes 安装。 |
+| Claude Code、Codex、Pi、Grok、OpenCode、DeepSeek Harness（DSH） | 支持 Studio 隔离配置或原生全局配置；可通过 Agent 管理器安装和执行受支持的更新。 |
+| Qwen Code、Kimi Code、CodeBuddy、GitHub Copilot CLI、ZCode | 支持 Studio 隔离配置或原生全局配置。ZCode 需手动安装，其余可通过 Agent 管理器进行 npm 安装。 |
+| Cursor、Qoder、Antigravity | Cursor 和 Qoder 使用原生全局配置。Antigravity 支持隔离和全局启动。Cursor 和 Antigravity 需手动安装。 |
+
+隔离模式为会话使用独立配置，受支持的运行时可使用 Studio 选择的 Provider/模型；全局模式沿用 CLI 已有配置和登录状态。模型、工具和上下文控制能力因运行时而异。
+详细说明见[原生 Coding Agent](./docs/native-coding-agents.md)、[Antigravity CLI](./docs/antigravity-cli.md) 和 [DSH 接入文档](./docs/dsh-management.md)。
 
 ## 功能特性
 
 ### AI 聊天
 
-- 聊天前端通过 Socket.IO `/chat-run` 实时流式更新；聊天运行通过 Hermes agent bridge 执行
+- 从响应式 Agent 卡片页面新建聊天；首次默认选择 Ekko，并记住上次的 Agent、模型、工作目录、启动方式和推理选项
+- 聊天前端通过 Socket.IO `/chat-run` 实时流式更新，由 Studio 分发给所选运行时适配器
 - 多会话管理 — 创建、重命名、删除、切换会话
-- **自建会话数据库** — Web UI 会话使用本地 SQLite；Hermes state.db 仅作为只读来源用于 Hermes 历史 API
+- **自建会话数据库** — Studio 会话使用本地 SQLite；Hermes state.db 仅作为只读来源用于 Hermes 历史 API
 - 按来源分组会话（Telegram、Discord、Slack 等），可折叠手风琴面板
 - 活跃会话实时指示器 — 正在进行的会话置顶并显示旋转图标
 - 按最新消息时间排序会话列表
 - Markdown 渲染，支持语法高亮和代码复制
 - 工具调用详情展开（参数 / 结果）
-- 按 Profile 隔离的文件上传
+- 按 Profile 隔离的文件上传、剪贴板图片/文件粘贴和工作区附件
 - 文件下载支持 — 按解析后的路径下载用户上传文件和 Agent 生成文件，兼容 local、Docker、SSH、Singularity 等多种 terminal backend
-- 会话搜索 — Ctrl+K 搜索 Web UI 本地会话库；不包含只读 Hermes 历史会话
-- 按账号授权 Profile 汇总模型选择器 — 只展示当前账号可访问的 Hermes Profile 中可用的模型
-- 每个会话显示模型标签和上下文 Token 用量
+- 可直接预览 Agent 生成的 HTML、PDF、DOCX、PPTX、XLSX、CSV、图片、Markdown 和源码文件
+- 会话搜索 — Ctrl+K 搜索 Studio 本地会话库；不包含只读 Hermes 历史会话
+- 会话分类、消息引用、压缩进度和可持久恢复的后台委派结果
+- 持久化任务卡片，实时显示步骤进度、审批请求和澄清问题
+- 按 Profile 授权的模型选择器，按运行时展示可用 Provider/模型
+- 每轮显示 Token 用量、缓存命中、预估费用和生成速度；受支持的运行时还提供上下文用量和压缩控制
 
 ### 平台渠道
 
-在一个页面统一配置 **8 个平台**：
+在一个页面统一配置 **10 个平台**：
 
 | 平台 | 功能 |
 |---|---|
@@ -69,12 +100,14 @@
 | WhatsApp | 启用/禁用、提及控制、提及模式 |
 | Matrix | Access Token、Homeserver、自动线程、私信提及线程 |
 | 飞书 | App ID / Secret、提及控制 |
+| 钉钉 | Client ID / Secret、提及控制 |
+| QQBot | App ID / Secret、提及控制 |
 | 微信 | 扫码登录（浏览器扫码，自动保存凭证） |
 | 企业微信 | Bot ID / Secret |
 
-- 凭证管理写入 `~/.hermes/.env`
-- 渠道行为设置写入 `~/.hermes/config.yaml`
+- 凭证和渠道行为设置写入所选 Hermes Profile 下的 `.env` 和 `config.yaml`
 - 每个平台已配置/未配置状态检测
+- Gateway 自动启动需在 Hermes 设置中开启；普通 Studio 聊天无需平台 Gateway
 
 ### 用量分析
 
@@ -94,16 +127,25 @@
 
 - 按 Profile 管理的 Kanban 看板，用于规划和跟踪 Agent 工作
 - 可在仪表盘中创建任务、更新任务并移动状态
-- 复用 Web UI 本地状态和认证体系
+- 使用 Hermes Kanban CLI 及其任务存储，并由 Studio 提供认证和 Profile 访问控制
+
+### 可视化工作流
+
+- 基于 Vue Flow 的画布，支持 Agent 列表中的运行时、文件/图片附件和对应的启动配置
+- 支持有向连线、结构化条件、成功/失败路由、循环和审批门
+- 工作流定义可导入/导出，并支持按 Profile 管理工作区
+- 支持运行预算、截止时间、停止、重跑和持久化执行历史
+- 可在画布回放冻结的运行快照、节点对话、路径选择和执行证据
 
 ### 模型管理
 
 - 从凭证池自动发现模型（`~/.hermes/auth.json`）
 - 从每个 Provider 端点获取可用模型（`/v1/models`）
-- 添加、更新、删除 Provider（预设 & 自定义 OpenAI 兼容）
-- OpenAI Codex 和 Nous Portal OAuth 登录
+- 添加、更新、删除 Provider（预设和自定义 OpenAI 兼容）
+- 支持 OpenAI Codex、Nous Portal、xAI、Claude 和 GitHub Copilot 的 OAuth/设备授权
 - Provider URL 自动检测，支持非 v1 API 版本（如 `/v4`）
-- Provider 级别模型分组，支持切换默认模型
+- Provider 级模型分组、可见模型控制、别名、刷新和默认模型切换
+- 在模型页分别管理 STT 与 TTS Provider
 
 ### 多配置文件
 
@@ -119,7 +161,7 @@
 - 上传、下载、重命名、复制、移动和删除文件
 - 上传文件保存到当前选择/请求的 Hermes Profile 目录下；下载按真实路径解析，支持下载上传目录外的 Agent 产物
 - 创建目录
-- 查看文件内容，支持语法高亮
+- 预览和编辑支持的文件并提供语法高亮，还可把工作区文件附加回聊天
 
 ### 群聊
 
@@ -134,16 +176,56 @@
 
 ### Coding Agents
 
-- 在 Web 仪表盘中启动和监控本地 Coding Agent 会话
-- 为 Codex 和 Claude Code 集成提供独立代理路由
-- 支持 DeepSeek Harness（`deepseek-harness`）托管 Coding Agent，通过 JSON-RPC stdio 驱动并复用同一流式事件管道
-- 持久化 Agent 输出和 reasoning 元数据，便于后续查看
+- 发现、配置、启动和监控上表中的 14 种 Coding Agent 集成；通过 Agent 管理器安装和更新受支持的 CLI
+- 内置 Coding Agent 终端、会话历史、工作区选择、图片输入和文件 Diff
+- 提供独立代理路由和 API 模式，适配不同 Provider/模型
+- 支持桌面独立聊天窗口，并持久化输出和 reasoning 元数据
+- Coding Agent 页面中的共享 `~/.agents/skills` 为只读；原生设置、私有技能和 MCP 管理能力因 Agent 而异
+
+#### DeepSeek Harness（DSH）
+
+- 支持单聊、群聊和工作流节点，可使用 Studio 选择的 Provider/模型，也可使用 DSH 原生全局配置。
+- 新建会话、添加群聊成员或配置工作流节点时可选择 Agent 预设，恢复会话时保留原有选择。
+- 复用原生 `web` profile 的插件。**插件配置**嵌入插件自带的设置界面并跟随黑白主题，**插件列表**管理已安装的包；Agent 预设使用独立的 Studio 管理页。
+- 管理 DSH 设置、指令、MCP 和私有技能。共享 `~/.agents/skills` 在所有 Coding Agent 页面中仅展示，禁止编辑和删除。
+
+通过 Agent 管理器，在运行 Studio 后端的机器上安装 DSH。安装原生插件还需要该机器的 PATH 中有 `pnpm`。配置方式、Profile 复用和兼容性说明见 [DSH 接入文档](docs/dsh-management.md)。
+
+### 桌面 Agent 浏览器
+
+- 桌面端多标签浏览器，Agent 可通过托管 MCP Server 进行导航和交互
+- 支持隔离浏览器 Profile、标签控制租约、代理、下载、Cookie 和权限管理
+- 支持可访问性快照、截图、控制台日志和页面标注
+- 支持分页局部查询和顺序批量操作，并返回文本变化、选中值及新开标签等观察结果
+
+### 移动 App 与会话分享
+
+- 通过局域网、鉴权直连或云端中转连接 App，直连不可用时回退到中转
+- 通过任务卡片和通知跟踪单聊、群聊和工作流进度；受支持的 iOS 版本还提供实时活动（Live Activities）
+- 将单个会话分享给 App 账号，配置输入、文件、语音和终端权限，并可撤销访问
+- 在 App 中使用可恢复的终端会话
+
+连接方式与权限边界见 [App 连接](./docs/app-relay.md) 和[会话分享](./docs/session-share-tokens.md)。
+
+### JEV 评估
+
+- 按 Profile 配置记忆召回、技能匹配和学习评估
+- 浏览器操作、群聊和工作流评估可单独开启或关闭
+
+配置方式和接入状态见 [JEV 文档](./docs/jev.md)。
 
 ### 技能与记忆
 
 - 浏览和搜索已安装的技能
 - 查看技能详情和附件
-- 用户笔记和档案管理
+- 安装和管理 Skill Bundles，并查看按 Profile 统计的技能用量
+- 用户笔记、Ekko Agent 持久记忆和按 Profile 管理的记忆
+- 学习轨迹关系图，支持技能/记忆关系、分类筛选、详情查看和播放
+
+### 主题自定义
+
+- 支持明暗模式、界面风格、基础字号、文字颜色和选中颜色
+- 支持按账号保存背景图片，并在整个工作区实时预览
 
 ### 日志
 
@@ -154,7 +236,7 @@
 ### 管理与运行时
 
 - 设备和局域网 Peer 页面，用于本地网络发现和 Peer 工具能力
-- MCP 管理器，用于托管的 `hermes-studio` MCP Server 和 Profile 自动注入
+- MCP 管理器，用于托管的 `ekko-studio-*` Server、Profile 自动注入和 `api` / `browser` / `devices` / `use` / `plan` 工具集；任务计划和澄清使用独立的 `ekko-studio-interaction` Server
 - Runtime Version 和 Version Preview 工具，用于隔离测试新版本
 - 面向超级管理员的性能监控视图
 
@@ -162,7 +244,7 @@
 
 - 基于 Token 的认证（首次运行自动生成或通过 `AUTH_TOKEN` 环境变量设置）
 - 用户名/密码登录，并在设置页提供账户管理
-- 默认登录名/密码为 `admin` / `123456`；登录后会提示尽快修改默认账户和密码
+- 默认登录名/密码为 `quanthermes` / `12345678`；登录后会提示尽快修改默认账户和密码
 - 超级管理员可以管理用户和 Profile 绑定；普通管理员只能管理自己的账户信息
 
 CLI 维护命令：
@@ -171,45 +253,14 @@ CLI 维护命令：
 # 删除持久化的登录 IP 锁记录
 hermes-web-ui clear-login-locks
 
-# 删除登录锁并重启正在运行的 Web UI 进程
+# 删除登录锁并重启正在运行的 Studio 服务
 hermes-web-ui clear-login-locks --restart
 
-# 创建或重置默认超级管理员登录名/密码为 admin / 123456
+# 创建或重置默认超级管理员登录名/密码为 quanthermes / 12345678
 hermes-web-ui reset-default-login
 ```
 
-`clear-login-locks` 会删除 `${HERMES_WEB_UI_HOME:-~/.hermes-web-ui}/.login-lock.json`。如果服务正在运行，需要重启服务才能清理内存中的锁定状态。`reset-default-login` 会更新 Web UI 账户数据库；如果已存在 `admin` 用户，则会把密码重置为 `123456`，并启用为超级管理员账户。
-
-登录页在 IP 被锁（HTTP 429/503）时会显示两个按钮 ——「清除登录锁定」和「重置默认密码」，由统一的恢复密码保护，默认与出厂 admin 密码一致（`12345678`）；可通过 `HERMES_WEB_UI_RECOVERY_PASSWORD` 环境变量配置为独立的值。
-
-### 设备扫码登录（Token Platform）
-
-硬件 Hermes 设备（QuantClaw / 量迹龙虾盒子等）首次开机时，可在登录页扫描微信二维码绑定 [Token Platform](https://api.quantclaw.vip) 账号 —— 设备端无需手动输入用户名密码。绑定后设备持有专属 API key + 模型白名单，每次开机自动恢复，无需重复扫码。
-
-流程：
-
-1. 设备首次开机，LoginView 渲染微信二维码（`WeChatQrPanel.vue`）。
-2. BFF 调 Token Platform `POST /api/device-login/request`，传入设备的稳定 `hardware_id`（随机 UUID，持久化在 `HERMES_WEB_UI_HOME/device-id`，缺失时重新生成），拿到 `{appid, state, redirect_uri}`。
-3. 用户用微信扫码并在手机端确认。
-4. 设备轮询 `GET /api/device-login/status?login_id=..`；批准后 Token Platform 一次性返回 `{api_base, api_key, models, device_id}`（`KeyDelivered` 标志防泄漏）。
-5. BFF `POST /api/auth/device-login` 用 `verifyDeviceApiKey` 校验设备 API key，取绑定的用户资料，首次运行时自动在本地引导出 `admin` 超级管理员，签发 Hermes JWT，并把绑定持久化到 `${HERMES_WEB_UI_HOME}/device-binding.json`（含 `api_base / api_key / models / display_name / username / bound_at / expires_at`）。
-6. 后续开机由 `useDeviceBinding` 读取 `device-binding.json`，调 `POST /api/auth/device-login/restore` 重新签发 JWT，无需重新扫码。
-
-环境变量：
-
-- `TOKEN_PLATFORM_BASE_URL`（默认 `https://api.quantclaw.vip`）—— Token Platform 地址。
-- `HERMES_WEB_UI_HOME` —— 存放 `device-id` 和 `device-binding.json` 的目录。
-
-Web UI BFF 端点：
-
-| 方法 | 路径 | 鉴权 | 用途 |
-| --- | --- | --- | --- |
-| `POST` | `/api/auth/device-login` | 无 | 用 `{api_base, api_key, device_id, device_name, models}` 完成扫码登录。 |
-| `POST` | `/api/auth/device-login/restore` | 无 | 后续开机从持久化绑定恢复 JWT。 |
-| `GET`  | `/api/auth/device-binding` | 需要 | 读取当前持久化的绑定。 |
-| `DELETE` | `/api/auth/device-binding` | 需要 | 清除绑定，下次开机重新显示二维码。 |
-
-解绑：**设置 → 设备绑定 → 解绑**，或调 `DELETE /api/auth/device-binding`。解绑只清本地绑定文件，Token Platform 上的账号和设备 API key 仍然有效，要彻底作废请去 `https://api.quantclaw.vip` 后台删除设备。
+`clear-login-locks` 会删除 `${HERMES_WEB_UI_HOME:-~/.hermes-web-ui}/.login-lock.json`。如果服务正在运行，需要重启服务才能清理内存中的锁定状态。`reset-default-login` 会更新 Studio 账户数据库；如果已存在 `quanthermes` 用户，则会把密码重置为 `12345678`，并启用为超级管理员账户。
 
 ### 设置
 
@@ -223,409 +274,14 @@ Web UI BFF 端点：
 
 ### 语音 / TTS / STT
 
-- 可在聊天和群聊消息中朗读 Assistant 回复。
-- Provider 支持：浏览器 Web Speech、内置 Edge TTS、OpenAI 兼容 `/audio/speech`、自定义 OpenAI 兼容 TTS 端点、MiMo。
-- MiMo 支持预置音色、音色设计提示词、音色复刻参考音频（`.mp3`/`.wav`，最大 10 MB），并可选择鉴权请求头模式（`Authorization`、`api-key` 或两者同时发送）。
-- Edge / OpenAI 兼容 / 自定义 / MiMo 播放统一走 Web UI 后端 `/api/hermes/tts/synthesize`，停止/暂停状态一致，并会在可行时中断进行中的 fetch。
-- Provider API Key 和 MiMo 复刻参考音频保存在服务端 TTS 设置中，浏览器只显示脱敏后的 secret 状态。
-- 使用 OpenAI / 自定义 / MiMo 播放前，先在 Settings → Voice 保存 provider 设置。消息播放只发送文本和非敏感播放参数，后端合成时读取当前用户保存的私钥。
-- 聊天输入框支持回合制语音输入：通过麦克风按钮开始/停止一轮录音，转写结果会先填入当前输入框，用户可以编辑后再用普通发送按钮发送。
-- 语音输入 / STT 可在支持时使用浏览器语音识别，也可使用在 Settings → Voice 中配置的服务端 provider。
-- 当 Assistant 音频正在播放时，开始新的语音输入会先停止播放。这个 barge-in 只打断音频，不会隐式取消正在运行的 Agent；停止 run 仍然需要显式操作。
+- 在模型 → STT 和模型 → TTS 中管理语音 Provider；旧的设置 → 语音入口会跳转到这里。
+- TTS 适配器：Edge、OpenAI 兼容、MiMo、豆包、ElevenLabs、Gemini、xAI、Mistral、MiniMax、DeepInfra。
+- STT 适配器：浏览器、OpenAI 兼容、豆包、Groq、Mistral、xAI、ElevenLabs、DeepInfra。
+- 可在聊天输入框使用可编辑的回合制语音输入，也可打开全屏实时语音舞台进入连续的语音交互体验。
+- Provider Key 和 MiMo 音色复刻音频保存在服务端，浏览器只接收脱敏后的 Secret 状态。
+- 开始新的语音输入会先停止 Assistant 播放，但不会隐式取消正在执行的 Agent Run。
 - 支持的设置项、安全边界和当前非目标范围见 [`docs/voice-dialogue.md`](./docs/voice-dialogue.md)。
-- 限制：浏览器/服务端中断后，外部 TTS Provider 仍可能继续处理请求；自定义 / OpenAI 兼容 / MiMo base URL 必须是公网 `http`/`https` 端点，不能指向 localhost 或私网。
-
-### 小智语音网关
-
-把离线的 [XiaoZhi（小智）](https://github.com/78/xiaozhi-esp32) AI 音箱接入 Hermes Agent，全程不上云。Studio 的 `/global-agent` 路由从本地伴生网关接收 Opus 音频，走当前 profile 配置的 STT → 触发 Agent → 把 TTS 音频流式回传到设备，全部在局域网内完成。
-
-|| 能力 | 说明 |
-| --- | --- |
-| OTA 配网 | 公开的 `GET/POST /api/xiaozhi/ota/<setupCode>` 端点在 timing-safe 校验 setup code 后返回 WebSocket 地址 + device token，绝不泄露 Studio 凭据或固件。 |
-| 状态查询 | 仅 super admin 的 `GET /api/xiaozhi/status` 报告网关可达性、当前会话数和 OTA 地址。 |
-| 局域网地址自适应 | `selectXiaozhiLanAddress` 每次请求都把 WebSocket URL 重写为宿主机的当前局域网地址，换 Wi-Fi 不用改设备配置。 |
-| 凭证复用 | Qwen ASR / Qwen TTS 直接使用当前 profile 已保存的 DashScope Key，无需重复填。 |
-| Devices 页组件 | `XiaozhiConnection.vue` 显示设备 ID、网关健康度、STT/TTS provider 和一键复制 OTA 地址，10 s 自动刷新。 |
-
-**配置。** 在 `<getWebUiHome()>/devices/xiaozhi.json` 放一个 `mode-0600` 的 JSON：
-
-```json
-{
-  "deviceId": "08:3A:8D:xx:xx:xx",
-  "setupCode": "<≥24 位随机字符串>",
-  "websocketUrl": "ws://xiaozhi-gateway.local:8765/xiaozhi",
-  "deviceToken": "<共享密钥>"
-}
-```
-
-Studio 会在响应前校验 `deviceId`、`setupCode`（≥ 24 位，timing-safe 比较）、`websocketUrl`（`ws:`/`wss:`，不嵌凭据）和 `deviceToken`（≥ 24 位）。伴生网关（端口 `8765`）独立发布，systemd 单元、网关探针与踩坑见 [`docs/harness/xiaozhi-integration.md`](./docs/harness/xiaozhi-integration.md)。
-
-**运维要点。**
-
-- 设备下发 `mcu.session.clear`（例如双击 BOOT）会 bump 一代会话，**下一轮作为新 Hermes 会话**而不是把现有会话清空。
-- MCU 的 `playbackDone` 拒绝不再污染后续片段 —— 之前只要有一段丢失就会用 `tts-failed` 把整段回答截断。
-- 语音分段阈值改为 `firstSegmentMinChars=3` + `maxChars=120`，段间停顿从 0.4–1.9 s 降到几乎不可感知。
-- 客户端断开时会同步清掉进行中的 MCU 语音流，下一轮不会让设备卡在 `listening`。
-- 嗯 / 哦 / 那个 等口头禅在进入 Agent 前直接丢弃，省一次 LLM + TTS 来回。
-- Qwen TTS 返回的 OSS HTTP 音频地址会被改写成 HTTPS，但不会把 API Key 一起带上。
-
-覆盖测试：`tests/server/loopback-url.test.ts`、`tests/server/mcu-model-selection.test.ts`、`tests/server/mcu-speech-segmenter.test.ts`、`tests/server/mcu-filler-transcript.test.ts`、`tests/server/xiaozhi-lan-address.test.ts`、`tests/server/global-agent-server.test.ts`。
-
-### 会议模式
-
-实时语音转写与 AI 会议分析功能，支持说话人分离和智能会议纪要生成。
-
-**核心功能：**
-
-| 功能 | 说明 |
-|---|---|
-| 实时语音转写 | 通过 WebSocket 连接 ASR 服务，实时将语音转为文字；ASR 服务商可切换（默认 DashScope Paraformer / Fun-ASR，可选 MiniMax `asr-1.0` REST 流式识别） |
-| 说话人分离 | 基于阿里云 DashScope Paraformer 模型，自动识别不同说话人 |
-| 说话人重命名 | 转写列表里的说话人标签始终可见，hover 时露出编辑图标，点击打开重命名弹窗；新名字会同步应用到该说话人的所有句子，并写入服务端（刷新页面不会回滚） |
-| 说话人数设置 | 支持自动识别或手动指定 2-8 人，提升分离精准度 |
-| 音频录制与回放 | 录制会议音频，支持进度条拖拽、点击句子跳转播放 |
-| AI 分析 | 支持 Hermes Agent 或自定义模型分析，生成摘要、要点、待办事项 |
-| 多格式导出 | 支持下载音频（WebM）、转写文本（TXT）、JSON 结构化数据、HTML 报告 |
-| 整文件转写 | 新建会议对话框的「直接音频转录」标签可直接上传录音开始转写；右栏的「拆分人声」按钮对同一段录音重跑一遍识别并补上说话人标签。引擎：MiniMax `asr-1.0`（支持说话人分离，超过 480s 自动切片）或 Qwen（≤5 分钟，说话人分离需 OSS） |
-
-**说话人分离模式：**
-
-- 开启说话人分离后，系统会自动识别不同说话人
-- 可手动设置说话人数（2-8 人）以提高识别准确度
-- 说话人 ID 会自动映射为可读名称（说话人 1、说话人 2...）
-- 支持重命名说话人，重命名后所有历史记录同步更新
-
-**JSON 导出格式：**
-
-```json
-{
-  "title": "会议标题",
-  "createdAt": "2026-07-17T10:00:00.000Z",
-  "speakers": [
-    { "id": "0", "displayName": "张三" },
-    { "id": "1", "displayName": "李四" }
-  ],
-  "sentences": [
-    {
-      "index": 1,
-      "text": "会议发言内容",
-      "startTimeMs": 1000,
-      "endTimeMs": 3500,
-      "speakerId": "0",
-      "speakerName": "张三"
-    }
-  ],
-  "analysis": {
-    "summary": "会议摘要",
-    "meeting_type": "项目汇报",
-    "key_points": ["要点1", "要点2"],
-    "action_items": [
-      { "task": "撰写上线方案", "assignee": "张三", "deadline": "2026-07-25" }
-    ],
-    "decisions": ["v0.74 灰度发布，先开功能开关"],
-    "risks": ["ASR 后端仍是单节点"],
-    "learnings": [],
-    "feedback": { "positive": [], "negative": [] },
-    "topics": ["主题1", "主题2"]
-  }
-}
-```
-
-**分析流水线（v0.74）：**
-
-- **可配置触发模式。** 每个会议可选择三种触发方式：
-  - `sentences`：每 N 句自动分析一次（默认 10，范围 1–100）。
-  - `time`：每 N 秒自动分析一次（默认 60，范围 10–600）。
-  - `both`：满足任一条件即触发。
-  在右侧面板工具栏的齿轮按钮中配置，或通过 `MeetingSession` 上的 `analysisTriggerMode` / `analysisIntervalSentences` / `analysisIntervalSeconds` 字段设置。
-- **会议类型识别。** LLM 先判断会议属于 *会议纪要* / *客户回访* / *头脑风暴* / *项目汇报* / *培训分享* / *其他*，并按类型输出对应字段（decisions / feedback / risks / learnings）。
-- **结构化待办事项。** `action_items` 现在为 `[{ task, assignee, deadline }]`，前端 store 和 Python 后端一致；旧的 `string[]` 数据依旧能渲染，保持向后兼容。
-- **HTML 报告生成。** 服务端在每次分析后输出一份完整的自包含 HTML 文档（CSS/JS 内联，仅在含 `relationships` 时引入 ECharts），风格根据会议类型自适应。客户端缓存 `html_content`，Agent 面板提供"查看 HTML"快捷入口和报告已就绪的提示横幅。
-- **复用工具。** `useMeetingAnalysis`（`packages/client/src/composables/useMeetingAnalysis.ts`）负责从 Agent 输出中提取平衡 JSON、转义 HTML、识别分析结构，由 `tests/client/useMeetingAnalysis.test.ts` 覆盖。
-
-**稳定性补丁（v0.74.1）：**
-
-- **更稳健的 HTML 报告提取。** `useMeetingAgent.ts` 现在从三类来源抽取 AI 生成的 HTML 报告——工具调用参数（`write_file` 及其他）、对应的工具执行结果、以及 assistant 消息中的 ` ```html ` 代码块（包括需要拼接多条 assistant 消息才能完整取出的情况）。三者都不命中时才回退到内置模板，避免 agent 直接内联报告时报告查看区空白。
-- **防重入。** `sendMessage` 与 `runAgent` 在已经有 run 进行中时通过 `isRunning` 标志短路返回，防止重复点击触发器重复拉起 agent run，也避免 `isRunning` 状态被回调和并发调用互相覆盖。
-- **对齐 Python 端 LLM 配置访问器。** `meeting-asr/python-backend/app/llm_service.py` 将已废弃的 `storage.get_llm_config()` 切换为 `storage.get_config().llm`，与 v0.74 引入的存储重构保持一致；旧的访问器下线后，分析与 HTML 渲染流程不再会因为这一处不一致抛出错误。
-
-**字幕纠错（v0.74.2）：**
-
-- **AI 字幕纠错。** Agent 面板新增 "纠错字幕" 按钮，把当前句子发给 Hermes 做 ASR 校对，agent 返回 `{index, original, corrected}` 数组，前端按序号回写到当前会话并刷新 `finalSentences`。由 `useMeetingAgent.ts` 的 `correctTranscript()` 实现，`MeetingAgentPanel.vue` 暴露按钮，`MeetingView.vue` 通过 `onAgentCorrectTranscript` 写回 store。
-- **完成自动关闭面板。** 分析 run 结束时面板会发出 `completed` 事件；`MeetingView.onAgentCompleted` 在已生成 HTML 报告时自动关闭面板，让报告视图直接顶上，省一次点击。
-- **多语言字符串。** `meeting.correctTranscript` 与 `meeting.correctTranscriptHint` 已加入中英文 locale 文件；其它 locale 暂以英文兜底，待后续翻译。
-
-**ASR 模型选择与节省模式（v0.74.3）：**
-
-- **会话级 ASR 模型选择。** 新建会议对话框新增 ASR 模型选择器，支持 `paraformer-v2` / `fun-asr` / `fun-asr-mtl` 三种模型，中英文 locale 都附带简短说明。选中的模型保存在 `MeetingSession.asrModel`，启动 ASR websocket 时随运行时配置下发。
-- **节省模式（仅说话人分离）。** `MeetingView` 新增 `saveMode` 开关：开启后改连独立的 `diarize` websocket，不再走实时 ASR 流。音频上传到说话人分离服务后端，扬声器标签异步回流，足以支撑后续分析与 HTML 报告生成；DashScope 按秒计费的实时 ASR 跳过，配额紧张的用户可以省下来。
-- **ASR-only 分支。** `startRecording` 把 websocket 接线分成三条显式分支——`saveMode`（仅说话人分离）、`useDiarize`（ASR + 说话人分离并行）、新增的纯 ASR-only——不需要说话人标签的用户可以彻底跳过 diarize websocket。
-- **重命名即时同步。** `confirmRenameSpeaker` 现在把 store 里更新后的 `speakerMap` 一并回写到 `MeetingView` 的本地 ref（之前只回写 `finalSentences`），重命名立刻可见，无需重载会话。
-
-**字幕纠错加固（v0.74.3）：**
-
-- **更稳健的纠错抽取。** `useMeetingAnalysis.ts` 的 `extractCorrections()` 现在对每条解析结果做 schema 校验（`index` 必须为数字、`original`/`corrected` 必须为字符串），并兼容 LLM 偶发的三种返回形态：纯 JSON 数组、`corrections = [...]` 赋值式行、夹杂在自然语言中的 JSON 块。校验失败的负载直接返回 `null`，不再返回残缺的数组。
-- **更严格的纠错 prompt。** `useMeetingAgent.correctTranscript` 中的 prompt 重写，明确 ASR 校对角色并禁止调用工具；运行参数中同时下发 pinned `instructions`，防止 Hermes 中途跑去搜网页或写文件。
-- **测试覆盖。** `tests/client/extractCorrections.test.ts` 新增 6 条用例覆盖上述形态与校验分支（16/16 全绿）。
-
-**Agent 面板优化（v0.74.4）：**
-
-- **切换会话重载。** `MeetingAgentPanel.vue` 现在 `watch` `sessionId`，切换时从 store 重新加载 `messages` / `analysisResult` / `reportHtml`，并重置 `isRunning` / `error` / `completed` / `correctedSentences`。之前用户在 `MeetingView` 切到另一个会话时，面板还停留在上一个会议的对话上。
-- **Assistant 内容走 Markdown 渲染。** 把 `<div class="assistant-content">{{ msg.content }}</div>` 替换为异步加载的 `MarkdownRenderer`，分析结果会按 Markdown 渲染（标题、列表、表格、代码块），不再是被转义的纯文本。
-- **报告生成 prompt 加固。** `useMeetingAgent.generateReport` 现在通过 `sendMessage` 的第二个参数下发 pinned `instructions`，带上会议标题，并把已有 `analysisResult` 以及之前 assistant/system 消息以 `### Previous analysis result` / `### Previous conversation` 块的形式拼进 prompt。再点一次 "生成报告" 会基于之前的分析结果增量补全，而不是从头再来；严格的 instructions 同时强制 `write_file + ```html` 契约，与 `extractHtml` 的抽取规则对齐。
-- **HTML 检测放宽。** `looksLikeHtmlDocument` 现在同时接受 `<!DOCTYPE html>` 开头，最小长度阈值从 200 字符降到 100 字符，短的（不含 ECharts 图表的）报告也能被识别为完整 HTML 文档。
-
-**整文件转写与事后说话人分离（2026-02）：**
-
-- **两条批量转写入口**，与实时 WebSocket 路径并列：
-  - **「直接音频转录」** 标签：在创建会议对话框里直接上传音频文件、选引擎、按需开启说话人分离，创建会议后立刻开始转写；录音文件随会议保存，播放 / 下载照常工作。
-  - **「拆分人声」** 按钮：位于右栏头部，有录音时可点击。重传整段录音并回填说话人标签到转写。点击后弹出对话框，先选识别引擎（MiniMax / Qwen）和说话人数；Qwen 引擎还需要在对话框里就地填 OSS 凭据，因为 DashScope 说话人分离文件接口只接受公网可达的音频 URL。
-- **引擎支持。** MiniMax 走 `asr-1.0`，使用 `response_format=verbose_json` + `segments[].speaker`（单次请求 500 s / 50 MB 上限，超过 480 s 自动切片，全局时间戳连续）；Qwen 的说话人分离只能走异步文件接口（`diarization_enabled`），需要 OSS 作为公网音频托管，同步接口则只有 5 分钟时长上限且不支持说话人标签。
-- **后台任务 + 轮询。** 长转写不会一直占住 HTTP 请求。客户端调 `POST /api/meeting-asr/transcribe/file?engine=&diarize=&speakerCount=&language=&sessionId=`（请求体为原始音频），再轮询 `GET /api/meeting-asr/transcribe/status/:jobId` 拿到 `{ status, progress, result | error }`。任务错误会带上失败调用点（例如 `[file_transcribe.py:283]`），反馈直接指向代码位置。
-- **陈旧后端自愈。** uvicorn 子进程在 spawn 时一次性导入 Python 模块，所以重新打包 `dist/` 只更新了客户端，运行时后端仍停留在旧代码。`MeetingASRService` 现在在 spawn 时给 `python-backend/**/*.py` 算内容哈希，作为 `MEETING_ASR_CODE_HASH` 传给子进程；下次 `start()` 若磁盘上的哈希变了就 respawn。`/healthz` 会暴露 `transcribe` 能力标记（`MeetingView.vue` 里的 `TRANSCRIBE_CAPABILITY` 与之对应）；两条整文件入口都会调用 `ensureTranscribeBackend()`，发现报告的 `code_hash` 对不上就先把服务停掉，再强制 spawn 新进程。
-- **容器解码。** 上传的容器（webm/mp3/wav/m4a/…）先用 `ffmpeg`（设备 / Docker 依赖里已声明）解码为 16 kHz 单声道 Int16 PCM，再送进引擎。
-- **热配置同步。** `MeetingASRService.updateConfig()` 同时转发 DashScope *和* MiniMax 字段，所以一次会话里切换引擎不需要重启服务。运行中下发的设置落到 `config.yaml`，`asr_minimax.py` 在下一次请求时直接拿到新的 key / endpoint。
-
-完整契约（引擎选择、OSS 桶字段、错误结构、重试策略）见 [`MEETING_MODE_README.md`](./MEETING_MODE_README.md#7-整文件转写与事后说话人分离-2026-02)。
-
-### 口语对练 / 口语教练（v0.8.0）
-
-AI 驱动的实时语音对话与口语练习辅导。
-
-**核心功能：**
-
-| 功能 | 描述 |
-|---|---|
-| 实时语音对话 | 基于 WebSocket 的 Omni 实时对话，支持流式回复 |
-| 口语教练模式 | 严格目标语言纪律，配备专属教练人格 |
-| 肢体语言评分 | 练习过程中基于摄像头的手势与姿态分析 |
-| 定时练习 | 可配置的练习时长与节奏控制 |
-| 会话类型分流 | 语音入口按会话类型自动路由（教练 vs. 实时对话） |
-| 双主题天体 | 跟随亮色/暗色主题切换的月亮/太阳矢量素材 |
-| 声纹可视化 | 64 根径向柱状均衡器显示音频 |
-
-**视觉设计（v0.8.0）：**
-
-- 天体素材重塑为跟随主题切换的月亮/太阳 SVG
-- 声纹改为 64 根径向柱状均衡器
-- 控件沉底，气泡不再与文字重叠
-- 亮色模式舞台配有晨光渐变背景层与高对比度控件
-- 全局统一单色水墨配色 + 紫蓝高光
-
-**教练人格：**
-
-- 独立于 Agent SOUL 的专属口语教练人格 — 不再产生人格冲突
-- 严格目标语言执行：教练全程使用练习语言回复
-- 会话入口按类型自动分流
-
-**音频与报告增强（v0.8.0）：**
-
-- **优雅停播：** 定时练习到点后先等当前句子播完再断开 — AI 语音不再被截断
-- **跨工具调用修复：** AI 跨多工具调用的回复不再因新响应到达时音频还在播放而被截断
-- **回声误打断防护：** 改善了 Linux/弱 AEC 扬声器的 barge-in 阈值 — AI 不再打断自己
-- **Qwen3.5-Omni 全模态报告：** 每次练习结束后，录音和摄像头画面提交给 DashScope Qwen3.5-Omni 生成 AI 全模态深度分析，追加到确定性报告末尾
-- **流式 AI 报告：** AI 分析结果实时流式渲染为 Markdown — 无需等待完整结果
-- **报告下载：** 保存后，报告文件作为附件出现在聊天页面 — 关闭对练舞台后仍可下载
-
-**旧版语音下线（v0.8.0）：**
-
-- 旧版实时语音页面已下线
-- 所有语音入口统一到全新 Omni 实时对话
-- 语音会话可无缝续接文字聊天上下文
-
-### 文档扫描（v0.8.0）
-
-摄像头驱动的文档扫描插件：连接 UVC USB 摄像头后，让「智能捕捉」完成
-整条流水线——边缘检测、ML 校验、透视校正、OCR、多页 PDF，并保存到当前
-Hermes profile 的工作区。
-
-**核心功能：**
-
-| 功能 | 描述 |
-|---|---|
-| UVC 摄像头预览 | 实时预览，支持设备选择，区分空闲/直播状态，针对授权拒绝、未检测到设备、浏览器拦截给出明确提示。 |
-| 智能捕捉 | 实时边缘检测 + 可拖拽选框；选框稳定后自动拍摄，也保留手动模式。 |
-| 多页会话 | 单次会话中可拍摄、重拍、删除、排序、重新识别每一页。 |
-| 内置图像增强 | 详情视图自带自动色阶、对比度/亮度/锐化；折叠的「高级调节」暴露去阴影、二值化程度、底色增白、去噪，并提供「应用到所有页」一键广播当前参数。 |
-| OCR | 通过 DashScope Qwen-VL-OCR 服务端接口（`POST /api/scanner/ocr`）做多页识别，可选「拍后自动识别」。 |
-| PDF 导出 | 把所选页面打包成 A4 或跟随图片的 PDF，可选「可搜索」模式把 OCR 文本作为隐藏文字层嵌入（服务端 `POST /api/scanner/pdf`）。 |
-| 工作区保存 | 把图像和 OCR 文本写入当前 Hermes profile 的工作区（服务端 `POST /api/scanner/save`）。 |
-| 插件架构 | 独立模块位于 `packages/client/src/plugins/scanner`，自带 Vue 视图、组合式 API、视觉模块与多语言包（en/zh + 其他 9 种）。 |
-
-**视觉流水线（纯 JS，运行于 Web Worker）：**
-
-- **多策略检测。** 主路径 `bright`（Otsu 双极性）+ Canny 风格 `edge` 兜底，
-  可选的 `ml` 走 Transformers.js + YOLOS-tiny（DETR 变体，ONNX WASM 本地
-  打包，CSP 开启 `wasm-unsafe-eval`）。各策略并行运行，结果按得分合并。
-- **AI 是 COCO 物体检测器，不是纸张检测器。** YOLOS-tiny 是在 COCO 上预
-  训练的通用物体检测模型，COCO 里没有 `paper` / `document` / `page` 类。
-  插件把 `book` 当作最接近的代理，再用加权得分（`labelBoost` ×
-  `aspectPrior` × 贴边惩罚）挑出"最像纸"的边界框。白纸、作业纸、单页便
-  签可能完全没有候选——这种情况下 AI 静默让位，由经典流水线兜底。请勿
-  把"AI 没有 hint"误读为"扫描坏了"。
-- **AI 提案二次校验。** ML 边界框不直接采用。每个提案在*当前帧*上裁剪并用
-  经典 edge/brightness 流水线复核，再映射回全图坐标系，并按
-  `minAreaRatio` / `maxAreaRatio` 重新校验。脱离当前像素的纯先验提案会被
-  拒绝，避免污染裁剪结果。AI 只输出轴对齐矩形，角点细化仍依赖经典寻边，
-  所以 AI 不能独立解决经典识别失败的场景。
-- **低对比度页面的 Otsu 二次分割。** 当打印文字主导暗簇时，对直方图上半段
-  再做一次 Otsu，把纸面从低对比度背景中分离——原先的单次 Otsu 在发票或
-  文字密集页面上经常崩溃。
-- **稳定的 Sobel 方向。** Sobel 梯度方向以 22.5°/67.5° 为扇区边界，让
-  Canny 风格滞回把较厚的页边缘保留在正确的角侧。
-- **稳定的凸包锚点。** 凸包始终保留起点；对于近垂直边，起点可能落在
-  边中段。算法现在把锚点游走到最左上点，让 Douglas–Peucker 从真正的角点
-  开始化简。
-- **容错的角点精修。** `refinePaperQuad` 拒绝过紧的 Douglas–Peucker
-  近似时，算法会跳到下一档容差，而不是整张丢弃。
-
-**智能捕捉 UX（v0.8.0）：**
-
-- **粘性选框。** 选框一旦亮起，连续 miss 几帧不会把它收掉——选框进入
-  `held` 状态（「选框已保留，可拖动角点或重置」），用户仍可拖动、重拍或
-  重置。
-- **拖动冻结追踪。** 在角点把手按下时调用 `lockSelection()`，检测结果
-  无法在拖动过程中移动选框；松手时调用 `resumeTracking()`，无需清空已编
-  辑角点即恢复跟随。
-- **远距目标重新捕获。** 当纸面真正移出选框时，新位置会被接受，即使位
-  移大于原先的稳定容差——旧容差要求接近拍摄级的静止。
-- **更大把手。** 角点把手从 22 px 增大到 44 px，在触控和高 DPI 摄像头下
-  更易抓握。
-- **指针捕获安全。** 拖动处理监听 `lostpointercapture`，被其他窗口抢走
-  焦点导致的指针事件丢失也能干净释放角点。
-- **响应式代理安全。** Vue 的 `reactive()` 代理坐标在 `postMessage` 进
-  Worker 前先用 `structuredClone` 转成普通对象，避免松手后第一帧被静默
-  丢弃。
-
-**AI 检测修复（v0.8.0）：**
-
-- **WebGPU 探测不再抛 `Illegal invocation`。** 旧版 `hasUsableWebGPU()`
-  把 `gpu.requestAdapter` 解构成局部变量再裸调，丢失了 Chrome 要求的宿
-  主实例 `this`。抛出的 `TypeError` 被 try/catch 吞掉，于是所有 Chrome
-  ——包括真正带 WebGPU adapter 的——都被静默降级到 WASM（慢 4–5 倍）。
-  改用 `gpu.requestAdapter.bind(gpu)` 绑定 `this`。
-- **慢设备推理结果不再被丢弃。** 旧版对 AI 回包做了 1.5 秒的硬性 wall-
-  clock 截止，推理耗时超过这个值的成功结果直接当废——结合上面的 WASM
-  降级，慢设备会出现"模型已就绪但 hint 一直用不上"。硬性截止已去掉：
-  唯一的过期判定改为 worker 代际（`stopML()` 自增代际，旧代际的 AI 回
-  包在接收时被丢），hint 读取侧窗口放宽到 5 秒，2–3 秒的 WASM 推理仍
-  能喂给下一帧。
-- **测试覆盖两项回归。** 新增 4 个 `hasUsableWebGPU` 用例，分别覆盖
-  adapter 存在 / adapter 为 null / `navigator.gpu` 缺失 / `requestAdapter`
-  抛错四种情形；`scanner-detector-worker.test.ts` 新增一个用例推进 fake
-  timer 2 秒后再回包，验证慢 hint 仍被采纳。
-
-**PDF 导出选项（v0.8.0）：**
-
-- **布局切换。** 导出栏新增「页面布局」：「跟随图片（满版）」按源图比例
-  输出，「A4 打印版」则把图居中到固定 A4 画布并保留白边。A4 路径走
-  既有 A4 框算法；满版路径用「输出 DPI」（72–600，默认 200）驱动 JPEG
-  重编码尺寸。
-- **可搜索 PDF（隐藏文字层）。** 「可搜索 PDF」开关开启后，每页 OCR 文本
-  以渲染模式 `3 Tr`（不可见、可选 / 可搜索 / 可复制）叠在图像上。导出
-  文件在 Acrobat、Chrome（PDFium）、Preview、移动端阅读器里都能正常搜索
-  复制；未识别到文字的页自动跳过。开关旁用徽标标出实际带文字层的页数，
-  方便导出前一眼校对覆盖率。
-- **非嵌入 CJK 字体。** 隐藏文字层采用 `/Subtype /Type0` +
-  `/BaseFont /STSong-Light` + `/Encoding /UniGB-UCS2-H` 的 CIDFontType0
-  方案，**不嵌入字体**。Adobe / Chrome（PDFium）/ macOS Preview 都会用
-  系统字体替换渲染，一份 50 页中文扫描的隐藏层体积只来自每页一行 UTF-16
-  hex，不会拖上几 MB 的字体负载。选区是按 OCR 行数均分页面高度的近似
-  行位置——对搜索 / 复制完全够用，不追求逐字像素对齐。
-- **UTF-16BE hex 编码。** `encodeUtf16BeHex()` 把文本流序列化为 PDF 的
-  `<…>` hex string（UTF-16BE），配合 `/Encoding /UniGB-UCS2-H` 让 2 字节
-  UTF-16 码元直接映射到 GB1 的 CID，覆盖全部 GB1 CJK 字符。非 BMP 字符
-  走标准代理对。
-
-**图像增强流水线（v0.8.0）：**
-
-- **高级调节折叠区。** 在原有对比度 / 亮度 / 锐化之上，详情面板新增
-  「高级调节」折叠区，包含：
-  - **去阴影强度**（`shadowRemove`，0–100）——去掉手部 / 台灯投射的柔
-    光阴影。`100` 是完整 flat-field（用背景光做除法归一化），`0` 完全
-    关闭；中间值在原始灰度与 flat-field 结果之间按比例混合。在 `scan`
-    与 `bw` 预设下生效。
-  - **二值化程度**（`binarizeSensitivity`，−50..+50）——映射 Sauvola 的
-    `k = 0.2 - v*0.004`；正值保留更多黑（笔画更黑更粗），负值背景更
-    干净但可能丢失浅笔画。只在 `bw` 预设下生效。
-  - **底色增白**（`whiteness`，0–100）——带拐点（knee）的白点下压：亮度
-    低于 110 的笔画像素原样保留，只把高于拐点的亮部拉伸到纯白，避免
-    「黑点提升」把字拖灰。在 `scan` 与 `bw` 预设下生效。
-  - **去噪**（`denoise`，0–100）——灰度 / 彩色预设用 3×3 RGB 中值（19
-    次比较的最优排序网络，无分支抖动）；`bw` 预设改为二值图斑点清除
-    （3×3 多数滤波），只翻动孤立点而不伤笔画边缘。全部预设下都生效。
-- **按预设显示。** 当前预设下没有任何生效的高级滑杆时，整块折叠区隐
-  藏；任何高级参数偏离默认值时，开关旁会显示一个小圆点，提醒用户已
-  经做过调节。
-- **默认值 = 旧行为。** `ENHANCE_ADVANCED_DEFAULTS`
-  （`shadowRemove=100, denoise=0, binarizeSensitivity=0, whiteness=0`）锁
-  住滑杆未触动时的输出与旧版完全一致，`scanner-vision-enhance.test.ts`
-  专门守这一合约。`normalizeEnhanceParams()` 在反序列化旧数据 / localStorage
-  时自动补齐新增字段，避免历史会话升级后页面渲染异常。
-- **应用到所有页。** 折叠区内一个按钮即可把当前页的全套 `EnhanceParams`
-  （预设 + 全部滑杆）一次性广播到本会话其它所有页，沿用同一 `enhanceDataUrl`
-  流水线重渲染，toast 提示更新了多少页。
-
-**拍摄 UX（v0.8.0）：**
-
-- **拍后自动识别。** 语言选择旁新增「拍后自动识别」开关：开启后，拍摄
-  / 智能拍摄后立刻对本页做 OCR（默认关闭，仍需先配 DashScope Key）。开
-  关开启后，新拍页面会自动 `pending → running → done`，OCR 批次进行时
-  状态栏显示 `识别中 N/M`。
-- **页面排序。** 每张缩略图悬停时出现上下移动按钮（移动端详情面板的溢
-  出菜单内也可触达）。拍摄后到导出前可自由调整顺序，服务端 `save` /
-  `pdf` 都按调整后的顺序读取页面。
-
-**服务端流水线：**
-
-- `POST /api/scanner/ocr` — DashScope Qwen-VL-OCR，接收 `data:image/...`；
-  校验 MIME、页数、单图大小；未传 key 时复用 Realtime store 中的 DashScope key。
-- `POST /api/scanner/pdf` — 把所选图像打包成 PDF（无外部 PDF 依赖，页面以
-  图片方式嵌入）。可选 `layout`（`image`|`a4`）、`dpi`（72–600）以及
-  `searchable`+`texts[]`（开启后把 OCR 文本作为隐藏文字层嵌入，得到可
-  搜索 / 可复制的 PDF）。
-- `POST /api/scanner/save` — 把图像和 OCR 文本写入当前 Hermes profile 的
-  工作区（经 `getActiveProfileDir()`）；支持配置基础目录、文件命名规则和
-  覆盖策略。
-
-**覆盖：**
-
-- 单元测试覆盖 Worker 桥接（`scanner-detector-worker.test.ts`）、视觉精度
-  回归（`scanner-vision-precision.test.ts`）、图像增强滤镜（含新增高级滑杆
-  —— `scanner-vision-enhance.test.ts` 用例锁住
-  `ENHANCE_ADVANCED_DEFAULTS` 与旧版输出逐字节一致）、OCR 校验、PDF 打包
-  （`scanner-pdf.test.ts` 同时覆盖 layout / dpi / searchable），以及
-  Smart Capture 状态机（`scanner-smart-capture.test.ts`）。
-- 端到端测试（`scanner-precision.spec.ts`）覆盖实时预览：选框进入 `held`
-  后仍保留、拖动期间冻结、松手后跟随摄像头移动，以及 13" 笔记本与移动端
-  两种视口。
-
-### 会议跑团插件（Meeting TRPG Plugin）
-
-桌游 / TRPG 跑团辅助，嵌入在会议模式里：创建会议时选择 **TRPG** 场景，
-右栏就会加载一个独立、懒加载的跑团工作台（角色卡、高光、编年史、长篇
-小说工作台、骰子、配图等），与文档扫描插件互不耦合。
-
-**能力一览：**
-
-| 能力 | 说明 |
-|---|---|
-| 角色卡 | 按 D&D 5E 的身份 / 六项属性 / 战斗 / 技能 / 背景 / 法术分组，可折叠。玩家（说话人）与角色名分开，输出名统一为【角色名】。 |
-| 角色草稿（PDF / 图片） | AI 抄写员先通过本地打包的 `pdfjs-dist` 提取 PDF 文本与坐标，再交给当前 Hermes profile 的模型填卡；扫描件仍需 OCR。草稿兼容 Markdown JSON、外围说明、嵌套 `character/data/sheet`、中文字段与属性缩写；Agent 最终答复优先于推理流。 |
-| 高光图库 | 点击时取最近 60 句确认转写（≤ 12000 字符），保留动作证据。**不再按 30 条丢弃**，更早的卡片可通过「展开更早的 N 条高光」和独立 `HighlightWorkbench` 页查看。支持手动上传 PNG/JPEG/WebP（≤ 5 MB）补图 / 换图。 |
-| 编年史 | 三种写作模式（小说化 / 记录体 / 日志体）+ **长篇小说**流水线（目标 1/2/4/6 万中文字符），后台任务、可断点续写、可取消；分章节规划、逐场景写作 + 审核；快照在点击时落盘，每段写作再读回原文。Agent 走新增的 `trpg-recap` skill 和 `hermes_studio_meetings_toolset` MCP，不另造聊天执行器。 |
-| 长篇小说工作台 | 独立的工作台把模型实时输出按步骤类型渲染成 AI 工具调用卡片（修订 / 写作 / 检查 / 事实账本 / 规划…），并展示每个产物的依赖指纹；操作员可以单独「删除」或「删除并重新生成」某一个产物而不必整本重来。提取块 / 事实账本 / 场景初稿是粘性断点，续写只重建真正缺失或变化的部分。 |
-| 实时输出预览 | 「AI 正在输出」面板会解析流式 JSON，把每个进行中的产物（修订 / 全文修订 / 检查 / 事实账本 / 写作 / 规划）渲染成带步骤徽章、正文 prose、可折叠结构化分区的 AI 风格卡片；流式中途 JSON 不完整时回落到 `<pre>` 原文，不隐藏任何中间状态。 |
-| 古籍阅读页 | 独立 Vite 入口（`/recap-book.html?meetingId=...&recapId=...`）渲染已保存的 Markdown：牛皮纸纹理、余烬漂浮、深色皮革封面 + 题签 + 红印、毛笔手写体字体（`Ma Shan Zheng`，OFL，本地 `public/fonts/`）、按真实排版分页、鼠标拖拽 + 键盘翻页、右侧插画栏对应 `images[]`。 |
-| 生成设置 | 一个对话框统一管理：高光转写范围（全部 / 最近 N 句 / 指定段落）、编年史转写范围（同上，默认全部）、编年史配图（已保存编年史 × 封面 / 内容 × 可选章节）。范围以**句子区间** `segments: {from,to}[]` 保存，不依赖段落 id，转写变化不会静默失效。 |
-| ChatGPT 网页生图 | 异步任务 + 轮询流程：`POST /api/hermes/media/chatgpt-web-image?async=true` 立即返回 202 + `job_id`，面板每 3s 轮询 `GET .../jobs/:jobId`，瞬时失败自动重试，任务在服务端保留 1 小时（每 profile 最多 30 个）。 |
-| 存储 | 角色 / 高光 / 图片 / 设置存于独立 IndexedDB，按 server + user + profile + meeting 隔离。编年史快照写入 `getWebUiHome()/meetings/<meetingId>/recaps.json`（原子写、会议级串行队列、同 `requestId` 重试覆盖），Markdown 渲染到同目录 `<recapId>.md`。 |
-
-插件保持「路由薄、服务厚」（控制器只委托到 `services/trpg/`），字段定义
-通过 `packages/shared/trpg-*.ts` 共享，复用现有聊天传输、profile 凭证和
-bridge 会话——不引入新的聊天执行器、不升级 Hermes Agent、不改动录音链路。
-完整契约（存储 key、MCP 工具集、范围语义、古籍阅读页分页模型、验证测试）
-见 [`packages/client/src/plugins/trpg/README.md`](./packages/client/src/plugins/trpg/README.md)。
+- 实时语音舞台不代表同时听说的全双工通话；电话接入和常驻唤醒词监听仍不在当前范围。
 
 ### Web 终端
 
@@ -637,10 +293,12 @@ bridge 会话——不引入新的聊天执行器、不升级 Hermes Agent、不
 ### 桌面应用与自动更新
 
 - Windows、macOS 和 Linux 原生 Electron 桌面壳
-- 内置 Web UI 运行时，并自动启动本地 Hermes Studio 服务
+- 内置 Studio 运行时，并自动启动本地服务
+- 截取屏幕区域、标注并附加到单聊或群聊；可配置全局截图快捷键
+- 受支持的 Windows/macOS 环境可在截图时隐藏 Studio；Linux 按桌面环境使用 X11 或系统 Screenshot Portal
 - 桌面自动更新优先使用 Cloudflare 下载端点获取更新元数据和安装包
 - 如果 Cloudflare 更新源不可用，会回退到 GitHub Releases `latest` 资源
-- Windows 升级时会先尝试关闭已有 Hermes Studio 进程，再替换文件
+- Windows 升级时会先尝试关闭已有 Ekko Studio 进程，再替换文件
 
 ---
 
@@ -648,18 +306,35 @@ bridge 会话——不引入新的聊天执行器、不升级 Hermes Agent、不
 
 ### 桌面应用（推荐）
 
-请从你们自己的发布渠道下载最新的 **Hermes Studio** 桌面安装包。
+从 [GitHub Releases](https://github.com/tangledup-ai/hermes-web-ui/releases/latest)
+下载最新的 **Quanthermes Studio** 桌面安装包。
 
 桌面版会发布 macOS、Windows 和 Linux 构建；适用时会区分不同 CPU 架构。
-桌面应用内置 Web UI 运行时，Hermes Agent 数据会保存到原生 Hermes 目录：
+桌面应用内置 Studio 运行时；在 Windows、macOS 和 Linux 上，Hermes Agent 数据统一保存到 `~/.hermes`。
 
-- Windows：`%LOCALAPPDATA%\hermes`（找不到时回退到 `%APPDATA%\hermes`）
-- macOS/Linux：`~/.hermes`
-
-桌面壳自身的 Web UI 状态会单独保存到 `~/.hermes-web-ui`，除非设置了
+桌面壳自身的 Studio 状态会单独保存到 `~/.hermes-web-ui`，除非设置了
 `HERMES_WEB_UI_HOME`。
 
-桌面自动更新应优先读取你们自己的更新元数据地址和安装包分发地址。
+打包后的桌面应用启动后，会安装受管命令 shim，避免桌面应用、内置 Hermes Agent CLI
+和内置服务端 CLI 的命令互相冲突：
+
+| 命令 | 说明 |
+|---|---|
+| `ekko-studio` | 打开 Ekko Studio 桌面应用 |
+| `ekko-studio cli ...` | 运行内置 Hermes Agent CLI |
+| `ekko-studio web ...` | 运行内置 `hermes-web-ui` 命令 |
+| `ekko-studio -h` | 显示 wrapper 帮助 |
+| `ekko-studio-mcp [api\|browser\|devices\|use\|plan]` | 运行指定的受管 Studio MCP 工具集 |
+
+桌面命令统一为 `ekko-studio`；安装新命令时会移除旧的受管 `hermes-studio` 命令，不保留兼容别名。
+
+使用 `ekko-studio cli -h` 查看 Hermes Agent CLI 帮助，使用
+`ekko-studio web -h` 查看服务端 CLI 帮助。`ekko-studio-mcp` 默认暴露
+`api` 工具集；按任务选择 `browser`、`devices`、`use` 或 `plan`，可以缩小 MCP 暴露面。
+
+桌面自动更新会优先读取 `https://tangledup-ai-staging.oss-cn-shanghai.aliyuncs.com/quanthermes_pj/quanthermes_web_ui`。
+如果该端点不可用，更新器会回退到
+`https://github.com/tangledup-ai/hermes-web-ui/releases/latest/download`。
 
 ### npm 安装
 
@@ -668,20 +343,19 @@ npm install -g @quanthermes/hermes-web-ui
 hermes-web-ui start
 ```
 
+用户数据位于 `HERMES_WEB_UI_HOME` 或 `HERMES_WEBUI_STATE_DIR`，默认是
+`~/.hermes-web-ui`。请使用上述带作用域的 npm 包更新本项目。
+
 打开 **http://localhost:8648**
 
-### 一键安装与 WSL
-
-请使用你们自己维护的安装脚本或部署文档，不再引用官方远程安装脚本。
-
-> WSL 使用与其他本地安装相同的 Web UI 后台启动流程；Web UI 不再单独启动 gateway 服务。
+需要 Node.js **23 或更高版本**。Ekko Agent 随包内置；使用 Hermes Agent 时，需在同一台机器安装其运行时，或选择内置运行时的桌面版/Docker。
 
 ### Docker Compose
 
 单容器部署，内置 Hermes Agent 运行时：
 
 ```bash
-# 从本仓库源码构建
+# 从源码构建本地发行版
 docker compose up -d --build
 
 docker compose logs -f hermes-webui
@@ -690,52 +364,46 @@ docker compose logs -f hermes-webui
 打开 **http://localhost:6060**
 
 - Hermes 持久化数据目录：`./hermes_data`
-- Web UI 认证 Token 存储在 `./hermes_data/hermes-web-ui/.token`
+- Studio 认证 Token 存储在 `./hermes_data/hermes-web-ui/.token`
 - 首次启动并开启认证时，Token 会打印到容器日志中
 - 运行参数全部由 `docker-compose.yml` 环境变量驱动
 
 更详细的说明与排错见：[`docs/docker.md`](./docs/docker.md)
 
-### 源码部署提醒
-
-如果你要在 Armbian / Ubuntu 上走宿主机源码部署，请先阅读 [`docs/work-log.md`](./docs/work-log.md) 再开始执行部署步骤。
-
-- `2026-05-19` 的工作日志记录了一个真实坑点：Hermes 被装到了 `root` 目录下，但 `hermes-web-ui.service` 实际以 `hermesui` 用户运行
-- 这种安装归属错位会导致 agent bridge 报 `run_agent.py not found`，随后聊天链路出现 `ENOENT /tmp/hermes-agent-bridge.sock`
-- 源码部署完成后，请优先检查 `/home/hermesui/.local/bin/hermes` 是否归属 `hermesui`，不要链接到 `/root/.local/...`
-
 ### Hermes Agent 运行时发现
 
-Web UI 启动后端聊天能力时，会优先使用包含 `run_agent.py` 的源码目录，例如
+Studio 启动后端聊天能力时，会优先使用包含 `run_agent.py` 的源码目录，例如
 `~/.hermes/hermes-agent`。如果找不到源码目录，会退回到已安装 `hermes` 命令所使用
 的 Python 环境，再退到系统 Python。因此源码安装和 `pip install hermes-agent` 这类
 包安装方式都可以兼容。
 
-## Web UI 环境变量
+## Studio 环境变量
 
-这些变量只用于配置 Hermes Web UI 自身。Provider API Key 和 Hermes Agent 相关设置仍通过 Hermes profile 管理。
+这些变量用于配置 Ekko Studio、本地 Hermes Runtime 集成以及开发/预览辅助能力。Provider API Key 和 Hermes Agent 相关设置通常仍通过 Hermes Profile 管理；这里列出的变量是进程级覆盖项。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `PORT` | `8648` | Web UI 监听端口。 |
-| `BIND_HOST` | `0.0.0.0` | Web UI 绑定地址。如需 IPv6，可显式设置为 `::`。 |
+| `PORT` | `8648` | Studio 服务监听端口。 |
+| `BIND_HOST` | `0.0.0.0` | Studio 服务绑定地址。如需 IPv6，可显式设置为 `::`。 |
 | `HERMES_LAN_ADVERTISE_URL` | 未设置 | App 局域网二维码使用的可访问 Studio 地址。Docker 中若通过 `localhost` 打开，请设置为宿主机局域网 URL，例如 `http://192.168.1.20:6060`。 |
 | `HERMES_APP_ENTITLEMENT_REQUIRED` | `true` | App 局域网 Relay 必须携带有效的云端签名。仅在临时兼容排查时设置为 `false`。 |
 | `HERMES_APP_ENTITLEMENT_PUBLIC_KEY` | 内置 | 可选的 RS256 App 签名 PEM 公钥覆盖。签名 issuer 为 `hermes-studio-server`，audience 为 `ekko-studio`。 |
-| `HERMES_WEB_UI_HOME` | `~/.hermes-web-ui` | Web UI 数据目录，用于认证 token、登录凭据、日志、数据库和默认上传目录。兼容支持 `HERMES_WEBUI_STATE_DIR` 作为别名。 |
+| `HERMES_WEB_UI_HOME` | `~/.hermes-web-ui` | Studio 数据目录，用于认证 Token、登录凭据、日志、数据库和默认上传目录。兼容支持 `HERMES_WEBUI_STATE_DIR` 作为别名。 |
 | `HERMES_WEBUI_STATE_DIR` | 未设置 | `HERMES_WEB_UI_HOME` 的兼容别名。 |
-| `HERMES_WEB_UI_DISABLE_MCP_AUTOINJECT` | 未设置 | 关闭启动时向 Hermes profile 配置自动注入托管的 `hermes-studio` MCP server。 |
+| `HERMES_WEB_UI_DISABLE_MCP_AUTOINJECT` | 未设置 | 关闭启动时向 Hermes profile 配置自动注入托管的 `ekko-studio-*` MCP server。 |
 | `HERMES_WEB_UI_ALLOW_TRANSIENT_MCP_AUTOINJECT` | 未设置 | 当 `HERMES_WEB_UI_HOME` 位于临时目录（例如 Version Preview runtime）时，仍允许托管 MCP 自动注入。 |
 | `UPLOAD_DIR` | `$HERMES_WEB_UI_HOME/upload` | 覆盖上传根目录。文件会保存在按 Profile 隔离的子目录下。 |
 | `CORS_ORIGINS` | 仅同 host | HTTP、Socket.IO、WebSocket 跨源 allowlist，支持逗号或空格分隔。只有明确需要旧版 wildcard CORS 时才设置为 `*`。 |
-| `AUTH_TOKEN` | 自动生成 | 显式指定 bearer token。未设置时，Web UI 会在 `HERMES_WEB_UI_HOME` 下自动生成。 |
+| `AUTH_TOKEN` | 自动生成 | 显式指定 Bearer Token。未设置时，Studio 会在 `HERMES_WEB_UI_HOME` 下自动生成。 |
+| `AUTH_JWT_SECRET` | `AUTH_TOKEN` | 用户名/密码会话的 JWT 签名密钥覆盖。 |
+| `HERMES_WEB_UI_AUTH_JWT_EXPIRES_IN` | `30d` | 用户名/密码会话 JWT 有效期。支持秒数或 `s`/`m`/`h`/`d` 后缀，例如 `12h` 或 `7d`。 |
 | `PROFILE` | `default` | 启动/默认 Hermes profile。运行时请求使用前端当前选择且当前账号有权限访问的 Profile。 |
 | `LOG_LEVEL` | `info` | Server 日志级别。 |
 | `BRIDGE_LOG_LEVEL` | `$LOG_LEVEL` 或 `info` | Bridge 日志级别。 |
 | `MAX_DOWNLOAD_SIZE` | `200MB` | 最大文件下载大小。 |
 | `MAX_EDIT_SIZE` | `10MB` | 最大可编辑文件大小。 |
 | `WORKSPACE_BASE` | 当前用户 Home 目录 | Workspace 浏览根目录。 |
-| `HERMES_HOME` | 平台默认值 | Hermes 数据目录。Windows 使用 `%LOCALAPPDATA%\hermes`；macOS/Linux 使用 `~/.hermes`。 |
+| `HERMES_HOME` | `~/.hermes` | Windows、macOS 和 Linux 上的 Hermes 数据目录。 |
 | `HERMES_BIN` | `hermes` | 自定义 Hermes CLI 二进制路径。 |
 | `HERMES_AGENT_ROOT` | 自动发现 | 包含 `run_agent.py` 的 Hermes Agent 源码目录。 |
 | `HERMES_AGENT_BRIDGE_PYTHON` | 自动发现 | 用于启动 agent bridge 的 Python 解释器。 |
@@ -746,7 +414,7 @@ Web UI 启动后端聊天能力时，会优先使用包含 `run_agent.py` 的源
 | `HERMES_AGENT_BRIDGE_TIMEOUT_MS` | `120000` | Node 请求 bridge broker 的响应超时。 |
 | `HERMES_AGENT_BRIDGE_CONNECT_RETRY_MS` | `5000` | 连接 bridge socket 失败时的短重试窗口。 |
 | `HERMES_AGENT_BRIDGE_STARTUP_TIMEOUT_MS` | `120000` | 等待 Python bridge ready 的超时。 |
-| `HERMES_AGENT_BRIDGE_STOP_ON_SHUTDOWN` | 开启 | Web UI 关闭和重启时是否停止 bridge broker；设为 `0`、`false`、`no` 或 `off` 才会在重启时保留 broker。 |
+| `HERMES_AGENT_BRIDGE_STOP_ON_SHUTDOWN` | 开启 | Studio 关闭和重启时是否停止 Bridge Broker；设为 `0`、`false`、`no` 或 `off` 才会在重启时保留 Broker。 |
 | `HERMES_AGENT_BRIDGE_AUTO_RESTART` | 开启 | bridge broker 意外退出后是否自动重启；设为 `0`、`false`、`no` 或 `off` 可关闭。 |
 | `HERMES_AGENT_BRIDGE_RESTART_DELAY_MS` | `1000` | bridge 自动重启退避的基础延迟。 |
 | `HERMES_AGENT_BRIDGE_PLATFORM` | `cli` | 传给 Hermes Agent 的 platform 标识。 |
@@ -756,106 +424,115 @@ Web UI 启动后端聊天能力时，会优先使用包含 `run_agent.py` 的源
 | `HERMES_BRIDGE_TOOLSETS` | profile/默认值 | bridge 运行时的 toolset 覆盖。 |
 | `HERMES_BRIDGE_MAX_TURNS` | profile/默认值 | bridge 运行时的最大轮数覆盖。 |
 | `HERMES_BRIDGE_SUPPRESS_PLATFORM_HINT` | `cli` | 控制传给 Hermes Agent 的 bridge platform hint suppression。 |
-| `HERMES_OPENROUTER_APP_REFERER` | 未设置 | bridge 运行发送给 OpenRouter 的 attribution referer；如需使用，请改成你们自己的公网站点。 |
-| `HERMES_OPENROUTER_APP_TITLE` | `Hermes Web UI` | bridge 运行发送给 OpenRouter 的 attribution title。 |
+| `HERMES_OPENROUTER_APP_REFERER` | `https://github.com/tangledup-ai/hermes-web-ui` | bridge 运行发送给 OpenRouter 的 attribution referer。 |
+| `HERMES_OPENROUTER_APP_TITLE` | `Ekko Studio` | Bridge 运行发送给 OpenRouter 的 Attribution Title。 |
 | `HERMES_OPENROUTER_APP_CATEGORIES` | `cli-agent,personal-agent` | bridge 运行发送给 OpenRouter 的 attribution categories。 |
-| `HERMES_WEB_UI_MANAGED_GATEWAY` | 默认开启 | 控制 Web UI 托管 Hermes gateway 进程；设为 `0`、`false`、`no` 或 `off` 时改用 `hermes gateway start`。 |
-| `HERMES_WEB_UI_DISABLE_GATEWAY_AUTOSTART` | 未设置 | 跳过启动时的 gateway 检查/自动启动；dashboard-only 部署中如果由其它服务管理 Hermes gateway，可设为 `1`、`true`、`yes` 或 `on`。 |
-| `HERMES_WEB_UI_DISABLE_SKILL_INJECTION` | 未设置 | 跳过启动时的内置 skill 注入；如果内置 skills 由 Hermes Web UI 外部管理，可设为 `1`、`true`、`yes` 或 `on`。启用注入时，Web UI 只更新自己此前安装的 skills 或内容完全相同的既有内置副本；本地修改和用户拥有的同名 skills 会跳过。 |
-| `HERMES_WEB_UI_STOP_GATEWAYS_ON_SHUTDOWN` | 生产环境默认开启 | Web UI 关闭时是否同时停止托管的 gateway 进程；设为 `0` 或 `false` 可让 gateway 分离运行。 |
+| `HERMES_WEB_UI_MANAGED_GATEWAY` | 默认开启 | 控制 Studio 托管 Hermes Gateway 进程；设为 `0`、`false`、`no` 或 `off` 时改用 `hermes gateway start`。 |
+| `HERMES_WEB_UI_DISABLE_GATEWAY_AUTOSTART` | 未设置 | 覆盖需手动开启的 Hermes Gateway 自动启动策略。设为 `1`、`true`、`yes` 或 `on` 时，即使设置中已开启，也跳过启动检查和配置驱动的状态协调。 |
+| `HERMES_WEB_UI_DISABLE_SKILL_INJECTION` | 未设置 | 跳过启动时的内置 Skill 注入；如果内置 Skills 由 Studio 外部管理，可设为 `1`、`true`、`yes` 或 `on`。启用注入时，Studio 只更新自己此前安装的 Skills 或内容完全相同的既有内置副本；本地修改和用户拥有的同名 Skills 会跳过。 |
+| `HERMES_WEB_UI_STOP_GATEWAYS_ON_SHUTDOWN` | 默认开启 | Studio 关闭时仅停止由当前 Studio 进程启动并登记的 Gateway；设为 `0` 或 `false` 可让它们分离运行。外部探测到的 Gateway 不会被收编或关闭。 |
+| `HERMES_WEB_UI_SHUTDOWN_FORCE_EXIT_MS` | `10000` | Studio 的短暂资源清理窗口；超时后会强制结束自己持有的进程树再退出。 |
+| `HERMES_DESKTOP_STOP_TIMEOUT_MS` | `20000` | Desktop 宿主原有的整树强制结束期限，独立于 Web UI 的 10 秒清理预算。 |
 | `GATEWAY_HOST` | `127.0.0.1` | 旧 gateway 兼容配置中写入 profile 的默认 gateway host。 |
 | `HERMES_WEB_UI_PREVIEW_REPO` | package repository | Version Preview 使用的 GitHub 仓库。 |
 | `HERMES_WEB_UI_PREVIEW_AGENT_BRIDGE_TRANSPORT` | 平台默认值 | Version Preview broker transport。设为 `tcp` 可让预览环境在 macOS/Linux 上也使用 loopback TCP；未设置时会跟随 `HERMES_AGENT_BRIDGE_WORKER_TRANSPORT=tcp`。 |
 | `HERMES_WEB_UI_PREVIEW_AGENT_BRIDGE_ENDPOINT` | 隔离的预览 endpoint | 直接覆盖 Version Preview 的 broker endpoint。 |
 | `HERMES_WEB_UI_BACKEND_PORT` | `8648` | Vite dev proxy 使用的后端端口。 |
 | `HERMES_WEB_UI_FRONTEND_PORT` | `8649` | 前端 Vite dev server 端口。 |
-| `HERMES_WEB_UI_MEETING_ASR_TLS` | `false` | 设为 `true` 时，meeting ASR 的 Python 子进程将携带 `--ssl-keyfile/--ssl-certfile` 启动，Node WS 代理改为 `tls.connect`。设备镜像上 uvicorn 需要 TLS 时开启；本地开发保留默认 `false`。 |
-| `HERMES_WEB_UI_SSL_CERTFILE` | `{product_dir}/certs/server.crt` | 覆盖自签 TLS 证书路径。Node HTTPS server 与 meeting ASR uvicorn 子进程共用。 |
-| `HERMES_WEB_UI_SSL_KEYFILE` | `{product_dir}/certs/server.key` | 覆盖 TLS 私钥路径。 |
 
 ### CLI 命令
 
+原有 `hermes-web-ui` 命令仍可作为下列 `hermes-web-ui` 命令的别名使用。
+
 | 命令 | 说明 |
 |---|---|
-| `hermes-web-ui start` | 后台启动（守护进程模式） |
-| `hermes-web-ui start --port 9000` | 自定义端口启动 |
+| `hermes-web-ui start [port]` | 后台启动；支持位置端口或 `--port <port>` |
+| `hermes-web-ui client [port]` | 为远程客户端启动，关闭 Gateway 自动启动并允许跨域 |
+| `hermes-web-ui restart [port]` | 重启；默认会关闭 Bridge Broker |
 | `hermes-web-ui stop` | 停止后台进程 |
-| `hermes-web-ui restart` | 重启后台进程；默认会关闭 bridge broker |
 | `hermes-web-ui status` | 查看运行状态 |
-| `hermes-web-ui update` | 更新到最新版本并重启 |
-| `hermes-web-ui upgrade` | `update` 的别名 |
-| `hermes-web-ui -v` | 显示版本号 |
+| `hermes-web-ui clear-login-locks [--restart]` | 清理持久登录锁，可选择重启 |
+| `hermes-web-ui reset-default-login` | 创建或重置默认管理员登录 |
+| `hermes-web-ui update` / `upgrade` | 更新到最新版本并重启 |
+| `hermes-web-ui version` / `-v` | 显示版本号 |
 | `hermes-web-ui -h` | 显示帮助信息 |
-| `hermes-web-ui-mcp [api\|browser\|devices\|use]` | 运行一个受管 Web UI MCP 工具集（等同于 `hermes-studio-mcp`） |
+| `hermes-web-ui-mcp [api\|browser\|devices\|use\|plan]` | 运行一个受管 Studio MCP 工具集（等同于 `ekko-studio-mcp`） |
 
-`update` / `upgrade` 会先尝试执行 `npm cache clean --force`，再执行 `npm install -g @quanthermes/hermes-web-ui@latest` 并重启。缓存清理是 best-effort；如果清理失败，只提示 warning，升级安装会继续执行。
+如不希望自动打开浏览器，可在 `start` 或 `client` 后添加 `--no-open`。
 
-## npm 发布
+`restart`、`update` 和 `upgrade` 默认会停止 Agent Bridge broker，避免重启或更新后的服务复用旧 Python bridge 进程。只有明确希望保留 broker 和正在运行的 bridge session 时，才在重启前设置 `HERMES_AGENT_BRIDGE_STOP_ON_SHUTDOWN=0`。
 
-- 发布包名：`@quanthermes/hermes-web-ui`
-- 全局安装：`npm install -g @quanthermes/hermes-web-ui`
-- 运行命令：`hermes-web-ui start`
-- 发布工作流：推送 `v*` tag 后触发 [`.github/workflows/npm-publish.yml`](./.github/workflows/npm-publish.yml)
-- 发布说明：[`docs/npm-release.md`](./docs/npm-release.md)
+`update` / `upgrade` 会先尝试执行 `npm cache clean --force`，再根据当前安装的包名升级 `ekko-studio@latest` 或 `hermes-web-ui@latest`，并重启对应包。Web UI 的版本检查也使用相同的包名。缓存清理失败时会提示警告，但不会中止升级安装。
 
 ### 自动配置
 
 启动时 BFF 服务器会自动：
 
-- 初始化 Web UI 数据目录、本地数据库和内置技能
-- 启动 `/chat-run` 使用的 Hermes agent bridge
-- 启动成功后自动打开浏览器
+- 初始化 Studio 数据目录、本地数据库和内置技能
+- Hermes Runtime 可用时启动 agent bridge；Gateway 自动启动遵循 Hermes 设置中的开关
+- 启动成功后自动打开浏览器；设置 `--no-open` 时跳过
 
 ---
 
 ## 开发
 
 ```bash
+git clone https://github.com/tangledup-ai/hermes-web-ui.git
+cd ekko-studio
 npm install
 npm run dev
 ```
 
-- 前端：http://localhost:5173
-- BFF 服务器：http://localhost:8648
+- 前端：http://localhost:8649
+- BFF 服务器：http://localhost:8647
 
 ```bash
+npm run harness:check
+npm run test
 npm run build   # 构建输出到 dist/
 ```
 
-项目开发规范见：[DEVELOPMENT.md](./DEVELOPMENT.md)。
+贡献命令见 [DEVELOPMENT.md](./DEVELOPMENT.md)，完整的 Package 与状态模型见
+[ARCHITECTURE.md](./ARCHITECTURE.md)。
 
 ## 架构
 
-```
-```
-Browser → BFF (Koa, :6060) → Socket.IO /chat-run
-                ↓
-                ↓
-           Hermes CLI / profiles
-           profile config.yaml    (渠道/Provider 配置)
-           profile auth.json      (凭证池)
-           腾讯 iLink API         (微信扫码登录)
+```text
+浏览器 / Desktop / App
+          │ HTTP + Socket.IO
+          ▼
+Koa Bootstrap（仅负责组装）
+          │
+          ├─ Studio 平台 ── 单聊、群聊、Global Agent、工作流、
+          │                 会话、文件、语音、设备、Webhook
+          ├─ Hermes Family ─ Profile、模型、技能、记忆、任务、
+          │                  Kanban、渠道、终端、Hermes Bridge
+          ├─ Ekko Family ─── Ekko Runtime 与 Agent 自有服务
+          └─ Coding Family ─ Coding Agent 适配器、隔离配置、原生 CLI 执行
 ```
 
-前端采用 **多 Agent 可扩展架构** — 所有 Hermes 相关代码都按命名空间组织在 `hermes/` 目录下（API、组件、视图、Store），可以方便地并行接入新的 Agent。
+服务端按业务归属组织在
+`packages/server/src/modules/{studio,hermes,ekko,coding-agents}`。Route 保持轻量，
+Controller 处理 HTTP 关注点，Service 负责可复用业务行为，只有
+`packages/server/src/bootstrap` 可以组装具体模块和 Adapter。跨 Agent 的能力归
+Studio；不能因为某项公共功能当前使用 Hermes，就把它放进 Hermes 模块。
 
-BFF 层负责：Socket.IO 聊天流式推送、Hermes agent bridge、按 Profile 隔离的上传和按路径解析的下载（多 Backend 支持：local/Docker/SSH/Singularity）、会话 CRUD、分账户分 Profile 管理、配置/凭证管理、微信扫码登录、模型发现、技能/记忆/插件管理、TTS/STT、Coding Agent 代理、MCP/Runtime 管理、日志读取和静态文件服务。
+Studio 状态与 Hermes Agent 状态彼此独立。Studio 默认使用
+`~/.hermes-web-ui`，Hermes Profile 数据仍保存在 Hermes Home 下。完整目录归属、
+依赖规则和 API 迁移约束见
+[`docs/harness/server-module-boundaries.md`](./docs/harness/server-module-boundaries.md)。
 
 ## 技术栈
 
 **前端：** Vue 3 + TypeScript + Vite + Naive UI + Pinia + Vue Router + vue-i18n + SCSS + markdown-it + highlight.js
 
-**后端：** Koa 2（BFF 服务器）+ node-pty（Web 终端）
-
-## Star 历史
-
-[![Star 历史图表](https://api.star-history.com/svg?repos=tangledup-ai/hermes-web-ui&type=Date)](https://star-history.com/#tangledup-ai/hermes-web-ui&Date)
-
-<!-- 如上方图表未加载，可访问 https://star-history.com/#tangledup-ai/hermes-web-ui -->
+**后端：** Koa 2 + Socket.IO + SQLite + node-pty
 
 ## 许可证
 
 [BSL-1.1](./LICENSE)
 
-该许可证覆盖 Hermes Studio、原 Hermes Web UI 名称、`hermes-web-ui` npm 包和
-CLI、桌面应用、固件、发布产物、文档以及本仓库内的关联文件。
+该许可证覆盖 Ekko Studio、`hermes-web-ui` npm 包和 CLI、桌面应用、
+固件、发布产物、文档以及本仓库内的关联文件。
+
+MCP 主入口为 `bin/ekko-studio-mcp.mjs`，工具名统一使用 `ekko_studio_*` 前缀。旧的 `hermes-studio-mcp` / `hermes-web-ui-mcp` 命令及 `hermes_studio_*` 调用继续兼容。重启 MCP 客户端后可发现新工具名；Studio 会将托管服务配置迁移为 `ekko-studio-api`、`ekko-studio-browser`、`ekko-studio-devices`、`ekko-studio-use` 和 `ekko-studio-interaction`。

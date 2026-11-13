@@ -75,7 +75,7 @@ function select(id: string) {
       :key="entry.id"
       type="button"
       role="radio"
-      class="scene-template-picker__card"
+      class="scene-template-picker__card" data-theme-surface="card"
       :class="{ 'scene-template-picker__card--selected': isSelected(entry.id) }"
       :aria-checked="isSelected(entry.id)"
       @click="select(entry.id)"
@@ -113,7 +113,7 @@ function select(id: string) {
   padding: 12px 14px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: var(--bg-card);
+  background: var(--theme-card-bg, var(--bg-card));
   color: var(--text-primary);
   cursor: pointer;
   text-align: left;
@@ -135,7 +135,7 @@ function select(id: string) {
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   color: var(--accent-primary);
 }
 .scene-template-picker__card--selected .scene-template-picker__icon {

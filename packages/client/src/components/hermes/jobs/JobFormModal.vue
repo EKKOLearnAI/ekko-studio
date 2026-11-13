@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { NModal, NForm, NFormItem, NInput, NButton, NSelect, NInputNumber } from 'naive-ui'
+import { NModal, NForm, NFormItem, NInput, NButton, NSelect, NInputNumber, useMessage } from 'naive-ui'
 import { useJobsStore } from '@/stores/hermes/jobs'
 import { useAppStore } from '@/stores/hermes/app'
 import {
@@ -23,7 +23,6 @@ import {
   type ScheduleFrequency,
 } from '@/utils/schedule-frequency'
 import { useI18n } from 'vue-i18n'
-import { useMessage } from '@/composables/useAppMessage'
 
 const { t, locale } = useI18n()
 
@@ -490,14 +489,14 @@ function handleClose() {
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .schedule-time-fields {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   width: 100%;
 }
 </style>

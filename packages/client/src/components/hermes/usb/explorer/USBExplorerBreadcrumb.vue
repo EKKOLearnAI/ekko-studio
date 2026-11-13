@@ -49,7 +49,7 @@ const segments = computed(() => {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  background: var(--bg-secondary);
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid $border-light;
   border-radius: 999px;
   color: $text-secondary;

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { UpdateError } from '../../packages/server/src/services/update/errors'
-import { buildSourceDeployCommand, buildSourceDeployEnv } from '../../packages/server/src/services/update/strategies/source-deploy'
+import { UpdateError } from '../../packages/server/src/modules/studio/services/update/errors'
+import { buildSourceDeployCommand, buildSourceDeployEnv } from '../../packages/server/src/modules/studio/services/update/strategies/source-deploy'
 
 describe('source deploy strategy', () => {
   afterEach(() => {

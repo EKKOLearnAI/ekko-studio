@@ -4,6 +4,14 @@
 
 ## 安装与最小示例
 
+宿主可以在 `AgentToolContext` 提供四个异步扩展回调：
+`transformInput(AgentMessageInput[])` 在准备本轮消息时转换输入；
+`transformContext(AgentMessage[])` 在每次模型请求前转换消息副本；
+`beforeTool(name, input)` 返回新参数，并在之后执行正常工具授权；
+`afterTool(name, input, result)` 转换成功执行的结果。授权拒绝或失败结果不会进入
+`afterTool`，回调抛错会终止相应操作。回调应遵循上下文的 `signal`，不得跨调用保留。
+这些宿主扩展不要求独立运行的 Ekko Agent 安装 Studio。
+
 ```bash
 npm install ekko-agent
 ```
@@ -113,7 +121,7 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 | `createRuntime(options?)` | `CreateEkkoRuntimeOptions` | `AgentRuntime` | 兼容的安装级 runtime 工厂。 |
 | `close()` | 无 | `void` | 幂等关闭监听、memory 与数据库；Profile Agent 不单独关闭共享资源。 |
 
-持久数据库修复并通过自检后，当前 Setup 仍保持临时内存库直到本轮结束，避免在一次 run 中混用新旧连接。Quanthermes 的现有宿主需要在所有活动 run 与后台任务结束后重启，重新连接已修复的持久数据库；故障期间写入临时库的数据不迁移。独立宿主需要在同一边界自行重建 Setup。`restartRequired` 表示“当前 Setup 需要被宿主重载”，当前 Quanthermes 宿主尚未实现自动重载。
+持久数据库修复并通过自检后，当前 Setup 仍保持临时内存库直到本轮结束，避免在一次 run 中混用新旧连接。Ekko Studio 会在所有活动 run 与后台任务结束后自动关闭该 Setup，下一次 run 自动重建并连接已修复的持久数据库；故障期间写入临时库的数据不迁移。独立宿主需要在同一边界自行重建 Setup。`restartRequired` 表示“当前 Setup 需要被宿主重载”，在 Studio 中不要求用户手动重启应用。
 
 根容器还保留配置/模型兼容转发方法：`readConfig`、`updateConfig`、`replaceConfig`、`resetConfig`；`list/get/set/update/deleteModelProviderPreset`、`installModelProviderPreset`；`list/get/set/update/deleteModelProvider`、`setDefaultModel`；`list/get/set/update/deleteModelAuthorization`、`modelAuthorizationNeedsRefresh`、`refreshModelAuthorization`、`resolveModelAuthorization`。参数和返回值与下文对应的 `config`、`model`、`authorization` 方法相同。
 
@@ -224,6 +232,10 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 
 `AgentRuntime.run(input)` 的 `input` 字段包括：必填 `messages`；可选 `signal`、`systemPrompt`、`skills`、`maxSteps`、`maxModelRetries`、`toolFailureRecoveryThreshold`、兼容字段 `maxConsecutiveToolFailures`、`toolContext`、`model`、`temperature`、`maxTokens`、`reasoningEffort`、`reasoningSummary`、`metadata`、`modelClient`、`modelDefaults`、`contextKey`、`context`、`memoryEnabled`、`memoryInput`、`backgroundDelegationEnabled`、`logContext`、`onSkillReviewUsage`、`onEvent`。同一工具连续失败达到阈值时，runtime 注入纠错指令并继续运行，不会因该阈值终止。完整方法签名见文末自动清单。
 
+`toolExecutionGuidelinesEnabled` 默认为 true；没有执行工具的受限宿主可以设为 false，省略通用终端、代码执行及命令环境提示。它仅控制提示，不会授予或移除工具，普通 Ekko 对话保持默认行为。
+
+宿主提供 `listSessionTasks` / `updateSessionTasks` 回调时，主对话可维护跨轮 session 目标。仅记录有独立交付价值、需要持续跟进或用户明确要求跟踪的事项；简单问答、即时查询和没有长期追踪价值的一次性微调可跳过。同一目标的补充、纠错和执行约束复用已有 id。摘要用一两句话说明结果和遗留问题，验证依据放入 `completion_evidence`；读取后没有变化无需写入。读取状态包括 `open`、`completed` 和用户手动设置的 `closed`；模型写入仍只接受前两种状态。已关闭目标必须保持不变，由用户在任务列表中手动重开后才可继续更新。
+
 ## Profile `memory` 模块
 
 所有 identity/query/input 中的 `profileId` 都从类型中移除并由模块强制注入，调用者只需提供 `sessionId`。
@@ -324,6 +336,8 @@ API mode 固定映射：`chat_completions` → `openai-chat`，`codex_responses`
 
 记忆增强的具体行为、开关及降级规则见 [memory-jev.md](memory-jev.md)。每次 `runtime.run` 固定 JEV 配置快照；本轮工具和召回沿用此快照，下一轮才使用更新后的值。
 
+Computer Use 的独立可选评估使用 `jev.computerUseMatchEnabled` / `jev.computerUseVerifyEnabled`（默认关闭）。在 `computer_use` 的 `get_window_state` 调用中传顶层 `target` / `expectation`，可从新鲜窗口证据获得已有元素 token 推荐或结果判断；不会自动点击、重试或改变原生结果。候选上限、最低置信度、超时与 Studio 映射见 [computer-use.md](computer-use.md#optional-jev-assessments)。
+
 JEV 实现由 Ekko 自己提供，可以脱离 Studio 独立使用。配置按字段合并，优先级从低到高为：
 
 1. `DEFAULT_EKKO_JEV_CONFIG`：默认关闭，空密钥、`https://api.typesafe.ai`、`jev-latest`、10 秒超时。
@@ -409,7 +423,7 @@ Studio 的 `ekkoSkillsEnabled` 映射到此字段；共用参数为 `skillsCandi
 
 | 路径 | 类型 | 说明 |
 | --- | --- | --- |
-| `schemaVersion` | `number` | 当前为 14；读取旧配置时补齐新字段。 |
+| `schemaVersion` | `number` | 当前为 15；读取旧配置时补齐新字段。 |
 | `runtime.maxSteps` | `number` | 单次主循环最大步数。 |
 | `runtime.maxModelRetries` | `number` | 单次模型步骤最大重试。 |
 | `runtime.toolFailureRecoveryThreshold` | `number` | 同一工具连续失败后要求模型纠错或换方案的阈值；默认 3，不终止运行。 |
@@ -438,7 +452,7 @@ Studio 的 `ekkoSkillsEnabled` 映射到此字段；共用参数为 `skillsCandi
 | `jev.skillsMinConfidence` | `number` | 补充匹配或跳过学习复盘的最低置信度，默认 0.8，范围 0.5–1。 |
 | `jev.skillsTimeoutMs` | `number` | 单次技能判断总预算，默认 3000，范围 100–30000 毫秒。 |
 | `jev.apiKey` | `string` | 独立运行时可保存的本地密钥，默认空；运行参数可临时覆盖。 |
-| `jev.baseUrl` | `string` | API 根地址，默认 `https://api.typesafe.ai`，不带 `/v1`。 |
+| `jev.baseUrl` | `string` | API 根地址，默认 `https://api.typesafe.ai`；也接受末尾带 `/v1` 或 `/v1/systemone` 的地址，自动规范化并保留网关前缀。 |
 | `jev.model` | `string` | 默认 `jev-latest`。 |
 | `jev.timeoutMs` | `number` | 默认 10000，范围 1000–120000 毫秒。 |
 | `model.providerCatalog` | `Record<string, EkkoModelProviderPreset>` | 可安装目录。 |
@@ -447,6 +461,8 @@ Studio 的 `ekkoSkillsEnabled` 映射到此字段；共用参数为 `skillsCandi
 | `model.authorizations` | `Record<string, EkkoModelAuthorizationSettings>` | OAuth 状态。 |
 | `tools.enabled` | `boolean` | 全部工具源总开关。 |
 | `tools.executionTimeoutMs` | `number` | 普通工具超时。 |
+| `tools.computerUse.enabled` | `boolean` | 桌面操作工具开关；默认开启，调用时才启动驱动。 |
+| `tools.computerUse.timeoutMs` | `number` | 内置 Cua SDK 每次操作超时，默认 30000 毫秒；SDK 随 Agent 安装，无需外部驱动路径。详见 [Computer Use](computer-use.md)。 |
 | `tools.approvals.enabled` | `boolean` | 危险工具审批开关。 |
 | `tools.approvals.timeoutMs` | `number` | 审批等待时间。 |
 | `tools.approvals.permanentAllow` | `string[]` | 持久允许键。 |
@@ -478,6 +494,8 @@ Studio 的 `ekkoSkillsEnabled` 映射到此字段；共用参数为 `skillsCandi
 | `prompt.instructions` | `string[]` | 注入 runtime 的全局指令。 |
 
 `EkkoModelProviderSettings` 字段：可选 `label`；必填 `type` 和 `defaultModel`；可选 `apiMode`、`requestStyle`、`openAIChatReasoningReplayFormat`、`baseUrl`、`endpointPath`、`models`、`authType`、`source`、`apiKey`、`headers`、`timeoutMs`、`capabilities`。`capabilities` 可覆盖 `streaming`、`tools`、`vision`、`jsonMode`、`systemPrompt`、`maxInputTokens`。
+
+Responses 客户端会为原生推理历史记录 `reasoning.native.replayScope`，按实际请求的 Provider、模型和接口地址绑定来源。只有来源相同时才重放这些原生项；切换目标或读取缺少来源的旧记录时，只跳过请求中的原生推理项，保留正文、工具调用和结果，且不改写已存历史。标记使用摘要，不保存接口地址或密钥，也不会发送给 Provider。Chat Completions 的 `reasoning_content`、Anthropic thinking 和 Coding Agent 代理保持各自原有处理。
 
 `EkkoMcpServerConfig` 支持两种传输：stdio 使用 `command`，可选 `args` 和字符串 `env`；远程服务使用 `type: "streamable_http"`、`url` 和可选字符串 `headers`。`enabled` 控制是否加载。两种传输均使用官方 MCP Client；新 runtime 自动读取所选 Profile 的配置，显式 run-level `toolContext.mcpServers` 仍可覆盖它。
 
@@ -799,7 +817,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig
 ### `src/config.ts`
 
 ```ts
-export const EKKO_CONFIG_SCHEMA_VERSION = 14
+export const EKKO_CONFIG_SCHEMA_VERSION = 15
 
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 
@@ -924,11 +942,17 @@ export interface EkkoCodeExecConfig {
   maxSourceBytes: number
 }
 
+export interface EkkoComputerUseConfig {
+  enabled: boolean
+  timeoutMs: number
+}
+
 export interface EkkoToolsConfig {
   enabled: boolean
   executionTimeoutMs: number
   approvals: EkkoToolApprovalConfig
   codeExec: EkkoCodeExecConfig
+  computerUse: EkkoComputerUseConfig
 }
 
 export interface EkkoMcpServerConfig {
@@ -1004,9 +1028,9 @@ export interface EkkoConfig {
   prompt: EkkoPromptConfig
 }
 
-export type EkkoConfigPatch = { schemaVersion?: number runtime?: Partial<EkkoRuntimeConfig> model?: Partial<Omit<EkkoModelConfig, 'providerCatalog' | 'disabledProviderPresets' | 'providers' | 'authorizations'>> & { providerCatalog?: Record<string, EkkoModelProviderPreset> disabledProviderPresets?: string[] providers?: Record<string, EkkoModelProviderSettings> authorizations?: Record<string, EkkoModelAuthorizationSettings> } tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec'>> & { approvals?: Partial<EkkoToolApprovalConfig> codeExec?: Partial<EkkoCodeExecConfig> } mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & { profiles?: Record<string, EkkoMcpProfileConfig> } delegation?: Partial<EkkoDelegationConfig> compression?: Partial<EkkoCompressionConfig> memory?: Partial<EkkoMemoryConfig> jev?: Partial<EkkoJevConfig> skills?: Partial<Omit<EkkoSkillsConfig, 'profiles'>> & { profiles?: Record<string, Partial<EkkoSkillsProfileConfig>> } logging?: Partial<EkkoLoggingConfig> prompt?: Partial<EkkoPromptConfig> }
+export type EkkoConfigPatch = { schemaVersion?: number runtime?: Partial<EkkoRuntimeConfig> model?: Partial<Omit<EkkoModelConfig, 'providerCatalog' | 'disabledProviderPresets' | 'providers' | 'authorizations'>> & { providerCatalog?: Record<string, EkkoModelProviderPreset> disabledProviderPresets?: string[] providers?: Record<string, EkkoModelProviderSettings> authorizations?: Record<string, EkkoModelAuthorizationSettings> } tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec' | 'computerUse'>> & { approvals?: Partial<EkkoToolApprovalConfig> codeExec?: Partial<EkkoCodeExecConfig> computerUse?: Partial<EkkoComputerUseConfig> } mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & { profiles?: Record<string, EkkoMcpProfileConfig> } delegation?: Partial<EkkoDelegationConfig> compression?: Partial<EkkoCompressionConfig> memory?: Partial<EkkoMemoryConfig> jev?: Partial<EkkoJevConfig> skills?: Partial<Omit<EkkoSkillsConfig, 'profiles'>> & { profiles?: Record<string, Partial<EkkoSkillsProfileConfig>> } logging?: Partial<EkkoLoggingConfig> prompt?: Partial<EkkoPromptConfig> }
 
-export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, toolFailureRecoveryThreshold: DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, jev: { ...DEFAULT_EKKO_JEV_CONFIG }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
+export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, toolFailureRecoveryThreshold: DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, computerUse: { enabled: true, timeoutMs: 30_000 }, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, jev: { ...DEFAULT_EKKO_JEV_CONFIG }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
 
 export function serializeDefaultEkkoConfig(): string
 ```
@@ -1443,6 +1467,8 @@ export * from './skills/types'
 
 export * from './tools/browser'
 
+export * from './tools/computer-use'
+
 export * from './tools/approval'
 
 export * from './tools/clarify'
@@ -1458,6 +1484,8 @@ export * from './tools/images'
 export * from './tools/manager'
 
 export * from './tools/registry'
+
+export * from './tools/session-tasks'
 
 export * from './tools/recovery'
 
@@ -1539,6 +1567,13 @@ export interface EkkoJevConfig {
   memoryMinConfidence: number
   memoryFilterMinConfidence: number
   memoryTimeoutMs: number
+  computerUseMatchEnabled: boolean
+  computerUseMatchCandidateLimit: number
+  computerUseMatchMinConfidence: number
+  computerUseMatchTimeoutMs: number
+  computerUseVerifyEnabled: boolean
+  computerUseVerifyMinConfidence: number
+  computerUseVerifyTimeoutMs: number
   skillsEnabled: boolean
   skillsCandidateLimit: number
   skillsMinConfidence: number
@@ -1551,7 +1586,7 @@ export interface EkkoJevConfig {
 
 export type EkkoJevOverrides = Partial<EkkoJevConfig> | false
 
-export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRelevanceFilterEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryFilterMinConfidence: 0.8, memoryTimeoutMs: 3000, skillsEnabled: false, skillsCandidateLimit: 20, skillsMinConfidence: 0.8, skillsTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
+export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRelevanceFilterEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryFilterMinConfidence: 0.8, memoryTimeoutMs: 3000, computerUseMatchEnabled: false, computerUseMatchCandidateLimit: 20, computerUseMatchMinConfidence: 0.8, computerUseMatchTimeoutMs: 3000, computerUseVerifyEnabled: false, computerUseVerifyMinConfidence: 0.8, computerUseVerifyTimeoutMs: 3000, skillsEnabled: false, skillsCandidateLimit: 20, skillsMinConfidence: 0.8, skillsTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
 
 export function resolveEkkoJevConfig( ...layers: Array<EkkoJevOverrides | undefined> ): EkkoJevConfig
 ```
@@ -2419,7 +2454,7 @@ export function openCodeSessionHeaders( baseUrl: string, sessionId?: string, pro
 ### `src/model/openrouter-attribution.ts`
 
 ```ts
-export const OPENROUTER_APP_HEADERS = { 'HTTP-Referer': 'https://github.com/tangledup-ai/hermes-web-ui', 'X-OpenRouter-Title': 'Quanthermes Web UI', 'X-OpenRouter-Categories': 'cli-agent,personal-agent', } as const
+export const OPENROUTER_APP_HEADERS = { 'HTTP-Referer': 'https://ekkostudio.xyz', 'X-OpenRouter-Title': 'Ekko Studio', 'X-OpenRouter-Categories': 'cli-agent,personal-agent', } as const
 
 export function openRouterAttributionHeaders(baseUrl: string, provider?: string): Record<string, string>
 ```
@@ -2493,7 +2528,7 @@ export interface EkkoModelProviderPreset {
   builtin: boolean
 }
 
-export const BUILTIN_MODEL_PROVIDER_PRESETS: Record<string, EkkoModelProviderPreset> = presetMap([ { id: 'openai-api', label: 'OpenAI API', type: 'openai', apiMode: 'codex_responses', requestStyle: 'openai-responses', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5.6-sol', models: [ 'gpt-5.6-sol', 'gpt-5.6-sol-pro', 'gpt-5.6-terra', 'gpt-5.6-terra-pro', 'gpt-5.6-luna', 'gpt-5.6-luna-pro', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-5.3-codex', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini', ], authType: 'api-key', builtin: true, }, { id: 'anthropic', label: 'Anthropic', type: 'anthropic', apiMode: 'anthropic_messages', requestStyle: 'anthropic-messages', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-fable-5', models: [ 'claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101', 'claude-sonnet-4-5-20250929', 'claude-opus-4-20250514', 'claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001', ], authType: 'api-key', builtin: true, }, { id: 'gemini', label: 'Google AI Studio', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-3.1-pro-preview', models: [ 'gemini-3.1-pro-preview', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-3.1-flash-lite-preview', ], authType: 'api-key', builtin: true, }, { id: 'deepseek', label: 'DeepSeek', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-pro', models: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'], authType: 'api-key', builtin: true, }, { id: 'xai', label: 'xAI', type: 'openai-compatible', apiMode: 'codex_responses', requestStyle: 'openai-responses', baseUrl: 'https://api.x.ai/v1', defaultModel: 'grok-build-0.1', models: [ 'grok-build-0.1', 'grok-composer-2.5-fast', 'grok-4.5', 'grok-4.3', 'grok-4.20-0309-reasoning', 'grok-4.20-0309-non-reasoning', 'grok-4.20-multi-agent-0309', ], authType: 'api-key', builtin: true, }, { id: 'alibaba', label: 'Alibaba Cloud', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen3.7-max', models: [ 'qwen3.7-max', 'qwen3.6-plus', 'kimi-k2.5', 'qwen3.5-plus', 'qwen3-coder-plus', 'qwen3-coder-next', 'glm-5', 'glm-4.7', 'MiniMax-M2.5', ], authType: 'api-key', builtin: true, }, { id: 'minimax', label: 'MiniMax', type: 'anthropic', apiMode: 'anthropic_messages', requestStyle: 'anthropic-messages', baseUrl: 'https://api.minimax.io/anthropic/v1', defaultModel: 'MiniMax-M3', models: [ 'MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M2.5', 'MiniMax-M2.5-highspeed', 'MiniMax-M2.1', 'MiniMax-M2.1-highspeed', 'MiniMax-M2', ], authType: 'api-key', builtin: true, }, { id: 'nous', label: 'Nous Portal', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://inference-api.nousresearch.com/v1', defaultModel: 'anthropic/claude-fable-5', models: [ 'anthropic/claude-fable-5', 'anthropic/claude-opus-4.8', 'anthropic/claude-sonnet-5', 'anthropic/claude-haiku-4.5', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-luna', 'openai/gpt-5.5', 'google/gemini-3.1-pro-preview', 'google/gemini-3.5-flash', 'x-ai/grok-4.5', 'deepseek/deepseek-v4-pro', 'qwen/qwen3.7-max', 'moonshotai/kimi-k2.7-code', 'minimax/minimax-m3', 'z-ai/glm-5.2', ], authType: 'oauth', builtin: true, }, { id: 'openai-codex', label: 'OpenAI Codex', type: 'openai-compatible', apiMode: 'codex_responses', requestStyle: 'openai-responses', baseUrl: 'https://chatgpt.com/backend-api/codex', defaultModel: 'gpt-5.6-sol', models: [ 'gpt-5.6-sol', 'gpt-5.6-sol-pro', 'gpt-5.6-terra', 'gpt-5.6-terra-pro', 'gpt-5.6-luna', 'gpt-5.6-luna-pro', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', ], authType: 'oauth', builtin: true, }, { id: 'xai-oauth', label: 'xAI Grok OAuth', type: 'openai-compatible', apiMode: 'codex_responses', requestStyle: 'openai-responses', baseUrl: 'https://api.x.ai/v1', defaultModel: 'grok-build-0.1', models: [ 'grok-build-0.1', 'grok-composer-2.5-fast', 'grok-4.5', 'grok-4.3', 'grok-4.20-0309-reasoning', 'grok-4.20-0309-non-reasoning', 'grok-4.20-multi-agent-0309', ], authType: 'oauth', builtin: true, }, { id: 'qwen-oauth', label: 'Qwen OAuth', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://portal.qwen.ai/v1', defaultModel: 'qwen3.5-plus', models: ['qwen3.5-plus', 'qwen3-coder-plus', 'qwen3-coder-next'], authType: 'oauth', builtin: true, }, { id: 'claude-oauth', label: 'Claude OAuth', type: 'anthropic', apiMode: 'anthropic_messages', requestStyle: 'anthropic-messages', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-fable-5', models: [ 'claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5', ], authType: 'oauth', builtin: true, }, { id: 'minimax-oauth', label: 'MiniMax Coding Plan', type: 'anthropic', apiMode: 'anthropic_messages', requestStyle: 'anthropic-messages', baseUrl: 'https://api.minimax.io/anthropic', defaultModel: 'MiniMax-M3', models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed'], authType: 'oauth', builtin: true, }, ])
+export const BUILTIN_MODEL_PROVIDER_PRESETS: Record<string, EkkoModelProviderPreset> = presetMap([ { id: 'openai-api', label: 'OpenAI API', type: 'openai', apiMode: 'codex_responses', requestStyle: 'openai-responses', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5.6-sol', models: [ 'gpt-5.6-sol', 'gpt-5.6-sol-pro', 'gpt-5.6-terra', 'gpt-5.6-terra-pro', 'gpt-5.6-luna', 'gpt-5.6-luna-pro', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-5.3-codex', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini', ], authType: 'api-key', builtin: true, }, { id: 'anthropic', label: 'Anthropic', type: 'anthropic', apiMode: 'anthropic_messages', requestStyle: 'anthropic-messages', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-fable-5', models: [ 'claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-opus-4-5-20251101', 'claude-sonnet-4-5-20250929', 'claude-opus-4-20250514', 'claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001', ], authType: 'api-key', builtin: true, }, { id: 'gemini', label: 'Google AI Studio', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-3.1-pro-preview', models: [ 'gemini-3.1-pro-preview', 'gemini-3-pro-preview', 'gemini-3.5-flash', 'gemini-3.1-flash-lite-preview', ], authType: 'api-key', builtin: true, }, { id: 'deepseek', label: 'DeepSeek', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-pro', models: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat', 'deepseek-reasoner'], authType: 'api-key', builtin: true, }, { id: 'xai', label: 'xAI', type: 'openai-compatible', apiMode: 'codex_responses', requestStyle: 'openai-responses', baseUrl: 'https://api.x.ai/v1', defaultModel: 'grok-build-0.1', models: [ 'grok-build-0.1', 'grok-composer-2.5-fast', 'grok-4.5', 'grok-4.3', 'grok-4.20-0309-reasoning', 'grok-4.20-0309-non-reasoning', 'grok-4.20-multi-agent-0309', ], authType: 'api-key', builtin: true, }, { id: 'alibaba', label: 'Alibaba Cloud', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen3.7-max', models: [ 'qwen3.7-max', 'qwen3.6-plus', 'kimi-k2.5', 'qwen3.5-plus', 'qwen3-coder-plus', 'qwen3-coder-next', 'glm-5', 'glm-4.7', ], authType: 'api-key', builtin: true, }, { id: 'minimax', label: 'MiniMax', type: 'anthropic', apiMode: 'anthropic_messages', requestStyle: 'anthropic-messages', baseUrl: 'https://api.minimax.io/anthropic/v1', defaultModel: 'MiniMax-M3.1-Flash', models: ['MiniMax-M3.1-Flash', 'MiniMax-M3'], authType: 'api-key', builtin: true, }, { id: 'nous', label: 'Nous Portal', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://inference-api.nousresearch.com/v1', defaultModel: 'anthropic/claude-fable-5', models: [ 'anthropic/claude-fable-5', 'anthropic/claude-opus-4.8', 'anthropic/claude-sonnet-5', 'anthropic/claude-haiku-4.5', 'openai/gpt-5.6-sol', 'openai/gpt-5.6-terra', 'openai/gpt-5.6-luna', 'openai/gpt-5.5', 'google/gemini-3.1-pro-preview', 'google/gemini-3.5-flash', 'x-ai/grok-4.5', 'deepseek/deepseek-v4-pro', 'qwen/qwen3.7-max', 'moonshotai/kimi-k2.7-code', 'minimax/minimax-m3', 'z-ai/glm-5.2', ], authType: 'oauth', builtin: true, }, { id: 'openai-codex', label: 'OpenAI Codex', type: 'openai-compatible', apiMode: 'codex_responses', requestStyle: 'openai-responses', baseUrl: 'https://chatgpt.com/backend-api/codex', defaultModel: 'gpt-5.6-sol', models: [ 'gpt-5.6-sol', 'gpt-5.6-sol-pro', 'gpt-5.6-terra', 'gpt-5.6-terra-pro', 'gpt-5.6-luna', 'gpt-5.6-luna-pro', 'gpt-5.5', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', ], authType: 'oauth', builtin: true, }, { id: 'xai-oauth', label: 'xAI Grok OAuth', type: 'openai-compatible', apiMode: 'codex_responses', requestStyle: 'openai-responses', baseUrl: 'https://api.x.ai/v1', defaultModel: 'grok-build-0.1', models: [ 'grok-build-0.1', 'grok-composer-2.5-fast', 'grok-4.5', 'grok-4.3', 'grok-4.20-0309-reasoning', 'grok-4.20-0309-non-reasoning', 'grok-4.20-multi-agent-0309', ], authType: 'oauth', builtin: true, }, { id: 'qwen-oauth', label: 'Qwen OAuth', type: 'openai-compatible', apiMode: 'chat_completions', requestStyle: 'openai-chat', baseUrl: 'https://portal.qwen.ai/v1', defaultModel: 'qwen3.5-plus', models: ['qwen3.5-plus', 'qwen3-coder-plus', 'qwen3-coder-next'], authType: 'oauth', builtin: true, }, { id: 'claude-oauth', label: 'Claude OAuth', type: 'anthropic', apiMode: 'anthropic_messages', requestStyle: 'anthropic-messages', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-fable-5', models: [ 'claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5', ], authType: 'oauth', builtin: true, }, { id: 'minimax-oauth', label: 'MiniMax Coding Plan', type: 'anthropic', apiMode: 'anthropic_messages', requestStyle: 'anthropic-messages', baseUrl: 'https://api.minimax.io/anthropic', defaultModel: 'MiniMax-M3', models: ['MiniMax-M3'], authType: 'oauth', builtin: true, }, ])
 
 export function listBuiltInModelProviderPresets(): EkkoModelProviderPreset[]
 
@@ -2550,6 +2585,11 @@ export function toGeminiContentsPayload(config: ModelProviderConfig, request: Mo
 
 export function normalizeGeminiResponse(response: GeminiResponse, model?: string): ModelResponse
 ```
+### `src/model/providers/minimax.ts`
+
+```ts
+export function minimaxThinkingParameters( config: ModelProviderConfig, request: ModelRequest, protocol: 'anthropic' | 'openai', )
+```
 ### `src/model/providers/openai-compatible.ts`
 
 ```ts
@@ -2582,7 +2622,7 @@ export class OpenAIResponsesModelClient implements ModelClient {
 
 export function toOpenAIResponsesPayload(config: ModelProviderConfig, request: ModelRequest): OpenAIResponsesPayload
 
-export function normalizeOpenAIResponsesResponse(response: OpenAIResponsesResponse): ModelResponse
+export function normalizeOpenAIResponsesResponse(response: OpenAIResponsesResponse, replayScope?: string): ModelResponse
 ```
 ### `src/model/providers/prompt-completion.ts`
 
@@ -2632,6 +2672,7 @@ export type AgentMessageRole = 'system' | 'user' | 'assistant' | 'tool'
 export type AgentReasoningFormat = | 'openai-reasoning-details' | 'openai-responses-items' | 'anthropic-thinking-blocks' | 'gemini-content-parts'
 
 export interface AgentReasoningNative {
+  replayScope?: string
   format: AgentReasoningFormat
   data: unknown
 }
@@ -2834,7 +2875,9 @@ export interface SystemPromptInput {
   runtimeInstructions?: string[]
   userSystemMessages?: string[]
   memoryContext?: string
+  toolExecutionGuidelinesEnabled?: boolean
   planningEnabled?: boolean
+  sessionTasksEnabled?: boolean
   clarificationEnabled?: boolean
   skillDiscoveryEnabled?: boolean
   skillManagementEnabled?: boolean
@@ -2921,6 +2964,7 @@ export interface AgentRuntimeRunInput {
   messages: AgentMessageInput[]
   signal?: AbortSignal
   systemPrompt?: string
+  toolExecutionGuidelinesEnabled?: boolean
   skills?: AgentSkill[]
   maxSteps?: number
   maxModelRetries?: number
@@ -2945,6 +2989,7 @@ export interface AgentRuntimeRunInput {
   logContext?: EkkoRuntimeLogContext
   onSkillReviewUsage?: (input: SkillReviewUsageEvent) => void
   onPlanUpdate?: (plan: import('../tools/plan').AgentTaskPlan) => void
+  onToolBatchComplete?: () => AgentOutputMessage | { finalReply: string; finishReason?: string } | undefined
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 
@@ -3287,6 +3332,58 @@ export class CodeExecTool implements AgentTool<CodeExecInput> {
   async execute(input: CodeExecInput, context: AgentToolContext = {}): Promise<AgentToolResult>
 }
 ```
+### `src/tools/computer-use/driver.ts`
+
+```ts
+export class ComputerUseDriverSession {
+  readonly id = `ekko-${randomUUID()}`
+  readonly described = new Set<string>()
+  constructor(private readonly timeoutMs: number)
+  async list(signal?: AbortSignal): Promise<any[]>
+  async call(name: string, args: Record<string, unknown>, signal?: AbortSignal)
+  async close(): Promise<void>
+}
+```
+### `src/tools/computer-use/index.ts`
+
+```ts
+export interface ComputerUseToolOptions {
+  enabled?: boolean
+  timeoutMs?: number
+}
+
+export class ComputerUseTool implements AgentTool {
+  readonly concurrency = 'serial' as const
+  readonly definition: AgentTool['definition']
+  constructor(private readonly options: ComputerUseToolOptions = {})
+  async execute(input: Record<string, unknown>, context: AgentToolContext = {}): Promise<AgentToolResult>
+}
+```
+### `src/tools/computer-use/jev.ts`
+
+```ts
+export type ComputerUseJevAssessment = Record<string, unknown>
+
+export function computerUseJevEnabled(feature: Feature): boolean
+
+export async function assessComputerUse( feature: Feature, intent: string, input: unknown, args: Record<string, unknown>, signal?: AbortSignal, ): Promise<ComputerUseJevAssessment>
+```
+### `src/tools/computer-use/policy.ts`
+
+```ts
+export const COMPUTER_USE_READ_TOOLS = new Set([ 'list_apps', 'list_windows', 'get_window_state', 'get_desktop_state', 'get_accessibility_tree', 'get_screen_size', 'get_cursor_position', 'verify_state', 'zoom', 'check_permissions', 'health_report', ])
+
+export const COMPUTER_USE_INPUT_TOOLS = new Set([ 'click', 'double_click', 'right_click', 'drag', 'scroll', 'type_text', 'press_key', 'hotkey', 'set_value', 'invoke_menu', 'launch_app', 'bring_to_front', 'set_window_frame', 'move_cursor', ])
+
+export function computerUseApproval(input: Record<string, unknown>)
+
+export function record(value: unknown): Record<string, any>
+```
+### `src/tools/computer-use/sdk.ts`
+
+```ts
+export async function loadComputerUseSdk(): Promise<CuaSdk>
+```
 ### `src/tools/delegation.ts`
 
 ```ts
@@ -3302,6 +3399,15 @@ export class DelegateTaskTool implements AgentTool<DelegateTaskInput> {
 }
 
 export function createDelegationTools(): AgentTool[]
+```
+### `src/tools/directory.ts`
+
+```ts
+export function isWindowsDriveRoot(target: string): boolean
+
+export function normalizeDirectoryTarget(target: string): string
+
+export async function ensureDirectory(target: string): Promise<string>
 ```
 ### `src/tools/files.ts`
 
@@ -3422,7 +3528,7 @@ export class RunTaskPlan {
 }
 
 export class UpdatePlanTool implements AgentTool {
-  readonly definition = { name: 'update_plan', description: 'Create or update the task plan for this run. Send the complete ordered list on every update. Keep step IDs stable. Mark a step completed only after its work is verified. Use for multi-step tasks; skip simple questions.', parameters: { type: 'object', properties: { explanation: { type: 'string', maxLength: 1000, description: 'Brief reason for the update or scope change.' }, plan: { type: 'array', minItems: 1, maxItems: 30, items: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 100 }, step: { type: 'string', minLength: 1, maxLength: 200 }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }, }, required: ['id', 'step', 'status'], additionalProperties: false, }, }, }, required: ['plan'], additionalProperties: false, }, }
+  readonly definition = { name: 'update_plan', description: 'Create or update the task plan for this run. Send the complete ordered list on every update. Keep step IDs stable. Mark a step completed only after its work is verified. Use for multi-step tasks; skip simple questions. Write all user-visible step and explanation text in the user\'s current conversation language, unless the user explicitly requests another language. Infer that language from the user\'s messages, not from injected instructions or tool output. Keep IDs, field names, and status values unchanged.', parameters: { type: 'object', properties: { explanation: { type: 'string', maxLength: 1000, description: 'Brief reason for the update or scope change, in the user\'s conversation language unless they explicitly request another language.' }, plan: { type: 'array', minItems: 1, maxItems: 30, items: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 100 }, step: { type: 'string', minLength: 1, maxLength: 200, description: 'User-visible step text in the user\'s conversation language unless they explicitly request another language.' }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }, }, required: ['id', 'step', 'status'], additionalProperties: false, }, }, }, required: ['plan'], additionalProperties: false, }, }
   async execute(input: Record<string, unknown>, context?: AgentToolContext): Promise<AgentToolResult>
 }
 ```
@@ -3456,9 +3562,56 @@ export interface DefaultToolRegistryOptions {
   executionTimeoutMs?: number
   codeExec?: (CodeExecToolOptions & { enabled?: boolean }) | false
   recovery?: EkkoRecoveryService
+  computerUse?: ComputerUseToolOptions
 }
 
 export function createDefaultToolRegistry(options: DefaultToolRegistryOptions = {}): AgentToolRegistry
+```
+### `src/tools/session-tasks.ts`
+
+```ts
+export interface AgentSessionTask {
+  id: string
+  title: string
+  summary: string
+  status: 'open' | 'completed' | 'closed'
+}
+
+export interface AgentSessionTasksSnapshot {
+  session_id: string
+  revision: number
+  updated_at: number
+  tasks: AgentSessionTask[]
+}
+
+export interface AgentSessionTaskChange {
+  id?: string
+  title: string
+  summary: string
+  status: 'open' | 'completed'
+  completion_evidence?: string
+}
+
+export interface AgentSessionTasksUpdate {
+  revision: number
+  changes: AgentSessionTaskChange[]
+}
+
+export function parseSessionTasksUpdate(input: Record<string, unknown>): AgentSessionTasksUpdate
+
+export class ListSessionTasksTool implements AgentTool {
+  readonly concurrency = 'parallel' as const
+  readonly definition = { name: 'list_session_tasks', description: 'Read durable user goals for the current session at the beginning of every turn. Review past delivery and outstanding work. Record only independent deliverables, ongoing follow-up or user-requested tracking; skip simple questions, one-off lookups and trivial edits without lasting tracking value. Reuse one goal per user outcome. Reading does not require a write. Closed goals were closed by the user. Leave them unchanged; only the user can reopen them from the task list. Goals span turns; update_plan manages execution steps for this run. The host binds the session. Follow the latest user request.', parameters: { type: 'object', properties: {}, required: [], additionalProperties: false }, }
+  async execute(input: Record<string, unknown>, context?: AgentToolContext): Promise<AgentToolResult>
+}
+
+export class UpdateSessionTasksTool implements AgentTool {
+  readonly concurrency = 'serial' as const
+  readonly definition = { name: 'update_session_tasks', description: 'Persist changed/new goals worth tracking: independent deliverables, ongoing follow-up or explicit user-requested tracking. Skip simple questions, one-off lookups and trivial edits without lasting tracking value. Keep one goal per user outcome: reuse its id for follow-ups, refinements, corrections, constraints and reopening. Create distinct goals before execution; save changed progress and verified completion before the final response. Use concise outcome titles and one or two short summary sentences about results and remaining blockers; keep implementation and test logs in the conversation, verification in completion_evidence. Omitted goals remain; unchanged ledgers need no write. Use the latest revision; reread on conflict. open includes blocked/interrupted work. Closed goals were closed by the user. Leave them unchanged; only the user can reopen them from the task list. Turn end or a finished update_plan never proves goal completion. Independent of run plans; no page card.', parameters: { type: 'object', additionalProperties: false, required: ['revision', 'changes'], properties: { revision: { type: 'integer', minimum: 0 }, changes: { type: 'array', minItems: 1, maxItems: 30, items: { type: 'object', additionalProperties: false, required: ['title', 'summary', 'status'], properties: { id: { type: 'string', minLength: 1, maxLength: 100 }, title: { type: 'string', minLength: 1, maxLength: 200, description: 'Concise user outcome; reuse the existing goal for refinements and corrections.' }, summary: { type: 'string', minLength: 1, maxLength: 1000, description: 'One or two short sentences about results and remaining blockers. Keep implementation and test logs in the conversation.' }, status: { type: 'string', enum: ['open', 'completed'] }, completion_evidence: { type: 'string', maxLength: 1000, description: 'Required when newly completing a goal: concise evidence that its requested outcome was delivered and verified.' }, }, } }, }, }, }
+  async execute(input: Record<string, unknown>, context?: AgentToolContext): Promise<AgentToolResult>
+}
+
+export function createSessionTasksToolProvider(): AgentToolProvider
 ```
 ### `src/tools/skills.ts`
 
@@ -3638,6 +3791,12 @@ export interface AgentToolAuthorizationDecision {
 export type AgentToolAuthorizer = ( toolName: string, input: Record<string, unknown>, context?: AgentToolContext, ) => Promise<AgentToolAuthorizationDecision>
 
 export interface AgentToolContext {
+  beforeTool?: (name: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>
+  afterTool?: (name: string, input: Record<string, unknown>, result: AgentToolResult) => Promise<AgentToolResult>
+  transformInput?: (messages: import('../model/messages').AgentMessageInput[]) => Promise<import('../model/messages').AgentMessageInput[]>
+  transformContext?: (messages: import('../model/types').AgentMessage[]) => Promise<import('../model/types').AgentMessage[]>
+  listSessionTasks?: () => import('./session-tasks').AgentSessionTasksSnapshot | Promise<import('./session-tasks').AgentSessionTasksSnapshot>
+  updateSessionTasks?: (update: import('./session-tasks').AgentSessionTasksUpdate) => import('./session-tasks').AgentSessionTasksSnapshot | Promise<import('./session-tasks').AgentSessionTasksSnapshot>
   updatePlan?: (update: import('./plan').AgentPlanUpdate) => import('./plan').AgentTaskPlan
   runId?: string
   cwd?: string
@@ -3658,6 +3817,7 @@ export interface AgentToolContext {
   browserSessionId?: string
   mcpServers?: Record<string, unknown>
   mcpSessionSignal?: AbortSignal
+  computerUseSessionSignal?: AbortSignal
   timeoutMs?: number
   signal?: AbortSignal
   requestToolApproval?: AgentToolApprovalRequester

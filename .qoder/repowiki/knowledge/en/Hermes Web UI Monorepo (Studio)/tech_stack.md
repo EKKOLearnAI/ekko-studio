@@ -1,1 +1,0 @@
-Node.js ≥23 with TypeScript; Vue 3 + Vite + Naive UI + Pinia + Vue Router + vue-i18n on the frontend; Koa 2 + Socket.IO + node-pty + SQLite on the backend; Electron for the desktop distribution; Python (pyudev) for the USB monitor bot; Vitest and Playwright for testing; Docker and docker-compose for containerized deployment.

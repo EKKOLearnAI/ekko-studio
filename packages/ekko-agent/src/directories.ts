@@ -22,6 +22,8 @@ import {
 const BUILTIN_SKILL_MANIFEST_FILENAME = '.ekko-builtin-skills.json'
 const BUILTIN_SKILL_MANIFEST_OWNER = 'ekko-agent'
 const BUILTIN_SKILL_HASH_IGNORED_FILENAMES = new Set(['.DS_Store', 'Thumbs.db'])
+const LEGACY_HERMES_SKILL_CLEANUP_FILENAME = '.ekko-hermes-skill-cleanup-v2.json'
+const SKILL_RESET_QUARANTINE_PREFIX = '.ekko-skills-reset-'
 
 interface BuiltinSkillManifestEntry {
   owner?: string
@@ -45,7 +47,7 @@ export interface EkkoDirectoryLayout {
 export interface EkkoDirectoryInitializationOptions {
   /**
    * Hermes Agent's root data directory. Its presence triggers the one-time
-   * non-destructive first-install import of Hermes profile skills. Existing skills are preserved.
+   * reset of legacy Ekko skill directories. Hermes Skills are never imported.
    */
   hermesRootDirectory?: string
   /** Host hook used to keep Core startup alive when the optional Skill tree fails. */
@@ -96,8 +98,9 @@ export class EkkoDirectoryManager {
     let skillError: unknown
     let fatalSkillError = false
     try {
-      if (!existsSync(this.skillsDirectory) && options.hermesRootDirectory) {
-        this.importHermesProfileSkills(options.hermesRootDirectory)
+      this.cleanupSkillResetQuarantines()
+      if (options.hermesRootDirectory) {
+        skillError = this.resetLegacySkillsDirectory(options.hermesRootDirectory)
       } else {
         mkdirSync(this.skillsDirectory, { recursive: true })
       }
@@ -256,33 +259,108 @@ export class EkkoDirectoryManager {
     }
   }
 
-  private importHermesProfileSkills(hermesRootDirectory: string): { hermesRootDirectory: string; profiles: string[] } {
-    const sources = hermesProfileSkillSources(hermesRootDirectory)
-    mkdirSync(this.rootDirectory, { recursive: true })
-    const stagingDirectory = join(this.rootDirectory, `.skills-import-${randomUUID()}`)
+  private resetLegacySkillsDirectory(hermesRootDirectory: string): unknown | undefined {
+    const cleanupPath = join(this.rootDirectory, LEGACY_HERMES_SKILL_CLEANUP_FILENAME)
+    if (existsSync(cleanupPath)) {
+      mkdirSync(this.skillsDirectory, { recursive: true })
+      return undefined
+    }
 
+    if (!this.builtinSkills) {
+      throw new Error('Bundled Ekko Skills are unavailable; refusing to reset the existing Skill directory')
+    }
+    const profiles = new Set(['default', ...this.profileNames()])
+    const deferredError = this.quarantineSkillsDirectoryForReset()
+    if (deferredError) {
+      // A Windows process can temporarily deny both deletion and rename. Keep
+      // Ekko available for this run and retry the full reset next startup; no
+      // migration marker is written until the old directory is detached.
+      for (const profile of profiles) this.profileSkillsDirectory(profile)
+      return deferredError
+    }
+
+    mkdirSync(this.skillsDirectory, { recursive: true })
+    for (const profile of profiles) this.profileSkillsDirectory(profile)
+    const marker = `${JSON.stringify({
+      version: 2,
+      hermesRootDirectory: resolve(hermesRootDirectory),
+      resetSkillsDirectory: true,
+    }, null, 2)}\n`
+    const temporaryCleanupPath = `${cleanupPath}.${randomUUID()}.tmp`
     try {
-      mkdirSync(stagingDirectory, { recursive: false })
-      for (const source of sources) {
-        cpSync(source.directory, join(stagingDirectory, source.profile), {
-          recursive: true,
-          force: false,
-          errorOnExist: true,
-          preserveTimestamps: true,
-        })
-      }
-      renameSync(stagingDirectory, this.skillsDirectory)
-      return {
-        hermesRootDirectory: resolve(hermesRootDirectory),
-        profiles: sources.map(source => source.profile),
-      }
+      writeFileSync(temporaryCleanupPath, marker, { encoding: 'utf8', mode: 0o600 })
+      renameSync(temporaryCleanupPath, cleanupPath)
     } catch (error) {
-      rmSync(stagingDirectory, { recursive: true, force: true })
-      throw error
+      try {
+        rmSync(temporaryCleanupPath, { force: true })
+      } catch {
+        // Preserve the marker write failure that caused the cleanup attempt.
+      }
+      // The marker is only an optimization that prevents repeating this safe,
+      // idempotent migration. Failure to persist it must not make Ekko
+      // unavailable when its config/database directories remain usable.
+      console.warn(
+        `[ekko-agent] failed to persist legacy Skill migration marker at ${cleanupPath}: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    return undefined
+  }
+
+  /**
+   * Atomically removes the complete active Skills tree before recreating it.
+   * Deleting the detached tree is best-effort because Windows scanners can
+   * keep individual files open even after the active path has been reset.
+   */
+  private quarantineSkillsDirectoryForReset(): unknown | undefined {
+    if (!existsSync(this.skillsDirectory)) return undefined
+    const quarantineDirectory = join(
+      this.rootDirectory,
+      `${SKILL_RESET_QUARANTINE_PREFIX}${randomUUID()}`,
+    )
+    try {
+      renameSync(this.skillsDirectory, quarantineDirectory)
+    } catch (error) {
+      if (!isTransientWindowsFilesystemError(error)) throw error
+      console.warn(
+        `[ekko-agent] Skill reset was deferred because Windows denied access to ${this.skillsDirectory}: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+      )
+      return error
+    }
+
+    this.removeSkillResetQuarantine(quarantineDirectory)
+    return undefined
+  }
+
+  private cleanupSkillResetQuarantines(): void {
+    let entries
+    try {
+      entries = readdirSync(this.rootDirectory, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith(SKILL_RESET_QUARANTINE_PREFIX)) continue
+      this.removeSkillResetQuarantine(join(this.rootDirectory, entry.name))
     }
   }
 
-
+  private removeSkillResetQuarantine(directory: string): void {
+    try {
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 200,
+      })
+    } catch (error) {
+      console.warn(
+        `[ekko-agent] detached legacy Skill directory will be cleaned on a later startup (${directory}): ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
 }
 
 function profileDirectoryName(value: string): string {
@@ -509,39 +587,4 @@ function isErrorWithCode(error: unknown, code: string): error is NodeJS.ErrnoExc
 function isTransientWindowsFilesystemError(error: unknown): boolean {
   if (process.platform !== 'win32' || !(error instanceof Error) || !('code' in error)) return false
   return ['EACCES', 'EBUSY', 'EPERM'].includes(String(error.code))
-}
-
-function hermesProfileSkillSources(
-  hermesRootDirectory: string,
-): Array<{ profile: string; directory: string }> {
-  const root = resolve(hermesRootDirectory)
-  const sources: Array<{ profile: string; directory: string }> = []
-  const defaultSkills = join(root, 'skills')
-  if (isDirectory(defaultSkills)) {
-    sources.push({ profile: 'default', directory: defaultSkills })
-  }
-
-  const profilesDirectory = join(root, 'profiles')
-  let entries
-  try {
-    entries = readdirSync(profilesDirectory, { withFileTypes: true })
-  } catch {
-    return sources
-  }
-
-  entries.sort((left, right) => left.name.localeCompare(right.name))
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'default') continue
-    let profile
-    try {
-      profile = profileDirectoryName(entry.name)
-    } catch {
-      continue
-    }
-    const skillsDirectory = join(profilesDirectory, entry.name, 'skills')
-    if (isDirectory(skillsDirectory)) {
-      sources.push({ profile, directory: skillsDirectory })
-    }
-  }
-  return sources
 }

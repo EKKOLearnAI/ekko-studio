@@ -15,14 +15,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   DEFAULT_KNOWLEDGE_EMBED_DIM,
   ensureKnowledgeSchema,
-} from '../../packages/server/src/db/knowledge-schema'
+} from '../../packages/server/src/modules/studio/infrastructure/database/knowledge-schema'
 import {
   ALLOWED_VAULT_KINDS,
   KnowledgeService,
   isVaultKind,
-} from '../../packages/server/src/services/knowledge/knowledge.service'
-import type { KnowledgeConfig } from '../../packages/server/src/services/knowledge/config'
-import type { Embedder } from '../../packages/server/src/services/knowledge/embedder'
+} from '../../packages/server/src/modules/studio/services/knowledge/knowledge.service'
+import type { KnowledgeConfig } from '../../packages/server/src/modules/studio/services/knowledge/config'
+import type { Embedder } from '../../packages/server/src/modules/studio/services/knowledge/embedder'
 
 type DatabaseSyncCtor = new (
   path: string,

@@ -1,4 +1,4 @@
-import type { LocalGroupAgentConnection } from '@/api/hermes/group-chat-agent-link'
+import type { LocalGroupAgentConnection } from '@/api/studio/group-chat-agent-link'
 
 export type RemoteGroupChatRoom = {
   key: string

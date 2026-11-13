@@ -1,4 +1,4 @@
-import type { WorkflowRunNodeSessionRecord, WorkflowRunRecord } from '@/api/hermes/workflows'
+import type { WorkflowRunNodeSessionRecord, WorkflowRunRecord } from '@/api/studio/workflows'
 
 export type WorkflowEvidenceKind = 'node' | 'edge' | 'loop'
 export interface WorkflowEvidenceRow {

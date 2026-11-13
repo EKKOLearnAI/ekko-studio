@@ -1,13 +1,26 @@
 <script setup lang="ts">
+import { deploymentUrl } from '@/utils/deployment-url'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import thinkingImage from '@/assets/thinking.gif'
+import type { ChatAgentAvatar } from '@/utils/chat-agent-avatar'
+import { personAvatarAnimation, personAvatarStyle } from '@/utils/chat-agent-avatar'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   reasoning?: string | null
   reasoningId?: string | number | null
+  hideReasoning?: boolean
+  activityLabel?: string
   elapsed: string
-}>()
+  agent?: ChatAgentAvatar
+  deploymentSessionId?: string
+}>(), {
+  agent: () => ({ label: 'Hermes', src: deploymentUrl('/coding-agents/hermes.png') }),
+})
+const isEkko = computed(() => props.agent.label === 'Ekko')
+const personThinking = computed(() => personAvatarAnimation(props.agent, 'thinking'))
+const isPerson = computed(() => !!personThinking.value)
+const avatarSrc = computed(() => personThinking.value || (isEkko.value ? thinkingImage : props.agent.src))
 
 const { t } = useI18n()
 const reasoningBody = ref<HTMLElement | null>(null)
@@ -67,17 +80,25 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   <div class="live-reasoning-status">
     <div class="thinking-status">
       <img
-        :src="thinkingImage"
+        :key="avatarSrc"
+        :src="avatarSrc"
+        data-agent-deployment-image="pending"
+        @load="($event.target as HTMLImageElement).dataset.agentDeploymentImage = 'ready'"
+        @error="($event.target as HTMLImageElement).dataset.agentDeploymentImage = 'error'"
         alt=""
         aria-hidden="true"
         class="thinking-avatar"
+        :data-agent-deployment-target="deploymentSessionId || ''"
+        :class="isPerson ? 'thinking-avatar--person' : isEkko ? 'thinking-avatar--animated' : 'thinking-avatar--logo'"
+        :style="personAvatarStyle(agent, 'thinking')"
       >
       <div class="thinking-status-copy">
-        <span class="thinking-status-label">{{ t('chat.thinkingInProgress') }}</span>
+        <span class="thinking-status-label">{{ activityLabel || t('chat.thinkingInProgress') }}</span>
         <span class="thinking-status-time">{{ elapsed }}</span>
       </div>
     </div>
     <div
+      v-if="!hideReasoning"
       class="live-reasoning-detail"
       :class="{ 'is-empty': !reasoningLine }"
       :data-reasoning-id="reasoningId"
@@ -93,13 +114,14 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
+@use "@/styles/person-avatar" as *;
 
 .live-reasoning-status {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   flex: 0 0 78px;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   width: 100%;
   max-width: 100%;
   height: 78px;
@@ -112,7 +134,7 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
 .thinking-status {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
   width: 100%;
   min-width: 0;
   height: 40px;
@@ -128,17 +150,28 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   object-fit: cover;
   flex-shrink: 0;
 
-  .dark & {
-    filter: brightness(1.18) contrast(1.08) saturate(1.08);
+  &--animated {
+    .dark & {
+      filter: brightness(1.18) contrast(1.08) saturate(1.08);
+    }
   }
 }
+
+.thinking-avatar--logo {
+  box-sizing: border-box;
+  padding: calc(5px * var(--spacing-scale, 1));
+  object-fit: contain;
+  background: #fff;
+}
+
+.thinking-avatar--person { @include person-avatar(40px); }
 
 .thinking-status-copy {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  column-gap: 8px;
-  row-gap: 2px;
+  column-gap: calc(8px * var(--spacing-scale, 1));
+  row-gap: calc(2px * var(--spacing-scale, 1));
   min-width: 0;
   height: 20px;
   min-height: 20px;
@@ -155,9 +188,9 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   background-position: 0% 0;
   -webkit-background-clip: text;
   background-clip: text;
-  font-size: 15px;
+  font-size: calc(var(--font-size-base, 14px) * 15 / 14);
   font-weight: 600;
-  line-height: 20px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 20 / 14));
   animation: thinking-label-shimmer 2.2s linear infinite;
   backface-visibility: hidden;
   contain: paint;
@@ -179,10 +212,10 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   align-items: center;
   margin-top: 2px;
   color: $text-muted;
-  font-family: $font-code;
-  font-size: 13px;
+  font-family: var(--font-code, $font-code);
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   font-variant-numeric: tabular-nums;
-  line-height: 20px;
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 20 / 14));
   min-width: 44px;
 }
 
@@ -190,7 +223,7 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   display: flex;
   align-items: center;
   flex: 0 0 30px;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   width: 520px;
   max-width: 100%;
   height: 30px;
@@ -198,7 +231,7 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   max-height: 30px;
   min-width: 0;
   box-sizing: border-box;
-  padding: 5px 10px;
+  padding: calc(5px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
   border-radius: $radius-sm;
   background: rgba(0, 0, 0, 0.025);
   color: $text-secondary;
@@ -219,9 +252,9 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   display: flex;
   align-items: center;
   flex: 0 0 auto;
-  gap: 5px;
+  gap: calc(5px * var(--spacing-scale, 1));
   color: $text-muted;
-  font-size: 11px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
   font-weight: 500;
 }
 
@@ -232,8 +265,8 @@ onBeforeUnmount(() => cancelAnimationFrame(scrollFrame))
   overflow-y: hidden;
   white-space: nowrap;
   text-overflow: clip;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+  line-height: var(--line-height, calc(var(--font-size-base, 14px) * 20 / 14));
   opacity: 0.9;
   scrollbar-width: none;
 

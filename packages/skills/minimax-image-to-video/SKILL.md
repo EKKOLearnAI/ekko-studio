@@ -25,7 +25,7 @@ Call the local Hermes Web UI media endpoint. The server resolves the selected pr
 Endpoint:
 
 ```bash
-POST <Hermes Web UI base URL>/api/hermes/media/minimax-image-to-video
+POST <Hermes Web UI base URL>/api/studio/media/minimax-image-to-video
 ```
 
 Resolve the Hermes Web UI base URL in this order:
@@ -82,7 +82,7 @@ fi
 BASE_URL="${HERMES_WEB_UI_URL:-http://127.0.0.1:${PORT:-8648}}"
 BASE_URL="${BASE_URL%/}"
 
-curl -sS -X POST "$BASE_URL/api/hermes/media/minimax-image-to-video" \
+curl -sS -X POST "$BASE_URL/api/studio/media/minimax-image-to-video" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{

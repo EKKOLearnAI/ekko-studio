@@ -3,7 +3,7 @@ self.addEventListener('activate', (event) => event.waitUntil(clients.claim()))
 
 function safeClickUrl(value) {
   return typeof value === 'string'
-    && value.startsWith('/hermes/')
+    && (value === '/person' || value.startsWith('/hermes/'))
     && !value.includes('..')
     && !value.includes('\\')
     ? value

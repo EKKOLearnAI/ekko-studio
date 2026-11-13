@@ -6,7 +6,7 @@ const authMocks = vi.hoisted(() => ({
   isAuthEnabled: vi.fn(),
 }))
 
-vi.mock('../../packages/server/src/middleware/user-auth', () => ({
+vi.mock('../../packages/server/src/modules/studio/middleware/auth', () => ({
   authenticateUserToken: authMocks.authenticateUserToken,
   isAuthEnabled: authMocks.isAuthEnabled,
 }))
@@ -65,7 +65,7 @@ describe('USBSocketServer', () => {
     service.listDevices = vi.fn(() => [])
     service.listHistory = vi.fn(() => [])
 
-    const { USBSocketServer } = await import('../../packages/server/src/services/usb/USBSocketServer')
+    const { USBSocketServer } = await import('../../packages/server/src/modules/studio/services/usb/USBSocketServer')
     const server = new USBSocketServer(io as any, service)
     server.init()
 
@@ -115,7 +115,7 @@ describe('USBSocketServer', () => {
       ts: Date.parse('2026-07-01T11:00:00.000Z'),
     }])
 
-    const { USBSocketServer } = await import('../../packages/server/src/services/usb/USBSocketServer')
+    const { USBSocketServer } = await import('../../packages/server/src/modules/studio/services/usb/USBSocketServer')
     const server = new USBSocketServer(io as any, service)
     server.init()
 

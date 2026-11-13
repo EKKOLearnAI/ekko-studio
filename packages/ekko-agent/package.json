@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
-  "description": "Optional standalone Ekko Agent runtime embedded in Quanthermes Web UI.",
+  "description": "Standalone Ekko Agent runtime embedded in Ekko Studio.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tangledup-ai/hermes-web-ui.git",
+    "url": "https://github.com/EKKOLearnAI/ekko-studio.git",
     "directory": "packages/ekko-agent"
   },
   "engines": {
@@ -26,7 +26,8 @@
     "dist",
     "skills",
     "README.md",
-    "docs/API.md"
+    "docs/API.md",
+    "docs/computer-use.md"
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
@@ -35,11 +36,11 @@
     "api:docs:check": "node scripts/api-doc-harness.mjs",
     "api:docs:update": "node scripts/api-doc-harness.mjs --write",
     "harness:check": "npm run api:docs:check && npm run check && npm test",
-    "harness:memory": "cd ../.. && vitest run tests/ekko-agent/memory-service.test.ts",
     "test": "cd ../.. && vitest run tests/ekko-agent",
     "test:watch": "cd ../.. && vitest tests/ekko-agent"
   },
   "dependencies": {
+    "@trycua/cua-driver": "0.35.4",
     "@typesafe-ai/sdk": "0.6.0",
     "@modelcontextprotocol/client": "^2.0.0",
     "agent-browser": "^0.26.0",

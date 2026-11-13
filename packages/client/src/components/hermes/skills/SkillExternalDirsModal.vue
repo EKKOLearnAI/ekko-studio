@@ -1,9 +1,14 @@
 <script setup lang="ts">
+import { NSpin, NModal, NButton, NInput, useMessage } from 'naive-ui'
 import { ref, onMounted } from 'vue'
-import { NModal, NButton, NInput } from 'naive-ui'
+
 import { useI18n } from 'vue-i18n'
 import { fetchExternalDirs, saveExternalDirs, type ExternalDirEntry } from '@/api/hermes/skills'
-import { useMessage } from '@/composables/useAppMessage'
+
+const props = defineProps<{
+  fetchHandler?: () => Promise<ExternalDirEntry[]>
+  saveHandler?: (directories: string[]) => Promise<void>
+}>()
 
 const emit = defineEmits<{
   close: []
@@ -32,7 +37,7 @@ function entryToRow(entry: ExternalDirEntry): Row {
 
 onMounted(async () => {
   try {
-    const entries = await fetchExternalDirs()
+    const entries = await (props.fetchHandler || fetchExternalDirs)()
     rows.value = entries.map(entryToRow)
   } catch (err: any) {
     message.error(t('skills.externalDirs.loadFailed') + `: ${err.message}`)
@@ -69,7 +74,7 @@ async function handleSave() {
 
   loading.value = true
   try {
-    await saveExternalDirs(cleaned)
+    await (props.saveHandler || saveExternalDirs)(cleaned)
     message.success(t('skills.externalDirs.saveSuccess'))
     emit('saved')
   } catch (err: any) {
@@ -97,7 +102,7 @@ function handleClose() {
   >
     <p class="hint">{{ t('skills.externalDirs.hint') }}</p>
 
-    <div v-if="initializing" class="state-row">{{ t('common.loading') }}</div>
+    <div v-if="initializing" class="state-row"><NSpin :description="t('common.loading')" /></div>
     <div v-else-if="rows.length === 0" class="state-row empty">{{ t('skills.externalDirs.empty') }}</div>
 
     <ul v-else class="dir-list">
@@ -154,20 +159,20 @@ function handleClose() {
 @use '@/styles/variables' as *;
 
 .hint {
-  font-size: 12px;
+  font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   color: $text-muted;
   margin: 0 0 12px;
-  line-height: 1.5;
+  line-height: var(--line-height, 1.5);
 }
 
 .state-row {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-muted;
-  padding: 12px 4px;
+  padding: calc(12px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1));
 
   &.empty {
     text-align: center;
-    border: 1px dashed $border-color;
+    border: var(--border-width, 1px) dashed $border-color;
     border-radius: $radius-sm;
   }
 }
@@ -178,28 +183,28 @@ function handleClose() {
   margin: 0 0 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .dir-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .dir-input-wrap {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .hint-tag {
   flex-shrink: 0;
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: 8px;
+  font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+  padding: calc(1px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+  border-radius: var(--radius-component, 8px);
 
   &.broken {
     color: #b45309;
@@ -235,6 +240,6 @@ function handleClose() {
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
 }
 </style>

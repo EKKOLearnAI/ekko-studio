@@ -2,6 +2,11 @@ appId: com.quanthermes.hermeswebui
 productName: Quanthermes Studio
 copyright: Copyright © 2026
 
+protocols:
+  - name: Ekko Studio provider import
+    schemes:
+      - ekko-studio
+
 directories:
   output: release
   buildResources: build
@@ -31,10 +36,12 @@ extraResources:
     to: "build"
     filter:
       - "icon.png"
+      - "iconLinux.png"
       - "icon.ico"
       - "trayMac.png"
       - "trayMac@2x.png"
       - "trayWindows.png"
+      - "trayLinux.png"
       - "runtime-release.json"
   - from: "../.."
     to: "webui"
@@ -43,7 +50,16 @@ extraResources:
       - "bin/**"
       - "dist/**"
       - "!packages/desktop/**"
-      - "!**/{.git,.github,docs,tests,playwright.config.ts,README*,scripts,*.map}"
+      # Exclude repository-root development files without dropping nested
+      # runtime assets such as dist/ekko-skills/*/scripts/**.
+      - "!.git/**"
+      - "!.github/**"
+      - "!docs/**"
+      - "!tests/**"
+      - "!scripts/**"
+      - "!playwright.config.ts"
+      - "!README*"
+      - "!**/*.map"
   # electron-builder 26 deliberately skips a root-level node_modules directory
   # when it is nested inside a broader matcher. Use node_modules itself as the
   # source so the pruned production dependencies are copied into the Web UI.
@@ -78,17 +94,18 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
   extendInfo:
-    NSMicrophoneUsageDescription: "Quanthermes Studio uses the microphone for voice conversations and speech transcription."
-  artifactName: "Quanthermes.Studio-${version}-${arch}.${ext}"
+    NSMicrophoneUsageDescription: "Ekko Studio uses the microphone for voice conversations and speech transcription."
+  artifactName: "Ekko.Studio-${version}-${arch}.${ext}"
 
 win:
   icon: build/icon.ico
   target:
     - target: nsis
-      arch: [x64]
-  artifactName: "Quanthermes.Studio-${version}-${arch}.${ext}"
+      arch: [x64, arm64]
+  artifactName: "Ekko.Studio-${version}-${arch}.${ext}"
 
 linux:
+  syncDesktopName: true
   icon: build/icons
   target:
     - target: AppImage
@@ -96,7 +113,7 @@ linux:
     - target: deb
       arch: [x64]   # fpm has no arm64 binary; deb only on x64
   category: Development
-  artifactName: "Quanthermes.Studio-${version}-${arch}.${ext}"
+  artifactName: "Ekko.Studio-${version}-${arch}.${ext}"
 
 deb:
   afterInstall: build/linux-after-install.tpl

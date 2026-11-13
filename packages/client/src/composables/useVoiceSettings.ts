@@ -1,5 +1,5 @@
 import { ref, watch } from 'vue'
-import { fetchTtsSettings, type FetchTtsSettingsResponse } from '@/api/hermes/tts-settings'
+import { fetchTtsSettings, type FetchTtsSettingsResponse } from '@/api/studio/tts-settings'
 import { getActiveProfileName, getStoredUserId, hasApiKey } from '@/api/client'
 import { DOUBAO_TTS_2_RESOURCE_ID, DOUBAO_TTS_DEFAULT_VOICE } from '@/constants/doubaoTtsVoices'
 
@@ -16,7 +16,6 @@ export type TtsProvider =
   | 'mistral'
   | 'minimax'
   | 'deepinfra'
-  | 'qwen'
 export type MimoAuthMode = 'api-key' | 'bearer' | 'both'
 
 export interface VoiceSettingsData {

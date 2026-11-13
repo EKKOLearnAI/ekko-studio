@@ -1,100 +1,81 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { afterEach, expect, it, vi } from 'vitest'
-import { writeDshAcpAdapter } from '../../packages/server/src/services/coding-agents/dsh/acp-adapter'
+import { expect, it, vi } from 'vitest'
+import { readFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { adaptDshAcpSource } from '../../packages/server/src/modules/coding-agents/services/dsh/acp-adapter'
 
-const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
-async function fixture(version: string, transform = (source: string) => source, layout: 'hoisted' | 'nested' | 'profile' = 'hoisted') {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-adapter-compat-')); roots.push(root)
-  const acpAppDirectory = join(root, layout === 'profile' ? 'native/profiles/web' : '', 'node_modules/@deepseek-ai/dsh-acp-app')
-  await mkdir(acpAppDirectory, { recursive: true })
-  await writeFile(join(acpAppDirectory, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-acp-app', version }))
-  const dependencyRoot = layout === 'hoisted' ? root : acpAppDirectory
-  const pkg = join(dependencyRoot, 'node_modules/@deepseek-ai/dsh-acp')
-  await mkdir(join(pkg, 'lib'), { recursive: true })
-  await writeFile(join(pkg, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-acp', version }))
-  const source = transform(await readFile(new URL('../fixtures/dsh-acp-compatible.mjs', import.meta.url), 'utf8'))
-  await writeFile(join(pkg, 'lib/index.js'), source)
-  await writeFile(join(pkg, 'LICENSE'), 'Fixture license')
-  for (const [name, method, property] of [
-    ['dsh-sandbox-policy', 'setSandboxMode', 'sandbox'], ['dsh-user-approval', 'setApprovalPolicy', 'approval'],
-  ]) {
-    const path = join(dependencyRoot, 'node_modules/@deepseek-ai', name)
-    await mkdir(path, { recursive: true })
-    await writeFile(join(path, 'package.json'), JSON.stringify({ type: 'module', main: 'index.js' }))
-    await writeFile(join(path, 'index.js'), `export function ${method}(session, value) { session.${property} = value }`)
+async function fixture(version: string) { return readFile(new URL(`./fixtures/dsh/acp-${version}.txt`, import.meta.url), 'utf8') }
+
+async function runtime(version: string) {
+  const source = adaptDshAcpSource(await fixture(version), version).replace(/^import .*;\n/gm, '')
+  let persisted: any
+  const live = new Map()
+  const header = (id: string) => ({ id, cwd: '/workspace', origin: 'root', agentPreset: persisted?.agentPreset })
+  const ctx: any = { llm: {}, get: () => undefined, logger: { warn: vi.fn() },
+    agentPresets: { defaultId: 'web-default', mount: vi.fn(async () => {}) },
+    sessions: { get: (id: string) => live.get(id), flush: vi.fn(async () => {}) }, agents: {} }
+  const agentCtx = { on: vi.fn(), effect: vi.fn() }
+  async function handle(options: any, resume: boolean) {
+    const h = resume ? { ...persisted } : { ...header(options.sessionId), ...options.meta }
+    const session = { id: h.id, header: h, seq: 1, requestHeader: () => undefined }
+    const agent = { session, status: 'idle', model: {}, whenIdle: async () => {} }
+    await options.setup(agentCtx, agent)
+    persisted = h
+    return { agent, dispose: () => live.delete(h.id) }
   }
-  return { root, pkg, source, acpAppDirectory, installation: join(root, 'package.json'), destination: join(root, 'adapter.mjs') }
+  ctx.agents.create = vi.fn(options => handle(options, false))
+  ctx.agents.resume = vi.fn(options => handle(options, true))
+  const dependencies: Record<string, any> = {
+    ctx, sessions: new Map(), activating: new Set(), persistence: { stat: async () => ({ header: persisted }) },
+    initialSelection: () => ({}), assertOpen: () => {}, validateWorkspaceParams: () => {}, brandString: (s: string) => s, randomUUID,
+    agentOptions: (config: any) => config, config: {}, notify: () => {}, closed: false,
+    sameDirectory: async (a: string, b: string) => a === b,
+    invalidParams: (s: string) => new Error(s), internalError: (s: string) => new Error(s),
+    internalError$1: (s: string) => new Error(s), invalidParams$1: (s: string) => new Error(s),
+    errorChain: String, turnEndToStopReason: () => 'end_turn',
+    mountAcpMcpServers: vi.fn(async () => {}), installModelSelection: vi.fn(),
+    setSandboxMode: (session: any, value: string) => { session.sandbox = value },
+    setApprovalPolicy: (session: any, value: string) => { session.approval = value },
+    AcpModelControl: class { install() {} options() { return [] } },
+    AcpMcpConfigError: class extends Error {}, AcpModelConfigError: class extends Error {},
+  }
+  const { AcpSession, implementation } = new Function(...Object.keys(dependencies), source + '\nreturn {AcpSession,implementation}')(...Object.values(dependencies))
+  return { ctx, implementation, AcpSession, live, sessions: dependencies.sessions }
 }
 
-it.each(['0.1.5-rc.2', '0.2.0', '9.0.0-beta.1'])('adapts compatible ACP %s without a version or whole-file hash allowlist', async version => {
-  const input = await fixture(version, source => source + '\nexport const unrelatedNewFeature = true;\n')
-  await writeDshAcpAdapter(input.installation, input.destination, input.acpAppDirectory)
-  const adapter = await import(pathToFileURL(input.destination).href)
-  const mount = vi.fn(), flush = vi.fn()
-  const ctx = { llm: {}, agentPresets: { defaultId: 'standard', mount }, sessions: { flush } }
-  const options = adapter.newOptions({}, { _meta: { agentPreset: 'custom' } })
-  expect(options.agentPreset).toBe('custom')
-  const created = await adapter.create(ctx, { ...options, cwd: '/workspace' })
-  expect(created.metadata.meta).toEqual({ cwd: '/workspace', agentPreset: 'custom' })
-  expect(mount).toHaveBeenCalledWith(expect.anything(), 'custom')
-  const resumed = adapter.resumeOptions(ctx, {}, { agentPreset: 'saved' }, 'native-1')
-  await adapter.restore(ctx, resumed)
-  expect(mount).toHaveBeenLastCalledWith(expect.anything(), 'saved')
-  const agent = { session: {}, whenIdle: vi.fn() }
-  const session = new adapter.Session(ctx, agent, {})
-  await session.settle({ messageQueued: true })
-  expect(flush).toHaveBeenCalledWith(agent.session)
-  expect(agent.session).toEqual({ sandbox: 'danger-full-access', approval: 'never' })
-  expect(adapter.unrelatedNewFeature).toBe(true)
-  expect(await readFile(join(input.pkg, 'lib/index.js'), 'utf8')).toBe(input.source)
-  expect(await readFile(input.destination, 'utf8')).toContain(`upstream ${version} (MIT); source sha256`)
-})
-
-it.each([
-  ['preset mounting', (source: string) => source.replaceAll('await mountAcpMcpServers(agentCtx, options.mcpServers, options.cwd);', '')],
-  ['session permission policy', (source: string) => source + '\nfunction ambiguous() { this.modelControl = modelControl; }\n'],
-] as const)('reports incompatible %s before replacing the private copy', async (capability, transform) => {
-  const input = await fixture('0.2.0', transform)
-  await writeFile(input.destination, 'previous adapter')
-  await expect(writeDshAcpAdapter(input.installation, input.destination, input.acpAppDirectory)).rejects.toMatchObject({
-    code: 'DSH_CAPABILITY_UNSUPPORTED', message: expect.stringContaining(capability),
+for (const version of ['0.2.1-rc.5', '0.2.2-rc.1']) {
+  it(`${version}: persists explicit presets, restores saved presets after default changes, and enforces permissions`, async () => {
+    const { ctx, implementation, sessions } = await runtime(version)
+    const created = await implementation.newSession({ cwd: '/workspace', mcpServers: [], _meta: { agentPreset: 'chosen' } })
+    expect(ctx.agentPresets.mount).toHaveBeenLastCalledWith(expect.anything(), 'chosen')
+    const options = ctx.agents.create.mock.calls[0][0]
+    expect(options.meta.agentPreset).toBe('chosen')
+    sessions.clear() // A restarted ACP bridge has no live session records.
+    ctx.agentPresets.defaultId = 'changed'
+    await implementation.resumeSession({ sessionId: created.sessionId, cwd: '/workspace' })
+    expect(ctx.agentPresets.mount).toHaveBeenLastCalledWith(expect.anything(), 'chosen')
   })
-  expect(await readFile(input.destination, 'utf8')).toBe('previous adapter')
-  expect(await readFile(join(input.pkg, 'lib/index.js'), 'utf8')).toBe(input.source)
-})
-
-it.each(['nested', 'profile'] as const)('resolves ACP and its imports from the selected %s bundle', async layout => {
-  const input = await fixture('0.1.5-rc.3', source => source, layout)
-  await writeDshAcpAdapter(input.installation, input.destination, input.acpAppDirectory)
-  const adapter = await import(pathToFileURL(input.destination).href)
-  const agent = { session: {} }
-  new adapter.Session({}, agent, {})
-  expect(agent.session).toEqual({ sandbox: 'danger-full-access', approval: 'never' })
-  expect(await readFile(input.destination, 'utf8')).toContain('upstream 0.1.5-rc.3 (MIT)')
-  expect(await readFile(join(input.pkg, 'lib/index.js'), 'utf8')).toBe(input.source)
-})
-
-it('prefers the bundle-owned ACP over another copy visible to the CLI', async () => {
-  const input = await fixture('0.1.5-rc.3', source => source, 'nested')
-  const other = join(input.root, 'node_modules/@deepseek-ai/dsh-acp')
-  await mkdir(join(other, 'lib'), { recursive: true })
-  await writeFile(join(other, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-acp', version: '0.1.5-rc.2' }))
-  await writeFile(join(other, 'lib/index.js'), 'incompatible ACP copy')
-  await writeDshAcpAdapter(input.installation, input.destination, input.acpAppDirectory)
-  expect(await readFile(input.destination, 'utf8')).toContain('upstream 0.1.5-rc.3 (MIT)')
-  expect(await readFile(join(other, 'lib/index.js'), 'utf8')).toBe('incompatible ACP copy')
-})
-
-it('still reports a missing ACP dependency before replacing the private adapter', async () => {
-  const input = await fixture('0.1.5-rc.3', source => source, 'nested')
-  await rm(input.pkg, { recursive: true })
-  await writeFile(input.destination, 'previous adapter')
-  await expect(writeDshAcpAdapter(input.installation, input.destination, input.acpAppDirectory)).rejects.toMatchObject({
-    code: 'DSH_DEPENDENCY_UNAVAILABLE', message: expect.stringContaining('@deepseek-ai/dsh-acp'),
+  it(`${version}: selects the Web default and flushes only after prompt output drains`, async () => {
+    const { ctx, AcpSession } = await runtime(version)
+    const record = await AcpSession.create(ctx, { sessionId: 's', cwd: '/workspace', agentOptions: {}, mcpServers: [] })
+    expect(record.agent.session.header.agentPreset).toBe('web-default')
+    expect(record.agent.session).toMatchObject({ sandbox: 'danger-full-access', approval: 'never' })
+    let drain!: () => void
+    record.outputTail = new Promise<void>(resolve => { drain = resolve })
+    const finished = new Promise((resolve, reject) => {
+      const inflight = { messageQueued: true, admissionDone: Promise.resolve(), admissionController: new AbortController(),
+        cancellationDone: { promise: new Promise(() => {}) }, resolve, reject, endReason: { kind: 'completed' } }
+      record.inflight = inflight
+      record.settleAfterQuiescence(inflight)
+    })
+    await Promise.resolve(); await Promise.resolve()
+    expect(ctx.sessions.flush).not.toHaveBeenCalled()
+    drain(); await finished
+    expect(ctx.sessions.flush).toHaveBeenCalledWith(record.agent.session)
   })
-  expect(await readFile(input.destination, 'utf8')).toBe('previous adapter')
-})
+  it(`${version}: rejects missing or duplicated critical integration seams`, async () => {
+    const source = await fixture(version)
+    const point = 'meta: { cwd: options.cwd },'
+    expect(() => adaptDshAcpSource(source.replace(point, 'meta: {},'), version)).toThrow(/preset persistence/)
+    expect(() => adaptDshAcpSource(source + point, version)).toThrow(/preset persistence/)
+  })
+}

@@ -1,20 +1,17 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NTabs,
   NTabPane,
-  NSpin,
 } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import { useSettingsStore } from "@/stores/hermes/settings";
 import DisplaySettings from "@/components/hermes/settings/DisplaySettings.vue";
-import AgentSettings from "@/components/hermes/settings/AgentSettings.vue";
-import GatewayAutoStartSettings from "@/components/hermes/settings/GatewayAutoStartSettings.vue";
 import ProxySettings from "@/components/hermes/settings/ProxySettings.vue";
-import MemorySettings from "@/components/hermes/settings/MemorySettings.vue";
 import CompressionSettings from "@/components/hermes/settings/CompressionSettings.vue";
-import SessionSettings from "@/components/hermes/settings/SessionSettings.vue";
 import PrivacySettings from "@/components/hermes/settings/PrivacySettings.vue";
 import ModelSettings from "@/components/hermes/settings/ModelSettings.vue";
 import AccountSettings from "@/components/hermes/settings/AccountSettings.vue";
@@ -37,10 +34,7 @@ const validTabs = computed(() => new Set([
   ...(canManageUsers ? ["webhooks"] : []),
   "display",
   "proxy",
-  "agent",
-  "memory",
   "compression",
-  "session",
   "privacy",
   "models",
 ]));
@@ -61,6 +55,16 @@ function handleTabUpdate(tab: string) {
 }
 
 watch(() => route.query.tab, (tab) => {
+  if (tab === "agent" || tab === "memory" || tab === "session" || tab === "gateway") {
+    void router.replace({
+      name: "hermes.configSettings",
+      query: {
+        ...route.query,
+        tab: tab === "agent" || tab === "gateway" ? undefined : tab,
+      },
+    });
+    return;
+  }
   if (tab === "voice") {
     void router.replace({
       name: "hermes.models",
@@ -81,23 +85,23 @@ async function loadSettingsForProfile() {
   await settingsStore.fetchSettings();
 }
 
+const initializing = ref(true)
+
 onMounted(() => {
-  void loadSettingsForProfile();
+  void loadSettingsForProfile().finally(() => { initializing.value = false });
 });
 </script>
 
 <template>
-  <div class="settings-view">
+  <PageLoading :show="initializing || settingsStore.loading" class="settings-view">
+    <PageHeader>
     <header class="page-header">
       <h2 class="header-title">{{ t("settings.title") }}</h2>
     </header>
+    </PageHeader>
 
     <div class="settings-content">
-      <NSpin
-        :show="settingsStore.loading || settingsStore.saving"
-        size="large"
-        :description="t('common.loading')"
-      >
+      <div>
         <NTabs v-model:value="activeTab" type="line" animated @update:value="handleTabUpdate">
           <NTabPane name="account" :tab="t('settings.tabs.account')">
             <AccountSettings />
@@ -114,38 +118,26 @@ onMounted(() => {
           <NTabPane name="proxy" :tab="t('settings.tabs.proxy')">
             <ProxySettings />
           </NTabPane>
-          <NTabPane name="agent" :tab="t('settings.tabs.agent')">
-            <AgentSettings />
-            <GatewayAutoStartSettings />
-          </NTabPane>
-          <NTabPane name="memory" :tab="t('settings.tabs.memory')">
-            <MemorySettings />
-          </NTabPane>
           <NTabPane name="compression" :tab="t('settings.tabs.compression')">
             <CompressionSettings />
-          </NTabPane>
-          <NTabPane name="session" :tab="t('settings.tabs.session')">
-            <SessionSettings />
           </NTabPane>
           <NTabPane name="privacy" :tab="t('settings.tabs.privacy')">
             <PrivacySettings />
           </NTabPane>
           <NTabPane name="models" :tab="t('settings.tabs.models')">
-            <div data-guide-id="settings-models-panel">
-              <ModelSettings />
-            </div>
+            <ModelSettings />
           </NTabPane>
         </NTabs>
-      </NSpin>
+      </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
 
 .settings-view {
-  height: calc(100 * var(--vh));
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -153,6 +145,6 @@ onMounted(() => {
 .settings-content {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: calc(20px * var(--spacing-scale, 1));
 }
 </style>

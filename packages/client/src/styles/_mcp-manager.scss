@@ -1,0 +1,34 @@
+@use 'variables' as *;
+
+@mixin layout {
+  .mcp-view { height: calc(100 * var(--vh)); display: flex; flex-direction: column; }
+  .mcp-content { flex: 1; min-height: 0; overflow-y: auto; padding: calc(20px * var(--spacing-scale, 1)); }
+  .mcp-content.is-loading, .mcp-loading-state { display: grid; place-items: center; }
+  .header-actions { display: flex; align-items: center; justify-content: flex-end; gap: calc(8px * var(--spacing-scale, 1)); min-width: 80px; }
+  .mcp-notice { margin-bottom: 14px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: calc(12px * var(--spacing-scale, 1)); margin-bottom: 16px; }
+  .summary-card { padding: calc(14px * var(--spacing-scale, 1)); border: var(--border-width, 1px) solid $border-color; border-radius: $radius-md; background: var(--theme-card-bg, $bg-card); display: flex; flex-direction: column; gap: calc(6px * var(--spacing-scale, 1)); }
+  .summary-card strong { font-size: calc(var(--font-size-base, 14px) * 24 / 14); line-height: var(--line-height, 1); }
+  .summary-card.success strong { color: $success; }
+  .summary-card.warning strong { color: $warning; }
+  .summary-card.error strong { color: $error; }
+  .summary-card.info strong { color: $accent-primary; }
+  .summary-label { font-size: calc(var(--font-size-base, 14px) * 11 / 14); color: $text-muted; text-transform: uppercase; letter-spacing: 0.04em; }
+  .toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: calc(10px * var(--spacing-scale, 1)); margin-bottom: 16px; }
+  .toolbar-row .search-input { flex: 1; min-width: 0; max-width: 360px; }
+  .btn-group { display: flex; gap: calc(8px * var(--spacing-scale, 1)); flex-shrink: 1; min-width: 0; }
+  .btn-group .n-button { flex: 1; white-space: nowrap; }
+  .servers-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: calc(14px * var(--spacing-scale, 1)); }
+  .mode-switch-row { display: flex; justify-content: center; margin-bottom: 8px; }
+  .config-textarea { font-family: monospace; font-size: calc(var(--font-size-base, 14px) * 13 / 14); }
+  .config-error { color: var(--n-error-color); font-size: calc(var(--font-size-base, 14px) * 12 / 14); margin-top: 4px; }
+  .modal-actions { display: flex; gap: calc(8px * var(--spacing-scale, 1)); justify-content: flex-end; margin-top: 16px; }
+
+  @media (max-width: $breakpoint-mobile) {
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .toolbar-row { flex-direction: column; align-items: stretch; }
+    .toolbar-row .search-input { max-width: none; }
+    .btn-group { width: 100%; }
+    .servers-grid { grid-template-columns: 1fr; }
+  }
+}

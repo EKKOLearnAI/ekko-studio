@@ -1,5 +1,5 @@
-import type { TtsProviderId } from '@/api/hermes/tts'
-import type { SttProvider } from '@/api/hermes/stt-settings'
+import type { TtsProviderId } from '@/api/studio/tts'
+import type { SttProvider } from '@/api/studio/stt-settings'
 
 export type VoiceApiKind = 'tts' | 'stt'
 

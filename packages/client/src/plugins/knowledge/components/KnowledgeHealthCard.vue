@@ -11,7 +11,7 @@ defineProps<{
 </script>
 
 <template>
-  <NCard v-if="health" size="small" class="knowledge-health-card">
+  <NCard v-if="health" size="small" class="knowledge-health-card" data-theme-surface="card">
     <NGrid :cols="4" :x-gap="12" responsive="screen">
       <NGi>
         <NStatistic :label="t('knowledge.health.vaults')" :value="health.vaults.total" />

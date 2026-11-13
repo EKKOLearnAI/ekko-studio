@@ -18,8 +18,8 @@
 import { mkdtempSync, rmSync, writeFileSync, unlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { KnowledgeWatcherManager } from '../../packages/server/src/services/knowledge/watcher'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { KnowledgeWatcherManager } from '../../packages/server/src/modules/studio/services/knowledge/watcher'
 
 const STABILITY_MS = 200
 const BATCH_WAIT_MS = 1500
@@ -51,14 +51,14 @@ describe('KnowledgeWatcherManager — real filesystem', () => {
 
     const watcher = manager.addVault({ id: 1, rootPath: tempDir })
     await watcher.ready
+    // Polling starts on the next stat cycle after the initial ready event.
+    await new Promise(resolve => setTimeout(resolve, 250))
 
     const filePath = join(tempDir, 'a.md')
     writeFileSync(filePath, 'hello')
 
     // Wait for awaitWriteFinish to flush.
-    await new Promise(r => setTimeout(r, BATCH_WAIT_MS))
-
-    expect(events).toHaveLength(1)
+    await vi.waitFor(() => expect(events).toHaveLength(1), { timeout: 3000, interval: 50 })
     expect(events[0].vaultId).toBe(1)
     expect(events[0].path).toBe(filePath)
   })
@@ -69,6 +69,8 @@ describe('KnowledgeWatcherManager — real filesystem', () => {
 
     const watcher = manager.addVault({ id: 1, rootPath: tempDir })
     await watcher.ready
+    // Polling starts on the next stat cycle after the initial ready event.
+    await new Promise(resolve => setTimeout(resolve, 250))
 
     // Write 10 files synchronously in a tight loop.
     for (let i = 0; i < 10; i++) {
@@ -94,13 +96,13 @@ describe('KnowledgeWatcherManager — real filesystem', () => {
 
     const watcher = manager.addVault({ id: 1, rootPath: tempDir })
     await watcher.ready
+    // Polling starts on the next stat cycle after the initial ready event.
+    await new Promise(resolve => setTimeout(resolve, 250))
 
-    // Modify the file.
-    writeFileSync(filePath, 'v2')
+    // Modify after the polling backend captured the initial stat.
+    writeFileSync(filePath, 'v2 with changed length')
 
-    await new Promise(r => setTimeout(r, BATCH_WAIT_MS))
-
-    expect(events).toHaveLength(1)
+    await vi.waitFor(() => expect(events).toHaveLength(1), { timeout: 3000, interval: 50 })
     expect(events[0].path).toBe(filePath)
   })
 
@@ -113,18 +115,20 @@ describe('KnowledgeWatcherManager — real filesystem', () => {
 
     const watcher = manager.addVault({ id: 1, rootPath: tempDir })
     await watcher.ready
+    // Polling starts on the next stat cycle after the initial ready event.
+    await new Promise(resolve => setTimeout(resolve, 250))
 
     unlinkSync(filePath)
 
-    await new Promise(r => setTimeout(r, BATCH_WAIT_MS))
-
-    expect(events).toHaveLength(1)
+    await vi.waitFor(() => expect(events).toHaveLength(1), { timeout: 3000, interval: 50 })
     expect(events[0].path).toBe(filePath)
   })
 
   it('stop() releases the watcher', async () => {
     const watcher = manager.addVault({ id: 1, rootPath: tempDir })
     await watcher.ready
+    // Polling starts on the next stat cycle after the initial ready event.
+    await new Promise(resolve => setTimeout(resolve, 250))
     expect(manager.listVaults()).toEqual([1])
 
     await manager.stopAll()

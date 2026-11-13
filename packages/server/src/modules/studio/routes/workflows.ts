@@ -1,0 +1,26 @@
+import Router from '@koa/router'
+import * as ctrl from '../controllers/workflows'
+
+export const workflowRoutes = new Router()
+
+workflowRoutes.get('/api/studio/workflows', ctrl.list)
+workflowRoutes.post('/api/studio/workflows', ctrl.create)
+workflowRoutes.post('/api/studio/workflows/batch-delete', ctrl.batchRemove)
+workflowRoutes.post('/api/studio/workflows/import/preview', ctrl.previewImport)
+workflowRoutes.post('/api/studio/workflows/import/confirm', ctrl.confirmImport)
+workflowRoutes.post('/api/studio/workflows/import/cancel', ctrl.cancelImport)
+workflowRoutes.get('/api/studio/workflows/:id/export', ctrl.exportDefinition)
+workflowRoutes.get('/api/studio/workflows/:id/schedules', ctrl.listSchedules)
+workflowRoutes.post('/api/studio/workflows/:id/schedules', ctrl.createSchedule)
+workflowRoutes.patch('/api/studio/workflows/:id/schedules/:scheduleId', ctrl.updateSchedule)
+workflowRoutes.delete('/api/studio/workflows/:id/schedules/:scheduleId', ctrl.removeSchedule)
+workflowRoutes.get('/api/studio/workflows/:id/runs', ctrl.listRuns)
+workflowRoutes.get('/api/studio/workflows/:id/runs/:runId', ctrl.getRun)
+workflowRoutes.post('/api/studio/workflows/:id/runs/:runId/stop', ctrl.stopRun)
+workflowRoutes.post('/api/studio/workflows/:id/runs/:runId/nodes/:nodeId/approval', ctrl.approveNode)
+workflowRoutes.post('/api/studio/workflows/:id/runs/:runId/rerun-from-node', ctrl.rerunFromNode)
+workflowRoutes.delete('/api/studio/workflows/:id/runs/:runId', ctrl.deleteRun)
+workflowRoutes.post('/api/studio/workflows/:id/run', ctrl.runNow)
+workflowRoutes.get('/api/studio/workflows/:id', ctrl.get)
+workflowRoutes.patch('/api/studio/workflows/:id', ctrl.update)
+workflowRoutes.delete('/api/studio/workflows/:id', ctrl.remove)

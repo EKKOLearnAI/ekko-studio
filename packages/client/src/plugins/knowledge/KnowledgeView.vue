@@ -202,10 +202,10 @@ onMounted(() => {
   gap: 0;
   height: 100%;
   min-height: 0;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-color, rgba(var(--text-primary-rgb), 0.06));
   border-radius: 8px;
   overflow: hidden;
-  background: var(--card-color, rgba(255, 255, 255, 0.02));
+  background: var(--card-color, rgba(var(--text-primary-rgb), 0.02));
 }
 .knowledge-main {
   flex: 1;

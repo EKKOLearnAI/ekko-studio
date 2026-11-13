@@ -1047,7 +1047,7 @@ onUnmounted(() => {
 
 // 推送句子到实时辅助服务（fire-and-forget）
 function pushSentenceToAssist(sessionId: string, sentence: TranscriptSentence) {
-  fetch('/api/meeting-asr/assist/sentence', {
+  fetch('/api/studio/meeting-asr/assist/sentence', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1449,6 +1449,7 @@ async function clearTranscript() {
           <button
             class="record-button"
             :class="{ recording: isRecording, connecting: isConnecting }"
+            :aria-label="isRecording ? t('meeting.stop') : (isConnecting ? t('meeting.connecting') : t('meeting.start'))"
             @click="isRecording ? stopRecording() : startRecording()"
             :disabled="isConnecting"
           >
@@ -1843,7 +1844,7 @@ async function clearTranscript() {
             </div>
 
             <!-- 报告预览：有 htmlContent 时直接渲染，HTML 内容始终可见 -->
-            <div v-if="htmlContent" class="report-preview-section">
+            <div v-if="htmlContent" class="report-preview-section" data-theme-surface="card">
               <div class="report-preview-header">
                 <h3>{{ t('meeting.reportPreview') }}</h3>
                 <div class="report-preview-actions">
@@ -2087,12 +2088,12 @@ async function clearTranscript() {
 .meeting-view {
   display: flex;
   height: calc(100 * var(--vh));
-  background: $bg-primary;
+  background: var(--theme-card-bg, var(--bg-card));
   color: $text-primary;
   overflow: hidden;
 }
 
-// 左侧边栏布局（容器+删除按钮样式由父级提供；列表项内层样式已迁入 MeetingSidebar）
+/* 左侧边栏布局（容器+删除按钮样式由父级提供；列表项内层样式已迁入 MeetingSidebar）*/
 :deep(.sidebar-backdrop) {
   display: none;
 
@@ -2100,7 +2101,7 @@ async function clearTranscript() {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(var(--text-primary-rgb), 0.4);
     z-index: 99;
     opacity: 0;
     pointer-events: none;
@@ -2120,7 +2121,7 @@ async function clearTranscript() {
   display: flex;
   flex-direction: column;
   border-right: 1px solid $border-color;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
   overflow: hidden;
   transition: width 0.2s ease, min-width 0.2s ease;
 
@@ -2206,7 +2207,7 @@ async function clearTranscript() {
   min-width: 0;
 }
 
-// 删除按钮由父级 slot 渲染（包 NPopconfirm），故其样式留在父级
+/* 删除按钮由父级 slot 渲染（包 NPopconfirm），故其样式留在父级*/
 :deep(.meeting-item-delete) {
   flex-shrink: 0;
   width: 20px;
@@ -2223,12 +2224,12 @@ async function clearTranscript() {
   transition: all 0.2s ease;
 
   &:hover {
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
+    background: rgba(var(--error-rgb), 0.1);
+    color: var(--error);
   }
 }
 
-// 让 hover 父级（列表项）时显示删除按钮——拆成独立规则，因为 SCSS 嵌套 + :deep + & 不能正确编译。
+/* 让 hover 父级（列表项）时显示删除按钮——拆成独立规则，因为 SCSS 嵌套 + :deep + & 不能正确编译。*/
 :deep(.meeting-list-item:hover) .meeting-item-delete {
   opacity: 1;
 }
@@ -2272,14 +2273,14 @@ async function clearTranscript() {
   object-fit: contain;
 }
 
-// 顶部控制条样式（MeetingTopBar 子组件内部 DOM，scoped 需用 :deep 穿透）
+/* 顶部控制条样式（MeetingTopBar 子组件内部 DOM，scoped 需用 :deep 穿透）*/
 :deep(.meeting-header) {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
   border-bottom: 1px solid $border-color;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
   flex-shrink: 0;
 }
 
@@ -2318,9 +2319,9 @@ async function clearTranscript() {
   min-width: 0;
 }
 
-// .waveform-container / .connecting-overlay 已迁入 WaveformCanvas 组件。
-// 演讲评分：波形区外层舞台。圆角悬浮卡对齐主设计——
-// 方角深蓝底（WaveformCanvas 容器）随 overflow:hidden 被圆角裁切。
+/* .waveform-container / .connecting-overlay 已迁入 WaveformCanvas 组件。*/
+/* 演讲评分：波形区外层舞台。圆角悬浮卡对齐主设计——*/
+/* 方角深蓝底（WaveformCanvas 容器）随 overflow:hidden 被圆角裁切。*/
 .waveform-stage {
   position: relative;
   overflow: hidden;
@@ -2334,7 +2335,7 @@ async function clearTranscript() {
   align-items: center;
   padding: 8px 16px;
   border-bottom: 1px solid $border-color;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
 }
 
 .status-actions {
@@ -2364,7 +2365,7 @@ async function clearTranscript() {
 
 .transcribe-progress-fill {
   height: 100%;
-  background: var(--color-primary, #667eea);
+  background: var(--accent-primary);
   transition: width 0.3s ease;
 }
 
@@ -2402,7 +2403,7 @@ async function clearTranscript() {
     color: $accent-primary;
 
     .status-dot {
-      background: #ef4444;
+      background: var(--error);
       animation: pulse 1.5s infinite;
     }
   }
@@ -2421,12 +2422,12 @@ async function clearTranscript() {
 }
 
 .error-message {
-  color: #ef4444;
+  color: var(--error);
   font-size: 12px;
 }
 
-// 转写内容样式（.transcript-content/.empty-state/.sentence-item/.sentence-speaker/
-// .partial-text 等）已迁入 TranscriptList.vue scoped 样式。
+/* 转写内容样式（.transcript-content/.empty-state/.sentence-item/.sentence-speaker/*/
+/* .partial-text 等）已迁入 TranscriptList.vue scoped 样式。*/
 
 .record-button-container {
   display: flex;
@@ -2442,7 +2443,7 @@ async function clearTranscript() {
   border-radius: 50%;
   border: none;
   background: $accent-primary;
-  color: white;
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2460,8 +2461,8 @@ async function clearTranscript() {
   }
 
   &.recording {
-    background: #ef4444;
-    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+    background: var(--error);
+    box-shadow: 0 4px 12px rgba(var(--error-rgb), 0.3);
     animation: pulse-button 1.5s infinite;
   }
 
@@ -2486,8 +2487,8 @@ async function clearTranscript() {
   color: $text-secondary;
 }
 
-// 右侧面板：chrome 已迁入 MeetingRightPanel.vue
-// 父组件只保留分析内容区域的样式（result-section / download-section / ...）
+/* 右侧面板：chrome 已迁入 MeetingRightPanel.vue*/
+/* 父组件只保留分析内容区域的样式（result-section / download-section / ...）*/
 
 .result-section {
   margin-bottom: 20px;
@@ -2528,10 +2529,10 @@ async function clearTranscript() {
     align-items: center;
     gap: 8px;
     padding: 8px;
-    background: rgba(255, 193, 7, 0.1);
+    background: rgba(var(--warning-rgb), 0.1);
     border-radius: 6px;
     margin-bottom: 8px;
-    border-left: 3px solid #ffc107;
+    border-left: 3px solid var(--warning);
 
     input[type="checkbox"] {
       width: 16px;
@@ -2547,7 +2548,7 @@ async function clearTranscript() {
   gap: 6px;
 }
 
-// 新增分析结果样式
+/* 新增分析结果样式*/
 .decision-list {
   margin: 0;
   padding-left: 24px;
@@ -2556,7 +2557,7 @@ async function clearTranscript() {
     font-size: 14px;
     line-height: 1.7;
     margin-bottom: 6px;
-    color: #2e7d32;
+    color: var(--success);
   }
 }
 
@@ -2594,19 +2595,19 @@ async function clearTranscript() {
 }
 
 .feedback-positive {
-  background: rgba(76, 175, 80, 0.1);
-  border-left: 3px solid #4caf50;
+  background: rgba(var(--success-rgb), 0.1);
+  border-left: 3px solid var(--success);
 
-  h4 { color: #2e7d32; }
-  li { color: #2e7d32; }
+  h4 { color: var(--success); }
+  li { color: var(--success); }
 }
 
 .feedback-negative {
-  background: rgba(244, 67, 54, 0.1);
-  border-left: 3px solid #f44336;
+  background: rgba(var(--error-rgb), 0.1);
+  border-left: 3px solid var(--error);
 
-  h4 { color: #c62828; }
-  li { color: #c62828; }
+  h4 { color: var(--error); }
+  li { color: var(--error); }
 }
 
 .people-container {
@@ -2626,7 +2627,7 @@ async function clearTranscript() {
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: rgba(156, 39, 176, 0.05);
+  background: rgba(var(--accent-info-rgb), 0.05);
   border-radius: 8px;
   flex-wrap: wrap;
 }
@@ -2634,12 +2635,12 @@ async function clearTranscript() {
 .rel-source,
 .rel-target {
   font-weight: 600;
-  color: #6a1b9a;
+  color: var(--accent-info);
   font-size: 13px;
 }
 
 .rel-arrow {
-  color: #9c27b0;
+  color: var(--accent-info);
 }
 
 .rel-desc {
@@ -2660,7 +2661,7 @@ async function clearTranscript() {
 .action-assignee,
 .action-deadline {
   font-size: 11px;
-  color: #856404;
+  color: var(--warning);
 }
 
 .meeting-type {
@@ -2668,7 +2669,7 @@ async function clearTranscript() {
   justify-content: flex-start;
 }
 
-// 音频播放器样式
+/* 音频播放器样式*/
 .audio-section {
   padding: 12px;
   background: rgba(var(--accent-primary-rgb), 0.03);
@@ -2690,7 +2691,7 @@ async function clearTranscript() {
   border: none;
   border-radius: 50%;
   background: $accent-primary;
-  color: white;
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2752,9 +2753,9 @@ async function clearTranscript() {
   width: 14px;
   height: 14px;
   background: $accent-primary;
-  border: 2px solid white;
+  border: 2px solid var(--border-color);
   border-radius: 50%;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 4px rgba(var(--text-primary-rgb), 0.2);
   opacity: 0;
   transition: opacity 0.15s ease, transform 0.15s ease;
   pointer-events: none;
@@ -2806,7 +2807,7 @@ async function clearTranscript() {
   }
 }
 
-// 报告预览：直接内嵌 iframe 渲染已生成的 HTML
+/* 报告预览：直接内嵌 iframe 渲染已生成的 HTML*/
 .report-preview-section {
   display: flex;
   flex-direction: column;
@@ -2814,7 +2815,7 @@ async function clearTranscript() {
   border-radius: 8px;
   overflow: hidden;
   margin-bottom: 16px;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
 }
 
 .report-preview-header {
@@ -2847,6 +2848,8 @@ async function clearTranscript() {
   width: 100%;
   height: 480px;
   border: none;
+
+  /* theme-exception: preview -- Fixed contrast keeps camera and paper preview controls visible. */
   background: white;
   display: block;
 }
@@ -2860,7 +2863,7 @@ async function clearTranscript() {
 .report-modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(var(--text-primary-rgb), 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2873,12 +2876,12 @@ async function clearTranscript() {
   height: 100%;
   max-width: 1200px;
   max-height: 90vh;
-  background: white;
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
   border-radius: 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 20px 60px rgba(var(--text-primary-rgb), 0.3);
 }
 
 .report-header {
@@ -2886,13 +2889,13 @@ async function clearTranscript() {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--border-color);
 
   h2 {
     font-size: 16px;
     font-weight: 600;
     margin: 0;
-    color: #1f2937;
+    color: var(--text-primary);
   }
 }
 
@@ -2906,10 +2909,10 @@ async function clearTranscript() {
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  color: #6b7280;
+  color: var(--text-primary);
 
   &:hover {
-    background: #f3f4f6;
+    background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
   }
 }
 
@@ -2920,7 +2923,7 @@ async function clearTranscript() {
   height: 100%;
 }
 
-// 创建会议对话框样式
+/* 创建会议对话框样式*/
 .create-meeting-form {
   display: flex;
   flex-direction: column;
@@ -2961,8 +2964,8 @@ async function clearTranscript() {
   align-items: center;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
+  background: rgba(var(--success-rgb), 0.1);
+  color: var(--success);
   font-size: 11px;
   font-weight: 600;
 }
@@ -2970,7 +2973,7 @@ async function clearTranscript() {
 .form-tutorial-link {
   font-size: 12px;
   font-weight: 400;
-  color: var(--color-primary, #667eea);
+  color: var(--color-primary, var(--accent-info));
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
@@ -3044,7 +3047,7 @@ async function clearTranscript() {
   color: $text-secondary;
 }
 
-// Agent 分析相关样式
+/* Agent 分析相关样式*/
 .agent-analysis-section {
   border-bottom: 1px solid $border-color;
   background: rgba($accent-primary, 0.02);
@@ -3089,7 +3092,7 @@ async function clearTranscript() {
   
   &.role-tool {
     padding: 6px 10px;
-    background: rgba(0, 0, 0, 0.03);
+    background: rgba(var(--text-primary-rgb), 0.03);
     border-radius: 6px;
     border-left: 3px solid $accent-primary;
   }
@@ -3143,11 +3146,11 @@ async function clearTranscript() {
 }
 
 .tool-done {
-  color: #22c55e;
+  color: var(--success);
 }
 
 .tool-error {
-  color: #ef4444;
+  color: var(--error);
 }
 
 .tool-name {
@@ -3156,7 +3159,7 @@ async function clearTranscript() {
 }
 
 .tool-error-text {
-  color: #ef4444;
+  color: var(--error);
   font-size: 11px;
 }
 
@@ -3167,7 +3170,7 @@ async function clearTranscript() {
   white-space: pre-wrap;
 }
 
-// 分析配置弹窗表单样式
+/* 分析配置弹窗表单样式*/
 .analysis-config-form {
   display: flex;
   flex-direction: column;
@@ -3193,7 +3196,7 @@ async function clearTranscript() {
   border: 1px solid $border-color;
   border-radius: 6px;
   font-size: 14px;
-  background: $bg-primary;
+  background: var(--theme-card-bg, var(--bg-card));
   color: $text-primary;
   cursor: pointer;
 
@@ -3215,7 +3218,7 @@ async function clearTranscript() {
   border: 1px solid $border-color;
   border-radius: 6px;
   font-size: 14px;
-  background: $bg-primary;
+  background: var(--theme-card-bg, var(--bg-card));
   color: $text-primary;
 
   &:focus {

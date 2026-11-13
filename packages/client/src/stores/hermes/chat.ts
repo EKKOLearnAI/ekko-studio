@@ -1,71 +1,1417 @@
-import { startRunViaSocket, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, type ChatRunTransport, type ResumeSessionPayload, type StartRunRequest, type RunEvent } from '@/api/hermes/chat'
-import { archiveSession as archiveSessionApi, createSessionServer, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, fetchWorkspaceRunChangesForSession, setSessionModel, setSessionReasoningEffort as persistSessionReasoningEffort, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/hermes/sessions'
+import { deploymentUrl } from '@/utils/deployment-url'
+import { chatSessionAgentAvatar, PERSON_AVATAR } from '@/utils/chat-agent-avatar'
+import { deleteSessionMessages, type MessageDeletionResult } from '@/api/studio/sessions'
+import { isNativeCodingAgent } from '@/utils/agent-catalog'
+import { historySessionSource, isBuiltinEkkoSession } from '@/utils/hermes/session-agent'
+import { isKnownEkkoSessionCommand } from '@/utils/hermes/bridge-session-commands'
+import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
+import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
+import { applyPersonTimelinePage, applyPersonFlowUpdate, preservePersonTimelineWindow } from '@/utils/person-timeline'
+import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
+import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
+import { getActiveProfileName } from '@/api/client'
+import { onAuthInvalidated } from '@/api/auth-invalidation'
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId } from '@/api/coding-agents'
-import { getDownloadUrl } from '@/api/hermes/download'
-import type { ProviderApiMode } from '@/api/hermes/system'
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { getDownloadUrl } from '@/api/studio/download'
+import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
+import { defineStore, getActivePinia } from 'pinia'
+import { ref, computed, onScopeDispose, hasInjectionContext, inject, provide, type InjectionKey } from 'vue'
+import { observeBackgroundStatus } from '@/api/studio/background-status'
 import { useAppStore } from './app'
 import { useProfilesStore } from './profiles'
 import { useSettingsStore } from './settings'
 import { primeCompletionSound, playCompletionSound } from '@/utils/completion-sound'
 import { showCompletionNotification } from '@/utils/completion-notification'
+import { notifyComputerUseStarted } from '@/composables/useComputerUsePermissionPrompt'
 import { detectThinkingBoundary } from '@/utils/thinking-parser'
 import { isKnownBridgeSessionCommand } from '@/utils/hermes/bridge-session-commands'
-import { type AbortState, type Attachment, type ChatAgentId, type ChatRuntimeMode, type CompressionState, type ContentBlock, type Message, type MessageReference, type PendingApproval, type PendingClarify, type QueueInsertionState, type Session, type SubagentStream, LEGACY_STORAGE_KEY, LEGACY_WORKSPACE_RUN_CHANGE_MESSAGE_PREFIX, LIVE_CHAT_MAX_LOADED_MESSAGES, LIVE_CHAT_MESSAGE_PAGE_SIZE, SESSION_PROFILE_FILTER_STORAGE_KEY, activeRuntimeMode, agentToCodingAgentId, alignWorkspaceChangeAssistantMessage, attachWorkspaceChangesToExactTurns, buildContentBlocks, clearCodingAgentRuntimeCredentials, codingAgentIdToAgent, formatMessageWithReference, friendlyAgentErrorMessage, getItemBestEffort, getReplayRunMarker, hasRuntimeToolPayload, isBackgroundDelegateToolPayload, isCodingAgentLikeSession, isQueueInsertionInterruption, lastVisibleMessageContent, lastVisibleMessageRole, legacyStorageKey, mapHermesMessages, mapHermesSession, readRunMarker, removeItem, resolveResumedAssistantState, runtimeObjectPayload, runtimeToolOutputFromEvent, runtimeToolOutputHasError, runtimeToolPayloadOrUndefined, sessionActivitySeconds, setItemBestEffort, shouldPreserveRuntimeApiMode, storageKey, setActiveRuntimeMode, uid, uploadFiles } from './chat-core'
-import { createChatInteractions } from './chat-interactions'
-import { createChatMessages } from './chat-messages'
-import { createChatQueue } from './chat-queue'
-import { createChatSubagents } from './chat-subagents'
-export * from './chat-core'
+import { responseErrorMessage } from '@/utils/http-error'
+import {
+  isPendingInteractionExpiredError,
+  notifyPendingInteractionExpired,
+  pendingInteractionDeadline,
+  type PendingInteractionSubmitResult,
+} from '@/utils/pending-interaction'
 
-export const useChatStore = defineStore('chat', () => {
-  const runtimeMode = ref<ChatRuntimeMode>(activeRuntimeMode)
+// Re-export ContentBlock for convenience
+export type ContentBlock = ContentBlockImport
+
+export const LIVE_CHAT_MESSAGE_PAGE_SIZE = 150
+export const LIVE_CHAT_MAX_LOADED_MESSAGES = 300
+const LEGACY_WORKSPACE_RUN_CHANGE_MESSAGE_PREFIX = 'workspace-run-change:'
+type ChatAgentId = `plugin:${string}/${string}` | 'hermes' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode' | 'ekko-agent'
+
+function agentToCodingAgentId(agent?: string): ChatCodingAgentId | undefined {
+  if (agent?.startsWith('plugin:')) return agent as `plugin:${string}/${string}`
+  if (isNativeCodingAgent(agent)) return agent
+  if (agent === 'codex') return 'codex'
+  if (agent === 'pi') return 'pi'
+  if (agent === 'grok') return 'grok'
+  if (agent === 'dsh') return 'dsh'
+  if (agent === 'opencode') return 'opencode'
+  if (agent === 'antigravity') return 'antigravity'
+  if (agent === 'cursor') return 'cursor'
+  if (agent === 'claude') return 'claude-code'
+  if (['ekko', 'ekko_agent', 'ekko-agent'].includes(agent || '')) return 'ekko-agent'
+  return undefined
+}
+
+function codingAgentIdToAgent(id?: ChatCodingAgentId): ChatAgentId | undefined {
+  if (id?.startsWith('plugin:')) return id as `plugin:${string}/${string}`
+  if (isNativeCodingAgent(id)) return id
+  if (id === 'codex') return 'codex'
+  if (id === 'pi') return 'pi'
+  if (id === 'grok') return 'grok'
+  if (id === 'dsh') return 'dsh'
+  if (id === 'opencode') return 'opencode'
+  if (id === 'antigravity') return 'antigravity'
+  if (id === 'cursor') return 'cursor'
+  if (id === 'claude-code') return 'claude'
+  if (id === 'ekko-agent') return 'ekko-agent'
+  return undefined
+}
+
+function moaReferenceLabel(evt: RunEvent): string {
+  const label = typeof evt.label === 'string' && evt.label.trim()
+    ? evt.label.trim()
+    : 'reference'
+  const index = Number.isFinite(Number(evt.index)) ? Number(evt.index) : undefined
+  const count = Number.isFinite(Number(evt.count)) ? Number(evt.count) : undefined
+  return index != null && count != null
+    ? `${index}/${count} ${label}`
+    : label
+}
+
+export interface Attachment {
+  id: string
+  name: string
+  type: string
+  size: number
+  url: string
+  file?: File
+  /** Structured context sent to the model but rendered collapsed in the UI. */
+  context?: string
+  /** Original video attachment id when this file is a model-only representative frame. */
+  videoFrameFor?: string
+}
+
+export interface Message {
+  personTaskReturn?: import('@/api/person').PersonTaskReturn
+  storedMessageId?: number
+  taskPlan?: TaskPlanSnapshot
+  id: string
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'command'
+  content: string
+  timestamp: number
+  toolName?: string
+  toolCallId?: string
+  toolPreview?: string
+  toolArgs?: unknown
+  toolResult?: unknown
+  toolStatus?: 'running' | 'done' | 'error'
+  toolDuration?: number  // 工具执行时长（秒）
+  workspaceChanges?: WorkspaceRunChangeSummary[]
+  runUsage?: RunUsageSummary
+  isStreaming?: boolean
+  attachments?: Attachment[]
+  // 思考/推理文本。两条来源：
+  //   1) 历史消息：来自 HermesMessage.reasoning 字段
+  //   2) 流式：由 reasoning.delta / thinking.delta / reasoning.available 事件累加
+  // 不含 <think> 包裹标签；内容自身可以为多段纯文本。
+  reasoning?: string
+  queued?: boolean
+  systemType?: 'command' | 'error' | 'fork-divider' | 'tool-run'
+  commandAction?: string
+  commandData?: Record<string, unknown>
+  finishReason?: string | null
+  runMarker?: string | null
+  toolRunId?: string
+  toolMessages?: Message[]
+}
+
+export type SubagentStreamStatus =
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'error'
+  | 'cancelled'
+  | 'interrupted'
+
+export interface SubagentStreamEntry {
+  id: string
+  kind: 'text' | 'thinking' | 'tool' | 'status'
+  timestamp: number
+  text?: string
+  reasoning?: string
+  reasoningEntryId?: string
+  toolName?: string
+  toolArgs?: unknown
+  status?: SubagentStreamStatus | 'started'
+}
+
+export interface SubagentStream {
+  sessionId: string
+  subagentId: string
+  taskIndex: number
+  taskCount: number
+  goal?: string
+  model?: string
+  status: SubagentStreamStatus
+  startedAt: number
+  updatedAt: number
+  completedAt?: number
+  durationSeconds?: number
+  toolCount?: number
+  apiCalls?: number
+  inputTokens?: number
+  outputTokens?: number
+  costUsd?: number
+  summary?: string
+  lastBackgroundSeq?: number
+  entries: SubagentStreamEntry[]
+}
+
+const SUBAGENT_STREAM_ENTRY_LIMIT = 200
+const SUBAGENT_STREAM_TEXT_LIMIT = 80_000
+let subagentStreamEntrySequence = 0
+
+function subagentEventTimestamp(value: unknown): number {
+  const timestamp = Number(value)
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return Date.now()
+  return timestamp < 1_000_000_000_000 ? Math.round(timestamp * 1000) : Math.round(timestamp)
+}
+
+function subagentStatus(value: unknown, fallback: SubagentStreamStatus = 'running'): SubagentStreamStatus {
+  const status = String(value || '').trim().toLowerCase()
+  if (status === 'completed' || status === 'failed' || status === 'error' || status === 'cancelled' || status === 'interrupted') {
+    return status
+  }
+  return fallback
+}
+
+function subagentEntryId(eventName: string, evt: RunEvent): string {
+  const backgroundSequence = Number((evt as any).background_seq)
+  if (Number.isFinite(backgroundSequence)) return `${eventName}:${backgroundSequence}`
+  if ((evt as any).background_snapshot) return `snapshot:${eventName}`
+  subagentStreamEntrySequence += 1
+  return `${eventName}:${subagentStreamEntrySequence}`
+}
+
+function trimSubagentEntries(entries: SubagentStreamEntry[]): SubagentStreamEntry[] {
+  return entries.length > SUBAGENT_STREAM_ENTRY_LIMIT
+    ? entries.slice(entries.length - SUBAGENT_STREAM_ENTRY_LIMIT)
+    : entries
+}
+
+function appendSubagentText(
+  entries: SubagentStreamEntry[],
+  entry: SubagentStreamEntry,
+): SubagentStreamEntry[] {
+  const previous = entries[entries.length - 1]
+  if (previous?.kind === entry.kind && entry.text) {
+    const previousText = previous.text || ''
+    const nextText = entry.text.startsWith(previousText)
+      ? entry.text
+      : `${previousText}${entry.text}`
+    entries[entries.length - 1] = {
+      ...previous,
+      text: nextText.slice(-SUBAGENT_STREAM_TEXT_LIMIT),
+      timestamp: entry.timestamp,
+    }
+    return entries
+  }
+  entries.push({
+    ...entry,
+    text: entry.text?.slice(-SUBAGENT_STREAM_TEXT_LIMIT),
+  })
+  return trimSubagentEntries(entries)
+}
+
+function subagentReasoningSinceLastTool(
+  entries: SubagentStreamEntry[],
+): { id: string; text: string } | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]
+    if (entry.kind === 'tool') return null
+    if (entry.kind === 'thinking' && entry.text?.trim()) {
+      return { id: entry.id, text: entry.text }
+    }
+  }
+  return null
+}
+
+export function reduceSubagentStream(
+  current: SubagentStream | undefined,
+  sessionId: string,
+  evt: RunEvent,
+): SubagentStream {
+  const eventName = String(evt.event || '')
+  const subagentId = String((evt as any).subagent_id || evt.delegation_id || `${(evt as any).task_index ?? 0}`)
+  const timestamp = subagentEventTimestamp(evt.timestamp || (evt as any).updated_at)
+  const backgroundSequence = Number((evt as any).background_seq)
+  if (
+    current
+    && Number.isFinite(backgroundSequence)
+    && current.lastBackgroundSeq != null
+    && backgroundSequence <= current.lastBackgroundSeq
+  ) {
+    return current
+  }
+
+  const incomingTaskIndex = Number((evt as any).task_index)
+  const incomingTaskCount = Number((evt as any).task_count)
+  const goal = String((evt as any).goal || '').trim()
+  const model = String((evt as any).model || '').trim()
+  const summary = String((evt as any).summary || '').trim()
+  const rawText = String(evt.text || evt.preview || '')
+  const text = rawText.trim()
+  const toolName = String((evt as any).tool || (evt as any).name || '').trim()
+  const durationSeconds = Number((evt as any).duration_seconds ?? (evt as any).duration)
+  const toolCount = Number((evt as any).tool_count)
+  const apiCalls = Number((evt as any).api_calls)
+  const inputTokens = Number((evt as any).input_tokens)
+  const outputTokens = Number((evt as any).output_tokens)
+  const costUsd = Number((evt as any).cost_usd)
+  const isTerminal = eventName === 'subagent.complete'
+    || (eventName === 'delegation.updated' && ['completed', 'failed', 'error', 'cancelled', 'interrupted'].includes(String((evt as any).status || '').toLowerCase()))
+  if (current && current.status !== 'running' && !isTerminal) return current
+  const nextStatus = isTerminal
+    ? subagentStatus((evt as any).status, 'completed')
+    : 'running'
+  const entries = current ? [...current.entries] : []
+  const entryId = subagentEntryId(eventName, evt)
+
+  if (eventName === 'subagent.start') {
+    if (!entries.some(entry => entry.kind === 'status' && entry.status === 'started')) {
+      entries.push({ id: entryId, kind: 'status', status: 'started', timestamp, text: goal || undefined })
+    }
+  } else if (eventName === 'subagent.text' && rawText) {
+    const reasoning = subagentReasoningSinceLastTool(entries)
+    appendSubagentText(entries, {
+      id: entryId,
+      kind: 'text',
+      timestamp,
+      text: rawText,
+      reasoning: reasoning?.text,
+      reasoningEntryId: reasoning?.id,
+    })
+  } else if (eventName === 'subagent.thinking' && rawText) {
+    appendSubagentText(entries, { id: entryId, kind: 'thinking', timestamp, text: rawText })
+  } else if (eventName === 'subagent.tool') {
+    const reasoning = subagentReasoningSinceLastTool(entries)
+    if (reasoning) {
+      // A tool boundary is the final owner for this reasoning segment. Text
+      // deltas can arrive before the tool call is announced, so revoke their
+      // provisional ownership to avoid rendering the same reasoning twice.
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i]
+        if (entry.kind !== 'text' || entry.reasoningEntryId !== reasoning.id) continue
+        const {
+          reasoning: _reasoning,
+          reasoningEntryId: _reasoningEntryId,
+          ...textEntry
+        } = entry
+        entries[i] = textEntry
+      }
+    }
+    entries.push({
+      id: entryId,
+      kind: 'tool',
+      timestamp,
+      text: text || undefined,
+      reasoning: reasoning?.text,
+      reasoningEntryId: reasoning?.id,
+      toolName: toolName || undefined,
+      toolArgs: (evt as any).arguments,
+    })
+  } else if (eventName === 'subagent.progress' && text) {
+    const previous = entries[entries.length - 1]
+    const progressEntry: SubagentStreamEntry = {
+      id: entryId,
+      kind: 'status',
+      status: 'running',
+      timestamp,
+      text,
+    }
+    if (previous?.kind === 'status' && previous.status === 'running') entries[entries.length - 1] = progressEntry
+    else entries.push(progressEntry)
+  }
+
+  if (isTerminal) {
+    const finalText = summary || text
+    const previousTextEntry = [...entries].reverse().find(entry => entry.kind === 'text')
+    const previousText = previousTextEntry?.text?.trim()
+    if (finalText && previousText !== finalText) {
+      const activeReasoning = subagentReasoningSinceLastTool(entries)
+      const reasoning = activeReasoning?.id === previousTextEntry?.reasoningEntryId
+        ? null
+        : activeReasoning
+      entries.push({
+        id: `${entryId}:summary`,
+        kind: 'text',
+        timestamp,
+        text: finalText,
+        reasoning: reasoning?.text,
+        reasoningEntryId: reasoning?.id,
+      })
+    }
+    const previous = entries[entries.length - 1]
+    const terminalEntry: SubagentStreamEntry = {
+      id: entryId,
+      kind: 'status',
+      status: nextStatus,
+      timestamp,
+    }
+    if (previous?.kind === 'status' && previous.status !== 'started') entries[entries.length - 1] = terminalEntry
+    else entries.push(terminalEntry)
+  }
+
+  return {
+    sessionId,
+    subagentId,
+    taskIndex: Number.isFinite(incomingTaskIndex) ? incomingTaskIndex : current?.taskIndex || 0,
+    taskCount: Number.isFinite(incomingTaskCount) && incomingTaskCount > 0 ? incomingTaskCount : current?.taskCount || 1,
+    goal: goal || current?.goal,
+    model: model || current?.model,
+    status: nextStatus,
+    startedAt: current?.startedAt || subagentEventTimestamp((evt as any).started_at || timestamp),
+    updatedAt: timestamp,
+    completedAt: isTerminal ? subagentEventTimestamp((evt as any).completed_at || timestamp) : current?.completedAt,
+    durationSeconds: Number.isFinite(durationSeconds) ? durationSeconds : current?.durationSeconds,
+    toolCount: Number.isFinite(toolCount) ? toolCount : current?.toolCount,
+    apiCalls: Number.isFinite(apiCalls) ? apiCalls : current?.apiCalls,
+    inputTokens: Number.isFinite(inputTokens) ? inputTokens : current?.inputTokens,
+    outputTokens: Number.isFinite(outputTokens) ? outputTokens : current?.outputTokens,
+    costUsd: Number.isFinite(costUsd) ? costUsd : current?.costUsd,
+    summary: summary || current?.summary,
+    lastBackgroundSeq: Number.isFinite(backgroundSequence) ? backgroundSequence : current?.lastBackgroundSeq,
+    entries: trimSubagentEntries(entries),
+  }
+}
+
+export interface MessageReference {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  sender?: string
+  senderId?: string
+}
+
+export { parseMessageReference } from '@/utils/content-blocks'
+
+export function formatReferencedContentForDisplay(content: string): string {
+  return content
+    .trim()
+    .split(/\r?\n/)
+    .map(line => line ? `> ${line}` : '>')
+    .join('\n')
+}
+
+export function formatMessageWithReference(reference: MessageReference, content: string): string {
+  const sender = reference.sender?.trim()
+  const openTag = sender
+    ? `<quoted_message sender=${JSON.stringify(sender)}>`
+    : '<quoted_message>'
+  const quotedContent = reference.content.trim()
+  const reply = content.trim()
+  const referenceBlock = `${openTag}\n${quotedContent}\n</quoted_message>`
+  return reply ? `${referenceBlock}\n\n${reply}` : referenceBlock
+}
+
+export interface PendingApproval {
+  sessionId: string
+  approvalId: string
+  command: string
+  description: string
+  choices: Array<'once' | 'session' | 'always' | 'deny'>
+  allowPermanent: boolean
+  isMemoryWrite: boolean
+  requestedAt: number
+  countdownDeadline: number
+}
+
+export interface PendingClarify {
+  sessionId: string
+  clarifyId: string
+  question: string
+  choices: string[] | null
+  initialResponse: string
+  responseMode: string
+  timeoutMs: number
+  requestedAt: number
+  countdownDeadline: number
+}
+
+export interface QueueInsertionState {
+  generation: string
+  runId?: string
+  queueId: string
+  runtime: `plugin:${string}/${string}` | 'hermes' | 'ekko' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
+  phase: 'requesting' | 'waiting_for_tool_batch' | 'stopping_current_turn'
+  guarantee: 'strict' | 'immediate'
+  requestedAt: number
+}
+
+export interface Session {
+  personFlows?: import('@/api/person').PersonFlowSnapshot
+  historyRevision?: number
+  id: string
+  profile?: string
+  title: string
+  source?: string
+  agent?: string
+  agentSessionId?: string
+  agentNativeSessionId?: string
+  codingAgentId?: ChatCodingAgentId
+  codingAgentMode?: 'global' | 'scoped'
+  agentPreset?: string
+  botType?: string
+  messages: Message[]
+  messagesLoaded?: boolean
+  createdAt: number
+  updatedAt: number
+  model?: string
+  provider?: string
+  baseUrl?: string
+  apiKey?: string
+  apiMode?: ProviderApiMode
+  messageCount?: number
+  messageTotal?: number
+  loadedMessageCount?: number
+  hasMoreBefore?: boolean
+  isLoadingOlderMessages?: boolean
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  contextTokens?: number
+  endedAt?: number | null
+  parentSessionId?: string | null
+  forkPointMessageId?: string | null
+  parentTitle?: string | null
+  parentLastMessage?: string | null
+  parentLastMessageRole?: string | null
+  lastActiveAt?: number
+  isPinned?: boolean
+  isArchived?: boolean
+  pushEnabled?: boolean
+  workspace?: string | null
+  categoryId?: number | null
+  isLocalOnly?: boolean
+  /** Per-session reasoning effort override.
+   * Empty string / undefined = use config.yaml default.
+   * Values: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' */
+  reasoningEffort?: string
+}
+
+interface CompressionState {
+  compressing: boolean
+  messageCount: number
+  beforeTokens: number
+  afterTokens: number
+  compressed: boolean | null
+  error?: string
+}
+
+interface AbortState {
+  aborting: boolean
+  synced: boolean | null
+  timedOut?: boolean
+  message?: string
+  error?: string
+}
+
+export function uid(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+}
+
+export function alignWorkspaceChangeAssistantMessage(
+  messages: Message[],
+  change: WorkspaceRunChangeSummary | null | undefined,
+  assistantMessageId?: string | null,
+): string | null {
+  const currentAssistantMessageId = String(assistantMessageId || '').trim()
+  const persistedAssistantMessageId = String(change?.assistant_message_id || '').trim()
+  if (!persistedAssistantMessageId) return currentAssistantMessageId || null
+  if (!currentAssistantMessageId || persistedAssistantMessageId === currentAssistantMessageId) {
+    return messages.some(item => item.id === persistedAssistantMessageId)
+      ? persistedAssistantMessageId
+      : currentAssistantMessageId || null
+  }
+  const message = messages.find(item => item.id === currentAssistantMessageId)
+  const idAlreadyLoaded = messages.some(item => item.id === persistedAssistantMessageId)
+  if (message && !idAlreadyLoaded) {
+    message.id = persistedAssistantMessageId
+    return persistedAssistantMessageId
+  }
+  return idAlreadyLoaded ? persistedAssistantMessageId : currentAssistantMessageId
+}
+
+export function attachWorkspaceChangesToExactTurns(
+  messages: Message[],
+  changes: WorkspaceRunChangeSummary[],
+): void {
+  for (const message of messages) message.workspaceChanges = []
+  const assistantById = new Map(
+    messages
+      .filter(message => message.role === 'assistant')
+      .map(message => [message.id, message]),
+  )
+  for (const change of changes) {
+    const assistantMessageId = String(change.assistant_message_id || '').trim()
+    if (!assistantMessageId) continue
+    const target = assistantMessageId ? assistantById.get(assistantMessageId) : undefined
+    if (target) target.workspaceChanges!.push(change)
+  }
+}
+
+function isToolOutputError(output: unknown): boolean {
+  if (typeof output !== 'string' || !output.trim()) return false
+  try {
+    const parsed = JSON.parse(output)
+    if (parsed && typeof parsed === 'object') {
+      const record = parsed as Record<string, unknown>
+      if (record.success === false) return true
+      if (record.error != null && String(record.error).trim() !== '') return true
+    }
+  } catch {
+    return false
+  }
+  return false
+}
+
+function errorMessageText(error: unknown): string {
+  if (typeof error === 'string') return error.trim()
+  if (error == null) return ''
+  if (typeof error !== 'object') return String(error).trim()
+
+  if (Array.isArray(error)) {
+    return error.map(errorMessageText).filter(Boolean).join('\n')
+  }
+
+  const record = error as Record<string, unknown>
+  for (const key of ['message', 'error', 'detail', 'description', 'code']) {
+    const text = errorMessageText(record[key])
+    if (text) return text
+  }
+
+  try {
+    return JSON.stringify(error)
+  } catch {
+    return String(error)
+  }
+}
+
+export async function uploadFiles(attachments: Attachment[]): Promise<{ name: string; path: string }[]> {
+  if (attachments.length === 0) return []
+  const formData = new FormData()
+  for (const att of attachments) {
+    if (att.file) formData.append('file', att.file, att.name)
+  }
+  const token = localStorage.getItem('hermes_api_key') || ''
+  const profileName = getActiveProfileName()
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  if (profileName) headers['X-Hermes-Profile'] = profileName
+  const res = await fetch(deploymentUrl('/api/studio/uploads'), {
+    method: 'POST',
+    body: formData,
+    headers,
+  })
+  if (!res.ok) throw new Error(await responseErrorMessage(res, 'Upload failed'))
+  const data = await res.json() as { files: { name: string; path: string }[] }
+  return data.files
+}
+
+export async function buildContentBlocks(
+  content: string,
+  attachments?: Attachment[],
+  uploadedFiles?: { name: string; path: string }[],
+  includeContextText = true,
+): Promise<ContentBlock[]> {
+  const blocks: ContentBlock[] = []
+
+  // Add text block if content is not empty
+  if (content.trim()) {
+    blocks.push({ type: 'text', text: content.trim() })
+  }
+
+  // Add attachment blocks using uploaded file paths
+  if (attachments && attachments.length > 0 && uploadedFiles) {
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      const uploaded = uploadedFiles[i]
+      const attachment = attachments[i]
+
+      // Check if it's an image
+      if (attachment?.type.startsWith('image/')) {
+        blocks.push({
+          type: 'image',
+          name: uploaded.name,
+          path: uploaded.path,
+          media_type: attachment.type,
+          ...(attachment.context?.trim() ? { context: attachment.context.trim() } : {}),
+          ...(attachment.videoFrameFor ? { video_frame: true } : {}),
+        })
+      } else {
+        // Other files
+        blocks.push({
+          type: 'file',
+          name: uploaded.name,
+          path: uploaded.path,
+          media_type: attachment?.type,
+          ...(attachment?.context?.trim() ? { context: attachment.context.trim() } : {}),
+        })
+      }
+      if (includeContextText && attachment?.context?.trim()) {
+        blocks.push({
+          type: 'text',
+          text: `<browser_selection_context format="json">\n${attachment.context.trim()}\n</browser_selection_context>`,
+        })
+      }
+    }
+  }
+
+  return blocks
+}
+
+function hasRuntimeToolPayload(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== ''
+}
+
+function runtimeToolPayloadOrUndefined(value: unknown): unknown | undefined {
+  return hasRuntimeToolPayload(value) ? value : undefined
+}
+
+function runtimeToolOutputFromEvent(event: unknown): unknown | undefined {
+  if (!event || typeof event !== 'object') return undefined
+  const record = event as Record<string, unknown>
+  return runtimeToolPayloadOrUndefined(
+    record.output ?? record.result ?? record.content ?? record.preview,
+  )
+}
+
+function runtimePayloadText(value: unknown): string {
+  if (!hasRuntimeToolPayload(value)) return ''
+  if (typeof value === 'string') return value
+  try {
+    const serialized = JSON.stringify(value)
+    if (serialized !== undefined) return serialized
+  } catch {
+    // Fall through to String(value) for non-serializable runtime payloads.
+  }
+  return String(value)
+}
+
+function runtimeObjectPayload(value: unknown): Record<string, unknown> | null {
+  if (!value) return null
+  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
+  if (typeof value !== 'string') return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function isBackgroundDelegateToolPayload(toolName: unknown, payload: unknown): boolean {
+  if (String(toolName || '') !== 'delegate_task') return false
+  return runtimeObjectPayload(payload)?.mode === 'background'
+}
+
+const HERMES_BACKGROUND_DELEGATE_ANCHOR_PREFIX = 'background-delegate:'
+
+function backgroundDelegateTaskDescriptors(
+  payload: Record<string, unknown>,
+  toolArgs: unknown,
+): Array<{ taskIndex: number; taskCount: number; goal: string }> {
+  const args = runtimeObjectPayload(toolArgs)
+  const payloadGoals = Array.isArray(payload.goals)
+    ? payload.goals.map(value => String(value || '').trim())
+    : []
+  const argumentGoals = Array.isArray(args?.goals)
+    ? args.goals.map(value => String(value || '').trim())
+    : []
+  const goals = payloadGoals.length > 0 ? payloadGoals : argumentGoals
+  const fallbackGoal = String(payload.goal || args?.goal || '').trim()
+  const requestedCount = Number(payload.count ?? payload.task_count)
+  const taskCount = Math.max(
+    1,
+    Number.isFinite(requestedCount) ? requestedCount : 0,
+    goals.length,
+  )
+  return Array.from({ length: taskCount }, (_, taskIndex) => ({
+    taskIndex,
+    taskCount,
+    goal: goals[taskIndex] || (taskIndex === 0 ? fallbackGoal : ''),
+  }))
+}
+
+function backgroundDelegateAnchorCallId(baseId: string, taskIndex: number): string {
+  return `${HERMES_BACKGROUND_DELEGATE_ANCHOR_PREFIX}${baseId}:${taskIndex}`
+}
+
+function parsePersistedMoaToolPayload(toolName: string | undefined, value: unknown): { preview?: string; result?: unknown } | null {
+  if (toolName !== 'moa_reference' && toolName !== 'moa_aggregating') return null
+  const payload = typeof value === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(value)
+        } catch {
+          return null
+        }
+      })()
+    : value
+  if (!payload || typeof payload !== 'object') return null
+  const data = payload as Record<string, unknown>
+  const preview = typeof data.preview === 'string'
+    ? data.preview
+    : typeof data.label === 'string'
+      ? data.label
+      : typeof data.aggregator === 'string'
+        ? data.aggregator
+        : undefined
+  const result = data.text ?? data.result
+  return { preview, result }
+}
+
+function isPersistedMoaToolDisplay(msg: HermesMessage): boolean {
+  return (msg.role === 'moa' || msg.display_role === 'tool')
+    && (msg.tool_name === 'moa_reference' || msg.tool_name === 'moa_aggregating')
+}
+
+function runtimeToolOutputHasError(value: unknown): boolean {
+  return typeof value === 'string' && isToolOutputError(value)
+}
+
+function readFinishReason(value: unknown): string | null | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  if (Object.prototype.hasOwnProperty.call(record, 'finishReason')) {
+    return (record as { finishReason?: string | null }).finishReason
+  }
+  if (Object.prototype.hasOwnProperty.call(record, 'finish_reason')) {
+    return (record as { finish_reason?: string | null }).finish_reason
+  }
+  return undefined
+}
+
+function readRunMarker(value: unknown): string | null | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const record = value as Record<string, unknown>
+  if (Object.prototype.hasOwnProperty.call(record, 'runMarker')) {
+    return typeof record.runMarker === 'string' || record.runMarker == null
+      ? record.runMarker as string | null
+      : undefined
+  }
+  if (Object.prototype.hasOwnProperty.call(record, 'run_marker')) {
+    return typeof record.run_marker === 'string' || record.run_marker == null
+      ? record.run_marker as string | null
+      : undefined
+  }
+  if (Object.prototype.hasOwnProperty.call(record, 'run_id')) {
+    return typeof record.run_id === 'string' || record.run_id == null
+      ? record.run_id as string | null
+      : undefined
+  }
+  return undefined
+}
+
+function normalizedRunMarker(value: unknown): string | null {
+  const runMarker = readRunMarker(value)
+  return typeof runMarker === 'string' && runMarker.trim() !== '' ? runMarker.trim() : null
+}
+
+function toolInstanceKey(value: unknown, toolCallId: string): string {
+  return `${normalizedRunMarker(value) || 'legacy'}\u0000${toolCallId}`
+}
+
+function setToolMetadata<T>(map: Map<string, T>, message: unknown, toolCallId: string, value: T) {
+  const scopedKey = toolInstanceKey(message, toolCallId)
+  const legacyKey = toolInstanceKey(null, toolCallId)
+  map.set(scopedKey, value)
+  // Some older rows only persisted the run marker on the tool result. Keep a
+  // best-effort fallback without allowing it to override an exact scoped key.
+  if (!map.has(legacyKey)) map.set(legacyKey, value)
+}
+
+function getToolMetadata<T>(map: Map<string, T>, message: unknown, toolCallId: string): T | undefined {
+  return map.get(toolInstanceKey(message, toolCallId))
+    ?? map.get(toolInstanceKey(null, toolCallId))
+}
+
+function isQueueInsertionInterruption(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const event = value as Pick<RunEvent, 'interrupted' | 'stop_reason'>
+  return event.interrupted === true && event.stop_reason === 'queue_insertion'
+}
+
+function hasAssistantVisibleText(message: Message | null | undefined): boolean {
+  if (!message) return false
+  return message.content.trim() !== '' || (message.reasoning?.trim() ?? '') !== ''
+}
+
+function selectResumedInFlightAssistant(messages: Message[], activeRunMarker?: string | null): Message | null {
+  if (messages.length === 0) return null
+  const lastMessage = messages[messages.length - 1]
+  if (lastMessage?.role !== 'assistant') return null
+  const finishReason = readFinishReason(lastMessage)
+  const runMarker = readRunMarker(lastMessage)
+  const hasMatchingRunMarker = !!activeRunMarker && !!runMarker && runMarker === activeRunMarker
+  return finishReason === null || hasMatchingRunMarker ? lastMessage : null
+}
+
+function getReplayRunMarker(events?: Array<{ event: string; data: RunEvent }>): string | null {
+  if (!Array.isArray(events)) return null
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const runMarker = readRunMarker(events[i]?.data)
+    if (typeof runMarker === 'string' && runMarker.trim() !== '') return runMarker
+  }
+  return null
+}
+
+function resolveResumedAssistantState(
+  messages: Message[],
+  options: {
+    previousActiveAssistantMessageId?: string | null
+    previousReasoningAssistantMessageId?: string | null
+    activeRunMarker?: string | null
+  },
+): {
+  activeAssistant: Message | null
+  reasoningAssistant: Message | null
+  runMarker: string | null
+  hadVisibleText: boolean
+} {
+  const activeAssistant = options.previousActiveAssistantMessageId
+    ? messages.find(m => m.role === 'assistant' && m.id === options.previousActiveAssistantMessageId) || null
+    : null
+  const selectedActiveAssistant = activeAssistant || selectResumedInFlightAssistant(messages, options.activeRunMarker)
+  const reasoningAssistant = options.previousReasoningAssistantMessageId
+    ? messages.find(m => m.role === 'assistant' && m.id === options.previousReasoningAssistantMessageId) || null
+    : null
+  const selectedReasoningAssistant = reasoningAssistant || (selectedActiveAssistant?.reasoning ? selectedActiveAssistant : null)
+  const selectedRunMarker = readRunMarker(selectedActiveAssistant) ?? options.activeRunMarker ?? null
+  return {
+    activeAssistant: selectedActiveAssistant,
+    reasoningAssistant: selectedReasoningAssistant,
+    runMarker: selectedRunMarker,
+    hadVisibleText: hasAssistantVisibleText(selectedActiveAssistant),
+  }
+}
+
+function mapHermesMessages(msgs: HermesMessage[], taskPlans: unknown[] = [], previous: Message[] = []): Message[] {
+  // Filter out assistant messages with no display content unless they carry tool call metadata
+  // needed to name later tool result rows when resuming persisted history.
+  const filteredMsgs = msgs.filter(m => {
+    if (m.role === 'assistant') {
+      return (m.tool_calls?.length || 0) > 0 || runtimePayloadText((m as any).content).trim() !== '' || !!m.run_usage || !!m.person_task_return
+    }
+    return true
+  })
+
+  // Build lookups from assistant messages with tool_calls
+  const toolNameMap = new Map<string, string>()
+  const toolArgsMap = new Map<string, unknown>()
+  const toolReasoningMap = new Map<string, string>()
+  for (const msg of filteredMsgs) {
+    if (msg.role === 'assistant' && msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        if (tc.id) {
+          if (tc.function?.name) setToolMetadata(toolNameMap, msg, tc.id, tc.function.name)
+          if (hasRuntimeToolPayload(tc.function?.arguments)) setToolMetadata(toolArgsMap, msg, tc.id, tc.function.arguments)
+          if (msg.reasoning?.trim()) setToolMetadata(toolReasoningMap, msg, tc.id, msg.reasoning)
+        }
+      }
+    }
+  }
+
+  const result: Message[] = []
+  for (const msg of filteredMsgs) {
+    // Skip assistant messages that only contain tool_calls (no meaningful content)
+    if (msg.role === 'assistant' && msg.tool_calls?.length && !runtimePayloadText((msg as any).content).trim()) {
+      // Emit a tool.started message for each tool call
+      for (const tc of msg.tool_calls) {
+        result.push({
+          id: String(msg.id) + '_' + tc.id,
+          role: 'tool',
+          content: '',
+          timestamp: Math.round(msg.timestamp * 1000),
+          toolName: tc.function?.name || undefined,
+          toolCallId: tc.id,
+          toolArgs: runtimeToolPayloadOrUndefined(tc.function?.arguments),
+          reasoning: msg.reasoning?.trim() ? msg.reasoning : undefined,
+          toolStatus: 'done',
+          finishReason: readFinishReason(msg),
+          runMarker: readRunMarker(msg),
+          storedMessageId: Number(msg.id),
+        })
+      }
+      if (!msg.run_usage) continue
+    }
+
+    // Tool result messages. MoA display rows are persisted with role "moa"
+    // so they can render as tool lines without becoming model-context tool results.
+    if (msg.role === 'tool' || isPersistedMoaToolDisplay(msg)) {
+      const tcId = msg.tool_call_id || ''
+      const exactPlaceholderIdx = result.findIndex(m =>
+        m.role === 'tool'
+        && m.toolCallId === tcId
+        && !m.toolResult
+        && normalizedRunMarker(m) === normalizedRunMarker(msg),
+      )
+      const placeholderIdx = exactPlaceholderIdx !== -1
+        ? exactPlaceholderIdx
+        : result.findIndex(m =>
+            m.role === 'tool'
+            && m.toolCallId === tcId
+            && !m.toolResult
+            && normalizedRunMarker(m) === null,
+          )
+      const placeholder = placeholderIdx !== -1 ? result[placeholderIdx] : undefined
+      const toolName = msg.tool_name || getToolMetadata(toolNameMap, msg, tcId) || placeholder?.toolName || undefined
+      const toolArgs = getToolMetadata(toolArgsMap, msg, tcId) ?? placeholder?.toolArgs
+      const toolReasoning = getToolMetadata(toolReasoningMap, msg, tcId) || placeholder?.reasoning
+      const moaPayload = parsePersistedMoaToolPayload(toolName, (msg as any).content)
+      const backgroundDelegate = isBackgroundDelegateToolPayload(toolName, (msg as any).content)
+      const delegatePayload = toolName === 'delegate_task'
+        ? runtimeObjectPayload(msg.display_content) || runtimeObjectPayload((msg as any).content)
+        : null
+      // Extract a short preview from the content
+      let preview = moaPayload?.preview || ''
+      const contentText = runtimePayloadText((msg as any).content)
+      if (!preview && contentText) {
+        try {
+          const parsed = typeof (msg as any).content === 'string'
+            ? JSON.parse(contentText)
+            : (msg as any).content
+          preview = parsed?.url || parsed?.title || parsed?.preview || parsed?.summary || ''
+        } catch {
+          preview = contentText.slice(0, 80)
+        }
+      }
+      // Remove only the placeholder belonging to this run. Coding-agent CLIs
+      // may reuse raw ids such as `item_2` on every resumed turn.
+      if (placeholderIdx !== -1) {
+        result.splice(placeholderIdx, 1)
+      }
+      if (delegatePayload?.runtime === 'ekko') {
+        const subagentId = String(delegatePayload.subagent_id || '').trim()
+        if (!subagentId) continue
+        const delegateArgs = runtimeObjectPayload(toolArgs)
+        const status = subagentStatus(delegatePayload.status)
+        const taskIndex = Number(delegatePayload.task_index ?? 0)
+        const taskCount = Math.max(1, Number(delegatePayload.task_count ?? 1) || 1)
+        const goal = String(delegatePayload.goal || delegateArgs?.goal || '').trim()
+        const summary = String(delegatePayload.summary || delegatePayload.output || '').trim()
+        const label = `${Number.isFinite(taskIndex) ? taskIndex + 1 : 1}/${taskCount}`
+        const durationMs = Number(delegatePayload.duration_ms)
+        const restoredPayload = {
+          ...delegatePayload,
+          goal,
+          duration_seconds: delegatePayload.duration_seconds
+            ?? (Number.isFinite(durationMs) ? durationMs / 1000 : undefined),
+        }
+        result.push({
+          id: String(msg.id),
+          role: 'tool',
+          content: '',
+          timestamp: Math.round(msg.timestamp * 1000),
+          toolName: 'delegate_task',
+          toolCallId: `subagent:${subagentId}`,
+          toolArgs,
+          toolPreview: `${label}${summary ? ` · ${summary}` : goal ? ` · ${goal}` : ''}`.slice(0, 220),
+          toolResult: restoredPayload,
+          reasoning: toolReasoning,
+          toolStatus: status === 'running' ? 'running' : status === 'completed' ? 'done' : 'error',
+          finishReason: readFinishReason(msg),
+          runMarker: readRunMarker(msg),
+          storedMessageId: Number(msg.id),
+        })
+        continue
+      }
+      if (delegatePayload?.runtime === 'hermes') {
+        const persistedTasks = Array.isArray(delegatePayload.tasks)
+          ? delegatePayload.tasks.filter(task => task && typeof task === 'object') as Array<Record<string, unknown>>
+          : [delegatePayload]
+        const restorableTasks = persistedTasks.filter(task => String(task.subagent_id || '').trim())
+        if (restorableTasks.length > 0) {
+          for (const [index, task] of restorableTasks.entries()) {
+            const subagentId = String(task.subagent_id || '').trim()
+            const status = subagentStatus(task.status)
+            const taskIndex = Number(task.task_index ?? index)
+            const taskCount = Math.max(1, Number(task.task_count ?? restorableTasks.length) || 1)
+            const goal = String(task.goal || '').trim()
+            const summary = String(task.summary || task.output || '').trim()
+            const label = `${Number.isFinite(taskIndex) ? taskIndex + 1 : index + 1}/${taskCount}`
+            result.push({
+              id: `${String(msg.id)}:background:${Number.isFinite(taskIndex) ? taskIndex : index}`,
+              role: 'tool',
+              content: '',
+              timestamp: Math.round(msg.timestamp * 1000),
+              toolName: 'delegate_task',
+              toolCallId: `subagent:${subagentId}`,
+              toolArgs,
+              toolPreview: `${label}${summary ? ` · ${summary}` : goal ? ` · ${goal}` : ''}`.slice(0, 220),
+              toolResult: task,
+              reasoning: toolReasoning,
+              toolStatus: status === 'running' ? 'running' : status === 'completed' ? 'done' : 'error',
+              finishReason: readFinishReason(msg),
+              runMarker: readRunMarker(msg),
+              storedMessageId: Number(msg.id),
+            })
+          }
+          continue
+        }
+      }
+      if (backgroundDelegate && delegatePayload) {
+        const baseId = tcId || String(msg.id)
+        for (const task of backgroundDelegateTaskDescriptors(delegatePayload, toolArgs)) {
+          const label = `${task.taskIndex + 1}/${task.taskCount}`
+          result.push({
+            id: `${String(msg.id)}:background:${task.taskIndex}`,
+            role: 'tool',
+            content: '',
+            timestamp: Math.round(msg.timestamp * 1000),
+            toolName: 'delegate_task',
+            toolCallId: backgroundDelegateAnchorCallId(baseId, task.taskIndex),
+            toolArgs,
+            toolPreview: `${label}${task.goal ? ` · ${task.goal}` : ''}`.slice(0, 220),
+            toolResult: {
+              ...delegatePayload,
+              runtime: 'hermes',
+              task_index: task.taskIndex,
+              task_count: task.taskCount,
+              goal: task.goal,
+            },
+            reasoning: toolReasoning,
+            toolStatus: 'done',
+            finishReason: readFinishReason(msg),
+            runMarker: readRunMarker(msg),
+            storedMessageId: Number(msg.id),
+          })
+        }
+        continue
+      }
+      result.push({
+        id: String(msg.id),
+        role: 'tool',
+        content: '',
+        timestamp: Math.round(msg.timestamp * 1000),
+        toolName,
+        toolCallId: tcId || undefined,
+        toolArgs,
+        toolPreview: typeof preview === 'string' ? preview.slice(0, 100) || undefined : undefined,
+        toolResult: moaPayload ? runtimeToolPayloadOrUndefined(moaPayload.result) : runtimeToolPayloadOrUndefined((msg as any).content),
+        reasoning: toolReasoning,
+        toolStatus: readFinishReason(msg) === 'error' ? 'error' : 'done',
+        finishReason: readFinishReason(msg),
+        runMarker: readRunMarker(msg),
+        storedMessageId: Number(msg.id),
+      })
+      continue
+    }
+
+    // Normal user/assistant/command messages
+    const displayRole = msg.display_role || msg.role
+    const displayContent = msg.display_content ?? msg.content
+    result.push({
+      id: String(msg.id),
+      role: displayRole === 'moa' ? 'system' : displayRole,
+      content: displayContent || '',
+      runUsage: normalizeRunUsage(msg.run_usage),
+      personTaskReturn: msg.person_task_return,
+      timestamp: Math.round(msg.timestamp * 1000),
+      reasoning: msg.reasoning ? msg.reasoning : undefined,
+      systemType: displayRole === 'command' ? 'command' : undefined,
+      finishReason: readFinishReason(msg),
+      runMarker: readRunMarker(msg),
+      storedMessageId: Number(msg.id),
+    })
+  }
+  const restored = mergeTaskPlanMessages(result, taskPlans)
+  const restoredIds = new Set(restored.map(message => message.id))
+  return mergeTaskPlanMessages(restored, previous.filter(message => message.taskPlan && restoredIds.has(message.id)).map(message => message.taskPlan))
+}
+
+function sessionActivitySeconds(s: SessionSummary): number {
+  return Math.max(
+    s.started_at || 0,
+    s.ended_at || 0,
+    s.last_active || 0,
+  )
+}
+
+function lastVisibleMessage(messages?: Message[] | null): Message | null {
+  if (!messages?.length) return null
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i]
+    if (message.role !== 'user' && message.role !== 'assistant') continue
+    if (!String(message.content || '').trim()) continue
+    return message
+  }
+  return null
+}
+
+function lastVisibleMessageContent(messages?: Message[] | null): string | null {
+  const message = lastVisibleMessage(messages)
+  if (!message) return null
+  const content = String(message.content || '').replace(/\s+/g, ' ').trim()
+  return content.length > 280 ? `${content.slice(0, 277)}...` : content
+}
+
+function lastVisibleMessageRole(messages?: Message[] | null): string | null {
+  return lastVisibleMessage(messages)?.role || null
+}
+
+function applySessionTokenUsage(session: Session, usage: {
+  inputTokens?: number | null; outputTokens?: number | null
+  cacheReadTokens?: number | null; cacheWriteTokens?: number | null; contextTokens?: number | null
+}) {
+  for (const key of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'contextTokens'] as const) {
+    const value = usage[key]
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) session[key] = value
+  }
+}
+
+export function mapHermesSession(s: SessionSummary): Session {
+  const codingAgentId = agentToCodingAgentId(s.agent)
+  const isCodingAgentSession = s.source === 'coding_agent' || Boolean(codingAgentId)
+  const codingAgentMode = isBuiltinEkkoSession(s) ? 'scoped' : isCodingAgentSession
+    ? (s.agent_mode === 'global' || s.agent_mode === 'scoped'
+        ? s.agent_mode
+        : s.provider === 'global' ? 'global' : 'scoped')
+    : undefined
+  const activitySeconds = sessionActivitySeconds(s)
+  return {
+    id: s.id,
+    profile: s.profile || 'default',
+    title: s.title || '',
+    source: historySessionSource(s) || undefined,
+    agent: s.agent || undefined,
+    agentSessionId: s.agent_session_id || undefined,
+    agentNativeSessionId: s.agent_native_session_id || undefined,
+    codingAgentId,
+    codingAgentMode,
+    messages: [],
+    createdAt: Math.round(s.started_at * 1000),
+    updatedAt: Math.round(activitySeconds * 1000),
+    model: s.model,
+    provider: s.provider || (s as any).billing_provider || '',
+    apiMode: s.api_mode,
+    agentPreset: s.agent_preset || undefined,
+    botType: s.bot_type || undefined,
+    reasoningEffort: s.reasoning_effort || undefined,
+    messageCount: s.message_count,
+    messageTotal: s.message_count,
+    loadedMessageCount: 0,
+    hasMoreBefore: false,
+    inputTokens: s.input_tokens,
+    outputTokens: s.output_tokens,
+    cacheReadTokens: s.cache_read_tokens,
+    cacheWriteTokens: s.cache_write_tokens,
+    endedAt: s.ended_at != null ? Math.round(s.ended_at * 1000) : null,
+    parentSessionId: s.parent_session_id || null,
+    forkPointMessageId: (s as any).fork_point_message_id != null ? String((s as any).fork_point_message_id) : null,
+    parentTitle: s.parent_title || null,
+    parentLastMessage: s.parent_last_message || null,
+    parentLastMessageRole: s.parent_last_message_role || null,
+    lastActiveAt: s.last_active != null ? Math.round(s.last_active * 1000) : undefined,
+    isPinned: Boolean(s.is_pinned),
+    isArchived: Boolean(s.is_archived),
+    pushEnabled: Boolean(s.push_enabled),
+    workspace: s.workspace || null,
+    categoryId: s.category_id ?? null,
+  }
+}
+
+const STORAGE_KEY_PREFIX = 'hermes_active_session_'
+type ChatRuntimeMode = 'default' | 'global_agent'
+let activeRuntimeMode: ChatRuntimeMode = 'default'
+const LEGACY_STORAGE_KEY = 'hermes_active_session'
+const SESSION_PROFILE_FILTER_STORAGE_KEY = 'hermes_session_profile_filter_v1'
+
+// 获取当前 profile 名称，用于隔离缓存。
+// 从 profiles store 的 activeProfileName（同步 localStorage）读取，
+// 避免异步加载导致 chat store 初始化时拿到 null。
+function getProfileName(): string {
+  try {
+    return useProfilesStore().activeProfileName || 'default'
+  } catch {
+    return 'default'
+  }
+}
+
+function runtimeStoragePrefix(): string {
+  return activeRuntimeMode === 'global_agent' ? `${STORAGE_KEY_PREFIX}global_agent_` : STORAGE_KEY_PREFIX
+}
+
+function storageKey(): string { return runtimeStoragePrefix() + getProfileName() }
+function legacyStorageKey(): string | null { return activeRuntimeMode === 'default' && getProfileName() === 'default' ? LEGACY_STORAGE_KEY : null }
+
+function isProviderAgentSession(session?: Pick<Session, 'source' | 'agent' | 'codingAgentId'> | null): boolean {
+  return session?.source === 'builtin_agent' || session?.source === 'coding_agent' ||
+    Boolean(session?.codingAgentId) ||
+    Boolean(agentToCodingAgentId(session?.agent))
+}
+
+function clearCodingAgentRuntimeCredentials(session?: Session | null) {
+  if (!session || !isProviderAgentSession(session)) return
+  session.baseUrl = undefined
+  session.apiKey = undefined
+}
+
+function shouldPreserveRuntimeApiMode(session?: Session | null): boolean {
+  return isProviderAgentSession(session) && session?.codingAgentMode !== 'global'
+}
+
+function isQuotaExceededError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const e = error as { name?: string, code?: number }
+  return e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014
+}
+
+function recoverStorageQuota() {
+  try {
+    // 清理所有会话相关的旧缓存（已完全废弃）
+    const prefixes = [
+      'hermes_sessions_cache_v1_',
+      'hermes_session_msgs_v1_',
+      'hermes_session_pins_v1_',
+      'hermes_human_only_v1_',
+    ]
+    const keysToRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key) continue
+      if (key === storageKey() || key === LEGACY_STORAGE_KEY) continue
+      if (prefixes.some(prefix => key.startsWith(prefix))) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach(key => removeItem(key))
+    if (keysToRemove.length > 0) {
+      console.log(`Recovered storage: cleared ${keysToRemove.length} old session cache entries`)
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function setItemBestEffort(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+    return
+  } catch (error) {
+    if (!isQuotaExceededError(error)) return
+  }
+
+  recoverStorageQuota()
+
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // quota exceeded or private mode — ignore, cache is best-effort
+  }
+}
+
+function getItemBestEffort(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function removeItem(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // ignore
+  }
+}
+
+// Strip the circular `file: File` reference from attachments before caching —
+// File objects don't serialize and we only need name/type/size/url for display.
+
+function createChatState(scopedSessionId?: string) {
+  const messageHistoryRevisions = new Map<string, number>()
+  const runtimeMode = ref<ChatRuntimeMode>(scopedSessionId ? 'default' : activeRuntimeMode)
   const seenSessionCommandEvents = new WeakSet<RunEvent>()
+  const announcedPersonRuns = new Set<string>()
   const sessions = ref<Session[]>([])
-  // 消息/会话状态操作域（拆分自本文件，见 chat-messages.ts）
-  const chatMessages = createChatMessages({ sessions })
-  const {
-    getSessionMsgs,
-    isEkkoAgentSession,
-    addMessage,
-    addMessageInTimelineOrder,
-    addHermesBackgroundDelegateAnchors,
-    findHermesBackgroundDelegateAnchor,
-    addOrUpdateSession,
-    updateMessage,
-    settleRunningTools,
-    settleRuntimeDisplayForCommand,
-  } = chatMessages
   const activeSessionId = ref<string | null>(null)
   const focusMessageId = ref<string | null>(null)
   const streamStates = ref<Map<string, { abort: () => void }>>(new Map())
   /** sessionId → server-reported isWorking status */
   const serverWorking = ref<Set<string>>(new Set())
+  /** Authoritative live delegation counts, never inferred from transcript history. */
+  const backgroundPendingBySession = ref<Map<string, number>>(new Map())
+  let runtimeGeneration = 0
+  const backgroundObservers = new Map<string, () => void>()
+
+  function clearBackgroundObservers() {
+    for (const dispose of backgroundObservers.values()) dispose()
+    backgroundObservers.clear()
+    backgroundPendingBySession.value.clear()
+  }
+
+  const unsubscribeAuthInvalidation = onAuthInvalidated(() => {
+    runtimeGeneration += 1
+    clearBackgroundObservers()
+    streamStates.value.clear()
+    serverWorking.value.clear()
+    announcedPersonRuns.clear()
+    pendingApprovals.value = new Map([...pendingApprovals.value].filter(([id]) => !id.startsWith('person-main-')))
+    pendingClarifies.value = new Map([...pendingClarifies.value].filter(([id]) => !id.startsWith('person-main-')))
+  })
+
+  onScopeDispose(() => {
+    unsubscribeAuthInvalidation()
+    runtimeGeneration += 1
+    clearBackgroundObservers()
+    if (scopedSessionId) unregisterSessionHandlers(scopedSessionId)
+  })
+
+  function disposeSubscription(stop: (() => void) | undefined) {
+    if (typeof stop === 'function') onScopeDispose(stop)
+  }
+
+  function setBackgroundPending(sessionId: string, pending: unknown) {
+    const count = Number(pending)
+    if (Number.isFinite(count) && count > 0) {
+      const session = sessions.value.find(s => s.id === sessionId)
+      if (!session) return
+      backgroundPendingBySession.value.set(sessionId, count)
+      if (!backgroundObservers.has(sessionId)) {
+        const generation = runtimeGeneration
+        backgroundObservers.set(sessionId, observeBackgroundStatus(
+          sessionId, session.profile || 'default', runtimeTransport(),
+          pending => {
+            if (generation === runtimeGeneration) setBackgroundPending(sessionId, pending)
+          },
+        ))
+      }
+    } else {
+      backgroundPendingBySession.value.delete(sessionId)
+      backgroundObservers.get(sessionId)?.()
+      backgroundObservers.delete(sessionId)
+    }
+  }
+
+  function applyBackgroundPendingEvent(sessionId: string, evt: RunEvent) {
+    if (evt.background_pending != null || evt.event === 'run.completed' || evt.event === 'run.failed' || evt.event === 'abort.completed') {
+      setBackgroundPending(sessionId, evt.background_pending)
+    }
+  }
   /** sessionIds with a terminal /fork command submitted but not settled yet */
   const pendingForkCommands = ref<Set<string>>(new Set())
   /** Sessions that completed while the user was viewing another session. */
   const completedUnreadSessions = ref<Set<string>>(new Set())
   /** UI-only live streams for Hermes background subagents. Never sent into parent context. */
   const subagentStreams = ref<Map<string, SubagentStream>>(new Map())
-  // 子代理 / MoA 流事件域（拆分自本文件，见 chat-subagents.ts）
-  const subagents = createChatSubagents({
-    subagentStreams,
-    messages: {
-      getSessionMsgs,
-      findHermesBackgroundDelegateAnchor,
-      updateMessage,
-      addMessageInTimelineOrder,
-      addMessage,
-    },
-  })
-  const {
-    handleSubagentEvent,
-    restorePersistedSubagentStreams,
-    settleInterruptedSubagents,
-    getSubagentStream,
-    handleMoaEvent,
-  } = subagents
   const storedSessionProfileFilter = getItemBestEffort(SESSION_PROFILE_FILTER_STORAGE_KEY)?.trim()
   const sessionProfileFilter = ref<string | null>(
     storedSessionProfileFilter && storedSessionProfileFilter !== '__all__'
@@ -98,7 +1444,8 @@ export const useChatStore = defineStore('chat', () => {
    * has to forget it — otherwise the next run in the same session inherits the
    * previous run's start and reports a far larger elapsed time.
    */
-  function applyResumedRunStartedAt(sessionId: string, data: { isWorking?: boolean; runStartedAt?: number }) {
+  function applyResumedRunActivity(sessionId: string, data: { isWorking?: boolean; runStartedAt?: number; backgroundPending?: number }) {
+    setBackgroundPending(sessionId, data.backgroundPending)
     const startedAt = Number(data?.runStartedAt) || 0
     if (data?.isWorking && startedAt > 0) setRunStartedAt(sessionId, startedAt)
     else clearRunStartedAt(sessionId)
@@ -106,6 +1453,8 @@ export const useChatStore = defineStore('chat', () => {
   const queueLengths = ref<Map<string, number>>(new Map())
   /** sessionId → queued user messages not yet visible in the transcript */
   const queuedUserMessages = ref<Map<string, Message[]>>(new Map())
+  /** Inputs submitted locally that have not yet been acknowledged by the server. */
+  const pendingUserMessageIds = new Map<string, Set<string>>()
   /** sessionId → server-owned safe-boundary insertion state */
   const queueInsertionStates = ref<Map<string, QueueInsertionState>>(new Map())
   /** sessionId → queue ids that server reported as dequeued before the peer message arrived */
@@ -117,53 +1466,18 @@ export const useChatStore = defineStore('chat', () => {
     return sid ? messageReferences.value.get(sid) || null : null
   })
   const pendingApprovals = ref<Map<string, PendingApproval>>(new Map())
+  const pendingApprovalResponseIds = new Map<string, string>()
+  const activePendingApproval = computed(() => {
+    const sid = activeSessionId.value
+    return sid ? pendingApprovals.value.get(sid) || null : null
+  })
+
   const pendingClarifies = ref<Map<string, PendingClarify>>(new Map())
-  // 审批/澄清交互域（拆分自本文件，见 chat-interactions.ts）
-  const interactions = createChatInteractions({
-    activeSessionId,
-    pendingApprovals,
-    pendingClarifies,
-    runtimeTransport,
+  const pendingClarifyResponseIds = new Map<string, string>()
+  const activePendingClarify = computed(() => {
+    const sid = activeSessionId.value
+    return sid ? pendingClarifies.value.get(sid) || null : null
   })
-  const {
-    activePendingApproval,
-    activePendingClarify,
-    setPendingApproval,
-    clearPendingApproval,
-    setPendingClarify,
-    clearPendingClarify,
-    clearPendingInteractions,
-    respondToClarifyFor,
-    respondToClarify,
-    respondApprovalFor,
-    respondApproval,
-  } = interactions
-  // 队列系统域（拆分自本文件，见 chat-queue.ts）
-  const queue = createChatQueue({
-    queuedUserMessages,
-    queueLengths,
-    queueInsertionStates,
-    dequeuedQueueIds,
-    runtimeTransport,
-    updateSessionTitle,
-    messages: {
-      getSessionMsgs,
-      addMessage,
-    },
-  })
-  const {
-    enqueueUserMessage,
-    updateQueuedUserMessage,
-    dropQueuedUserMessage,
-    removeQueuedMessage,
-    insertQueuedMessage,
-    replaceQueueInsertionState,
-    handleQueueInsertionUpdated,
-    normalizeQueuedUserMessages,
-    replaceQueuedUserMessages,
-    consumeDequeuedQueueId,
-    handleRunQueuedEvent,
-  } = queue
 
   function setSessionProfileFilter(profile: string | null) {
     const normalized = profile?.trim()
@@ -198,10 +1512,6 @@ export const useChatStore = defineStore('chat', () => {
   })
   const isLoadingSessions = ref(false)
   const sessionsLoaded = ref(false)
-  // 最近一次 switchSession 失败的原因（'resume timeout' / 'socket error' / ...）。
-  // UI 可以 watch 这个 ref 出 toast。resume 失败时 store 内只能 console.error
-  // （没有可继续上抛的调用方），否则用户在录音中切会话只会看到「空白」却不知道为什么。
-  const lastSwitchError = ref<string | null>(null)
   const messageLoadRequests = ref<Map<string, number>>(new Map())
   const isLoadingMessages = computed(() => {
     const sid = activeSessionId.value
@@ -213,10 +1523,15 @@ export const useChatStore = defineStore('chat', () => {
   const olderMessageLoads = new WeakMap<Session, object>()
   let activeSelectionSequence = 0
   const reasoningEffortWriteChains = new Map<string, Promise<boolean>>()
-  const reasoningEffortWriteTargets = new Map<string, string | undefined>()
-  const reasoningEffortConfirmedValues = new Map<string, string | undefined>()
+  const reasoningEffortWriteTargets = new Map<string, { effort: string | undefined; model?: string }>()
+  const reasoningEffortConfirmedValues = new Map<string, { effort: string | undefined; model?: string }>()
+  const pushEnabledWriteChains = new Map<string, Promise<boolean>>()
+  const pushEnabledWriteTargets = new Map<string, boolean>()
+  const pushEnabledConfirmedValues = new Map<string, boolean>()
 
   function beginMessageLoad(sessionId: string, requestSequence: number) {
+    const session = sessions.value.find(session => session.id === sessionId)
+    if (session) session.messagesLoaded = false
     const next = new Map(messageLoadRequests.value)
     next.set(sessionId, requestSequence)
     messageLoadRequests.value = next
@@ -250,15 +1565,21 @@ export const useChatStore = defineStore('chat', () => {
 
   function setRuntimeMode(mode: ChatRuntimeMode) {
     if (runtimeMode.value === mode) return
-    setActiveRuntimeMode(mode)
+    activeRuntimeMode = mode
     runtimeMode.value = mode
+    runtimeGeneration += 1
+    clearBackgroundObservers()
     sessions.value = []
+    pendingRunUsage.clear()
     completedUnreadSessions.value = new Set()
     queueLengths.value = new Map()
     queuedUserMessages.value = new Map()
+    pendingUserMessageIds.clear()
     queueInsertionStates.value = new Map()
-    pendingApprovals.value = new Map()
-    pendingClarifies.value = new Map()
+    pendingApprovals.value = new Map([...pendingApprovals.value].filter(([id]) => id.startsWith('person-main-')))
+    pendingClarifies.value = new Map([...pendingClarifies.value].filter(([id]) => id.startsWith('person-main-')))
+    pendingApprovalResponseIds.clear()
+    pendingClarifyResponseIds.clear()
     streamStates.value = new Map()
     serverWorking.value = new Set()
     pendingForkCommands.value = new Set()
@@ -308,10 +1629,14 @@ export const useChatStore = defineStore('chat', () => {
   const activeSession = ref<Session | null>(null)
   const messages = computed<Message[]>(() => activeSession.value?.messages || [])
   const workspaceRunChangesBySession = ref<Map<string, Map<string, WorkspaceRunChangeSummary>>>(new Map())
-  const workspaceRunChangeLoadRequests = new Set<string>()
 
   function isSessionLive(sessionId: string): boolean {
     return streamStates.value.has(sessionId) || serverWorking.value.has(sessionId)
+  }
+
+  // Display activity is broader than foreground execution (send/queue/voice).
+  function isSessionWorking(sessionId: string): boolean {
+    return isSessionLive(sessionId) || (backgroundPendingBySession.value.get(sessionId) || 0) > 0
   }
 
   function isSessionCompletedUnread(sessionId: string): boolean {
@@ -364,7 +1689,7 @@ export const useChatStore = defineStore('chat', () => {
     focusMessageId.value = null
     setAbortState(sid, null)
     setCompressionState(sid, null)
-    removeItem(storageKey())
+    if (!scopedSessionId) removeItem(storageKey())
   }
 
   function attachWorkspaceChangesToMessages(sessionId: string) {
@@ -385,6 +1710,17 @@ export const useChatStore = defineStore('chat', () => {
   function setWorkspaceRunChanges(sessionId: string, changes: WorkspaceRunChangeSummary[]) {
     const next = new Map(workspaceRunChangesBySession.value)
     const byChangeId = new Map<string, WorkspaceRunChangeSummary>()
+    for (const change of changes) {
+      if (change?.change_id) byChangeId.set(change.change_id, change)
+    }
+    next.set(sessionId, byChangeId)
+    workspaceRunChangesBySession.value = next
+    attachWorkspaceChangesToMessages(sessionId)
+  }
+
+  function mergeWorkspaceRunChanges(sessionId: string, changes: WorkspaceRunChangeSummary[]) {
+    const next = new Map(workspaceRunChangesBySession.value)
+    const byChangeId = new Map(next.get(sessionId) || [])
     for (const change of changes) {
       if (change?.change_id) byChangeId.set(change.change_id, change)
     }
@@ -417,6 +1753,8 @@ export const useChatStore = defineStore('chat', () => {
     return alignedAssistantMessageId
   }
 
+  const pendingRunUsage = new Map<string, Map<string, NonNullable<ReturnType<typeof normalizeRunUsage>>>>()
+
   function handleTerminalWorkspaceRunChange(
     sessionId: string,
     evt: any,
@@ -426,22 +1764,27 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessions.value.find(session => session.id === sessionId)
     if (target) alignWorkspaceChangeAssistantMessage(target.messages, change, assistantMessageId)
     upsertWorkspaceRunChange(sessionId, change)
-  }
-
-  function restoreWorkspaceRunChangeMessages(sessionId: string) {
-    attachWorkspaceChangesToMessages(sessionId)
-    if (workspaceRunChangesBySession.value.has(sessionId) || workspaceRunChangeLoadRequests.has(sessionId)) return
-    workspaceRunChangeLoadRequests.add(sessionId)
-    void loadWorkspaceRunChangesForSession(sessionId)
-      .catch(err => console.warn('Failed to load workspace run changes:', err))
-      .finally(() => {
-        workspaceRunChangeLoadRequests.delete(sessionId)
-      })
-  }
-
-  async function loadWorkspaceRunChangesForSession(sessionId: string) {
-    const changes = await fetchWorkspaceRunChangesForSession(sessionId)
-    setWorkspaceRunChanges(sessionId, changes)
+    const originalSummary = normalizeRunUsage(evt?.run_usage)
+    const summary = originalSummary && (pendingRunUsage.get(sessionId)?.get(originalSummary.runId) || originalSummary)
+    if (summary) {
+      pendingRunUsage.get(sessionId)?.delete(summary.runId)
+      if (!pendingRunUsage.get(sessionId)?.size) pendingRunUsage.delete(sessionId)
+    }
+    const taskReturn = evt?.person_task_return as import('@/api/person').PersonTaskReturn | undefined
+    const persistedId = taskReturn?.assistantMessageId || summary?.assistantMessageId
+    if (target && (summary || taskReturn)) {
+      let message = target.messages.find(m => m.role === 'assistant' && m.id === persistedId)
+        || target.messages.find(m => m.role === 'assistant' && m.id === assistantMessageId)
+      if (!message && persistedId) {
+        message = { id: persistedId, role: 'assistant', content: '', timestamp: Date.now() }
+        target.messages.push(message)
+      }
+      if (message) {
+        if (persistedId && !target.messages.some(m => m !== message && m.id === persistedId)) message.id = persistedId
+        if (summary) message.runUsage = summary
+        if (taskReturn) message.personTaskReturn = taskReturn
+      }
+    }
   }
 
   async function loadWorkspaceRunChangeFile(sessionId: string, toolCallId: string, fileId: number): Promise<WorkspaceRunChangeFileDetail | null> {
@@ -466,8 +1809,14 @@ export const useChatStore = defineStore('chat', () => {
     return mapped
   }
 
-  async function loadSessions(profile?: string | null, preferredSessionId?: string | null) {
+  async function loadSessions(profile?: string | null, preferredSessionId?: string | null, preferredFocusId?: string | null) {
     const requestSequence = ++loadSessionsRequestSequence
+    // Returning from Person must detach its private conversation even when
+    // the ordinary chat list is slow or unavailable.
+    if (/^person-(main|task)-/.test(activeSessionId.value || '')) {
+      clearActiveSession()
+      sessions.value = sessions.value.filter(session => !/^person-(main|task)-/.test(session.id))
+    }
     const selectionSequence = activeSelectionSequence
     isLoadingSessions.value = true
     try {
@@ -535,7 +1884,8 @@ export const useChatStore = defineStore('chat', () => {
             ? storedId
             : sessions.value[0]?.id
       if (targetId) {
-        await switchSession(targetId, targetId === currentId ? focusMessageId.value : null)
+        await switchSession(targetId, targetId === preferredSessionId && preferredFocusId
+          ? preferredFocusId : targetId === currentId ? focusMessageId.value : null)
       } else {
         clearActiveSession()
       }
@@ -583,6 +1933,7 @@ export const useChatStore = defineStore('chat', () => {
           // (messages, loadedMessageCount, hasMoreBefore, contextTokens).
           existing.title = fresh.title
           existing.source = fresh.source
+          existing.botType = fresh.botType
           existing.updatedAt = fresh.updatedAt
           existing.lastActiveAt = fresh.lastActiveAt
           existing.endedAt = fresh.endedAt
@@ -590,10 +1941,11 @@ export const useChatStore = defineStore('chat', () => {
           existing.provider = fresh.provider
           existing.apiMode = fresh.apiMode || existing.apiMode
           existing.reasoningEffort = fresh.reasoningEffort
+          if (!pushEnabledWriteTargets.has(existing.id)) existing.pushEnabled = fresh.pushEnabled
           existing.messageCount = fresh.messageCount
-          existing.inputTokens = fresh.inputTokens
-          existing.outputTokens = fresh.outputTokens
+          applySessionTokenUsage(existing, fresh)
           existing.workspace = fresh.workspace
+          existing.isPinned = fresh.isPinned
           existing.categoryId = fresh.categoryId
           existing.isLocalOnly = false
           // messageTotal: keep the larger of server count vs what we've loaded,
@@ -629,38 +1981,86 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function applyMessageDeletion(sessionId: string, result: MessageDeletionResult) {
+    if ((messageHistoryRevisions.get(sessionId) ?? -1) >= result.historyRevision) return
+    messageHistoryRevisions.set(sessionId, result.historyRevision)
+    const target = sessions.value.find(session => session.id === sessionId)
+    if (!target) return
+    target.historyRevision = result.historyRevision
+    const ids = new Set(result.messageIds)
+    const runs = new Set(target.messages.filter(message => ids.has(message.storedMessageId ?? Number(message.id)))
+      .map(message => message.runMarker).filter(Boolean))
+    target.messages = target.messages.filter(message => !ids.has(message.storedMessageId ?? Number(message.id))
+      && !(message.taskPlan && runs.has(message.runMarker)))
+    target.messageTotal = Math.max(0, (target.messageTotal ?? target.messageCount ?? 0) - result.deleted)
+    target.messageCount = target.messageTotal
+    target.contextTokens = typeof result.contextTokens === 'number' && Number.isFinite(result.contextTokens) && result.contextTokens >= 0
+      ? result.contextTokens : undefined
+    target.loadedMessageCount = 0
+    clearMessageReference(sessionId)
+    pendingRunUsage.delete(sessionId)
+    if (activeSessionId.value === sessionId) {
+      focusMessageId.value = null
+      const messagesAtDeletion = target.messages
+      const countAtDeletion = messagesAtDeletion.length
+      // A subsequent run/resume owns the newer transcript, even if it finishes
+      // before this refresh returns.
+      void refreshActiveSession({ canApply: () => !isSessionWorking(sessionId)
+        && target.messages === messagesAtDeletion && target.messages.length === countAtDeletion })
+    }
+  }
+
+  async function deleteMessages(sessionId: string, messageIds: number[], historyRevision: number) {
+    const session = sessions.value.find(item => item.id === sessionId)
+    const result = await deleteSessionMessages(sessionId, messageIds, historyRevision, session?.profile)
+    applyMessageDeletion(sessionId, result)
+    return result
+  }
+
   // Re-pull active session from server. Used on tab-visible events.
-  async function refreshActiveSession(): Promise<boolean> {
+  async function refreshActiveSession(options: { canApply?: () => boolean; latest?: boolean } = {}): Promise<boolean> {
     const sid = activeSessionId.value
     if (!sid) return false
     try {
       const target = sessions.value.find(s => s.id === sid)
       if (!target) return false
-      const limit = focusMessageId.value
+      if (target.personFlows?.timeline?.has_newer && !options.latest && !options.canApply) return true
+      const revision = messageHistoryRevisions.get(sid)
+      const previousPersonFlows = target.personFlows
+      const limit = target.personFlows?.timeline ? LIVE_CHAT_MESSAGE_PAGE_SIZE : focusMessageId.value
         ? Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE)
         : Math.min(
           Math.max(target.loadedMessageCount || LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MESSAGE_PAGE_SIZE),
           LIVE_CHAT_MAX_LOADED_MESSAGES,
         )
-      const detail = await fetchSessionMessagesPage(sid, 0, limit, activeSession.value?.profile)
+      const detail = await fetchSessionMessagesPage(sid, 0, limit, activeSession.value?.profile, sid.startsWith('person-main-') ? {} : undefined)
+      if (revision !== messageHistoryRevisions.get(sid) || options.canApply?.() === false) return false
       if (!detail) return false
-      const mapped = mapHermesMessages(detail.messages || [])
+      if ((target.personFlows?.timeline?.history_revision ?? -1) > (detail.personFlows?.timeline?.history_revision ?? Infinity)) return false
+      const pushedFlows = target.personFlows !== previousPersonFlows ? target.personFlows : undefined
+      const mapped = mapHermesMessages(detail.messages || [], detail.taskPlans, target.messages)
       target.messages = mapped
+      target.messagesLoaded = true
       restorePersistedSubagentStreams(sid)
+      setWorkspaceRunChanges(sid, detail.workspaceRunChanges || [])
       target.loadedMessageCount = detail.messages.length
       target.messageTotal = detail.total
       target.messageCount = detail.total
       target.hasMoreBefore = detail.hasMore
+      if (!applyPersonTimelinePage(target,detail.personFlows,mapped) && target.personFlows === previousPersonFlows && detail.personFlows) target.personFlows=detail.personFlows
+      if (pushedFlows && detail.personFlows?.timeline) applyPersonFlowUpdate(target,pushedFlows)
       if (detail.session.title) target.title = detail.session.title
       target.workspace = detail.session.workspace || target.workspace || null
+      target.botType = detail.session.bot_type || target.botType
+      target.isPinned = Boolean(detail.session.is_pinned)
       target.categoryId = detail.session.category_id ?? null
+      if (!pushEnabledWriteTargets.has(sid)) target.pushEnabled = Boolean(detail.session.push_enabled)
       target.isLocalOnly = false
       target.parentSessionId = detail.session.parent_session_id || target.parentSessionId || null
       target.forkPointMessageId = (detail.session as any).fork_point_message_id != null ? String((detail.session as any).fork_point_message_id) : target.forkPointMessageId || null
       target.parentTitle = detail.session.parent_title || target.parentTitle || null
       target.parentLastMessage = detail.session.parent_last_message || target.parentLastMessage || null
       target.parentLastMessageRole = detail.session.parent_last_message_role || target.parentLastMessageRole || null
-      restoreWorkspaceRunChangeMessages(sid)
       return true
     } catch (err) {
       console.error('Failed to refresh active session:', err)
@@ -673,19 +2073,21 @@ export const useChatStore = defineStore('chat', () => {
     profile?: string
     model?: string
     provider?: string
-    source?: 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
+    source?: 'api_server' | 'cli' | 'coding_agent' | 'builtin_agent' | 'global_agent' | 'workflow' | 'group_chat'
     agent?: ChatAgentId
     codingAgentId?: ChatCodingAgentId
     codingAgentMode?: 'global' | 'scoped'
+    agentPreset?: string
     workspace?: string | null
     categoryId?: number | null
     baseUrl?: string
     apiKey?: string
     apiMode?: ProviderApiMode
+    reasoningEffort?: string
   } = {}): Session {
-    const source = runtimeMode.value === 'global_agent' ? 'global_agent' : options.source || 'cli'
     const codingAgentId = options.codingAgentId || agentToCodingAgentId(options.agent)
-    const codingAgentMode = codingAgentId ? (options.codingAgentMode || 'scoped') : undefined
+    const source = historySessionSource({ ...options, codingAgentId, source: runtimeMode.value === 'global_agent' ? 'global_agent' : options.source || 'cli' })
+    const codingAgentMode = codingAgentId ? (codingAgentId === 'ekko-agent' ? 'scoped' : options.codingAgentMode || 'scoped') : undefined
     const session: Session = {
       id: uid(),
       profile: options.profile || useProfilesStore().activeProfileName || 'default',
@@ -694,6 +2096,7 @@ export const useChatStore = defineStore('chat', () => {
       agent: options.agent || codingAgentIdToAgent(codingAgentId) || 'hermes',
       codingAgentId,
       codingAgentMode,
+      agentPreset: options.agentPreset,
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -705,6 +2108,7 @@ export const useChatStore = defineStore('chat', () => {
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
       apiMode: options.apiMode,
+      reasoningEffort: options.reasoningEffort || undefined,
     }
     sessions.value.unshift(session)
     return session
@@ -736,16 +2140,20 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function switchSession(sessionId: string, focusId?: string | null) {
+    const generation = runtimeGeneration
     activeSelectionSequence++
     const requestSequence = ++switchSessionRequestSequence
-    const isCurrentSelection = () => activeSessionId.value === sessionId
+    const isCurrentSelection = () => generation === runtimeGeneration
+      && activeSessionId.value === sessionId
       && requestSequence === switchSessionRequestSequence
     clearThinkingObservationFor(sessionId)
     activeSessionId.value = sessionId
     focusMessageId.value = focusId ?? null
-    setItemBestEffort(storageKey(), sessionId)
-    const legacyActiveKey = legacyStorageKey()
-    if (legacyActiveKey) removeItem(legacyActiveKey)
+    if (!scopedSessionId) {
+      setItemBestEffort(storageKey(), sessionId)
+      const legacyActiveKey = legacyStorageKey()
+      if (legacyActiveKey) removeItem(legacyActiveKey)
+    }
     activeSession.value = sessions.value.find(s => s.id === sessionId) || null
     clearSessionCompletedUnread(sessionId)
 
@@ -753,7 +2161,7 @@ export const useChatStore = defineStore('chat', () => {
 
     // Unsent drafts have no server history. Resuming them only waits for a
     // response to a session that does not exist until its first run.
-    if (activeSession.value.isLocalOnly && activeSession.value.messages.length === 0 && !streamStates.value.has(sessionId) && !serverWorking.value.has(sessionId)) return true
+    if (activeSession.value.isLocalOnly && activeSession.value.messages.length === 0 && !isSessionWorking(sessionId)) return true
 
     beginMessageLoad(sessionId, requestSequence)
     let backgroundPendingOnResume = 0
@@ -767,6 +2175,7 @@ export const useChatStore = defineStore('chat', () => {
           clearTimeout(timeout)
           if (
             data.session_id !== sessionId
+            || generation !== runtimeGeneration
             || activeSessionId.value !== sessionId
             || requestSequence !== switchSessionRequestSequence
           ) {
@@ -795,16 +2204,14 @@ export const useChatStore = defineStore('chat', () => {
             replaceQueuedUserMessages(sessionId, [])
           }
           replaceQueueInsertionState(sessionId, data.queueInsertion)
-          applyResumedRunStartedAt(sessionId, data as any)
+          applyResumedRunActivity(sessionId, data as any)
           if ((data as any).isAborting) {
             setAbortState(sessionId, { aborting: true, synced: null })
           } else if (!data.isWorking) {
             setAbortState(sessionId, null)
           }
           if (!data.isWorking) setCompressionState(sessionId, null)
-          if (data.inputTokens != null) target.inputTokens = data.inputTokens
-          if (data.outputTokens != null) target.outputTokens = data.outputTokens
-          if ((data as any).contextTokens != null) target.contextTokens = (data as any).contextTokens
+          applySessionTokenUsage(target, data)
           applyResumedSessionSettings(data)
           if (typeof data.workspace === 'string') {
             target.workspace = data.workspace.trim() || null
@@ -815,14 +2222,16 @@ export const useChatStore = defineStore('chat', () => {
           target.parentTitle = (data as any).parentTitle || target.parentTitle || null
           target.parentLastMessage = (data as any).parentLastMessage || target.parentLastMessage || null
           target.parentLastMessageRole = (data as any).parentLastMessageRole || target.parentLastMessageRole || null
-          if (data.messages?.length) {
-            target.messages = mapHermesMessages(data.messages as any[])
+          if (Array.isArray(data.messages) && !preservePersonTimelineWindow(target,data.personFlows)) {
+            target.messages = mapHermesMessages(data.messages as any[], data.taskPlans, target.messages)
+            target.messagesLoaded = true
             restorePersistedSubagentStreams(sessionId)
-            restoreWorkspaceRunChangeMessages(sessionId)
+            setWorkspaceRunChanges(sessionId, data.workspaceRunChanges || [])
             target.loadedMessageCount = data.messageLoadedCount ?? data.messages.length
             target.messageTotal = data.messageTotal ?? target.messageCount ?? target.loadedMessageCount
             target.messageCount = target.messageTotal
             target.hasMoreBefore = data.hasMoreBefore ?? target.loadedMessageCount < target.messageTotal
+            if (!applyPersonTimelinePage(target,data.personFlows,target.messages) && data.personFlows) target.personFlows=data.personFlows
           }
           if (!target.title) {
             const firstUser = target.messages.find(m => m.role === 'user')
@@ -875,78 +2284,14 @@ export const useChatStore = defineStore('chat', () => {
                 addAgentErrorMessage(sessionId, e.error)
                 serverWorking.value.delete(sessionId)
                 queueLengths.value.delete(sessionId)
-              } else if (e.event === 'agent.event' || e.event === 'run.reattach_failed') {
+              } else if (e.event === 'plan.updated' || e.event === 'agent.event' || e.event === 'run.reattach_failed') {
                 handleAgentEvent(e)
               } else if (e.event === 'workspace.diff.completed') {
                 handleWorkspaceRunChangeEvent(sessionId, e)
               } else if (e.event === 'tool.started') {
-                const startedToolName = e.tool || e.name
-                if (
-                  isBackgroundDelegateToolPayload(startedToolName, (e as any).arguments)
-                  || (isEkkoAgentSession(sessionId) && startedToolName === 'delegate_task')
-                ) continue
-                const msgs = getSessionMsgs(sessionId)
-                const toolCallId = e.tool_call_id as string | undefined
-                const existingTool = toolCallId
-                  ? msgs.find(m => m.role === 'tool' && m.toolCallId === toolCallId)
-                  : null
-                if (existingTool) {
-                  updateMessage(sessionId, existingTool.id, {
-                    toolName: e.tool || e.name,
-                    runMarker: existingTool.runMarker || readRunMarker(e),
-                    toolArgs: hasRuntimeToolPayload((e as any).arguments) ? (e as any).arguments : existingTool.toolArgs,
-                    toolPreview: e.preview || existingTool.toolPreview,
-                    toolStatus: existingTool.toolStatus || 'running',
-                  })
-                } else {
-                  addMessage(sessionId, {
-                    id: uid(),
-                    role: 'tool',
-                    content: '',
-                    timestamp: Date.now(),
-                    toolName: e.tool || e.name,
-                    toolCallId,
-                    runMarker: readRunMarker(e),
-                    toolPreview: e.preview,
-                    toolArgs: runtimeToolPayloadOrUndefined((e as any).arguments),
-                    toolStatus: 'running',
-                  })
-                }
+                handleToolStartedEvent(sessionId, e as RunEvent)
               } else if (e.event === 'tool.completed' || e.event === 'tool.failed') {
-                const msgs = getSessionMsgs(sessionId)
-                const toolCallId = e.tool_call_id as string | undefined
-                const toolMsgs = toolCallId
-                  ? msgs.filter(m => m.role === 'tool' && m.toolCallId === toolCallId)
-                  : msgs.filter(m => m.role === 'tool' && m.toolStatus === 'running')
-                const output = runtimeToolOutputFromEvent(e)
-                const toolName = e.tool || e.name || toolMsgs[toolMsgs.length - 1]?.toolName
-                if (isBackgroundDelegateToolPayload(toolName, output)) {
-                  target.messages = target.messages.filter(message => !toolMsgs.includes(message))
-                  addHermesBackgroundDelegateAnchors(
-                    sessionId,
-                    toolCallId,
-                    output,
-                    toolMsgs[toolMsgs.length - 1]?.toolArgs,
-                  )
-                  continue
-                }
-                if (
-                  isEkkoAgentSession(sessionId)
-                  && toolName === 'delegate_task'
-                  && runtimeObjectPayload(output)?.runtime === 'ekko'
-                ) {
-                  target.messages = target.messages.filter(message => !toolMsgs.includes(message))
-                  continue
-                }
-                if (toolMsgs.length > 0) {
-                  const last = toolMsgs[toolMsgs.length - 1]
-                  updateMessage(sessionId, last.id, {
-                    runMarker: last.runMarker || readRunMarker(e),
-                    toolStatus: e.event === 'tool.failed' || e.error === true || runtimeToolOutputHasError(output) ? 'error' : 'done',
-                    toolDuration: e.duration,
-                    toolResult: output,
-                  })
-                }
+                handleToolCompletedEvent(sessionId, e as RunEvent)
               } else if (e.event === 'moa.reference' || e.event === 'moa.aggregating') {
                 handleMoaEvent(sessionId, e as RunEvent)
               } else if (String(e.event || '').startsWith('subagent.') || e.event === 'delegation.updated') {
@@ -977,36 +2322,26 @@ export const useChatStore = defineStore('chat', () => {
           resolve()
         }, activeSession.value?.profile, runtimeTransport())
       })
-      if (activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
-        await loadWorkspaceRunChangesForSession(sessionId)
-      }
       // A search hit can be older than both the resume page and the live-chat
       // history cap. Only explicit message navigation may extend that window.
       while (focusId && isCurrentSelection()) {
         const target = activeSession.value
         if (!target || target.messages.some(message => message.id === focusId)) break
-        const offset = target.loadedMessageCount || 0
+        const offset = target.personFlows?.timeline?.before ?? target.loadedMessageCount ?? 0
         if (!await loadOlderMessages(sessionId, isCurrentSelection)) break
-        if ((target.loadedMessageCount || 0) <= offset) break
+        if (target.personFlows?.timeline ? target.personFlows.timeline.before === offset : (target.loadedMessageCount || 0) <= Number(offset)) break
       }
       loaded = isCurrentSelection() && (!focusId || !!activeSession.value?.messages.some(message => message.id === focusId))
       if (isCurrentSelection() && !loaded) focusMessageId.value = null
     } catch (err) {
       console.error('Failed to load session messages via resume:', err)
-      // 只在「这次切会话请求还是当前活跃请求」时 surface，避免快速连切导致旧错误
-      // 覆盖新错误。同时把错误归一化：timeout / network / 其他都有区分。
-      if (activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
-        const reason = err instanceof Error ? err.message : String(err)
-        lastSwitchError.value = `${sessionId}:${reason}`
-      }
       if (isCurrentSelection()) focusMessageId.value = null
-
     } finally {
       endMessageLoad(sessionId, requestSequence)
     }
 
     // Resume in-flight run event listeners if needed
-    if (activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
+    if (generation === runtimeGeneration && activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
       resumeServerWorkingRun(sessionId, backgroundPendingOnResume > 0, !serverWorking.value.has(sessionId))
     }
     return loaded
@@ -1017,19 +2352,33 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessions.value.find(s => s.id === sessionId)
     if (!target || (!searchSelection && target.isLoadingOlderMessages) || !target.hasMoreBefore) return false
     const offset = target.loadedMessageCount || 0
-    if (!searchSelection && offset >= LIVE_CHAT_MAX_LOADED_MESSAGES) return false
-    const limit = searchSelection
+    const personMain = sessionId.startsWith('person-main-')
+    const timeline = target.personFlows?.timeline
+    const budgetCount = personMain ? target.messages.length : offset
+    if (!timeline && !searchSelection && budgetCount >= LIVE_CHAT_MAX_LOADED_MESSAGES) return false
+    const limit = timeline || searchSelection
       ? LIVE_CHAT_MESSAGE_PAGE_SIZE
-      : Math.min(LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MAX_LOADED_MESSAGES - offset)
+      : Math.min(LIVE_CHAT_MESSAGE_PAGE_SIZE, LIVE_CHAT_MAX_LOADED_MESSAGES - budgetCount)
     const loadToken = {}
     const previousMessages = target.messages
+    const previousPersonFlows = target.personFlows
     olderMessageLoads.set(target, loadToken)
     target.isLoadingOlderMessages = true
     try {
-      const page = await fetchSessionMessagesPage(sessionId, offset, limit, target.profile)
+      const page = await fetchSessionMessagesPage(sessionId, offset, limit, target.profile, timeline ? { before:timeline.before } : undefined)
       if (olderMessageLoads.get(target) !== loadToken || target.messages !== previousMessages
         || (searchSelection && !searchSelection())) return false
       if (!page) return false
+      if ((target.personFlows?.timeline?.history_revision ?? -1) > (page.personFlows?.timeline?.history_revision ?? Infinity)) return false
+      if (page.personFlows?.timeline) {
+        const incoming = mapHermesMessages(page.messages,page.taskPlans)
+        applyPersonTimelinePage(target,page.personFlows,incoming,true)
+        restorePersistedSubagentStreams(sessionId)
+        mergeWorkspaceRunChanges(sessionId,page.workspaceRunChanges || [])
+        target.messageTotal=page.total;target.messageCount=page.total
+        return page.personFlows.timeline.items.length > 0
+      }
+      if (target.personFlows === previousPersonFlows && page.personFlows) target.personFlows = page.personFlows
       if (page.messages.length === 0) {
         target.hasMoreBefore = false
         return false
@@ -1037,14 +2386,14 @@ export const useChatStore = defineStore('chat', () => {
 
       const existingIds = new Set(target.messages.map(message => message.id))
       const olderMessages = mapHermesMessages(page.messages).filter(message => !existingIds.has(message.id))
-      target.messages = [...olderMessages, ...target.messages]
+      target.messages = mergeTaskPlanMessages([...olderMessages, ...target.messages], page.taskPlans || [], sessionId)
       restorePersistedSubagentStreams(sessionId)
-      attachWorkspaceChangesToMessages(sessionId)
+      mergeWorkspaceRunChanges(sessionId, page.workspaceRunChanges || [])
       target.loadedMessageCount = offset + page.messages.length
       target.messageTotal = page.total
       target.messageCount = page.total
       target.hasMoreBefore = page.hasMore
-      return olderMessages.length > 0
+      return olderMessages.length > 0 || personMain
     } catch (err) {
       console.error('Failed to load older session messages:', err)
       return false
@@ -1060,65 +2409,38 @@ export const useChatStore = defineStore('chat', () => {
     profile?: string
     model?: string
     provider?: string
-    source?: 'api_server' | 'cli' | 'coding_agent' | 'global_agent' | 'workflow' | 'group_chat'
+    source?: 'api_server' | 'cli' | 'coding_agent' | 'builtin_agent' | 'global_agent' | 'workflow' | 'group_chat'
     agent?: ChatAgentId
     codingAgentId?: ChatCodingAgentId
     codingAgentMode?: 'global' | 'scoped'
+    agentPreset?: string
     workspace?: string | null
     categoryId?: number | null
     baseUrl?: string
     apiKey?: string
     apiMode?: ProviderApiMode
+    reasoningEffort?: string
   } = {}): Session {
     const appStore = useAppStore()
     const storageSource = runtimeMode.value === 'global_agent' ? 'global_agent' : options.source || 'cli'
     const codingAgentId = options.codingAgentId || agentToCodingAgentId(options.agent)
-    const isGlobalCodingAgent = Boolean(codingAgentId) && options.codingAgentMode === 'global'
+    const isGlobalCodingAgent = Boolean(codingAgentId) && codingAgentId !== 'ekko-agent' && options.codingAgentMode === 'global'
     const session = createSession({
       profile: options.profile,
-      model: isGlobalCodingAgent ? undefined : options.model || appStore.selectedModel || undefined,
+      model: isGlobalCodingAgent ? options.model || undefined : options.model || appStore.selectedModel || undefined,
       provider: isGlobalCodingAgent ? '' : options.provider || appStore.selectedProvider || '',
       source: storageSource,
       agent: options.agent,
       codingAgentId,
       codingAgentMode: options.codingAgentMode,
+      agentPreset: options.agentPreset,
       workspace: options.workspace,
       categoryId: options.categoryId,
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
       apiMode: options.apiMode,
+      reasoningEffort: !isGlobalCodingAgent && options.provider === 'moa' ? undefined : options.reasoningEffort,
     })
-    void switchSession(session.id)
-    return session
-  }
-
-  /**
-   * 同步在 server 端创建 session，避免 ChatView.loadSessions 覆盖本地新建 session
-   * 失败时回退到本地 createSession
-   */
-  async function newChatWithRemoteCreate(options: {
-    profile?: string
-    model?: string
-    provider?: string
-    source?: 'api_server' | 'cli' | 'coding_agent' | 'global_agent'
-    agent?: 'hermes' | 'claude' | 'codex'
-    title?: string
-  } = {}): Promise<Session> {
-    const session = createSession(options)
-    try {
-      await createSessionServer({
-        id: session.id,
-        profile: session.profile || 'default',
-        title: options.title || '',
-        source: session.source,
-        agent: session.agent,
-        model: session.model,
-        provider: session.provider,
-      })
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn('[chat] remote session create failed, falling back to local:', err)
-    }
     void switchSession(session.id)
     return session
   }
@@ -1129,11 +2451,11 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessions.value.find(s => s.id === targetId)
     const activeTarget = activeSession.value?.id === targetId ? activeSession.value : null
     const session = target || activeTarget
-    if (session?.codingAgentMode === 'global' && isCodingAgentLikeSession(session)) return false
+    if (session?.codingAgentMode === 'global' && isProviderAgentSession(session)) return false
     const previousProvider = String(target?.provider ?? activeTarget?.provider ?? '')
     const nextProvider = provider || ''
     const shouldClearRuntimeCredentials = previousProvider !== nextProvider && (
-      isCodingAgentLikeSession(target) || isCodingAgentLikeSession(activeTarget)
+      isProviderAgentSession(target) || isProviderAgentSession(activeTarget)
     )
     const preservedApiMode = apiMode || (previousProvider === nextProvider
       ? (shouldPreserveRuntimeApiMode(target) ? target?.apiMode : undefined) ||
@@ -1162,21 +2484,23 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
+  function forgetSession(sessionId: string) {
+    setBackgroundPending(sessionId, 0)
+    clearMessageReference(sessionId)
+    clearSessionCompletedUnread(sessionId)
+    setAbortState(sessionId, null)
+    setCompressionState(sessionId, null)
+    sessions.value = sessions.value.filter(session => session.id !== sessionId)
+    if (activeSessionId.value === sessionId) clearActiveSession()
+  }
+
   async function deleteSession(sessionId: string): Promise<boolean> {
     const target = sessions.value.find(s => s.id === sessionId)
     const ok = await deleteSessionApi(sessionId, target?.profile)
     if (!ok) return false
-    sessions.value = sessions.value.filter(s => s.id !== sessionId)
-    clearMessageReference(sessionId)
-    setAbortState(sessionId, null)
-    if (activeSessionId.value === sessionId) {
-      if (sessions.value.length > 0) {
-        await switchSession(sessions.value[0].id)
-      } else {
-        const session = createSession()
-        switchSession(session.id)
-      }
-    }
+    const wasActive = activeSessionId.value === sessionId
+    forgetSession(sessionId)
+    if (wasActive && sessions.value.length > 0) await switchSession(sessions.value[0].id)
     return true
   }
 
@@ -1184,6 +2508,7 @@ export const useChatStore = defineStore('chat', () => {
     const target = sessions.value.find(s => s.id === sessionId)
     const ok = await archiveSessionApi(sessionId)
     if (!ok) return false
+    setBackgroundPending(sessionId, 0)
     sessions.value = sessions.value.filter(s => s.id !== sessionId)
     clearMessageReference(sessionId)
     setAbortState(sessionId, null)
@@ -1204,15 +2529,491 @@ export const useChatStore = defineStore('chat', () => {
     return true
   }
 
+  function getSessionMsgs(sessionId: string): Message[] {
+    const s = sessions.value.find(s => s.id === sessionId)
+    return s?.messages || []
+  }
+
+  function isEkkoAgentSession(sessionId: string): boolean {
+    const session = sessions.value.find(item => item.id === sessionId)
+    return session?.codingAgentId === 'ekko-agent' || session?.agent === 'ekko-agent'
+  }
+
+  function addMessage(sessionId: string, msg: Message) {
+    const s = sessions.value.find(s => s.id === sessionId)
+    if (s) s.messages.push(msg)
+  }
+
+  function addMessageInTimelineOrder(sessionId: string, msg: Message) {
+    const session = sessions.value.find(item => item.id === sessionId)
+    if (!session) return
+    const insertAt = session.messages.findIndex(existing => existing.timestamp > msg.timestamp)
+    if (insertAt === -1) {
+      session.messages.push(msg)
+      return
+    }
+    session.messages.splice(insertAt, 0, msg)
+  }
+
+  function addHermesBackgroundDelegateAnchors(
+    sessionId: string,
+    toolCallId: string | undefined,
+    output: unknown,
+    toolArgs: unknown,
+    runMarker?: string | null,
+  ) {
+    const payload = runtimeObjectPayload(output)
+    if (!payload || payload.mode !== 'background' || payload.runtime === 'ekko') return
+    const baseId = toolCallId || String(payload.delegation_id || uid())
+    const messages = getSessionMsgs(sessionId)
+    for (const task of backgroundDelegateTaskDescriptors(payload, toolArgs)) {
+      const anchorCallId = backgroundDelegateAnchorCallId(baseId, task.taskIndex)
+      if (messages.some(message =>
+        message.toolCallId === anchorCallId
+        && normalizedRunMarker(message) === (runMarker || null),
+      )) continue
+      const label = `${task.taskIndex + 1}/${task.taskCount}`
+      addMessage(sessionId, {
+        id: uid(),
+        role: 'tool',
+        content: '',
+        timestamp: Date.now(),
+        toolName: 'delegate_task',
+        toolCallId: anchorCallId,
+        toolArgs,
+        toolPreview: `${label}${task.goal ? ` · ${task.goal}` : ''}`.slice(0, 220),
+        toolResult: {
+          ...payload,
+          runtime: 'hermes',
+          task_index: task.taskIndex,
+          task_count: task.taskCount,
+          goal: task.goal,
+        },
+        toolStatus: 'done',
+        runMarker,
+      })
+    }
+  }
+
+  function findHermesBackgroundDelegateAnchor(messages: Message[], evt: RunEvent): Message | undefined {
+    const taskIndex = Number((evt as any).task_index ?? 0)
+    const goal = String((evt as any).goal || '').trim()
+    const candidates = messages.filter(message =>
+      message.role === 'tool'
+      && message.toolCallId?.startsWith(HERMES_BACKGROUND_DELEGATE_ANCHOR_PREFIX)
+      && runtimeObjectPayload(message.toolResult)?.runtime === 'hermes',
+    )
+    return candidates.find(message => {
+      const payload = runtimeObjectPayload(message.toolResult)
+      return Number(payload?.task_index ?? 0) === taskIndex
+        && (!goal || !String(payload?.goal || '').trim() || String(payload?.goal || '').trim() === goal)
+    }) || candidates.find(message => Number(runtimeObjectPayload(message.toolResult)?.task_index ?? 0) === taskIndex)
+  }
+
+  function addOrUpdateSession(session: Session) {
+    const existingIndex = sessions.value.findIndex(s => s.id === session.id)
+    if (existingIndex !== -1) {
+      // Update existing session
+      sessions.value[existingIndex] = session
+    } else {
+      // Add new session
+      sessions.value.push(session)
+    }
+  }
+
+  function updateMessage(sessionId: string, id: string, update: Partial<Message>) {
+    const s = sessions.value.find(s => s.id === sessionId)
+    if (!s) return
+    const idx = s.messages.findIndex(m => m.id === id)
+    if (idx !== -1) {
+      // Realtime speech tracks the live object across status updates and ID alignment.
+      Object.assign(s.messages[idx]!, update)
+    }
+  }
+
+  function findToolMessageForEvent(
+    messages: Message[],
+    evt: RunEvent,
+    toolCallId?: string,
+  ): Message | undefined {
+    const eventRunMarker = normalizedRunMarker(evt)
+    const reversed = [...messages].reverse()
+    const hasMatchingId = (message: Message) => !toolCallId || message.toolCallId === toolCallId
+
+    if (eventRunMarker) {
+      const exact = reversed.find(message =>
+        message.role === 'tool'
+        && hasMatchingId(message)
+        && normalizedRunMarker(message) === eventRunMarker
+        && (toolCallId || message.toolStatus === 'running'),
+      )
+      if (exact) return exact
+
+      // A legacy started event may not have carried its run marker even when
+      // the corresponding completion does. Adopt only an unscoped running row.
+      return reversed.find(message =>
+        message.role === 'tool'
+        && hasMatchingId(message)
+        && normalizedRunMarker(message) === null
+        && message.toolStatus === 'running',
+      )
+    }
+
+    // Without a run marker, never revive a finalized historical row. The most
+    // recent running match is the only safe legacy fallback.
+    return reversed.find(message =>
+      message.role === 'tool'
+      && hasMatchingId(message)
+      && message.toolStatus === 'running',
+    )
+  }
+
+  function handleToolStartedEvent(sessionId: string, evt: RunEvent, reasoning?: string, live = false) {
+    const toolName = evt.tool || evt.name
+    if (live && activeSessionId.value === sessionId && isEkkoAgentSession(sessionId)) {
+      void notifyComputerUseStarted(toolName, runtimeObjectPayload(evt.arguments))
+    }
+    if (
+      isBackgroundDelegateToolPayload(toolName, evt.arguments)
+      || (isEkkoAgentSession(sessionId) && toolName === 'delegate_task')
+    ) return
+
+    const toolCallId = typeof (evt as any).tool_call_id === 'string'
+      ? String((evt as any).tool_call_id)
+      : undefined
+    const messages = getSessionMsgs(sessionId)
+    const existing = toolCallId ? findToolMessageForEvent(messages, evt, toolCallId) : undefined
+    const eventRunMarker = normalizedRunMarker(evt)
+    if (existing) {
+      const isSettled = existing.toolStatus === 'done'
+        || existing.toolStatus === 'error'
+        || existing.toolResult !== undefined
+      updateMessage(sessionId, existing.id, {
+        toolName: toolName || existing.toolName,
+        runMarker: existing.runMarker || eventRunMarker,
+        toolArgs: hasRuntimeToolPayload(evt.arguments) ? evt.arguments : existing.toolArgs,
+        toolPreview: evt.preview || existing.toolPreview,
+        reasoning: existing.reasoning || reasoning,
+        toolStatus: isSettled ? existing.toolStatus : 'running',
+      })
+      return
+    }
+
+    addMessage(sessionId, {
+      id: uid(),
+      role: 'tool',
+      content: '',
+      timestamp: Date.now(),
+      toolName,
+      toolCallId,
+      runMarker: eventRunMarker,
+      toolPreview: evt.preview,
+      toolArgs: runtimeToolPayloadOrUndefined(evt.arguments),
+      reasoning,
+      toolStatus: 'running',
+    })
+  }
+
+  function handleToolCompletedEvent(sessionId: string, evt: RunEvent) {
+    const toolCallId = typeof (evt as any).tool_call_id === 'string'
+      ? String((evt as any).tool_call_id)
+      : undefined
+    const messages = getSessionMsgs(sessionId)
+    const existing = findToolMessageForEvent(messages, evt, toolCallId)
+    const output = runtimeToolOutputFromEvent(evt)
+    const toolName = evt.tool || evt.name || existing?.toolName
+    const eventRunMarker = normalizedRunMarker(evt)
+
+    if (isBackgroundDelegateToolPayload(toolName, output)) {
+      const session = sessions.value.find(item => item.id === sessionId)
+      if (session && existing) session.messages = session.messages.filter(message => message !== existing)
+      addHermesBackgroundDelegateAnchors(
+        sessionId,
+        toolCallId,
+        output,
+        existing?.toolArgs,
+        eventRunMarker,
+      )
+      return
+    }
+    if (
+      isEkkoAgentSession(sessionId)
+      && toolName === 'delegate_task'
+      && runtimeObjectPayload(output)?.runtime === 'ekko'
+    ) {
+      const session = sessions.value.find(item => item.id === sessionId)
+      if (session && existing) session.messages = session.messages.filter(message => message !== existing)
+      return
+    }
+
+    const hasError = evt.event === 'tool.failed'
+      || (evt as any).error === true
+      || runtimeToolOutputHasError(output)
+    if (existing) {
+      updateMessage(sessionId, existing.id, {
+        toolName: toolName || existing.toolName,
+        runMarker: existing.runMarker || eventRunMarker,
+        toolStatus: hasError ? 'error' : 'done',
+        toolDuration: (evt as any).duration,
+        toolResult: output,
+      })
+      return
+    }
+
+    // Completion can arrive after a reconnect even when the start event was
+    // not replayed. Preserve the call instead of silently dropping it.
+    addMessage(sessionId, {
+      id: uid(),
+      role: 'tool',
+      content: '',
+      timestamp: Date.now(),
+      toolName,
+      toolCallId,
+      runMarker: eventRunMarker,
+      toolPreview: evt.preview,
+      toolResult: output,
+      toolStatus: hasError ? 'error' : 'done',
+      toolDuration: (evt as any).duration,
+    })
+  }
+
+  function settleRunningTools(sessionId: string, status: 'done' | 'error') {
+    const msgs = getSessionMsgs(sessionId)
+    msgs.forEach((m, i) => {
+      if (m.role === 'tool' && m.toolStatus === 'running' && !m.toolCallId?.startsWith('subagent:')) {
+        msgs[i] = { ...m, toolStatus: status }
+      }
+    })
+  }
+
+  function settleRuntimeDisplayForCommand(sessionId: string) {
+    const msgs = getSessionMsgs(sessionId)
+    msgs.forEach((m, i) => {
+      if (m.isStreaming) updateMessage(sessionId, m.id, { isStreaming: false })
+      if (m.role === 'tool' && m.toolStatus === 'running') {
+        msgs[i] = { ...m, toolStatus: 'done' }
+      }
+    })
+  }
+
   function clearAgentEventMessages(sessionId: string) {
     const s = sessions.value.find(s => s.id === sessionId)
     if (!s) return
     s.messages = s.messages.filter(m => m.commandAction !== 'agent.event')
   }
 
+  function handleSubagentEvent(sessionId: string, evt: RunEvent) {
+    const eventName = String(evt.event || '')
+    if (!eventName.startsWith('subagent.') && eventName !== 'delegation.updated') return
+
+    if (eventName === 'delegation.updated') {
+      const delegationId = String(evt.delegation_id || '').trim()
+      const status = subagentStatus((evt as any).status)
+      if (status === 'running') return
+      const sessionStreams = [...subagentStreams.value.values()].filter(stream =>
+        stream.sessionId === sessionId && stream.status === 'running',
+      )
+      const exactMatch = sessionStreams.find(stream => stream.subagentId === delegationId)
+      const targets = exactMatch
+        ? [exactMatch]
+        : ['failed', 'error', 'cancelled', 'interrupted'].includes(status)
+          ? sessionStreams
+          : []
+      for (const stream of targets) {
+        handleSubagentEvent(sessionId, {
+          ...evt,
+          event: 'subagent.complete',
+          subagent_id: stream.subagentId,
+          task_index: stream.taskIndex,
+          task_count: stream.taskCount,
+          goal: stream.goal,
+          model: stream.model,
+          status,
+        })
+      }
+      return
+    }
+
+    const subagentId = String((evt as any).subagent_id || `${(evt as any).task_index ?? 0}`)
+    const streamKey = `${sessionId}:${subagentId}`
+    const currentStream = subagentStreams.value.get(streamKey)
+    const nextStream = reduceSubagentStream(currentStream, sessionId, evt)
+    if (nextStream === currentStream) return
+    subagentStreams.value.set(streamKey, nextStream)
+    const toolCallId = `subagent:${subagentId}`
+    const taskIndex = Number((evt as any).task_index ?? 0)
+    const taskCount = Number((evt as any).task_count ?? 1)
+    const label = `${taskIndex + 1}/${Math.max(1, taskCount || 1)}`
+    const toolName = String((evt as any).tool || (evt as any).name || '')
+    const toolCount = Number((evt as any).tool_count || 0)
+    const goal = String((evt as any).goal || '').trim()
+    const rawText = String(evt.text || evt.preview || '')
+    const text = rawText.trim()
+    const summary = String((evt as any).summary || '').trim()
+    const duration = Number((evt as any).duration_seconds ?? (evt as any).duration)
+
+    let preview = `${label}${goal ? ` · ${goal}` : ''}`
+    if (eventName === 'subagent.start') {
+      preview = `${label}${goal ? ` · ${goal}` : ''}`
+    } else if (eventName === 'subagent.tool') {
+      preview = `${label}${toolCount ? ` · #${toolCount}` : ''}${toolName ? ` · ${toolName}` : ''}${text ? ` · ${text}` : ''}`
+    } else if (eventName === 'subagent.progress' || eventName === 'subagent.text' || eventName === 'subagent.thinking') {
+      preview = `${label}${text ? ` · ${text}` : goal ? ` · ${goal}` : ''}`
+    } else if (eventName === 'subagent.complete') {
+      preview = `${label}${summary ? ` · ${summary}` : text ? ` · ${text}` : ''}`
+    }
+
+    const msgs = getSessionMsgs(sessionId)
+    const existing = msgs.find(m => m.role === 'tool' && m.toolCallId === toolCallId)
+      || findHermesBackgroundDelegateAnchor(msgs, evt)
+    const toolStatus = nextStream.status === 'running'
+      ? 'running'
+      : nextStream.status === 'completed' ? 'done' : 'error'
+    const update: Partial<Message> = {
+      toolName: 'delegate_task',
+      toolCallId,
+      toolPreview: preview.slice(0, 220),
+      toolArgs: eventName === 'subagent.tool'
+        ? runtimeToolPayloadOrUndefined((evt as any).arguments)
+        : existing?.toolArgs,
+      toolStatus,
+      toolDuration: Number.isFinite(duration) ? duration : undefined,
+      toolResult: eventName === 'subagent.complete'
+        ? JSON.stringify({
+            status: (evt as any).status || 'completed',
+            summary: summary || text,
+            api_calls: (evt as any).api_calls,
+            input_tokens: (evt as any).input_tokens,
+            output_tokens: (evt as any).output_tokens,
+            output_tail: (evt as any).output_tail,
+          }, null, 2)
+        : existing?.toolResult,
+    }
+
+    if (existing) {
+      updateMessage(sessionId, existing.id, update)
+      return
+    }
+
+    addMessageInTimelineOrder(sessionId, {
+      id: uid(),
+      role: 'tool',
+      content: '',
+      timestamp: nextStream.startedAt,
+      ...update,
+    })
+  }
+
+  function restorePersistedSubagentStreams(sessionId: string) {
+    for (const message of getSessionMsgs(sessionId)) {
+      if (message.role !== 'tool' || !message.toolCallId?.startsWith('subagent:')) continue
+      const subagentId = message.toolCallId.slice('subagent:'.length).trim()
+      if (!subagentId || subagentStreams.value.has(`${sessionId}:${subagentId}`)) continue
+      const payload = runtimeObjectPayload(message.toolResult)
+      if (!payload) continue
+      const status = subagentStatus(payload.status)
+      const restoredOutput = String(payload.output || payload.output_tail || payload.summary || '').trim()
+      handleSubagentEvent(sessionId, {
+        ...payload,
+        event: status === 'running' ? 'subagent.start' : 'subagent.complete',
+        session_id: sessionId,
+        subagent_id: subagentId,
+        background: payload.mode === 'background',
+        background_snapshot: true,
+        summary: restoredOutput || payload.summary,
+        timestamp: message.timestamp,
+      } as RunEvent)
+    }
+  }
+
+  function settleInterruptedSubagents(sessionId: string) {
+    const runningStreams = [...subagentStreams.value.values()].filter(stream =>
+      stream.sessionId === sessionId && stream.status === 'running',
+    )
+    for (const stream of runningStreams) {
+      handleSubagentEvent(sessionId, {
+        event: 'subagent.complete',
+        session_id: sessionId,
+        subagent_id: stream.subagentId,
+        task_index: stream.taskIndex,
+        task_count: stream.taskCount,
+        goal: stream.goal,
+        model: stream.model,
+        status: 'interrupted',
+        timestamp: Date.now(),
+      })
+    }
+  }
+
+  function getSubagentStream(sessionId: string, subagentId: string): SubagentStream | null {
+    return subagentStreams.value.get(`${sessionId}:${subagentId}`) || null
+  }
+
+  function handleMoaEvent(sessionId: string, evt: RunEvent) {
+    const eventName = String(evt.event || '')
+    if (eventName !== 'moa.reference' && eventName !== 'moa.aggregating') return
+
+    const msgs = getSessionMsgs(sessionId)
+    if (eventName === 'moa.reference') {
+      const label = moaReferenceLabel(evt)
+      const index = Number.isFinite(Number(evt.index)) ? Number(evt.index) : label
+      const toolCallId = `moa:reference:${evt.run_id || 'run'}:${index}`
+      const output = typeof evt.text === 'string'
+        ? evt.text
+        : typeof evt.delta === 'string'
+          ? evt.delta
+          : ''
+      const update: Partial<Message> = {
+        toolName: 'moa_reference',
+        toolCallId,
+        runMarker: readRunMarker(evt),
+        toolPreview: label.slice(0, 220),
+        toolStatus: 'done',
+        toolResult: output,
+      }
+      const existing = msgs.find(m => m.role === 'tool' && m.toolCallId === toolCallId)
+      if (existing) {
+        updateMessage(sessionId, existing.id, update)
+        return
+      }
+      addMessage(sessionId, {
+        id: uid(),
+        role: 'tool',
+        content: '',
+        timestamp: Date.now(),
+        ...update,
+      })
+      return
+    }
+
+    const aggregator = typeof evt.aggregator === 'string' && evt.aggregator.trim()
+      ? evt.aggregator.trim()
+      : 'aggregator'
+    const toolCallId = `moa:aggregating:${evt.run_id || 'run'}`
+    const update: Partial<Message> = {
+      toolName: 'moa_aggregating',
+      toolCallId,
+      runMarker: readRunMarker(evt),
+      toolPreview: aggregator.slice(0, 220),
+      toolStatus: 'running',
+      toolArgs: { aggregator },
+    }
+    const existing = msgs.find(m => m.role === 'tool' && m.toolCallId === toolCallId)
+    if (existing) {
+      updateMessage(sessionId, existing.id, update)
+      return
+    }
+    addMessage(sessionId, {
+      id: uid(),
+      role: 'tool',
+      content: '',
+      timestamp: Date.now(),
+      ...update,
+    })
+  }
 
   function addAgentErrorMessage(sessionId: string, error?: unknown) {
-    const message = friendlyAgentErrorMessage(error)
+    const message = errorMessageText(error)
     const content = message ? `Error: ${message}` : 'Run failed'
     const msgs = getSessionMsgs(sessionId)
     const last = msgs[msgs.length - 1]
@@ -1252,6 +3053,10 @@ export const useChatStore = defineStore('chat', () => {
 
     const sid = evt.session_id
     if (!sid) return
+    if ((evt as any).action === 'messages_deleted') {
+      applyMessageDeletion(sid, evt as unknown as MessageDeletionResult)
+      return
+    }
     const target = sessions.value.find(s => s.id === sid)
     const action = (evt as any).action as string | undefined
     const command = String((evt as any).command || '').toLowerCase()
@@ -1274,8 +3079,12 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     if (action === 'clear' && command === 'clear') {
-      if (target) target.messages = []
+      if (target) {
+        target.messages = []
+        if (target.personFlows) target.personFlows = { ...target.personFlows, history_cleared_at: Date.now() }
+      }
       queuedUserMessages.value.delete(sid)
+      pendingUserMessageIds.delete(sid)
       queueLengths.value.delete(sid)
       queueInsertionStates.value.delete(sid)
       clearMessageReference(sid)
@@ -1301,10 +3110,8 @@ export const useChatStore = defineStore('chat', () => {
       target.updatedAt = Date.now()
     }
 
-    if (action === 'usage' && target) {
-      target.inputTokens = (evt as any).inputTokens
-      target.outputTokens = (evt as any).outputTokens
-      if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+    if (action === 'usage' && target && (evt as any).available !== false) {
+      applySessionTokenUsage(target, evt as any)
     }
 
     if (action === 'destroy') {
@@ -1313,6 +3120,7 @@ export const useChatStore = defineStore('chat', () => {
       clearRunStartedAt(sid)
       queueLengths.value.delete(sid)
       queuedUserMessages.value.delete(sid)
+      pendingUserMessageIds.delete(sid)
       queueInsertionStates.value.delete(sid)
       clearMessageReference(sid)
       setAbortState(sid, null)
@@ -1374,6 +3182,11 @@ export const useChatStore = defineStore('chat', () => {
   function handleAgentEvent(evt: RunEvent) {
     const sid = evt.session_id
     if (!sid) return
+    if (evt.event === 'plan.updated') {
+      const target = sessions.value.find(session => session.id === sid)
+      if (target) target.messages = mergeTaskPlanMessages(target.messages, [evt], sid)
+      return
+    }
     if ((evt as any).source === 'coding_agent' && (evt as any).kind === 'status') return
     const text = String((evt as any).text || (evt as any).message || '').trim()
     if (!text) return
@@ -1401,6 +3214,429 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
+  function enqueueUserMessage(sessionId: string, message: Message) {
+    const queue = queuedUserMessages.value.get(sessionId) || []
+    if (queue.some(item => item.id === message.id)) return
+    const nextMap = new Map(queuedUserMessages.value)
+    nextMap.set(sessionId, [...queue, { ...message, queued: true }])
+    queuedUserMessages.value = nextMap
+  }
+
+  function updateQueuedUserMessage(sessionId: string, messageId: string, patch: Partial<Message>) {
+    const queue = queuedUserMessages.value.get(sessionId)
+    if (!queue?.length) return
+    const next = queue.map(message => message.id === messageId
+      ? { ...message, ...patch, queued: true }
+      : message)
+    const nextMap = new Map(queuedUserMessages.value)
+    nextMap.set(sessionId, next)
+    queuedUserMessages.value = nextMap
+  }
+
+  function dropQueuedUserMessage(sessionId: string, messageId: string): boolean {
+    acknowledgeUserMessage(sessionId, messageId)
+    const queue = queuedUserMessages.value.get(sessionId)
+    if (!queue?.length) return false
+    const next = queue.filter(message => message.id !== messageId)
+    if (next.length === queue.length) return false
+    const nextMap = new Map(queuedUserMessages.value)
+    if (next.length > 0) {
+      nextMap.set(sessionId, next)
+      queueLengths.value.set(sessionId, next.length)
+    } else {
+      nextMap.delete(sessionId)
+      queueLengths.value.delete(sessionId)
+    }
+    queuedUserMessages.value = nextMap
+    return true
+  }
+
+  function removeQueuedMessage(sessionId: string, messageId: string) {
+    if (!dropQueuedUserMessage(sessionId, messageId)) return
+    getChatRunSocket(runtimeTransport())?.emit('cancel_queued_run', {
+      session_id: sessionId,
+      queue_id: messageId,
+    })
+  }
+
+  function insertQueuedMessage(sessionId: string, messageId: string) {
+    if (!(queuedUserMessages.value.get(sessionId) || []).some(message => message.id === messageId)) return
+    getChatRunSocket(runtimeTransport())?.emit('insert_queued_run', {
+      session_id: sessionId,
+      queue_id: messageId,
+    })
+  }
+
+  function replaceQueueInsertionState(sessionId: string, raw: ResumeSessionPayload['queueInsertion'] | RunEvent | null | undefined) {
+    const nextMap = new Map(queueInsertionStates.value)
+    const phase = raw?.phase
+    const generation = typeof raw?.generation === 'string' ? raw.generation : ''
+    const queueId = typeof raw?.queue_id === 'string' ? raw.queue_id : ''
+    if (!raw || phase === 'cancelled' || phase === 'starting_queued_message' || !generation || !queueId) {
+      nextMap.delete(sessionId)
+      queueInsertionStates.value = nextMap
+      return
+    }
+    if (phase !== 'requesting' && phase !== 'waiting_for_tool_batch' && phase !== 'stopping_current_turn') return
+    nextMap.set(sessionId, {
+      generation,
+      runId: typeof raw.run_id === 'string' ? raw.run_id : undefined,
+      queueId,
+      runtime: typeof raw.runtime === 'string' && raw.runtime.startsWith('plugin:') ? raw.runtime as `plugin:${string}/${string}` : raw.runtime === 'ekko'
+        || raw.runtime === 'claude-code'
+        || raw.runtime === 'codex'
+        || raw.runtime === 'pi'
+        || raw.runtime === 'grok'
+        || raw.runtime === 'opencode'
+        || raw.runtime === 'dsh'
+        || (isNativeCodingAgent(raw.runtime) || raw.runtime === 'cursor' || raw.runtime === 'antigravity')
+        ? raw.runtime
+        : 'hermes',
+      phase,
+      guarantee: raw.guarantee === 'immediate' ? 'immediate' : 'strict',
+      requestedAt: typeof raw.requested_at === 'number' ? raw.requested_at : Date.now(),
+    })
+    queueInsertionStates.value = nextMap
+  }
+
+  function handleQueueInsertionUpdated(evt: RunEvent) {
+    const sid = evt.session_id
+    if (!sid) return
+    replaceQueueInsertionState(sid, evt)
+  }
+
+  function normalizeQueuedUserMessages(rawMessages: unknown): Message[] {
+    if (!Array.isArray(rawMessages)) return []
+    return rawMessages.flatMap((raw) => {
+      const peer = raw as NonNullable<RunEvent['queued_messages']>[number]
+      const content = typeof peer?.content === 'string' ? peer.content : ''
+      const messageId = peer?.id != null ? String(peer.id) : ''
+      if (!messageId || !content.trim()) return []
+      const timestamp = typeof peer?.timestamp === 'number' && Number.isFinite(peer.timestamp)
+        ? Math.round(peer.timestamp * 1000)
+        : Date.now()
+      const role = peer?.role === 'command' ? 'command' : 'user'
+      return [{
+        id: messageId,
+        role,
+        content,
+        timestamp,
+        queued: true,
+        systemType: role === 'command' ? 'command' as const : undefined,
+      }]
+    })
+  }
+
+  function replaceQueuedUserMessages(sessionId: string, messages: Message[]) {
+    const existingQueue = queuedUserMessages.value.get(sessionId) || []
+    const transcript = getSessionMsgs(sessionId)
+    const transcriptIds = new Set(transcript.map(message => message.id))
+    const pendingIds = pendingUserMessageIds.get(sessionId)
+    const existingById = new Map([...transcript, ...existingQueue].map(message => [message.id, message]))
+    // An old snapshot cannot put an already-started input back in the queue.
+    const queued = messages.filter(message => !transcriptIds.has(message.id) || pendingIds?.has(message.id))
+    const confirmedIds = new Set(queued.map(message => message.id))
+    const merged: Message[] = queued.map(message => ({
+      ...(existingById.get(message.id) || {}),
+      ...message,
+      timestamp: existingById.get(message.id)?.timestamp ?? message.timestamp,
+      attachments: existingById.get(message.id)?.attachments || message.attachments,
+      queued: true,
+    }))
+    for (const id of confirmedIds) acknowledgeUserMessage(sessionId, id)
+    // A snapshot may predate later sends (including attachment uploads).
+    merged.push(...existingQueue.filter(message => !confirmedIds.has(message.id) && pendingIds?.has(message.id)))
+    const queuedIds = new Set(merged.map(message => message.id))
+    const target = sessions.value.find(session => session.id === sessionId)
+    if (target && transcript.some(message => queuedIds.has(message.id))) {
+      target.messages = transcript.filter(message => !queuedIds.has(message.id))
+    }
+    const nextMap = new Map(queuedUserMessages.value)
+    if (merged.length > 0) {
+      nextMap.set(sessionId, merged)
+      queueLengths.value.set(sessionId, Math.max(queueLengths.value.get(sessionId) || 0, merged.length))
+    } else {
+      nextMap.delete(sessionId)
+    }
+    queuedUserMessages.value = nextMap
+  }
+
+  function promoteStartedQueuedMessage(sessionId: string, queueId: string | undefined) {
+    if (!queueId) return
+    acknowledgeUserMessage(sessionId, queueId)
+    const queue = queuedUserMessages.value.get(sessionId) || []
+    const message = queue.find(item => item.id === queueId)
+    if (!message) return
+    dropQueuedUserMessage(sessionId, queueId)
+    if (!getSessionMsgs(sessionId).some(item => item.id === queueId)) {
+      addMessage(sessionId, { ...message, queued: false })
+      updateSessionTitle(sessionId)
+    }
+  }
+
+  function acknowledgeUserMessage(sessionId: string, messageId: string) {
+    const ids = pendingUserMessageIds.get(sessionId)
+    ids?.delete(messageId)
+    if (!ids?.size) pendingUserMessageIds.delete(sessionId)
+  }
+
+  function markDequeuedQueueId(sessionId: string, messageId: string) {
+    const nextMap = new Map(dequeuedQueueIds.value)
+    const ids = new Set(nextMap.get(sessionId) || [])
+    ids.add(messageId)
+    nextMap.set(sessionId, ids)
+    dequeuedQueueIds.value = nextMap
+  }
+
+  function consumeDequeuedQueueId(sessionId: string, messageId: string): boolean {
+    const ids = dequeuedQueueIds.value.get(sessionId)
+    if (!ids?.has(messageId)) return false
+    const nextIds = new Set(ids)
+    nextIds.delete(messageId)
+    const nextMap = new Map(dequeuedQueueIds.value)
+    if (nextIds.size > 0) nextMap.set(sessionId, nextIds)
+    else nextMap.delete(sessionId)
+    dequeuedQueueIds.value = nextMap
+    return true
+  }
+
+  function handleRunQueuedEvent(sessionId: string, evt: RunEvent) {
+    const queueLength = Number((evt as any).queue_length || 0)
+    if (queueLength > 0) {
+      queueLengths.value.set(sessionId, queueLength)
+    } else {
+      queueLengths.value.delete(sessionId)
+    }
+
+    const dequeuedId = (evt as any).dequeued_queue_id != null
+      ? String((evt as any).dequeued_queue_id)
+      : ''
+    if (dequeuedId) {
+      acknowledgeUserMessage(sessionId, dequeuedId)
+      const existingQueue = queuedUserMessages.value.get(sessionId) || []
+      const dequeued = existingQueue.find(message => message.id === dequeuedId)
+      if (Array.isArray((evt as any).queued_messages)) {
+        const queued = normalizeQueuedUserMessages((evt as any).queued_messages)
+        replaceQueuedUserMessages(sessionId, queued)
+      } else {
+        const nextQueue = existingQueue.filter(message => message.id !== dequeuedId)
+        replaceQueuedUserMessages(sessionId, nextQueue)
+      }
+      if (dequeued && !getSessionMsgs(sessionId).some(message => message.id === dequeued.id)) {
+        addMessage(sessionId, { ...dequeued, queued: false })
+        updateSessionTitle(sessionId)
+      } else if (!dequeued) {
+        markDequeuedQueueId(sessionId, dequeuedId)
+      }
+      return
+    }
+
+    if (Array.isArray((evt as any).queued_messages)) {
+      const queued = normalizeQueuedUserMessages((evt as any).queued_messages)
+      replaceQueuedUserMessages(sessionId, queued)
+      return
+    }
+
+    const peer = evt.message
+    const content = typeof peer?.content === 'string' ? peer.content : ''
+    const messageId = peer?.id != null ? String(peer.id) : ''
+    if (!messageId || !content.trim()) return
+
+    acknowledgeUserMessage(sessionId, messageId)
+
+    if ((queuedUserMessages.value.get(sessionId) || []).some(msg => msg.id === messageId)) return
+
+    const timestamp = typeof peer?.timestamp === 'number' && Number.isFinite(peer.timestamp)
+      ? Math.round(peer.timestamp * 1000)
+      : Date.now()
+    const msgs = getSessionMsgs(sessionId)
+    const existingIndex = msgs.findIndex(msg => msg.id === messageId && msg.role === 'user')
+    const existing = existingIndex >= 0 ? msgs[existingIndex] : null
+    if (existingIndex >= 0) {
+      msgs.splice(existingIndex, 1)
+    }
+
+    enqueueUserMessage(sessionId, {
+      ...(existing || {}),
+      id: messageId,
+      role: peer?.role === 'command' ? 'command' : 'user',
+      content,
+      timestamp: existing?.timestamp || timestamp,
+      attachments: existing?.attachments,
+      queued: true,
+      systemType: peer?.role === 'command' ? 'command' : existing?.systemType,
+    })
+  }
+
+  function setPendingApproval(evt: RunEvent) {
+    const sid = evt.session_id
+    const approvalId = (evt as any).approval_id as string | undefined
+    if (!sid || !approvalId) return
+    if (pendingApprovalResponseIds.get(sid) !== approvalId) pendingApprovalResponseIds.delete(sid)
+    const description = String((evt as any).description || '')
+    const normalizedDescription = description.trim().toLowerCase().replace(/\s+/g, ' ')
+    const isMemoryWrite = !Boolean((evt as any).allow_permanent) && (
+      normalizedDescription === 'save to memory' ||
+      normalizedDescription.startsWith('save to memory:') ||
+      normalizedDescription.startsWith('save to memory?')
+    )
+    const rawChoices = Array.isArray((evt as any).choices) ? (evt as any).choices : ['once', 'session', 'deny']
+    const choices = rawChoices
+      .filter((choice: unknown): choice is PendingApproval['choices'][number] =>
+        choice === 'once' || choice === 'session' || choice === 'always' || choice === 'deny')
+    pendingApprovals.value.set(sid, {
+      sessionId: sid,
+      approvalId,
+      command: String((evt as any).command || ''),
+      description,
+      choices: isMemoryWrite ? ['once', 'deny'] : choices.length ? choices : ['once', 'session', 'deny'],
+      allowPermanent: Boolean((evt as any).allow_permanent),
+      isMemoryWrite,
+      requestedAt: Date.now(),
+      countdownDeadline: (evt as any).durable === true ? Infinity : pendingInteractionDeadline(
+        (evt as any).remaining_timeout_ms,
+        (evt as any).timeout_ms,
+      ),
+    })
+    pendingApprovals.value = new Map(pendingApprovals.value)
+  }
+
+  function clearPendingApproval(evt: RunEvent) {
+    const sid = evt.session_id
+    if (!sid) return
+    const approvalId = String((evt as any).approval_id || '')
+    const attempted = Boolean(approvalId && pendingApprovalResponseIds.get(sid) === approvalId)
+    if (attempted) pendingApprovalResponseIds.delete(sid)
+    const current = pendingApprovals.value.get(sid)
+    if (!current) {
+      if (attempted && (evt as any).resolved === false && ((evt as any).stale === true || isPendingInteractionExpiredError((evt as any).error || (evt as any).reason))) {
+        notifyPendingInteractionExpired()
+      }
+      return
+    }
+    if (approvalId && current.approvalId !== approvalId) return
+    if ((evt as any).resolved === false) {
+      if ((evt as any).stale === true || isPendingInteractionExpiredError((evt as any).error || (evt as any).reason)) {
+        dismissPendingApprovalFor(sid, current.approvalId)
+        if (attempted) notifyPendingInteractionExpired()
+      }
+      return
+    }
+    pendingApprovals.value.delete(sid)
+    pendingApprovals.value = new Map(pendingApprovals.value)
+  }
+
+  function setPendingClarify(evt: RunEvent) {
+    const sid = evt.session_id
+    const clarifyId = (evt as any).clarify_id as string | undefined
+    if (!sid || !clarifyId) return
+    if (pendingClarifyResponseIds.get(sid) !== clarifyId) pendingClarifyResponseIds.delete(sid)
+    pendingClarifies.value.set(sid, {
+      sessionId: sid,
+      clarifyId,
+      question: String((evt as any).question || ''),
+      choices: Array.isArray((evt as any).choices) ? (evt as any).choices : null,
+      initialResponse: String((evt as any).initial_response || ''),
+      responseMode: String((evt as any).response_mode || ''),
+      timeoutMs: Number((evt as any).timeout_ms) || 300000,
+      requestedAt: Date.now(),
+      countdownDeadline: (evt as any).durable === true ? Infinity : pendingInteractionDeadline(
+        (evt as any).remaining_timeout_ms,
+        (evt as any).timeout_ms,
+      ),
+    })
+    pendingClarifies.value = new Map(pendingClarifies.value)
+  }
+
+  function clearPendingClarify(evt: RunEvent) {
+    const sid = evt.session_id
+    if (!sid) return
+    const clarifyId = String((evt as any).clarify_id || '')
+    const attempted = Boolean(clarifyId && pendingClarifyResponseIds.get(sid) === clarifyId)
+    if (attempted) pendingClarifyResponseIds.delete(sid)
+    const current = pendingClarifies.value.get(sid)
+    if (!current) {
+      if (attempted && (evt as any).resolved === false && ((evt as any).stale === true || isPendingInteractionExpiredError((evt as any).error || (evt as any).reason))) {
+        notifyPendingInteractionExpired()
+      }
+      return
+    }
+    if (clarifyId && current.clarifyId !== clarifyId) return
+    if ((evt as any).resolved === false) {
+      if ((evt as any).stale === true || isPendingInteractionExpiredError((evt as any).error || (evt as any).reason)) {
+        dismissPendingClarifyFor(sid, current.clarifyId)
+        if (attempted) notifyPendingInteractionExpired()
+      }
+      return
+    }
+    pendingClarifies.value.delete(sid)
+    pendingClarifies.value = new Map(pendingClarifies.value)
+  }
+
+  function clearPendingInteractions(sessionId: string) {
+    pendingApprovalResponseIds.delete(sessionId)
+    pendingClarifyResponseIds.delete(sessionId)
+    let changed = false
+    if (pendingApprovals.value.has(sessionId)) {
+      pendingApprovals.value.delete(sessionId)
+      changed = true
+    }
+    if (pendingClarifies.value.has(sessionId)) {
+      pendingClarifies.value.delete(sessionId)
+      changed = true
+    }
+    if (changed) {
+      pendingApprovals.value = new Map(pendingApprovals.value)
+      pendingClarifies.value = new Map(pendingClarifies.value)
+    }
+  }
+
+  function dismissPendingApprovalFor(sessionId: string, approvalId: string) {
+    const pending = pendingApprovals.value.get(sessionId)
+    if (!pending || pending.approvalId !== approvalId) return
+    pendingApprovals.value.delete(sessionId)
+    pendingApprovals.value = new Map(pendingApprovals.value)
+  }
+
+  function dismissPendingClarifyFor(sessionId: string, clarifyId: string) {
+    const pending = pendingClarifies.value.get(sessionId)
+    if (!pending || pending.clarifyId !== clarifyId) return
+    pendingClarifies.value.delete(sessionId)
+    pendingClarifies.value = new Map(pendingClarifies.value)
+  }
+
+  function respondToClarifyFor(sessionId: string, clarifyId: string, response: string): PendingInteractionSubmitResult {
+    const pending = pendingClarifies.value.get(sessionId)
+    if (!pending || pending.clarifyId !== clarifyId) return 'missing'
+    respondClarify(sessionId, clarifyId, response, sessionId.startsWith('person-main-') ? 'chat-run' : runtimeTransport())
+    pendingClarifyResponseIds.set(sessionId, clarifyId)
+    return 'submitted'
+  }
+
+  function respondToClarify(response: string): PendingInteractionSubmitResult {
+    const pending = activePendingClarify.value
+    if (!pending) return 'missing'
+    const result = respondToClarifyFor(pending.sessionId, pending.clarifyId, response)
+    if (result === 'submitted') dismissPendingClarifyFor(pending.sessionId, pending.clarifyId)
+    return result
+  }
+
+
+  function respondApprovalFor(sessionId: string, approvalId: string, choice: PendingApproval['choices'][number]): PendingInteractionSubmitResult {
+    const pending = pendingApprovals.value.get(sessionId)
+    if (!pending || pending.approvalId !== approvalId) return 'missing'
+    respondToolApproval(sessionId, approvalId, choice, sessionId.startsWith('person-main-') ? 'chat-run' : runtimeTransport())
+    pendingApprovalResponseIds.set(sessionId, approvalId)
+    return 'submitted'
+  }
+
+  function respondApproval(choice: PendingApproval['choices'][number]): PendingInteractionSubmitResult {
+    const pending = activePendingApproval.value
+    if (!pending) return 'missing'
+    const result = respondApprovalFor(pending.sessionId, pending.approvalId, choice)
+    if (result === 'submitted') dismissPendingApprovalFor(pending.sessionId, pending.approvalId)
+    return result
+  }
 
   function updateSessionTitle(sessionId: string) {
     const target = sessions.value.find(s => s.id === sessionId)
@@ -1452,14 +3688,22 @@ export const useChatStore = defineStore('chat', () => {
     const targets = [sessions.value.find(s => s.id === sid), activeSession.value?.id === sid ? activeSession.value : null]
       .filter((session): session is Session => Boolean(session))
     for (const target of new Set(targets)) {
-      if (typeof evt.model === 'string') target.model = evt.model
+      const pendingReasoning = reasoningEffortWriteTargets.get(sid)
+      const matchesReasoningWrite = !pendingReasoning || pendingReasoning.effort === (evt.reasoning_effort || undefined)
+      if (typeof evt.model === 'string' && (!pendingReasoning?.model || matchesReasoningWrite)) target.model = evt.model
       if (typeof evt.provider === 'string') target.provider = evt.provider
       if (typeof evt.api_mode === 'string') target.apiMode = evt.api_mode as ProviderApiMode || undefined
       if (typeof evt.reasoning_effort === 'string') {
         const incomingEffort = evt.reasoning_effort || undefined
-        const pendingEffort = reasoningEffortWriteTargets.get(sid)
+        const pendingEffort = reasoningEffortWriteTargets.get(sid)?.effort
         if (!reasoningEffortWriteTargets.has(sid) || pendingEffort === incomingEffort) {
           target.reasoningEffort = incomingEffort
+        }
+      }
+      if (typeof evt.push_enabled === 'boolean') {
+        const pendingEnabled = pushEnabledWriteTargets.get(sid)
+        if (!pushEnabledWriteTargets.has(sid) || pendingEnabled === evt.push_enabled) {
+          target.pushEnabled = evt.push_enabled
         }
       }
     }
@@ -1473,6 +3717,7 @@ export const useChatStore = defineStore('chat', () => {
       ...(typeof data.provider === 'string' ? { provider: data.provider } : {}),
       ...(typeof data.api_mode === 'string' ? { api_mode: data.api_mode || undefined } : {}),
       ...(typeof data.reasoning_effort === 'string' ? { reasoning_effort: data.reasoning_effort } : {}),
+      ...(typeof data.push_enabled === 'boolean' ? { push_enabled: data.push_enabled } : {}),
     })
   }
 
@@ -1496,23 +3741,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function completionNotificationAgent(session: Session): { icon: string } {
-    const codingAgentId = session.codingAgentId || agentToCodingAgentId(session.agent)
-    if (codingAgentId === 'codex') {
-      return { icon: '/coding-agents/codex-openai.png' }
-    }
-    if (codingAgentId === 'claude-code') {
-      return { icon: '/coding-agents/claude-code.svg' }
-    }
-if (codingAgentId === 'dsh') {
-      return { icon: '/coding-agents/dsh.svg' }
-    }
-    if (codingAgentId === 'pi') {
-      return { icon: '/coding-agents/pi.svg' }
-    }
-    if (codingAgentId === 'ekko-agent') {
-      return { icon: '/coding-agents/ekko-agent.png' }
-    }
-    return { icon: '/coding-agents/hermes.png' }
+    return { icon: chatSessionAgentAvatar(session).src }
   }
 
   function completionNotificationBody(session: Session, message?: Message): string {
@@ -1521,6 +3750,7 @@ if (codingAgentId === 'dsh') {
   }
 
   function showCompletionNotificationIfEnabled(sessionId: string, messageId?: string | null) {
+    if (sessionId.startsWith('person-main-')) return // The global Person terminal event owns this notification.
     const settingsStore = useSettingsStore()
     if (!settingsStore.display.notify_on_complete) return
 
@@ -1540,6 +3770,7 @@ if (codingAgentId === 'dsh') {
   }
 
   async function sendMessage(content: string, attachments?: Attachment[]) {
+    const generation = runtimeGeneration
     if ((!content.trim() && !(attachments && attachments.length > 0))) return
 
     primeNotificationSoundIfEnabled()
@@ -1553,11 +3784,17 @@ if (codingAgentId === 'dsh') {
 
     // Capture session ID at send time — all callbacks use this, not activeSessionId
     const sid = activeSessionId.value!
+    if (activeSession.value?.personFlows?.timeline?.has_newer) {
+      await refreshActiveSession({latest:true})
+      if (generation !== runtimeGeneration || activeSessionId.value !== sid) return
+    }
     const shouldSendInitialSessionConfig = activeSession.value
       ? activeSession.value.messageCount == null || activeSession.value.messageCount === 0
       : false
-    const isCodingAgentSession = isCodingAgentLikeSession(activeSession.value)
-    const isBridgeSlashCommand = !isCodingAgentSession && isKnownBridgeSessionCommand(trimmedContent)
+    const isProviderAgent = isProviderAgentSession(activeSession.value)
+    const isBuiltinSlashCommand = !attachments?.length && isBuiltinEkkoSession(activeSession.value) && isKnownEkkoSessionCommand(trimmedContent)
+    const isBridgeSlashCommand = !isProviderAgent && isKnownBridgeSessionCommand(trimmedContent)
+    const isSessionSlashCommand = isBridgeSlashCommand || isBuiltinSlashCommand
     const isBridgeCompressCommand = isBridgeSlashCommand && /^\/compress(?:\s|$)/i.test(trimmedContent)
     const isBridgePlanCommand = isBridgeSlashCommand && /^\/plan(?:\s|$)/i.test(trimmedContent)
     const isBridgeSkillCommand = isBridgeSlashCommand && /^\/skill(?:\s|$)/i.test(trimmedContent)
@@ -1565,36 +3802,41 @@ if (codingAgentId === 'dsh') {
     const isBridgeMoaCommand = isBridgeSlashCommand && /^\/moa(?:\s|$)/i.test(trimmedContent)
     const isBridgeGoalCommand = isBridgeSlashCommand && /^\/goal(?:\s|$)/i.test(trimmedContent)
     const isBridgeForkCommand = isBridgeSlashCommand && /^\/fork(?:\s|$)/i.test(trimmedContent)
-    const messageReference = isBridgeSlashCommand ? null : messageReferences.value.get(sid) || null
+    const messageReference = isSessionSlashCommand ? null : messageReferences.value.get(sid) || null
     const submittedContent = messageReference
       ? formatMessageWithReference(messageReference, trimmedContent)
       : trimmedContent
-    const shouldOptimisticallyShowRunStatus = !isCodingAgentSession && !isBridgeForkCommand
+    const shouldOptimisticallyShowRunStatus = !isProviderAgent && !isBridgeForkCommand
     const wasLiveBeforeSend = isSessionLive(sid)
     if (isBridgeForkCommand) {
       if (pendingForkCommands.value.has(sid)) return
       pendingForkCommands.value = new Set(pendingForkCommands.value).add(sid)
     }
     const shouldQueue = wasLiveBeforeSend && (
-      !isBridgeSlashCommand ||
+      (!isBridgeSlashCommand && !isBuiltinSlashCommand) ||
       isBridgePlanCommand ||
       isBridgeSkillCommand ||
       isBridgeBundleCommand ||
       isBridgeMoaCommand
     )
-    if (isBridgeSlashCommand && !shouldQueue && !wasLiveBeforeSend) {
+    if (isSessionSlashCommand && !shouldQueue && !wasLiveBeforeSend) {
       settleRuntimeDisplayForCommand(sid)
     }
 
+    const visibleAttachments = attachments?.filter(attachment => !attachment.videoFrameFor)
     const userMsg: Message = {
       id: uid(),
-      role: isBridgeSlashCommand ? 'command' : 'user',
+      role: isSessionSlashCommand ? 'command' : 'user',
       content: submittedContent,
       timestamp: Date.now(),
-      attachments: attachments && attachments.length > 0 ? attachments : undefined,
+      attachments: visibleAttachments && visibleAttachments.length > 0 ? visibleAttachments : undefined,
       queued: shouldQueue,
-      systemType: isBridgeSlashCommand ? 'command' : undefined,
+      systemType: isSessionSlashCommand ? 'command' : undefined,
     }
+
+    const pendingIds = pendingUserMessageIds.get(sid) || new Set<string>()
+    pendingIds.add(userMsg.id)
+    pendingUserMessageIds.set(sid, pendingIds)
 
     if (shouldQueue) {
       enqueueUserMessage(sid, userMsg)
@@ -1617,6 +3859,7 @@ if (codingAgentId === 'dsh') {
       if (attachments && attachments.length > 0) {
         // Has attachments: upload first, then build content blocks
         const uploaded = await uploadFiles(attachments)
+        if (generation !== runtimeGeneration) return
 
         // Update attachment URLs on the user message for display
         const urlMap = new Map(uploaded.map(f => {
@@ -1641,8 +3884,10 @@ if (codingAgentId === 'dsh') {
 
         // Build content blocks with uploaded file paths
         input = await buildContentBlocks(submittedContent, attachments, uploaded)
+        if (generation !== runtimeGeneration) return
         if (attachments.some(attachment => attachment.context?.trim())) {
           displayInput = await buildContentBlocks(submittedContent, attachments, uploaded, false)
+          if (generation !== runtimeGeneration) return
         }
       } else {
         // No attachments: use plain text format
@@ -1651,6 +3896,7 @@ if (codingAgentId === 'dsh') {
 
       const appStore = useAppStore()
       await appStore.waitForModelsForRun()
+      if (generation !== runtimeGeneration) return
       const sessionModel = activeSession.value?.model || appStore.selectedModel
       const sessionProvider = activeSession.value?.provider || appStore.selectedProvider
       const sessionProfile = activeSession.value?.profile || useProfilesStore().activeProfileName || undefined
@@ -1664,17 +3910,22 @@ if (codingAgentId === 'dsh') {
         ? 'global_agent'
         : storedSource === 'workflow'
           ? 'workflow'
-        : isCodingAgentSession
+        : storedSource === 'group_chat'
+          ? 'group_chat'
+        : isBuiltinEkkoSession(activeSession.value)
+          ? 'builtin_agent'
+        : isProviderAgent
           ? 'coding_agent'
           : storedSource === 'api_server'
             ? 'api_server'
             : 'cli'
-      const isCodingAgentExecution = sessionSource === 'coding_agent' || (sessionSource === 'workflow' && isCodingAgentSession)
+      const isCodingAgentExecution = sessionSource === 'builtin_agent' || sessionSource === 'coding_agent'
+        || ((sessionSource === 'workflow' || sessionSource === 'group_chat' || sessionSource === 'global_agent') && isProviderAgent)
       const codingAgentId: ChatCodingAgentId =
-        activeSession.value?.codingAgentId ||
+        (isBuiltinEkkoSession(activeSession.value) ? 'ekko-agent' : activeSession.value?.codingAgentId) ||
         agentToCodingAgentId(activeSession.value?.agent) ||
         'claude-code'
-      const codingAgentMode = activeSession.value?.codingAgentMode || 'scoped'
+      const codingAgentMode = codingAgentId === 'ekko-agent' ? 'scoped' : activeSession.value?.codingAgentMode || 'scoped'
       const codingAgentApiMode = isCodingAgentExecution && codingAgentMode !== 'global'
         ? normalizeCodingAgentApiMode(
             activeSession.value?.apiMode || providerGroup?.api_mode,
@@ -1690,7 +3941,7 @@ if (codingAgentId === 'dsh') {
         session_id: sid,
         profile: sessionProfile,
         model: isCodingAgentExecution
-          ? (codingAgentMode === 'global' ? undefined : sessionModel || undefined)
+          ? (codingAgentMode === 'global' ? activeSession.value?.model || undefined : sessionModel || undefined)
           : shouldSendInitialSessionConfig ? sessionModel || undefined : undefined,
         provider: isCodingAgentExecution
           ? (codingAgentMode === 'global' ? undefined : sessionProvider || undefined)
@@ -1707,20 +3958,17 @@ if (codingAgentId === 'dsh') {
         ...(sessionSource === 'workflow' ? { session_source: 'workflow' as const } : {}),
         ...(isCodingAgentExecution
           ? {
-              coding_agent_id: codingAgentId,
+              ...(codingAgentId === 'ekko-agent' ? { agent_id: 'ekko-agent' as const } : { coding_agent_id: codingAgentId }),
+              agent_preset: activeSession.value?.agentPreset,
               mode: codingAgentMode,
               baseUrl: codingAgentMode === 'global' ? undefined : activeSession.value?.baseUrl || providerGroup?.base_url || undefined,
               apiKey: codingAgentMode === 'global' ? undefined : activeSession.value?.apiKey || providerGroup?.api_key || undefined,
               apiMode: codingAgentApiMode,
             }
           : {}),
-        // Per-session reasoning effort override. Hermes bridge and scoped coding
-        // agents both consume this when the selected provider/API supports it.
-        // Global coding-agent mode uses the user's native CLI config, so avoid
-        // injecting a per-session override there.
-        reasoning_effort: isCodingAgentExecution && codingAgentMode === 'global'
-          ? undefined
-          : activeSession.value?.reasoningEffort || undefined,
+        // An absent override preserves the agent's native reasoning setting.
+        reasoning_effort: activeSession.value?.reasoningEffort || undefined,
+        push_enabled: activeSession.value?.pushEnabled !== false,
       }
       if (shouldSendInitialSessionConfig && activeSession.value) {
         activeSession.value.messageCount = Math.max(activeSession.value.messageCount || 0, 1)
@@ -1760,13 +4008,13 @@ if (codingAgentId === 'dsh') {
       }
 
       const applyReconnectResume = (data: ResumeSessionPayload) => {
-        if (data.session_id !== sid) return
+        if (generation !== runtimeGeneration || data.session_id !== sid) return
         const target = sessions.value.find(s => s.id === sid)
         if (!target) return
 
         if (data.isWorking) serverWorking.value.add(sid)
         else serverWorking.value.delete(sid)
-        applyResumedRunStartedAt(sid, data as any)
+        applyResumedRunActivity(sid, data as any)
 
         if (data.queueLength && data.queueLength > 0) {
           queueLengths.value.set(sid, data.queueLength)
@@ -1788,23 +4036,22 @@ if (codingAgentId === 'dsh') {
         }
         if (!data.isWorking) setCompressionState(sid, null)
 
-        if (data.inputTokens != null) target.inputTokens = data.inputTokens
-        if (data.outputTokens != null) target.outputTokens = data.outputTokens
-        if (data.contextTokens != null) target.contextTokens = data.contextTokens
+        applySessionTokenUsage(target, data)
         applyResumedSessionSettings(data)
 
-        if (Array.isArray(data.messages)) {
+        if (Array.isArray(data.messages) && !preservePersonTimelineWindow(target,data.personFlows)) {
           const previousActiveAssistantMessageId = activeAssistantMessageId
           const previousReasoningAssistantMessageId = reasoningAssistantMessageId
           const replayRunMarker = getReplayRunMarker(data.events) ?? activeRunMarker
-          target.messages = mapHermesMessages(data.messages as any[])
+          target.messages = mapHermesMessages(data.messages as any[], data.taskPlans, target.messages)
+          target.messagesLoaded = true
           restorePersistedSubagentStreams(sid)
+          setWorkspaceRunChanges(sid, data.workspaceRunChanges || [])
           target.loadedMessageCount = data.messageLoadedCount ?? data.messages.length
           target.messageTotal = data.messageTotal ?? target.messageCount ?? target.loadedMessageCount
           target.messageCount = target.messageTotal
           target.hasMoreBefore = data.hasMoreBefore ?? target.loadedMessageCount < target.messageTotal
-          restoreWorkspaceRunChangeMessages(sid)
-
+          if (!applyPersonTimelinePage(target,data.personFlows,target.messages) && data.personFlows) target.personFlows=data.personFlows
           const resumedAssistantState = data.isWorking
             ? resolveResumedAssistantState(target.messages, {
                 previousActiveAssistantMessageId,
@@ -1890,6 +4137,7 @@ if (codingAgentId === 'dsh') {
                 handleTerminalWorkspaceRunChange(sid, e)
                 if (!isQueueInsertionInterruption(e)) addAgentErrorMessage(sid, e.error)
                 break
+              case 'plan.updated':
               case 'agent.event':
                 handleAgentEvent(e)
                 break
@@ -1911,10 +4159,15 @@ if (codingAgentId === 'dsh') {
         runPayload,
         // onEvent
         (evt: RunEvent) => {
+          if (generation !== runtimeGeneration || (evt.session_id && evt.session_id !== sid)) return
+          applyBackgroundPendingEvent(sid, evt)
           const eventRunMarker = readRunMarker(evt)
           if (eventRunMarker) activeRunMarker = eventRunMarker
           switch (evt.event) {
             case 'run.started':
+              // Optimistic queueing can race with the previous run finishing.
+              // A direct start then has no matching server dequeue event.
+              promoteStartedQueuedMessage(sid, evt.queue_id)
               clearSessionCompletedUnread(sid)
               serverWorking.value.add(sid)
               setRunStartedAt(sid, Date.now())
@@ -1958,6 +4211,7 @@ if (codingAgentId === 'dsh') {
               break
             }
 
+            case 'plan.updated':
             case 'agent.event': {
               handleAgentEvent(evt)
               break
@@ -2017,6 +4271,10 @@ if (codingAgentId === 'dsh') {
               setAbortState(sid, { aborting: false, synced: (evt as any).synced ?? false })
               settleInterruptedSubagents(sid)
               clearPendingInteractions(sid)
+              const abortedAssistant = getSessionMsgs(sid).find(message => message.id === activeAssistantMessageId)
+                || [...getSessionMsgs(sid)].reverse().find(message => message.role === 'assistant' && message.isStreaming)
+              handleTerminalWorkspaceRunChange(sid, evt, abortedAssistant?.id)
+              if (abortedAssistant) updateMessage(sid, abortedAssistant.id, { isStreaming: false })
               if ((evt as any).queue_length > 0) {
                 queueLengths.value.set(sid, (evt as any).queue_length)
                 setAbortState(sid, null)
@@ -2168,11 +4426,10 @@ if (codingAgentId === 'dsh') {
               runHadToolActivity = true
               const startedToolName = evt.tool || evt.name
               if (
-                isBackgroundDelegateToolPayload(startedToolName, (evt as any).arguments)
+                isBackgroundDelegateToolPayload(startedToolName, evt.arguments)
                 || (isEkkoAgentSession(sid) && startedToolName === 'delegate_task')
               ) break
               const msgs = getSessionMsgs(sid)
-              const toolCallId = (evt as any).tool_call_id as string | undefined
               const last = activeAssistantMessageId
                 ? msgs.find(m => m.id === activeAssistantMessageId)
                 : msgs[msgs.length - 1]
@@ -2185,33 +4442,7 @@ if (codingAgentId === 'dsh') {
               }
               activeAssistantMessageId = null
               reasoningAssistantMessageId = null
-              const existingTool = toolCallId
-                ? msgs.find(m => m.role === 'tool' && m.toolCallId === toolCallId)
-                : null
-              if (existingTool) {
-                updateMessage(sid, existingTool.id, {
-                  toolName: evt.tool || evt.name,
-                  runMarker: existingTool.runMarker || readRunMarker(evt),
-                  toolArgs: hasRuntimeToolPayload((evt as any).arguments) ? (evt as any).arguments : existingTool.toolArgs,
-                  toolPreview: evt.preview || existingTool.toolPreview,
-                  reasoning: existingTool.reasoning || toolReasoning,
-                  toolStatus: existingTool.toolStatus || 'running',
-                })
-                break
-              }
-              addMessage(sid, {
-                id: uid(),
-                role: 'tool',
-                content: '',
-                timestamp: Date.now(),
-                toolName: evt.tool || evt.name,
-                toolCallId,
-                runMarker: readRunMarker(evt),
-                toolPreview: evt.preview,
-                toolArgs: runtimeToolPayloadOrUndefined((evt as any).arguments),
-                reasoning: toolReasoning,
-                toolStatus: 'running',
-              })
+              handleToolStartedEvent(sid, evt, toolReasoning, true)
 
               break
             }
@@ -2219,44 +4450,7 @@ if (codingAgentId === 'dsh') {
             case 'tool.completed':
             case 'tool.failed': {
               runHadToolActivity = true
-              const msgs = getSessionMsgs(sid)
-              const toolCallId = (evt as any).tool_call_id as string | undefined
-              const toolMsgs = toolCallId
-                ? msgs.filter(m => m.role === 'tool' && m.toolCallId === toolCallId)
-                : msgs.filter(m => m.role === 'tool' && m.toolStatus === 'running')
-              const output = runtimeToolOutputFromEvent(evt)
-              const toolName = evt.tool || evt.name || toolMsgs[toolMsgs.length - 1]?.toolName
-              if (isBackgroundDelegateToolPayload(toolName, output)) {
-                const session = sessions.value.find(item => item.id === sid)
-                if (session) session.messages = session.messages.filter(message => !toolMsgs.includes(message))
-                addHermesBackgroundDelegateAnchors(
-                  sid,
-                  toolCallId,
-                  output,
-                  toolMsgs[toolMsgs.length - 1]?.toolArgs,
-                )
-                break
-              }
-              if (
-                isEkkoAgentSession(sid)
-                && toolName === 'delegate_task'
-                && runtimeObjectPayload(output)?.runtime === 'ekko'
-              ) {
-                const session = sessions.value.find(item => item.id === sid)
-                if (session) session.messages = session.messages.filter(message => !toolMsgs.includes(message))
-                break
-              }
-              if (toolMsgs.length > 0) {
-                const last = toolMsgs[toolMsgs.length - 1]
-                const hasError = evt.event === 'tool.failed' || (evt as any).error === true || runtimeToolOutputHasError(output)
-                const duration = (evt as any).duration
-                updateMessage(sid, last.id, {
-                  runMarker: last.runMarker || readRunMarker(evt),
-                  toolStatus: hasError ? 'error' : 'done',
-                  toolDuration: duration,
-                  toolResult: output,
-                })
-              }
+              handleToolCompletedEvent(sid, evt)
 
               break
             }
@@ -2316,9 +4510,7 @@ if (codingAgentId === 'dsh') {
               if ((evt as any).inputTokens != null) {
                 const target = sessions.value.find(s => s.id === sid)
                 if (target) {
-                  target.inputTokens = (evt as any).inputTokens
-                  target.outputTokens = (evt as any).outputTokens
-                  if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+                  applySessionTokenUsage(target, evt as any)
                 }
               }
               // Belt-and-suspenders: some providers may deliver the final
@@ -2407,11 +4599,13 @@ if (codingAgentId === 'dsh') {
               // signal but not required, since some providers/local models
               // legitimately omit usage.
               const queueInsertionInterruption = isQueueInsertionInterruption(evt)
+              const waitingForTasks = evt.stop_reason === 'waiting_for_tasks'
               const swallowedError =
                 !runProducedAssistantText &&
                 !runHadToolActivity &&
                 finalOutputTrimmed === '' &&
-                !queueInsertionInterruption
+                !queueInsertionInterruption &&
+                !waitingForTasks
               if (swallowedError) {
                 addMessage(sid, {
                   id: uid(),
@@ -2419,7 +4613,7 @@ if (codingAgentId === 'dsh') {
                   content: 'Error: Agent returned no output. The model call may have failed (e.g. invalid API key, model not supported by provider, or context exceeded). Check the hermes-agent logs for details.',
                   timestamp: Date.now(),
                 })
-              } else {
+              } else if (!waitingForTasks) {
                 playCompletionBellIfEnabled()
                 showCompletionNotificationIfEnabled(sid, completedAssistantMessageId)
               }
@@ -2457,6 +4651,7 @@ if (codingAgentId === 'dsh') {
             }
 
             case 'run.failed': {
+              if (evt.queue_id) acknowledgeUserMessage(sid, evt.queue_id)
               clearRunStartedAt(sid)
               clearPendingInteractions(sid)
               const failedMessages = getSessionMsgs(sid)
@@ -2469,9 +4664,7 @@ if (codingAgentId === 'dsh') {
               if ((evt as any).inputTokens != null) {
                 const target = sessions.value.find(s => s.id === sid)
                 if (target) {
-                  target.inputTokens = (evt as any).inputTokens
-                  target.outputTokens = (evt as any).outputTokens
-                  if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+                  applySessionTokenUsage(target, evt as any)
                 }
               }
               if (queueInsertionInterruption) {
@@ -2495,9 +4688,7 @@ if (codingAgentId === 'dsh') {
             case 'usage.updated': {
               const target = sessions.value.find(s => s.id === sid)
               if (target) {
-                target.inputTokens = (evt as any).inputTokens
-                target.outputTokens = (evt as any).outputTokens
-                if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+                applySessionTokenUsage(target, evt as any)
               }
               break
             }
@@ -2536,13 +4727,15 @@ if (codingAgentId === 'dsh') {
       )
       runSubmitted = true
 
-      if (isCodingAgentSession) {
+      if (isProviderAgent && !isBuiltinSlashCommand) {
         serverWorking.value.add(sid)
         streamStates.value.set(sid, ctrl)
-      } else if (!isBridgeSlashCommand || isBridgeCompressCommand || isBridgePlanCommand || isBridgeGoalCommand) {
+      } else if (!isSessionSlashCommand || isBridgeCompressCommand || isBridgePlanCommand || isBridgeGoalCommand) {
         streamStates.value.set(sid, ctrl)
       }
     } catch (err: any) {
+      if (generation !== runtimeGeneration) return
+      acknowledgeUserMessage(sid, userMsg.id)
       if (isBridgeForkCommand) {
         const nextPendingForkCommands = new Set(pendingForkCommands.value)
         nextPendingForkCommands.delete(sid)
@@ -2569,6 +4762,7 @@ if (codingAgentId === 'dsh') {
    * then sets up event listeners to receive ongoing events.
    */
   function resumeServerWorkingRun(sid: string, force = false, passive = false) {
+    const generation = runtimeGeneration
     // Don't register duplicate listeners if already streaming
     if (streamStates.value.has(sid)) return
     // Only set up listeners if the server reported an active run during resume.
@@ -2639,9 +4833,10 @@ if (codingAgentId === 'dsh') {
 
     // Shared event handler — filters by session_id tag
     function handleEvent(evt: RunEvent) {
-      if (closed) return
+      if (closed || generation !== runtimeGeneration) return
       // Filter events for this session (server tags all events with session_id)
       if (evt.session_id && evt.session_id !== sid) return
+      applyBackgroundPendingEvent(sid, evt)
       const eventRunMarker = readRunMarker(evt)
       if (eventRunMarker) activeRunMarker = eventRunMarker
       switch (evt.event) {
@@ -2670,6 +4865,7 @@ if (codingAgentId === 'dsh') {
           break
         }
 
+        case 'plan.updated':
         case 'agent.event': {
           handleAgentEvent(evt)
           break
@@ -2681,6 +4877,7 @@ if (codingAgentId === 'dsh') {
         }
 
         case 'run.started':
+          promoteStartedQueuedMessage(sid, evt.queue_id)
           clearSessionCompletedUnread(sid)
           serverWorking.value.add(sid)
           setRunStartedAt(sid, Date.now())
@@ -2748,6 +4945,10 @@ if (codingAgentId === 'dsh') {
           setAbortState(sid, { aborting: false, synced: (evt as any).synced ?? false })
           settleInterruptedSubagents(sid)
           clearPendingInteractions(sid)
+          const abortedAssistant = getSessionMsgs(sid).find(message => message.id === activeAssistantMessageId)
+            || [...getSessionMsgs(sid)].reverse().find(message => message.role === 'assistant' && message.isStreaming)
+          handleTerminalWorkspaceRunChange(sid, evt, abortedAssistant?.id)
+          if (abortedAssistant) updateMessage(sid, abortedAssistant.id, { isStreaming: false })
           if ((evt as any).queue_length > 0) {
             queueLengths.value.set(sid, (evt as any).queue_length)
             setAbortState(sid, null)
@@ -2891,11 +5092,10 @@ if (codingAgentId === 'dsh') {
           runHadToolActivity = true
           const startedToolName = evt.tool || evt.name
           if (
-            isBackgroundDelegateToolPayload(startedToolName, (evt as any).arguments)
+            isBackgroundDelegateToolPayload(startedToolName, evt.arguments)
             || (isEkkoAgentSession(sid) && startedToolName === 'delegate_task')
           ) break
           const msgs = getSessionMsgs(sid)
-          const toolCallId = (evt as any).tool_call_id as string | undefined
           const last = activeAssistantMessageId
             ? msgs.find(m => m.id === activeAssistantMessageId)
             : msgs[msgs.length - 1]
@@ -2908,33 +5108,7 @@ if (codingAgentId === 'dsh') {
           }
           activeAssistantMessageId = null
           reasoningAssistantMessageId = null
-          const existingTool = toolCallId
-            ? msgs.find(m => m.role === 'tool' && m.toolCallId === toolCallId)
-            : null
-          if (existingTool) {
-            updateMessage(sid, existingTool.id, {
-              toolName: evt.tool || evt.name,
-              runMarker: existingTool.runMarker || readRunMarker(evt),
-              toolArgs: hasRuntimeToolPayload((evt as any).arguments) ? (evt as any).arguments : existingTool.toolArgs,
-              toolPreview: evt.preview || existingTool.toolPreview,
-              reasoning: existingTool.reasoning || toolReasoning,
-              toolStatus: existingTool.toolStatus || 'running',
-            })
-            break
-          }
-          addMessage(sid, {
-            id: uid(),
-            role: 'tool',
-            content: '',
-            timestamp: Date.now(),
-            toolName: evt.tool || evt.name,
-            toolCallId,
-            runMarker: readRunMarker(evt),
-            toolPreview: evt.preview,
-            toolArgs: runtimeToolPayloadOrUndefined((evt as any).arguments),
-            reasoning: toolReasoning,
-            toolStatus: 'running',
-          })
+          handleToolStartedEvent(sid, evt, toolReasoning, true)
 
           break
         }
@@ -2942,43 +5116,7 @@ if (codingAgentId === 'dsh') {
         case 'tool.completed':
         case 'tool.failed': {
           runHadToolActivity = true
-          const msgs = getSessionMsgs(sid)
-          const toolCallId = (evt as any).tool_call_id as string | undefined
-          const toolMsgs = toolCallId
-            ? msgs.filter(m => m.role === 'tool' && m.toolCallId === toolCallId)
-            : msgs.filter(m => m.role === 'tool' && m.toolStatus === 'running')
-          const output = runtimeToolOutputFromEvent(evt)
-          const toolName = evt.tool || evt.name || toolMsgs[toolMsgs.length - 1]?.toolName
-          if (isBackgroundDelegateToolPayload(toolName, output)) {
-            const session = sessions.value.find(item => item.id === sid)
-            if (session) session.messages = session.messages.filter(message => !toolMsgs.includes(message))
-            addHermesBackgroundDelegateAnchors(
-              sid,
-              toolCallId,
-              output,
-              toolMsgs[toolMsgs.length - 1]?.toolArgs,
-            )
-            break
-          }
-          if (
-            isEkkoAgentSession(sid)
-            && toolName === 'delegate_task'
-            && runtimeObjectPayload(output)?.runtime === 'ekko'
-          ) {
-            const session = sessions.value.find(item => item.id === sid)
-            if (session) session.messages = session.messages.filter(message => !toolMsgs.includes(message))
-            break
-          }
-          if (toolMsgs.length > 0) {
-            const hasError = evt.event === 'tool.failed' || (evt as any).error === true || runtimeToolOutputHasError(output)
-            const last = toolMsgs[toolMsgs.length - 1]
-            updateMessage(sid, last.id, {
-              runMarker: last.runMarker || readRunMarker(evt),
-              toolStatus: hasError ? 'error' : 'done',
-              toolDuration: (evt as any).duration,
-              toolResult: output,
-            })
-          }
+          handleToolCompletedEvent(sid, evt)
 
           break
         }
@@ -3045,9 +5183,7 @@ if (codingAgentId === 'dsh') {
           if ((evt as any).inputTokens != null) {
             const target = sessions.value.find(s => s.id === sid)
             if (target) {
-              target.inputTokens = (evt as any).inputTokens
-              target.outputTokens = (evt as any).outputTokens
-              if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+              applySessionTokenUsage(target, evt as any)
             }
           }
           // Check if backend provided parsed content (from stringified array format)
@@ -3120,10 +5256,12 @@ if (codingAgentId === 'dsh') {
             }
           }
           const queueInsertionInterruption = isQueueInsertionInterruption(evt)
+          const waitingForTasks = evt.stop_reason === 'waiting_for_tasks'
           const swallowedError = !runProducedAssistantText
             && !runHadToolActivity
             && finalOutputTrimmed === ''
             && !queueInsertionInterruption
+            && !waitingForTasks
           if (swallowedError) {
             addMessage(sid, {
               id: uid(),
@@ -3131,7 +5269,7 @@ if (codingAgentId === 'dsh') {
               content: 'Error: Agent returned no output. The model call may have failed (e.g. invalid API key, model not supported by provider, or context exceeded). Check the hermes-agent logs for details.',
               timestamp: Date.now(),
             })
-          } else {
+          } else if (!waitingForTasks) {
             playCompletionBellIfEnabled()
             showCompletionNotificationIfEnabled(sid, completedAssistantMessageId)
           }
@@ -3189,9 +5327,7 @@ if (codingAgentId === 'dsh') {
           if ((evt as any).inputTokens != null) {
             const target = sessions.value.find(s => s.id === sid)
             if (target) {
-              target.inputTokens = (evt as any).inputTokens
-              target.outputTokens = (evt as any).outputTokens
-              if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+              applySessionTokenUsage(target, evt as any)
             }
           }
           const hasQueue = (evt as any).queue_remaining > 0
@@ -3222,9 +5358,7 @@ if (codingAgentId === 'dsh') {
         case 'usage.updated': {
           const target = sessions.value.find(s => s.id === sid)
           if (target) {
-            target.inputTokens = (evt as any).inputTokens
-            target.outputTokens = (evt as any).outputTokens
-            if ((evt as any).contextTokens != null) target.contextTokens = (evt as any).contextTokens
+            applySessionTokenUsage(target, evt as any)
           }
           break
         }
@@ -3273,6 +5407,17 @@ if (codingAgentId === 'dsh') {
 
   function handlePeerUserMessage(evt: RunEvent) {
     const sid = evt.session_id
+    if (scopedSessionId ? sid !== scopedSessionId : sid?.startsWith('person-task-')) return
+    if (evt.event === 'person.run.completed' || evt.event === 'person.run.failed') {
+      if (scopedSessionId || !sid?.startsWith('person-main-') || !evt.notification_id || announcedPersonRuns.has(evt.notification_id)) return
+      announcedPersonRuns.add(evt.notification_id)
+      if (announcedPersonRuns.size > 1000) announcedPersonRuns.delete(announcedPersonRuns.values().next().value!)
+      if (useSettingsStore().display.notify_on_complete) void showCompletionNotification({
+        title: PERSON_AVATAR.label, body: truncateNotificationText(evt.output || '', 140),
+        icon: chatSessionAgentAvatar({ id: sid }).src, tag: `hermes-person-${evt.notification_id}`, clickUrl: `/person?session=${encodeURIComponent(sid)}`,
+      })
+      return
+    }
     if (evt.event === 'approval.requested') return setPendingApproval(evt)
     if (evt.event === 'approval.resolved') return clearPendingApproval(evt)
     if (evt.event === 'clarify.requested') return setPendingClarify(evt)
@@ -3285,6 +5430,7 @@ if (codingAgentId === 'dsh') {
 
     const messageId = peer?.id != null ? String(peer.id) : ''
     const isPeerCommand = peer?.role === 'command'
+    if (messageId && peer?.queued === false) promoteStartedQueuedMessage(sid, messageId)
     const msgs = getSessionMsgs(sid)
     if (messageId && msgs.some(msg => msg.id === messageId)) {
       serverWorking.value.add(sid)
@@ -3329,10 +5475,21 @@ if (codingAgentId === 'dsh') {
     resumeServerWorkingRun(sid, true)
   }
 
-  onPeerUserMessage(handlePeerUserMessage)
+  disposeSubscription(onPeerUserMessage(handlePeerUserMessage))
+  const stopUnobservedRuns = onUnobservedRunStarted(evt => {
+    const sid = evt.session_id
+    if (!sid || sid !== activeSessionId.value || !activeSession.value) return
+    // Reattach before dispatching run.started so an autonomous callback can stream immediately.
+    resumeServerWorkingRun(sid, true, true)
+  })
+  onScopeDispose(stopUnobservedRuns)
 
   function handleGlobalSessionCommand(evt: RunEvent) {
     const sid = evt.session_id
+    if (sid && (evt as any).action === 'messages_deleted') {
+      handleSessionCommandEvent(evt)
+      return
+    }
     if (!sid || activeSessionId.value !== sid || !activeSession.value) return
     const shouldAttachToStartedRun = (evt as any).started === true && (evt as any).terminal === false
     handleSessionCommandEvent(evt)
@@ -3342,11 +5499,34 @@ if (codingAgentId === 'dsh') {
     }
   }
 
-  onSessionCommand(handleGlobalSessionCommand)
+  disposeSubscription(onSessionCommand(handleGlobalSessionCommand))
+  disposeSubscription(onPersonUpdated(event => {
+    if (!event.session_id || !event.personFlows) return
+    const target = sessions.value.find(session => session.id === event.session_id)
+    if (target && applyPersonFlowUpdate(target,event.personFlows) && activeSessionId.value === target.id) void refreshActiveSession()
+  }))
 
-  onSessionTitleUpdated(applyGeneratedSessionTitle)
-  onSessionWorkspaceUpdated(applySessionWorkspaceUpdate)
-  onSessionSettingsUpdated(applySessionSettingsUpdate)
+  disposeSubscription(onSessionTitleUpdated(applyGeneratedSessionTitle))
+  disposeSubscription(onSessionWorkspaceUpdated(applySessionWorkspaceUpdate))
+  disposeSubscription(onSessionSettingsUpdated(applySessionSettingsUpdate))
+  disposeSubscription(onRunUsageUpdated(evt => {
+    const sid = evt.session_id
+    const summary = normalizeRunUsage((evt as any).run_usage)
+    const session = sessions.value.find(item => item.id === sid)
+    if (!sid || !session || !summary?.assistantMessageId) return
+    applySessionTokenUsage(session, evt as any)
+    // Late native logs and prices belong to this exact run, even when another
+    // turn is already streaming. Never fall back to the newest assistant.
+    const message = session.messages.find(item => item.role === 'assistant'
+      && (item.id === summary.assistantMessageId || item.runUsage?.runId === summary.runId))
+    const terminalNotReceived = !message?.runUsage
+    if (message) message.runUsage = summary
+    if (terminalNotReceived) {
+      const updates = pendingRunUsage.get(sid) || new Map()
+      updates.set(summary.runId, summary)
+      pendingRunUsage.set(sid, updates)
+    }
+  }))
 
   function stopStreaming() {
     const sid = activeSessionId.value
@@ -3377,8 +5557,8 @@ if (codingAgentId === 'dsh') {
 
   // Tab visibility: re-sync when returning to foreground
   if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && !isStreaming.value) {
+    const onVisibilityChange = () => {
+      if (!scopedSessionId && document.visibilityState === 'visible' && !isStreaming.value) {
         // Live-sync the session list so sessions created elsewhere (CLI,
         // Telegram, another device) appear without a manual reload.
         void refreshSessionListOnly()
@@ -3387,13 +5567,15 @@ if (codingAgentId === 'dsh') {
         const sid = activeSessionId.value
         if (sid && !streamStates.value.has(sid)) {
           // Re-load messages via resume (server loads from DB)
+          const generation = runtimeGeneration
           resumeSession(sid, (data) => {
+            if (generation !== runtimeGeneration || data.session_id !== sid || activeSessionId.value !== sid) return
             if (data.isWorking) {
               serverWorking.value.add(sid)
             } else {
               serverWorking.value.delete(sid)
             }
-            applyResumedRunStartedAt(sid, data as any)
+            applyResumedRunActivity(sid, data as any)
             if (data.isAborting) {
               setAbortState(sid, { aborting: true, synced: null })
             } else if (!data.isWorking) {
@@ -3401,24 +5583,29 @@ if (codingAgentId === 'dsh') {
             }
             if (!data.isWorking) setCompressionState(sid, null)
             applyResumedSessionSettings(data)
-            if (data.messages?.length && activeSession.value) {
+            if (activeSession.value) applySessionTokenUsage(activeSession.value, data)
+            if (Array.isArray(data.messages) && activeSession.value && !preservePersonTimelineWindow(activeSession.value,data.personFlows)) {
               if (typeof data.workspace === 'string') {
                 activeSession.value.workspace = data.workspace.trim() || null
                 activeSession.value.isLocalOnly = false
               }
-              activeSession.value.messages = mapHermesMessages(data.messages as any[])
+              activeSession.value.messages = mapHermesMessages(data.messages as any[], data.taskPlans, activeSession.value.messages)
+              activeSession.value.messagesLoaded = true
               restorePersistedSubagentStreams(sid)
+              setWorkspaceRunChanges(sid, data.workspaceRunChanges || [])
               activeSession.value.loadedMessageCount = data.messageLoadedCount ?? data.messages.length
               activeSession.value.messageTotal = data.messageTotal ?? activeSession.value.messageCount ?? activeSession.value.loadedMessageCount
               activeSession.value.messageCount = activeSession.value.messageTotal
               activeSession.value.hasMoreBefore = data.hasMoreBefore ?? activeSession.value.loadedMessageCount < activeSession.value.messageTotal
-              restoreWorkspaceRunChangeMessages(sid)
+              if (!applyPersonTimelinePage(activeSession.value,data.personFlows,activeSession.value.messages) && data.personFlows) activeSession.value.personFlows=data.personFlows
             }
-            resumeServerWorkingRun(sid)
+            resumeServerWorkingRun(sid, (data.backgroundPending || 0) > 0, !data.isWorking)
           }, activeSession.value?.profile, runtimeTransport())
         }
       }
-    })
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    onScopeDispose(() => document.removeEventListener('visibilitychange', onVisibilityChange))
   }
 
   // Mild background polling for live session-list sync (covers sessions created
@@ -3426,12 +5613,13 @@ if (codingAgentId === 'dsh') {
   // runs when the tab is visible and not streaming, so it's cheap and never
   // disrupts an active run. visibilitychange (above) handles the wake-from-hidden
   // case; this covers the "left it open and watching" case.
-  if (typeof window !== 'undefined') {
-    window.setInterval(() => {
+  if (!scopedSessionId && typeof window !== 'undefined') {
+    const refreshTimer = window.setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
       if (isStreaming.value) return
       void refreshSessionListOnly()
     }, 12_000)
+    onScopeDispose(() => window.clearInterval(refreshTimer))
   }
 
   // Transient observation of <think> boundaries during active streaming.
@@ -3485,32 +5673,41 @@ if (codingAgentId === 'dsh') {
     }
   }
 
-  async function setSessionReasoningEffort(sessionId: string, effort: string): Promise<boolean> {
+  async function setSessionReasoningEffort(sessionId: string, effort: string, nativeModel?: string): Promise<boolean> {
     const target = sessions.value.find(s => s.id === sessionId)
     const activeTarget = activeSession.value?.id === sessionId ? activeSession.value : null
     const session = target || activeTarget
     if (!session) return false
 
     const nextEffort = effort || undefined
-    const previousEffort = session.reasoningEffort
+    const previous = { effort: session.reasoningEffort, model: session.model }
+    const next = { effort: nextEffort, model: nativeModel ?? session.model }
+    const writeTarget = { effort: nextEffort, model: nativeModel }
     if (target) target.reasoningEffort = nextEffort
     if (activeTarget) activeTarget.reasoningEffort = nextEffort
+    if (nativeModel !== undefined) {
+      if (target) target.model = nativeModel
+      if (activeTarget) activeTarget.model = nativeModel
+    }
     if (session.isLocalOnly) return true
 
     if (!reasoningEffortWriteChains.has(sessionId)) {
-      reasoningEffortConfirmedValues.set(sessionId, previousEffort)
+      reasoningEffortConfirmedValues.set(sessionId, previous)
     }
-    reasoningEffortWriteTargets.set(sessionId, nextEffort)
+    reasoningEffortWriteTargets.set(sessionId, writeTarget)
     const previousWrite = reasoningEffortWriteChains.get(sessionId) || Promise.resolve(true)
     const write: Promise<boolean> = previousWrite
       .catch(() => false)
-      .then(() => persistSessionReasoningEffort(sessionId, effort))
+      .then(() => nativeModel === undefined ? persistSessionReasoningEffort(sessionId, effort) : persistSessionReasoningEffort(sessionId, effort, nativeModel))
       .then((ok) => {
-        if (ok) reasoningEffortConfirmedValues.set(sessionId, nextEffort)
-        if (!ok && reasoningEffortWriteTargets.get(sessionId) === nextEffort) {
-          const confirmedEffort = reasoningEffortConfirmedValues.get(sessionId)
-          if (target) target.reasoningEffort = confirmedEffort
-          if (activeTarget) activeTarget.reasoningEffort = confirmedEffort
+        if (ok) reasoningEffortConfirmedValues.set(sessionId, next)
+        if (!ok && reasoningEffortWriteTargets.get(sessionId) === writeTarget) {
+          const confirmed = reasoningEffortConfirmedValues.get(sessionId) || previous
+          for (const session of new Set([target, activeTarget])) {
+            if (!session) continue
+            session.reasoningEffort = confirmed.effort
+            if (nativeModel !== undefined) session.model = confirmed.model
+          }
         }
         return ok
       })
@@ -3521,6 +5718,44 @@ if (codingAgentId === 'dsh') {
         reasoningEffortConfirmedValues.delete(sessionId)
       })
     reasoningEffortWriteChains.set(sessionId, write)
+    return write
+  }
+
+  async function setSessionPushEnabled(sessionId: string, enabled: boolean): Promise<boolean> {
+    const target = sessions.value.find(s => s.id === sessionId)
+    const activeTarget = activeSession.value?.id === sessionId ? activeSession.value : null
+    const session = target || activeTarget
+    if (!session) return false
+
+    const previousEnabled = Boolean(session.pushEnabled)
+    if (target) target.pushEnabled = enabled
+    if (activeTarget) activeTarget.pushEnabled = enabled
+    if (session.isLocalOnly) return true
+
+    if (!pushEnabledWriteChains.has(sessionId)) {
+      pushEnabledConfirmedValues.set(sessionId, previousEnabled)
+    }
+    pushEnabledWriteTargets.set(sessionId, enabled)
+    const previousWrite = pushEnabledWriteChains.get(sessionId) || Promise.resolve(true)
+    const write: Promise<boolean> = previousWrite
+      .catch(() => false)
+      .then(() => persistSessionPushEnabled(sessionId, enabled))
+      .then((ok) => {
+        if (ok) pushEnabledConfirmedValues.set(sessionId, enabled)
+        if (!ok && pushEnabledWriteTargets.get(sessionId) === enabled) {
+          const confirmedEnabled = pushEnabledConfirmedValues.get(sessionId) || false
+          if (target) target.pushEnabled = confirmedEnabled
+          if (activeTarget) activeTarget.pushEnabled = confirmedEnabled
+        }
+        return ok
+      })
+      .finally(() => {
+        if (pushEnabledWriteChains.get(sessionId) !== write) return
+        pushEnabledWriteChains.delete(sessionId)
+        pushEnabledWriteTargets.delete(sessionId)
+        pushEnabledConfirmedValues.delete(sessionId)
+      })
+    pushEnabledWriteChains.set(sessionId, write)
     return write
   }
 
@@ -3540,6 +5775,7 @@ if (codingAgentId === 'dsh') {
   }
 
   return {
+    addMessage,
     sessions,
     runtimeMode,
     activeSessionId,
@@ -3550,6 +5786,7 @@ if (codingAgentId === 'dsh') {
     isForkPending,
     isRunActive,
     isSessionLive,
+    isSessionWorking,
     runStartedAt,
     isSessionCompletedUnread,
     clearSessionCompletedUnread,
@@ -3576,18 +5813,13 @@ if (codingAgentId === 'dsh') {
     isLoadingSessions,
     sessionsLoaded,
     isLoadingMessages,
-    lastSwitchError,
-    clearLastSwitchError: () => {
-      lastSwitchError.value = null
-    },
 
     newChat,
-    createSession,
-    newChatWithRemoteCreate,
     newCliSession,
     switchSession,
     ensureSessionLoaded,
-    addMessage,
+    forgetSession,
+    clearActiveSession,
     loadOlderMessages,
     switchSessionModel,
     addOrUpdateSession,
@@ -3603,6 +5835,7 @@ if (codingAgentId === 'dsh') {
     loadSessions,
     refreshSessionListOnly,
     refreshActiveSession,
+    deleteMessages,
     getThinkingObservation,
     noteThinkingDelta,
     noteReasoningStart,
@@ -3612,7 +5845,33 @@ if (codingAgentId === 'dsh') {
     playMessageSpeech,
     loadWorkspaceRunChangeFile,
     setSessionReasoningEffort,
+    setSessionPushEnabled,
     setRuntimeMode,
   }
-})
+}
 
+function defineChatStore(id: string, scopedSessionId?: string) {
+  return defineStore(id, () => createChatState(scopedSessionId))
+}
+const useDefaultChatStore = defineChatStore('chat')
+type ChatStore = ReturnType<typeof useDefaultChatStore>
+const chatStoreContext: InjectionKey<ChatStore> = Symbol('chat-store-context')
+
+/** Shared chat components resolve their nearest conversation surface. */
+export const useChatStore = Object.assign((...args: Parameters<typeof useDefaultChatStore>): ChatStore => {
+  const scoped = hasInjectionContext() ? inject(chatStoreContext, null) : null
+  return scoped || useDefaultChatStore(...args)
+}, { $id: useDefaultChatStore.$id })
+
+/** A task drawer owns its selection and subscriptions without changing the main chat. */
+export function provideScopedChatStore(sessionId: string): ChatStore {
+  const pinia = getActivePinia()
+  if (!pinia) throw new Error('Chat store requires Pinia')
+  const store = defineChatStore(`chat:${sessionId}`, sessionId)(pinia)
+  provide(chatStoreContext, store)
+  onScopeDispose(() => {
+    store.$dispose()
+    delete pinia.state.value[store.$id]
+  })
+  return store
+}

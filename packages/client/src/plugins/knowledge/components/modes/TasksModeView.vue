@@ -289,15 +289,15 @@ const lastIngestError = computed(() => props.health?.ingestion?.lastError ?? nul
   align-items: center;
   gap: 4px;
   padding: 14px 8px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border-color, rgba(var(--text-primary-rgb), 0.08));
   border-radius: 10px;
-  background: var(--card-color, rgba(255, 255, 255, 0.02));
+  background: var(--card-color, rgba(var(--text-primary-rgb), 0.02));
   color: inherit;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
-.progress-card:hover { background: var(--hover-color, rgba(255, 255, 255, 0.05)); }
-.progress-card.active { border-color: var(--primary-color, #63e2b7); }
+.progress-card:hover { background: var(--hover-color, rgba(var(--text-primary-rgb), 0.05)); }
+.progress-card.active { border-color: var(--primary-color, var(--success)); }
 .progress-number {
   font-size: 26px;
   font-weight: 700;
@@ -308,14 +308,14 @@ const lastIngestError = computed(() => props.health?.ingestion?.lastError ?? nul
   font-size: 12px;
   opacity: 0.65;
 }
-.progress-card.good .progress-number { color: #63e2b7; }
-.progress-card.busy .progress-number { color: #f2c97d; }
-.progress-card.bad .progress-number { color: #e88080; }
+.progress-card.good .progress-number { color: var(--success); }
+.progress-card.busy .progress-number { color: var(--warning); }
+.progress-card.bad .progress-number { color: var(--warning); }
 .ingest-error { margin: 0; }
 .files-section {
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border-color, rgba(var(--text-primary-rgb), 0.06));
   border-radius: 10px;
-  background: var(--card-color, rgba(255, 255, 255, 0.02));
+  background: var(--card-color, rgba(var(--text-primary-rgb), 0.02));
   padding: 12px 14px;
 }
 .files-header {
@@ -331,7 +331,7 @@ const lastIngestError = computed(() => props.health?.ingestion?.lastError ?? nul
 }
 .empty-alert { margin: 4px 0; }
 .document-link {
-  color: var(--primary-color, #2080f0);
+  color: var(--primary-color, var(--accent-info));
   text-decoration: none;
 }
 .document-link:hover { text-decoration: underline; }
@@ -364,5 +364,5 @@ const lastIngestError = computed(() => props.health?.ingestion?.lastError ?? nul
   font-size: 12px;
   opacity: 0.55;
 }
-.knowledge-refs-failed { color: #e88080; opacity: 0.9; }
+.knowledge-refs-failed { color: var(--warning); opacity: 0.9; }
 </style>

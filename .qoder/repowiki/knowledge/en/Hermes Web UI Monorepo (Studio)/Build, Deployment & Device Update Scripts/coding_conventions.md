@@ -1,6 +1,0 @@
-- Bash scripts use `set -Eeuo pipefail` plus color-coded `info()`/`warn()`/`err()`/`step()` helpers and a `trap '... ERR'` handler for consistent error reporting.
-- All scripts resolve their own location via `$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)` or `fileURLToPath(import.meta.url)` and derive other paths relative to `SCRIPT_DIR` or the repo root.
-- Long-running operations write structured task state through `update-task-state.py` by exporting `STATE_FILE`, `TASK_ID`, `TASK_STRATEGY`, `TASK_STATUS`, `TASK_STAGE`, and related `TASK_*` environment variables before invoking it.
-- Node.js scripts validate inputs defensively, throwing descriptive `Error` messages for missing/invalid arguments, and read configuration from well-known locations like `.github/device-package-release.json` and `package.json`.
-- Python code embedded in Bash uses `python3 - <<'PY'` heredocs with strict type checks and `pathlib.Path` for filesystem operations, writing JSON atomically via `tempfile.NamedTemporaryFile` followed by `replace()`.
-- Update-related scripts enforce security by validating allowed environment variable keys against a whitelist and refusing to operate inside `DEPLOY_DIR` unless explicitly preserved.

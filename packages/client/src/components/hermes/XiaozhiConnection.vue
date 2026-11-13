@@ -13,7 +13,7 @@ async function capturePhoto() {
   if (capturing.value) return
   capturing.value = true; photoError.value = ''
   try {
-    const photo = await request<{ id: string; url: string }>('/api/xiaozhi/camera/capture', { method: 'POST' })
+    const photo = await request<{ id: string; url: string }>('/api/studio/xiaozhi/camera/capture', { method: 'POST' })
     const image = await request<{ base64: string }>(`${photo.url}?format=json`)
     const bytes = Uint8Array.from(atob(image.base64), character => character.charCodeAt(0))
     if (photoUrl.value) URL.revokeObjectURL(photoUrl.value)
@@ -27,9 +27,9 @@ async function refresh() {
   loading.value = true
   try {
     const [device, speech, voice] = await Promise.all([
-      request<NonNullable<typeof state.value>>('/api/xiaozhi/status'),
-      request<NonNullable<typeof stt.value>>('/api/hermes/stt/profile-status').catch(() => undefined),
-      request<{ activeProvider: string }>('/api/hermes/tts/settings').catch(() => undefined),
+      request<NonNullable<typeof state.value>>('/api/studio/xiaozhi/status'),
+      request<NonNullable<typeof stt.value>>('/api/studio/stt/profile-status').catch(() => undefined),
+      request<{ activeProvider: string }>('/api/studio/tts/settings').catch(() => undefined),
     ])
     state.value = device; stt.value = speech; tts.value = voice?.activeProvider || ''; error.value = false
   } catch { error.value = true; state.value = undefined }
@@ -40,7 +40,7 @@ onMounted(() => { void refresh(); timer = setInterval(refresh, 10000) })
 onUnmounted(() => { clearInterval(timer); if (photoUrl.value) URL.revokeObjectURL(photoUrl.value) })
 </script>
 <template>
-  <section class="connection">
+  <section class="connection" data-theme-surface="card">
     <header><h2>{{ t('xiaozhiConnection.title') }}</h2><NButton :loading="loading" @click="refresh">{{ t('xiaozhiConnection.refresh') }}</NButton></header>
     <p v-if="error" role="alert">{{ t('xiaozhiConnection.error') }}</p>
     <template v-else-if="state">
@@ -53,6 +53,6 @@ onUnmounted(() => { clearInterval(timer); if (photoUrl.value) URL.revokeObjectUR
   </section>
 </template>
 <style scoped>
-.connection{padding:24px;border:1px solid var(--border-color,#8884);border-radius:16px;margin-bottom:24px;background:var(--bg-secondary,#8881)}header{display:flex;justify-content:space-between;gap:16px}h2{font-size:20px;margin:0}p{opacity:.75;line-height:1.6}dl{display:flex;gap:40px;flex-wrap:wrap}dt{opacity:.65;font-size:12px}dd{margin:6px 0}code{display:block;overflow-wrap:anywhere;padding:12px;margin-bottom:8px;background:#8881;border-radius:8px}a{display:block;margin-top:16px}
+.connection{padding:24px;border:1px solid var(--border-color,rgba(var(--text-primary-rgb), 0.267));border-radius:16px;margin-bottom:24px;background:var(--bg-secondary,rgba(var(--text-primary-rgb), 0.067))}header{display:flex;justify-content:space-between;gap:16px}h2{font-size:20px;margin:0}p{opacity:.75;line-height:1.6}dl{display:flex;gap:40px;flex-wrap:wrap}dt{opacity:.65;font-size:12px}dd{margin:6px 0}code{display:block;overflow-wrap:anywhere;padding:12px;margin-bottom:8px;background:rgba(var(--text-primary-rgb), 0.067);border-radius:8px}a{display:block;margin-top:16px}
 .camera{margin-top:20px}.camera img{display:block;width:100%;max-width:640px;border-radius:12px}
 </style>

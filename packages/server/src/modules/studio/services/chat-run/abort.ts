@@ -1,0 +1,378 @@
+import { cancelPersonDelivery } from '../person/delivery'
+/**
+ * Abort handler — cancels in-progress runs (both API server and CLI bridge).
+ */
+
+import type { Server, Socket } from 'socket.io'
+import { getSession, updateSession, updateSessionStats } from '../../repositories/session-store'
+import { isPrivatePersonSession } from '../../contracts/person-session'
+import { publishPluginObservation } from '../plugins/event-source'
+import { logger } from '../../public/logging'
+import { chatCodingAgentRunManager as codingAgentRunManager } from '../../public/chat-agent-runtime'
+import {
+  abortChatEkkoBackgroundTasks as abortGlobalEkkoBackgroundTasks,
+  hasChatEkkoBackgroundTasks as hasGlobalEkkoBackgroundTasks,
+} from '../../public/chat-agent-runtime'
+import { flushBridgePendingToDb } from './bridge-message'
+import { flushResponseRunToDb } from './response-stream'
+import { replaceState } from './compression'
+import { calcAndUpdateUsage } from './usage'
+import { finalizeAbortedRunUsage } from './terminal-usage'
+import type { QueuedRun, SessionState } from './types'
+
+const ABORT_BRIDGE_SYNC_TIMEOUT_MESSAGE = 'Hermes Agent did not confirm stop before timeout. Local run state was released so you can continue.'
+const abortCompletions = new WeakMap<SessionState, { runId: string; runMarker?: string }>()
+const abortRequests = new WeakMap<SessionState, Promise<void>>()
+
+function isBridgeRunSource(source?: string): boolean {
+  return source === 'cli' || source === 'global_agent' || source === 'workflow' || source === 'group_chat'
+}
+
+function settleInterruptedBackgroundTasks(state: SessionState): Array<Record<string, unknown>> {
+  const timestamp = Date.now() / 1000
+  const completed: Array<Record<string, unknown>> = []
+  state.backgroundTasks = state.backgroundTasks || {}
+  for (const [subagentId, task] of Object.entries(state.backgroundTasks)) {
+    if (String(task.status || '').toLowerCase() !== 'running') continue
+    const snapshot = {
+      ...task,
+      subagent_id: subagentId,
+      status: 'interrupted',
+      last_event: 'subagent.complete',
+      updated_at: timestamp,
+      completed_at: timestamp,
+    }
+    state.backgroundTasks[subagentId] = snapshot
+    completed.push({
+      ...snapshot,
+      event: 'subagent.complete',
+      timestamp,
+    })
+  }
+  return completed
+}
+
+export async function handleAbort(
+  nsp: ReturnType<Server['of']>,
+  socket: Socket,
+  sessionId: string,
+  sessionMap: Map<string, SessionState>,
+  bridge: any,
+  runQueuedItem: (socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void,
+) {
+  let state = sessionMap.get(sessionId)
+  const hasCodingAgentRun = codingAgentRunManager.hasSession(sessionId)
+  const hasEkkoBackgroundTasks = hasGlobalEkkoBackgroundTasks(sessionId)
+  if (!state && (hasCodingAgentRun || hasEkkoBackgroundTasks)) {
+    state = { messages: [], isWorking: true, events: [], queue: [], source: hasCodingAgentRun ? 'coding_agent' : 'builtin_agent' }
+    sessionMap.set(sessionId, state)
+  }
+  const isCodingAgentRun = !!state?.pluginAgent || state?.source === 'coding_agent' || state?.source === 'builtin_agent' || state?.webhookAgent === 'ekko' || hasCodingAgentRun || hasEkkoBackgroundTasks
+  if (state) {
+    state.backgroundWakeStopped = true
+    const dropped = state.queue.filter(item => item.goalContinuation || item.autonomous || item.backgroundDelegationId)
+    state.queue = state.queue.filter(item => !dropped.includes(item))
+    for (const item of dropped) if (item.personDelivery) cancelPersonDelivery(item.personDelivery.userId, item.personDelivery.executionId,item.personDelivery.acceptanceReturnId)
+    for (const item of dropped) {
+      if (item.backgroundDelegationId && item.backgroundClaimId) {
+        // Releasing a claim requeues it, undoing the user's Stop.
+        try {
+          void Promise.resolve(bridge.completeBackgroundNotification?.(
+            sessionId, item.profile || state.profile, item.backgroundDelegationId, item.backgroundClaimId,
+          )).catch((err: unknown) => logger.warn(err, '[chat-run-socket] failed to acknowledge stopped background wake'))
+        } catch (err) {
+          logger.warn(err, '[chat-run-socket] failed to acknowledge stopped background wake')
+        }
+      }
+    }
+  }
+  if (
+    (!state?.isWorking && !hasCodingAgentRun && !hasEkkoBackgroundTasks) ||
+    (state && !isCodingAgentRun && !state.runId && !state.abortController)
+  ) {
+    logger.info({ sessionId }, '[chat-run-socket][abort] ignored: no active run')
+    if (state) {
+      if (state.queueInsertion) {
+        emitToSession(nsp, socket, sessionId, 'run.queue_insertion.updated', {
+          event: 'run.queue_insertion.updated',
+          generation: state.queueInsertion.generation,
+          run_id: state.queueInsertion.runId,
+          queue_id: state.queueInsertion.queueId,
+          runtime: state.queueInsertion.runtime,
+          phase: 'cancelled',
+          guarantee: state.queueInsertion.guarantee,
+          reason: 'hard_stop',
+        })
+        state.queueInsertion = undefined
+      }
+      state.isWorking = false
+      state.isAborting = false
+      state.abortController = undefined
+      state.runId = undefined
+      state.events = []
+    }
+    emitToSession(nsp, socket, sessionId, 'abort.completed', {
+      event: 'abort.completed',
+      synced: false,
+      ignored: true,
+    })
+    return
+  }
+
+  const activeState = state
+  if (!activeState) return
+  if (activeState.isAborting) return
+  abortCompletions.delete(activeState)
+
+  if (activeState.queueInsertion) {
+    emitToSession(nsp, socket, sessionId, 'run.queue_insertion.updated', {
+      event: 'run.queue_insertion.updated',
+      generation: activeState.queueInsertion.generation,
+      run_id: activeState.queueInsertion.runId,
+      queue_id: activeState.queueInsertion.queueId,
+      runtime: activeState.queueInsertion.runtime,
+      phase: 'cancelled',
+      guarantee: activeState.queueInsertion.guarantee,
+      reason: 'hard_stop',
+    })
+    activeState.queueInsertion = undefined
+  }
+
+  const runId = activeState.runId
+  const runMarker = activeState.activeRunMarker
+  const isCurrentAbort = () => sessionMap.get(sessionId) === activeState
+    && activeState.runId === runId && activeState.activeRunMarker === runMarker && activeState.isAborting
+  activeState.isAborting = true
+  replaceState(sessionMap, sessionId, 'abort.started', {
+    event: 'abort.started',
+    run_id: runId,
+    graceMs: 5000,
+  })
+  emitToSession(nsp, socket, sessionId, 'abort.started', {
+    event: 'abort.started',
+    run_id: runId,
+    graceMs: 5000,
+  })
+  logger.info({ sessionId, runId }, '[chat-run-socket][abort] started')
+
+  // Workflow sessions can be backed either by Hermes bridge runs or by scoped
+  // coding-agent runners. Prefer the coding-agent runtime when it owns the
+  // session; otherwise source='workflow' is misclassified as a bridge run and
+  // bridge.interrupt returns "unknown session" while the coding agent keeps
+  // running.
+  const shouldAbortThroughBridge = isBridgeRunSource(activeState.source) && !isCodingAgentRun
+
+  // Flush in-memory assistant text to DB before aborting the stream.
+  activeState.pluginAgent?.flushPartial()
+  if (shouldAbortThroughBridge) {
+    flushBridgePendingToDb(activeState, sessionId)
+  } else {
+    flushResponseRunToDb(activeState, sessionId)
+  }
+
+  if (shouldAbortThroughBridge) {
+    let releaseRequest!: () => void
+    const request = new Promise<void>(resolve => { releaseRequest = resolve })
+    abortRequests.set(activeState, request)
+    const finishRequest = () => {
+      if (abortRequests.get(activeState) === request) abortRequests.delete(activeState)
+      releaseRequest()
+    }
+    try {
+      activeState.queue = activeState.queue.filter(item => !item.goalContinuation)
+      let interruptResult: any = null
+      try {
+        interruptResult = await bridge.interrupt(sessionId, 'Aborted by user', activeState.profile)
+        if (!isCurrentAbort()) return
+        const interruptedDelegationIds = Array.isArray(interruptResult?.background_delegation_ids)
+          ? interruptResult.background_delegation_ids.map((value: unknown) => String(value || '').trim()).filter(Boolean)
+          : []
+        for (const delegationId of interruptedDelegationIds) {
+          activeState.backgroundDelegations = activeState.backgroundDelegations || {}
+          const previous = activeState.backgroundDelegations[delegationId]
+          activeState.backgroundDelegations[delegationId] = {
+            delegationId,
+            status: 'interrupted',
+            profile: previous?.profile || activeState.profile || 'default',
+            updatedAt: Date.now(),
+          }
+          emitToSession(nsp, socket, sessionId, 'delegation.updated', {
+            event: 'delegation.updated',
+            delegation_id: delegationId,
+            status: 'interrupted',
+            delivery_status: 'cancelled',
+          })
+        }
+        for (const task of settleInterruptedBackgroundTasks(activeState)) {
+          emitToSession(nsp, socket, sessionId, 'subagent.complete', task)
+        }
+      } catch (err) {
+        logger.warn(err, '[chat-run-socket][abort] failed to interrupt CLI bridge for session %s', sessionId)
+      }
+      if (!isCurrentAbort()) return
+      try {
+        await bridge.goalPause?.(sessionId, 'user-interrupted', activeState.profile)
+      } catch (err) {
+        logger.debug(err, '[chat-run-socket][abort] goal pause-on-interrupt skipped for session %s', sessionId)
+      }
+      if (!isCurrentAbort()) return
+      if (interruptResult?.synced === false) {
+        replaceState(sessionMap, sessionId, 'abort.timeout', {
+          event: 'abort.timeout',
+          run_id: runId,
+          synced: false,
+          message: ABORT_BRIDGE_SYNC_TIMEOUT_MESSAGE,
+        })
+        emitToSession(nsp, socket, sessionId, 'abort.timeout', {
+          event: 'abort.timeout',
+          run_id: runId,
+          synced: false,
+          message: ABORT_BRIDGE_SYNC_TIMEOUT_MESSAGE,
+        })
+        logger.warn({ sessionId, runId }, '[chat-run-socket][abort] CLI bridge interrupt did not sync before timeout')
+        try {
+          await bridge.destroy?.(sessionId, activeState.profile)
+        } catch (err) {
+          logger.warn(err, '[chat-run-socket][abort] failed to destroy timed-out CLI bridge session %s', sessionId)
+        }
+        if (!isCurrentAbort()) return
+        finishRequest()
+        await markAbortCompleted(nsp, socket, sessionId, runId || 'bridge_abort_timeout', sessionMap, runQueuedItem, false, runMarker)
+        return
+      }
+    } finally {
+      // The terminal poll must not dequeue a new run while goalPause/destroy
+      // still targets this session. Release it only after those calls settle.
+      finishRequest()
+    }
+  } else if (isCodingAgentRun) {
+    activeState.abortController?.abort()
+    codingAgentRunManager.stop(sessionId, { reportClosed: false })
+    if (hasEkkoBackgroundTasks) {
+      await abortGlobalEkkoBackgroundTasks(sessionId)
+      for (const task of settleInterruptedBackgroundTasks(activeState)) {
+        emitToSession(nsp, socket, sessionId, 'subagent.complete', task)
+      }
+    }
+  } else if (activeState.abortController) {
+    activeState.abortController.abort()
+  }
+
+  if (!isCurrentAbort()) return
+  await markAbortCompleted(nsp, socket, sessionId, runId || 'response_stream', sessionMap, runQueuedItem, true, runMarker)
+}
+
+export async function markAbortCompleted(
+  nsp: ReturnType<Server['of']>,
+  socket: Socket,
+  sessionId: string,
+  runId: string,
+  sessionMap: Map<string, SessionState>,
+  runQueuedItem: (socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void,
+  synced = true,
+  expectedRunMarker?: string,
+) {
+  const state = sessionMap.get(sessionId)
+  if (!state) return
+  const activeRunId = state.runId
+  const runMarker = state.activeRunMarker
+  const pendingRequest = abortRequests.get(state)
+  if (pendingRequest) await pendingRequest
+  if (sessionMap.get(sessionId) !== state || state.runId !== activeRunId || state.activeRunMarker !== runMarker) return
+  if (!state.isWorking && !state.isAborting) return
+  if (state.runId && state.runId !== runId) return
+  if (expectedRunMarker !== undefined && state.activeRunMarker !== expectedRunMarker) return
+  const previous = abortCompletions.get(state)
+  if (previous?.runId === runId && previous.runMarker === runMarker) return
+  // Claim before accounting yields: both the interrupt reply and terminal poll
+  // can finish the same abort. Only the owner may release state/dequeue a run.
+  const completion = { runId, runMarker }
+  abortCompletions.set(state, completion)
+  const isCurrent = () => sessionMap.get(sessionId) === state
+    && state.runId === activeRunId && state.activeRunMarker === runMarker
+    && abortCompletions.get(state) === completion
+
+  const profile = state.profile
+  const runUsage = finalizeAbortedRunUsage(sessionId, runId, state)
+  const usagePayload = runUsage ? { run_usage: runUsage, message_id: runUsage.assistantMessageId } : {}
+  updateSessionStats(sessionId)
+  const emit = (event: string, payload: any) => {
+    nsp.to(`session:${sessionId}`).emit(event, { ...payload, session_id: sessionId })
+  }
+  await calcAndUpdateUsage(sessionId, state, emit, { nativeSource: state.nativeUsageSource })
+  if (!isCurrent()) return
+
+  state.isWorking = false
+  state.isAborting = false
+  state.profile = undefined
+  state.abortController = undefined
+  state.runId = undefined
+  state.responseRun = undefined
+  state.activeRunMarker = undefined
+  state.pluginAgent = undefined
+  state.finalizeRunUsage = undefined
+  state.nativeUsageSource = undefined
+
+  // Process queued messages after abort completes
+  if (state.queue.length > 0) {
+    const next = state.queue.shift()!
+    state.isWorking = true
+    state.isAborting = false
+    state.profile = next.profile || profile
+    state.source = next.source
+    logger.info('[chat-run-socket][abort] dequeuing queued run for session %s (remaining: %d)', sessionId, state.queue.length)
+    replaceState(sessionMap, sessionId, 'abort.completed', {
+      event: 'abort.completed',
+      run_id: runId,
+      synced,
+      queue_length: state.queue.length + 1,
+      ...usagePayload,
+    })
+    emitToSession(nsp, socket, sessionId, 'abort.completed', {
+      event: 'abort.completed',
+      run_id: runId,
+      synced,
+      queue_length: state.queue.length + 1,
+      ...usagePayload,
+    })
+    emitToSession(nsp, socket, sessionId, 'run.queued', {
+      event: 'run.queued',
+      queue_length: state.queue.length,
+      dequeued_queue_id: next.queue_id,
+    })
+    state.events = []
+    runQueuedItem(socket, sessionId, next, profile || 'default')
+    return
+  }
+
+  try {
+    updateSession(sessionId, {
+      ended_at: Math.floor(Date.now() / 1000),
+      end_reason: 'abort',
+    })
+  } catch (err) {
+    logger.warn(err, '[chat-run-socket][abort] failed to write cancellation end marker for session %s', sessionId)
+  }
+
+  state.events = []
+  emitToSession(nsp, socket, sessionId, 'abort.completed', {
+    event: 'abort.completed',
+    run_id: runId,
+    synced,
+    ...usagePayload,
+  })
+  logger.info({ sessionId, runId, synced }, '[chat-run-socket][abort] completed')
+}
+
+function emitToSession(nsp: ReturnType<Server['of']>, socket: Socket, sessionId: string, event: string, payload: any) {
+  const tagged = { ...payload, session_id: sessionId }
+  if (event === 'abort.completed' && !payload.ignored && !isPrivatePersonSession(sessionId)) {
+    const session = getSession(sessionId)
+    if (session) publishPluginObservation('chat.run.stopped', session.profile || 'default', session.source || 'chat',
+      { session_id: sessionId, run_id: payload.run_id || undefined }, { status: 'stopped' })
+  }
+  nsp.to(`session:${sessionId}`).emit(event, tagged)
+  if (!nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
+    socket.emit(event, tagged)
+  }
+}

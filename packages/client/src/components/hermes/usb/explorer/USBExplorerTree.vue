@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { NSpin, NEmpty, NIcon } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { listUSBFiles, type USBFileEntry } from '@/api/hermes/usb'
+import { listUSBFiles, type USBFileEntry } from '@/api/studio/usb'
 import { useMessage } from '@/composables/useAppMessage'
 
 interface TreeNode {
@@ -211,7 +211,7 @@ watch(
   flex-direction: column;
   gap: 8px;
   min-height: 0;
-  background: $bg-card;
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid $border-light;
   border-radius: $radius-md;
   padding: 10px 8px;
@@ -267,7 +267,7 @@ details > summary::-webkit-details-marker {
   transition: background $transition-fast;
 
   &:hover {
-    background: var(--bg-secondary);
+    background: var(--theme-card-bg, var(--bg-card));
   }
 
   &.active {

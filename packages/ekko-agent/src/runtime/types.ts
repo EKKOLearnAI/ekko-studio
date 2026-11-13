@@ -1,4 +1,4 @@
-import type { AgentMessage, ModelClient, ModelRequest, ModelUsage } from '../model/types'
+import type { AgentMessage, ModelClient, ModelRequest } from '../model/types'
 import type { AgentMessageInput, AgentOutputMessage } from '../model/messages'
 import type { AgentSkill } from '../skills/types'
 import type { AgentToolRegistry } from '../tools/registry'
@@ -97,6 +97,8 @@ export interface AgentRuntimeRunInput {
   messages: AgentMessageInput[]
   signal?: AbortSignal
   systemPrompt?: string
+  /** Default true. Scoped hosts without execution tools may omit generic shell/code guidance. Does not grant or remove tools. */
+  toolExecutionGuidelinesEnabled?: boolean
   skills?: AgentSkill[]
   maxSteps?: number
   maxModelRetries?: number
@@ -141,16 +143,14 @@ export interface AgentRuntimeRunInput {
   backgroundDelegationEnabled?: boolean
   /** Correlation fields only; log events and payloads remain runtime-owned. */
   logContext?: EkkoRuntimeLogContext
-  /** Legacy summary-usage hook; direct memory capture performs no model calls. */
-  onMemoryUsage?: (input: {
-    purpose: 'ekko-memory-summary'
-    usage: ModelUsage
-    model?: string
-    callIndex: number
-  }) => void
   onSkillReviewUsage?: (input: SkillReviewUsageEvent) => void
   /** Synchronous durable commit, called before plan.updated is published. Throw to reject an update. */
   onPlanUpdate?: (plan: import('../tools/plan').AgentTaskPlan) => void
+  /**
+   * Trusted host decision after the entire tool batch has settled. A finalReply
+   * requests one tool-free model reply, even at maxSteps, instead of cutting off text.
+   */
+  onToolBatchComplete?: () => AgentOutputMessage | { finalReply: string; finishReason?: string } | undefined
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 

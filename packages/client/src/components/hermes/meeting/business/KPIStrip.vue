@@ -72,7 +72,7 @@ function deltaIcon(d?: KpiItem['delta']): string {
   gap: 12px;
 }
 .kpi-card {
-  background: var(--bg-card);
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 10px 14px;

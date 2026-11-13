@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
-import { NDropdown, useDialog } from 'naive-ui'
+import { NDropdown, useMessage, useDialog } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useFilesStore, isTextFile, isPreviewableFile } from '@/stores/hermes/files'
-import { downloadSessionWorkspaceFile } from '@/api/hermes/sessions'
-import { downloadGroupWorkspaceFile } from '@/api/hermes/group-chat'
-import { downloadFile } from '@/api/hermes/download'
-import type { FileEntry } from '@/api/hermes/files'
+import { downloadSessionWorkspaceFile } from '@/api/studio/sessions'
+import { downloadGroupWorkspaceFile } from '@/api/studio/group-chat'
+import { downloadFile } from '@/api/studio/download'
+import type { FileEntry } from '@/api/studio/files'
 import { copyToClipboard } from '@/utils/clipboard'
 import { getClipboardPathForEntry } from '@/utils/file-path'
-import { useMessage } from '@/composables/useAppMessage'
 
 const { t } = useI18n()
 const message = useMessage()

@@ -1,13 +1,7 @@
-import type { ChatMessage, RoomAgent } from '@/api/hermes/group-chat'
+import type { ChatMessage, RoomAgent } from '@/api/studio/group-chat'
 import type { ProfileAvatar } from '@/api/hermes/profiles'
 
-const DEFAULT_AGENT_ICONS: Record<RoomAgent['agent'], string> = {
-    hermes: '/coding-agents/hermes.png',
-    ekko: '/coding-agents/ekko-agent.png',
-    codex: '/coding-agents/codex-openai.png',
-    claude: '/coding-agents/claude-code.svg',
-    pi: '/coding-agents/pi.svg',
-}
+import { chatSessionAgentAvatar } from './chat-agent-avatar'
 
 export function parseStoredAvatar(raw: unknown): ProfileAvatar | null {
     if (!raw) return null
@@ -26,11 +20,7 @@ export function parseStoredAvatar(raw: unknown): ProfileAvatar | null {
 }
 
 export function defaultGroupAgentAvatar(agent: RoomAgent['agent'] | undefined): ProfileAvatar {
-    const runtime = agent && agent in DEFAULT_AGENT_ICONS ? agent : 'hermes'
-    return {
-        type: 'image',
-        dataUrl: DEFAULT_AGENT_ICONS[runtime],
-    }
+    return { type: 'image', dataUrl: chatSessionAgentAvatar({ agent: agent || 'hermes' }).src }
 }
 
 export function groupAgentAvatar(agent: Pick<RoomAgent, 'agent' | 'avatar'> | null | undefined): ProfileAvatar {
@@ -46,14 +36,13 @@ export function groupMessageAgent(message: ChatMessage, agents: RoomAgent[]): Ro
     if (active) return active
     if (message.senderType !== 'agent') return undefined
 
-    const agentType = message.senderAgentType && message.senderAgentType in DEFAULT_AGENT_ICONS
-        ? message.senderAgentType
-        : 'hermes'
+    const agentType = message.senderAgentType || 'hermes'
     return {
         id: message.senderAgentRecordId || `historical:${message.senderId}`,
         roomId: message.roomId,
         agentId: message.senderId,
         agent: agentType,
+        agentMode: 'scoped',
         profile: message.senderAgentProfile || '',
         provider: message.senderAgentProvider || '',
         model: message.senderAgentModel || '',

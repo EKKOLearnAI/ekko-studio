@@ -28,7 +28,7 @@ export function groupChatAgentLinkPopupResponse(
       height: 720,
       minWidth: 480,
       minHeight: 600,
-      title: 'Hermes Studio',
+      title: 'Ekko Studio',
       backgroundColor: '#1a1a1a',
       autoHideMenuBar: true,
       show: true,

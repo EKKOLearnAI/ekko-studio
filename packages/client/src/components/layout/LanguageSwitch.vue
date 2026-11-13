@@ -2,22 +2,15 @@
 import { useI18n } from 'vue-i18n'
 import { NSelect } from 'naive-ui'
 import { switchLocale } from '@/i18n'
+import { languageOptions } from '@/i18n/language-options'
+
+withDefaults(defineProps<{
+  size?: 'tiny' | 'small' | 'medium' | 'large'
+}>(), {
+  size: 'tiny',
+})
 
 const { locale } = useI18n()
-
-const options = [
-  { label: '简体中文', value: 'zh' },
-  { label: '繁體中文', value: 'zh-TW' },
-  { label: 'English', value: 'en' },
-  { label: '日本語', value: 'ja' },
-  { label: '한국어', value: 'ko' },
-  { label: 'Français', value: 'fr' },
-  { label: 'Español', value: 'es' },
-  { label: 'Deutsch', value: 'de' },
-  { label: 'Português', value: 'pt' },
-  { label: 'Русский', value: 'ru' },
-  { label: 'العربية', value: 'ar' },
-]
 
 async function handleChange(val: string) {
   await switchLocale(val)
@@ -27,8 +20,8 @@ async function handleChange(val: string) {
 <template>
   <NSelect
     :value="locale"
-    :options="options"
-    size="tiny"
+    :options="languageOptions"
+    :size="size"
     :consistent-menu-width="false"
     class="language-switch input-sm"
     @update:value="handleChange"

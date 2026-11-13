@@ -1,4 +1,5 @@
 import type { App } from 'vue'
+import { registerAdditionalLocaleMessages } from '@/i18n/messages'
 import type { Router } from 'vue-router'
 
 /**
@@ -51,8 +52,11 @@ function createContext(app: App, router: Router, i18n: PluginI18n): PluginContex
       router.addRoute(route)
     },
     addI18nMessages(locale, messages) {
+      registerAdditionalLocaleMessages(locale, messages)
       const existing = i18n.global.getLocaleMessage(locale) || {}
-      i18n.global.setLocaleMessage(locale, deepMerge(existing, messages))
+      if (Object.keys(existing).length > 0) {
+        i18n.global.setLocaleMessage(locale, deepMerge(existing, messages))
+      }
     },
   }
 }

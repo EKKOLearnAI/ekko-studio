@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ run: vi.fn(), auth: vi.fn() }))
-vi.mock('../../packages/server/src/services/terminal/realtime-command', () => ({ runRealtimeCommand: mocks.run }))
-vi.mock('../../packages/server/src/middleware/user-auth', () => ({ isAuthEnabled: mocks.auth }))
-import { terminalCommand } from '../../packages/server/src/controllers/hermes/realtime-agent'
+vi.mock('../../packages/server/src/modules/studio/services/terminal/realtime-command', () => ({ runRealtimeCommand: mocks.run }))
+vi.mock('../../packages/server/src/modules/studio/middleware/auth', () => ({ isAuthEnabled: mocks.auth }))
+import { terminalCommand } from '../../packages/server/src/modules/studio/controllers/realtime-agent'
 
 function context(body: unknown, role = 'super_admin') {
   return { request: { body }, state: { user: { role } }, res: new EventEmitter(), status: 200, body: undefined as unknown }

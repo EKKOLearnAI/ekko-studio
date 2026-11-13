@@ -21,7 +21,7 @@ const status = {
   error: null as string | null,
 }
 
-vi.mock('../../packages/server/src/services/meeting-asr', () => ({
+vi.mock('../../packages/server/src/modules/studio/services/meeting-asr', () => ({
   meetingASRService: {
     get status() {
       return status
@@ -32,7 +32,7 @@ vi.mock('../../packages/server/src/services/meeting-asr', () => ({
 import {
   getFileTranscriptionStatus,
   startFileTranscription,
-} from '../../packages/server/src/controllers/hermes/meeting-asr'
+} from '../../packages/server/src/modules/studio/controllers/meeting-asr'
 
 interface Captured {
   path: string
@@ -197,7 +197,7 @@ describe('stale ASR backend self-heal wiring', () => {
 
   it('the service hashes the sources, stamps the child and reports it', () => {
     const source = readFileSync(
-      'packages/server/src/services/meeting-asr/index.ts',
+      'packages/server/src/modules/studio/services/meeting-asr/index.ts',
       'utf8',
     )
     expect(source).toContain('computeBackendCodeHash')

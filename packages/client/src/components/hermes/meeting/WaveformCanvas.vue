@@ -98,7 +98,7 @@ onBeforeUnmount(stop)
 <style scoped lang="scss">
 .waveform-container {
   height: 100px;
-  background: rgb(15, 23, 42);
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
   position: relative;
   overflow: hidden;
 
@@ -114,8 +114,8 @@ onBeforeUnmount(stop)
     align-items: center;
     justify-content: center;
     gap: 8px;
-    background: rgba(0, 0, 0, 0.5);
-    color: white;
+    background: rgba(var(--text-primary-rgb), 0.5);
+    color: var(--text-primary);
     font-size: 14px;
   }
 }

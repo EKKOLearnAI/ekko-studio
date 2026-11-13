@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useOmniRealtime, type OmniDialogToolCall } from '@/composables/useOmniRealtime'
 import OmniVisualizer from '@/components/hermes/chat/OmniVisualizer.vue'
 import { meetingASRApi } from '@/utils/meeting-asr-api'
-import { executeOmniTool, OMNI_REALTIME_TOOLS } from '@/api/hermes/omni-tools'
+import { executeOmniTool, OMNI_REALTIME_TOOLS } from '@/api/studio/omni-tools'
 import { fetchMemory } from '@/api/hermes/skills'
 import { uid, useChatStore, type Message } from '@/stores/hermes/chat'
 import { useMeetingStore } from '@/stores/hermes/meeting'
@@ -900,7 +900,7 @@ onBeforeUnmount(() => {
   isolation: isolate;
   overflow: hidden;
   /* 不透明水墨底色——light 是 #fafafa，dark 是 #1a1a1a。完全跟随主题。 */
-  background: var(--bg-primary);
+  background: var(--theme-card-bg, var(--bg-card));
   color: var(--text-primary);
 }
 
@@ -961,7 +961,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 14px;
   border-bottom: 1px solid var(--glass-realtime-border);
-  background: var(--glass-realtime-bg);
+  background: var(--theme-card-bg, var(--bg-card));
   -webkit-backdrop-filter: var(--glass-realtime-blur);
   backdrop-filter: var(--glass-realtime-blur);
 }
@@ -973,14 +973,14 @@ onBeforeUnmount(() => {
   place-items: center;
   border: 1px solid var(--glass-realtime-border);
   border-radius: 12px;
-  background: var(--glass-realtime-bg-subtle);
+  background: var(--theme-card-bg, var(--bg-card));
   color: inherit;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease;
 }
 
 .omni-stage__back:hover {
-  background: var(--glass-realtime-bg-strong);
+  background: var(--theme-card-bg, var(--bg-card));
   border-color: var(--glass-realtime-border-strong);
 }
 .omni-stage__back svg { width: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; }
@@ -1006,7 +1006,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--glass-realtime-border-strong);
   border-radius: 999px;
   color: var(--text-primary);
-  background: var(--glass-realtime-bg-subtle);
+  background: var(--theme-card-bg, var(--bg-card));
   font-size: 11px;
   letter-spacing: 0.04em;
 }
@@ -1058,7 +1058,7 @@ onBeforeUnmount(() => {
   padding: 26px 24px;
   border: 1px solid var(--glass-realtime-border);
   border-radius: 20px;
-  background: var(--glass-realtime-bg-strong);
+  background: var(--theme-card-bg, var(--bg-card));
   -webkit-backdrop-filter: var(--glass-realtime-blur-strong);
   backdrop-filter: var(--glass-realtime-blur-strong);
   box-shadow: var(--glass-realtime-shadow);
@@ -1163,7 +1163,7 @@ onBeforeUnmount(() => {
   border-bottom-left-radius: 6px;
   /* AI 气泡：mono 玻璃，跟随主题底色——light 下浅灰，dark 下深墨。
    * 没有任何彩色，纯水墨质感。 */
-  background: var(--glass-realtime-bg-strong);
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid var(--glass-realtime-border-strong);
   -webkit-backdrop-filter: blur(16px) saturate(160%);
   backdrop-filter: blur(16px) saturate(160%);
@@ -1241,7 +1241,7 @@ onBeforeUnmount(() => {
   max-width: min(560px, calc(100% - 40px));
   padding: 8px 14px;
   border-radius: 999px;
-  background: var(--glass-realtime-bg-subtle);
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid var(--glass-realtime-border);
   -webkit-backdrop-filter: var(--glass-realtime-blur);
   backdrop-filter: var(--glass-realtime-blur);
@@ -1255,7 +1255,7 @@ onBeforeUnmount(() => {
 .omni-stage__tool-inline--error {
   /* 不再走 error-rgb 红色——视觉上只用一个 mono 灰色加深 + 文字
    * 透明度降低表达"未完成"，保留水墨调色板一致性。 */
-  background: var(--glass-realtime-bg-subtle);
+  background: var(--theme-card-bg, var(--bg-card));
   border-color: var(--glass-realtime-border-strong);
   color: rgba(var(--text-primary-rgb), 0.7);
 }
@@ -1334,7 +1334,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--glass-realtime-border-strong);
   border-radius: 50%;
   color: var(--text-primary);
-  background: var(--glass-realtime-bg);
+  background: var(--theme-card-bg, var(--bg-card));
   -webkit-backdrop-filter: var(--glass-realtime-blur);
   backdrop-filter: var(--glass-realtime-blur);
   cursor: pointer;
@@ -1343,7 +1343,7 @@ onBeforeUnmount(() => {
 }
 
 .omni-stage__control:hover {
-  background: var(--glass-realtime-bg-strong);
+  background: var(--theme-card-bg, var(--bg-card));
   border-color: var(--text-primary);
   transform: scale(1.05);
 }
@@ -1381,25 +1381,25 @@ html:not(.dark) .omni-stage__halo {
 
 html:not(.dark) .omni-stage__backdrop {
   background:
-    radial-gradient(ellipse 72% 44% at 50% 24%, rgba(255, 205, 110, 0.20), rgba(255, 205, 110, 0) 72%),
-    radial-gradient(ellipse 95% 44% at 50% 114%, rgba(150, 180, 235, 0.13), rgba(150, 180, 235, 0) 70%),
-    var(--bg-primary);
+    radial-gradient(ellipse 72% 44% at 50% 24%, rgba(var(--accent-primary-rgb), 0.2), rgba(var(--accent-primary-rgb), 0) 72%),
+    radial-gradient(ellipse 95% 44% at 50% 114%, rgba(var(--accent-info-rgb), 0.13), rgba(var(--accent-info-rgb), 0) 70%),
+    var(--theme-card-bg, var(--bg-card));
 }
 
 html:not(.dark) .omni-stage__control {
-  background: rgba(255, 255, 255, 0.90);
-  border-color: rgba(26, 26, 26, 0.16);
-  box-shadow: 0 2px 14px rgba(26, 26, 26, 0.10);
+  background: rgba(var(--text-primary-rgb), 0.9);
+  border-color: rgba(var(--text-primary-rgb), 0.16);
+  box-shadow: 0 2px 14px rgba(var(--text-primary-rgb), 0.1);
 }
 
 html:not(.dark) .omni-stage__control:hover {
-  background: #ffffff;
-  border-color: rgba(26, 26, 26, 0.42);
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
+  border-color: rgba(var(--text-primary-rgb), 0.42);
 }
 
 html:not(.dark) .omni-stage__control--muted {
-  border-color: rgba(26, 26, 26, 0.44);
-  background: rgba(26, 26, 26, 0.08);
+  border-color: rgba(var(--text-primary-rgb), 0.44);
+  background: rgba(var(--text-primary-rgb), 0.08);
 }
 
 html:not(.dark) .omni-stage__control--end {
@@ -1412,8 +1412,8 @@ html:not(.dark) .omni-stage__control--end:hover {
 }
 
 html:not(.dark) .omni-stage__bubble--assistant {
-  background: rgba(255, 255, 255, 0.92);
-  border-color: rgba(26, 26, 26, 0.14);
-  box-shadow: 0 2px 16px rgba(26, 26, 26, 0.08);
+  background: rgba(var(--text-primary-rgb), 0.92);
+  border-color: rgba(var(--text-primary-rgb), 0.14);
+  box-shadow: 0 2px 16px rgba(var(--text-primary-rgb), 0.08);
 }
 </style>

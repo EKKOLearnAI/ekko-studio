@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NCheckbox } from 'naive-ui'
+import { NModal, NForm, NFormItem, NInput, NInputNumber, NSelect, NButton, NCheckbox, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useKanbanStore } from '@/stores/hermes/kanban'
 import { withDefaultAssignee } from '@/utils/hermes/kanban-assignees'
 import { fetchSkills } from '@/api/hermes/skills'
 import type { SkillInfo } from '@/api/hermes/skills'
-import { useMessage } from '@/composables/useAppMessage'
 
 const emit = defineEmits<{
   close: []
@@ -210,7 +209,7 @@ async function handleSubmit() {
 <style scoped lang="scss">
 .advanced-row {
   display: flex;
-  gap: 16px;
+  gap: calc(16px * var(--spacing-scale, 1));
   margin: 0 0 12px;
   flex-wrap: wrap;
 }
@@ -218,6 +217,6 @@ async function handleSubmit() {
 .advanced-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: calc(10px * var(--spacing-scale, 1));
 }
 </style>

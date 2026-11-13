@@ -3,7 +3,8 @@ import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { NAlert, NButton, NInput, NInputNumber, NSwitch } from 'naive-ui'
 import { io, type Socket } from 'socket.io-client'
-import { getApiKey } from '@/api/client'
+import { getActiveProfileName, getApiKey, getBaseUrlValue } from '@/api/client'
+import { socketEndpoint } from '@/utils/deployment-url'
 import { useI18n } from 'vue-i18n'
 import { useScannerCamera } from '../scanner/composables/useScannerCamera'
 import { gradingApi, type Submission, type Annotation } from './api'
@@ -108,7 +109,8 @@ function goChat() {
   void router.push({ name: 'hermes.chat' })
 }
 onMounted(() => void attempt(async () => { settings.value = await gradingApi('settings', { enabled: true }); await load();
-  socket = io(`${localStorage.getItem('hermes_server_url') || ''}/grading`, { auth: { token: getApiKey() }, query: { profile: localStorage.getItem('hermes_active_profile_name') || 'default' } })
+  const endpoint = socketEndpoint(getBaseUrlValue(), '/grading')
+  socket = io(endpoint.url, { path: endpoint.path, auth: { token: getApiKey() }, query: { profile: getActiveProfileName() || 'default' } })
   socket.on('grading.request', (request: any) => void attempt(async () => {
     if (request.action === 'capture') {
       captureRequest.value = request.requestId
@@ -147,28 +149,28 @@ onBeforeUnmount(() => { disposed = true; paused.value = true; camera.stop(); soc
     </section>
     <div class="actions"><NButton type="primary" :disabled="running || busy || !rows.length" @click="attempt(() => start())">{{ t('grading.start') }}</NButton><NButton :disabled="!running" @click="paused = true">{{ t('grading.pause') }}</NButton><NButton :disabled="running || !rows.some(r => r.results.length)" @click="attempt(exportAll)">{{ t('grading.allPdf') }}</NButton><NButton :disabled="!summary?.total" @click="exportReport">{{ t('grading.report') }}</NButton></div>
     <section class="workspace">
-      <div class="queue"><p v-if="!rows.length">{{ t('grading.empty') }}</p><article v-for="row in rows" :key="row.id" :class="{ selected: active?.id === row.id }"><NButton text @click="attempt(() => select(row.id))">{{ row.studentName }}</NButton><span>{{ t(`grading.${row.status}`) }}</span><strong v-if="row.results.length">{{ row.results.reduce((n,r) => n+r.score,0) }}</strong><p v-if="row.error">{{ row.error }}</p><NButton v-if="row.status === 'error'" :disabled="running" @click="attempt(() => start(row))">{{ t('grading.retry') }}</NButton></article></div>
-      <div v-if="active" class="paper"><div class="actions"><NSwitch v-model:value="rough" />{{ t(rough ? 'grading.rough' : 'grading.printed') }}<NButton @click="attempt(save)">{{ t('grading.save') }}</NButton><NButton @click="attempt(() => exportOne('pdf'))">{{ t('grading.pdf') }}</NButton><NButton @click="attempt(() => exportOne('png'))">{{ t('grading.png') }}</NButton></div><NAlert v-if="active.status === 'review'" type="warning">{{ t('grading.review') }}</NAlert><GradingAnnotator v-model="annotations" :image="active.image" :rough="rough" /><div v-for="result in active.results" :key="result.qid" class="actions"><span>{{ result.qid }} / {{ result.fullMark }}</span><NInputNumber v-model:value="result.score" :min="0" :max="result.fullMark" /><NInput v-model:value="result.feedback" /></div><NButton v-if="active.results.length" @click="attempt(review)">{{ t('grading.confirmReview') }}</NButton></div>
+      <div class="queue" data-theme-surface="card"><p v-if="!rows.length">{{ t('grading.empty') }}</p><article v-for="row in rows" :key="row.id" :class="{ selected: active?.id === row.id }"><NButton text @click="attempt(() => select(row.id))">{{ row.studentName }}</NButton><span>{{ t(`grading.${row.status}`) }}</span><strong v-if="row.results.length">{{ row.results.reduce((n,r) => n+r.score,0) }}</strong><p v-if="row.error">{{ row.error }}</p><NButton v-if="row.status === 'error'" :disabled="running" @click="attempt(() => start(row))">{{ t('grading.retry') }}</NButton></article></div>
+      <div v-if="active" class="paper" data-theme-surface="card"><div class="actions"><NSwitch v-model:value="rough" />{{ t(rough ? 'grading.rough' : 'grading.printed') }}<NButton @click="attempt(save)">{{ t('grading.save') }}</NButton><NButton @click="attempt(() => exportOne('pdf'))">{{ t('grading.pdf') }}</NButton><NButton @click="attempt(() => exportOne('png'))">{{ t('grading.png') }}</NButton></div><NAlert v-if="active.status === 'review'" type="warning">{{ t('grading.review') }}</NAlert><GradingAnnotator v-model="annotations" :image="active.image" :rough="rough" /><div v-for="result in active.results" :key="result.qid" class="actions"><span>{{ result.qid }} / {{ result.fullMark }}</span><NInputNumber v-model:value="result.score" :min="0" :max="result.fullMark" /><NInput v-model:value="result.feedback" /></div><NButton v-if="active.results.length" @click="attempt(review)">{{ t('grading.confirmReview') }}</NButton></div>
     </section>
     <section v-if="summary?.total" class="report"><span v-for="key in ['average','max','min','passRate']" :key="key">{{ t(`grading.${key}`) }}: {{ Number(summary[key]).toFixed(2) }}</span><p>{{ t('grading.wrongRank') }}: {{ summary.wrongRank.map((q: any) => `${q.qid} (${q.wrongCount})`).join(', ') }}</p></section>
   </main>
 </template>
 <style scoped lang="scss">
-/* ─── Terminal Hacker Theme ────────────────────────────────────────────── */
+/* Keep the grading workspace on the shared Studio theme. */
 .grading-view {
   /* 主题色 */
-  --hacker-bg: #0a0e0d;
-  --hacker-bg-soft: #0f1413;
-  --hacker-card: #11171680;
-  --hacker-border: #00ff8833;
-  --hacker-border-strong: #00ff88aa;
-  --hacker-grid: #00ff881a;
-  --hacker-text: #00ff88;
-  --hacker-text-dim: #00ff8888;
-  --hacker-text-mute: #00ff8844;
-  --hacker-accent: #00e5ff;
-  --hacker-warn: #facc15;
-  --hacker-err: #ff4d4d;
+  --hacker-bg: var(--theme-content-bg, var(--bg-primary));
+  --hacker-bg-soft: var(--theme-input-bg, var(--bg-card));
+  --hacker-card: var(--theme-card-bg, var(--bg-card));
+  --hacker-border: var(--border-color);
+  --hacker-border-strong: var(--accent-primary);
+  --hacker-grid: rgba(var(--text-primary-rgb), 0.025);
+  --hacker-text: var(--text-primary);
+  --hacker-text-dim: var(--text-secondary);
+  --hacker-text-mute: var(--text-muted);
+  --hacker-accent: var(--accent-info);
+  --hacker-warn: var(--warning);
+  --hacker-err: var(--error);
   --hacker-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', ui-monospace, monospace;
 
   padding: 24px;
@@ -181,16 +183,16 @@ onBeforeUnmount(() => { disposed = true; paused.value = true; camera.stop(); soc
   isolation: isolate;
 
   /* 双向网格背景：模拟 CRT 终端扫描线 + 矩阵方格 */
-  background-color: var(--hacker-bg);
+  background-color: var(--theme-content-bg, var(--bg-primary));
   background-image:
     /* 水平扫描线 */
-    repeating-linear-gradient(0deg, transparent 0 3px, #00ff8808 3px 4px),
-    /* 细网格 */
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(var(--success-rgb), 0.031) 3px 4px),
+
     linear-gradient(transparent calc(100% - 1px), var(--hacker-grid) 100%),
     linear-gradient(90deg, transparent calc(100% - 1px), var(--hacker-grid) 100%),
-    /* 大网格 */
-    linear-gradient(transparent calc(100% - 1px), #00ff8825 100%),
-    linear-gradient(90deg, transparent calc(100% - 1px), #00ff8825 100%);
+
+    linear-gradient(transparent calc(100% - 1px), rgba(var(--success-rgb), 0.145) 100%),
+    linear-gradient(90deg, transparent calc(100% - 1px), rgba(var(--success-rgb), 0.145) 100%);
   background-size: 100% 100%, 32px 32px, 32px 32px, 128px 128px, 128px 128px;
   background-position: 0 0, 0 0, 0 0, 0 0, 0 0;
   color: var(--hacker-text);
@@ -200,8 +202,8 @@ onBeforeUnmount(() => { disposed = true; paused.value = true; camera.stop(); soc
 
   /* 全局滚动条黑客化 */
   &::-webkit-scrollbar { width: 10px; height: 10px; }
-  &::-webkit-scrollbar-track { background: var(--hacker-bg); }
-  &::-webkit-scrollbar-thumb { background: var(--hacker-border); }
+  &::-webkit-scrollbar-track { background: var(--theme-content-bg, var(--bg-primary)); }
+  &::-webkit-scrollbar-thumb { background: var(--border-color); }
   &::-webkit-scrollbar-thumb:hover { background: var(--hacker-border-strong); }
 
   /* 顶部 CRT 辉光 */
@@ -209,7 +211,7 @@ onBeforeUnmount(() => { disposed = true; paused.value = true; camera.stop(); soc
     content: '';
     position: absolute;
     inset: 0;
-    background: radial-gradient(ellipse at top, #00ff8810, transparent 60%);
+    background: radial-gradient(ellipse at top, rgba(var(--success-rgb), 0.063), transparent 60%);
     pointer-events: none;
     z-index: -1;
   }
@@ -225,18 +227,18 @@ header {
   flex-wrap: wrap;
   justify-content: space-between;
   padding: 10px 14px;
-  background: linear-gradient(180deg, #0f1413, #0a0e0d);
+  background: linear-gradient(180deg, var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))), var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))));
   border: 1px solid var(--hacker-border);
   border-radius: 6px;
   position: relative;
-  box-shadow: 0 0 18px #00ff8810, inset 0 0 18px #00ff8808;
+  box-shadow: 0 0 18px rgba(var(--success-rgb), 0.063), inset 0 0 18px rgba(var(--success-rgb), 0.031);
 
   &::before {
     content: '● grading.terminal [OK]';
     position: absolute;
     top: -10px;
     left: 14px;
-    background: var(--hacker-bg);
+    background: var(--theme-content-bg, var(--bg-primary));
     color: var(--hacker-text);
     padding: 0 8px;
     font-size: 11px;
@@ -268,7 +270,7 @@ header {
   font-family: var(--hacker-mono);
   font-weight: 500;
   letter-spacing: 0.03em;
-  background: #0f1413 !important;
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))) !important;
   border: 1px solid var(--hacker-border) !important;
   color: var(--hacker-text) !important;
   box-shadow: 0 0 6px transparent;
@@ -277,13 +279,13 @@ header {
   &:hover {
     border-color: var(--hacker-border-strong) !important;
     color: var(--hacker-text) !important;
-    background: #111916 !important;
+    background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))) !important;
     box-shadow: 0 0 12px var(--hacker-border);
     text-shadow: 0 0 6px var(--hacker-text);
   }
 
   &.n-button--primary-type {
-    background: linear-gradient(180deg, #00ff8822, #00ff8811) !important;
+    background: linear-gradient(180deg, rgba(var(--success-rgb), 0.133), rgba(var(--success-rgb), 0.067)) !important;
     border-color: var(--hacker-text) !important;
     color: var(--hacker-text) !important;
     text-shadow: 0 0 6px var(--hacker-text);
@@ -296,7 +298,7 @@ header {
   font-family: var(--hacker-mono);
   border-radius: 4px;
   border: 1px solid currentColor;
-  background: #0f1413 !important;
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))) !important;
 }
 
 /* ─── Rubric Input ──────────────────────────────────────────────────── */
@@ -305,7 +307,7 @@ header {
 
   .n-input__input-el,
   .n-input__textarea-el {
-    background: #0a0e0d !important;
+    background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card))) !important;
     color: var(--hacker-text) !important;
     caret-color: var(--hacker-text);
     font-family: var(--hacker-mono);
@@ -323,8 +325,8 @@ header {
   padding: 20px;
   border-radius: 6px;
   background:
-    repeating-linear-gradient(45deg, transparent 0 8px, #00ff8805 8px 9px),
-    #0a0e0d;
+    repeating-linear-gradient(45deg, transparent 0 8px, rgba(var(--success-rgb), 0.02) 8px 9px),
+    var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
   position: relative;
   transition: all 0.2s ease;
 
@@ -365,7 +367,7 @@ header {
 
 /* Queue 侧栏 */
 .queue {
-  background: var(--hacker-card);
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid var(--hacker-border);
   border-radius: 6px;
   padding: 12px;
@@ -392,11 +394,11 @@ header {
     border-radius: 4px;
     position: relative;
 
-    &:hover { background: #00ff8815; box-shadow: inset 2px 0 0 var(--hacker-text); }
+    &:hover { background: rgba(var(--success-rgb), 0.082); box-shadow: inset 2px 0 0 var(--hacker-text); }
 
     &.selected {
-      background: linear-gradient(90deg, #00ff8820, transparent);
-      box-shadow: inset 2px 0 0 var(--hacker-text), 0 0 12px #00ff8820;
+      background: linear-gradient(90deg, rgba(var(--success-rgb), 0.125), transparent);
+      box-shadow: inset 2px 0 0 var(--hacker-text), 0 0 12px rgba(var(--success-rgb), 0.125);
       &::before {
         content: '▸';
         position: absolute;
@@ -433,7 +435,7 @@ header {
 /* Paper 主区 */
 .paper {
   min-width: 0;
-  background: var(--hacker-card);
+  background: var(--theme-card-bg, var(--bg-card));
   border: 1px solid var(--hacker-border);
   border-radius: 6px;
   padding: 14px;
@@ -456,7 +458,7 @@ header {
 /* 题目反馈行 */
 .paper .actions:has(.n-input-number),
 .paper .actions:has(.n-input) {
-  background: #0a0e0d;
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
   border: 1px dashed var(--hacker-border);
   border-radius: 4px;
   padding: 8px;
@@ -468,7 +470,7 @@ header {
   gap: 16px;
   flex-wrap: wrap;
   padding: 10px 14px;
-  background: #0f1413;
+  background: var(--theme-card-bg, var(--theme-card-bg, var(--bg-card)));
   border: 1px solid var(--hacker-border);
   border-radius: 6px;
   font-family: var(--hacker-mono);
@@ -495,7 +497,7 @@ header {
 }
 .paper:has(article.selected),
 .workspace:has(.selected) .paper {
-  box-shadow: 0 0 24px #00ff8820, inset 0 0 24px #00ff8810;
+  box-shadow: 0 0 24px rgba(var(--success-rgb), 0.125), inset 0 0 24px rgba(var(--success-rgb), 0.063);
 }
 
 /* ─── 响应式 ───────────────────────────────────────────────────────── */
