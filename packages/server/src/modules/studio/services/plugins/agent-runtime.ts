@@ -83,8 +83,9 @@ export class PluginAgentRuntime {
     return this.manage(identity, undefined, async ctx => {
       if (!this.definition.management.settings) throw new PluginError('Agent has no settings page')
       const target = json(await this.definition.management.settings(ctx)) as unknown as { viewId: string; query?: Record<string, string> }
-      if (!this.owner.record.manifest.views?.some(view => view.id === target.viewId && view.slot === 'settings') || target.query && (typeof target.query !== 'object' || Object.values(target.query).some(value => typeof value !== 'string'))) throw new PluginError('Agent settings must target its own declared settings view')
-      return { name: 'studio.pluginSettings', params: { pluginId: this.owner.record.manifest.id, viewId: target.viewId }, query: target.query || {} }
+      const view = this.owner.record.manifest.views?.find(view => view.id === target.viewId && ['settings', 'agent-settings'].includes(view.slot))
+      if (!view || target.query && (typeof target.query !== 'object' || Object.values(target.query).some(value => typeof value !== 'string'))) throw new PluginError('Agent settings must target its own declared settings or agent-settings view')
+      return { name: view.slot === 'agent-settings' ? 'studio.pluginAgentSettings' : 'studio.pluginSettings', params: { pluginId: this.owner.record.manifest.id, viewId: target.viewId }, query: target.query || {} }
     })
   }
   async checkUpdate(identity: PluginIdentity) {

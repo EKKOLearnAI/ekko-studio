@@ -4,14 +4,18 @@ export const pluginPages = (plugin: InstalledPlugin) => (plugin.manifest.views |
   .slice().sort((a, b) => (a.order || 0) - (b.order || 0))
 
 export const pluginPageLocation = (plugin: InstalledPlugin, viewId = pluginPages(plugin)[0]?.id) => ({
-  name: pluginPages(plugin).find(view => view.id === viewId)?.slot === 'settings' ? 'studio.pluginSettings' : 'studio.pluginPage',
+  name: pluginRouteName(pluginPages(plugin).find(view => view.id === viewId)?.slot),
   params: { pluginId: plugin.manifest.id, viewId },
 })
 
-export function pluginNavigation(plugin: InstalledPlugin) {
+export const pluginRouteName = (slot?: string) => slot === 'agent-settings' ? 'studio.pluginAgentSettings' : slot === 'settings' ? 'studio.pluginSettings' : 'studio.pluginPage'
+
+export function pluginNavigation(plugin: InstalledPlugin, slot: 'main' | 'settings' = 'main') {
   const pages = pluginPages(plugin)
-  const workspace = pages.find(view => view.slot === 'workspace')
-  return pages.filter(view => view.slot === 'page' || view === workspace)
+  return (plugin.manifest.navigation?.[slot] || []).flatMap(entry => {
+    const view = pages.find(view => view.id === entry.viewId)
+    return view ? [{ ...view, title: entry.title || view.title, icon: entry.icon, order: entry.order || 0 }] : []
+  }).sort((a, b) => a.order - b.order)
 }
 
 export function pluginLinks(plugin: InstalledPlugin) {

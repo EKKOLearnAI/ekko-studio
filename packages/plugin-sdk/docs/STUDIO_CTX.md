@@ -50,7 +50,7 @@ config 不含 secret，storage 仅在清单声明 `storage.client` 时开放本�
 | 成员 | 说明 |
 | --- | --- |
 | `locale` | 当前语言，可选；切换语言会重新挂载。 |
-| `view / slot` | 当前声明的视图与入口类型，包括 workspace-sidebar。 |
+| `view / slot` | 当前声明的视图与布局类型，包括 agent-settings 和 workspace-sidebar；全局入口由 navigation 独立声明。 |
 | `location.path/query` | 当前插件路由和参数，参数不能用作可信身份。 |
 | `data` | 宿主传入的 JSON 数据；未提供时为 null。 |
 | `rpc(name, input?)` | 默认 input=null，Promise 返回插件后端的 JSON 值。 |

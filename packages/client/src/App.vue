@@ -113,13 +113,13 @@ const appStore = useAppStore();
 const profilesStore = useProfilesStore();
 watch(() => profilesStore.activeProfileName, async () => { await stopRemoteBrowserRelay(); await ensureRemoteBrowserRelay() });
 const route = useRoute();
-const { snapshot: pluginSnapshot, profile: pluginProfile } = usePluginCatalog(computed(() => route.name === 'studio.pluginPage'));
+const { snapshot: pluginSnapshot, profile: pluginProfile } = usePluginCatalog(computed(() => ['studio.pluginPage', 'studio.pluginAgentSettings'].includes(String(route.name))));
 const workspacePlugin = computed(() => {
-  if (route.name !== 'studio.pluginPage') return undefined;
+  if (!['studio.pluginPage', 'studio.pluginAgentSettings'].includes(String(route.name))) return undefined;
   const plugin = pluginSnapshot.value.plugins.find(plugin => plugin.manifest.id === route.params.pluginId && plugin.status === 'active');
-  const views = plugin ? pluginPages(plugin).filter(view => view.slot !== 'settings') : [];
+  const views = plugin ? pluginPages(plugin).filter(view => route.name === 'studio.pluginAgentSettings' ? view.slot === 'agent-settings' : ['page', 'workspace'].includes(view.slot)) : [];
   const view = route.params.viewId ? views.find(view => view.id === route.params.viewId) : views[0];
-  return view?.slot === 'workspace' ? plugin : undefined;
+  return view && ['workspace', 'agent-settings'].includes(view.slot) ? plugin : undefined;
 });
 const usesPluginSidebar = computed(() => Boolean(workspacePlugin.value));
 const { sessionSearchOpen } = useSessionSearch();
@@ -164,7 +164,7 @@ provide(mobileNavigationKey, {
   target: computed(() => !isWideViewport.value && hasNavigationRail.value ? mobileSidebarHost.value : null),
 });
 const hasMobileContextSidebar = computed(() =>
-  usesPluginSidebar.value || !['studio.plugins', 'studio.pluginPage', 'hermes.connections', 'hermes.agentManager', 'hermes.models', 'hermes.usage', 'hermes.apiRelay'].includes(String(route.name)),
+  usesPluginSidebar.value || !['studio.plugins', 'studio.pluginPage', 'studio.pluginAgentSettings', 'hermes.connections', 'hermes.agentManager', 'hermes.models', 'hermes.usage', 'hermes.apiRelay'].includes(String(route.name)),
 );
 watch([hasNavigationRail, isWideViewport], () => { mobileNavigationOpen.value = false; });
 watch(sessionSearchOpen, (open) => { if (open) mobileNavigationOpen.value = false; });
@@ -180,6 +180,7 @@ const usesPageSidebar = computed(() =>
   [
     "studio.plugins",
     "studio.pluginPage",
+    "studio.pluginAgentSettings",
     "hermes.person",
     "hermes.chat",
     "hermes.session",
@@ -429,7 +430,7 @@ useKeyboard();
                 <CodingAgentConfigSidebar
                   v-if="!isLoginPage && usesCodingAgentConfigSidebar"
                 />
-                <PluginWorkspaceSidebar v-if="workspacePlugin" :plugin="workspacePlugin" :profile="pluginProfile" />
+                <PluginWorkspaceSidebar v-if="workspacePlugin" :plugin="workspacePlugin" :profile="pluginProfile" :agent-settings="route.name === 'studio.pluginAgentSettings'" />
                 <main
                   class="app-main"
                   :class="{

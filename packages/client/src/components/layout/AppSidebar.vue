@@ -9,10 +9,10 @@ import { useAppStore } from "@/stores/hermes/app";
 import RouteLinkItem from "@/components/common/RouteLinkItem.vue";
 import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { isStoredSuperAdmin } from "@/api/client";
-import { usePluginCatalog, pluginPages, pluginPageLocation } from '@/composables/usePluginCatalog';
-import PluginIcon from '@/components/plugins/PluginIcon.vue';
+import { usePluginCatalog, pluginNavigation, pluginPageLocation } from '@/composables/usePluginCatalog';
+import PluginNavigationIcon from '@/components/plugins/PluginNavigationIcon.vue';
 const { snapshot: pluginSnapshot } = usePluginCatalog();
-const pluginSettings = computed(() => pluginSnapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginPages(plugin).filter(view => view.slot === 'settings').map(view => ({ plugin, view }))));
+const pluginSettings = computed(() => pluginSnapshot.value.plugins.filter(plugin => plugin.status === 'active').flatMap(plugin => pluginNavigation(plugin, 'settings').map(view => ({ plugin, view }))));
 
 const { t } = useI18n();
 const route = useRoute();
@@ -269,7 +269,7 @@ function handleSidebarClick(event: MouseEvent) {
         <span>{{ t("sidebar.settings") }}</span>
       </RouteLinkItem>
       <RouteLinkItem v-for="{ plugin, view } in pluginSettings" :key="plugin.manifest.id + ':' + view.id" class="nav-item" :to="pluginPageLocation(plugin, view.id)" :active="route.name === 'studio.pluginSettings' && route.params.pluginId === plugin.manifest.id && route.params.viewId === view.id" :title="view.title">
-        <PluginIcon :plugin="plugin" :icon="view.icon" compact /><span>{{ view.title }}</span>
+        <PluginNavigationIcon :icon="view.icon" /><span>{{ view.title }}</span>
       </RouteLinkItem>
     </nav>
 

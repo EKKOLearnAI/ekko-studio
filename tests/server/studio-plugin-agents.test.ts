@@ -49,6 +49,13 @@ it('registers namespaced agents and enforces registration permission, schema, an
   expect(() => value.runtime.context().agents.register(definition({ id: 'late' }))).toThrow('during apply')
 })
 
+it('opens Agent-only settings pages without registering either global navigation entry', async () => {
+  const value = await owner(ctx => { ctx.agents.register(definition({ management: { settings: () => ({ viewId: 'skills' }) } })) })
+  value.runtime.record.manifest.views = [{ id: 'skills', title: 'Skills', slot: 'agent-settings', icon: 'skills' }]
+  expect(value.runtime.record.manifest.navigation).toBeUndefined()
+  expect(await value.agent.settings({ userId: 2, profile: 'work' })).toEqual({ name: 'studio.pluginAgentSettings', params: { pluginId: 'example', viewId: 'skills' }, query: {} })
+})
+
 it('binds concurrent runs and root SDK calls to actual users, isolates state, and expires run services', async () => {
   let root!: PluginContext
   const contexts: AgentRunContext[] = [], factory = vi.fn()

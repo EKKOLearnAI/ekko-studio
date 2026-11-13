@@ -4,6 +4,7 @@ import { cp, mkdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { PluginManifest } from '../../contracts/plugins'
 import { manifest } from './schema'
+import { PLUGIN_ICON_PATHS } from '../../contracts/plugins'
 import { PluginError } from './errors'
 import { windowsCmdShimExecution } from '../../public/windows-command'
 import { builtinPluginDirectory } from './builtin-directory'
@@ -26,7 +27,7 @@ export async function readManifest(directory: string, options: { validateEntries
   if (pkg.version !== undefined && pkg.version !== result.version) throw new PluginError('Package and plugin versions must match')
   if (options.validateEntries !== false) for (const entry of [result.server, result.client].filter(Boolean)) await pluginFile(directory, entry!)
   async function icon(value: string | undefined): Promise<string | undefined> {
-    if (!value || value.startsWith('data:')) return value
+    if (!value || value.startsWith('data:') || Object.hasOwn(PLUGIN_ICON_PATHS, value)) return value
     const file = await pluginFile(directory, value)
     if ((await stat(file)).size > 256_000) throw new PluginError('Plugin icon exceeds 256 KB')
     const type = /\.jpe?g$/i.test(value) ? 'jpeg' : value.split('.').at(-1)!.toLowerCase()
@@ -34,6 +35,7 @@ export async function readManifest(directory: string, options: { validateEntries
   }
   if (result.icon) result.icon = await icon(result.icon)
   for (const view of result.views || []) if (view.icon) view.icon = await icon(view.icon)
+  for (const entry of result.navigation?.main || []) entry.icon = (await icon(entry.icon))!
   return manifest(result)
 }
 export async function installPackage(root: string, source: string): Promise<{ manifest: PluginManifest; directory: string; dispose: () => Promise<void> }> {

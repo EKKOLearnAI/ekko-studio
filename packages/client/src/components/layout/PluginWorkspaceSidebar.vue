@@ -9,11 +9,11 @@ import { useAppStore } from '@/stores/hermes/app'
 import PageSidebar from './PageSidebar.vue'
 import SidebarResizeHandle from './SidebarResizeHandle.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
-import PluginIcon from '@/components/plugins/PluginIcon.vue'
+import PluginNavigationIcon from '@/components/plugins/PluginNavigationIcon.vue'
 import PluginFrame from '@/components/plugins/PluginFrame.vue'
 
-const props = defineProps<{ plugin: InstalledPlugin; profile: string }>()
-const views = computed(() => pluginPages(props.plugin).filter(view => view.slot === 'workspace'))
+const props = defineProps<{ plugin: InstalledPlugin; profile: string; agentSettings?: boolean }>()
+const views = computed(() => pluginPages(props.plugin).filter(view => view.slot === (props.agentSettings ? 'agent-settings' : 'workspace')))
 const route = useRoute(), { t } = useI18n(), appStore = useAppStore()
 const { expanded, isMobile } = usePageSidebarState()
 watch(expanded, value => appStore.setPageSidebarExpanded(value), { immediate: true })
@@ -28,12 +28,12 @@ onBeforeUnmount(() => window.removeEventListener('studio.plugin.navigate', navig
       <SidebarResizeHandle />
       <nav class="plugin-config-nav">
         <RouteLinkItem v-for="view in views" :key="view.id" class="plugin-config-nav-item" :to="pluginPageLocation(plugin, view.id)" :active="route.params.viewId === view.id || !route.params.viewId && view.id === views[0]?.id" :title="view.title" @click="navigated">
-          <PluginIcon :plugin="plugin" :icon="view.icon" :title="view.title" compact /><span class="plugin-view-title">{{ view.title }}</span>
+          <PluginNavigationIcon :icon="view.icon!" /><span class="plugin-view-title">{{ view.title }}</span>
         </RouteLinkItem>
-        <PluginFrame v-if="plugin.manifest.workspace?.sidebar" v-show="isMobile || !appStore.sidebarCollapsed" :plugin="plugin" :profile="profile" :view="plugin.manifest.workspace.sidebar" slot="workspace-sidebar" sidebar />
+        <PluginFrame v-if="!agentSettings && plugin.manifest.workspace?.sidebar" v-show="isMobile || !appStore.sidebarCollapsed" :plugin="plugin" :profile="profile" :view="plugin.manifest.workspace.sidebar" slot="workspace-sidebar" sidebar />
       </nav>
       <footer class="plugin-config-footer">
-        <RouteLinkItem class="plugin-config-nav-item plugin-config-return" :to="{ name: 'studio.plugins' }" :title="t('studioPlugins.backToCenter')" @click="navigated"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg><span>{{ t('studioPlugins.backToCenter') }}</span></RouteLinkItem>
+        <RouteLinkItem class="plugin-config-nav-item plugin-config-return" :to="{ name: agentSettings ? 'hermes.agentManager' : 'studio.plugins' }" :title="t(agentSettings ? 'ekkoConfig.back' : 'studioPlugins.backToCenter')" @click="navigated"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg><span>{{ t(agentSettings ? 'ekkoConfig.back' : 'studioPlugins.backToCenter') }}</span></RouteLinkItem>
         <button class="plugin-config-collapse" :title="t(appStore.sidebarCollapsed ? 'sidebar.expand' : 'sidebar.collapse')" @click="appStore.toggleSidebarCollapsed()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="appStore.sidebarCollapsed ? 'm9 6 6 6-6 6' : 'm15 6-6 6 6 6'" /></svg></button>
       </footer>
     </aside>
@@ -43,6 +43,6 @@ onBeforeUnmount(() => window.removeEventListener('studio.plugin.navigate', navig
 <style scoped lang="scss">
 @use '@/styles/agent-config-sidebar' as sidebar;
 @include sidebar.layout('plugin');
-.plugin-config-sidebar.collapsed .plugin-config-nav-item :deep(.plugin-icon) { display: inline-grid; }
+.plugin-config-sidebar.collapsed .plugin-config-nav-item :deep(.plugin-navigation-icon) { display: inline-block; }
 .plugin-view-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 </style>

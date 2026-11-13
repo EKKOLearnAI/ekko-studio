@@ -1,4 +1,5 @@
 import type { Json, PluginManifest, Schema } from '../../contracts/plugins'
+import { PLUGIN_ICON_PATHS } from '../../contracts/plugins'
 import { PluginError } from './errors'
 import { validateDetails, validateIcon } from './manifest-details'
 
@@ -84,11 +85,34 @@ export function manifest(value: unknown): PluginManifest {
   for (const view of m.views || []) {
     if (!view || typeof view !== 'object') throw new PluginError('Invalid plugin view')
     identifier(view.id, 'view id')
-    if (ids.has(view.id) || typeof view.title !== 'string' || !view.title.trim() || view.title.length > 160 || !['page', 'workspace', 'settings'].includes(view.slot)) throw new PluginError('Invalid or duplicate plugin view; use page, settings or workspace')
+    if (ids.has(view.id) || typeof view.title !== 'string' || !view.title.trim() || view.title.length > 160 || !['page', 'workspace', 'settings', 'agent-settings'].includes(view.slot)) throw new PluginError('Invalid or duplicate plugin view; use page, settings, workspace or agent-settings')
     if (view.order !== undefined && (!Number.isSafeInteger(view.order) || Math.abs(view.order) > 10000)) throw new PluginError('Invalid plugin view order')
-    if (view.icon !== undefined) validateIcon(view.icon)
+    if (['workspace', 'agent-settings'].includes(view.slot)) {
+      if (!view.icon || !Object.hasOwn(PLUGIN_ICON_PATHS, view.icon)) throw new PluginError('Plugin configuration sidebar pages require a named icon')
+    } else if (view.icon !== undefined && !Object.hasOwn(PLUGIN_ICON_PATHS, view.icon)) validateIcon(view.icon)
     ids.add(view.id)
     if (!m.client || !m.capabilities.includes('ui')) throw new PluginError('Views require a client entry and ui capability')
+  }
+  if (m.navigation !== undefined) {
+    if (!m.navigation || typeof m.navigation !== 'object' || Array.isArray(m.navigation) || Object.keys(m.navigation).some(key => !['main', 'settings'].includes(key))) throw new PluginError('Invalid plugin navigation')
+    for (const slot of ['main', 'settings'] as const) {
+      const entries = m.navigation[slot]
+      if (entries === undefined) continue
+      if (!Array.isArray(entries) || entries.length > 50) throw new PluginError('Invalid plugin navigation entries')
+      const targets = new Set<string>()
+      for (const entry of entries) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(key => !['viewId', 'title', 'icon', 'order'].includes(key))) throw new PluginError('Invalid plugin navigation entry')
+        if (!ids.has(entry.viewId) || targets.has(entry.viewId)) throw new PluginError('Navigation must target a distinct declared view')
+        if (entry.title !== undefined && (typeof entry.title !== 'string' || !entry.title.trim() || entry.title.length > 160)) throw new PluginError('Invalid plugin navigation title')
+        if (entry.order !== undefined && (!Number.isSafeInteger(entry.order) || Math.abs(entry.order) > 10000)) throw new PluginError('Invalid plugin navigation order')
+        if (typeof entry.icon !== 'string' || !entry.icon) throw new PluginError('Plugin navigation requires an explicit icon')
+        if (!Object.hasOwn(PLUGIN_ICON_PATHS, entry.icon)) {
+          if (slot === 'settings') throw new PluginError('Settings navigation requires a named icon; images are not supported')
+          validateIcon(entry.icon)
+        }
+        targets.add(entry.viewId)
+      }
+    }
   }
   if (m.workspace !== undefined) {
     if (!m.workspace || typeof m.workspace !== 'object' || Array.isArray(m.workspace)) throw new PluginError('Invalid plugin workspace')

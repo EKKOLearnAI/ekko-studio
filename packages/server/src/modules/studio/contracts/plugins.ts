@@ -1,4 +1,5 @@
 export type * from '../../../../../plugin-sdk/src'
+export { PLUGIN_ICON_PATHS } from '../../../../../plugin-sdk/src'
 export interface PluginRecord {
   manifest: import('../../../../../plugin-sdk/src').PluginManifest
   directory: string
