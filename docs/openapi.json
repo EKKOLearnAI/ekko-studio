@@ -53,6 +53,14 @@
       "description": "Scheduled job management"
     },
     {
+      "name": "Cron Consent",
+      "description": "Model-initiated cron result delivery requests that the logged-in user approves in Studio"
+    },
+    {
+      "name": "Script Reports",
+      "description": "Opt-in script invocation reports for no_agent cron jobs"
+    },
+    {
       "name": "Kanban",
       "description": "Kanban board and task management"
     },
@@ -6996,6 +7004,229 @@
         ]
       }
     },
+    "/api/hermes/cron/consent-contexts": {
+      "post": {
+        "tags": [
+          "Cron Consent"
+        ],
+        "summary": "Create consent-contexts",
+        "description": "Login only. Open a model-free setup context for one session: body { profile, session_id } → { context_id, expires_at }. Issues the profile's ordinary MCP runtime credential.",
+        "operationId": "prepare",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/hermes/cron/consent-requests": {
+      "get": {
+        "tags": [
+          "Cron Consent"
+        ],
+        "summary": "List consent-requests",
+        "description": "Login only. List the caller's pending consent requests for a session: query profile, session_id.",
+        "operationId": "list",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Cron Consent"
+        ],
+        "summary": "Create consent-requests",
+        "description": "MCP runtime credential: ask the user to approve cron result delivery into a chat. Body { profile, context_id (current turn or prepared), kind: \"cron_session_binding\" + job_id | \"script_report_enrollment\" + mode \"new\" (name, schedule, script) or \"existing\" + job_id }. No session_id. 202 pending; nothing runs until approved in Studio.",
+        "operationId": "request",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/hermes/cron/consent-requests/{id}/approve": {
+      "post": {
+        "tags": [
+          "Cron Consent"
+        ],
+        "summary": "Create approve",
+        "description": "Login only, same account. Execute the frozen request once: body { profile }.",
+        "operationId": "approve",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/hermes/cron/consent-requests/{id}/deny": {
+      "post": {
+        "tags": [
+          "Cron Consent"
+        ],
+        "summary": "Create deny",
+        "description": "Login only, same account. Discard the request: body { profile }.",
+        "operationId": "deny",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/hermes/cron/session-bindings": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Create session-bindings",
+        "description": "POST /api/hermes/cron/session-bindings",
+        "operationId": "bind",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/hermes/custom-model": {
       "put": {
         "tags": [
@@ -10816,6 +11047,105 @@
         "parameters": [
           {
             "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/hermes/script-reports/enrollments": {
+      "get": {
+        "tags": [
+          "Script Reports"
+        ],
+        "summary": "List enrollments",
+        "description": "GET /api/hermes/script-reports/enrollments",
+        "operationId": "list",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Script Reports"
+        ],
+        "summary": "Create enrollments",
+        "description": "POST /api/hermes/script-reports/enrollments",
+        "operationId": "enroll",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/hermes/script-reports/enrollments/{id}/revoke": {
+      "post": {
+        "tags": [
+          "Script Reports"
+        ],
+        "summary": "Create revoke",
+        "description": "POST /api/hermes/script-reports/enrollments/:id/revoke",
+        "operationId": "revoke",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {

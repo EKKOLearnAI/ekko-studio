@@ -57,6 +57,7 @@ import FolderPicker from "./FolderPicker.vue";
 import StarIcon from "@/components/common/StarIcon.vue";
 import SessionTaskIcon from '@/components/common/SessionTaskIcon.vue';
 import ChatInput from "./ChatInput.vue";
+import CronConsentCard from "./CronConsentCard.vue";
 import NewChatAgentCards from "./NewChatAgentCards.vue";
 import NewChatPage from "./NewChatPage.vue";
 import { prepareAgentDeployment, type AgentDeploymentController } from "./agentDeployment.mjs";
@@ -1558,10 +1559,22 @@ const activeSessionMenuOptions = computed<DropdownOption[]>(() => buildActiveSes
     ? "chat.openSessionInNewWindow"
     : "chat.openSessionInNewTab"),
   copyId: t("chat.copySessionId"),
+  cronConsentSetup: t("chat.cronConsent.menuSetup"),
 }, {
   canRename: activeSessionSupportsPersistence.value,
   canOpen: activeSessionSupportsPersistence.value,
+  canCronConsentSetup: activeSessionReceivesCronNotices.value,
 }));
+
+// Sessions the server accepts as scheduled-result destinations (ordinary Hermes chats).
+const activeSessionReceivesCronNotices = computed(() => {
+  const session = chatStore.activeSession;
+  if (!session || !activeSessionSupportsPersistence.value) return false;
+  return ["", "cli", "api_server"].includes(session.source || "")
+    && ["", "hermes"].includes(session.agent || "")
+    && !session.agentSessionId;
+});
+const cronConsentCardRef = ref<InstanceType<typeof CronConsentCard> | null>(null);
 
 function activeSessionMenuProps() {
   return {
@@ -1712,6 +1725,8 @@ function handleActiveSessionMenuSelect(key: string) {
     openSessionInNewTab(sessionId, chatStore.activeSession?.profile || null);
   } else if (key === "copy-id") {
     void copySessionId(sessionId);
+  } else if (key === "cron-consent-setup") {
+    void cronConsentCardRef.value?.prepare();
   }
 }
 
@@ -3145,6 +3160,12 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
               :selection-actions-target="messageSelectionActionsTarget"
               :approval-portal-to-body="showRealtimeVoice"
               scroll-scope="chat"
+            />
+            <CronConsentCard
+              v-if="chatStore.activeSessionId && activeSessionReceivesCronNotices"
+              ref="cronConsentCardRef"
+              :session-id="chatStore.activeSessionId"
+              :profile="chatStore.activeSession?.profile || 'default'"
             />
             <ChatInput
               ref="chatInputRef"

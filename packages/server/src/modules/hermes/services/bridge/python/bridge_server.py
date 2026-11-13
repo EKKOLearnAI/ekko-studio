@@ -303,6 +303,10 @@ class BridgeServer:
             session_ids = req.get("session_ids")
             return self.pool.poll_background(session_ids if isinstance(session_ids, list) else None)
 
+        if action == "studio_cron_observe":
+            jobs = req.get("jobs")
+            return self.pool.studio_cron_observe(jobs if isinstance(jobs, list) else [], req.get("profile"))
+
         if action == "background_notification_complete":
             delegation_id = str(req.get("delegation_id") or "").strip()
             claim_id = str(req.get("claim_id") or "").strip()

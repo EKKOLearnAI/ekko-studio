@@ -305,6 +305,9 @@ class BridgeBroker:
                 "notifications": notifications,
             }
 
+        if action == "studio_cron_observe":
+            return self._forward(self._normalize_profile(req.get("profile")), req)
+
         if action in {"background_notification_complete", "background_notification_release"}:
             session_id = str(req.get("session_id") or "")
             profile, worker_key = self._route_for_session(

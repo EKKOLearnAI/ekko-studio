@@ -19,11 +19,14 @@ interface ActiveSessionMenuLabels {
   rename: string
   open: string
   copyId: string
+  /** Offered only for sessions that can receive scheduled cron result notices. */
+  cronConsentSetup?: string
 }
 
 interface ActiveSessionMenuAvailability {
   canRename: boolean
   canOpen: boolean
+  canCronConsentSetup?: boolean
 }
 
 interface SessionContextMenuLabels {
@@ -152,6 +155,9 @@ export function buildActiveSessionMenuOptions(
     actionOption(labels.copyId, 'copy-id', 'copy'),
     actionOption(labels.rename, 'rename', 'rename', { disabled: !availability.canRename }),
     actionOption(labels.open, 'open-link', 'open-new', { disabled: !availability.canOpen }),
+    ...(labels.cronConsentSetup && availability.canCronConsentSetup
+      ? [actionOption(labels.cronConsentSetup, 'cron-consent-setup', 'link')]
+      : []),
   ]
 }
 

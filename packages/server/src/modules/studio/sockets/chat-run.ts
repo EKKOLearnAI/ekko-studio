@@ -25,7 +25,7 @@ import { savePersonTaskReturn, withPersonTaskReturns } from '../repositories/per
 import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
 import { isBuiltinEkkoAgent, normalizeEkkoRunData } from '../contracts/history-source'
 import { recordSessionUploadAttachments } from '../services/files/session-uploads'
-import { authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
+import { authorizeSessionShare, authenticateSessionShare, socketShareToken, assertShareProfile, sessionShareExecutionUser, refreshSessionShare, type SessionShareAccess } from '../services/session-shares/access'
 import { bindSessionShareSocket } from '../services/session-shares/socket-access'
 import { codingAgentId } from '../services/chat-run/types'
 import { studioMcpCapabilities } from '../public/runs/mcp-capabilities'
@@ -58,7 +58,7 @@ import type { Server, Socket } from 'socket.io'
 import { randomUUID } from 'crypto'
 import { logger } from '../public/logging'
 import { getSystemPrompt } from '../public/runs/prompt'
-import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
+import { clearSessionMessages, deleteSession, getSession, getSessionGeneration, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
 import { deleteSessionMessageGroups } from '../repositories/session-message-deletion'
 import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
 import { getSessionCategory } from '../repositories/session-category-store'
@@ -106,7 +106,14 @@ import type {
   SessionState,
 } from '../services/chat-run/types'
 import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
-import { userCanAccessProfile } from '../repositories/users-store'
+import { findUserById, userCanAccessProfile } from '../repositories/users-store'
+import { noticeToMessage, withSessionNotices } from '../services/session-notifications/presentation'
+import { observeCronBindings } from '../services/session-notifications/cron-observer'
+import { existsSync } from 'fs'
+import { getDb } from '../infrastructure/database'
+import { cronBindingsDbPath, studioInstanceId } from '../public/session-notifications'
+import { isVisibleNoticeDisposition, type SessionNotificationRecord } from '../repositories/session-notification-store'
+import { importScriptReports } from '../services/session-notifications/script-reports'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observePersonPresenceEvent } from '../services/person/presence'
 import { SessionStateSync } from '../services/session-state'
@@ -231,6 +238,8 @@ function isHermesWorkerBackedSession(session?: { source?: string | null; agent?:
   const agent = String(session?.agent || '').trim()
   return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && (agent !== 'cursor' && (agent !== 'antigravity' && !isNativeCodingAgent(agent))) && (agent !== 'opencode' && agent !== 'dsh') && agent !== 'ekko-agent' && !session?.agent_session_id
 }
+
+const SCRIPT_REPORT_IMPORT_INTERVAL_MS = 15_000
 
 function isBridgeRunSource(source?: string): boolean {
   return source === 'cli' || source === 'global_agent' || source === 'workflow' || source === 'group_chat'
@@ -369,6 +378,7 @@ type PendingMobileLocationRequest = {
   timer: NodeJS.Timeout
 }
 
+const CRON_OBSERVE_INTERVAL_MS = 15_000
 const MOBILE_LOCATION_MIN_TIMEOUT_MS = 3_000
 const MOBILE_LOCATION_MAX_TIMEOUT_MS = 60_000
 const MOBILE_LOCATION_DEVICE_TIMEOUT_MS = 30_000
@@ -478,6 +488,9 @@ export class ChatRunSocket {
   private readonly pendingMobileCalendar = new Map<string, PendingMobileCalendarRequest>()
   private readonly pendingMobileHealth = new Map<string, PendingMobileHealthRequest>()
   private backgroundPollTimer?: NodeJS.Timeout
+  private scriptReportTimer?: NodeJS.Timeout
+  private cronObserveTimer?: NodeJS.Timeout
+  private cronObserveInFlight = false
   private backgroundPollInFlight = false
   private backgroundRecoveryNeeded = true
   private backgroundBrokerId?: string
@@ -595,11 +608,33 @@ export class ChatRunSocket {
     return { contextId, finish: (state: 'ended' | 'interrupted' | 'failed') => this.taskPlanRuns.finish(contextId, state) }
   }
 
-  private beginTaskPlanRun(sessionId: string | undefined, profile: string, sessionTasksEnabled = true) {
+  private beginTaskPlanRun(sessionId: string | undefined, profile: string, sessionTasksEnabled = true, accountId?: number) {
     if (!sessionId) return undefined
     runMcpCredentials.revoke(sessionId)
     this.clarificationRuns.finishSession(sessionId)
-    return this.taskPlanRuns.begin(sessionId, profile, () => this.sessionMap.get(sessionId), undefined, sessionTasksEnabled)
+    return this.taskPlanRuns.begin(sessionId, profile, () => this.sessionMap.get(sessionId), undefined, sessionTasksEnabled, accountId)
+  }
+
+  /**
+   * Authority for a cron consent request made with a live turn context: the turn's session and the
+   * account that started it, with the same eligibility as session goals.
+   */
+  cronConsentTurnAuthority(contextId: string, profile: string): { sessionId: string; accountId: number } {
+    const authority = this.taskPlanRuns.authorityForContext(contextId, profile)
+    this.sessionTasksContext(contextId, profile)
+    return authority
+  }
+
+  /** Content-free hint that the pending cron consents of a session changed; clients refetch. */
+  publishCronConsentUpdate(sessionId: string) {
+    const session = getSession(sessionId)
+    if (!session) return
+    for (const socketId of this.nsp.adapter.rooms.get(`session:${sessionId}`) || []) {
+      const socket = this.nsp.sockets.get(socketId)
+      if (socket && !socket.data?.sessionShare && this.noticeRecipientAllowed(socket, sessionId, session.profile || 'default')) {
+        socket.emit('cron_consent.updated', { event: 'cron_consent.updated', session_id: sessionId })
+      }
+    }
   }
 
   private finishTaskPlanRun(sessionId: string, event: string, payload?: any, contextId?: string) {
@@ -630,6 +665,73 @@ export class ChatRunSocket {
       release()
       if (this.runAdmissions.get(sessionId) === current) this.runAdmissions.delete(sessionId)
     }
+  }
+
+  /**
+   * Live passive notice, published after its acceptance committed. Recipients are members of the
+   * session room and signed-in account sockets, each authorized again against the session and the
+   * account as they exist now, and only while the accepting generation is current. Attention goes
+   * through the session-state sync. Never a model turn.
+   */
+  /** Import finished script invocation reports and publish new ones. Never runs or retries a script. */
+  private importScriptReports() {
+    if (this.closing) return
+    try {
+      for (const record of importScriptReports().accepted) this.publishSessionNotice(record)
+    } catch (err) {
+      logger.debug(err, '[chat-run-socket] script report import unavailable')
+    }
+  }
+
+  /** Results of explicitly bound native cron jobs, observed through the profile's bridge worker. */
+  private async observeCronSessionResults() {
+    // Only explicit bindings are observed; without a bindings database there is nothing to ask Hermes.
+    if (this.closing || this.cronObserveInFlight || !getDb() || !existsSync(cronBindingsDbPath())) return
+    this.cronObserveInFlight = true
+    try {
+      await observeCronBindings({
+        namespace: studioInstanceId(),
+        bindingsPath: cronBindingsDbPath(),
+        observe: (profile, jobs) => this.backgroundBridge.studioCronObserve(profile, jobs, { timeoutMs: 30_000 }),
+        getSession: sessionId => {
+          const session = getSession(sessionId)
+          return session ? { profile: session.profile, generation: getSessionGeneration(sessionId) } : null
+        },
+        publish: record => this.publishSessionNotice(record),
+      })
+    } catch (err) {
+      logger.debug(err, '[chat-run-socket] cron session observation unavailable')
+    } finally {
+      this.cronObserveInFlight = false
+    }
+  }
+
+  publishSessionNotice(record: SessionNotificationRecord) {
+    const session = getSession(record.session_id)
+    if (!session || (session.profile || 'default') !== record.profile || isPrivatePersonSession(session.id)
+      || !isVisibleNoticeDisposition(record.disposition)
+      || getSessionGeneration(record.session_id) !== record.session_generation) return
+    const payload = { event: 'session.notice', session_id: record.session_id, profile: record.profile,
+      attention: record.attention_pending === 1, message: noticeToMessage(record) }
+    const candidates = new Set<string>([...(this.nsp.adapter.rooms.get(`session:${record.session_id}`) || []),
+      ...(this.nsp.adapter.rooms.get('studio-account') || [])])
+    for (const socketId of candidates) {
+      const socket = this.nsp.sockets.get(socketId)
+      if (socket && this.noticeRecipientAllowed(socket, session.id, record.profile)) socket.emit('session.notice', payload)
+    }
+    this.sessionStateSync.publish(record.session_id)
+  }
+
+  private noticeRecipientAllowed(socket: Socket, sessionId: string, profile: string): boolean {
+    const shared = socket.data?.sessionShare as SessionShareAccess | undefined
+    if (shared) {
+      if (shared.share.session_id !== sessionId) return false
+      try { authorizeSessionShare(shared, 'read', sessionId); return true } catch { return false }
+    }
+    const user = socket.data?.user as AuthenticatedUser | undefined
+    // The account as stored now: a disabled or demoted user loses access its socket still caches.
+    const account = user ? findUserById(user.id) : null
+    return !!account && account.status === 'active' && (account.role === 'super_admin' || userCanAccessProfile(account.id, profile))
   }
 
   emitSessionSettingsUpdated(sessionId: string, settings: {
@@ -821,6 +923,10 @@ export class ChatRunSocket {
     this.backgroundPollTimer = setInterval(() => void this.pollBackgroundWork(), 500)
     this.backgroundPollTimer.unref?.()
     void this.pollBackgroundWork()
+    this.scriptReportTimer = setInterval(() => this.importScriptReports(), SCRIPT_REPORT_IMPORT_INTERVAL_MS)
+    this.scriptReportTimer.unref?.()
+    this.cronObserveTimer = setInterval(() => void this.observeCronSessionResults(), CRON_OBSERVE_INTERVAL_MS)
+    this.cronObserveTimer.unref?.()
     logger.info('[chat-run-socket] Socket.IO ready at /chat-run')
   }
 
@@ -1999,7 +2105,9 @@ export class ChatRunSocket {
         return
       }
 
-      const planContext = mcpCapabilities.interaction ? this.beginTaskPlanRun(data.session_id, profile, !data.background_delegation_id) : undefined
+      const planContext = mcpCapabilities.interaction
+        ? this.beginTaskPlanRun(data.session_id, profile, !data.background_delegation_id, (socket.data?.sessionShare ? undefined : (socket.data?.user as AuthenticatedUser | undefined)?.id))
+        : undefined
       if (planContext) data.instructions = [data.instructions, taskPlanRunInstruction()].filter(Boolean).join('\n\n')
       let fullInstructions = data.instructions
         ? `${getSystemPrompt(undefined, { source, mcpCapabilities })}\n${data.instructions}`
@@ -2078,7 +2186,8 @@ export class ChatRunSocket {
 
     const isCommand = typeof data.input === 'string' && parseCodingAgentSessionCommand(data.input)
     const groupRun = source === 'group_chat' || data.session_source === 'group_chat'
-    const planContext = isCommand || !mcpCapabilities.interaction ? undefined : this.beginTaskPlanRun(data.session_id, profile)
+    const planContext = isCommand || !mcpCapabilities.interaction ? undefined
+      : this.beginTaskPlanRun(data.session_id, profile, true, groupRun ? undefined : (socket.data?.sessionShare ? undefined : (socket.data?.user as AuthenticatedUser | undefined)?.id))
     const credentialContext = planContext || (groupRun && !isCommand ? this.beginTaskPlanRun(data.session_id, profile) : undefined)
     const interactionContext = planContext && source !== 'workflow' && data.session_source !== 'workflow'
       && source !== 'global_agent' && data.session_source !== 'global_agent' ? planContext : undefined
@@ -2435,7 +2544,7 @@ export class ChatRunSocket {
         .map(message => message.id),
     )
     const taskPlans = getSessionTaskPlans(sid, messagePage.messages, true, state.runId)
-    const resumePage = personDisplayPage(sid, { ...messagePage, messages: withPersonTaskReturns(sid, withRunUsage(sid, messagePage.messages)), workspaceRunChanges, taskPlans })
+    const resumePage = personDisplayPage(sid, { ...messagePage, messages: withSessionNotices(sid, withPersonTaskReturns(sid, withRunUsage(sid, messagePage.messages)), { offset: 0, storedCount: messagePage.messageLoadedCount }), workspaceRunChanges, taskPlans })
     const appMessagePage = options
       ? buildAppResumeMessagePage(resumePage, options.cachedId)
       : null
@@ -3787,6 +3896,14 @@ export class ChatRunSocket {
     if (this.backgroundPollTimer) {
       clearInterval(this.backgroundPollTimer)
       this.backgroundPollTimer = undefined
+    }
+    if (this.scriptReportTimer) {
+      clearInterval(this.scriptReportTimer)
+      this.scriptReportTimer = undefined
+    }
+    if (this.cronObserveTimer) {
+      clearInterval(this.cronObserveTimer)
+      this.cronObserveTimer = undefined
     }
     for (const requestId of [...this.pendingMobileLocations.keys()]) {
       this.finishMobileLocationRequest(requestId, {

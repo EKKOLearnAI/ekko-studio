@@ -45,6 +45,23 @@ from bridge_runtime import (
     _tool_names_from_definitions,
 )
 
+
+def _studio_cron():
+    """Sibling Studio cron adapter, loaded on first use (also when loaded by path)."""
+    module = sys.modules.get("bridge_studio_cron")
+    if module is not None:
+        return module
+    try:
+        import bridge_studio_cron as module
+    except ModuleNotFoundError:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("bridge_studio_cron", Path(__file__).with_name("bridge_studio_cron.py"))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["bridge_studio_cron"] = module
+        spec.loader.exec_module(module)
+    return module
+
 CLARIFY_TIMEOUT_SECONDS = 300
 
 
@@ -1286,6 +1303,9 @@ class AgentPool:
             "notifications": notifications,
             "pending_count": pending_notification_count,
         }
+
+    def studio_cron_observe(self, jobs: list[dict[str, Any]], profile: str | None = None) -> dict[str, Any]:
+        return _studio_cron().observe_cron_jobs(jobs, self._db.get_for_profile(profile))
 
     def complete_background_notification(self, delegation_id: str, claim_id: str) -> dict[str, Any]:
         from tools.async_delegation import complete_completion_delivery
