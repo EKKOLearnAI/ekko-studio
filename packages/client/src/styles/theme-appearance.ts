@@ -72,7 +72,8 @@ export function resolveAppearance(customization: ThemeCustomization, dark: boole
     if (values.backgroundColor || values.opacity !== undefined) {
       variables[`${prefix}-bg`] = `rgba(${toRgbComponents(surfaceColor)}, ${values.opacity ?? 1})`
     }
-    if (values.blur !== undefined) variables[`${prefix}-filter`] = `blur(${values.blur}px) saturate(1.1)`
+    // A zero-radius blur with saturation still enables backdrop filtering.
+    if (values.blur !== undefined) variables[`${prefix}-filter`] = values.blur === 0 ? 'none' : `blur(${values.blur}px) saturate(1.1)`
     if (values.radius !== undefined) variables[`${prefix}-radius`] = `${values.radius}px`
     if (values.borderColor || values.opacity !== undefined) {
       variables[`${prefix}-border`] = withOpacity(values.borderColor || border, values.opacity)
