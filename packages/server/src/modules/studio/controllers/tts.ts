@@ -138,7 +138,7 @@ export async function saveSettings(ctx: Context) {
       ? saveActiveTtsProvider(profile, storedProvider)
       : saveActiveTtsProvider(profile, assertActiveTtsProvider(String(body.activeProvider)))
 
-    await syncVoiceConfigToHermesProfile(profile)
+    await syncVoiceConfigToHermesProfile(profile, 'tts', { selectProvider: true })
     ctx.body = { setting, activeProvider }
   } catch (error) {
     if (handleSettingsError(ctx, error)) return
@@ -155,7 +155,7 @@ export async function saveActiveProvider(ctx: Context) {
   try {
     const profile = requestedProfile(ctx)
     const activeProvider = saveActiveTtsProvider(profile, assertActiveTtsProvider(String(body?.provider || '')))
-    await syncVoiceConfigToHermesProfile(profile)
+    await syncVoiceConfigToHermesProfile(profile, 'tts', { selectProvider: true })
     ctx.body = { activeProvider }
   } catch (error) {
     if (handleSettingsError(ctx, error)) return
@@ -197,7 +197,9 @@ export async function deleteSecret(ctx: Context) {
     const profile = requestedProfile(ctx)
     const storedProvider = assertStoredTtsProvider(provider)
     const setting = clearStoredTtsSecret(profile, storedProvider, secretName)
-    await syncVoiceConfigToHermesProfile(profile)
+    if (getActiveTtsProvider(profile) === storedProvider) {
+      await syncVoiceConfigToHermesProfile(profile, 'tts')
+    }
     ctx.body = { success: true, setting }
   } catch (error) {
     if (handleSettingsError(ctx, error)) return
@@ -224,7 +226,9 @@ export async function deleteProvider(ctx: Context) {
     const activeProvider = currentActiveProvider === storedProvider
       ? saveActiveTtsProvider(profile, 'edge')
       : currentActiveProvider
-    await syncVoiceConfigToHermesProfile(profile)
+    if (currentActiveProvider === storedProvider) {
+      await syncVoiceConfigToHermesProfile(profile, 'tts')
+    }
     ctx.body = { success: true, deleted, activeProvider }
   } catch (error) {
     if (handleSettingsError(ctx, error)) return

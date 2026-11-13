@@ -16,6 +16,7 @@ import { join } from 'path'
 import { isLocalSttModelUsable } from './stt/local-model-manager'
 
 export type VoiceConfigSyncStatus = 'hermes-studio' | 'fallback' | 'unchanged'
+export type VoiceConfigSection = 'stt' | 'tts'
 
 export interface VoiceConfigSyncResult {
   stt: VoiceConfigSyncStatus
@@ -94,7 +95,7 @@ function studioProviderConfig(command: string, outputFormat: 'mp3' | 'wav' | 'tx
   }
 }
 
-function buildVoiceConfigPatch(profile: string, curlConfigPath: string): VoiceConfigPatch {
+function buildVoiceConfigPatch(profile: string, curlConfigPath: string, section: VoiceConfigSection): VoiceConfigPatch {
   const patch: VoiceConfigPatch = {
     result: {
       stt: 'unchanged',
@@ -102,27 +103,12 @@ function buildVoiceConfigPatch(profile: string, curlConfigPath: string): VoiceCo
     },
   }
 
-  const activeSttProvider = getActiveSttProvider(profile)
-  if (!activeSttProvider || activeSttProvider === 'browser') {
-    patch.stt = { provider: 'local' }
-    patch.result.stt = 'fallback'
-  } else if (activeSttProvider === 'local' && isLocalSttModelUsable()) {
-    patch.stt = {
-      provider: 'hermes-studio',
-      providers: {
-        'hermes-studio': studioProviderConfig(
-          studioSttCommand(profile, curlConfigPath),
-          'txt',
-        ),
-      },
-    }
-    patch.result.stt = 'hermes-studio'
-  } else {
-    const setting = getSttProviderSetting(profile, activeSttProvider, { includeSecrets: true })
-    if (!setting?.secrets.apiKey?.trim()) {
+  if (section === 'stt') {
+    const activeSttProvider = getActiveSttProvider(profile)
+    if (activeSttProvider === 'browser') {
       patch.stt = { provider: 'local' }
       patch.result.stt = 'fallback'
-    } else {
+    } else if (activeSttProvider === 'local' && isLocalSttModelUsable()) {
       patch.stt = {
         provider: 'hermes-studio',
         providers: {
@@ -133,47 +119,77 @@ function buildVoiceConfigPatch(profile: string, curlConfigPath: string): VoiceCo
         },
       }
       patch.result.stt = 'hermes-studio'
+    } else if (activeSttProvider) {
+      const setting = getSttProviderSetting(profile, activeSttProvider, { includeSecrets: true })
+      if (!setting?.secrets.apiKey?.trim()) {
+        patch.stt = { provider: 'local' }
+        patch.result.stt = 'fallback'
+      } else {
+        patch.stt = {
+          provider: 'hermes-studio',
+          providers: {
+            'hermes-studio': studioProviderConfig(
+              studioSttCommand(profile, curlConfigPath),
+              'txt',
+            ),
+          },
+        }
+        patch.result.stt = 'hermes-studio'
+      }
     }
-  }
-
-  const activeTtsProvider = getActiveTtsProvider(profile)
-  if (activeTtsProvider === 'edge') {
-    patch.tts = {
-      provider: 'hermes-studio',
-      providers: {
-        'hermes-studio': studioProviderConfig(
-          studioTtsCommand(profile, curlConfigPath),
-          'mp3',
-        ),
-      },
-    }
-    patch.result.tts = 'hermes-studio'
-  } else if (activeTtsProvider) {
-    const setting = getTtsProviderSetting(profile, activeTtsProvider, { includeSecrets: true })
-    if (!setting?.secrets.apiKey?.trim()) {
-      patch.tts = { provider: 'edge' }
-      patch.result.tts = 'fallback'
-    } else {
-      const outputFormat = activeTtsProvider === 'gemini' ? 'wav' : 'mp3'
+  } else {
+    const activeTtsProvider = getActiveTtsProvider(profile)
+    if (activeTtsProvider === 'edge') {
       patch.tts = {
         provider: 'hermes-studio',
         providers: {
           'hermes-studio': studioProviderConfig(
             studioTtsCommand(profile, curlConfigPath),
-            outputFormat,
+            'mp3',
           ),
         },
       }
       patch.result.tts = 'hermes-studio'
+    } else if (activeTtsProvider) {
+      const setting = getTtsProviderSetting(profile, activeTtsProvider, { includeSecrets: true })
+      if (!setting?.secrets.apiKey?.trim()) {
+        patch.tts = { provider: 'edge' }
+        patch.result.tts = 'fallback'
+      } else {
+        const outputFormat = activeTtsProvider === 'gemini' ? 'wav' : 'mp3'
+        patch.tts = {
+          provider: 'hermes-studio',
+          providers: {
+            'hermes-studio': studioProviderConfig(
+              studioTtsCommand(profile, curlConfigPath),
+              outputFormat,
+            ),
+          },
+        }
+        patch.result.tts = 'hermes-studio'
+      }
     }
   }
 
   return patch
 }
 
+function isStudioCommandProvider(value: unknown, command: string): boolean {
+  const provider = asRecord(value)
+  // The generated transport remains Studio-owned across server port changes.
+  // A different endpoint or command is user-owned, even under the same name.
+  const normalizePort = (value: string) => value.replace(
+    /http:\/\/127\.0\.0\.1:\d+(\/api\/studio\/voice\/proxy\/)/g,
+    'http://127.0.0.1:PORT$1',
+  )
+  return provider.type === 'command' && typeof provider.command === 'string'
+    && normalizePort(provider.command) === normalizePort(command)
+}
+
 function mergeVoiceSection(
   currentValue: unknown,
   sectionPatch: Record<string, unknown>,
+  command: string,
 ): Record<string, unknown> {
   const current = asRecord(currentValue)
   const merged = { ...current, ...sectionPatch }
@@ -181,6 +197,10 @@ function mergeVoiceSection(
   if (sectionPatch.providers) {
     const currentProviders = asRecord(current.providers)
     const nextProviders = asRecord(sectionPatch.providers)
+    if (Object.hasOwn(currentProviders, 'hermes-studio')
+      && !isStudioCommandProvider(currentProviders['hermes-studio'], command)) {
+      delete nextProviders['hermes-studio']
+    }
     merged.providers = {
       ...currentProviders,
       ...nextProviders,
@@ -193,15 +213,30 @@ function mergeVoiceSection(
  * Point Hermes at the profile-scoped Web UI voice proxy. Provider credentials
  * remain exclusively in the Web UI database; Hermes receives a command
  * provider while its loopback token stays in the Web UI-owned curl config.
+ * Only explicit selection may replace a native selector; maintenance actions
+ * update an existing Studio-owned selection. Custom provider blocks survive both.
  */
-export async function syncVoiceConfigToHermesProfile(profile: string): Promise<VoiceConfigSyncResult> {
+export async function syncVoiceConfigToHermesProfile(
+  profile: string,
+  section: VoiceConfigSection,
+  options: { selectProvider?: boolean } = {},
+): Promise<VoiceConfigSyncResult> {
   try {
     const curlConfigPath = await ensureCurlConfig()
-    const patch = buildVoiceConfigPatch(profile, curlConfigPath)
-    if (patch.stt || patch.tts) {
+    const patch = buildVoiceConfigPatch(profile, curlConfigPath, section)
+    const sectionPatch = patch[section]
+    const command = section === 'stt'
+      ? studioSttCommand(profile, curlConfigPath)
+      : studioTtsCommand(profile, curlConfigPath)
+    if (sectionPatch) {
       await updateConfigYamlForProfile(profile, (configYaml) => {
-        if (patch.stt) configYaml.stt = mergeVoiceSection(configYaml.stt, patch.stt)
-        if (patch.tts) configYaml.tts = mergeVoiceSection(configYaml.tts, patch.tts)
+        const current = asRecord(configYaml[section])
+        if (!options.selectProvider && (current.provider !== 'hermes-studio'
+          || !isStudioCommandProvider(asRecord(current.providers)['hermes-studio'], command))) {
+          patch.result[section] = 'unchanged'
+          return { data: configYaml, result: undefined, write: false }
+        }
+        configYaml[section] = mergeVoiceSection(current, sectionPatch, command)
         return configYaml
       })
     }
