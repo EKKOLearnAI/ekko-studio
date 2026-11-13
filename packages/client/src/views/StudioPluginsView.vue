@@ -230,7 +230,7 @@ async function update(plugin: InstalledPlugin, input: object) {
   return success
 }
 function uninstall(plugin: InstalledPlugin) {
-  dialog.warning({ title: t('studioPlugins.uninstall'), content: t('studioPlugins.uninstallConfirm', { name: plugin.manifest.name }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
+  dialog.warning({ title: t('studioPlugins.uninstall'), content: t('studioPlugins.uninstallConfirm', { name: plugin.manifest.name }), positiveText: t('common.confirm'), positiveButtonProps: { type: 'primary' }, negativeText: t('common.cancel'), onPositiveClick: async () => {
     const success = await perform(async () => {
       const latest = await pluginList(), current = latest.plugins.find(local => local.manifest.id === plugin.manifest.id)
       if (!samePluginInstallation(plugin, current)) throw new Error(t('studioPlugins.marketChanged'))
@@ -243,7 +243,7 @@ function uninstall(plugin: InstalledPlugin) {
   } })
 }
 function unlinkDevelopment(plugin: CatalogPlugin) {
-  dialog.warning({ title: t('studioPlugins.devUnlink'), content: t('studioPlugins.devUnlinkConfirm', { name: plugin.manifest.name }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
+  dialog.warning({ title: t('studioPlugins.devUnlink'), content: t('studioPlugins.devUnlinkConfirm', { name: plugin.manifest.name }), positiveText: t('common.confirm'), positiveButtonProps: { type: 'primary' }, negativeText: t('common.cancel'), onPositiveClick: async () => {
     const success = await perform(async () => { const { revision } = await pluginList(); await pluginRequest(undefined, '/' + encodeURIComponent(plugin.manifest.id) + '/development?revision=' + revision, undefined, 'DELETE') })
     if (success) { if (plugin.installed) scope.value = 'installed'; closeDetails() }
   } })
