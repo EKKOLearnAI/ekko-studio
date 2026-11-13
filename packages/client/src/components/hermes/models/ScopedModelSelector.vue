@@ -16,6 +16,7 @@ const props = defineProps<{
   allowMoa?: boolean
   disabled?: boolean
   selectProtocol?: boolean
+  inheritApiMode?: boolean
   apiMode?: ProviderApiMode
 }>()
 
@@ -59,7 +60,9 @@ const selectedDisplayName = computed(() => {
 function handleSelect(selection: { provider: string; model: string; apiMode?: ProviderApiMode }) {
   if (props.selectProtocol && !isAuthModelProvider(selection.provider)) {
     const group = props.groups.find(group => group.provider === selection.provider)
-    protocol.select(selection, { provider: props.provider, model: props.model, apiMode: props.apiMode }, !!group?.api_mode_by_model)
+    const current = { provider: props.provider, model: props.model, apiMode: props.apiMode }
+    if (props.inheritApiMode) protocol.selectInherited(selection, current, group)
+    else protocol.select(selection, current, !!group?.api_mode_by_model)
     return
   }
   showModels.value = false

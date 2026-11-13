@@ -17,10 +17,16 @@ require manual protocol selection. These defaults do not probe endpoint support
 or guarantee cache hits; use a fixed provider mode or a manual selection when a
 relay requires another protocol.
 
-Switching models recomputes the automatic protocol. Select the current model
-again to open the shared protocol dialog and override it; cancelling leaves the
-saved selection unchanged. This applies to scoped single chats and BOT main
-conversations and execution agents. Native Global mode retains CLI configuration.
+Switching models recomputes the automatic protocol. Scoped single chats and BOT
+main conversations retain their protocol confirmation rules. BOT execution-agent
+settings inherit a known model or provider protocol without confirmation, and
+reselecting the same model preserves its saved protocol and reasoning effort.
+Saved presets have no protocol provenance, so every valid saved protocol is
+treated as an explicit choice. Without a valid saved choice, unknown or unsupported
+metadata, or a selection event that disagrees with the catalog, requires confirmation;
+cancelling leaves the saved selection unchanged. A per-model map is authoritative:
+missing or null entries do not inherit the provider default. Native Global mode
+retains CLI configuration.
 
 ## Native model directory
 
