@@ -334,10 +334,11 @@ async function loadOlderHistoryMessages(sessionId: string): Promise<boolean> {
 }
 
 function openHistorySession(sessionId: string, profile?: string | null) {
+  // Ordinary list navigation follows the active profile; only explicit links stay scoped.
   return router.push({
     name: 'hermes.historySession',
     params: { sessionId },
-    query: profile ? { profile } : undefined,
+    query: routeProfile.value && profile ? { profile } : undefined,
   })
 }
 
@@ -363,7 +364,7 @@ async function openDefaultHistorySession(replace = false) {
   const location = {
     name: 'hermes.historySession',
     params: { sessionId: firstSession.id },
-    query: firstSession.profile ? { profile: firstSession.profile } : undefined,
+    query: routeProfile.value && firstSession.profile ? { profile: firstSession.profile } : undefined,
   }
   if (replace) await router.replace(location)
   else await router.push(location)
@@ -424,25 +425,25 @@ onUnmounted(() => {
 
 watch(
   [routeSessionId, routeProfile],
-  async ([sessionId]) => {
+  async ([sessionId, profile], [, previousProfile]) => {
     if (!sessionId) {
       historySessionRequestId++
       historySessionLoading.value = false
       historySessionId.value = null
       historySession.value = null
-      return
     }
     if (!hermesSessionsLoaded.value) return
-    if (routeProfile.value && !hermesSessions.value.some(s => s.profile === routeProfile.value)) {
+    if (profile !== previousProfile || (profile && !hermesSessions.value.some(s => s.profile === profile))) {
       await loadHermesSessions()
     }
-    await syncRouteSession()
+    if (sessionId) await syncRouteSession()
   },
 )
 
-watch(() => profilesStore.activeProfileName, async () => {
+watch([() => profilesStore.activeProfileName, () => profilesStore.switching], async () => {
   if (!hermesSessionsLoaded.value) return
   if (profilesStore.switching) return
+  if (routeProfile.value) return
   historySessionId.value = null
   historySession.value = null
   await loadHermesSessions()
