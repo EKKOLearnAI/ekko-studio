@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -18,7 +18,7 @@ afterEach(() => {
 })
 
 function installation(options: { version?: string; bootstrap?: string; legacy?: boolean } = {}) {
-  const directory = mkdtempSync(join(tmpdir(), 'studio-hermes-probe-'))
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'studio-hermes-probe-')))
   directories.push(directory)
   const root = join(directory, "Hermes source 'with spaces'")
   const path = join(root, 'bin', 'hermes')
@@ -135,5 +135,46 @@ describe('Hermes installation version probes', () => {
       source: 'managed-runtime', version: '0.23.1', agentRoot: valid.root,
       managedRuntimeFailures: [{ directory: dirname(broken.root), reason: expect.stringContaining('empty version') }],
     })
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('Desktop Unix PM launcher discovery', () => {
+  it('locates an unquoted store interpreter before probing the source root', async () => {
+    const fixture = installation()
+    fixture.write('bin/hermes', `#!/bin/sh\nexec ${python} -I -c 'bootstrap' "$@"\n`)
+    expect(await fixture.desktop()).toMatchObject({
+      source: 'user-cli', pythonPath: python, agentRoot: fixture.root, version: '0.23.1+3685.gb03df8f',
+    })
+  })
+
+  it.each(['single', 'double'])('follows a %s-quoted forwarding wrapper to the installation launcher', async quoting => {
+    const fixture = installation()
+    // shlex-style single quotes use adjacent quote segments for apostrophes.
+    const root = join(dirname(fixture.root), 'user bin')
+    mkdirSync(root)
+    const inner = join(fixture.root, '.hermes', 'bin', 'hermes')
+    fixture.write('.hermes/bin/hermes', `#!/bin/sh\nexec ${python} -I -c 'bootstrap' "$@"\n`)
+    const outer = join(root, 'hermes')
+    const quotedInner = quoting === 'single'
+      ? `'${inner.replaceAll("'", "'\"'\"'")}'`
+      : `"${inner}"`
+    writeFileSync(outer, `#!/bin/sh\nexec ${quotedInner} "$@"\n`)
+    expect(await resolveDesktopHermesSelection({
+      env: { ...fixture.env, HERMES_BIN: outer }, searchPath: '', hermesHome: fixture.env.HERMES_HOME,
+    })).toMatchObject({ source: 'user-cli', pythonPath: python, agentRoot: fixture.root })
+  })
+
+  it('terminates cycles between forwarding wrappers', async () => {
+    const fixture = installation()
+    const other = join(fixture.root, 'bin', 'other-hermes')
+    fixture.write('bin/hermes', `#!/bin/sh\nexec "${other}" "$@"\n`)
+    fixture.write('bin/other-hermes', `#!/bin/sh\nexec "${fixture.path}" "$@"\n`)
+    expect(await fixture.desktop()).toMatchObject({ source: 'none' })
+  })
+
+  it('does not scan oversized files for interpreter-looking strings', async () => {
+    const fixture = installation()
+    fixture.write('bin/hermes', `#!/bin/sh\nexec "${python}" "$@"\n${'x'.repeat(1024 * 1024)}`)
+    expect(await fixture.desktop()).toMatchObject({ source: 'none' })
   })
 })
