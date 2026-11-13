@@ -86,3 +86,15 @@ state.agentSession 是 Agent 专用会话分区，state.plugin 始终是插件�
 CDP send 返回原始协议 JSON；attach 返回 cursor 和 iframe sessions；events 返回 cursor/oldestCursor/dropped/events。
 每条事件含 sequence/method/params，可带 sessionId/truncated。按返回 cursor 继续轮询；dropped/truncated 时由调用者决定是否重新读取页面状态。
 CDP 模块不返回宿主 token、调试端口或其他标签页的 WebContents 对象。通用 SDK JSON 值仍有 2 MB 限制。
+
+## 单聊和 BOT 实时返回
+
+host.sessions.connect 与 host.bots.connect 返回 HostSession：sessionId、run、stop、resume、queue、interactions、close。
+控制方法 Promise<void> 只表示已分发到核心通道，最终状态由 run.started/queued/completed/failed、abort、
+approval/clarify 等原始事件确认。连接故障时控制调用 reject，宿主不会把未确认的指令自动重发。
+回调的 SessionEvent 包含 event/session_id 和核心协议原始 JSON 字段；文本增量位于 delta，
+最终完整结果位于 run.completed.output，恢复数据位于 resumed 快照。
+transport.connected/disconnected/error/closed 反映连接与交付状态，不等同于运行完成或失败。
+重连重新获取快照，不能据此假定断线期间每个增量均被补发；插件按宿主快照和历史恢复。
+close 只释放自身订阅，保持宿主任务继续运行；显式 stop 发出原有 abort 指令。
+BOT 的普通方法保留现有服务 JSON 形状及并发 revision；校验失败直接 reject。

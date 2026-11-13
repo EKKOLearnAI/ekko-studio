@@ -50,7 +50,7 @@
 只声明实际需要的能力；宿主业务 API 仍按真实调用者校验权限。
 根 `ctx.state.plugin` 是插件全局存储，不会自动按用户或 Profile 分区。
 使用 `run.identity` 决定 namespace；浏览器传来的 userId/profile 不可信。
-Agent 的 `run.state.plugin` 则由宿主按 Agent、用户、Profile、会话和模式分区。
+Agent 的 `run.state.agentSession` 由宿主按 Agent、用户、Profile、会话和模式分区。
 `ctx.paths.dataDir` 供插件原生引擎、缓存和配置文件使用，升级/卸载保留。
 
 插件定时任务全局运行一次，使用激活管理员身份；更换 Profile 不会复制定时器。
@@ -75,7 +75,7 @@ Agent 使用 `agentApiVersion: 1` 与 `features`。只实现这一份最新契�
 
 | 模块 | 唯一职责 |
 | --- | --- |
-| `host` | 调用宿主 models/agents/sessions/groupChats/workflows/files/browser，request 是受限 JSON 逃生口 |
+| `host` | 调用宿主 models/agents/sessions/bots/groupChats/workflows/files/browser，request 是受限 JSON 逃生口 |
 | `extensions` | 注册 agents/tools/commands/hooks/actions/rpc；不承担宿主目录查询 |
 | `state` | 显式 plugin/user/profile/session/agentSession 数据作用域 |
 | `events` | 订阅宿主业务事件；只观察，不修改原业务 |
@@ -85,7 +85,27 @@ Agent 使用 `agentApiVersion: 1` 与 `features`。只实现这一份最新契�
 | `ui` | 前端提示、确认、输入、导航、模型选择器 |
 | `lifecycle` | add/acquire 统一登记同步与异步资源；signal 是上下文根部的取消元数据 |
 
-源码按 core/state/host/browser/contexts/agents 分文件，index.ts 只作为统一导出入口。
+源码按 core/state/host/browser/sessions/bots/contexts/agents 分文件，index.ts 只作为统一导出入口。
 插件包管理和 Agent 引擎维护属于宿主管理面；注册 Agent 的插件实现自己的管理回调。
 六种上下文分别是 PluginContext、RunContext、ClientContext、AgentManagementContext、AgentSessionContext、AgentRunContext。
 身份、配置、路径和取消信号是上下文元数据；功能入口不得再放置同义的根级别名。
+
+## 完整单聊与 BOT
+
+`host.sessions.connect(sessionId, listener)` 开放核心单聊的完整会话通道，
+包括流式文本、推理、工具、子任务、队列、审批、澄清、使用量和恢复快照。
+后端适配宿主现有 `/chat-run` Socket 协议；前端由宿主管理 `/plugins` 桥接连接，
+iframe 通过消息桥收发事件。插件不接收登录凭证或共享 Socket 对象。
+会话查询、配置、历史等一次性操作继续复用 HTTP API；控制指令和实时事件复用同一聊天运行时。
+
+`host.bots` 是独立宿主业务模块，统一 BOT 角色/对话、配置、模型、任务、协作、定时计划、
+记忆和交互。`host.bots.connect` 使用相同实时会话句柄，目标必须是当前调用者有权访问的 BOT 对话。
+BOT 业务与 `host.agents` 的执行引擎目录分别归属；创建 BOT 仍遵循宿主现有模型、工作区和版本检查。
+
+读取和连接需要 `api.read`；运行、停止、队列和交互回应需要 `api.write`。
+连接固定真实账号、Profile 和目标会话，每次控制和事件交付重新校验授权。
+宿主处理断线重连并重新请求原会话快照，只恢复订阅，不重发运行或变更指令。
+关闭句柄只释放它自己的资源；停止运行使用 `stop()`。插件结束、页面卸载和调用取消均关闭相应连接。
+
+无效已安装清单保持失败状态，可从插件中心更新或卸载；缺失权限元数据不会使整个页面崩溃。
+宿主不把旧字段转换为新契约，启用前必须通过当前清单校验。

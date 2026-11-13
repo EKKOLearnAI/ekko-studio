@@ -1,5 +1,5 @@
 import { createHostApi } from '../../../plugin-sdk/src'
-import type { ClientContext, ClientModule, Dispose, PluginEvent, PluginStorage } from '../../../plugin-sdk/src'
+import type { ClientContext, ClientModule, Dispose, PluginEvent, PluginStorage, HostSession, SessionListener } from '../../../plugin-sdk/src'
 
 // Serialized into an opaque-origin frame. Keep this function self-contained.
 function bootstrap(apiFactory: typeof createHostApi, loadModule: (url: string) => Promise<ClientModule>) {
@@ -10,6 +10,7 @@ function bootstrap(apiFactory: typeof createHostApi, loadModule: (url: string) =
     const { channel, source, context, theme } = event.data
     const pending = new Map<number, { resolve(value: any): void; reject(reason: Error): void }>()
     const listeners = new Map<string, Set<(value: PluginEvent) => void>>()
+    const sessions = new Map<string, SessionListener>()
     const disposers: Dispose[] = []
     const controller = new AbortController()
     let sequence = 0
@@ -26,6 +27,8 @@ function bootstrap(apiFactory: typeof createHostApi, loadModule: (url: string) =
       if (message.type === 'response') {
         const request = pending.get(message.id); pending.delete(message.id)
         if (message.error) request?.reject(new Error(message.error)); else request?.resolve(message.value)
+      } else if (message.type === 'session.event') {
+        try { sessions.get(message.id)?.(message.event) } catch (error) { send({ type: 'error', message: String(error) }) }
       } else if (message.type === 'event') {
         const matches = (pattern: string) => pattern === `${message.event.channel || 'business'}:${message.event.type}` || pattern === `${message.event.channel || 'business'}:*` || pattern.endsWith('.*') && `${message.event.channel || 'business'}:${message.event.type}`.startsWith(pattern.slice(0, -1))
         for (const listener of new Set([...listeners].filter(([pattern]) => matches(pattern)).flatMap(([, entries]) => [...entries]))) {
@@ -37,10 +40,28 @@ function bootstrap(apiFactory: typeof createHostApi, loadModule: (url: string) =
         controller.abort()
         for (const request of pending.values()) request.reject(new Error('Plugin view is closed'))
         pending.clear()
+        sessions.clear()
         for (const dispose of disposers.reverse()) { try { await dispose() } catch { /* Frame is closing. */ } }
       }
     })
-    const host = apiFactory((path, options = {}) => call('api', { path, options }), (method, params) => call('browser', { method, params }))
+    const host = apiFactory((path, options = {}) => call('api', { path, options }), (method, params) => call('browser', { method, params }), async (sessionId, listener, kind = 'chat') => {
+      const id = `session-${++sequence}`
+      sessions.set(id, listener)
+      try { await call('session-open', { id, sessionId, kind }) }
+      catch (error) { sessions.delete(id); throw error }
+      const command = (method: string, args: unknown = {}) => call<void>('session-command', { id, method, args })
+      const close = addResource(async () => {
+        sessions.delete(id)
+        if (!controller.signal.aborted) await call('session-close', { id })
+      })
+      const connection: HostSession = {
+        sessionId, close, run: (input, options = {}) => command('run', { input, options }),
+        stop: () => command('stop'), resume: () => command('resume'),
+        queue: { insert: queueId => command('queue.insert', { queueId }), cancel: queueId => command('queue.cancel', { queueId }) },
+        interactions: { approve: (approvalId, choice) => command('approval.respond', { approvalId, choice }), clarify: (clarifyId, response) => command('clarify.respond', { clarifyId, response }) },
+      }
+      return connection
+    })
     const storage = (scope: string, namespace: string[] = []): PluginStorage => ({
       namespace: (...segments) => storage(scope, [...namespace, ...segments]),
       get: key => call('storage', { scope, action: 'get', key, namespace }).then(result => result.present ? result.value : undefined),

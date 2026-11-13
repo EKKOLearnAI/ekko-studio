@@ -47,10 +47,11 @@ it('keeps deliberately installed fixtures and preserves builtin configuration/da
   await reconcileBuiltinPlugins(manager, who)
   expect(manager.snapshot().plugins.map(plugin => plugin.manifest.id)).toEqual(['notebook', 'omp'])
   const path = manager.runtime(who, 'omp').context().paths.dataDir
+  const version = manager.snapshot().plugins.find(plugin => plugin.manifest.id === 'omp')!.manifest.version
   await manager.update(who, 'omp', manager.store.read().revision, { enabled: false })
   const state = manager.store.read(); state.records.omp.manifest.version = '0.0.1'; manager.store.write(state, state.revision)
   await reconcileBuiltinPlugins(manager, who)
-  expect(manager.snapshot().plugins.find(plugin => plugin.manifest.id === 'omp')).toMatchObject({ enabled: false, manifest: { version: '0.2.0' } })
+  expect(manager.snapshot().plugins.find(plugin => plugin.manifest.id === 'omp')).toMatchObject({ enabled: false, manifest: { version } })
   await manager.update(who, 'omp', manager.store.read().revision, { enabled: true })
   expect(manager.runtime(who, 'omp').context().paths.dataDir).toBe(path)
 })

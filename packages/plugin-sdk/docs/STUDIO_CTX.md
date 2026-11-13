@@ -1,6 +1,6 @@
 # Studio SDK v1 上下文与能力
 
-精确类型由 sdk/src/index.ts 统一导出，按 core/state/host/browser/contexts/agents 六个模块组织。
+精确类型由 sdk/src/index.ts 统一导出，按 core/state/host/browser/sessions/bots/contexts/agents 组织源码。
 
 | 上下文 | 元数据及能力 | 生命周期 |
 | --- | --- | --- |
@@ -22,7 +22,8 @@ paths.dataDir 保存稳定插件私有文件；Agent paths.runtimeDir/workspaceD
 | --- | --- |
 | models | list、respond（非流式 Responses JSON） |
 | agents | list、status、models、settings |
-| sessions | list/get/create/run/stop/remove/rename/archive/setModel/setWorkspace/messages |
+| sessions | list/get/create/run/stop/remove/rename/archive/setModel/setWorkspace/messages；connect 实时会话 |
+| bots | list/create/get/configure/clear/remove/connect；models/tasks/flows/schedules/memory/interactions，见下文 |
 | groupChats | list/get/create/update/remove/send/stop/messages；agents.list/add/update/remove |
 | workflows | list/get/create/update/remove/run/stop/runs/getRun；schedules.list/create/update/remove |
 | files | list/read |
@@ -47,7 +48,7 @@ iframe 不共享宿主 DOM、localStorage 或登录 token；使用宿主主题�
 
 ## SDK v1 规范入口
 
-`ctx.host` 在前后端及调用上下文中使用相同业务分组：models、agents、sessions、groupChats、workflows、files、browser。
+`ctx.host` 在前后端及调用上下文中使用相同业务分组：models、agents、sessions、bots、groupChats、workflows、files、browser。
 宿主业务统一通过 host 分组调用。Agent 目录通过 host.agents.list/status/models/settings 访问，
 注册自己的 Agent 则使用 extensions.agents.register。维护动作继续由宿主按原有管理员规则调度。
 `permissions` 是实际 manifest 权限；普通 run.features 是运行环境支持项；AgentDefinition.features 是引擎声明。
@@ -61,6 +62,54 @@ Agent 不再覆盖默认存储。根 ctx.state 在回调内动态绑定真实身
 注册统一使用 extensions.agents/tools/commands/hooks/actions/rpc；每个注册返回清理句柄。
 定时执行使用 scheduler.every；资源使用 lifecycle.add/acquire，按所在上下文寿命清理。
 前端 events.on 订阅业务事件，messages.on 接收插件自定义页面消息；Agent output.emit 发布运行事件。
+
+## 单聊实时会话
+
+```js
+const live = await ctx.host.sessions.connect(sessionId, event => {
+  if (event.event === 'message.delta') appendText(event.delta)
+  if (event.event === 'resumed') restoreSnapshot(event)
+  if (event.event === 'run.completed') showFinalReply(event.output)
+})
+await live.run('你好')
+// await live.queue.insert(queueId)
+// await live.queue.cancel(queueId)
+// await live.interactions.approve(approvalId, choice)
+// await live.interactions.clarify(clarifyId, response)
+// await live.stop()
+await live.close()
+```
+
+connect 需要 api.read，控制指令需要 api.write；resume 只需 api.read。
+listener 接收核心 `/chat-run` 协议中目标会话的原始事件字段，含 event/session_id。
+包括 message.delta/interim、reasoning/thinking、tool/subagent、run/queue、approval/clarify、
+usage、plan、compression、workspace、session 更新，以及 resumed 恢复快照。
+transport.connected/disconnected/error/closed 描述连接状态。调用监听器应快速处理，不承担业务回执。
+首次连接与重连自动请求 resume；插件按快照恢复显示，不应把快照重复拼接到已有增量。
+断线期间的指令明确失败，不缓冲或自动重放。close 释放订阅，stop 才会停止宿主运行。
+指令 Promise 表示分发完成；运行结果、失败、审批与终态由后续事件确认。
+输入、options、事件和结果沿用 SDK JSON 限制；过大的事件会报告 transport.error，调用者可分页读取历史。
+连接寿命绑定创建它的上下文：页面卸载、插件停用、调用取消均释放资源；普通 RPC 不适合承载长期订阅。
+
+## BOT 完整模块
+
+`host.bots.list/create/get/configure/clear/remove` 管理 BOT 角色及对话；create 输入沿用宿主 title、bot_type、
+workspace、model 等字段，get 返回权威快照，configure 与 clear/remove 保留原有 revision 并发检查。
+`host.bots.connect(botSessionId, listener)` 返回同样的实时句柄，可聊天、排队、回应审批并恢复快照。
+BOT 变化通过 person.updated 事件通知，可重新 get 权威配置、任务、记忆和协作状态。
+
+| BOT 子模块 | 方法 |
+| --- | --- |
+| models | list / agents / execution：模型及执行 Agent 目录 |
+| tasks | list / apply：查询和变更任务；messages / send：任务对话；insert / remove：待执行输入队列；executions / events：执行历史与事件 |
+| flows | list / apply / messages：BOT 协作及协作对话 |
+| schedules | apply：查询、创建及控制原有定时计划 |
+| memory | forget(id, expectedRevision)：遗忘指定记忆；记忆新增修订仍通过 BOT 对话 |
+| interactions | answer(id, expectedRevision, answer)：回应 BOT 原有交互 |
+
+这些 HTTP 方法保留现有服务的 JSON 请求/返回、action、revision、幂等键、工作区和归属校验。
+其中 POST 查询也遵循 api.write 的现有方法授权规则；SDK 不代填 revision 或跳过业务确认。
+模型直接调用 host.models.respond 仍是非流式 JSON；单聊实时会话通过现有引擎保留流式体验。
 
 ## 桌面内置浏览器 CDP
 

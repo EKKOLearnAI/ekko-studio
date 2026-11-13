@@ -9,6 +9,12 @@ const row = (index = 1) => ({ id: index.toString(16).padStart(64, '0'), name: `P
 const page = (list: unknown[], total = list.length, current = 1) => Response.json({ ok: true, data: { list, total, page: current, pageSize: 100 } })
 afterEach(() => vi.unstubAllGlobals())
 
+it('keeps the plugin center usable when an installed package has invalid permission metadata', () => {
+  expect(matchesPluginCategory(undefined, 'all')).toBe(true)
+  expect(matchesPluginCategory(undefined, 'agents')).toBe(false)
+  expect(matchesPluginCategory(['agents'], 'agents')).toBe(true)
+})
+
 it('loads every page without credentials so filtering can find entries beyond the first page', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(page(Array.from({ length: 100 }, (_, i) => row(i + 1)), 101))
     .mockResolvedValueOnce(page([{ ...row(101), permissions: ['agents'], name: 'Last agent' }], 101, 2))

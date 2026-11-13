@@ -3,6 +3,11 @@
 当前为 SDK v1，清单使用 apiVersion: 1 和 permissions，Agent 使用 agentApiVersion: 1 和 features。
 模块规范见 [SDK 架构](../packages/plugin-sdk/docs/ARCHITECTURE.md)，全部上下文及 CDP 用法见 [能力指南](../packages/plugin-sdk/docs/STUDIO_CTX.md)。
 
+宿主业务按 models、agents、sessions、bots、groupChats、workflows、files、browser 八个模块开放。
+单聊和 BOT 通过 `host.sessions.connect` / `host.bots.connect` 复用核心聊天实时协议，
+保留流式文本、工具、排队、审批、澄清与恢复快照；页面通过宿主 Socket 桥接，不使用业务观察事件轮询代替实时会话。
+已安装清单不满足当前契约时显示失败并允许更新/卸载，插件中心仍可正常访问。
+
 Studio 插件用于定制工作台页面、设置页面、独立工作区、Agent 运行时、工具、命令和自动化动作。
 插件中心在主导航中开放，位于自定义插件业务入口之前、API Key 之前。插件页面与其他 Studio 页面复用固定页头。
 插件中心与 Hermes、DSH 各自的原生插件管理分开。插件安装、启用、配置和运行实例属于整个 Studio，所有账号、Profile 和任务均可使用，无需重复安装。

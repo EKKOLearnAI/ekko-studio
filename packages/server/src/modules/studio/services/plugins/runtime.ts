@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
-import type { ApiRequest, PluginPermission, Dispose, HookResult, Json, PluginAction, PluginCommand, PluginContext, PluginEvent, PluginHook, PluginIdentity, PluginModule, PluginRecord, PluginTool, RunContext, ToolResult } from '../../contracts/plugins'
+import type { ApiRequest, PluginPermission, Dispose, HookResult, Json, PluginAction, PluginCommand, PluginContext, PluginEvent, PluginHook, PluginIdentity, PluginModule, PluginRecord, PluginTool, RunContext, ToolResult, HostSession, SessionListener } from '../../contracts/plugins'
 import { createHostApi } from '../../../../../../plugin-sdk/src'
 import { PluginEffects } from './effects'
 import { PluginError, message } from './errors'
@@ -13,6 +13,7 @@ import type { PluginStore } from './store'
 import { PluginAgentRuntime } from './agent-runtime'
 
 export interface PluginPorts {
+  sessions?(identity: PluginIdentity, sessionId: string, listener: SessionListener, signal: AbortSignal, kind: 'chat' | 'bot'): Promise<HostSession>
   browser?(identity: PluginIdentity, method: string, params: Record<string, Json>, binding: string, signal: AbortSignal): Promise<Json>
   api(identity: PluginIdentity, path: string, options: ApiRequest, signal: AbortSignal): Promise<Json>
   authorize(identity: PluginIdentity): void | Promise<void>
@@ -92,6 +93,32 @@ export class PluginRuntime {
       profile: plugin.namespace('sdk', 'profiles', String(identity.userId), identity.profile),
       ...(identity.sessionId ? { session: plugin.namespace('sdk', 'sessions', String(identity.userId), identity.profile, identity.sessionId) } : {}) }
   }
+  async connectSession(identity: PluginIdentity, signal: AbortSignal, sessionId: string, listener: SessionListener, kind: 'chat' | 'bot' = 'chat'): Promise<HostSession> {
+    if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256 || !['chat', 'bot'].includes(kind)) throw new PluginError('Invalid session connection')
+    const connection = new AbortController()
+    signal = AbortSignal.any([signal, this.effects.controller.signal, connection.signal])
+    const authorize = async (write = false) => {
+      signal.throwIfAborted(); this.require(write ? 'api.write' : 'api.read')
+      await this.ports.authorize({ ...identity, sessionId })
+    }
+    await authorize()
+    if (!this.ports.sessions) throw new PluginError('Live session transport is unavailable', 'PLUGIN_UNAVAILABLE', 503)
+    let delivery = Promise.resolve()
+    const session = await this.ports.sessions(identity, sessionId, event => {
+      delivery = delivery.then(async () => { await authorize(); listener(event) }).catch(error => {
+        this.log('warn', `Session event delivery: ${message(error)}`, undefined, identity)
+      })
+    }, signal, kind)
+    if (signal.aborted) { await session.close(); signal.throwIfAborted() }
+    const close = this.effects.add(() => { connection.abort(); return session.close() })
+    const command = async (work: () => Promise<void>, write = true) => { await authorize(write); await work() }
+    return {
+      sessionId, close, run: (input, options) => command(() => session.run(input, options)),
+      stop: () => command(() => session.stop()), resume: () => command(() => session.resume(), false),
+      queue: { insert: id => command(() => session.queue.insert(id)), cancel: id => command(() => session.queue.cancel(id)) },
+      interactions: { approve: (id, choice) => command(() => session.interactions.approve(id, choice)), clarify: (id, response) => command(() => session.interactions.clarify(id, response)) },
+    }
+  }
   async browserRequest(identity: PluginIdentity, signal: AbortSignal, method: string, params: Record<string, Json>): Promise<Json> {
     if (!['tabs.list', 'tabs.create', 'tabs.close', 'cdp.attach', 'cdp.send', 'cdp.events', 'lease.release'].includes(method) || !params || typeof params !== 'object' || Array.isArray(params)) throw new PluginError('Invalid plugin browser request')
     signal.throwIfAborted(); this.require('browser.cdp'); await this.ports.authorize(identity)
@@ -110,7 +137,8 @@ export class PluginRuntime {
     const host = createHostApi(<T = Json>(path: string, options?: ApiRequest) => {
       const current = this.current()
       return this.api(current.identity, current.signal).request<T>(path, options)
-    }, (method, params) => { const current = this.current(); return this.browserRequest(current.identity, current.signal, method, params) })
+    }, (method, params) => { const current = this.current(); return this.browserRequest(current.identity, current.signal, method, params) },
+    (id, listener, kind) => { const current = this.current(); return this.connectSession(current.identity, current.signal, id, listener, kind) })
     return {
       paths: Object.freeze({ dataDir: join(this.store.directory(), 'plugin-data', this.record.manifest.id) }),
       plugin: Object.freeze(structuredClone(this.record.manifest)), get identity() { return Object.freeze({ ...self.current().identity }) },
@@ -156,7 +184,8 @@ export class PluginRuntime {
     return createHostApi(async <T = Json>(path: string, options: ApiRequest = {}) => {
       signal.throwIfAborted(); this.require(!options.method || options.method === 'GET' ? 'api.read' : 'api.write')
       return await this.ports.api(identity, path, options, signal) as T
-    }, (method, params) => this.browserRequest(identity, signal, method, params))
+    }, (method, params) => this.browserRequest(identity, signal, method, params),
+    (id, listener, kind) => this.connectSession(identity, signal, id, listener, kind))
   }
   runContext(identity: PluginIdentity, signal: AbortSignal, effects = this.effects): RunContext {
     const active = () => { this.effects.assertActive(); signal.throwIfAborted() }

@@ -1,5 +1,7 @@
 import type { Json } from './core'
 import type { PluginBrowser, BrowserTransport } from './browser'
+import type { SessionConnector, SessionListener } from './sessions'
+import type { HostBots } from './bots'
 
 export interface ApiRequest {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -16,10 +18,12 @@ export interface SessionCreateInput {
 export interface HostApi {
   agents: { list(): Promise<Json>; status(id: string): Promise<Json>; models(id: string, refresh?: boolean): Promise<Json>; settings(id: string): Promise<Json> }
   browser: PluginBrowser
+  bots: HostBots
 
   request<T = Json>(path: string, options?: ApiRequest): Promise<T>
   models: { list(): Promise<Json>; respond(input: Record<string, Json>): Promise<Json> }
   sessions: {
+    connect: SessionConnector
     list(query?: ApiQuery): Promise<Json>; get(id: string): Promise<Json>
     create(input?: SessionCreateInput): Promise<Json>
     /** Returns after the run starts/queues. Set wait:true to wait for completion. */
@@ -51,7 +55,7 @@ export interface HostApi {
   }
   files: { list(path?: string): Promise<Json>; read(path: string): Promise<Json> }
 }
-export function createHostApi(request: HostApi['request'], browserRequest?: BrowserTransport): HostApi {
+export function createHostApi(request: HostApi['request'], browserRequest?: BrowserTransport, sessionConnect?: SessionConnector): HostApi {
   const id = encodeURIComponent
   // This entire factory is serialized into the browser iframe; keep helpers local.
   const session = (value: string) => `/api/studio/sessions/${id(value)}`
@@ -59,6 +63,12 @@ export function createHostApi(request: HostApi['request'], browserRequest?: Brow
   const workflow = (value: string) => `/api/studio/workflows/${id(value)}`
   const post = (path: string, body: Json = {}) => request(path, { method: 'POST', body })
   const remove = (path: string) => request(path, { method: 'DELETE' })
+  const connect = (sessionId: string, listener: SessionListener, kind: 'chat' | 'bot' = 'chat') => {
+    if (!sessionConnect) return Promise.reject(new Error('Live session transport is unavailable'))
+    return sessionConnect(sessionId, listener, kind)
+  }
+  const person = '/api/studio/person'
+  const task = (value: string) => `${person}/tasks/${id(value)}`
   const browser = async <T>(method: string, params: Record<string, Json> = {}): Promise<T> => {
     if (!browserRequest) throw new Error('Desktop browser transport is unavailable')
     return await browserRequest(method, params) as T
@@ -68,6 +78,25 @@ export function createHostApi(request: HostApi['request'], browserRequest?: Brow
     status: value => request(`/api/studio/agents/${id(value)}/status`),
     models: (value, refresh = false) => request(`/api/studio/agents/${id(value)}/models`, { query: { refresh } }),
     settings: value => post(`/api/studio/agents/${id(value)}/settings`),
+  }, bots: {
+    list: query => request(`${person}/conversations`, { query }),
+    create: input => post(`${person}/conversations`, input),
+    get: sessionId => request(person, { query: { session_id: sessionId } }),
+    configure: (sessionId, input) => request(`${person}/settings`, { method: 'PUT', body: { ...input, session_id: sessionId } }),
+    clear: (sessionId, expectedHistoryRevision) => post(`${person}/clear`, { session_id: sessionId, expected_history_revision: expectedHistoryRevision }),
+    remove: (sessionId, expectedHistoryRevision) => request(`${person}/conversations/${id(sessionId)}`, { method: 'DELETE', body: { expected_history_revision: expectedHistoryRevision } }),
+    connect: (sessionId, listener) => connect(sessionId, listener, 'bot'),
+    models: { list: () => request(`${person}/models`), agents: () => request(`${person}/capabilities`), execution: () => request(`${person}/agent-models`) },
+    tasks: {
+      list: (input = {}) => post(`${person}/tasks/query`, input), apply: input => post(`${person}/tasks/apply`, input),
+      messages: (value, query) => request(`${task(value)}/chat`, { query }), send: (value, input) => post(`${task(value)}/chat`, input),
+      insert: (value, input) => post(`${task(value)}/queue/insert`, input), remove: (value, input) => post(`${task(value)}/queue/remove`, input),
+      executions: value => request(`${task(value)}/executions`), events: (value, after = 0) => request(`${person}/executions/${id(value)}/events`, { query: { after } }),
+    },
+    flows: { list: (input = {}) => post(`${person}/flows/query`, input), apply: input => post(`${person}/flows/apply`, input), messages: (value, query) => request(`${person}/flows/${id(value)}/messages`, { query }) },
+    schedules: { apply: input => post(`${person}/schedules/apply`, input) },
+    memory: { forget: (value, expectedRevision) => post(`${person}/memory`, { id: value, expected_revision: expectedRevision, forget: true }) },
+    interactions: { answer: (value, expectedRevision, answer) => post(`${person}/interactions/${id(value)}/answer`, { expected_revision: expectedRevision, answer }) },
   }, browser: {
     tabs: { list: () => browser('tabs.list'), create: (url = 'about:blank') => browser('tabs.create', { url }), close: tabId => browser('tabs.close', { tab_id: tabId }) },
     cdp: {
@@ -81,6 +110,7 @@ export function createHostApi(request: HostApi['request'], browserRequest?: Brow
     respond: input => request('/api/ekko-studio/models/v1/responses', { method: 'POST', body: { ...input, stream: false } }),
   },
     sessions: {
+      connect,
       list: query => request('/api/studio/sessions', query ? { query } : undefined), get: value => request(session(value)),
       create: (input = {}) => post('/api/studio/sessions', { ...input }),
       run: (value, input, options = {}) => post('/api/studio/chat-run/runs', { wait: false, ...options, session_id: value, input }),
