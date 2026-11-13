@@ -44,7 +44,14 @@ events.on 支持精确名称、前缀及 *，业务事件是有界内存观察�
 messages.emit 默认发给当前调用者，audience=plugin 广播本插件所有账号/Profile 页面，前端通过 messages.on 接收。
 messages.notify 给当前调用者提示；自定义消息不会回流后端 events 总线。
 前端 rpc.call 调用本插件 extensions.rpc 注册的业务函数。
-ui 提供 notify/confirm/prompt/navigate/selectModel；模型选择器返回规范模型引用或 null，不包含凭证，也不负责保存或调用模型。
+ui 提供 notify/confirm/prompt/navigate/selectModel/selectWorkspace；模型选择器返回规范模型引用或 null，不包含凭证，也不负责保存或调用模型。
+工作区选择器复用宿主目录浏览、手动路径、账号级收藏及最近记录；返回 `{profile,workspace}` 或取消时 null。
+它不修改会话或插件设置，插件可通过 RPC 保存选择，或显式调用 host.sessions.setWorkspace 等已有业务方法。
+
+```js
+const selected = await ctx.ui.selectWorkspace({ current: savedWorkspace || '' })
+if (selected) await ctx.rpc.call('save-workspace', selected)
+```
 页面包括 page/settings/workspace/agent-settings 和动态 workspace-sidebar，navigation.main/settings 独立声明入口。
 iframe 不共享宿主 DOM、localStorage 或登录 token；使用宿主主题变量，不直接联网。
 

@@ -451,7 +451,7 @@ ctx.events.on('group.message.delta', event => {
 高频流可覆盖较早事件，插件应按事件 ID 去重并用历史接口恢复状态。观察回调不阻塞原始运行；
 需要拦截时使用 `ctx.extensions.hooks`。自定义 `messages.emit` 发给前端，不重新进入后端 `ctx.events.on`。
 
-前端还可使用 `ctx.state.plugin`、`ctx.host.models`、`ctx.ui.notify/confirm/prompt/navigate`、
+前端还可使用 `ctx.state.plugin`、`ctx.host.models`、`ctx.ui.notify/confirm/prompt/navigate/selectModel/selectWorkspace`、
 `ctx.events.on` 和 `ctx.lifecycle.add`。页面布局类型为 `page`、`settings`、`workspace`、`agent-settings`；
 动态工作区侧栏挂载时的 `ctx.slot` 为 `workspace-sidebar`。这些页面不绑定当前单聊会话，
 需要访问会话时由插件通过 SDK 显式指定 ID，宿主照常检查当前调用者权限。
