@@ -301,7 +301,7 @@ test('opens developer resources and submission from the compact catalog across t
   await banner.getByRole('link', { name: '开发文档' }).click()
   const docs = await popup
   await expect(docs).toHaveURL(docsUrl); await docs.close()
-  await banner.getByRole('button', { name: '提交插件', exact: true }).click()
+  await page.locator('.catalog-actions').getByRole('button', { name: '提交插件', exact: true }).click()
   await expect(page.locator('.plugin-submission-modal').getByRole('textbox', { name: '仓库地址', exact: true })).toBeVisible()
   await page.locator('.plugin-submission-modal').getByRole('button', { name: '取消', exact: true }).click()
   await expect(page.locator('.plugin-submission-modal')).toHaveCount(0)
@@ -350,7 +350,7 @@ test('opens developer resources and submission from the compact catalog across t
   await expect(guide.getByRole('alert')).toHaveCount(0)
   await expect(guide.getByRole('button', { name: '已复制', exact: true })).toBeVisible()
   await page.keyboard.press('Escape'); await expect(guide).toHaveCount(0)
-  await banner.getByRole('button', { name: '提交插件', exact: true }).click()
+  await page.locator('.catalog-actions').getByRole('button', { name: '提交插件', exact: true }).click()
   await expect(page.locator('.plugin-submission-modal')).toBeInViewport({ ratio: .95 })
   await page.keyboard.press('Escape'); await expect(page.locator('.plugin-submission-modal')).toHaveCount(0)
   await page.evaluate(() => { (window as any).pluginFixture.appearance({ brightness: 'light', appearance: { global: {}, regions: {} } }); (window as any).pluginFixture.wallpaper(false) })

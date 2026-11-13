@@ -305,7 +305,6 @@ async function logs(id: string) {
         <nav class="developer-links" :aria-label="t('studioPlugins.developResources')">
           <a href="https://github.com/EKKOLearnAI/ekko-studio/blob/main/docs/plugins.md" target="_blank" rel="noopener noreferrer"><span>{{ t('studioPlugins.developGuide') }}</span><ExternalLinkIcon /></a>
           <a href="https://github.com/EKKOLearnAI/ekko-studio/tree/main/packages/plugin-sdk/template" target="_blank" rel="noopener noreferrer"><span>{{ t('studioPlugins.developTemplate') }}</span><ExternalLinkIcon /></a>
-          <NButton text @click="showSubmission = true">{{ t('studioPluginSubmission.title') }}</NButton>
         </nav>
       </aside>
       <PluginDevelopmentGuide v-model:mode="developmentGuide" />
@@ -319,7 +318,10 @@ async function logs(id: string) {
           <NTab name="all" id="plugins-tab-all" role="tab" :aria-selected="scope === 'all'" :tabindex="scope === 'all' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.all') }} <span v-if="marketLoaded" class="scope-count">{{ marketEntries.length }}</span></NTab>
           <NTab v-if="canManage && projects.length" name="development" id="plugins-tab-development" role="tab" :aria-selected="scope === 'development'" :tabindex="scope === 'development' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.devProjects') }} <span class="scope-count">{{ projects.length }}</span></NTab>
         </NTabs>
-        <NButton v-if="canManage" type="primary" :disabled="busy" @click="showInstall = true">{{ t('studioPlugins.installTitle') }}</NButton>
+        <div class="catalog-actions">
+          <NButton secondary @click="showSubmission = true">{{ t('studioPluginSubmission.title') }}</NButton>
+          <NButton v-if="canManage" type="primary" :disabled="busy" @click="showInstall = true">{{ t('studioPlugins.installTitle') }}</NButton>
+        </div>
       </div>
       <section id="plugin-catalog-panel" class="catalog-panel" role="tabpanel" :aria-labelledby="'plugins-tab-' + scope">
       <NAlert v-if="scope === 'all' && marketFailed" type="warning">{{ t('studioPlugins.marketUnavailable') }} <NButton text :loading="marketLoading" @click="refreshMarket(true)">{{ t('common.retry') }}</NButton></NAlert>
@@ -539,10 +541,9 @@ async function logs(id: string) {
 .developer-links { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 18px; font-size: 12px; line-height: 20px; }
 .developer-links a { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; color: $text-secondary; text-decoration: none; }
 .developer-links a:hover { color: $accent-primary; text-decoration: underline; text-underline-offset: 3px; }
-.developer-links :deep(.n-button) { min-height: 24px; font-size: inherit; line-height: inherit; }
-.developer-links :deep(.n-button__content) { line-height: inherit; }
 .catalog-heading { display: flex; align-items: center; gap: 24px; }
 .catalog-scopes { flex: 1; min-width: 0; }
+.catalog-actions { display: flex; align-items: center; flex-shrink: 0; gap: 8px; }
 .eyebrow { color: $text-muted; font-size: 12px; }
 p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .search-row { display: flex; gap: 12px; align-items: center; }
@@ -605,6 +606,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflo
   .developer-copy h1 { font-size: 14px; }
   .catalog-heading { gap: 12px; flex-wrap: wrap; }
   .catalog-scopes { flex-basis: 220px; }
+  .catalog-actions { margin-inline-start: auto; flex-wrap: wrap; }
   .plugin-card { padding: 16px; }
   .card-footer { grid-column: 1 / -1; }
   .catalog-toolbar { align-items: flex-start; flex-direction: column; }

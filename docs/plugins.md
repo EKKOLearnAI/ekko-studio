@@ -692,7 +692,8 @@ The catalog uses compact rows: the icon, name, source/runtime state and short
 description form the main identity; author, repository and version metadata stay
 together, with primary actions separated from details and uninstall. Rows wrap
 on narrow screens without hiding management actions. The header links directly
-to development documentation and the plugin template, alongside plugin submission.
+to development documentation and the plugin template. Plugin submission sits beside
+installation in the catalog toolbar, with both actions kept together on narrow screens.
 It also offers **Create a blank project** and **Link an existing project** guides,
 with copyable CLI commands to run on the Studio server machine. Creating a project
 includes a minimal settings-page example, SDK and development docs and registers
