@@ -42,7 +42,7 @@ const routeProfile = computed(() => {
   return typeof value === 'string' && value.trim() ? value : null
 })
 
-const effectiveHistoryProfile = computed(() => profilesStore.activeProfileName || routeProfile.value || null)
+const effectiveHistoryProfile = computed(() => routeProfile.value || profilesStore.activeProfileName || null)
 
 // Hermes history sessions grouped by source, including Web UI/API Server.
 const hermesSessions = ref<SessionSummary[]>([])
@@ -54,6 +54,7 @@ const pageLoading = computed(() => initializingPage.value || hermesSessionsLoadi
 let historySessionRequestId = 0
 let pendingHistorySessionKey: string | null = null
 let disposed = false
+let historyNavigationId = 0
 // History page's own selected session (independent from chatStore)
 const historySessionId = ref<string | null>(null)
 const historySession = ref<Session | null>(null)
@@ -82,12 +83,13 @@ function handleOutlineNavigate(target: { messageId: string; anchorId: string }) 
 
 async function loadHermesSessions() {
   const requestId = ++hermesSessionsRequestId
+  const requestedProfile = effectiveHistoryProfile.value
   hermesSessionsLoading.value = true
   try {
     const includedIds: string[] = []
     if (routeSessionId.value && !includedIds.includes(routeSessionId.value)) includedIds.push(routeSessionId.value)
-    const result = await fetchHermesSessionGroups(HISTORY_GROUP_PAGE_SIZE, effectiveHistoryProfile.value, includedIds)
-    if (requestId !== hermesSessionsRequestId) return
+    const result = await fetchHermesSessionGroups(HISTORY_GROUP_PAGE_SIZE, requestedProfile, includedIds)
+    if (disposed || requestId !== hermesSessionsRequestId || requestedProfile !== effectiveHistoryProfile.value) return false
     const sessionsByKey = new Map<string, SessionSummary>()
     for (const session of result.groups.flatMap(group => group.sessions)) {
       sessionsByKey.set(`${session.profile || 'default'}\u0000${session.id}`, session)
@@ -100,8 +102,10 @@ async function loadHermesSessions() {
     sourceOffsets.value = Object.fromEntries(result.groups.map(group => [group.source, group.sessions.length]))
     sourceLoading.value = {}
     hermesSessionsLoaded.value = true
+    return true
   } catch (err) {
     console.error('Failed to load Hermes sessions:', err)
+    return false
   } finally {
     if (requestId === hermesSessionsRequestId) {
       hermesSessionsLoading.value = false
@@ -334,10 +338,11 @@ async function loadOlderHistoryMessages(sessionId: string): Promise<boolean> {
 }
 
 function openHistorySession(sessionId: string, profile?: string | null) {
+  // Ordinary list navigation follows the active profile; only explicit links stay scoped.
   return router.push({
     name: 'hermes.historySession',
     params: { sessionId },
-    query: profile ? { profile } : undefined,
+    query: routeProfile.value && profile ? { profile } : undefined,
   })
 }
 
@@ -363,7 +368,7 @@ async function openDefaultHistorySession(replace = false) {
   const location = {
     name: 'hermes.historySession',
     params: { sessionId: firstSession.id },
-    query: firstSession.profile ? { profile: firstSession.profile } : undefined,
+    query: routeProfile.value && firstSession.profile ? { profile: firstSession.profile } : undefined,
   }
   if (replace) await router.replace(location)
   else await router.push(location)
@@ -424,28 +429,40 @@ onUnmounted(() => {
 
 watch(
   [routeSessionId, routeProfile],
-  async ([sessionId]) => {
+  async ([sessionId, profile], [, previousProfile]) => {
+    const navigationId = ++historyNavigationId
+    const requestedRoute = route.fullPath
     if (!sessionId) {
       historySessionRequestId++
       historySessionLoading.value = false
       historySessionId.value = null
       historySession.value = null
-      return
     }
     if (!hermesSessionsLoaded.value) return
-    if (routeProfile.value && !hermesSessions.value.some(s => s.profile === routeProfile.value)) {
-      await loadHermesSessions()
+    if (profile !== previousProfile || (profile && !hermesSessions.value.some(s => s.profile === profile))) {
+      if (!await loadHermesSessions()) return
     }
-    await syncRouteSession()
+    if (disposed || navigationId !== historyNavigationId || route.fullPath !== requestedRoute) return
+    if (sessionId) await syncRouteSession()
   },
 )
 
-watch(() => profilesStore.activeProfileName, async () => {
-  if (!hermesSessionsLoaded.value) return
+let lastHistoryProfile = profilesStore.activeProfileName
+watch([() => profilesStore.activeProfileName, () => profilesStore.switching], async () => {
   if (profilesStore.switching) return
+  const profile = profilesStore.activeProfileName
+  const previousProfile = lastHistoryProfile
+  lastHistoryProfile = profile
+  if (!hermesSessionsLoaded.value || profile === previousProfile || routeProfile.value) return
+  const navigationId = historyNavigationId
+  const requestedRoute = route.fullPath
+  historySessionRequestId++
+  historySessionLoading.value = false
   historySessionId.value = null
   historySession.value = null
-  await loadHermesSessions()
+  const loaded = await loadHermesSessions()
+  if (!loaded || disposed || navigationId !== historyNavigationId || profilesStore.switching || profilesStore.activeProfileName !== profile
+    || routeProfile.value || route.fullPath !== requestedRoute) return
   await openDefaultHistorySession(true)
 })
 
