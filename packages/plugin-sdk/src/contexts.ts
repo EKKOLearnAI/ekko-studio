@@ -11,7 +11,7 @@ export interface PluginEvent {
   data: Json
   audience?: 'caller' | 'plugin'
 }
-/** Observations available through ctx.on()/ctx.events.on(); delivery is in-memory. */
+/** Observations available through ctx.events.on(); delivery is in-memory. */
 export const PLUGIN_EVENT_TYPES = [
   'chat.session.created', 'chat.session.removed', 'chat.message.created', 'chat.message.delta', 'chat.reasoning.delta',
   'chat.run.queued', 'chat.run.started', 'chat.run.updated', 'chat.run.completed', 'chat.run.failed', 'chat.run.stopped',

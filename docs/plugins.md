@@ -208,7 +208,7 @@ Studio 的 harness/build 检查 SDK 变化是否同时修改了架构、ctx 或�
 
 全局注册表位于 Web UI 状态目录的 `plugins/global/state.json`。一个插件只激活一个后端实例，依赖检查、配置、版本并发控制和启停均为全局；定时器不会因切换账号或 Profile 重复启动。插件自身定时任务使用最近激活它的管理员默认 Profile。该身份失去权限时相应后台 API 调用会被拒绝，不影响其他合法账号调用插件。
 
-RPC、工具、聊天命令、钩子、业务事件和工作流始终使用实际调用者的账号、Profile、会话和任务上下文。宿主通过异步调用上下文绑定根 `ctx.identity / api / models / signal`，并发请求不会复用安装者权限。业务数据的共享与分区由插件开发者决定；宿主不按账号、Profile、会话或工作区自动划分插件存储。现有 Studio API 仍按实际调用者校验访问权限。
+RPC、工具、聊天命令、钩子、业务事件和工作流始终使用实际调用者的账号、Profile、会话和任务上下文。宿主通过异步调用上下文绑定 `ctx.identity / host / signal`，并发请求使用各自的调用者权限。`state.plugin` 提供插件共享存储，`state.user/profile/session/agentSession` 提供显式分区；业务数据选择哪个作用域由插件决定。现有 Studio API 仍按实际调用者校验访问权限。
 
 ## 包格式
 
