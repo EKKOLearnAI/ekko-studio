@@ -379,8 +379,9 @@ useKeyboard();
                 v-if="showDesktopTitleBar && showNavigationRail"
                 flush
               />
+              <!-- Keep the control before headers teleported while sidebar metadata is loading. -->
               <HeaderSidebarToggle
-                v-if="showNavigationRail && usesShellSidebar"
+                v-show="showNavigationRail && usesShellSidebar"
                 class="header-sidebar-toggle"
                 :expanded="!appStore.sidebarCollapsed"
                 @toggle="appStore.toggleSidebarCollapsed()"
