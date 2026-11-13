@@ -75,7 +75,9 @@ const Layout = { setup() {
     ])
   }
 } }
-createApp({ setup: () => () => h(NConfigProvider, { theme: theme.isDark.value ? darkTheme : null,
+const fixtureRoot = { setup: () => () => h(NConfigProvider, { theme: theme.isDark.value ? darkTheme : null,
   themeOverrides: getThemeOverrides(theme.isDark.value, theme.isComic.value, theme.customization.value, theme.hasCustomBackground.value) },
-  () => h(NDialogProvider, null, () => h(NMessageProvider, null, () => [h(PluginNotifications), h(Layout)]))) })
+  () => h(NDialogProvider, null, () => h(NMessageProvider, null, () => [h(PluginNotifications), h(Layout)]))) }
+const root = new URLSearchParams(location.search).has('shell') ? (await import('../../../packages/client/src/App.vue')).default : fixtureRoot
+createApp(root)
   .use(pinia).use(router).use(createI18n({ legacy: false, locale: 'zh', messages: { zh } })).mount('#app')
