@@ -1,5 +1,5 @@
 import type { Json, PluginManifest, Schema } from '../../contracts/plugins'
-import { PLUGIN_ICON_PATHS, PLUGIN_PERMISSIONS } from '../../contracts/plugins'
+import { PLUGIN_ICON_PATHS, PLUGIN_PERMISSIONS, assertJson } from '../../../../../../plugin-sdk/src'
 import { PluginError } from './errors'
 import { validateDetails, validateIcon } from './manifest-details'
 
@@ -8,18 +8,38 @@ export function identifier(value: unknown, label = 'identifier'): string {
   return value
 }
 export function json(value: unknown): Json {
+  try { assertJson(value) } catch (error) { throw new PluginError(error instanceof Error ? error.message : 'Invalid JSON data', 'PLUGIN_SCHEMA') }
   const encoded = JSON.stringify(value)
   if (!encoded || Buffer.byteLength(encoded) > 2_000_000) throw new PluginError('Plugin value exceeds the JSON size limit')
   return JSON.parse(encoded)
 }
 export function validateSchema(schema: Schema, depth = 0): void {
+  if (depth === 0) json(schema)
   if (depth > 32 || !schema || !['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'].includes(schema.type)) throw new PluginError('Invalid schema')
   if (depth === 0 && schema.type !== 'object') throw new PluginError('Root schema must be an object')
   const allowed = new Set(['type', 'title', 'description', 'properties', 'required', 'additionalProperties', 'items', 'enum', 'default', 'minimum', 'maximum', 'minLength', 'maxLength', 'maxItems', 'secret'])
   for (const key of Object.keys(schema)) if (!allowed.has(key)) throw new PluginError(`Unsupported schema keyword: ${key}`)
+  for (const key of ['title', 'description'] as const) if (schema[key] !== undefined && typeof schema[key] !== 'string') throw new PluginError(`Schema ${key} must be a string`)
+  for (const key of ['secret', 'additionalProperties'] as const) if (schema[key] !== undefined && typeof schema[key] !== 'boolean') throw new PluginError(`Schema ${key} must be a boolean`)
+  if (schema.properties !== undefined && (!schema.properties || typeof schema.properties !== 'object' || Array.isArray(schema.properties))) throw new PluginError('Schema properties must be an object')
+  if (schema.type !== 'object' && (schema.properties !== undefined || schema.required !== undefined || schema.additionalProperties !== undefined)) throw new PluginError('Object schema keywords require object type')
+  if (schema.items !== undefined && schema.type !== 'array') throw new PluginError('Schema items requires array type')
   for (const field of Object.values(schema.properties || {})) validateSchema(field, depth + 1)
   if (schema.items) validateSchema(schema.items, depth + 1)
-  if (schema.required && (!Array.isArray(schema.required) || schema.required.some(key => typeof key !== 'string' || !schema.properties?.[key]))) throw new PluginError('Required fields must be declared in properties')
+  if (schema.required !== undefined && (!Array.isArray(schema.required) || schema.required.some(key => typeof key !== 'string' || !Object.hasOwn(schema.properties || {}, key)))) throw new PluginError('Required fields must be declared in properties')
+  for (const key of ['minimum', 'maximum', 'minLength', 'maxLength', 'maxItems'] as const) {
+    const value = schema[key]
+    if (value === undefined) continue
+    const numeric = key === 'minimum' || key === 'maximum'
+    if (!Number.isFinite(value) || !numeric && (!Number.isSafeInteger(value) || value < 0)) throw new PluginError(`Invalid schema ${key}`)
+    if (numeric && !['number', 'integer'].includes(schema.type) || key.endsWith('Length') && schema.type !== 'string' || key === 'maxItems' && schema.type !== 'array') throw new PluginError(`Schema ${key} does not apply to ${schema.type}`)
+  }
+  if (schema.minimum !== undefined && schema.maximum !== undefined && schema.minimum > schema.maximum || schema.minLength !== undefined && schema.maxLength !== undefined && schema.minLength > schema.maxLength) throw new PluginError('Schema limits are inverted')
+  if (schema.enum !== undefined) {
+    if (!Array.isArray(schema.enum) || !schema.enum.length) throw new PluginError('Schema enum must be a nonempty array')
+    for (const value of schema.enum) validate({ ...schema, enum: undefined }, value, 'schema.enum')
+  }
+  if (schema.default !== undefined) validate(schema, schema.default, 'schema.default')
 }
 export function validate(schema: Schema, value: unknown, path = 'input', depth = 0): void {
   if (depth > 32) throw new PluginError(`${path}: schema nesting limit exceeded`)

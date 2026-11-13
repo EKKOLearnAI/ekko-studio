@@ -3,6 +3,7 @@ import type { AgentDefinition, AgentEvent, AgentManagementContext, AgentMode, Ag
 import { PluginEffects } from './effects'
 import { PluginError } from './errors'
 import { identifier, json } from './schema'
+import { agentStatus, agentSettings, agentUpdate, agentUpgrade, agentModels, agentCheckpoint, agentResult, agentEvent } from './agent-contracts'
 import type { PluginRuntime } from './runtime'
 
 export function pluginAgentId(plugin: string, agent: string): `plugin:${string}/${string}` { return `plugin:${identifier(plugin)}/${identifier(agent)}` }
@@ -66,23 +67,19 @@ export class PluginAgentRuntime {
   }
   status(identity: PluginIdentity, signal?: AbortSignal) {
     return this.manage(identity, signal, async ctx => {
-      const value = json(await this.definition.getStatus(ctx)) as unknown as Awaited<ReturnType<AgentDefinition['getStatus']>>
-      if (typeof value?.installed !== 'boolean' || typeof value.version !== 'string') throw new PluginError('Invalid Agent status')
-      return value
+      return agentStatus(await this.definition.getStatus(ctx))
     })
   }
   async models(identity: PluginIdentity, refresh = false, signal?: AbortSignal) {
     return this.manage(identity, signal, async ctx => {
       if (!this.definition.modes.global) throw new PluginError('Agent does not support global mode')
-      const value = json(await this.definition.modes.global.listModels({ ...ctx, refresh })) as unknown as Awaited<ReturnType<NonNullable<AgentDefinition['modes']['global']>['listModels']>>
-      if (!value || !Array.isArray(value.models) || value.models.some(m => !m || typeof m.id !== 'string' || !m.id || typeof m.name !== 'string')) throw new PluginError('Invalid Agent model catalog')
-      return value
+      return agentModels(await this.definition.modes.global.listModels({ ...ctx, refresh }))
     })
   }
   async settings(identity: PluginIdentity) {
     return this.manage(identity, undefined, async ctx => {
       if (!this.definition.management.settings) throw new PluginError('Agent has no settings page')
-      const target = json(await this.definition.management.settings(ctx)) as unknown as { viewId: string; query?: Record<string, string> }
+      const target = agentSettings(await this.definition.management.settings(ctx))
       const view = this.owner.record.manifest.views?.find(view => view.id === target.viewId && view.slot === 'agent-settings')
       if (!view || target.query && (typeof target.query !== 'object' || Object.values(target.query).some(value => typeof value !== 'string'))) throw new PluginError('Agent settings must target its own declared agent-settings view')
       return { name: 'studio.pluginAgentSettings', params: { pluginId: this.owner.record.manifest.id, viewId: target.viewId }, query: target.query || {} }
@@ -91,9 +88,7 @@ export class PluginAgentRuntime {
   async checkUpdate(identity: PluginIdentity) {
     return this.manage(identity, undefined, async ctx => {
       if (!this.definition.management.checkUpdate) throw new PluginError('Agent cannot check updates')
-      const value = json(await this.definition.management.checkUpdate(ctx)) as unknown as Awaited<ReturnType<NonNullable<AgentDefinition['management']['checkUpdate']>>>
-      if (typeof value?.currentVersion !== 'string' || typeof value.latestVersion !== 'string' || typeof value.updateAvailable !== 'boolean') throw new PluginError('Invalid Agent update result')
-      return value
+      return agentUpdate(await this.definition.management.checkUpdate(ctx))
     })
   }
   async upgrade(identity: PluginIdentity, input: { version: string; expectedVersion: string }, options: { automatic?: boolean } = {}) {
@@ -104,13 +99,13 @@ export class PluginAgentRuntime {
       return await this.manage(identity, undefined, async ctx => {
         if (!this.definition.management.upgrade) throw new PluginError('Agent cannot upgrade')
         if (options.automatic && (!this.definition.management.supportsAutoUpdate || await this.definition.management.supportsAutoUpdate(ctx) !== true)) throw new PluginError('Automatic updates are no longer supported', 'AGENT_UNSUPPORTED', 400)
-        const status = await this.definition.getStatus(ctx)
+        const status = agentStatus(await this.definition.getStatus(ctx))
         if (status.version !== input.expectedVersion) throw new PluginError('Agent version changed; check updates again', 'AGENT_VERSION', 409)
-        const update = await this.definition.management.checkUpdate!(ctx)
+        const update = agentUpdate(await this.definition.management.checkUpdate!(ctx))
         if (!update.updateAvailable || update.latestVersion !== input.version || update.currentVersion !== status.version) throw new PluginError('Agent update changed; check updates again', 'AGENT_VERSION', 409)
         await this.closeSessions()
-        const result = await this.definition.management.upgrade(input, ctx)
-        const actual = await this.definition.getStatus(ctx)
+        const result = agentUpgrade(await this.definition.management.upgrade(input, ctx))
+        const actual = agentStatus(await this.definition.getStatus(ctx))
         if (!actual.installed || actual.version !== result.installedVersion || actual.version !== input.version) throw new PluginError('Agent upgrade did not install the requested version')
         return json(result)
       })
@@ -131,11 +126,11 @@ export class PluginAgentRuntime {
     try {
       return await this.manage(identity, undefined, async ctx => {
         if (!this.definition.management.remove) throw new PluginError('Agent cannot remove its engine', 'AGENT_UNSUPPORTED', 400)
-        const before = await this.definition.getStatus(ctx)
+        const before = agentStatus(await this.definition.getStatus(ctx))
         if (before.version !== input.expectedVersion) throw new PluginError('Agent version changed; refresh before removing', 'AGENT_VERSION', 409)
         await this.closeSessions()
         await this.definition.management.remove(ctx)
-        const after = await this.definition.getStatus(ctx)
+        const after = agentStatus(await this.definition.getStatus(ctx))
         if (after.installed) throw new PluginError('Agent engine is still installed')
         return { removed: true }
       })
@@ -192,20 +187,14 @@ export class PluginAgentRuntime {
           interactions: {
             approve: async request => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); if (!input.interactions) throw new PluginError('Agent interactions are unavailable'); return input.interactions.approve(request) },
             clarify: async request => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); if (!input.interactions) throw new PluginError('Agent interactions are unavailable'); return input.interactions.clarify(request) },
-          }, output: { emit: async (event: AgentEvent) => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); await input.emit(json(event) as unknown as AgentEvent) } },
+          }, output: { emit: async (event: AgentEvent) => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); await input.emit(agentEvent(event)) } },
         } as AgentRunContext
-        const result = json(await engine.run(input.request, context)) as unknown as AgentRunResult
+        const result = agentResult(await engine.run(input.request, context))
         signal.throwIfAborted()
-        if (!result || !Array.isArray(result.content) || result.content.some(part => !part || !['text', 'image', 'file'].includes(part.type) || part.type === 'text' && typeof part.text !== 'string') || !['stop', 'length', 'tool_limit'].includes(result.finishReason)) throw new PluginError('Invalid Agent run result')
-        if (result.usage && (typeof result.usage.isEstimated !== 'boolean' || ['inputTokens', 'outputTokens', 'cacheReadTokens', 'costUsd'].some(key => {
-          const value = (result.usage as any)[key]
-          return value != null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
-        }))) throw new PluginError('Invalid Agent usage')
         const checkpoint = result.checkpoint || (this.definition.features.resume ? await engine.checkpoint!() : undefined)
         signal.throwIfAborted()
         if (checkpoint) {
-          if (!Number.isSafeInteger(checkpoint.schemaVersion) || checkpoint.schemaVersion < 1) throw new PluginError('Invalid Agent checkpoint version')
-          await store.set('checkpoint', json(checkpoint))
+          await store.set('checkpoint', json(agentCheckpoint(checkpoint)))
         }
         return result
       })

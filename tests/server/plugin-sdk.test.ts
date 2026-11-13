@@ -61,3 +61,15 @@ it('cleans ordinary callback resources when the call finishes', async () => {
   expect(await runtime.invoke('rpc', 'resource', null, { userId: 1, profile: 'default' })).toBe(true)
   expect(dispose).toHaveBeenCalledTimes(1)
 })
+it('rejects malformed public results and API bodies before dispatch and leaves the plugin usable', async () => {
+  const { runtime, api } = await fixture(['tools', 'api.write'])
+  const ctx = runtime.context(), who = { userId: 1, profile: 'default' }
+  ctx.extensions.rpc.register('invalid', async () => ({ count: NaN }))
+  await expect(runtime.invoke('rpc', 'invalid', null, who)).rejects.toThrow(/JSON/)
+  ctx.extensions.tools.register({ name: 'broken', description: 'Invalid envelope', inputSchema: { type: 'object' }, execute: async () => ({ content: 'missing ok' } as any) })
+  await expect(runtime.invoke('tool', 'broken', {}, who)).rejects.toThrow(/missing ok/)
+  await expect(ctx.host.models.respond({ model: 'native', input: { value: undefined } } as any)).rejects.toThrow(/JSON/)
+  expect(api).not.toHaveBeenCalled()
+  ctx.extensions.rpc.register('valid', async () => ({ count: 1 }))
+  expect(await runtime.invoke('rpc', 'valid', null, who)).toEqual({ count: 1 })
+})

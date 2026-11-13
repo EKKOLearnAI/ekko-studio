@@ -1,6 +1,8 @@
 # Studio SDK v1 上下文与能力
 
 精确类型由 sdk/src/index.ts 统一导出，按 core/state/host/browser/sessions/bots/contexts/agents 组织源码。
+逐字段含义、单位、必填/可空/默认与限制见 [FIELD_REFERENCE.md](FIELD_REFERENCE.md)，
+宿主业务方法的输入和返回见 [HOST_API.md](HOST_API.md)。通用 Json 是开放业务数据，不代表没有业务约束。
 
 | 上下文 | 元数据及能力 | 生命周期 |
 | --- | --- | --- |

@@ -6,6 +6,8 @@ Studio 修改插件架构、ctx、输入输出或事件结构时，开发者或�
 `packages/plugin-sdk/docs/ARCHITECTURE.md`、`STUDIO_CTX.md`、`STUDIO_RETURNS.md` 中对应的说明，
 与接口代码一起提交；影响现有插件时，在相关段落写清默认行为、兼容方式或迁移要求。
 这些都是普通 Markdown，不需要生成命令、哈希或额外变更参数。
+字段变更同时维护 FIELD_REFERENCE.md，宿主方法变更同时维护 HOST_API.md。包括类型、含义、
+必填/可空、默认值、单位、范围、权限、错误与兼容行为；不能仅把签名改成 Json 后省略业务约束。
 
 创建插件时，CLI 将当前 Studio 版本的指南和 SDK 复制到项目中。精确类型直接查看项目根目录下
 `sdk/src/index.ts` 和 `sdk/src/agents.ts`，不再维护一份重复的类型快照。

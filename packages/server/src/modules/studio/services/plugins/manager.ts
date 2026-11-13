@@ -223,7 +223,7 @@ export class PluginManager {
   private log(id: string, identity: PluginIdentity, level: string, text: string, data?: Json) {
     const file = join(this.store.directory(), 'logs', `${identifier(id)}.json`)
     const entries = readJson<Json[]>(file, () => [])
-    entries.push({ timestamp: Date.now(), level, message: text, identity: json(identity), ...(data === undefined ? {} : { data: json(data) }) })
+    entries.push({ timestamp: Date.now(), level, message: text, identity: json(Object.fromEntries(Object.entries(identity).filter(([, value]) => value !== undefined))), ...(data === undefined ? {} : { data: json(data) }) })
     writeJson(file, entries.slice(-200))
   }
   logs(_identity: PluginIdentity, id: string) { return readJson<Json[]>(join(this.store.directory(), 'logs', `${identifier(id)}.json`), () => []) }

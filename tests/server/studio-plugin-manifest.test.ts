@@ -36,7 +36,9 @@ it('installs standalone metadata and bundled icons without modifying the source 
 })
 
 it('separates page declarations from navigation and requires explicit, suitable icons for sidebar entries', () => {
-  expect(manifest({ ...definition, navigation: undefined }).navigation).toBeUndefined()
+  const { navigation: _navigation, workspace: _workspace, ...standalone } = definition
+  expect(manifest(standalone).navigation).toBeUndefined()
+  expect(() => manifest({ ...definition, navigation: undefined })).toThrow(/JSON/)
   const agentView = { id: 'skills', title: 'Skills', slot: 'agent-settings', icon: 'skills' }
   expect(manifest({ ...definition, views: [...definition.views!, agentView] }).views?.at(-1)).toEqual(agentView)
   for (const navigation of [
@@ -48,7 +50,8 @@ it('separates page declarations from navigation and requires explicit, suitable 
     { main: [{ viewId: 'home', icon: 'https://example.com/icon.png' }] },
   ]) expect(() => manifest({ ...definition, navigation })).toThrow()
   for (const icon of [undefined, 'icon.png', '<svg/>']) {
-    expect(() => manifest({ ...definition, views: [{ ...agentView, icon }], workspace: undefined, navigation: undefined })).toThrow(/named icon/)
+    const { icon: _icon, ...view } = agentView
+    expect(() => manifest({ ...standalone, views: [{ ...view, ...(icon === undefined ? {} : { icon }) }] })).toThrow(/named icon/)
   }
 })
 

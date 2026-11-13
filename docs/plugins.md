@@ -1,6 +1,8 @@
 # Studio 插件与 ctx SDK
 
 当前为 SDK v1，清单使用 apiVersion: 1 和 permissions，Agent 使用 agentApiVersion: 1 和 features。
+逐字段契约见 [字段手册](../packages/plugin-sdk/docs/FIELD_REFERENCE.md)，
+业务输入与返回见 [宿主业务参数](../packages/plugin-sdk/docs/HOST_API.md)，两者随独立项目一起创建。
 模块规范见 [SDK 架构](../packages/plugin-sdk/docs/ARCHITECTURE.md)，全部上下文及 CDP 用法见 [能力指南](../packages/plugin-sdk/docs/STUDIO_CTX.md)。
 
 宿主业务按 models、agents、sessions、bots、groupChats、workflows、files、browser 八个模块开放。
@@ -202,7 +204,7 @@ Studio 的 harness/build 检查 SDK 变化是否同时修改了架构、ctx 或�
 不含账号密码、查询参数或锚点。提交时校验字段并禁止重复点击，失败保留输入。
 网络中断或超时无法证明服务端没有收到，因此提示结果未确认且不自动重试。
 
-本次只接提交。云端列表、仓库数据抓取和安装来源解析在后台流程确定后接入。
+云端审核、目录和固定提交的安装更新流程见本文的 Published directory and installed-plugin updates。
 
 ### 全局安装与调用上下文
 
@@ -254,7 +256,7 @@ RPC、工具、聊天命令、钩子、业务事件和工作流始终使用实�
 需要包声明 `type: module`。客户端必须是一个自包含 bundle，资源内联为 data/blob URL，
 React/Vue 等框架可一并打包。配置 JSON Schema 支持对象、数组、基础类型、必填、枚举、
 默认值、数值和长度范围，以及 `secret`。不支持的关键字会报错，不会被静默忽略。
-`secret` 字段不会传给客户端；空白配置输入保留已保存的密钥，后端仍可读取完整配置。
+`secret` 字段不会传给客户端；未提交该字段时保留已保存的密钥，显式空字符串是新值，后端仍可读取完整配置。
 
 作者和项目链接仅允许不含账号密码的 HTTP(S) 地址。图标允许包内相对路径的 PNG/JPEG/WebP/GIF
 （每个文件不超过 256 KB）或相应的 base64 data URL；安装器读取并内联，拒绝越界路径和符号链接。
@@ -354,7 +356,7 @@ run.messages.emit('notebook.updated', { id: note.id }, { audience: 'plugin' })
 export async function mount(element, ctx) {
   const result = await ctx.host.sessions.list()
   element.textContent = JSON.stringify(result)
-  const unsubscribe = ctx.events.on('notebook.updated', event => {
+  const unsubscribe = ctx.messages.on('notebook.updated', event => {
     element.textContent = JSON.stringify(event.data)
   })
   return unsubscribe
@@ -646,7 +648,7 @@ export function apply(ctx) {
 | `output.emit / log / lifecycle` | 过程事件、运行日志与本轮资源清理 |
 
 模型代理和 MCP 凭证在运行结束或取消时失效，不得记录到日志、前端或聊天历史。
-异步回调中的根 `ctx.identity/api/models/signal` 也绑定当前调用者。运行结束后保存下来的上下文不可继续使用。
+异步回调中的根 `ctx.identity/host/signal` 也绑定当前调用者。运行结束后保存下来的上下文不可继续使用。
 Node.js 插件仍是可信代码；取消信号无法强行中断同进程的无限循环，插件必须正确释放其进程和连接。
 
 标准事件为 `text.delta`、`reasoning.summary.delta`、`status`、`tool.started/completed/failed`。
