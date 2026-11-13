@@ -10,6 +10,10 @@ export interface PersonContextEvidence {
   id: number; role: string; content: string; created_at: number; session_id: string; session_title: string
   offset: number; next_offset: number | null; source_length: number
 }
+export interface PersonContextStoreOptions {
+  /** Restrict reads and indexing to the requested Person Bot conversation. */
+  sessionOnly?: boolean
+}
 
 /** Bound the query before segmentation; Chinese bigrams also work without spaces. */
 export function personSearchTerms(text: string): string[] {
@@ -21,14 +25,24 @@ export function personSearchTerms(text: string): string[] {
   }))]
 }
 
-export function openPersonContextStore(userId: number, sessionId: string, db: DatabaseSync = personDb()) {
+export function openPersonContextStore(
+  userId: number,
+  sessionId: string,
+  db: DatabaseSync = personDb(),
+  options: PersonContextStoreOptions = {},
+) {
+  const sessionOnly = options.sessionOnly === true
   const session = () => db.prepare('SELECT id,studio_user_id,history_revision FROM sessions WHERE id=?').get(sessionId) as
     { id: string; studio_user_id: string; history_revision: number } | undefined
   const original = session()
   if (!ownsPersonSession(userId, original)) throw personError('Person session not found', 404)
-  const snapshots = db.prepare("SELECT id,history_revision FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%'").all(String(userId)) as Array<{ id: string; history_revision: number }>
+  const snapshots = sessionOnly
+    ? [original!]
+    : db.prepare("SELECT id,history_revision FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%'").all(String(userId)) as Array<{ id: string; history_revision: number }>
   const revision = original!.history_revision
-  const throughId = Number(db.prepare("SELECT COALESCE(MAX(m.id),0) AS id FROM messages m JOIN sessions s ON s.id=m.session_id WHERE CAST(s.studio_user_id AS TEXT)=? AND s.id LIKE 'person-main-%'").get(String(userId))!.id)
+  const throughId = Number(sessionOnly
+    ? db.prepare("SELECT COALESCE(MAX(id),0) AS id FROM messages WHERE session_id=?").get(sessionId)!.id
+    : db.prepare("SELECT COALESCE(MAX(m.id),0) AS id FROM messages m JOIN sessions s ON s.id=m.session_id WHERE CAST(s.studio_user_id AS TEXT)=? AND s.id LIKE 'person-main-%'").get(String(userId))!.id)
   const scope = `person${userId}`
   const snapshotKey = JSON.stringify(snapshots.map(row => [row.id, row.history_revision]).sort())
   function assertCurrent() {
@@ -89,8 +103,8 @@ export function openPersonContextStore(userId: number, sessionId: string, db: Da
     assertCurrent()
     offset = Math.max(0, Math.floor(offset))
     const row = db.prepare(`SELECT id,role,substr(content,?,?) AS content,length(content) AS source_length,timestamp*1000 AS created_at,session_id,(SELECT title FROM sessions WHERE id=messages.session_id) AS session_title
-      FROM messages WHERE session_id IN (SELECT id FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%') AND id=? AND id<=? AND role IN ('user','assistant') AND COALESCE(finish_reason,'')!='streaming'`)
-      .get(offset + 1, CHUNK_CHARS, String(userId), messageId, throughId) as Omit<PersonContextEvidence, 'offset' | 'next_offset'> | undefined
+      FROM messages WHERE session_id ${sessionOnly ? '= ?' : "IN (SELECT id FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%')"} AND id=? AND id<=? AND role IN ('user','assistant') AND COALESCE(finish_reason,'')!='streaming'`)
+      .get(offset + 1, CHUNK_CHARS, sessionOnly ? sessionId : String(userId), messageId, throughId) as Omit<PersonContextEvidence, 'offset' | 'next_offset'> | undefined
     return row ? { ...row, offset, next_offset: offset + CHUNK_CHARS < row.source_length ? offset + CHUNK_CHARS : null } : undefined
   }
   function recent() {
@@ -109,8 +123,8 @@ export function openPersonContextStore(userId: number, sessionId: string, db: Da
     // FTS must drive the query. A session-index-first join repeats MATCH per history row.
     const candidates = db.prepare(`SELECT c.message_id,c.source_offset,c.content FROM person_context_search
       CROSS JOIN person_context_chunks c ON c.id=person_context_search.rowid
-      WHERE person_context_search MATCH ? AND c.session_id IN (SELECT id FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%') AND c.message_id<=? ORDER BY rank LIMIT 7 OFFSET ?`)
-      .all(match, String(userId), throughId, offset) as Array<{ message_id: number; source_offset: number; content: string }>
+      WHERE person_context_search MATCH ? AND c.session_id ${sessionOnly ? '= ?' : "IN (SELECT id FROM sessions WHERE CAST(studio_user_id AS TEXT)=? AND id LIKE 'person-main-%')"} AND c.message_id<=? ORDER BY rank LIMIT 7 OFFSET ?`)
+      .all(match, sessionOnly ? sessionId : String(userId), throughId, offset) as Array<{ message_id: number; source_offset: number; content: string }>
     // Verify retrieved data against current originals, including an out-of-band edit.
     const evidence = candidates.slice(0,6).flatMap(candidate => {
       const actual = read(candidate.message_id, candidate.source_offset)

@@ -23,6 +23,7 @@ import { personRequirements } from '../../contracts/person-flow'
 import { assertPersonStageTask } from '../../repositories/person-stage-store'
 import { deliverPersonStages, recoverPersonStages } from './stage-flows'
 import { personTaskPrompt } from './task-prompt'
+import { loadPersonTaskHistory } from './task-history'
 import { dispatchPersonInsertion } from './task-queue'
 import { advanceAutomaticAcceptances } from './automatic-acceptance'
 import { advancePersonRedirects, assertPersonRedirectConversation } from './task-redirection'
@@ -127,14 +128,16 @@ async function execute(run: PersonExecution, abort: AbortController) {
     personDb().prepare('UPDATE sessions SET workspace=? WHERE id=? AND CAST(studio_user_id AS TEXT)=?').run(workspace, run.session_id, String(userId))
     const decisions = personDb().prepare("SELECT question,answer,answered_by FROM person_interactions WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=? AND session_id=? AND requirements_revision=?) AND state='answered' ORDER BY created_at DESC LIMIT 10").all(task.id,run.session_id,run.requirements_revision) as unknown as Pick<PersonInteraction, 'question' | 'answer' | 'answered_by'>[]
     const requirements = personRequirements(task)
-    const description = personTaskPrompt(task, decisions)
     const input = run.input_json ? JSON.parse(run.input_json) as ContentBlock[] : undefined
+    const historyQuery = [task.title, requirements.goal, ...(input || []).map(block => block.type === 'text' ? block.text : block.name)].filter(Boolean).join('\n').slice(0, 4000)
+    const history = loadPersonTaskHistory(userId, task.session_id, historyQuery)
+    const description = personTaskPrompt(task, decisions, history)
     const corrected = !!personDb().prepare("SELECT 1 FROM person_task_redirects WHERE task_id=? AND execution_id=? AND requirements_revision=? AND state='completed'")
       .get(task.id,run.id,run.requirements_revision)
     if (corrected) assertPersonRedirectConversation(run)
     // A new conversation needs its task brief; an existing one already has that context.
     const prompt = input
-      ? corrected ? [{ type:'text' as const,text:`The user has replaced the previous requirements for this same task. Continue in this conversation using the complete current brief below. Earlier conflicting goals and decisions are superseded; preserve applicable context and artifacts.\n\n${personTaskPrompt(task,[])}` },...input]
+      ? corrected ? [{ type:'text' as const,text:`The user has replaced the previous requirements for this same task. Continue in this conversation using the complete current brief below. Earlier conflicting goals and decisions are superseded; preserve applicable context and artifacts.\n\n${personTaskPrompt(task,[],history)}` },...input]
         : run.session_id === personExecutionSessionId(run.id) ? [{ type: 'text' as const, text: description }, ...input] : input
       : description
     current(run)
