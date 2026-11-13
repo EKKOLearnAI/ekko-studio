@@ -3,6 +3,7 @@ import {
   existsSync,
   readFileSync,
   realpathSync,
+  statSync,
 } from 'node:fs'
 import {
   basename,
@@ -18,7 +19,22 @@ import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000
-const HERMES_VERSION_PROBE = "import importlib.util, hermes_cli; assert importlib.util.find_spec('hermes_cli.main'); print(hermes_cli.__version__)"
+const HERMES_VERSION_PROBE = [
+  'import sys',
+  // Match source-launcher imports without invoking bootstrap's install/repair
+  // path during discovery. The root is an argv value, never Python source.
+  'if sys.argv[1]: sys.path.insert(0, sys.argv[1])',
+  'import importlib.util, hermes_cli',
+  "assert importlib.util.find_spec('hermes_cli.main')",
+  'try:',
+  '    from hermes_cli.version_info import get_version_info',
+  'except ModuleNotFoundError as exc:',
+  "    if exc.name != 'hermes_cli.version_info': raise",
+  '    version = hermes_cli.__version__',
+  'else:',
+  '    version = get_version_info().display_version',
+  'print(version)',
+].join('\n')
 
 export type DesktopHermesSelectionSource = 'user-cli' | 'managed-runtime' | 'none'
 
@@ -107,22 +123,59 @@ function isPythonExecutable(command: string): boolean {
   return /^(?:python|pypy)(?:\d+(?:\.\d+)*)?(?:\.exe)?$/i.test(basename(command))
 }
 
-function launcherContents(hermesBin: string): string[] {
-  const candidates = [hermesBin]
-  try {
-    const real = realpathSync(hermesBin)
-    if (real !== hermesBin) candidates.push(real)
-  } catch {}
+function shellExecTarget(contents: string): string | undefined {
+  // Read only the executable token; do not evaluate shell expansions or the
+  // Python bootstrap passed as later arguments.
+  for (const line of contents.split(/\r?\n/)) {
+    const command = line.match(/^\s*exec\s+(.+)$/)?.[1]
+    if (!command) continue
+    let target = ''
+    let quote = ''
+    for (let i = 0; i < command.length; i += 1) {
+      const char = command[i]
+      if (quote === "'") {
+        if (char === "'") quote = ''
+        else target += char
+      } else if (char === quote) {
+        quote = ''
+      } else if (char === '\\' && (!quote || /["\\$`]/.test(command[i + 1] || ''))) {
+        target += command[++i] || ''
+      } else if (!quote && (char === '"' || char === "'")) {
+        quote = char
+      } else if (!quote && /\s/.test(char)) {
+        break
+      } else {
+        target += char
+      }
+    }
+    if (!quote && isAbsolute(target)) return target
+  }
+  return undefined
+}
 
-  const contents: string[] = []
-  for (const candidate of candidates) {
+function launcherScripts(hermesBin: string): Array<{ path: string; contents: string }> {
+  const scripts: Array<{ path: string; contents: string }> = []
+  const seen = new Set<string>()
+  let current: string | undefined = hermesBin
+  // User-bin wrappers forward to <checkout>/.hermes/bin/hermes, whose exec
+  // target is an unquoted store Python. Stop before reading native interpreters.
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    const path = canonicalPath(current)
+    if (seen.has(path)) break
+    seen.add(path)
     try {
-      contents.push(readFileSync(candidate, 'utf8'))
+      const stat = statSync(path)
+      if (!stat.isFile() || stat.size > 1024 * 1024) break
+      const contents = readFileSync(path, 'utf8')
+      scripts.push({ path, contents })
+      const target = shellExecTarget(contents)
+      if (!target || isPythonExecutable(target)) break
+      current = target
     } catch {
-      // Native launchers are intentionally handled by the filesystem layout.
+      break
     }
   }
-  return contents
+  return scripts
 }
 
 function resolveFromPath(command: string, env: NodeJS.ProcessEnv): string | undefined {
@@ -142,7 +195,7 @@ function resolveFromPath(command: string, env: NodeJS.ProcessEnv): string | unde
 }
 
 function pythonFromLauncher(hermesBin: string, env: NodeJS.ProcessEnv): string | undefined {
-  for (const contents of launcherContents(hermesBin)) {
+  for (const { contents } of launcherScripts(hermesBin)) {
     const firstLine = contents.split(/\r?\n/, 1)[0] || ''
     const shebang = firstLine.match(/^#!\s*(.+)$/)?.[1]?.trim() || ''
     const shebangParts = shebang.split(/\s+/).filter(Boolean)
@@ -160,6 +213,9 @@ function pythonFromLauncher(hermesBin: string, env: NodeJS.ProcessEnv): string |
       }
     }
 
+    const execTarget = shellExecTarget(contents)
+    if (execTarget && isPythonExecutable(execTarget) && existsSync(execTarget)) return execTarget
+
     for (const match of contents.matchAll(/["']([^"'\r\n]+)["']/g)) {
       const candidate = match[1]
       if (isAbsolute(candidate) && isPythonExecutable(candidate) && existsSync(candidate)) {
@@ -171,7 +227,7 @@ function pythonFromLauncher(hermesBin: string, env: NodeJS.ProcessEnv): string |
 }
 
 function agentRootCandidates(hermesBin: string, hermesHome: string): string[] {
-  const binCandidates = [hermesBin]
+  const binCandidates = [hermesBin, ...launcherScripts(hermesBin).map(script => script.path)]
   try {
     const real = realpathSync(hermesBin)
     if (real !== hermesBin) binCandidates.push(real)
@@ -275,10 +331,11 @@ function findHermesCommands(searchPath: string, env: NodeJS.ProcessEnv): string[
 }
 
 function normalizeVersion(raw: string): string {
-  return raw
+  const version = raw
     .split(/\r?\n/)[0]
     ?.replace(/^Hermes(?: Agent)?\s+/i, '')
     .trim() || ''
+  return /^(?:v?0\.0\.0|unknown)$/i.test(version) ? '' : version
 }
 
 type HermesVersionProbeResult =
@@ -319,7 +376,7 @@ async function probeHermesVersion(
     version: '',
   })
   try {
-    const { stdout } = await execFileAsync(selection.pythonPath, ['-c', HERMES_VERSION_PROBE], {
+    const { stdout } = await execFileAsync(selection.pythonPath, ['-c', HERMES_VERSION_PROBE, selection.agentRoot], {
       encoding: 'utf8',
       timeout,
       windowsHide: true,
