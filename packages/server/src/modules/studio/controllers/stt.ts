@@ -381,7 +381,7 @@ export async function saveSettings(ctx: Context) {
       ? saveActiveSttProvider(profile, storedProvider)
       : saveActiveSttProvider(profile, assertActiveSttProvider(String(body.activeProvider)))
 
-    await syncVoiceConfigToHermesProfile(profile)
+    await syncVoiceConfigToHermesProfile(profile, 'stt', { selectProvider: true })
     ctx.body = { setting, activeProvider }
   } catch (error) {
     if (handleSettingsError(ctx, error)) return
@@ -423,7 +423,9 @@ export async function deleteSecret(ctx: Context) {
     const profile = requestedProfile(ctx)
     const storedProvider = assertStoredSttProvider(provider)
     const setting = clearStoredSttSecret(profile, storedProvider, secretName)
-    await syncVoiceConfigToHermesProfile(profile)
+    if (getActiveSttProvider(profile) === storedProvider) {
+      await syncVoiceConfigToHermesProfile(profile, 'stt')
+    }
     ctx.body = { success: true, setting }
   } catch (error) {
     if (handleSettingsError(ctx, error)) return
@@ -445,7 +447,9 @@ export async function deleteProvider(ctx: Context) {
     const activeProvider = currentActiveProvider === storedProvider
       ? saveActiveSttProvider(profile, 'browser')
       : currentActiveProvider
-    await syncVoiceConfigToHermesProfile(profile)
+    if (currentActiveProvider === storedProvider) {
+      await syncVoiceConfigToHermesProfile(profile, 'stt')
+    }
     ctx.body = { success: true, deleted, activeProvider }
   } catch (error) {
     if (handleSettingsError(ctx, error)) return
@@ -475,7 +479,7 @@ export async function saveActiveProvider(ctx: Context) {
       })
     }
     const activeProvider = saveActiveSttProvider(profile, requestedProvider)
-    await syncVoiceConfigToHermesProfile(profile)
+    await syncVoiceConfigToHermesProfile(profile, 'stt', { selectProvider: true })
     ctx.body = { activeProvider }
   } catch (error) {
     if (handleSettingsError(ctx, error)) return

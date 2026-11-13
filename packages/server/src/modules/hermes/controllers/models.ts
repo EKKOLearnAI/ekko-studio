@@ -8,7 +8,7 @@ import { join } from 'path'
 import { getActiveEnvPath, getActiveAuthPath, getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../services/profiles/profile'
 import { readConfigYaml, readConfigYamlForProfile, updateConfigYaml, updateConfigYamlForProfile, buildModelGroups, PROVIDER_ENV_MAP } from '../../studio/public/profile-config'
 import { fetchProviderModels } from '../../studio/public/provider-catalog'
-import { getCompatibleCustomProviders } from '../../studio/contracts/provider-compat'
+import { getCompatibleCustomProviders, resolveCustomProviderApiKey } from '../../studio/contracts/provider-compat'
 import { buildProviderModelMap, PROVIDER_PRESETS, isRetiredProvider, RETIRED_PROVIDER_MESSAGE } from '../../studio/contracts/providers'
 import { getCopilotModelsDetailed, resolveCopilotOAuthToken, type CopilotModelMeta } from '../services/providers/copilot-models'
 import { readAppConfig, writeAppConfig, providerDisplayLabel, type ModelVisibilityRule } from '../../studio/public/app-config'
@@ -31,7 +31,7 @@ const PROVIDER_MODEL_CATALOG = buildProviderModelMap()
 
 type ModelMeta = { preview?: boolean; disabled?: boolean; alias?: string; reasoning?: boolean; reasoning_efforts?: string[] }
 type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
-type AvailableGroup = { provider: string; label: string; base_url: string; models: string[]; api_key: string; api_mode?: ProviderApiMode; api_mode_by_model?: Record<string, ProviderApiMode | null>; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean }
+type AvailableGroup = { provider: string; label: string; base_url: string; models: string[]; api_key: string; credential_configured?: boolean; api_mode?: ProviderApiMode; api_mode_by_model?: Record<string, ProviderApiMode | null>; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean }
 type ModelVisibility = Record<string, ModelVisibilityRule>
 type CustomModels = Record<string, string[]>
 
@@ -332,6 +332,7 @@ function mergeAvailableGroups(groups: AvailableGroup[]): AvailableGroup[] {
     existing.models = [...new Set([...existing.models, ...group.models])]
     existing.available_models = [...new Set([...(existing.available_models || existing.models), ...(group.available_models || group.models)])]
     existing.api_key = existing.api_key || group.api_key
+    existing.credential_configured = existing.credential_configured || group.credential_configured
     existing.base_url = existing.base_url || group.base_url
     existing.api_mode = existing.api_mode || group.api_mode
     existing.builtin = existing.builtin || group.builtin
@@ -438,7 +439,7 @@ async function buildAvailableForProfile(
 
   const groups: AvailableGroup[] = []
   const seenProviders = new Set<string>()
-  const addGroup = (provider: string, label: string, base_url: string, models: string[], api_key: string, builtin?: boolean, model_meta?: Record<string, ModelMeta>, extra?: Pick<AvailableGroup, 'provider_source' | 'provider_key' | 'api_mode'>) => {
+  const addGroup = (provider: string, label: string, base_url: string, models: string[], api_key: string, builtin?: boolean, model_meta?: Record<string, ModelMeta>, extra?: Pick<AvailableGroup, 'provider_source' | 'provider_key' | 'api_mode' | 'credential_configured'>) => {
     if (isRetiredProvider(provider) || seenProviders.has(provider)) return
     seenProviders.add(provider)
     const availableModels = [...new Set(models)]
@@ -461,6 +462,7 @@ async function buildAvailableForProfile(
       models: availableModels,
       available_models: availableModels,
       api_key,
+      ...(extra?.credential_configured !== undefined ? { credential_configured: extra.credential_configured } : {}),
       ...(apiMode ? { api_mode: apiMode } : {}),
       ...(builtin ? { builtin: true } : {}),
       ...(Object.keys(unavailableMeta).length ? { model_meta: unavailableMeta } : {}),
@@ -539,13 +541,13 @@ async function buildAvailableForProfile(
         { hasStaticManifest, profile },
       )
       const models = [...new Set([cp.model, ...configuredModels, ...resolvedCatalogModels].filter(Boolean) as string[])]
-      return { providerKey, label: cp.name, base_url: baseUrl, models, api_key: cp.api_key || '', api_mode: cp.api_mode, builtin: hasStaticManifest, provider_source: cp.source, provider_key: cp.provider_key }
+      return { providerKey, label: cp.name, base_url: baseUrl, models, api_key: cp.api_key || '', credential_configured: !!resolveCustomProviderApiKey(cp, envContent), api_mode: cp.api_mode, builtin: hasStaticManifest, provider_source: cp.source, provider_key: cp.provider_key }
     }),
   )
   for (const result of customFetches) {
     if (result.status === 'fulfilled' && result.value?.models.length) {
-      const { providerKey, label, base_url, models, api_key, api_mode, builtin, provider_source, provider_key } = result.value
-      addGroup(providerKey, label, base_url, models, api_key, builtin, undefined, { provider_source, provider_key, api_mode })
+      const { providerKey, label, base_url, models, api_key, credential_configured, api_mode, builtin, provider_source, provider_key } = result.value
+      addGroup(providerKey, label, base_url, models, api_key, builtin, undefined, { provider_source, provider_key, api_mode, credential_configured })
     }
   }
 
