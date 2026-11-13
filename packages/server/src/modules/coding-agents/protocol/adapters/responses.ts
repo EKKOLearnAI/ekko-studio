@@ -140,7 +140,7 @@ function mcpToolAlias(namespace: string, name: string): string {
 export function responseMcpToolRoutes(body: any): McpToolRoutes {
   const routes: McpToolRoutes = Object.create(null)
   for (const tool of expandedResponseTools(responsesAvailableTools(body))) {
-    if (tool.namespace?.startsWith('mcp__')) {
+    if (tool.namespace && !(tool.namespace.startsWith('mcp__') && tool.name === tool.namespace)) {
       routes[mcpToolAlias(tool.namespace, tool.name)] = { name: tool.name, namespace: tool.namespace }
     }
   }
@@ -148,7 +148,7 @@ export function responseMcpToolRoutes(body: any): McpToolRoutes {
 }
 
 function providerToolName(tool: any): string {
-  return tool.namespace?.startsWith('mcp__') && tool.name !== tool.namespace
+  return tool.namespace && !(tool.namespace.startsWith('mcp__') && tool.name === tool.namespace)
     ? mcpToolAlias(tool.namespace, tool.name) : String(tool.name || 'tool')
 }
 
@@ -447,7 +447,7 @@ export function normalizeResponseFunctionCall(name: unknown, argumentsValue: unk
   // JSON when the client appends subsequent argument deltas.
   const rawArguments = String(argumentsValue ?? '{}')
   const route = routes?.[rawName]
-  if (route && route.name !== route.namespace) return { ...route, arguments: rawArguments }
+  if (route && (route.name !== route.namespace || !route.namespace.startsWith('mcp__'))) return { ...route, arguments: rawArguments }
   const namespace = normalizedNamespaceName(rawName)
   if (namespace.startsWith('mcp__')) {
     const parsed = safeJsonParse(rawArguments)
@@ -754,8 +754,8 @@ function responsesToolsToChatTools(tools: unknown): any[] | undefined {
       type: 'function',
       function: {
         name: providerToolName(tool),
-        description: tool.namespace?.startsWith('mcp__')
-          ? `${String(tool.description || '')} MCP tool: ${tool.namespace}.${tool.name}.`
+        description: tool.namespace
+          ? `${String(tool.description || '')} ${tool.namespace.startsWith('mcp__') ? 'MCP tool' : 'Tool'}: ${tool.namespace}.${tool.name}.`
           : String(tool.description || ''),
         parameters: tool.parameters || { type: 'object', properties: {} },
       },
@@ -870,8 +870,8 @@ function responsesToolsToAnthropicTools(tools: unknown): any[] | undefined {
     if (tool?.type !== 'function') return null
     return {
       name: providerToolName(tool),
-      description: tool.namespace?.startsWith('mcp__')
-          ? `${String(tool.description || '')} MCP tool: ${tool.namespace}.${tool.name}.`
+      description: tool.namespace
+          ? `${String(tool.description || '')} ${tool.namespace.startsWith('mcp__') ? 'MCP tool' : 'Tool'}: ${tool.namespace}.${tool.name}.`
           : String(tool.description || ''),
       input_schema: tool.parameters || { type: 'object', properties: {} },
     }

@@ -1,3 +1,4 @@
+import { codexSearchToolOverrides } from './codex/search-tool-overrides'
 import { lowestReasoningEffort } from '../../../../../shared/reasoning-effort'
 import { studioModelReasoningEffort } from '../../studio/public/model-reasoning-effort'
 import type { CodingAgentDefinition, CodingAgentConfigFileDefinition } from '../contracts/definition'
@@ -885,6 +886,7 @@ function codexCatalogEntry(input: {
   displayName: string
   contextWindow: number
   priority: number
+  supportsSearchTool?: boolean
 }) {
   return {
     slug: input.model,
@@ -934,7 +936,7 @@ function codexCatalogEntry(input: {
     effective_context_window_percent: 95,
     experimental_supported_tools: [],
     input_modalities: ['text', 'image'],
-    supports_search_tool: true,
+    supports_search_tool: input.supportsSearchTool ?? true,
   }
 }
 
@@ -943,6 +945,7 @@ function buildCodexModelCatalog(input: {
   provider: string
   model: string
   presetModels: string[]
+  searchToolOverrides?: ReadonlyMap<string, boolean>
 }) {
   const models = [...new Set([input.model, ...input.presetModels].map(item => item.trim()).filter(Boolean))]
   return {
@@ -951,6 +954,7 @@ function buildCodexModelCatalog(input: {
       displayName: displayNameForModel(model),
       contextWindow: getModelContextLength({ profile: input.profile, provider: input.provider, model }),
       priority: index,
+      supportsSearchTool: input.searchToolOverrides?.get(model),
     })),
   }
 }
@@ -3513,6 +3517,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     const toolSearchFeatures = await resolveCodexToolSearchConfig()
     const globalCodexConfig = await safeReadFile(getLiveConfigFileDefinition(tool.id, 'config')?.absolutePath || '')
     const scopedCodexConfig = await safeReadFile(getScopedConfigFileDefinition(tool.id, 'config', scope)?.absolutePath || '')
+    const searchToolOverrides = await codexSearchToolOverrides(scopedCodexConfig, model, getGlobalConfigHome())
     const userRuntimeConfig = codexRuntimeUserConfig(globalCodexConfig, scopedCodexConfig)
     const featureConfig = userRuntimeConfig.featureLines.length || toolSearchFeatures.toolSearch || toolSearchFeatures.alwaysDefer
       ? [
@@ -3565,6 +3570,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       provider,
       model,
       presetModels: Array.isArray(preset?.models) ? preset.models : [],
+      searchToolOverrides,
     })
     await writeFile(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf-8')
     files.push({ key: 'model_catalog', path: CODEX_MODEL_CATALOG_FILE, absolutePath: catalogPath })
