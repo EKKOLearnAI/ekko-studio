@@ -23,9 +23,9 @@ export function validateAgent(definition: AgentDefinition): void {
   if (!modes || !modes.global && !modes.scoped || Object.keys(modes).some(key => !['global', 'scoped'].includes(key))) throw new PluginError('Agent must declare scoped or global mode')
   if (modes.global && typeof modes.global.listModels !== 'function') throw new PluginError('Global Agent requires listModels')
   if (modes.scoped && (!Array.isArray(modes.scoped.protocols) || !modes.scoped.protocols.length || modes.scoped.protocols.some(value => !['chat_completions', 'codex_responses', 'anthropic_messages'].includes(value)))) throw new PluginError('Scoped Agent requires supported protocols')
-  const capabilities = definition.capabilities
-  if (!capabilities || !Array.isArray(capabilities.surfaces) || !capabilities.surfaces.length || capabilities.surfaces.some(value => !['chat', 'group-chat', 'workflow', 'api'].includes(value)) || typeof capabilities.streaming !== 'boolean' || typeof capabilities.resume !== 'boolean') throw new PluginError('Invalid Agent capabilities')
-  if ('images' in capabilities || 'files' in capabilities || 'supportsImages' in capabilities || 'supportsFiles' in capabilities) throw new PluginError('Images and files are required Agent inputs, not optional capabilities')
+  const features = definition.features
+  if (!features || !Array.isArray(features.surfaces) || !features.surfaces.length || features.surfaces.some(value => !['chat', 'group-chat', 'workflow', 'api'].includes(value)) || typeof features.streaming !== 'boolean' || typeof features.resume !== 'boolean') throw new PluginError('Invalid Agent features')
+  if ('images' in features || 'files' in features || 'supportsImages' in features || 'supportsFiles' in features) throw new PluginError('Images and files are required Agent inputs, not optional capabilities')
 }
 
 type Entry = { effects: PluginEffects; engine: Promise<AgentSession>; busy: boolean }
@@ -51,7 +51,7 @@ export class PluginAgentRuntime {
     const d = this.definition
     return { id: this.id, pluginId: this.owner.record.manifest.id, name: d.name, vendor: d.vendor, description: d.description || '',
       icon: d.icon || this.owner.record.manifest.icon || '', origin: 'plugin' as const,
-      modes: Object.keys(d.modes) as AgentMode[], surfaces: d.capabilities.surfaces,
+      modes: Object.keys(d.modes) as AgentMode[], surfaces: d.features.surfaces,
       actions: { settings: !!d.management.settings, checkUpdate: !!d.management.checkUpdate, upgrade: !!d.management.upgrade, remove: !!d.management.remove, autoUpdate: !!d.management.supportsAutoUpdate } }
   }
   async manage<T>(identity: PluginIdentity, signal: AbortSignal | undefined, work: (ctx: AgentManagementContext) => Promise<T> | T): Promise<T> {
@@ -59,7 +59,7 @@ export class PluginAgentRuntime {
     try {
       return await this.owner.withIdentity(identity, AbortSignal.any([effects.controller.signal, AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]), async bound => work({
         identity: Object.freeze({ ...identity, agentId: this.id }), signal: bound,
-        log: this.owner.context().log, resources: { add: dispose => effects.add(dispose) },
+        log: this.owner.context().log, lifecycle: { add: dispose => effects.add(dispose), acquire: acquire => effects.acquire(acquire) },
         progress: value => { this.owner.context().log.info(value.message) },
       }))
     } finally { await closeEffects(effects) }
@@ -83,9 +83,9 @@ export class PluginAgentRuntime {
     return this.manage(identity, undefined, async ctx => {
       if (!this.definition.management.settings) throw new PluginError('Agent has no settings page')
       const target = json(await this.definition.management.settings(ctx)) as unknown as { viewId: string; query?: Record<string, string> }
-      const view = this.owner.record.manifest.views?.find(view => view.id === target.viewId && ['settings', 'agent-settings'].includes(view.slot))
-      if (!view || target.query && (typeof target.query !== 'object' || Object.values(target.query).some(value => typeof value !== 'string'))) throw new PluginError('Agent settings must target its own declared settings or agent-settings view')
-      return { name: view.slot === 'agent-settings' ? 'studio.pluginAgentSettings' : 'studio.pluginSettings', params: { pluginId: this.owner.record.manifest.id, viewId: target.viewId }, query: target.query || {} }
+      const view = this.owner.record.manifest.views?.find(view => view.id === target.viewId && view.slot === 'agent-settings')
+      if (!view || target.query && (typeof target.query !== 'object' || Object.values(target.query).some(value => typeof value !== 'string'))) throw new PluginError('Agent settings must target its own declared agent-settings view')
+      return { name: 'studio.pluginAgentSettings', params: { pluginId: this.owner.record.manifest.id, viewId: target.viewId }, query: target.query || {} }
     })
   }
   async checkUpdate(identity: PluginIdentity) {
@@ -152,20 +152,20 @@ export class PluginAgentRuntime {
     const identity = { ...input.identity, agentId: this.id }
     const key = JSON.stringify([identity.userId, identity.profile, identity.sessionId, input.mode])
     let entry = this.sessions.get(key)
-    const store = this.owner.runContext(identity, input.signal).storage.namespace('agent-runtime', this.definition.id, String(identity.userId), identity.profile, identity.sessionId, input.mode)
+    const store = this.owner.runContext(identity, input.signal).state.plugin.namespace('agent-runtime', this.definition.id, String(identity.userId), identity.profile, identity.sessionId, input.mode)
     if (!entry) {
       const effects = new PluginEffects()
       entry = { effects, engine: Promise.resolve(null as unknown as AgentSession), busy: false }
       this.sessions.set(key, entry)
       entry.engine = this.owner.withIdentity(identity, effects.controller.signal, async () => {
         await mkdir(input.paths.runtimeDir, { recursive: true, mode: 0o700 })
-        const resumeState = this.definition.capabilities.resume ? await store.get('checkpoint') : undefined
+        const resumeState = this.definition.features.resume ? await store.get('checkpoint') : undefined
         let engine: AgentSession | undefined
         await effects.acquire(async () => {
           engine = await this.definition.runtime.createSession({ identity: Object.freeze(identity), mode: input.mode, paths: Object.freeze(input.paths),
             resumeState: resumeState as unknown as import('../../contracts/plugins').AgentCheckpoint | undefined,
-            signal: effects.controller.signal, log: this.owner.context().log, resources: { add: dispose => effects.add(dispose) } })
-          if (typeof engine?.run !== 'function' || typeof engine.dispose !== 'function' || this.definition.capabilities.resume && typeof engine.checkpoint !== 'function') throw new PluginError('Invalid Agent session implementation')
+            signal: effects.controller.signal, log: this.owner.context().log, lifecycle: { add: dispose => effects.add(dispose), acquire: acquire => effects.acquire(acquire) } })
+          if (typeof engine?.run !== 'function' || typeof engine.dispose !== 'function' || this.definition.features.resume && typeof engine.checkpoint !== 'function') throw new PluginError('Invalid Agent session implementation')
           return () => engine!.dispose()
         })
         return engine!
@@ -183,8 +183,8 @@ export class PluginAgentRuntime {
         const base = this.owner.runContext(identity, signal)
         const context = { ...base, identity: Object.freeze(identity), paths: Object.freeze(input.paths),
           mode: input.mode, model: Object.freeze(input.model), signal, deadlineAt: input.deadlineAt,
-          storage: base.storage.namespace('agent-runtime', this.definition.id, String(identity.userId), identity.profile, identity.sessionId, input.mode),
-          log: this.owner.context().log, resources: { add: (dispose: () => void | Promise<void>) => runEffects.add(dispose) },
+          state: { ...base.state, agentSession: base.state.plugin.namespace('agent-runtime', this.definition.id, String(identity.userId), identity.profile, identity.sessionId, input.mode) },
+          log: this.owner.context().log, lifecycle: { add: (dispose: () => void | Promise<void>) => runEffects.add(dispose), acquire: acquire => runEffects.acquire(acquire) },
           attachments: {
             resolve: async (assetId: string) => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); return input.attachments.resolve(assetId) },
             read: async (assetId: string) => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); return input.attachments.read(assetId) },
@@ -192,7 +192,7 @@ export class PluginAgentRuntime {
           interactions: {
             approve: async request => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); if (!input.interactions) throw new PluginError('Agent interactions are unavailable'); return input.interactions.approve(request) },
             clarify: async request => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); if (!input.interactions) throw new PluginError('Agent interactions are unavailable'); return input.interactions.clarify(request) },
-          }, events: { emit: async (event: AgentEvent) => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); await input.emit(json(event) as unknown as AgentEvent) } },
+          }, output: { emit: async (event: AgentEvent) => { signal.throwIfAborted(); await this.owner.ports.authorize(identity); await input.emit(json(event) as unknown as AgentEvent) } },
         } as AgentRunContext
         const result = json(await engine.run(input.request, context)) as unknown as AgentRunResult
         signal.throwIfAborted()
@@ -201,7 +201,7 @@ export class PluginAgentRuntime {
           const value = (result.usage as any)[key]
           return value != null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)
         }))) throw new PluginError('Invalid Agent usage')
-        const checkpoint = result.checkpoint || (this.definition.capabilities.resume ? await engine.checkpoint!() : undefined)
+        const checkpoint = result.checkpoint || (this.definition.features.resume ? await engine.checkpoint!() : undefined)
         signal.throwIfAborted()
         if (checkpoint) {
           if (!Number.isSafeInteger(checkpoint.schemaVersion) || checkpoint.schemaVersion < 1) throw new PluginError('Invalid Agent checkpoint version')

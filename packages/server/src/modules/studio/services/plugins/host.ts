@@ -6,10 +6,11 @@ import { issueModelRunJwt } from '../../public/auth'
 import { logger } from '../../public/logging'
 import { findUserById, getDefaultProfileForUser, listUsers, userCanAccessProfile } from '../../repositories/users-store'
 import { getSession } from '../../repositories/session-store'
-import { isPrivatePersonSession, ownsPersonSession } from '../../contracts/person-session'
+import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../../contracts/person-session'
 import { ownedPersonTaskSession } from '../person/task-chat'
 import { businessEvents } from '../webhooks/business-events'
 import { canReceivePluginEvent, pluginEventData } from './events'
+import { desktopBrowserRelays } from '../browser/desktop-relay'
 import { PluginManager } from './manager'
 import { PluginDevelopment } from './development'
 import { PluginError } from './errors'
@@ -18,6 +19,7 @@ import { pluginApiPath } from './policy'
 import { configurePluginAgents } from '../agents/registry'
 import { reconcileBuiltinPlugins } from './builtin'
 import { synchronizePluginMcpServers } from './mcp'
+import { connectPluginSession } from './session-transport'
 
 let baseUrl = ''
 let instance: PluginManager | undefined
@@ -75,6 +77,22 @@ async function api(identity: PluginIdentity, path: string, options: ApiRequest, 
 export function getPluginManager(): PluginManager {
   if (instance) return instance
   instance = new PluginManager(join(config.appHome, 'plugins'), {
+    sessions: async (identity, sessionId, listener, signal, kind) => {
+      const who = resolvePluginIdentity({ ...identity, sessionId })
+      if (kind === 'bot' && !isPersonSession(sessionId)) throw new PluginError('Select an existing BOT conversation', 'PLUGIN_SCOPE', 403)
+      if (!baseUrl) throw new PluginError('Session transport is not ready', 'PLUGIN_UNAVAILABLE', 503)
+      return connectPluginSession({ baseUrl, sessionId, profile: who.profile, signal, listener,
+        token: async () => { authorizePluginIdentity(who); return issueModelRunJwt(findUserById(who.userId)!) },
+      })
+    },
+    browser: async (identity, method, params, binding, signal) => {
+      authorizePluginIdentity(identity); signal.throwIfAborted()
+      if (!['tabs.list', 'tabs.create', 'tabs.close', 'cdp.attach', 'cdp.send', 'cdp.events', 'lease.release'].includes(method)) throw new PluginError('Unsupported plugin browser method')
+      const key = JSON.stringify([binding, identity.userId, identity.profile])
+      const envelope = await desktopBrowserRelays.request(identity.userId, identity.profile, { method, params }, key) as { result?: unknown }
+      signal.throwIfAborted()
+      return json(envelope.result ?? null)
+    },
     api, authorize: authorizePluginIdentity, emit: () => {},
     log: (pluginId, identity, level, text) => logger.info({ pluginId, profile: identity.profile, level }, text),
   })

@@ -8,7 +8,7 @@ export interface MarketPlugin {
   description: string
   manifestId: string | null
   version: string | null
-  capabilities: string[]
+  permissions: string[]
   keywords: string[]
   author?: { name: string }
   iconUrl?: string
@@ -18,18 +18,19 @@ export interface MarketPlugin {
 
 function marketPlugin(value: any): MarketPlugin {
   const repository = normalizePluginRepository(value?.repository)
+  const permissions = value?.permissions
   if (!repository || typeof value.id !== 'string' || !/^[a-f0-9]{64}$/.test(value.id)
     || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 160
     || typeof value.description !== 'string' || value.description.length > 4000
-    || !Array.isArray(value.capabilities) || value.capabilities.some((item: unknown) => typeof item !== 'string')) throw new Error('Invalid plugin catalog entry')
+    || !Array.isArray(permissions) || permissions.some((item: unknown) => typeof item !== 'string')) throw new Error('Invalid plugin catalog entry')
   let release: PluginRelease | null = null
-  // Older/incompatible publications remain browsable, but cannot be installed.
+  // Invalid publications cannot be installed.
   try { release = parsePluginRelease(value, repository) } catch { /* Unverified releases have no install action. */ }
   return {
     id: value.id, repository, repositoryStars: repositoryStars(value.repositoryStars, repository), name: value.name, description: value.description,
     manifestId: typeof value.manifestId === 'string' ? value.manifestId : null,
     version: typeof value.version === 'string' ? value.version : null,
-    capabilities: value.capabilities,
+    permissions: permissions,
     keywords: Array.isArray(value.keywords) ? value.keywords.filter((item: unknown) => typeof item === 'string') : [],
     ...(typeof value.author?.name === 'string' ? { author: { name: value.author.name } } : {}),
     ...(typeof value.iconUrl === 'string' ? { iconUrl: value.iconUrl } : {}),

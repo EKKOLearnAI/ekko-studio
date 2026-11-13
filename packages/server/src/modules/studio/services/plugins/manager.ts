@@ -6,7 +6,7 @@ import type { ApiRequest, HookResult, Json, PluginEvent, PluginHook, PluginIdent
 import { PluginError, message } from './errors'
 import { installPackage, pluginFile } from './installer'
 import { PluginRuntime, type PluginPorts } from './runtime'
-import { configuration, identifier, json } from './schema'
+import { configuration, identifier, json, manifest } from './schema'
 import { PluginStore, readJson, scopeKey, writeJson, type PluginState } from './store'
 
 function previousVersion(record: PluginRecord): Omit<PluginRecord, 'previous'> {
@@ -54,6 +54,7 @@ export class PluginManager {
   }
   private async mount(identity: PluginIdentity, record: PluginRecord): Promise<PluginRuntime> {
     if (!packagePresent(record)) throw missingPackage()
+    manifest(record.manifest)
     this.dependencies(record)
     const runtime = new PluginRuntime(record, { userId: identity.userId, profile: identity.profile }, this.store, this.ports)
     try { await runtime.load(); runtime.activate() } catch (e) { await runtime.close().catch(() => {}); throw e }
@@ -182,7 +183,7 @@ export class PluginManager {
     const runtime = this.runtime(identity, id)
     await this.ports.authorize(identity)
     const combined = AbortSignal.any([runtime.effects.controller.signal, ...(signal ? [signal] : [])])
-    return runtime.runContext(identity, combined).api.request(path, options)
+    return runtime.runContext(identity, combined).host.request(path, options)
   }
   async callTool(identity: PluginIdentity, name: string, input: Record<string, Json>, signal?: AbortSignal): Promise<ToolResult> {
     const [id, tool, extra] = name.split('/')

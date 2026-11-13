@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 
 export const DESKTOP_BROWSER_IDLE_MS = 10 * 60 * 1000
 export const DESKTOP_BROWSER_METHODS = new Set([
-  'state', 'tabs.list', 'tabs.create', 'tabs.activate', 'tabs.close', 'lease.release',
+  'cdp.attach', 'cdp.send', 'cdp.events', 'state', 'tabs.list', 'tabs.create', 'tabs.activate', 'tabs.close', 'lease.release',
   'navigate', 'navigation.action', 'snapshot', 'text.read', 'interact', 'interact.batch',
   'screenshot', 'console.read', 'console.clear', 'upload', 'wait', 'download.start', 'download.read',
   'dialog', 'network.read', 'network.clear',
@@ -90,7 +90,7 @@ export class DesktopBrowserRelayRegistry {
     connection.inFlight++
     this.notify(userId, profile)
     try {
-      const result = await connection.peer.request({ method: input.method, params: input.params || {}, operation_id: randomUUID() })
+      const result = await connection.peer.request({ method: input.method, params: input.params || {}, ...(bindingId ? { client_scope: createHash('sha256').update(bindingId).digest('hex') } : {}), operation_id: randomUUID() })
       if (this.peers.get(connection.peer.id) !== connection || group.ownerId !== connection.peer.id) throw new Error('Desktop browser disconnected during operation')
       return result
     } finally {

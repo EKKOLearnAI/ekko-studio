@@ -4,9 +4,9 @@ import { pluginRepository } from './updates'
 
 export const pluginCategories = ['all', 'agents', 'pages', 'chat', 'tools', 'automation'] as const
 export type PluginCategory = typeof pluginCategories[number]
-const categoryCapabilities = { agents: 'agents', pages: 'ui', chat: 'commands', tools: 'tools', automation: 'automation' } as const
-export function matchesPluginCategory(capabilities: readonly string[], category: PluginCategory): boolean {
-  return category === 'all' || capabilities.includes(categoryCapabilities[category])
+const categoryPermissions = { agents: 'agents', pages: 'ui', chat: 'commands', tools: 'tools', automation: 'automation' } as const
+export function matchesPluginCategory(permissions: readonly string[] | undefined, category: PluginCategory): boolean {
+  return category === 'all' || Array.isArray(permissions) && permissions.includes(categoryPermissions[category])
 }
 export function matchesPluginSearch(plugin: { name: string; description?: string; id?: string; manifestId?: string | null; repository?: string; author?: { name: string }; keywords?: string[] }, search: string) {
   const query = search.trim().toLocaleLowerCase()

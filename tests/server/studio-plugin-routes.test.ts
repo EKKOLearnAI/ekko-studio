@@ -64,22 +64,22 @@ it('requires trusted administrator installation and rejects run credentials and 
 })
 it('requires developer opt-in for browser storage and shares explicit namespaces with the backend', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'plugin-storage-route-'))
-  const runtime = new PluginRuntime({ manifest: { id: 'notes', name: 'Notes', version: '1.0.0', apiVersion: 1, capabilities: [] }, directory: dir, source: dir, installedAt: 0, enabled: true, config: {} }, { userId: 1, profile: 'work' }, new PluginStore(dir), { authorize() {}, emit() {}, log() {}, api: async () => null })
+  const runtime = new PluginRuntime({ manifest: { id: 'notes', name: 'Notes', version: '1.0.0', apiVersion: 1, permissions: [] }, directory: dir, source: dir, installedAt: 0, enabled: true, config: {} }, { userId: 1, profile: 'work' }, new PluginStore(dir), { authorize() {}, emit() {}, log() {}, api: async () => null })
   mocks.runtime.mockReturnValue(runtime)
   try {
     await server(async base => {
       const storage = (body: object) => fetch(`${base}/api/studio/plugins/notes/storage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       expect((await storage({ action: 'get', key: 'private' })).status).toBe(403)
-      runtime.record.manifest.capabilities.push('storage.client')
+      runtime.record.manifest.permissions.push('storage.client')
       expect((await storage({ action: 'set', key: 'value', value: 'shared' })).status).toBe(200)
-      expect(await runtime.context().storage.get('value')).toBe('shared')
+      expect(await runtime.context().state.plugin.get('value')).toBe('shared')
       mocks.user.id = 2; mocks.profile = 'other'
       expect(await storage({ action: 'get', key: 'value' }).then(response => response.json())).toEqual({ present: true, value: 'shared' })
-      await runtime.context().storage.namespace('project', 'alpha').set('value', 'partitioned')
+      await runtime.context().state.plugin.namespace('project', 'alpha').set('value', 'partitioned')
       expect(await storage({ action: 'get', key: 'value', namespace: ['project', 'alpha'] }).then(response => response.json())).toEqual({ present: true, value: 'partitioned' })
       expect(await storage({ action: 'keys', namespace: ['project', 'alpha'] }).then(response => response.json())).toEqual({ keys: ['value'] })
       expect((await storage({ action: 'delete', key: 'value', namespace: ['project', 'alpha'] })).status).toBe(200)
-      expect(await runtime.context().storage.namespace('project', 'alpha').get('value')).toBeUndefined()
+      expect(await runtime.context().state.plugin.namespace('project', 'alpha').get('value')).toBeUndefined()
       for (const namespace of ['invalid', [null], Array(17).fill('x')]) expect((await storage({ action: 'get', key: 'value', namespace })).status).toBe(400)
     })
   } finally { await runtime.close(); await rm(dir, { recursive: true, force: true }) }

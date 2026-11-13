@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PluginRuntime } from '../../packages/server/src/modules/studio/services/plugins/runtime'
 import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
+import { manifest } from '../../packages/server/src/modules/studio/services/plugins/schema'
 
 const state = vi.hoisted(() => ({ user: { id: 2, role: 'super_admin' } as any, shared: false, agents: [] as any[], updates: null as any }))
 vi.mock('../../packages/server/src/modules/studio/services/agents/plugin-update-policy', async importOriginal => {
@@ -35,15 +36,15 @@ async function server() {
   const directory = await mkdtemp(join(tmpdir(), 'studio-agent-routes-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   const runtime = new PluginRuntime({ directory, source: directory, config: {}, installedAt: 0, enabled: true,
-    manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, server: 'server.mjs', capabilities: ['agents'], views: [{ id: 'settings', title: 'Settings', slot: 'settings' }] } },
+    manifest: manifest({ id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, server: 'server.mjs', client: 'client.mjs', permissions: ['agents', 'ui'], views: [{ id: 'settings', title: 'Settings', slot: 'agent-settings', icon: 'settings' }] }) },
   { userId: 1, profile: 'installer' }, new PluginStore(directory), { authorize() {}, api: async () => null, emit() {}, log() {} })
   cleanup.push(() => runtime.close())
-  await runtime.load({ apply(ctx) { ctx.agents.register({ id: 'assistant', name: 'Example Agent', vendor: 'Example Team', agentApiVersion: 1,
+  await runtime.load({ apply(ctx) { ctx.extensions.agents.register({ id: 'assistant', name: 'Example Agent', vendor: 'Example Team', agentApiVersion: 1,
     getStatus: async context => { actors.push(context.identity.userId); return { installed: true, version, path: '/private/executable' } },
     management: { settings: () => ({ viewId: 'settings' }), checkUpdate, supportsAutoUpdate: () => true,
       upgrade: async input => { upgraded(input); version = input.version; return { installedVersion: version } } },
     modes: { global: { listModels: async context => ({ status: 'ready', source: 'sdk', scope: 'configured', models: [{ id: `model-${context.identity.userId}`, name: 'Native' }] }) } },
-    capabilities: { surfaces: ['chat'], streaming: true, resume: false }, runtime: { createSession: () => ({ run: async () => ({ content: [], finishReason: 'stop' }), dispose() {} }) },
+    features: { surfaces: ['chat'], streaming: true, resume: false }, runtime: { createSession: () => ({ run: async () => ({ content: [], finishReason: 'stop' }), dispose() {} }) },
   }) } }); runtime.activate(); state.agents = [...runtime.agents.values()]
   configurePluginAgents(() => state.agents)
   state.updates = new PluginAgentUpdates(directory, () => state.agents)
@@ -67,7 +68,7 @@ it('publishes plugin vendor/actions and native models under the actual caller an
   expect(list.agents.find((agent: any) => agent.id.startsWith('plugin:'))).toMatchObject({ vendor: 'Example Team', status: { installed: true, version: '1.0.0' } })
   expect(list.agents.find((agent: any) => agent.id.startsWith('plugin:')).status).not.toHaveProperty('path')
   expect(await (await request(id + '/models')).json()).toMatchObject({ models: [{ id: 'model-2' }] })
-  expect(await (await request(id + '/settings', {})).json()).toMatchObject({ name: 'studio.pluginSettings', params: { pluginId: 'example', viewId: 'settings' } })
+  expect(await (await request(id + '/settings', {})).json()).toMatchObject({ name: 'studio.pluginAgentSettings', params: { pluginId: 'example', viewId: 'settings' } })
   expect(await (await request('/codex/settings', {})).json()).toMatchObject({ name: 'codingAgent.config', params: { agentId: 'codex' } })
   await request('/codex/check-update', {}); expect(legacyCheck).toHaveBeenCalledWith('codex')
   expect(actors).toEqual([2])

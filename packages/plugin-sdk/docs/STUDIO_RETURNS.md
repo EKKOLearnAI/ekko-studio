@@ -15,12 +15,12 @@
 | 自动化动作 execute | JSON，结构应在插件契约中声明，供工作流消费。 |
 | hooks handler | `{ value?: Json, deny?: string }`；value 替换内容，deny 拒绝；不用修改时返回空对象。 |
 | 业务观察 handler | void/Promise<void>；事件不能通过返回值修改原业务。 |
-| ui.emit | 传事件名、JSON data、可选 audience；没有业务返回值。 |
+| messages.emit | 传事件名、JSON data、可选 audience；没有业务返回值。 |
 | 前端 ui.selectModel | 宿主返回 `{profile,provider,model,apiMode?}`，关闭或取消返回 null；model 为规范 ID，不含凭证。调用方自行通过 RPC 保存；加载失败或重复打开时 Promise reject。 |
 
 工具 inputSchema 使用 SDK 的 Schema 子集（type/properties/items/required/enum 等）；
-它与项目 harness 的描述型 schema 分开，宿主 Schema 不支持 description/$ref 等任意 JSON Schema 关键字。
-不要把 `contracts/plugin.json` 中带 description 的模型直接当 inputSchema 传给宿主。
+它与项目 harness 的描述型 schema 分开，宿主 Schema 支持 description；不支持 $ref/anyOf 等未声明的 JSON Schema 关键字。
+复用契约模型时，先确认所有关键字都属于 SDK Schema 子集。
 
 ```js
 return { ok: true, content: '已保存', data: { id: 'note-1' } }
@@ -33,7 +33,7 @@ return { ok: false, content: '无法保存', error: '目标记录不存在' }
 | 入口 | 返回结构 |
 | --- | --- |
 | getStatus | `{ installed, version, source?, path?, error? }` |
-| management.settings | `{ viewId, query? }`；必须是本插件声明的 settings 或 agent-settings 视图；不要求注册任何全局侧栏入口。 |
+| management.settings | `{ viewId, query? }`；必须是本插件声明的 agent-settings 视图；不要求注册任何全局侧栏入口。 |
 | management.checkUpdate | `{ currentVersion, latestVersion, updateAvailable, message? }` |
 | management.upgrade | `{ installedVersion, message? }`；输入含 version/expectedVersion，插件自行处理引擎恢复。 |
 | management.remove | `Promise<void>`；只移除受管引擎，成功后 getStatus 必须返回 installed:false，保留源码、配置、凭证及会话数据。 |
@@ -52,11 +52,11 @@ return { ok: false, content: '无法保存', error: '目标记录不存在' }
 标准事件：
 
 ```js
-await ctx.events.emit({ type: 'text.delta', text: '你好' })
-await ctx.events.emit({ type: 'reasoning.summary.delta', text: '正在检查输入' })
-await ctx.events.emit({ type: 'status', phase: 'working', message: '读取文件' })
-await ctx.events.emit({ type: 'tool.started', callId: 'call-1', name: 'read', input: { path: 'a.txt' } })
-await ctx.events.emit({ type: 'tool.completed', callId: 'call-1', result: { text: '内容' } })
+await ctx.output.emit({ type: 'text.delta', text: '你好' })
+await ctx.output.emit({ type: 'reasoning.summary.delta', text: '正在检查输入' })
+await ctx.output.emit({ type: 'status', phase: 'working', message: '读取文件' })
+await ctx.output.emit({ type: 'tool.started', callId: 'call-1', name: 'read', input: { path: 'a.txt' } })
+await ctx.output.emit({ type: 'tool.completed', callId: 'call-1', result: { text: '内容' } })
 // 失败时以同一 callId 结束：tool.failed + error 字符串。
 ```
 
@@ -78,3 +78,23 @@ content 必须是完整回复，增量仅供实时预览，宿主最终只保存
 usage 的 inputTokens/outputTokens 可为 null，cacheReadTokens/costUsd 可选且可为 null；
 填写实际统计或明确 isEstimated，不编造用量。取消应响应 signal 并清理，错误抛出由宿主处理终态。
 宿主生成运行 ID、持久化工具历史/最终消息并发布完成事件，插件无需自行伪造这些宿主事件。
+
+## SDK v1 返回规则
+
+资源注册统一使用 lifecycle.add/acquire；业务事件与插件消息分开，Agent 运行事件通过 output.emit 发布。
+state.agentSession 是 Agent 专用会话分区，state.plugin 始终是插件全局存储。
+CDP send 返回原始协议 JSON；attach 返回 cursor 和 iframe sessions；events 返回 cursor/oldestCursor/dropped/events。
+每条事件含 sequence/method/params，可带 sessionId/truncated。按返回 cursor 继续轮询；dropped/truncated 时由调用者决定是否重新读取页面状态。
+CDP 模块不返回宿主 token、调试端口或其他标签页的 WebContents 对象。通用 SDK JSON 值仍有 2 MB 限制。
+
+## 单聊和 BOT 实时返回
+
+host.sessions.connect 与 host.bots.connect 返回 HostSession：sessionId、run、stop、resume、queue、interactions、close。
+控制方法 Promise<void> 只表示已分发到核心通道，最终状态由 run.started/queued/completed/failed、abort、
+approval/clarify 等原始事件确认。连接故障时控制调用 reject，宿主不会把未确认的指令自动重发。
+回调的 SessionEvent 包含 event/session_id 和核心协议原始 JSON 字段；文本增量位于 delta，
+最终完整结果位于 run.completed.output，恢复数据位于 resumed 快照。
+transport.connected/disconnected/error/closed 反映连接与交付状态，不等同于运行完成或失败。
+重连重新获取快照，不能据此假定断线期间每个增量均被补发；插件按宿主快照和历史恢复。
+close 只释放自身订阅，保持宿主任务继续运行；显式 stop 发出原有 abort 指令。
+BOT 的普通方法保留现有服务 JSON 形状及并发 revision；校验失败直接 reject。

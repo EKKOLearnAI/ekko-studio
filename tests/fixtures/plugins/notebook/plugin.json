@@ -6,7 +6,7 @@
   "description": "跨账号与 Profile 共享便签；独立工作区、Agent 工具和工作流实时同步。",
   "server": "server.mjs",
   "client": "client.mjs",
-  "capabilities": [
+  "permissions": [
     "ui",
     "tools",
     "commands",

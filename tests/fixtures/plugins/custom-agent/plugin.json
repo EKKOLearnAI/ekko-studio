@@ -6,7 +6,7 @@
   "description": "An Agent runtime with its own settings, a local global model, and Studio-proxied scoped models.",
   "server": "server.mjs",
   "client": "client.mjs",
-  "capabilities": [
+  "permissions": [
     "agents",
     "ui"
   ],
@@ -14,7 +14,8 @@
     {
       "id": "settings",
       "title": "Custom Agent settings",
-      "slot": "settings"
+      "slot": "agent-settings",
+      "icon": "settings"
     }
   ],
   "navigation": {

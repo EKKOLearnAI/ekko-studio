@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NInput, useDialog, useMessage } from 'naive-ui'
 import { getStoredUserId } from '@/api/client'
+import { createPluginSessionBridge } from '@/api/studio/plugin-sessions'
 import { pluginApi, pluginInvoke, pluginRequest, type InstalledPlugin, type Json, type PluginEvent } from '@/api/studio/plugins'
 import { pluginFrameDocument } from '@/plugins/frame'
 import ModelCascader from '@/components/hermes/models/ModelCascader.vue'
@@ -28,6 +29,8 @@ watch(() => [frame.value, props.plugin, props.profile, props.view, props.session
   let source: string | undefined, ready = false, started = false, timer: ReturnType<typeof setTimeout> | undefined
   let cursor = 0, generation = ''
   const send = (value: object) => element.contentWindow?.postMessage(JSON.parse(JSON.stringify({ ...value, channel })), '*')
+  const sessionBridge = createPluginSessionBridge(profile, plugin.manifest.id, controller.signal,
+    (id, event) => send({ type: 'session.event', id, event }))
   const dialogs = new Set<ReturnType<typeof dialog.create>>()
   const prompt = (text: string, input: boolean): Promise<string | boolean | null> => new Promise(resolve => {
     let value = ''
@@ -76,9 +79,13 @@ watch(() => [frame.value, props.plugin, props.profile, props.view, props.session
     try {
       let value: unknown
       switch (data.method) {
+        case 'session-open':
+        case 'session-command':
+        case 'session-close': value = await sessionBridge(data.method, args); break
+        case 'browser': value = await pluginRequest(profile, `/${plugin.manifest.id}/browser`, { method: args.method, params: args.params || {}, sessionId }, 'POST', controller.signal); break
         case 'api': value = await pluginApi(profile, plugin.manifest.id, args.path, args.options || {}, sessionId, controller.signal); break
         case 'rpc': value = await pluginInvoke(profile, plugin.manifest.id, 'rpc', args.name, args.input ?? null, sessionId, controller.signal); break
-        case 'storage': value = await pluginRequest(profile, `/${plugin.manifest.id}/storage`, { action: args.action, key: args.key, value: args.value, namespace: args.namespace, sessionId }, 'POST', controller.signal); break
+        case 'storage': value = await pluginRequest(profile, `/${plugin.manifest.id}/storage`, { action: args.action, key: args.key, value: args.value, scope: args.scope, namespace: args.namespace, sessionId }, 'POST', controller.signal); break
         case 'notify': message[['info', 'success', 'error'].includes(args.level) ? args.level as 'info' : 'info'](`${plugin.manifest.name}: ${String(args.message).slice(0, 2000)}`); value = null; break
         case 'confirm': value = await prompt(String(args.message).slice(0, 2000), false); break
         case 'prompt': value = await prompt(String(args.message).slice(0, 2000), true); break

@@ -20,6 +20,7 @@ interface BrokerRequest {
   operation_id?: unknown
   run_metadata?: unknown
   client_pid?: unknown
+  client_scope?: unknown
 }
 
 interface Lease {
@@ -28,6 +29,7 @@ interface Lease {
 }
 
 interface BrokerClient {
+  parentId?: string
   token: string
   lastSeenAt: number
   pid?: number
@@ -156,6 +158,7 @@ export class BrowserBroker {
   }
 
   revokeClient(clientId: string): void {
+    for (const [id, client] of this.clients) if (client.parentId === clientId) this.revokeClient(id)
     for (const [tabId, lease] of this.leases) {
       if (lease.clientId === clientId) this.revokeTab(tabId)
     }
@@ -195,6 +198,17 @@ export class BrowserBroker {
       if (!client || !providedToken || !safeEqual(providedToken, client.token)) return this.send(response, 401, { error: 'Unauthorized' })
       client.lastSeenAt = Date.now()
       const body = await this.readBody(request)
+      let effectiveClientId = clientId
+      if (body.client_scope !== undefined) {
+        const scope = requiredString(body.client_scope, 'client_scope')
+        if (scope.length > 200) throw new Error('Browser client scope exceeds 200 characters')
+        effectiveClientId = `${clientId}:${scope}`
+        if (!this.clients.has(effectiveClientId)) {
+          if ([...this.clients.values()].filter(item => item.parentId === clientId).length >= 256) throw new Error('Browser client scope capacity reached')
+          this.clients.set(effectiveClientId, { ...client, parentId: clientId })
+        }
+        this.clients.get(effectiveClientId)!.lastSeenAt = Date.now()
+      }
       const method = requiredString(body.method, 'method')
       const params = asObject(body.params)
       const operationId = typeof body.operation_id === 'string' && body.operation_id.trim()
@@ -203,8 +217,8 @@ export class BrowserBroker {
       const tabId = typeof params.tab_id === 'string' ? params.tab_id.trim() : ''
       const tabGeneration = tabId ? this.tabGenerations.get(tabId) || 0 : 0
       const result = tabId
-        ? await this.queued(tabId, () => this.execute(clientId, method, params, operationId, tabGeneration))
-        : await this.withCapacity(() => this.execute(clientId, method, params, operationId, tabGeneration))
+        ? await this.queued(tabId, () => this.execute(effectiveClientId, method, params, operationId, tabGeneration))
+        : await this.withCapacity(() => this.execute(effectiveClientId, method, params, operationId, tabGeneration))
       this.send(response, 200, { operation_id: operationId, result })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -256,6 +270,16 @@ export class BrowserBroker {
           const tab = await this.manager.navigationAction(requiredString(params.tab_id, 'tab_id'), action)
           return this.publicTab(tab)
         }
+        case 'cdp.attach':
+          return await this.manager.attachPluginCdp(requiredString(params.tab_id, 'tab_id'))
+        case 'cdp.send': {
+          if (params.params !== undefined && (!params.params || typeof params.params !== 'object' || Array.isArray(params.params))) throw new Error('CDP params must be an object')
+          return await this.manager.sendPluginCdp(requiredString(params.tab_id, 'tab_id'), requiredString(params.method, 'method'), asObject(params.params),
+            params.session_id === undefined ? undefined : requiredString(params.session_id, 'session_id'))
+        }
+        case 'cdp.events':
+          return await this.manager.pluginCdpEvents(requiredString(params.tab_id, 'tab_id'),
+            boundedInteger(params.cursor, 'cursor', 0, 0, Number.MAX_SAFE_INTEGER), boundedInteger(params.limit, 'limit', 32, 1, 64))
         case 'snapshot':
           return await this.manager.snapshot(requiredString(params.tab_id, 'tab_id'), snapshotOptions({
             snapshotId: params.snapshot_id as string | undefined, selector: params.selector as string | undefined,

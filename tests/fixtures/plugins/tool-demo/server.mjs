@@ -1,5 +1,5 @@
 export function apply(ctx) {
-  ctx.tools.register({
+  ctx.extensions.tools.register({
     name: 'hello',
     description: '问候演示：输入名字，返回问候语及当前 Profile。可用于验证 Studio 插件工具的 MCP 注入；不修改数据、不调用模型。',
     readOnly: true,

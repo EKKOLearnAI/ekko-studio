@@ -13,16 +13,16 @@ import type { PluginContext, PluginIdentity, PluginManifest } from '../../packag
 import type { PluginRecord } from '../../packages/server/src/modules/studio/contracts/plugins'
 
 const who: PluginIdentity = { userId: 1, profile: 'one' }
-const definition: PluginManifest = { id: 'notes', name: 'Notes', version: '1.0.0', apiVersion: 1, server: 'server.mjs', client: 'client.mjs', capabilities: ['tools', 'commands', 'api.read', 'api.write', 'events', 'hooks', 'automation', 'ui'], views: [{ id: 'home', title: 'Notes', slot: 'page' }] }
+const definition: PluginManifest = { id: 'notes', name: 'Notes', version: '1.0.0', apiVersion: 1, server: 'server.mjs', client: 'client.mjs', permissions: ['tools', 'commands', 'api.read', 'api.write', 'events', 'hooks', 'automation', 'ui'], views: [{ id: 'home', title: 'Notes', slot: 'page' }] }
 const directories: string[] = [], managers: PluginManager[] = []
 const ports = (): PluginPorts => ({ api: vi.fn(async (_identity, path) => ({ path })), authorize: vi.fn(), emit: vi.fn(), log: vi.fn() })
 async function home() { const dir = await mkdtemp(join(tmpdir(), 'studio-plugins-')); directories.push(dir); return dir }
 const server = `export function apply(ctx) {
-  ctx.tools.register({ name: 'read', description: 'Read a note', readOnly: true, inputSchema: { type:'object', properties:{key:{type:'string'}}, required:['key'], additionalProperties:false }, async execute(input, run) { const count = (await ctx.storage.get('count') || 0) + 1; await ctx.storage.set('count', count); return { ok:true, content: String(await run.storage.get(input.key) || ''), data:{count} } } });
-  ctx.commands.register({name:'echo',description:'Echo',async execute(args,run){ return {args,profile:run.identity.profile} }});
-  ctx.automation.register({name:'digest',description:'Digest',inputSchema:{type:'object',properties:{input:{type:'string'}}},async execute(input,run){return {input,session:run.identity.sessionId || null}}});
-  ctx.rpc.register('write',async (input,run)=>{await run.storage.set(input.key,input.value);return input.value});
-  ctx.onDispose(async ()=>{globalThis.__pluginDisposed = (globalThis.__pluginDisposed || 0) + 1});
+  ctx.extensions.tools.register({ name: 'read', description: 'Read a note', readOnly: true, inputSchema: { type:'object', properties:{key:{type:'string'}}, required:['key'], additionalProperties:false }, async execute(input, run) { const count = (await ctx.state.plugin.get('count') || 0) + 1; await ctx.state.plugin.set('count', count); return { ok:true, content: String(await run.state.plugin.get(input.key) || ''), data:{count} } } });
+  ctx.extensions.commands.register({name:'echo',description:'Echo',async execute(args,run){ return {args,profile:run.identity.profile} }});
+  ctx.extensions.actions.register({name:'digest',description:'Digest',inputSchema:{type:'object',properties:{input:{type:'string'}}},async execute(input,run){return {input,session:run.identity.sessionId || null}}});
+  ctx.extensions.rpc.register('write',async (input,run)=>{await run.state.plugin.set(input.key,input.value);return input.value});
+  ctx.lifecycle.add(async ()=>{globalThis.__pluginDisposed = (globalThis.__pluginDisposed || 0) + 1});
 }`
 async function source(dir: string, version = '1.0.0', code = server) {
   const directory = join(dir, `source-${version}`); await mkdir(directory, { recursive: true })
@@ -39,7 +39,7 @@ describe('Studio plugin host', () => {
     const project = await source(dir)
     await manager.install(who, project, 0)
     await manager.update(who, 'notes', 1, { enabled: true })
-    await manager.runtime(who, 'notes').context().storage.set('saved', 'keep')
+    await manager.runtime(who, 'notes').context().state.plugin.set('saved', 'keep')
     await rm(manager.store.read().records.notes.directory, { recursive: true })
     expect(manager.snapshot().plugins[0]).toMatchObject({ status: 'failed', tools: [], commands: [], actions: [], error: expect.stringContaining('Plugin package is missing') })
     expect(() => manager.runtime(who, 'notes')).toThrow('Plugin package is missing')
@@ -225,17 +225,17 @@ describe('Studio plugin host', () => {
     const manager = new PluginManager(join(dir, 'host'), access); managers.push(manager)
     await manager.install(who, await source(dir, '1.0.0', `export function apply(ctx) {
       ctx.log.info('activated');
-      const api = ctx.api;
-      const storage = () => ctx.storage.namespace('users', String(ctx.identity.userId), 'profiles', ctx.identity.profile);
-      ctx.rpc.register('probe', async (input, run) => {
+      const api = ctx.host;
+      const storage = () => ctx.state.plugin.namespace('users', String(ctx.identity.userId), 'profiles', ctx.identity.profile);
+      ctx.extensions.rpc.register('probe', async (input, run) => {
         await storage().set('value', input.value);
         await new Promise(resolve => setTimeout(resolve, input.delay));
-        run.ui.emit('probe', input.value);
-        return { value: await storage().get('value'), root: ctx.identity, caller: run.identity, api: await api.studio.sessions.list() };
+        run.messages.emit('probe', input.value);
+        return { value: await storage().get('value'), root: ctx.identity, caller: run.identity, api: await api.sessions.list() };
       });
-      ctx.rpc.register('read', () => storage().get('value'));
-      ctx.hooks.register('input.transform', async (_value, run) => ({ value: { userId: run.identity.userId, rootUser: ctx.identity.userId } }));
-      ctx.on('activity', async () => { await Promise.resolve(); await storage().set('value', ctx.identity.profile) });
+      ctx.extensions.rpc.register('read', () => storage().get('value'));
+      ctx.extensions.hooks.register('input.transform', async (_value, run) => ({ value: { userId: run.identity.userId, rootUser: ctx.identity.userId } }));
+      ctx.events.on('activity', async () => { await Promise.resolve(); await storage().set('value', ctx.identity.profile) });
     }`), 0)
     await manager.update(who, 'notes', 1, { enabled: true })
     const second = { userId: 2, profile: 'work', sessionId: 'task', runId: 'run' }, third = { userId: 3, profile: 'personal' }
@@ -279,8 +279,8 @@ describe('Studio plugin host', () => {
   it('starts one recurring scheduler for a globally enabled plugin and stops it for all callers', async () => {
     const dir = await home(), access = ports(), manager = new PluginManager(dir, access); managers.push(manager)
     await manager.install(who, await source(dir, '1.0.0', `export function apply(ctx) {
-      ctx.automation.register({ name:'tick', description:'Tick', inputSchema:{type:'object'}, async execute(){ctx.log.info('tick');return null} });
-      ctx.automation.every('timer',1000,'tick');
+      ctx.extensions.actions.register({ name:'tick', description:'Tick', inputSchema:{type:'object'}, async execute(){ctx.log.info('tick');return null} });
+      ctx.scheduler.every('timer',1000,'tick');
     }`), 0)
     vi.useFakeTimers()
     await manager.update(who, 'notes', 1, { enabled: true })
@@ -300,23 +300,23 @@ describe('Plugin context lifetime', () => {
   }
   it('expires invocation contexts on completion and aborts active calls on unload', async () => {
     const host = await runtime(); let captured: any
-    await host.load({ apply(ctx) { ctx.rpc.register('capture', (_input, run) => { captured = run; return null }); ctx.rpc.register('wait', async (_input, run) => new Promise((_resolve, reject) => run.signal.addEventListener('abort', () => reject(new Error('stopped'))))) } })
+    await host.load({ apply(ctx) { ctx.extensions.rpc.register('capture', (_input, run) => { captured = run; return null }); ctx.extensions.rpc.register('wait', async (_input, run) => new Promise((_resolve, reject) => run.signal.addEventListener('abort', () => reject(new Error('stopped'))))) } })
     await host.invoke('rpc', 'capture', null, who)
-    await expect(captured.storage.set('late', true)).rejects.toThrow()
-    expect(() => captured.storage.namespace('late')).toThrow()
+    await expect(captured.state.plugin.set('late', true)).rejects.toThrow()
+    expect(() => captured.state.plugin.namespace('late')).toThrow()
     const call = host.invoke('rpc', 'wait', null, who); const failure = expect(call).rejects.toThrow()
     await Promise.resolve(); await host.close(); await failure
     expect(host.rpc.size).toBe(0)
   })
   it('cleans failed startup, orders hooks and isolates subscriber errors', async () => {
     const host = await runtime(); let cleanup = 0
-    await expect(host.load({ apply(ctx) { ctx.onDispose(() => { cleanup++ }); throw new Error('setup') } })).rejects.toThrow('setup')
+    await expect(host.load({ apply(ctx) { ctx.lifecycle.add(() => { cleanup++ }); throw new Error('setup') } })).rejects.toThrow('setup')
     expect(cleanup).toBe(1)
     const active = await runtime()
     await active.load({ apply(ctx) {
-      ctx.hooks.register('input.transform', () => ({ value: 'second' }), 10)
-      ctx.hooks.register('input.transform', () => ({ value: 'first' }), 0)
-      ctx.on('test', () => { throw new Error('observer failed') })
+      ctx.extensions.hooks.register('input.transform', () => ({ value: 'second' }), 10)
+      ctx.extensions.hooks.register('input.transform', () => ({ value: 'first' }), 0)
+      ctx.events.on('test', () => { throw new Error('observer failed') })
     } })
     expect(await active.transform('input.transform', null, who)).toEqual({ value: 'second' })
     await active.observe({ id: 'e', type: 'test', identity: who, timestamp: Date.now(), data: null })
@@ -336,8 +336,8 @@ describe('Plugin context lifetime', () => {
     const host = await runtime(), seen: any[] = []; let unsubscribe!: () => void
     const handler = (event: any, run: any) => { seen.push({ type: event.type, user: run.identity.userId }) }
     await host.load({ apply(ctx) {
-      ctx.on('*', handler); unsubscribe = ctx.on('chat.*', handler); ctx.on('chat.run.*', handler)
-      ctx.on('group.*', () => { throw new Error('unrelated namespace must not run') })
+      ctx.events.on('*', handler); unsubscribe = ctx.events.on('chat.*', handler); ctx.events.on('chat.run.*', handler)
+      ctx.events.on('group.*', () => { throw new Error('unrelated namespace must not run') })
     } })
     await host.observe({ id: 'e', type: 'chat.run.started', identity: { ...who, userId: 2 }, timestamp: Date.now(), data: null })
     expect(seen).toEqual([{ type: 'chat.run.started', user: 2 }])
@@ -349,11 +349,11 @@ describe('Plugin context lifetime', () => {
     const host = await runtime(); let ctx!: PluginContext, running = 0, max = 0
     await host.load({ apply(context) {
       ctx = context
-      ctx.automation.register({ name: 'tick', description: '', inputSchema: { type: 'object' }, async execute() { max = Math.max(max, ++running); await new Promise(resolve => setTimeout(resolve, 1500)); running--; return null } })
-      ctx.automation.every('clock', 1000, 'tick')
+      ctx.extensions.actions.register({ name: 'tick', description: '', inputSchema: { type: 'object' }, async execute() { max = Math.max(max, ++running); await new Promise(resolve => setTimeout(resolve, 1500)); running--; return null } })
+      ctx.scheduler.every('clock', 1000, 'tick')
     } })
     vi.useFakeTimers(); host.activate(); await vi.advanceTimersByTimeAsync(4200); expect(max).toBe(1)
     await host.close(); const calls = running; await vi.advanceTimersByTimeAsync(5000); expect(running).toBeLessThanOrEqual(calls)
-    await expect(ctx.api.request('/api/studio/sessions')).rejects.toThrow()
+    await expect(ctx.host.request('/api/studio/sessions')).rejects.toThrow()
   })
 })

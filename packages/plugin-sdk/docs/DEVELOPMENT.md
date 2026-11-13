@@ -44,7 +44,7 @@ npm test
 
 Studio 启用开发链接及源码重载时自动运行插件 harness；有 build 时在其前后检查，失败保留上一个成功版本。
 生成项目的 prepack 和 CI 同样执行检查和测试。检查缺失字段描述、未知模型、缺失文件和版本不一致；
-不会因为手动编辑了 Markdown 而拒绝加载。旧插件未声明 harness 时保持原有加载行为。
+不会因为手动编辑了 Markdown 而拒绝加载。所有新项目都应声明并运行 harness。
 
 harness 无额外 npm 依赖。测试至少覆盖有效输入、非法输入、错误输出、存储分区和关键失败路径。
 Agent 还需覆盖流式与最终结果、中断、工具事件配对、审批拒绝、附件和检查点恢复。
@@ -58,4 +58,4 @@ object 声明 properties、required、additionalProperties；array 声明 items�
 支持 enum、minimum/maximum、minLength/maxLength/maxItems；拒绝未知关键字，不支持 $ref/anyOf。
 操作的 input/output 引用 models 中的名称；事件声明 model 和 caller/plugin audience。
 storage/checkpoints 声明 model、正整数 version 和 scope；迁移逻辑由插件实现。
-宿主 inputSchema 是 SDK Schema 子集，不能直接传入含 description 的文档模型。
+宿主 inputSchema 是 SDK Schema 子集，支持 description；只有全部字段都属于 SDK Schema 子集时才可复用文档模型。

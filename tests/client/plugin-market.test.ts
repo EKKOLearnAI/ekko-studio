@@ -5,17 +5,23 @@ import type { InstalledPlugin } from '../../packages/client/src/api/studio/plugi
 
 const row = (index = 1) => ({ id: index.toString(16).padStart(64, '0'), name: `Plugin ${index}`, description: 'A published plugin',
   repository: `https://github.com/example/plugin-${index}`, manifestId: `plugin-${index}`, version: '1.0.0', apiVersion: 1,
-  capabilities: ['commands', 'tools'], sourceCommit: 'b'.repeat(40), installSource: `github:example/plugin-${index}#${'b'.repeat(40)}` })
+  permissions: ['commands', 'tools'], sourceCommit: 'b'.repeat(40), installSource: `github:example/plugin-${index}#${'b'.repeat(40)}` })
 const page = (list: unknown[], total = list.length, current = 1) => Response.json({ ok: true, data: { list, total, page: current, pageSize: 100 } })
 afterEach(() => vi.unstubAllGlobals())
 
+it('keeps the plugin center usable when an installed package has invalid permission metadata', () => {
+  expect(matchesPluginCategory(undefined, 'all')).toBe(true)
+  expect(matchesPluginCategory(undefined, 'agents')).toBe(false)
+  expect(matchesPluginCategory(['agents'], 'agents')).toBe(true)
+})
+
 it('loads every page without credentials so filtering can find entries beyond the first page', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(page(Array.from({ length: 100 }, (_, i) => row(i + 1)), 101))
-    .mockResolvedValueOnce(page([{ ...row(101), capabilities: ['agents'], name: 'Last agent' }], 101, 2))
+    .mockResolvedValueOnce(page([{ ...row(101), permissions: ['agents'], name: 'Last agent' }], 101, 2))
   vi.stubGlobal('fetch', fetch)
   const entries = await fetchPluginMarket(new AbortController().signal)
   expect(entries).toHaveLength(101)
-  expect(entries.filter(entry => matchesPluginCategory(entry.capabilities, 'agents')).map(entry => entry.name)).toEqual(['Last agent'])
+  expect(entries.filter(entry => matchesPluginCategory(entry.permissions, 'agents')).map(entry => entry.name)).toEqual(['Last agent'])
   expect(entries.filter(entry => matchesPluginSearch(entry, ' LAST '))).toHaveLength(1)
   expect(fetch.mock.calls.map(([url]) => new URL(url).searchParams.get('page'))).toEqual(['1', '2'])
   for (const [, options] of fetch.mock.calls) expect(options).toMatchObject({ credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', headers: { Accept: 'application/json' } })
@@ -59,11 +65,17 @@ it('uses declared capabilities, including disabled chat commands, settings UI an
 it('marks installations by repository and manifest identity, including development installs', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(page([row()])))
   const [entry] = await fetchPluginMarket(new AbortController().signal)
-  const local: InstalledPlugin = { manifest: { id: 'plugin-1', name: 'Plugin 1', repository: entry.repository, version: '2.0.0', apiVersion: 1, capabilities: [] },
+  const local: InstalledPlugin = { manifest: { id: 'plugin-1', name: 'Plugin 1', repository: entry.repository, version: '2.0.0', apiVersion: 1, permissions: [] },
     source: '/local/plugin', installedAt: 0, enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [] }
   expect(installedMarketPlugin(entry, [local])).toBe(local)
   const development = { ...local, developmentDirectory: '/work/plugin' }
   expect(installedMarketPlugin(entry, [development])).toBe(development)
   expect(installedMarketPlugin(entry, [{ ...local, source: `github:another/plugin#${'a'.repeat(40)}` }])).toBeUndefined()
   expect(installedMarketPlugin(entry, [{ ...local, manifest: { ...local.manifest, id: 'different' } }])).toBeUndefined()
+})
+
+it('requires canonical permissions from the directory instead of accepting removed aliases', async () => {
+  const { permissions, ...entry } = row(1)
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(page([{ ...entry, capabilities: permissions }])))
+  await expect(fetchPluginMarket(new AbortController().signal)).rejects.toThrow('Invalid plugin catalog entry')
 })

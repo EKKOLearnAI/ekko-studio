@@ -21,7 +21,7 @@ async function setup(page: Page, options: { unavailable?: boolean; ordinary?: bo
       return route.fulfill({ json: { ok: true } })
     }
     if (url.pathname === '/api/studio/plugins') return route.fulfill({ json: { revision, plugins: [{
-      manifest: { id: 'notes', name: 'Notebook', version, apiVersion: 1, repository, server: 'server.mjs', capabilities: ['tools'] },
+      manifest: { id: 'notes', name: 'Notebook', version, apiVersion: 1, repository, server: 'server.mjs', permissions: ['tools'] },
       source: 'github:example/notes#' + 'c'.repeat(40), installedAt: 0, enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [],
     }] } })
     if (url.pathname.endsWith('/events')) return route.fulfill({ json: { cursor: 0, generation: 'test', events: [] } })

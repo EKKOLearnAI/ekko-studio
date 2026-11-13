@@ -93,7 +93,7 @@ export function validateModel(contract, name, value) {
 export function registerRpc(ctx, contract, name, handler) {
   const definition = Object.hasOwn(contract.rpc, name) ? contract.rpc[name] : undefined
   if (!definition) throw new Error(`RPC ${name} must be declared in contracts/plugin.json`)
-  return ctx.rpc.register(name, async (input, run) => {
+  return ctx.extensions.rpc.register(name, async (input, run) => {
     validateModel(contract, definition.input, input)
     return validateModel(contract, definition.output, await handler(input, run))
   })

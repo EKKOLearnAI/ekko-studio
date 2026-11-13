@@ -6,7 +6,7 @@ import type { InstalledPlugin } from '../../packages/client/src/api/studio/plugi
 const repository = 'https://github.com/example/notes'
 const release: PluginRelease = { id: 'a'.repeat(64), repository, manifestId: 'notes', version: '1.10.0', apiVersion: 1,
   sourceCommit: 'b'.repeat(40), installSource: 'github:example/notes#' + 'b'.repeat(40) }
-const plugin = (): InstalledPlugin => ({ manifest: { id: 'notes', name: 'Notes', version: '1.9.0', apiVersion: 1, capabilities: [], repository },
+const plugin = (): InstalledPlugin => ({ manifest: { id: 'notes', name: 'Notes', version: '1.9.0', apiVersion: 1, permissions: [], repository },
   source: 'github:Example/Notes#' + 'c'.repeat(40), installedAt: 0, enabled: true, status: 'active', config: {}, tools: [], commands: [], actions: [] })
 afterEach(() => vi.unstubAllGlobals())
 

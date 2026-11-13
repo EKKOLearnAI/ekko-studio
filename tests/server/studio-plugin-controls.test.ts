@@ -4,7 +4,7 @@ import Router from '@koa/router'
 import { bodyParser } from '@koa/bodyparser'
 import { once } from 'node:events'
 import { Server } from 'socket.io'
-import { createStudioApi } from '../../packages/plugin-sdk/src'
+import { createHostApi } from '../../packages/plugin-sdk/src'
 
 const mocks = vi.hoisted(() => ({
   sessions: new Map<string, any>(), abort: vi.fn(), working: true, user: { id: 7, role: 'admin', profiles: ['work'] } as any,
@@ -33,7 +33,7 @@ import { businessEvents } from '../../packages/server/src/modules/studio/service
 beforeEach(() => { vi.clearAllMocks(); mocks.sessions.clear(); mocks.working = true; mocks.shared = false; mocks.user = { id: 7, role: 'admin', profiles: ['work'] } })
 afterEach(() => vi.unstubAllEnvs())
 
-async function withServer(test: (api: ReturnType<typeof createStudioApi>, io: Server, calls: any[], base: string) => Promise<void>) {
+async function withServer(test: (api: ReturnType<typeof createHostApi>, io: Server, calls: any[], base: string) => Promise<void>) {
   const app = new Koa(), router = new Router(), calls: any[] = []
   app.use(bodyParser()); app.use(async (ctx, next) => { ctx.state.user = mocks.user; ctx.state.profile = { name: 'work' }; ctx.state.sessionShare = mocks.shared; await next() })
   router.post('/api/studio/sessions', sessions.create).post('/api/studio/sessions/:id/stop', sessions.stop)
@@ -53,7 +53,7 @@ async function withServer(test: (api: ReturnType<typeof createStudioApi>, io: Se
     socket.on('message', (data, ack) => { calls.push({ event: 'message', data }); ack({ ok: true, id: 'message-1' }) })
     socket.on('interrupt_agent', (data, ack) => { calls.push({ event: 'interrupt_agent', data }); ack(socket.handshake.auth.token === 'denied' ? { error: 'Access denied' } : { ok: true }) })
   })
-  const api = createStudioApi(async (path, options = {}) => {
+  const api = createHostApi(async (path, options = {}) => {
     const url = new URL(path, base)
     for (const [key, value] of Object.entries(options.query || {})) if (value !== undefined) url.searchParams.set(key, String(value))
     const response = await fetch(url, { method: options.method, headers: { Authorization: 'Bearer test-user', 'Content-Type': 'application/json' }, ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }) })
@@ -68,55 +68,55 @@ async function withServer(test: (api: ReturnType<typeof createStudioApi>, io: Se
 it('creates an empty session, starts asynchronously, waits on request, queues, and stops only authorized sessions', async () => {
   const events: any[] = [], unsubscribe = businessEvents.subscribe('controls-test', event => events.push(event))
   try { await withServer(async (api, _io, calls) => {
-    const result: any = await api.studio.sessions.create({ title: 'Created by plugin' })
+    const result: any = await api.sessions.create({ title: 'Created by plugin' })
     expect(result.session).toMatchObject({ user_id: 7, profile: 'work', agent: 'ekko-agent', source: 'builtin_agent' })
     expect(calls).toHaveLength(0)
     expect(events[0]).toMatchObject({ type: 'chat.session.created', subject: { session_id: result.session.id } })
     const model = { provider: 'custom:test', model: 'demo', apiMode: 'chat_completions' }
-    const started: any = await api.studio.sessions.run(result.session.id, 'start', model)
+    const started: any = await api.sessions.run(result.session.id, 'start', model)
     expect(started).toMatchObject({ status: 'running', run_id: 'run-1', session_id: result.session.id })
     expect(calls[0]).toMatchObject({ token: 'test-user', data: { agent_id: 'ekko-agent', source: 'builtin_agent', profile: 'work', ...model } })
     expect(calls[0].data).not.toHaveProperty('wait')
-    expect(await api.studio.sessions.run(result.session.id, 'complete', { ...model, wait: true })).toMatchObject({ status: 'completed', output: 'done' })
-    expect(await api.studio.sessions.run(result.session.id, 'queue', model)).toMatchObject({ status: 'queued' })
-    expect(await api.studio.sessions.stop(result.session.id)).toMatchObject({ stopped: true })
+    expect(await api.sessions.run(result.session.id, 'complete', { ...model, wait: true })).toMatchObject({ status: 'completed', output: 'done' })
+    expect(await api.sessions.run(result.session.id, 'queue', model)).toMatchObject({ status: 'queued' })
+    expect(await api.sessions.stop(result.session.id)).toMatchObject({ stopped: true })
     expect(mocks.abort).toHaveBeenCalledWith(result.session.id, 'Stopped by user')
-    mocks.working = false; expect(await api.studio.sessions.stop(result.session.id)).toMatchObject({ stopped: false })
+    mocks.working = false; expect(await api.sessions.stop(result.session.id)).toMatchObject({ stopped: false })
     expect(mocks.abort).toHaveBeenCalledTimes(1)
     mocks.sessions.set('foreign', { id: 'foreign', profile: 'private', agent: 'hermes' })
     mocks.sessions.set('legacy', { id: 'legacy', profile: 'work', source: 'api_server', agent: '' })
-    expect(await api.studio.sessions.run('legacy', 'start')).toMatchObject({ status: 'running' })
+    expect(await api.sessions.run('legacy', 'start')).toMatchObject({ status: 'running' })
     expect(calls.at(-1).data).not.toHaveProperty('agent_id')
-    await expect(api.studio.sessions.stop('foreign')).rejects.toMatchObject({ status: 403 })
-    await expect(api.studio.sessions.run('foreign', 'no')).rejects.toMatchObject({ status: 403 })
-    await expect(api.studio.sessions.stop('person-task-hidden')).rejects.toMatchObject({ status: 404 })
+    await expect(api.sessions.stop('foreign')).rejects.toMatchObject({ status: 403 })
+    await expect(api.sessions.run('foreign', 'no')).rejects.toMatchObject({ status: 403 })
+    await expect(api.sessions.stop('person-task-hidden')).rejects.toMatchObject({ status: 404 })
     mocks.sessions.set('workflow-node', { id: 'workflow-node', profile: 'work', source: 'workflow' })
-    await expect(api.studio.sessions.stop('workflow-node')).rejects.toMatchObject({ status: 409 })
+    await expect(api.sessions.stop('workflow-node')).rejects.toMatchObject({ status: 409 })
   }) } finally { unsubscribe() }
 })
 
 it('validates session creation and rejects unauthenticated and shared access', async () => {
   await withServer(async api => {
-    await expect(api.studio.sessions.create({ agent: 'unknown' })).rejects.toMatchObject({ status: 400 })
-    expect(await api.studio.sessions.create({ agent: 'cursor' })).toMatchObject({ session: { agent_mode: 'global' } })
-    mocks.user = undefined; await expect(api.studio.sessions.create()).rejects.toMatchObject({ status: 401 })
-    mocks.shared = true; await expect(api.studio.sessions.create()).rejects.toMatchObject({ status: 403 })
+    await expect(api.sessions.create({ agent: 'unknown' })).rejects.toMatchObject({ status: 400 })
+    expect(await api.sessions.create({ agent: 'cursor' })).toMatchObject({ session: { agent_mode: 'global' } })
+    mocks.user = undefined; await expect(api.sessions.create()).rejects.toMatchObject({ status: 401 })
+    mocks.shared = true; await expect(api.sessions.create()).rejects.toMatchObject({ status: 403 })
   })
 })
 
 it('sends and interrupts through authenticated group transport, strips forged identity and checks room history access', async () => {
   await withServer(async (api, _io, calls) => {
-    expect(await api.studio.groupChats.send('room', 'hello', [{ type: 'agent', name: 'Writer' }])).toMatchObject({ id: 'message-1' })
+    expect(await api.groupChats.send('room', 'hello', [{ type: 'agent', name: 'Writer' }])).toMatchObject({ id: 'message-1' })
     expect(calls[0]).toMatchObject({ event: 'join', token: 'test-user' })
     expect(calls[1]).toMatchObject({ event: 'message', data: { roomId: 'room', content: 'hello', mentions: [{ type: 'agent', name: 'Writer' }] } })
     await api.request('/api/studio/group-chat/rooms/room/messages', { method: 'POST', body: { content: 'hello', senderId: 'admin', role: 'assistant', agentSessionId: 'forged' } })
     expect(calls.at(-1).data).toEqual({ content: 'hello', roomId: 'room' })
-    expect(await api.studio.groupChats.stop('room', 'Writer')).toEqual({ ok: true })
+    expect(await api.groupChats.stop('room', 'Writer')).toEqual({ ok: true })
     expect(calls.at(-1)).toEqual({ event: 'interrupt_agent', data: { roomId: 'room', agentName: 'Writer' } })
-    mocks.user.id = 8; expect(await api.studio.groupChats.messages('room')).toMatchObject({ total: 1, hasMore: false })
-    mocks.user.id = 9; await expect(api.studio.groupChats.send('room', 'forbidden')).rejects.toMatchObject({ status: 403 })
-    await expect(api.studio.groupChats.messages('room')).rejects.toMatchObject({ status: 403 })
-    await expect(api.studio.groupChats.messages('missing')).rejects.toMatchObject({ status: 404 })
+    mocks.user.id = 8; expect(await api.groupChats.messages('room')).toMatchObject({ total: 1, hasMore: false })
+    mocks.user.id = 9; await expect(api.groupChats.send('room', 'forbidden')).rejects.toMatchObject({ status: 403 })
+    await expect(api.groupChats.messages('room')).rejects.toMatchObject({ status: 403 })
+    await expect(api.groupChats.messages('missing')).rejects.toMatchObject({ status: 404 })
   })
 })
 
