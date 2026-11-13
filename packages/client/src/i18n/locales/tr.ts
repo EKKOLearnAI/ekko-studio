@@ -564,6 +564,14 @@ export default {
     voiceInput: {
       backendSttRequired: 'Masaüstü uygulamasında sesli giriş için sunucu taraflı STT gerekir. Modeller → STT bölümünde yerel konuşma tanımayı etkinleştirin veya bir bulut sağlayıcısını yapılandırıp etkinleştirin.',
     },
+    sessionNotice: {
+      truncated: "Sonuç görüntüleme için kısaltıldı.",
+      scriptReportTitle: "“{name}” betiği raporladı",
+      scriptReportFailedTitle: "“{name}” betiği başarısız oldu",
+      scriptReportProvenance: "Ekko sarmalayıcısından betik çağrısı raporu (yerel Hermes yürütme makbuzu değildir).",
+      scriptReportUnavailable: "Bu çağrı için betik çıktısı yakalanmadı; yalnızca durum.",
+      scriptReportUnknown: "Rapor eksik: betik çağrısı kesintiye uğradı. Sonuç bilinmiyor; Studio yeniden çalıştırmayacak.",
+    },
     selectMessages: "Mesajları seç",
     messagesSelected: "{count} seçildi",
     deleteSelectedMessages: "Seçilenleri sil",
