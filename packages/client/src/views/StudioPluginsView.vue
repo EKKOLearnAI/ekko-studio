@@ -39,7 +39,7 @@ function scopeKeydown(event: KeyboardEvent) {
     : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : ['Enter', ' '].includes(event.key) ? current : -1
   if (target >= 0) { event.preventDefault(); tabs[target].click(); tabs[target].focus() }
 }
-const { entries: marketEntries, loading: marketLoading, failed: marketFailed, loaded: marketLoaded, refresh: refreshMarket } = usePluginMarket(computed(() => scope.value === 'all'))
+const { entries: marketEntries, total: marketTotal, loading: marketLoading, failed: marketFailed, loaded: marketLoaded, refresh: refreshMarket } = usePluginMarket(computed(() => scope.value === 'all'))
 const search = ref(''), category = ref<PluginCategory>('all'), state = ref('all')
 watch(scope, value => { if (value !== 'all' && ['installed', 'notInstalled'].includes(state.value)) state.value = 'all' })
 const selectedMarketId = ref('')
@@ -315,7 +315,7 @@ async function logs(id: string) {
       <div class="catalog-heading">
         <NTabs v-model:value="scope" type="line" class="catalog-scopes" role="tablist" :aria-label="t('studioPlugins.title')" @keydown="scopeKeydown">
           <NTab name="installed" id="plugins-tab-installed" role="tab" :aria-selected="scope === 'installed'" :tabindex="scope === 'installed' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.installed') }} <span class="scope-count">{{ snapshot.plugins.length }}</span></NTab>
-          <NTab name="all" id="plugins-tab-all" role="tab" :aria-selected="scope === 'all'" :tabindex="scope === 'all' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.all') }} <span v-if="marketLoaded" class="scope-count">{{ marketEntries.length }}</span></NTab>
+          <NTab name="all" id="plugins-tab-all" role="tab" :aria-selected="scope === 'all'" :tabindex="scope === 'all' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.all') }} <span v-if="marketTotal !== null" class="scope-count">{{ marketTotal }}</span></NTab>
           <NTab v-if="canManage && projects.length" name="development" id="plugins-tab-development" role="tab" :aria-selected="scope === 'development'" :tabindex="scope === 'development' ? 0 : -1" aria-controls="plugin-catalog-panel">{{ t('studioPlugins.devProjects') }} <span class="scope-count">{{ projects.length }}</span></NTab>
         </NTabs>
         <div class="catalog-actions">
