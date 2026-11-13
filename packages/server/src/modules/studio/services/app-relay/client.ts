@@ -52,6 +52,7 @@ const ALLOWED_GROUP_AGENT_CLIENT_EVENTS = new Set([
 const ALLOWED_CHAT_RUN_CLIENT_EVENTS = new Set([
   'sessions.state.request',
   'sessions.read',
+  'sessions.unread',
   'app.events.subscribe',
   'app.events.unsubscribe',
   'run',

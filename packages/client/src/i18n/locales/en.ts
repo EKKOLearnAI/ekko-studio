@@ -1450,6 +1450,8 @@ export default {
     openSessionInNewWindow: 'Open in new window',
     sessionLinkCopied: 'Session link copied',
     copySessionId: 'Copy Session ID',
+    markUnread: 'Mark as unread',
+    markUnreadFailed: 'Could not mark as unread',
     export: 'Export',
     exportFull: 'Full Export (JSON)',
     exportCompressed: 'Compressed Export (TXT)',

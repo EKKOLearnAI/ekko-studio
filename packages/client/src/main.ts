@@ -6,6 +6,7 @@ import App from './App.vue'
 import './styles/global.scss'
 import { desktopBridge } from '@/utils/desktop-bridge'
 import { useTheme } from '@/composables/useTheme'
+import { trackSessionOpens } from '@/stores/hermes/session-state'
 
 // Apply theme classes before mount to prevent FOUC (Flash of Unstyled Content)
 function storedPreference(key: string, fallback: string): string {
@@ -62,6 +63,7 @@ async function mountApp(): Promise<void> {
   }
   app.use(createPinia())
   app.use(i18n)
+  trackSessionOpens(router)
   app.use(router)
   await router.isReady().catch(() => undefined)
   app.mount('#app')

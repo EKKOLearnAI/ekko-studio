@@ -1387,6 +1387,8 @@ export default {
     openSessionInNewWindow: '새 창에서 열기',
     sessionLinkCopied: 'Session link copied',
     copySessionId: '세션 ID 복사',
+    markUnread: '읽지 않음으로 표시',
+    markUnreadFailed: '읽지 않음으로 표시하지 못했습니다',
     export: '내보내기',
     editConfig: '구성 편집',
     exportFull: '전체 내보내기 (JSON)',

@@ -106,7 +106,7 @@ import type {
   SessionState,
 } from '../services/chat-run/types'
 import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
-import { userCanAccessProfile } from '../repositories/users-store'
+import { findUserById, userCanAccessProfile } from '../repositories/users-store'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observePersonPresenceEvent } from '../services/person/presence'
 import { SessionStateSync } from '../services/session-state'
@@ -498,7 +498,8 @@ export class ChatRunSocket {
       return { working: !!state?.isWorking,
         collaborationPending: owner ? personCollaborationPendingCount(owner, sessionId) : 0,
         backgroundPending: owner ? Math.max(backgroundPending, personBackgroundTaskCount(owner, sessionId)) : backgroundPending }
-    }, (user, profile) => this.canAccessProfile(user, profile))
+    }, (user, profile) => this.canAccessProfile(user, profile),
+    (user, profile) => profile == null ? findUserById(user.id)?.status === 'active' : this.currentAccountAllowed(user, profile))
     this.stopPersonUpdates = onPersonUpdated(userId => this.syncPersonInteraction(userId))
     this.stopUsageUpdates = onRunUsageUpdated((sessionId, summary) => {
       const session = getSession(sessionId)
@@ -3770,6 +3771,12 @@ export class ChatRunSocket {
       timestamp: Math.floor(Date.now() / 1000),
       queued: true,
     }))
+  }
+
+  /** The account as stored now: a disabled or demoted user loses access its socket still caches. */
+  private currentAccountAllowed(user: AuthenticatedUser, profile: string): boolean {
+    const account = findUserById(user.id)
+    return !!account && account.status === 'active' && (account.role === 'super_admin' || userCanAccessProfile(account.id, profile))
   }
 
   private canAccessProfile(user: AuthenticatedUser, profile: string): boolean {

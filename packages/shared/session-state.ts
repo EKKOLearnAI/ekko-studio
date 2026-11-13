@@ -8,7 +8,13 @@ export interface SessionListState {
   readMessageId: number
   lastAttentionId?: number
   readAttentionId?: number
-  /** Completed content awaiting a read receipt; false while working. */
+  /** This account marked the conversation unread by hand. */
+  manualUnread?: boolean
+  /** Revision of the latest manual mark; a read must name it to clear the mark. */
+  unreadRevision?: number
+  /** Session incarnation; manual unread requests must name the one they observed. */
+  generation?: string
+  /** Completed content or a manual mark awaiting a read receipt; false while working. */
   unread: boolean
 }
 

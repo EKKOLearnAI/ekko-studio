@@ -1443,6 +1443,8 @@ export default {
     openSessionInNewWindow: 'فتح في نافذة جديدة',
     sessionLinkCopied: 'تم نسخ رابط الجلسة',
     copySessionId: 'نسخ معرّف الجلسة',
+    markUnread: 'تعليم كغير مقروء',
+    markUnreadFailed: 'تعذّر التعليم كغير مقروء',
     export: 'تصدير',
     exportFull: 'تصدير كامل (JSON)',
     exportCompressed: 'تصدير مضغوط (TXT)',

@@ -378,6 +378,7 @@ async function handleSessionClick(
   options: { preserveCategoryCollapse?: boolean } = {},
 ) {
   closeNewChatPage();
+  sessionStates.acknowledge(sessionId);
   if (!options.preserveCategoryCollapse) {
     setCategoryRevealSuppressedSessionId(null);
   }
@@ -1933,6 +1934,8 @@ const contextMenuOptions = computed(() => buildSessionContextMenuOptions({
   pinned: contextSessionPinned.value,
   includeArchive: contextSession.value?.source !== "global_agent",
   includeModel: canSetContextSessionModel.value,
+  includeMarkUnread: !!contextSessionId.value && !contextSession.value?.isLocalOnly
+    && sessionStates.canMarkUnread(contextSessionId.value),
   categoryChildren: buildSessionCategoryMenuChildren({
     categories: sessionCategories.value,
     currentCategoryId: contextSession.value?.categoryId,
@@ -1946,6 +1949,7 @@ const contextMenuOptions = computed(() => buildSessionContextMenuOptions({
   labels: {
     pin: t("chat.pin"),
     unpin: t("chat.unpin"),
+    markUnread: t("chat.markUnread"),
     rename: t("chat.rename"),
     archive: t("chat.archiveSession"),
     workspace: t("chat.setWorkspace"),
@@ -2010,6 +2014,11 @@ async function handleContextMenuSelect(key: string) {
     nextTick(() => {
       createCategoryInputRef.value?.focus();
     });
+    return;
+  }
+  if (key === "mark-unread") {
+    // The open conversation stays on screen; it is read again only when selected again.
+    if (!await sessionStates.markUnread(contextSessionId.value)) message.error(t("chat.markUnreadFailed"));
     return;
   }
   if (key === "pin") {

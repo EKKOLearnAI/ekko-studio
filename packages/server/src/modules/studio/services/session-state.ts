@@ -1,11 +1,12 @@
 import type { Socket } from 'socket.io'
 import type { AuthenticatedUser } from '../public/auth'
 import { logger } from '../public/logging'
-import { listSessionStateRecords, markSessionRead, type SessionStateRecord } from '../repositories/session-state-store'
+import { listSessionStateRecords, markSessionRead, markSessionUnread, type SessionStateRecord } from '../repositories/session-state-store'
 import type { SessionListState } from '../../../../../shared/session-state'
 
 interface RuntimeState { working: boolean; backgroundPending: number; collaborationPending?: number }
 type Subscriber = { socket: Socket; user: AuthenticatedUser }
+const isRevision = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0
 
 /** Uses the authenticated chat transport, but never joins transcript rooms. */
 export class SessionStateSync {
@@ -14,7 +15,9 @@ export class SessionStateSync {
   private readonly pending = new Map<string, number>()
 
   constructor(private readonly runtime: (sessionId: string) => RuntimeState,
-    private readonly canAccessProfile: (user: AuthenticatedUser, profile: string) => boolean) {}
+    private readonly canAccessProfile: (user: AuthenticatedUser, profile: string) => boolean,
+    /** Re-reads the stored account so a disabled or demoted socket cannot change state. */
+    private readonly currentAccountAllowed: (user: AuthenticatedUser, profile: string | null) => boolean = () => true) {}
 
   private allowed(user: AuthenticatedUser, session: SessionStateRecord) {
     if (session.id.startsWith('person-main-')) return String(user.id) === String(session.studio_user_id)
@@ -33,7 +36,9 @@ export class SessionStateSync {
       return { sessionId: session.id, profile: session.profile || 'default', working,
         backgroundPending, lastMessageId: session.lastMessageId, readMessageId: session.readMessageId,
         lastAttentionId: session.lastAttentionId, readAttentionId: session.readAttentionId,
-        unread: !working && (session.lastMessageId > session.readMessageId || session.lastAttentionId > session.readAttentionId) }
+        manualUnread: !!session.manualUnread, unreadRevision: session.unreadRevision, generation: session.generation,
+        unread: !working && (!!session.manualUnread || session.lastMessageId > session.readMessageId
+          || session.lastAttentionId > session.readAttentionId) }
     })
   }
 
@@ -41,22 +46,46 @@ export class SessionStateSync {
     if (socket.data.sessionShare || socket.handshake.query?.session_state !== '1') return
     // Chat auth accepts an anonymous connection only when login is disabled.
     // Keep that installation's ordinary chats in a separate local read scope.
+    const local = !socket.data.user
     const user = (socket.data.user as AuthenticatedUser | undefined)
       ?? { id: 0, username: 'local', role: 'super_admin' as const }
+    // Manual marks re-read the stored account; the local scope has none.
+    const currentAccount = (session: SessionStateRecord) => local
+      || this.currentAccountAllowed(user, session.id.startsWith('person-main-') ? null : session.profile || 'default')
     const subscriber = { socket, user }
     this.subscribers.add(subscriber)
     socket.on('disconnect', () => this.subscribers.delete(subscriber))
     socket.on('sessions.state.request', () => this.send(subscriber))
-    socket.on('sessions.read', (data: { sessionId?: unknown; messageId?: unknown; attentionId?: unknown }, ack?: (result: { ok: boolean }) => void) => {
+    socket.on('sessions.read', (data: { sessionId?: unknown; messageId?: unknown; attentionId?: unknown; unreadRevision?: unknown; generation?: unknown }, ack?: (result: { ok: boolean }) => void) => {
       try {
         if (typeof data?.sessionId !== 'string' || !Number.isSafeInteger(data.messageId) || Number(data.messageId) < 0) throw new Error('Invalid read cursor')
         if (data.attentionId != null && (!Number.isSafeInteger(data.attentionId) || Number(data.attentionId) < 0)) throw new Error('Invalid attention cursor')
+        if (data.unreadRevision != null && !isRevision(data.unreadRevision)) throw new Error('Invalid unread revision')
         const session = listSessionStateRecords(user.id, data.sessionId)[0]
         if (!session || !this.allowed(user, session)) throw new Error('Session not found')
         if (this.states(user, session.id)[0]?.working) throw new Error('Reply is still running')
-        markSessionRead(user.id, session.id, Number(data.messageId), Number(data.attentionId || 0))
+        const clearsMark = data.unreadRevision != null && data.generation === session.generation && currentAccount(session)
+        markSessionRead(user.id, session.id, Number(data.messageId), Number(data.attentionId || 0),
+          clearsMark ? Number(data.unreadRevision) : null)
         this.publish(session.id, user.id)
         if (typeof ack === 'function') ack({ ok: true })
+      } catch {
+        if (typeof ack === 'function') ack({ ok: false })
+      }
+    })
+    socket.on('sessions.unread', (data: { sessionId?: unknown; unreadRevision?: unknown; generation?: unknown }, ack?: (result: { ok: boolean; changed?: boolean }) => void) => {
+      try {
+        if (typeof data?.sessionId !== 'string' || !isRevision(data.unreadRevision) || typeof data.generation !== 'string') throw new Error('Invalid unread request')
+        const session = listSessionStateRecords(user.id, data.sessionId)[0]
+        if (!session || !this.allowed(user, session) || !currentAccount(session)) throw new Error('Session not found')
+        const state = this.states(user, session.id)[0]
+        if (!state || state.working) throw new Error('Reply is still running')
+        // Only a read conversation of the observed incarnation can be marked; anything else is stale.
+        const changed = !state.unread && data.generation === session.generation
+          && markSessionUnread(user.id, session.id, Number(data.unreadRevision))
+        if (changed) this.publish(session.id, user.id)
+        else this.send(subscriber, session.id)
+        if (typeof ack === 'function') ack({ ok: true, changed })
       } catch {
         if (typeof ack === 'function') ack({ ok: false })
       }

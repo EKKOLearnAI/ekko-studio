@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { fetchSessions, searchSessions, type SessionSearchResult, type SessionSummary } from '@/api/studio/sessions'
 import { personRequest } from '@/api/person'
 import { useChatStore } from '@/stores/hermes/chat'
+import { useSessionStateStore } from '@/stores/hermes/session-state'
 import { useSessionSearch } from '@/composables/useSessionSearch'
 import { historySessionSource, sessionAgentFields } from '@/utils/hermes/session-agent'
 import { getSourceLabel } from '@/shared/session-display'
@@ -16,6 +17,7 @@ const router = useRouter()
 const route = useRoute()
 const personScope = computed(() => route.name === 'hermes.person')
 const chatStore = useChatStore()
+const sessionStates = useSessionStateStore()
 const { sessionSearchOpen } = useSessionSearch()
 
 const query = ref('')
@@ -127,6 +129,7 @@ async function ensureChatSessionsLoaded() {
 async function openItem(item: SearchItem) {
   const messageId = item.matched_message_id != null ? String(item.matched_message_id) : null
   sessionSearchOpen.value = false
+  sessionStates.acknowledge(item.id)
 
   if (personScope.value) {
     await router.push({ name: 'hermes.person', query: { session: item.id, ...(messageId ? { message: messageId } : {}) } })

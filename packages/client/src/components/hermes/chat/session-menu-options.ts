@@ -4,6 +4,7 @@ import { h, type VNode, type VNodeChild } from 'vue'
 export type SessionMenuIconName =
   | 'outline'
   | 'pin'
+  | 'unread'
   | 'rename'
   | 'archive'
   | 'workspace'
@@ -29,6 +30,7 @@ interface ActiveSessionMenuAvailability {
 interface SessionContextMenuLabels {
   pin: string
   unpin: string
+  markUnread?: string
   rename: string
   archive: string
   workspace: string
@@ -46,6 +48,8 @@ interface BuildSessionContextMenuOptions {
   pinned: boolean
   includeArchive: boolean
   includeModel: boolean
+  /** Only for a persisted conversation that is currently read. */
+  includeMarkUnread?: boolean
   categoryChildren: DropdownOption[]
   labels: SessionContextMenuLabels
 }
@@ -64,6 +68,12 @@ function iconChildren(name: SessionMenuIconName): VNodeChild[] {
         h('path', { d: 'M8 4h8' }),
         h('path', { d: 'M9 4v6l-2 4v2h10v-2l-2-4V4' }),
         h('path', { d: 'M12 16v5' }),
+      ]
+    case 'unread':
+      return [
+        h('path', { d: 'M21 12.5V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h9' }),
+        h('path', { d: 'm3 8 9 6 4-2.7' }),
+        h('circle', { cx: 19, cy: 6, r: 3 }),
       ]
     case 'rename':
       return [
@@ -159,13 +169,19 @@ export function buildSessionContextMenuOptions({
   pinned,
   includeArchive,
   includeModel,
+  includeMarkUnread = false,
   categoryChildren,
   labels,
 }: BuildSessionContextMenuOptions): DropdownOption[] {
   const options: DropdownOption[] = [
     actionOption(pinned ? labels.unpin : labels.pin, 'pin', 'pin'),
-    actionOption(labels.rename, 'rename', 'rename'),
   ]
+
+  if (includeMarkUnread && labels.markUnread) {
+    options.push(actionOption(labels.markUnread, 'mark-unread', 'unread'))
+  }
+
+  options.push(actionOption(labels.rename, 'rename', 'rename'))
 
   if (includeArchive) {
     options.push(actionOption(labels.archive, 'archive', 'archive'))
