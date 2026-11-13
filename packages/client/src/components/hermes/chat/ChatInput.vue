@@ -581,10 +581,25 @@ function saveDraftForActiveSession(value: string) {
   }
 }
 
+function restoreCancelledAttachmentDraft() {
+  const sessionId = getActiveDraftSessionId()
+  const draft = chatStore.cancelledAttachmentDrafts.get(sessionId)
+  if (!draft) return
+  chatStore.cancelledAttachmentDrafts.delete(sessionId)
+  // Keep anything typed while the upload was pending as well as the cancelled input.
+  inputText.value = [draft.content, inputText.value].filter(Boolean).join('\n\n')
+  const existingIds = new Set(attachments.value.map(attachment => attachment.id))
+  attachments.value = [...draft.attachments.filter(attachment => !existingIds.has(attachment.id)), ...attachments.value]
+  nextTick(focusComposer)
+}
+
+watch(() => chatStore.cancelledAttachmentDrafts.get(getActiveDraftSessionId()), restoreCancelledAttachmentDraft, { flush: 'post' })
+
 // 从 localStorage 读取设置
 onMounted(() => {
   if (props.initialText) inputText.value = props.initialText
   else if (props.persistDraft) loadDraftForActiveSession()
+  restoreCancelledAttachmentDraft()
   syncViewport()
   window.addEventListener('resize', syncViewport)
   nextTick(() => {

@@ -1346,7 +1346,8 @@ function createChatState(scopedSessionId?: string) {
   const activeSessionId = ref<string | null>(null)
   const focusMessageId = ref<string | null>(null)
   const streamStates = ref<Map<string, { abort: () => void }>>(new Map())
-  const pendingAttachmentSends = new Map<string, { controller: AbortController; messageId: string }>()
+  const pendingAttachmentSends = new Map<string, { controller: AbortController; messageId: string; content: string; attachments: Attachment[] }>()
+  const cancelledAttachmentDrafts = ref(new Map<string, { content: string; attachments: Attachment[] }>())
   /** sessionId → server-reported isWorking status */
   const serverWorking = ref<Set<string>>(new Set())
   /** Authoritative live delegation counts, never inferred from transcript history. */
@@ -1363,6 +1364,7 @@ function createChatState(scopedSessionId?: string) {
   function clearPendingAttachmentSends() {
     for (const pending of pendingAttachmentSends.values()) pending.controller.abort()
     pendingAttachmentSends.clear()
+    cancelledAttachmentDrafts.value.clear()
   }
 
   const unsubscribeAuthInvalidation = onAuthInvalidated(() => {
@@ -3863,7 +3865,7 @@ function createChatState(scopedSessionId?: string) {
     // Hermes already shows Stop while an idle chat's attachments are preparing.
     // Own that local send until dispatch, rather than aborting a nonexistent server run.
     const pendingAttachmentSend = !shouldQueue && shouldOptimisticallyShowRunStatus && attachments?.length
-      ? { controller: new AbortController(), messageId: userMsg.id }
+      ? { controller: new AbortController(), messageId: userMsg.id, content: submittedContent, attachments: [...attachments] }
       : undefined
     if (pendingAttachmentSend) pendingAttachmentSends.set(sid, pendingAttachmentSend)
     let runSubmitted = false
@@ -5556,6 +5558,13 @@ function createChatState(scopedSessionId?: string) {
       pendingAttachmentSend.controller.abort()
       pendingAttachmentSends.delete(sid)
       acknowledgeUserMessage(sid, pendingAttachmentSend.messageId)
+      const msgs = getSessionMsgs(sid)
+      const index = msgs.findIndex(message => message.id === pendingAttachmentSend.messageId)
+      if (index !== -1) msgs.splice(index, 1)
+      cancelledAttachmentDrafts.value.set(sid, {
+        content: pendingAttachmentSend.content,
+        attachments: pendingAttachmentSend.attachments,
+      })
       // A peer may have started a real run while this upload was pending.
       if (!streamStates.value.has(sid)) {
         serverWorking.value.delete(sid)
@@ -5827,6 +5836,7 @@ function createChatState(scopedSessionId?: string) {
     isAborting,
     queueLengths,
     queuedUserMessages,
+    cancelledAttachmentDrafts,
     queueInsertionStates,
     activeMessageReference,
     pendingApprovals,
