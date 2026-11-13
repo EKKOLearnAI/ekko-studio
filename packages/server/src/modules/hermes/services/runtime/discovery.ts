@@ -10,6 +10,11 @@ import { resolveHermesBin } from './process'
 
 const execFileAsync = promisify(execFile)
 const HERMES_VERSION_PROBE = [
+  'import sys',
+  // Source launchers add the checkout root, including packages that an older
+  // editable install does not know about. Keep this probe free of bootstrap's
+  // dependency installation and update-recovery side effects.
+  'if sys.argv[1]: sys.path.insert(0, sys.argv[1])',
   'import importlib.util, hermes_cli',
   "assert importlib.util.find_spec('hermes_cli.main')",
   'try:',
@@ -120,7 +125,7 @@ export async function probeHermesCliVersion(
   }
 
   try {
-    const { stdout } = await execFileAsync(installation.python, ['-c', HERMES_VERSION_PROBE], {
+    const { stdout } = await execFileAsync(installation.python, ['-c', HERMES_VERSION_PROBE, installation.agentRoot || ''], {
       encoding: 'utf8',
       timeout: 5000,
       windowsHide: true,
