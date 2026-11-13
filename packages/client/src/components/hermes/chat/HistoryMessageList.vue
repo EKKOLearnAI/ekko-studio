@@ -44,6 +44,8 @@ const displayMessages = computed(() =>
     // Tool messages without a name are internal use only and remain hidden.
     if (m.taskPlan) return true
     if (m.role === 'tool') return toolTraceVisible.value && !!m.toolName
+    // A passive notice renders its own header even without result text (failure, status only).
+    if (m.studioNotice) return true
     // Filter out messages with empty content.
     if (!m.content?.trim()) return false
     return true
