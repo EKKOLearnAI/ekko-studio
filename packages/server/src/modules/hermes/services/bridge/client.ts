@@ -350,6 +350,14 @@ export class AgentBridgeClient {
       }
       const onConnect = () => {
         cleanup()
+        // A response can settle before the TCP stream closes. Keep ownership of
+        // errors across the request handoff and end(), including a late peer RST.
+        const onConnectedError = (err: Error) => {
+          bridgeLogger.warn({ err, endpoint }, '[agent-bridge-client] connected socket error')
+          socket.destroy()
+        }
+        socket.on('error', onConnectedError)
+        socket.once('close', () => socket.off('error', onConnectedError))
         resolveConnect(socket)
       }
       const onError = (err: Error) => {
