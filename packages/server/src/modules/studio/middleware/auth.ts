@@ -41,11 +41,16 @@ export interface AppUserTokenInspection {
   connectionType: AppConnectionType
 }
 
+/** Signed purpose of an access JWT: an interactive login, or a token Studio issues to a model run. */
+export type UserJwtPurpose = 'login' | 'model_run'
+
 interface JwtPayload {
   sub: string
   username: string
   role: UserRole
   type: 'access' | 'app_access'
+  /** Absent on tokens issued before purposes existed; generic authentication accepts every purpose. */
+  purpose?: UserJwtPurpose
   app_device_code?: string
   app_connection_type?: AppConnectionType
   app_token_id?: string
@@ -54,8 +59,12 @@ interface JwtPayload {
   exp: number
 }
 
+/** How `requireUserJwt` authenticated the request, from verified token data only. */
+export type RequestCredentialKind = 'login' | 'model_run' | 'legacy_access' | 'app' | 'run' | 'server' | 'model_api_key'
+
 declare module 'koa' {
   interface DefaultState {
+    credentialKind?: RequestCredentialKind
     user?: AuthenticatedUser
     profile?: RequestProfile
     serverTokenAuth?: boolean
@@ -169,6 +178,7 @@ export function signUserJwt(
   secret: string,
   now = Date.now(),
   expiresSeconds = DEFAULT_EXPIRES_SECONDS,
+  purpose?: UserJwtPurpose,
 ): string {
   const iat = Math.floor(now / 1000)
   const payload: JwtPayload = {
@@ -176,6 +186,7 @@ export function signUserJwt(
     username: user.username,
     role: user.role,
     type: 'access',
+    ...(purpose ? { purpose } : {}),
     aud: JWT_AUDIENCE,
     iat,
     exp: iat + expiresSeconds,
@@ -248,7 +259,7 @@ export function verifyUserJwt(token: string, secret: string, now = Date.now()): 
 
 export async function issueUserJwt(user: Pick<UserRecord, 'id' | 'username' | 'role'>): Promise<string> {
   const secret = await getJwtSecret()
-  return signUserJwt(user, secret, Date.now(), getUserJwtExpiresSeconds())
+  return signUserJwt(user, secret, Date.now(), getUserJwtExpiresSeconds(), 'login')
 }
 
 export async function issueAppJwt(
@@ -262,7 +273,7 @@ export async function issueAppJwt(
 
 export async function issueModelRunJwt(user: Pick<UserRecord, 'id' | 'username' | 'role'>): Promise<string> {
   const secret = await getJwtSecret()
-  return signUserJwt(user, secret, Date.now(), getModelRunJwtExpiresSeconds())
+  return signUserJwt(user, secret, Date.now(), getModelRunJwtExpiresSeconds(), 'model_run')
 }
 
 export function toAuthenticatedUser(user: Pick<UserRecord, 'id' | 'username' | 'role'>): AuthenticatedUser {
@@ -315,6 +326,17 @@ export async function authenticateUserToken(token: string): Promise<Authenticate
   const user = findUserById(payload.sub)
   if (!user || user.status !== 'active') return null
   return toAuthenticatedUser(user)
+}
+
+/**
+ * `authenticateUserToken` restricted to tokens issued by an interactive login. Model-run and App
+ * tokens, and tokens issued before login tokens carried a purpose, are refused here; every other
+ * route keeps accepting them through `authenticateUserToken`.
+ */
+export async function authenticateLoginUserToken(token: string): Promise<AuthenticatedUser | null> {
+  const payload = token ? verifyUserJwt(token, await getJwtSecret()) : null
+  if (payload?.type !== 'access' || payload.purpose !== 'login') return null
+  return authenticateUserToken(token)
 }
 
 export async function isAuthEnabled(): Promise<boolean> {
@@ -390,6 +412,7 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
       const user = findUserById(key.userId)
       if (!user || user.status !== 'active') throw new ModelApiError('The key owner is disabled or no longer exists.', 403)
       ctx.state.user = toAuthenticatedUser(user)
+      ctx.state.credentialKind = 'model_api_key'
       ctx.state.modelApiKey = { id: key.id, models: key.models }
       touchModelApiKey(key.id)
     } catch (error) {
@@ -441,12 +464,14 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
       return
     }
     ctx.state.profile = { name: binding.profile }
+    ctx.state.credentialKind = 'run'
     await next()
     return
   }
   const payload = token ? verifyUserJwt(token, secret) : null
   if (!payload) {
     if (!workerRefs.length && !personRefs.length && await allowServerTokenForAgentEndpoint(ctx, token)) {
+      ctx.state.credentialKind = 'server'
       await next()
       return
     }
@@ -484,6 +509,7 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
   }
   if (personRefs.length) ctx.state.personSession = getSession(personRefs[0])
   ctx.state.user = toAuthenticatedUser(user)
+  ctx.state.credentialKind = payload.type === 'app_access' ? 'app' : payload.purpose ?? 'legacy_access'
   touchUserLogin(user.id)
   await next()
 }
@@ -542,6 +568,17 @@ export async function resolveUserProfile(ctx: Context, next: Next): Promise<void
 
   ctx.state.profile = { name: profileName }
   await next()
+}
+
+/**
+ * The authorization `requireUserJwt` and `resolveUserProfile` granted, evaluated again from the
+ * current account record: for a request that waited (for example behind a job lock) before acting.
+ */
+export function currentAccountProfileRefusal(userId: number, profile: string): string | null {
+  const user = findUserById(userId)
+  if (!user || user.status !== 'active') return 'User is disabled or does not exist'
+  if (user.role !== 'super_admin' && !userCanAccessProfile(user.id, profile)) return `Profile "${profile}" is not available for this user`
+  return null
 }
 
 export async function requireUserProfile(ctx: Context, next: Next): Promise<void> {
