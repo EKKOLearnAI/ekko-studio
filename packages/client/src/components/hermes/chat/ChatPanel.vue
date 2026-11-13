@@ -1491,7 +1491,7 @@ async function submitNewChat(text: string, attachments?: Attachment[]): Promise<
       workspace: newChatWorkspace.value || null,
       categoryId: newChatCategoryId.value,
       baseUrl: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
-      apiKey: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
+      apiKey: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.api_key || (newChatNeedsApiKey.value ? newChatApiKey.value.trim() || undefined : undefined) : undefined,
       apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
       reasoningEffort: isGlobalCodingAgent ? newChatComposerReasoningEffort.value || undefined
         : newChatProvider.value !== "moa" ? newChatReasoningEffort.value : undefined,
