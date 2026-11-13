@@ -602,7 +602,7 @@ function errorMessageText(error: unknown): string {
   }
 }
 
-export async function uploadFiles(attachments: Attachment[]): Promise<{ name: string; path: string }[]> {
+export async function uploadFiles(attachments: Attachment[], signal?: AbortSignal): Promise<{ name: string; path: string }[]> {
   if (attachments.length === 0) return []
   const formData = new FormData()
   for (const att of attachments) {
@@ -617,6 +617,7 @@ export async function uploadFiles(attachments: Attachment[]): Promise<{ name: st
     method: 'POST',
     body: formData,
     headers,
+    signal,
   })
   if (!res.ok) throw new Error(await responseErrorMessage(res, 'Upload failed'))
   const data = await res.json() as { files: { name: string; path: string }[] }
@@ -1345,6 +1346,7 @@ function createChatState(scopedSessionId?: string) {
   const activeSessionId = ref<string | null>(null)
   const focusMessageId = ref<string | null>(null)
   const streamStates = ref<Map<string, { abort: () => void }>>(new Map())
+  const pendingAttachmentSends = new Map<string, { controller: AbortController; messageId: string }>()
   /** sessionId → server-reported isWorking status */
   const serverWorking = ref<Set<string>>(new Set())
   /** Authoritative live delegation counts, never inferred from transcript history. */
@@ -1358,8 +1360,14 @@ function createChatState(scopedSessionId?: string) {
     backgroundPendingBySession.value.clear()
   }
 
+  function clearPendingAttachmentSends() {
+    for (const pending of pendingAttachmentSends.values()) pending.controller.abort()
+    pendingAttachmentSends.clear()
+  }
+
   const unsubscribeAuthInvalidation = onAuthInvalidated(() => {
     runtimeGeneration += 1
+    clearPendingAttachmentSends()
     clearBackgroundObservers()
     streamStates.value.clear()
     serverWorking.value.clear()
@@ -1371,6 +1379,7 @@ function createChatState(scopedSessionId?: string) {
   onScopeDispose(() => {
     unsubscribeAuthInvalidation()
     runtimeGeneration += 1
+    clearPendingAttachmentSends()
     clearBackgroundObservers()
     if (scopedSessionId) unregisterSessionHandlers(scopedSessionId)
   })
@@ -1568,6 +1577,7 @@ function createChatState(scopedSessionId?: string) {
     activeRuntimeMode = mode
     runtimeMode.value = mode
     runtimeGeneration += 1
+    clearPendingAttachmentSends()
     clearBackgroundObservers()
     sessions.value = []
     pendingRunUsage.clear()
@@ -3850,6 +3860,12 @@ function createChatState(scopedSessionId?: string) {
     }
     clearMessageReference(sid)
 
+    // Hermes already shows Stop while an idle chat's attachments are preparing.
+    // Own that local send until dispatch, rather than aborting a nonexistent server run.
+    const pendingAttachmentSend = !shouldQueue && shouldOptimisticallyShowRunStatus && attachments?.length
+      ? { controller: new AbortController(), messageId: userMsg.id }
+      : undefined
+    if (pendingAttachmentSend) pendingAttachmentSends.set(sid, pendingAttachmentSend)
     let runSubmitted = false
     try {
 
@@ -3858,8 +3874,8 @@ function createChatState(scopedSessionId?: string) {
       let displayInput: string | ContentBlock[] | undefined
       if (attachments && attachments.length > 0) {
         // Has attachments: upload first, then build content blocks
-        const uploaded = await uploadFiles(attachments)
-        if (generation !== runtimeGeneration) return
+        const uploaded = await uploadFiles(attachments, pendingAttachmentSend?.controller.signal)
+        if (generation !== runtimeGeneration || pendingAttachmentSend?.controller.signal.aborted) return
 
         // Update attachment URLs on the user message for display
         const urlMap = new Map(uploaded.map(f => {
@@ -3884,10 +3900,10 @@ function createChatState(scopedSessionId?: string) {
 
         // Build content blocks with uploaded file paths
         input = await buildContentBlocks(submittedContent, attachments, uploaded)
-        if (generation !== runtimeGeneration) return
+        if (generation !== runtimeGeneration || pendingAttachmentSend?.controller.signal.aborted) return
         if (attachments.some(attachment => attachment.context?.trim())) {
           displayInput = await buildContentBlocks(submittedContent, attachments, uploaded, false)
-          if (generation !== runtimeGeneration) return
+          if (generation !== runtimeGeneration || pendingAttachmentSend?.controller.signal.aborted) return
         }
       } else {
         // No attachments: use plain text format
@@ -3896,7 +3912,7 @@ function createChatState(scopedSessionId?: string) {
 
       const appStore = useAppStore()
       await appStore.waitForModelsForRun()
-      if (generation !== runtimeGeneration) return
+      if (generation !== runtimeGeneration || pendingAttachmentSend?.controller.signal.aborted) return
       const sessionModel = activeSession.value?.model || appStore.selectedModel
       const sessionProvider = activeSession.value?.provider || appStore.selectedProvider
       const sessionProfile = activeSession.value?.profile || useProfilesStore().activeProfileName || undefined
@@ -4734,7 +4750,7 @@ function createChatState(scopedSessionId?: string) {
         streamStates.value.set(sid, ctrl)
       }
     } catch (err: any) {
-      if (generation !== runtimeGeneration) return
+      if (generation !== runtimeGeneration || pendingAttachmentSend?.controller.signal.aborted) return
       acknowledgeUserMessage(sid, userMsg.id)
       if (isBridgeForkCommand) {
         const nextPendingForkCommands = new Set(pendingForkCommands.value)
@@ -4753,6 +4769,8 @@ function createChatState(scopedSessionId?: string) {
         content: `Error: ${err.message}`,
         timestamp: Date.now(),
       })
+    } finally {
+      if (pendingAttachmentSends.get(sid) === pendingAttachmentSend) pendingAttachmentSends.delete(sid)
     }
   }
 
@@ -5533,6 +5551,18 @@ function createChatState(scopedSessionId?: string) {
     if (!sid) return
     if (isAborting.value) return
     clearPendingInteractions(sid)
+    const pendingAttachmentSend = pendingAttachmentSends.get(sid)
+    if (pendingAttachmentSend) {
+      pendingAttachmentSend.controller.abort()
+      pendingAttachmentSends.delete(sid)
+      acknowledgeUserMessage(sid, pendingAttachmentSend.messageId)
+      // A peer may have started a real run while this upload was pending.
+      if (!streamStates.value.has(sid)) {
+        serverWorking.value.delete(sid)
+        clearRunStartedAt(sid)
+        return
+      }
+    }
     const ctrl = streamStates.value.get(sid)
     if (ctrl) {
       setAbortState(sid, { aborting: true, synced: null })
