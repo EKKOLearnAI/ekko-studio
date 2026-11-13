@@ -6996,6 +6996,57 @@
         ]
       }
     },
+    "/api/hermes/cron/session-bindings": {
+      "post": {
+        "tags": [
+          "Jobs"
+        ],
+        "summary": "Create session-bindings",
+        "description": "POST /api/hermes/cron/session-bindings",
+        "operationId": "bind",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/hermes/custom-model": {
       "put": {
         "tags": [
