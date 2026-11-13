@@ -57,6 +57,7 @@ function bootstrap(apiFactory: typeof createStudioApi, loadModule: (url: string)
       ui: {
         notify: (message, level = 'info') => { void call('notify', { message, level }).catch(() => {}) },
         confirm: message => call('confirm', { message }), prompt: message => call('prompt', { message }),
+        selectModel: (options = {}) => call('select-model', options),
         navigate: path => { void call('navigate', { path }).catch(() => {}) },
       },
       onDispose: dispose => { disposers.push(dispose) },

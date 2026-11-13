@@ -56,7 +56,19 @@ config 不含 secret，storage 仅在清单声明 `storage.client` 时开放本�
 | `rpc(name, input?)` | 默认 input=null，Promise 返回插件后端的 JSON 值。 |
 | `events.on(pattern, handler)` | 订阅允许接收的事件，返回取消订阅函数。 |
 | `ui.notify/confirm/prompt/navigate` | 宿主提示、确认、文本输入和导航。confirm 返回 boolean，prompt 返回 string/null。 |
+| `ui.selectModel(options?)` | 打开宿主通用模型选择器。`options.current={provider,model}` 高亮当前项；模型目录绑定页面的 Profile，支持搜索、别名和自定义模型。返回 `{profile,provider,model,apiMode?}`，取消返回 null。 |
 | `onDispose` | 注册清理；也可从 mount 返回 disposer。 |
+
+`ui.selectModel` 只选择模型，不修改宿主或插件配置，不调用模型，也不返回凭证或供应商地址。
+`model` 始终是规范 ID，`apiMode` 来自该模型的已有协议配置，未配置时省略；此接口不额外弹出协议编辑。
+同一页面同时只能打开一个选择器，重复调用会 reject；目录加载失败也会 reject，允许重试。
+页面关闭、重载或 Profile 切换时释放选择器，旧页面的桥接 Promise 随页面生命周期 reject。
+界面能力由已有 `ui` 页面提供；后续 API、RPC、保存与运行仍遵守各自的权限规则。
+
+```js
+const selected = await ctx.ui.selectModel({ current: { provider: 'custom:example', model: 'my-model' } })
+if (selected) await ctx.rpc('save-model', selected)
+```
 
 ## StudioApi
 
