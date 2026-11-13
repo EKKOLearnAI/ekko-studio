@@ -164,6 +164,8 @@ export interface SessionState {
   abortController?: AbortController
   runId?: string
   activeRunMarker?: string
+  /** Monotonic owner revision: advanced on every accepted run owner and on Stop (see run-ownership.ts). */
+  ownerRevision?: number
   /** Generation owned by a live Hermes output consumer, including finalization. */
   bridgeRunPollMarker?: string
   profile?: string
