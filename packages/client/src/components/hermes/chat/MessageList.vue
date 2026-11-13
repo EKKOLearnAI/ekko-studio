@@ -226,6 +226,7 @@ const showEmptyConversation = computed(() => {
   const session = chatStore.activeSession;
   return !chatStore.isLoadingMessages && !isRunIndicatorActive.value
     && !!session && (session.messagesLoaded === true || session.isLocalOnly === true)
+    && !session.hasMoreBefore
     && chatStore.messages.length === 0 && !props.collaborations?.length && (session.messageTotal ?? session.messageCount ?? 0) === 0;
 });
 
