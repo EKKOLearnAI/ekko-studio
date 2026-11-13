@@ -79,7 +79,7 @@ import { loadNewChatFormPreferences, saveNewChatFormPreferences } from "@/utils/
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
 import { useChatSurfaceReveal } from "@/composables/useChatSurfaceReveal";
 import ModelCascader from "@/components/hermes/models/ModelCascader.vue";
-import { configuredProviderApiMode, canScopedCodingAgentUseProvider, usesServerManagedProviderAuth } from "@/utils/codingAgentProviders";
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider, usesServerManagedProviderAuth, hasConfiguredProviderApiKey } from "@/utils/codingAgentProviders";
 import { OPEN_SUBAGENT_STREAM_EVENT, type OpenSubagentStreamDetail } from "@/utils/hermes/subagent-stream";
 import { desktopBridge, hasDesktopBrowserBridge } from "@/utils/desktop-bridge";
 import { OPEN_DESKTOP_BROWSER_PANEL_EVENT } from "@/utils/desktop-browser";
@@ -1250,7 +1250,7 @@ const newChatNeedsApiKey = computed(() =>
   isNewChatCodingAgent.value &&
   effectiveNewChatAgentMode.value === "scoped" &&
   !newChatUsesServerAuth.value &&
-  !selectedNewChatProviderGroup.value?.api_key,
+  !hasConfiguredProviderApiKey(selectedNewChatProviderGroup.value),
 );
 const canConfirmNewChat = computed(() => {
   if (newChatCategoryCreating.value || newChatLoading.value) return false;
