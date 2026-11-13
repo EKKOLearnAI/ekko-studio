@@ -1,0 +1,5 @@
+# Optional CPU-only visible-expression inference, overlay on requirements.txt.
+# Python 3.11 compatible; install only into the dedicated Pulse MCP venv.
+numpy==2.4.6
+onnxruntime==1.31.1
+opencv-python-headless==4.13.0.92

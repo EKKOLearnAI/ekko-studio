@@ -1,0 +1,12 @@
+{
+  "name": "PulseNetworkClient",
+  "version": "2.0.17-pulse.1",
+  "description": "Project-local Arduino 2.0.17 WiFiClient connected() backport",
+  "license": "LGPL-2.1-or-later",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": "vendor",
+    "srcFilter": "-<*>"
+  }
+}
