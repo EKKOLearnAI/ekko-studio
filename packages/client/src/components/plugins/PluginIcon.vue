@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import type { InstalledPlugin } from '@/api/studio/plugins'
-import { pluginIcon } from '@/plugins/navigation'
-defineProps<{ plugin: InstalledPlugin; compact?: boolean; icon?: string; title?: string }>()
+import { computed, ref, watch } from 'vue'
+import { pluginIcon, safePluginLink } from '@/plugins/navigation'
+const props = defineProps<{ plugin: { manifest: { name: string; icon?: string } }; compact?: boolean; icon?: string; iconUrl?: string; title?: string }>()
+const failed = ref(false)
+const source = computed(() => pluginIcon(props.icon || props.plugin.manifest.icon) || pluginIcon(props.iconUrl) || safePluginLink(props.iconUrl))
+watch(source, () => { failed.value = false })
 </script>
 
 <template>
-  <span class="plugin-icon" :class="{ compact }" aria-hidden="true"><img v-if="pluginIcon(icon || plugin.manifest.icon)" :src="pluginIcon(icon || plugin.manifest.icon)" alt="" /><template v-else>{{ Array.from((title || plugin.manifest.name).trim())[0]?.toLocaleUpperCase() || '+' }}</template></span>
+  <span class="plugin-icon" :class="{ compact }" aria-hidden="true"><img v-if="source && !failed" :src="source" alt="" crossorigin="anonymous" referrerpolicy="no-referrer" loading="lazy" @error="failed = true" /><template v-else>{{ Array.from((title || plugin.manifest.name).trim())[0]?.toLocaleUpperCase() || '+' }}</template></span>
 </template>
 
 <style scoped lang="scss">

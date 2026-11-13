@@ -139,8 +139,13 @@ export class PluginManager {
       const record = state.records[id]
       if (!record) throw new PluginError('Plugin not found', 'PLUGIN_NOT_FOUND', 404)
       let next: PluginRecord | undefined = structuredClone(record)
-      if (input.action === 'uninstall') next = undefined
-      else if (input.action === 'rollback') {
+      if (input.action === 'uninstall') {
+        next = undefined
+        // An explicitly removed local/market installation must not reappear as a
+        // bundled plugin on the next list request or restart.
+        state.builtinVersions ||= {}
+        state.builtinVersions[id] ||= record.manifest.version
+      } else if (input.action === 'rollback') {
         if (!record.previous) throw new PluginError('No previous plugin version')
         next = { ...record.previous, enabled: record.enabled, previous: previousVersion(record) }
         delete next.developmentDirectory
