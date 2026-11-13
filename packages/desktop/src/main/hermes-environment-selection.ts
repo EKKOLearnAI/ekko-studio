@@ -18,7 +18,22 @@ import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000
-const HERMES_VERSION_PROBE = "import importlib.util, hermes_cli; assert importlib.util.find_spec('hermes_cli.main'); print(hermes_cli.__version__)"
+const HERMES_VERSION_PROBE = [
+  'import sys',
+  // Match source-launcher imports without invoking bootstrap's install/repair
+  // path during discovery. The root is an argv value, never Python source.
+  'if sys.argv[1]: sys.path.insert(0, sys.argv[1])',
+  'import importlib.util, hermes_cli',
+  "assert importlib.util.find_spec('hermes_cli.main')",
+  'try:',
+  '    from hermes_cli.version_info import get_version_info',
+  'except ModuleNotFoundError as exc:',
+  "    if exc.name != 'hermes_cli.version_info': raise",
+  '    version = hermes_cli.__version__',
+  'else:',
+  '    version = get_version_info().display_version',
+  'print(version)',
+].join('\n')
 
 export type DesktopHermesSelectionSource = 'user-cli' | 'managed-runtime' | 'none'
 
@@ -275,10 +290,11 @@ function findHermesCommands(searchPath: string, env: NodeJS.ProcessEnv): string[
 }
 
 function normalizeVersion(raw: string): string {
-  return raw
+  const version = raw
     .split(/\r?\n/)[0]
     ?.replace(/^Hermes(?: Agent)?\s+/i, '')
     .trim() || ''
+  return /^(?:v?0\.0\.0|unknown)$/i.test(version) ? '' : version
 }
 
 type HermesVersionProbeResult =
@@ -319,7 +335,7 @@ async function probeHermesVersion(
     version: '',
   })
   try {
-    const { stdout } = await execFileAsync(selection.pythonPath, ['-c', HERMES_VERSION_PROBE], {
+    const { stdout } = await execFileAsync(selection.pythonPath, ['-c', HERMES_VERSION_PROBE, selection.agentRoot], {
       encoding: 'utf8',
       timeout,
       windowsHide: true,
