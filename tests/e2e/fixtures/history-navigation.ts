@@ -1,4 +1,4 @@
-import { createApp, h } from 'vue'
+import { createApp, h, nextTick } from 'vue'
 import { createPinia } from 'pinia'
 import { RouterView } from 'vue-router'
 import { NConfigProvider, NMessageProvider, NDialogProvider } from 'naive-ui'
@@ -20,7 +20,11 @@ app.use(pinia)
 // Keep real profile switching, routing and HTTP helpers; model discovery is unrelated.
 useAppStore(pinia).loadModels = async () => {}
 useAppStore(pinia).reloadModels = async () => {}
-;(window as any).historyNavigationFixture = { router, profiles: useProfilesStore(pinia) }
+;(window as any).historyNavigationFixture = { router, profiles: useProfilesStore(pinia), async flush() {
+  await nextTick()
+  await new Promise(requestAnimationFrame)
+  await new Promise(requestAnimationFrame)
+} }
 app.use(await i18nReady)
 app.use(router)
 await router.isReady()
