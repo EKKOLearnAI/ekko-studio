@@ -83,6 +83,9 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -99,11 +102,30 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Download shard reports
+        id: shard-reports
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           pattern: e2e-blob-*
           path: ${{ runner.temp }}/studio-artifacts/playwright-blob/
           merge-multiple: true
+
+      # The download Action can fail to extract a valid artifact with an
+      # unexpected EOF. The REST download used by gh handles that archive.
+      - name: Recover shard reports through GitHub API
+        if: steps.shard-reports.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPORT_DIR: ${{ runner.temp }}/studio-artifacts/playwright-blob
+        shell: bash
+        run: |
+          download_dir="$RUNNER_TEMP/studio-artifacts/shard-download"
+          gh run download "$GITHUB_RUN_ID" --pattern 'e2e-blob-*' --dir "$download_dir"
+          mkdir -p "$REPORT_DIR"
+          for shard in 1 2 3 4; do
+            cp "$download_dir/e2e-blob-$shard/report-$shard.zip" "$REPORT_DIR/report-$shard.zip"
+          done
 
       - name: Merge browser reports
         env:
