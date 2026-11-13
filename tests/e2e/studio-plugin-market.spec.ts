@@ -3,15 +3,15 @@ import { resolve } from 'node:path'
 
 function published(index: number, extra: Record<string, unknown> = {}) {
   return { id: index.toString(16).padStart(64, '0'), name: `Published ${index}`, description: 'Available from the plugin marketplace',
-    repository: `https://github.com/example/plugin-${index}`, manifestId: `plugin-${index}`, version: '1.0.0', apiVersion: 1,
+    repository: `https://github.com/example/plugin-${index}`, manifestId: `plugin-${index}`, version: '1.0.0', apiVersion: 2,
     author: { name: `Publisher ${index}` }, repositoryStars: 1234,
-    capabilities: ['tools'], sourceCommit: 'b'.repeat(40), installSource: `github:example/plugin-${index}#${'b'.repeat(40)}`, ...extra }
+    permissions: ['tools'], sourceCommit: 'b'.repeat(40), installSource: `github:example/plugin-${index}#${'b'.repeat(40)}`, ...extra }
 }
 async function setup(page: Page, options: { ordinary?: boolean; unavailable?: boolean; entries?: any[] } = {}) {
-  const local = { manifest: { id: 'plugin-1', name: 'Installed commands', description: 'Disabled, but still a chat-command plugin', version: '2.0.0', apiVersion: 1,
-    repository: 'https://github.com/example/plugin-1', author: { name: 'Local Maintainer' }, capabilities: ['commands', 'tools'] }, source: 'github:example/plugin-1#' + 'c'.repeat(40), installedAt: 0,
+  const local = { manifest: { id: 'plugin-1', name: 'Installed commands', description: 'Disabled, but still a chat-command plugin', version: '2.0.0', apiVersion: 2,
+    repository: 'https://github.com/example/plugin-1', author: { name: 'Local Maintainer' }, permissions: ['commands', 'tools'] }, source: 'github:example/plugin-1#' + 'c'.repeat(40), installedAt: 0,
     enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [] }
-  const state = { plugins: [local], revision: 1, unavailable: Boolean(options.unavailable), entries: options.entries || [published(1), published(2, { name: 'Agent extension', capabilities: ['agents', 'ui'] })] }
+  const state = { plugins: [local], revision: 1, unavailable: Boolean(options.unavailable), entries: options.entries || [published(1), published(2, { name: 'Agent extension', permissions: ['agents', 'ui'] })] }
   const installs: any[] = [], marketRequests: URL[] = [], cloudHeaders: Record<string, string>[] = []
   if (options.ordinary) await page.addInitScript(() => localStorage.setItem('plugin_fixture_account', JSON.stringify({ sub: '2', role: 'user' })))
   await page.context().addCookies([{ name: 'cloud_cookie', value: 'private', url: 'https://api.ekkostudio.xyz' }])
@@ -29,7 +29,7 @@ async function setup(page: Page, options: { ordinary?: boolean; unavailable?: bo
     if (path === '/api/studio/plugins/install') {
       const input = route.request().postDataJSON(); installs.push(input)
       const entry = state.entries.find(value => value.manifestId === input.pluginId)!
-      state.plugins.push({ ...local, manifest: { ...local.manifest, id: entry.manifestId, name: entry.name, repository: entry.repository, version: entry.version, capabilities: entry.capabilities }, source: input.source })
+      state.plugins.push({ ...local, manifest: { ...local.manifest, id: entry.manifestId, name: entry.name, repository: entry.repository, version: entry.version, permissions: entry.permissions }, source: input.source })
       state.revision++
       return route.fulfill({ json: { ok: true } })
     }
@@ -49,7 +49,7 @@ async function setup(page: Page, options: { ordinary?: boolean; unavailable?: bo
 }
 
 test('defaults to installed plugins, filters the full market and installs an exact release after confirmation', async ({ page }, testInfo) => {
-  const entries = [...Array.from({ length: 100 }, (_, i) => published(i + 1)), published(101, { name: 'Last-page Agent', capabilities: ['agents', 'ui'] })]
+  const entries = [...Array.from({ length: 100 }, (_, i) => published(i + 1)), published(101, { name: 'Last-page Agent', permissions: ['agents', 'ui'] })]
   const { installs, marketRequests, cloudHeaders } = await setup(page, { entries })
   await expect(page.getByRole('tab').nth(0)).toContainText('已安装')
   await expect(page.getByRole('tab').nth(1)).toHaveText('全部')
@@ -102,7 +102,7 @@ test('shows and filters live installation statuses in All without confusing anot
   for (const [index, status] of [[2, 'active'], [3, 'failed'], [5, 'active']] as const) {
     const repository = index === 5 ? 'https://github.com/another/plugin-5' : `https://github.com/example/plugin-${index}`
     state.plugins.push({ ...state.plugins[0], status, enabled: true,
-      manifest: { ...state.plugins[0].manifest, id: `plugin-${index}`, name: `Installed ${index}`, repository, capabilities: ['tools'] },
+      manifest: { ...state.plugins[0].manifest, id: `plugin-${index}`, name: `Installed ${index}`, repository, permissions: ['tools'] },
       source: 'git+' + repository + '#' + 'c'.repeat(40) })
   }
   state.revision++
@@ -258,9 +258,9 @@ test('distinguishes no upgrade from a failed check and preserves the last known 
 test('opens developer resources and submission from the compact catalog across themes and narrow layouts', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 960 })
   await setup(page, { entries: [
-    published(1, { name: 'File Search', description: '查找工作区文件，让 Agent 随时获取项目上下文。', version: '3.0.0', author: { name: 'Studio Community' }, capabilities: ['tools'] }),
-    published(2, { name: 'Terminal Agent', description: '在 Studio 中运行终端 Agent，管理模型、工具和任务。', author: { name: 'Ekko Studio' }, capabilities: ['agents', 'ui'] }),
-    published(3, { name: 'Project Board', description: '把项目任务带入工作区，与团队一起查看进展。', author: { name: 'Community Labs' }, capabilities: ['ui', 'commands'], repositoryStars: 42 }),
+    published(1, { name: 'File Search', description: '查找工作区文件，让 Agent 随时获取项目上下文。', version: '3.0.0', author: { name: 'Studio Community' }, permissions: ['tools'] }),
+    published(2, { name: 'Terminal Agent', description: '在 Studio 中运行终端 Agent，管理模型、工具和任务。', author: { name: 'Ekko Studio' }, permissions: ['agents', 'ui'] }),
+    published(3, { name: 'Project Board', description: '把项目任务带入工作区，与团队一起查看进展。', author: { name: 'Community Labs' }, permissions: ['ui', 'commands'], repositoryStars: 42 }),
   ] })
   const banner = page.getByRole('complementary', { name: '开发你的插件' })
   await expect(banner).toBeVisible()

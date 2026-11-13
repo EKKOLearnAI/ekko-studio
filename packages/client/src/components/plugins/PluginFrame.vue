@@ -76,9 +76,10 @@ watch(() => [frame.value, props.plugin, props.profile, props.view, props.session
     try {
       let value: unknown
       switch (data.method) {
+        case 'browser': value = await pluginRequest(profile, `/${plugin.manifest.id}/browser`, { method: args.method, params: args.params || {}, sessionId }, 'POST', controller.signal); break
         case 'api': value = await pluginApi(profile, plugin.manifest.id, args.path, args.options || {}, sessionId, controller.signal); break
         case 'rpc': value = await pluginInvoke(profile, plugin.manifest.id, 'rpc', args.name, args.input ?? null, sessionId, controller.signal); break
-        case 'storage': value = await pluginRequest(profile, `/${plugin.manifest.id}/storage`, { action: args.action, key: args.key, value: args.value, namespace: args.namespace, sessionId }, 'POST', controller.signal); break
+        case 'storage': value = await pluginRequest(profile, `/${plugin.manifest.id}/storage`, { action: args.action, key: args.key, value: args.value, scope: args.scope, namespace: args.namespace, sessionId }, 'POST', controller.signal); break
         case 'notify': message[['info', 'success', 'error'].includes(args.level) ? args.level as 'info' : 'info'](`${plugin.manifest.name}: ${String(args.message).slice(0, 2000)}`); value = null; break
         case 'confirm': value = await prompt(String(args.message).slice(0, 2000), false); break
         case 'prompt': value = await prompt(String(args.message).slice(0, 2000), true); break

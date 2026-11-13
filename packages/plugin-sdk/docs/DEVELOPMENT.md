@@ -58,4 +58,4 @@ object 声明 properties、required、additionalProperties；array 声明 items�
 支持 enum、minimum/maximum、minLength/maxLength/maxItems；拒绝未知关键字，不支持 $ref/anyOf。
 操作的 input/output 引用 models 中的名称；事件声明 model 和 caller/plugin audience。
 storage/checkpoints 声明 model、正整数 version 和 scope；迁移逻辑由插件实现。
-宿主 inputSchema 是 SDK Schema 子集，不能直接传入含 description 的文档模型。
+宿主 inputSchema 是 SDK Schema 子集，支持 description；只有全部字段都属于 SDK Schema 子集时才可复用文档模型。

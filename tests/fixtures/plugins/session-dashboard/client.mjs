@@ -64,7 +64,7 @@ export async function mount(root, ctx) {
     busy = true; refresh.disabled = more.disabled = true
     $('[data-status]').textContent = '正在读取会话…'
     try {
-      const result = await ctx.api.request('/api/studio/sessions', { query:{ limit:60, offset:append ? sessions.length : 0 } })
+      const result = await ctx.host.request('/api/studio/sessions', { query:{ limit:60, offset:append ? sessions.length : 0 } })
       if (disposed) return
       const incoming = Array.isArray(result.sessions) ? result.sessions : []
       sessions = append ? [...sessions, ...incoming] : incoming
@@ -77,6 +77,6 @@ export async function mount(root, ctx) {
     finally { busy = false; refresh.disabled = more.disabled = false }
   }
   search.oninput = render; filter.onchange = render; refresh.onclick = () => load(); more.onclick = () => load(true)
-  ctx.onDispose(() => { disposed = true; search.oninput = filter.onchange = refresh.onclick = more.onclick = null })
+  ctx.lifecycle.add(() => { disposed = true; search.oninput = filter.onchange = refresh.onclick = more.onclick = null })
   await load()
 }

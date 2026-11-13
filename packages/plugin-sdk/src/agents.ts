@@ -1,4 +1,4 @@
-import type { Dispose, Json, PluginIdentity, RunContext } from './index'
+import type { Json, PluginIdentity, RunContext, PluginLifecycle, PluginState, PluginStorage } from './index'
 
 export type PluginAgentId = `plugin:${string}/${string}`
 export type AgentMode = 'scoped' | 'global'
@@ -8,13 +8,12 @@ export interface AgentLog {
   warn(message: string, data?: Json): void
   error(message: string, data?: Json): void
 }
-export interface AgentResources { add(dispose: Dispose): Dispose }
 export interface AgentManagementContext {
   readonly identity: PluginIdentity & { readonly agentId: string }
   readonly mode?: AgentMode
   readonly signal: AbortSignal
   readonly log: AgentLog
-  readonly resources: AgentResources
+  readonly lifecycle: PluginLifecycle
   progress(input: { message: string; percent?: number }): void
 }
 export interface AgentStatus { installed: boolean; version: string; source?: string; path?: string; error?: string }
@@ -62,15 +61,16 @@ export interface AgentSessionContext {
   readonly resumeState?: AgentCheckpoint
   readonly signal: AbortSignal
   readonly log: AgentLog
-  readonly resources: AgentResources
+  readonly lifecycle: PluginLifecycle
 }
-export type AgentRunContext = Omit<RunContext, 'identity'> & {
+export type AgentRunContext = Omit<RunContext, 'identity' | 'state'> & {
   readonly identity: AgentSessionContext['identity'] & { readonly runId: string }
+  readonly state: PluginState & { readonly agentSession: PluginStorage }
   readonly paths: AgentSessionContext['paths']
   readonly deadlineAt: number
   readonly log: AgentLog
-  readonly resources: AgentResources
-  readonly events: { emit(event: AgentEvent): Promise<void> }
+  readonly lifecycle: PluginLifecycle
+  readonly output: { emit(event: AgentEvent): Promise<void> }
   /** Run-scoped Studio transports; the plugin writes its engine's native MCP configuration. */
   readonly mcpServers: Readonly<Record<string, Record<string, Json>>>
   readonly interactions: {
@@ -97,7 +97,7 @@ export interface AgentSession {
   dispose(): void | Promise<void>
 }
 export interface AgentDefinition {
-  id: string; name: string; vendor: string; description?: string; icon?: string; agentApiVersion: 1
+  id: string; name: string; vendor: string; description?: string; icon?: string; agentApiVersion: 2
   getStatus(ctx: AgentManagementContext): Promise<AgentStatus>
   management: {
     settings?(ctx: AgentManagementContext): AgentSettingsTarget | Promise<AgentSettingsTarget>
@@ -112,7 +112,7 @@ export interface AgentDefinition {
     global?: { listModels(ctx: AgentManagementContext & { refresh: boolean }): Promise<AgentModelCatalog> }
     scoped?: { protocols: AgentApiMode[] }
   }
-  capabilities: { surfaces: Array<'chat' | 'group-chat' | 'workflow' | 'api'>; streaming: boolean; resume: boolean }
+  features: { surfaces: Array<'chat' | 'group-chat' | 'workflow' | 'api'>; streaming: boolean; resume: boolean }
   runtime: { createSession(ctx: AgentSessionContext): AgentSession | Promise<AgentSession> }
 }
 export interface AgentRegistration { readonly id: PluginAgentId; dispose(): Promise<void> }

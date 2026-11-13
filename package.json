@@ -121,7 +121,7 @@
   },
   "devDependencies": {
     "@aiden0z/pptx-renderer": "^1.2.4",
-    "@ekko-studio/plugin-omp": "https://codeload.github.com/EKKOLearnAI/ekko-studio-plugin-omp/tar.gz/ec68ab0776c0e27c6e649dec733263efb66cd99d",
+    "@ekko-studio/plugin-omp": "https://codeload.github.com/EKKOLearnAI/ekko-studio-plugin-omp/tar.gz/43ea3b345f0cdccc2c38e7433f6fe8b2b61f1a05",
     "@koa/bodyparser": "^5.0.0",
     "@koa/cors": "^5.0.0",
     "@koa/router": "^15.4.0",

@@ -67,7 +67,7 @@ export class PluginManager {
       const { directory: _directory, runtimeIdentity: _runtimeIdentity, previous, ...rest } = record
       const present = packagePresent(record)
       const runtime = present ? this.runtimes.get(record.manifest.id) : undefined
-      return { ...rest, status: !present ? 'failed' : runtime ? 'active' : record.enabled ? 'failed' : 'disabled',
+      return { ...rest, manifest: { ...rest.manifest, permissions: rest.manifest.permissions || [] }, status: !present ? 'failed' : runtime ? 'active' : record.enabled ? 'failed' : 'disabled',
         previousVersion: previous?.manifest.version, error: present ? this.errors.get(record.manifest.id) : missingPackage().message,
         tools: [...(runtime?.tools.values() || [])].map(({ name, description, inputSchema, readOnly }) => ({ name, description, inputSchema, readOnly })),
         commands: [...(runtime?.commands.values() || [])].map(({ name, description }) => ({ name, description })),
@@ -182,7 +182,7 @@ export class PluginManager {
     const runtime = this.runtime(identity, id)
     await this.ports.authorize(identity)
     const combined = AbortSignal.any([runtime.effects.controller.signal, ...(signal ? [signal] : [])])
-    return runtime.runContext(identity, combined).api.request(path, options)
+    return runtime.runContext(identity, combined).host.request(path, options)
   }
   async callTool(identity: PluginIdentity, name: string, input: Record<string, Json>, signal?: AbortSignal): Promise<ToolResult> {
     const [id, tool, extra] = name.split('/')

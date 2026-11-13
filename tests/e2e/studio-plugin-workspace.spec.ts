@@ -8,7 +8,7 @@ test('plugin pages and visible navigation follow enabled state across accounts a
   const clients: string[] = []
   let change = 0
   const makePlugin = (id: string, name: string, enabled: boolean, views: object[], capabilities = ['ui']) => ({
-    manifest: { id, name, description: name + ' description', apiVersion: 1, version: '1.0.0', client: 'client.mjs', capabilities, views, navigation: { main: views.filter((v: any) => v.slot === 'page').map((v: any) => ({ viewId: v.id, icon: 'grid' })), settings: views.filter((v: any) => v.slot === 'settings').map((v: any) => ({ viewId: v.id, icon: 'settings' })) } },
+    manifest: { id, name, description: name + ' description', apiVersion: 2, version: '1.0.0', client: 'client.mjs', permissions: capabilities, views, navigation: { main: views.filter((v: any) => v.slot === 'page').map((v: any) => ({ viewId: v.id, icon: 'grid' })), settings: views.filter((v: any) => v.slot === 'settings').map((v: any) => ({ viewId: v.id, icon: 'settings' })) } },
     enabled, status: enabled ? 'active' : 'disabled', source: '/tmp/' + id, config: {}, tools: [], commands: [], actions: [],
   })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {

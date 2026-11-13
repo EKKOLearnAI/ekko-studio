@@ -75,7 +75,7 @@ const catalog = computed<CatalogPlugin[]>(() => snapshot.value.plugins.map(plugi
 const developmentCatalog = computed<CatalogPlugin[]>(() => projects.value.map(project => {
     const installed = catalog.value.find(plugin => plugin.manifest.id === project.id && plugin.developmentDirectory === project.directory)
     return installed ? { ...installed, development: project, developmentEntry: true } : {
-      manifest: project.manifest || { id: project.id, name: project.id, version: '', apiVersion: 1, capabilities: [] },
+      manifest: project.manifest || { id: project.id, name: project.id, version: '', apiVersion: 2, permissions: [] },
       source: project.directory, installedAt: project.createdAt || 0, installed: false, enabled: false,
       status: ['missing', 'error'].includes(project.status) ? 'failed' : 'disabled', error: project.error,
       config: {}, tools: [], commands: [], actions: [], development: project, developmentEntry: true,
@@ -84,11 +84,11 @@ const developmentCatalog = computed<CatalogPlugin[]>(() => projects.value.map(pr
 const selected = computed(() => (selectedDevelopment.value ? developmentCatalog.value : catalog.value).find(plugin => plugin.manifest.id === selectedId.value))
 const activeCount = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').length)
 const localEntries = computed(() => scope.value === 'development' ? developmentCatalog.value : catalog.value)
-const filtered = computed(() => localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.capabilities, category.value)
+const filtered = computed(() => localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.permissions, category.value)
   && (state.value === 'all' || plugin.status === state.value) && matchesPluginSearch(plugin.manifest, search.value)))
 const categoryCount = (value: PluginCategory) => scope.value === 'all'
-  ? marketEntries.value.filter(plugin => matchesPluginCategory(plugin.capabilities, value)).length
-  : localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.capabilities, value)).length
+  ? marketEntries.value.filter(plugin => matchesPluginCategory(plugin.permissions, value)).length
+  : localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.permissions, value)).length
 const marketInstalled = (plugin: MarketPlugin) => installedMarketPlugin(plugin, snapshot.value.plugins)
 const marketConflict = (plugin: MarketPlugin) => !marketInstalled(plugin) && snapshot.value.plugins.some(local => local.manifest.id === plugin.manifestId)
 const marketStatus = (plugin: MarketPlugin) => marketInstalled(plugin)?.status || (marketConflict(plugin) ? 'marketConflict' : 'notInstalled')
@@ -100,7 +100,7 @@ function matchesMarketState(plugin: MarketPlugin) {
   return installed?.status === state.value
 }
 const filteredMarket = computed(() => marketEntries.value.filter(plugin => matchesMarketState(plugin)
-  && matchesPluginCategory(plugin.capabilities, category.value) && matchesPluginSearch(plugin, search.value)))
+  && matchesPluginCategory(plugin.permissions, category.value) && matchesPluginSearch(plugin, search.value)))
 const marketAction = (plugin: MarketPlugin) => marketConflict(plugin) ? undefined : publishedPluginAction(marketInstalled(plugin), plugin.release)
 const actionLabel = (action: PublishedPluginAction | undefined, version: string | null | undefined) => t('studioPlugins.' + ({ install: 'install', switch: 'installMarketVersion', upgrade: 'updateTo', reinstall: 'reinstallVersion' }[action || 'install']), { version })
 const installationLabel = (plugin: InstalledPlugin) => t('studioPlugins.' + ({ development: 'updateDevelopment', local: 'localVersion', package: 'installed' }[pluginInstallationKind(plugin)]))
@@ -355,7 +355,7 @@ async function logs(id: string) {
               <PluginCardMetadata compact :author="plugin.author?.name" :repository="plugin.repository" :stars="plugin.repositoryStars"
                 :version="marketInstalled(plugin)?.manifest.version || plugin.version" :installed="Boolean(marketInstalled(plugin))"
                 :published-version="plugin.version" :update-state="marketUpdateState(plugin)">
-                <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+                <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.permissions, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
               </PluginCardMetadata>
             </div>
             <footer class="card-footer">
@@ -385,7 +385,7 @@ async function logs(id: string) {
             <p class="card-description">{{ plugin.manifest.description || plugin.manifest.id }}</p>
             <PluginCardMetadata compact :author="plugin.manifest.author?.name" :repository="pluginRepository(plugin)" :stars="localRelease(plugin)?.repositoryStars"
               :version="plugin.manifest.version" :installed="plugin.installed" :published-version="localPublishedVersion(plugin)" :update-state="localUpdateState(plugin)">
-              <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.manifest.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+              <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.manifest.permissions, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
             </PluginCardMetadata>
           </div>
           <footer class="card-footer">
@@ -430,7 +430,7 @@ async function logs(id: string) {
             :version="marketInstalled(selectedMarket)?.manifest.version || selectedMarket.version" :installed="Boolean(marketInstalled(selectedMarket))"
             :published-version="selectedMarket.version" :update-state="marketUpdateState(selectedMarket)" />
           <p class="detail-description">{{ selectedMarket.description }}</p>
-          <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(selectedMarket!.capabilities, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
+          <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(selectedMarket!.permissions, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
           <div class="project-metadata">
             <p v-if="selectedMarket.license"><strong>{{ t('studioPlugins.license') }}:</strong> {{ selectedMarket.license }}</p>
           </div>
@@ -477,7 +477,7 @@ async function logs(id: string) {
                 <p v-else>{{ t('studioPlugins.noPage') }}</p>
                 <div class="capability-list"><NTag v-for="slot in [...new Set(pluginPages(selected).map(view => view.slot))]" :key="slot" size="small">{{ t('studioPlugins.slot_' + slot) }}</NTag></div>
                 <h4>{{ t('studioPlugins.capabilities') }}</h4>
-                <div class="capability-list"><NTag v-for="capability in selected.manifest.capabilities" :key="capability" size="small" :bordered="false">{{ capability }}</NTag></div>
+                <div class="capability-list"><NTag v-for="capability in selected.manifest.permissions" :key="capability" size="small" :bordered="false">{{ capability }}</NTag></div>
                 <div class="operation-list"><p v-for="operation in [...selected.tools, ...selected.commands, ...selected.actions]" :key="operation.name"><strong>{{ operation.name }}</strong><span>{{ operation.description }}</span></p></div>
               </div>
             </NTabPane>

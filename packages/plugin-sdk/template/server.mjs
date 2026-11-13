@@ -4,7 +4,7 @@ const contract = assertContracts(JSON.parse(readFileSync(new URL('./contracts/pl
 
 /** @param {import('@ekko-studio/plugin-sdk').PluginContext} ctx */
 export function apply(ctx) {
-  const store = run => ctx.storage.namespace(String(run.identity.userId), run.identity.profile)
+  const store = run => ctx.state.plugin.namespace(String(run.identity.userId), run.identity.profile)
   registerRpc(ctx, contract, 'get-settings', async (_input, run) =>
     validateModel(contract, 'settings', await store(run).get('settings') ?? { greeting: 'Hello', compact: false }))
   registerRpc(ctx, contract, 'save-settings', async (input, run) => {

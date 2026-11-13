@@ -14,3 +14,5 @@ studioPluginRoutes.get('/api/studio/plugins/:id/logs', ctrl.logs)
 studioPluginRoutes.post('/api/studio/plugins/:id/invoke', ctrl.invoke)
 studioPluginRoutes.post('/api/studio/plugins/:id/api', ctrl.api)
 studioPluginRoutes.post('/api/studio/plugins/:id/storage', ctrl.storage)
+
+studioPluginRoutes.post('/api/studio/plugins/:id/browser', ctrl.browser)

@@ -2,8 +2,8 @@ import { expect, it } from 'vitest'
 import { pluginNavigation, pluginPageLocation, pluginPages } from '../../packages/client/src/plugins/navigation'
 import type { InstalledPlugin } from '../../packages/client/src/api/studio/plugins'
 
-const plugin = (navigation?: InstalledPlugin['manifest']['navigation']) => ({ manifest: { id: 'demo', name: 'Demo', version: '1.0.0', apiVersion: 1,
-  capabilities: ['ui'], client: 'client.mjs', views: [
+const plugin = (navigation?: InstalledPlugin['manifest']['navigation']) => ({ manifest: { id: 'demo', name: 'Demo', version: '1.0.0', apiVersion: 2,
+  permissions: ['ui'], client: 'client.mjs', views: [
     { id: 'home', title: 'Home', slot: 'page' }, { id: 'preferences', title: 'Preferences', slot: 'settings' },
     { id: 'skills', title: 'Skills', slot: 'agent-settings', icon: 'skills' },
   ], navigation }, status: 'active' } as InstalledPlugin)

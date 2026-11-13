@@ -10,6 +10,7 @@ import { isPrivatePersonSession, ownsPersonSession } from '../../contracts/perso
 import { ownedPersonTaskSession } from '../person/task-chat'
 import { businessEvents } from '../webhooks/business-events'
 import { canReceivePluginEvent, pluginEventData } from './events'
+import { desktopBrowserRelays } from '../browser/desktop-relay'
 import { PluginManager } from './manager'
 import { PluginDevelopment } from './development'
 import { PluginError } from './errors'
@@ -75,6 +76,14 @@ async function api(identity: PluginIdentity, path: string, options: ApiRequest, 
 export function getPluginManager(): PluginManager {
   if (instance) return instance
   instance = new PluginManager(join(config.appHome, 'plugins'), {
+    browser: async (identity, method, params, binding, signal) => {
+      authorizePluginIdentity(identity); signal.throwIfAborted()
+      if (!['tabs.list', 'tabs.create', 'tabs.close', 'cdp.attach', 'cdp.send', 'cdp.events', 'lease.release'].includes(method)) throw new PluginError('Unsupported plugin browser method')
+      const key = JSON.stringify([binding, identity.userId, identity.profile])
+      const envelope = await desktopBrowserRelays.request(identity.userId, identity.profile, { method, params }, key) as { result?: unknown }
+      signal.throwIfAborted()
+      return json(envelope.result ?? null)
+    },
     api, authorize: authorizePluginIdentity, emit: () => {},
     log: (pluginId, identity, level, text) => logger.info({ pluginId, profile: identity.profile, level }, text),
   })

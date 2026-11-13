@@ -536,6 +536,19 @@ export class BrowserManager {
     return this.state()
   }
 
+  async attachPluginCdp(tabId: string) {
+    const record = this.requireTab(tabId)
+    return this.withAutomationView(record, () => this.automation.attachPluginCdp(record.view.webContents))
+  }
+  async sendPluginCdp(tabId: string, method: string, params: Record<string, unknown>, sessionId?: string) {
+    const record = this.requireTab(tabId)
+    return this.withAutomationView(record, () => this.automation.sendPluginCdp(record.view.webContents, method, params, sessionId))
+  }
+  async pluginCdpEvents(tabId: string, cursor: number, limit: number) {
+    const record = this.requireTab(tabId)
+    return this.automation.pluginCdpEvents(record.view.webContents, cursor, limit)
+  }
+
   async snapshot(tabId: string, options: BrowserSnapshotOptions = {}) {
     const record = this.requireTab(tabId)
     let snapshot = await this.automation.snapshot(tabId, record.view.webContents, options)

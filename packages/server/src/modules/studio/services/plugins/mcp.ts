@@ -26,7 +26,7 @@ export function pluginMcpServers(): Array<{ name: string; toolset: string }> {
   const state = new PluginStore(join(config.appHome, 'plugins')).read()
   return Object.values(state.records).flatMap(({ manifest }) => {
     const name = manifest.mcp?.name
-    return name && name !== 'ekko-studio-plugins' && manifest.capabilities.includes('tools') ? [{ name, toolset: 'plugins' }] : []
+    return name && name !== 'ekko-studio-plugins' && manifest.permissions.includes('tools') ? [{ name, toolset: 'plugins' }] : []
   })
 }
 

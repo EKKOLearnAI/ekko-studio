@@ -986,6 +986,19 @@ export class BrowserAutomation {
     return { tabId, url: publicBrowserUrl(contents.getURL()), title: redactBrowserText(contents.getTitle()), mediaType: 'image/png', data, width, height }
   }
 
+  async attachPluginCdp(contents: WebContents) {
+    await this.ensureAttached(contents)
+    return this.cdp(contents).pluginInfo()
+  }
+  async sendPluginCdp(contents: WebContents, method: string, params: Record<string, unknown>, sessionId?: string) {
+    await this.ensureAttached(contents)
+    return await this.cdp(contents).pluginSend(method, params, sessionId)
+  }
+  async pluginCdpEvents(contents: WebContents, cursor: number, limit: number) {
+    await this.ensureAttached(contents)
+    return this.cdp(contents).pluginEvents(cursor, limit)
+  }
+
   private async ensureAttached(contents: WebContents): Promise<void> {
     if (contents.isDestroyed()) throw new Error('Browser tab is closed')
     const state = this.cdp(contents)

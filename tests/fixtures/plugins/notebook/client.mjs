@@ -4,15 +4,15 @@ export async function mount(root, ctx) {
     const list = document.createElement('div'); root.append(list)
     let alive = true
     async function refresh() {
-      const notes = await ctx.rpc('list'); if (!alive) return
+      const notes = await ctx.rpc.call('list'); if (!alive) return
       list.replaceChildren(...notes.slice(-10).reverse().map(note => {
         const button = document.createElement('button'); button.style.display = 'block'; button.style.width = '100%'; button.textContent = note.text.slice(0, 24)
         button.onclick = () => ctx.ui.navigate(`/studio/plugins/${ctx.plugin.id}/notes?note=${encodeURIComponent(note.id)}`)
         return button
       }))
     }
-    const unsubscribe = ctx.events.on('notebook.updated', () => { void refresh().catch(() => {}) })
-    ctx.onDispose(() => { alive = false; unsubscribe() })
+    const unsubscribe = ctx.messages.on('notebook.updated', () => { void refresh().catch(() => {}) })
+    ctx.lifecycle.add(() => { alive = false; unsubscribe() })
     await refresh(); return
   }
   if (ctx.view === 'usage') {
@@ -23,8 +23,8 @@ export async function mount(root, ctx) {
     const label = document.createElement('label'); label.textContent = '默认筛选：'
     const select = document.createElement('select')
     for (const [value, text] of [['all', '全部'], ['open', '待完成'], ['done', '已完成']]) { const option = document.createElement('option'); option.value = value; option.textContent = text; select.append(option) }
-    select.value = await ctx.rpc('get-preferences')
-    select.onchange = async () => { await ctx.rpc('set-preferences', { filter: select.value }); ctx.ui.notify('已保存', 'success') }
+    select.value = await ctx.rpc.call('get-preferences')
+    select.onchange = async () => { await ctx.rpc.call('set-preferences', { filter: select.value }); ctx.ui.notify('已保存', 'success') }
     label.append(select); root.append(label); return
   }
   root.innerHTML = `
@@ -65,7 +65,7 @@ export async function mount(root, ctx) {
   $('h2').textContent = ctx.config.title || '工作便签'
   $('[data-profile]').textContent = '全局共享 · 所有账号与 Profile · 页面与 Agent 同步'
   let notes = [], filter = 'all', busy = false, disposed = false, sequence = 0
-  filter = await ctx.rpc('get-preferences')
+  filter = await ctx.rpc.call('get-preferences')
   const origins = { ui:'页面记录', tool:'Agent 工具', command:'聊天命令', workflow:'工作流' }
   function controls() { save.disabled = busy || !input.value.trim(); input.disabled = busy; refresh.disabled = busy; for (const button of list.querySelectorAll('button')) button.disabled = busy }
   function render() {
@@ -75,13 +75,13 @@ export async function mount(root, ctx) {
     list.replaceChildren(...visible.map(note => {
       const row = document.createElement('article'); row.className = `note${note.done ? ' done' : ''}`
       const check = document.createElement('button'); check.type = 'button'; check.className = 'check'; check.textContent = note.done ? '✓' : '○'; check.setAttribute('aria-label', note.done ? '恢复待完成' : '标记完成'); check.setAttribute('aria-pressed', String(note.done))
-      check.onclick = () => mutate(() => ctx.rpc('update', { id:note.id, done:!note.done }), note.done ? '已恢复待完成' : '已标记完成')
+      check.onclick = () => mutate(() => ctx.rpc.call('update', { id:note.id, done:!note.done }), note.done ? '已恢复待完成' : '已标记完成')
       const content = document.createElement('div'); content.className = 'note-content'
       const text = document.createElement('p'); text.className = 'note-text'; text.textContent = note.text
       const meta = document.createElement('p'); meta.className = 'muted'; meta.textContent = `${origins[note.origin] || '便签'} · ${new Date(note.createdAt).toLocaleString('zh-CN', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}`
       content.append(text, meta)
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'delete'; remove.textContent = '删除'; remove.setAttribute('aria-label', '删除便签')
-      remove.onclick = async () => { if (await ctx.ui.confirm('删除这条便签？此操作不可撤销。')) await mutate(() => ctx.rpc('remove', { id:note.id }), '便签已删除') }
+      remove.onclick = async () => { if (await ctx.ui.confirm('删除这条便签？此操作不可撤销。')) await mutate(() => ctx.rpc.call('remove', { id:note.id }), '便签已删除') }
       row.append(check, content, remove); return row
     }))
     if (!visible.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = notes.length ? '这个分类还没有便签。' : '把第一条想法记在这里。'; list.append(empty) }
@@ -89,7 +89,7 @@ export async function mount(root, ctx) {
   }
   async function load() {
     const current = ++sequence
-    try { const value = await ctx.rpc('list'); if (disposed || current !== sequence) return; notes = value; render(); $('[data-status]').textContent = '已与后端同步' }
+    try { const value = await ctx.rpc.call('list'); if (disposed || current !== sequence) return; notes = value; render(); $('[data-status]').textContent = '已与后端同步' }
     catch (error) { if (!disposed && current === sequence) $('[data-status]').textContent = `读取失败：${error.message}`; throw error }
   }
   async function mutate(work, message) {
@@ -101,13 +101,13 @@ export async function mount(root, ctx) {
   }
   function count() { $('[data-count]').textContent = `${input.value.length} / 4000 · Ctrl / ⌘ + Enter 保存`; controls() }
   // Sandboxed views use the RPC bridge instead of native HTML form submission.
-  function submit() { if (!input.value.trim()) return; void mutate(async () => { await ctx.rpc('append', { text:input.value }); input.value = ''; count() }, '便签已保存') }
+  function submit() { if (!input.value.trim()) return; void mutate(async () => { await ctx.rpc.call('append', { text:input.value }); input.value = ''; count() }, '便签已保存') }
   save.onclick = submit
   input.oninput = count
   input.onkeydown = event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); if (!busy) submit() } }
   refresh.onclick = () => { void load().catch(() => {}) }
   for (const button of root.querySelectorAll('[data-filter]')) button.onclick = () => { filter = button.dataset.filter; for (const item of root.querySelectorAll('[data-filter]')) item.setAttribute('aria-pressed', String(item === button)); render() }
-  const unsubscribe = ctx.events.on('notebook.updated', () => { void load().catch(() => {}) })
-  ctx.onDispose(() => { disposed = true; unsubscribe(); save.onclick = input.oninput = input.onkeydown = refresh.onclick = null })
+  const unsubscribe = ctx.messages.on('notebook.updated', () => { void load().catch(() => {}) })
+  ctx.lifecycle.add(() => { disposed = true; unsubscribe(); save.onclick = input.oninput = input.onkeydown = refresh.onclick = null })
   await load().catch(() => {})
 }

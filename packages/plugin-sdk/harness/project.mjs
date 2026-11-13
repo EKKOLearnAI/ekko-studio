@@ -8,7 +8,7 @@ export async function checkProject(root) {
   const config = await readJson(join(root, 'plugin.harness.json'))
   if (config.schemaVersion !== 1 || Object.keys(config).some(key => key !== 'schemaVersion')) throw new Error('Unsupported plugin.harness.json; use schemaVersion 1')
   const plugin = await readJson(join(root, 'plugin.json')), pkg = await readJson(join(root, 'package.json'))
-  if (plugin.version !== pkg.version || plugin.apiVersion !== 1) throw new Error('Package/plugin versions must match and apiVersion must be 1')
+  if (plugin.version !== pkg.version || plugin.apiVersion !== 2) throw new Error('Package/plugin versions must match and apiVersion must be 2')
   if (pkg.scripts?.['harness:check'] !== 'node scripts/plugin-harness.mjs check') throw new Error('Keep the generated harness:check command')
   assertContracts(await readJson(join(root, 'contracts/plugin.json')))
   await checkSdk(join(root, 'sdk'))

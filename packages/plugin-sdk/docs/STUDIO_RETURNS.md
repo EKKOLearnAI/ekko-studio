@@ -19,8 +19,8 @@
 | 前端 ui.selectModel | 宿主返回 `{profile,provider,model,apiMode?}`，关闭或取消返回 null；model 为规范 ID，不含凭证。调用方自行通过 RPC 保存；加载失败或重复打开时 Promise reject。 |
 
 工具 inputSchema 使用 SDK 的 Schema 子集（type/properties/items/required/enum 等）；
-它与项目 harness 的描述型 schema 分开，宿主 Schema 不支持 description/$ref 等任意 JSON Schema 关键字。
-不要把 `contracts/plugin.json` 中带 description 的模型直接当 inputSchema 传给宿主。
+它与项目 harness 的描述型 schema 分开，宿主 Schema 支持 description；不支持 $ref/anyOf 等未声明的 JSON Schema 关键字。
+复用契约模型时，先确认所有关键字都属于 SDK Schema 子集。
 
 ```js
 return { ok: true, content: '已保存', data: { id: 'note-1' } }
@@ -52,11 +52,11 @@ return { ok: false, content: '无法保存', error: '目标记录不存在' }
 标准事件：
 
 ```js
-await ctx.events.emit({ type: 'text.delta', text: '你好' })
-await ctx.events.emit({ type: 'reasoning.summary.delta', text: '正在检查输入' })
-await ctx.events.emit({ type: 'status', phase: 'working', message: '读取文件' })
-await ctx.events.emit({ type: 'tool.started', callId: 'call-1', name: 'read', input: { path: 'a.txt' } })
-await ctx.events.emit({ type: 'tool.completed', callId: 'call-1', result: { text: '内容' } })
+await ctx.output.emit({ type: 'text.delta', text: '你好' })
+await ctx.output.emit({ type: 'reasoning.summary.delta', text: '正在检查输入' })
+await ctx.output.emit({ type: 'status', phase: 'working', message: '读取文件' })
+await ctx.output.emit({ type: 'tool.started', callId: 'call-1', name: 'read', input: { path: 'a.txt' } })
+await ctx.output.emit({ type: 'tool.completed', callId: 'call-1', result: { text: '内容' } })
 // 失败时以同一 callId 结束：tool.failed + error 字符串。
 ```
 
@@ -78,3 +78,11 @@ content 必须是完整回复，增量仅供实时预览，宿主最终只保存
 usage 的 inputTokens/outputTokens 可为 null，cacheReadTokens/costUsd 可选且可为 null；
 填写实际统计或明确 isEstimated，不编造用量。取消应响应 signal 并清理，错误抛出由宿主处理终态。
 宿主生成运行 ID、持久化工具历史/最终消息并发布完成事件，插件无需自行伪造这些宿主事件。
+
+## SDK v2 返回与迁移
+
+资源注册统一使用 lifecycle.add/acquire；业务事件与插件消息分开，Agent 运行事件通过 output.emit 发布。
+state.agentSession 是 Agent 专用的原会话分区，state.plugin 始终是插件全局存储。
+CDP send 返回原始协议 JSON；attach 返回 cursor 和 iframe sessions；events 返回 cursor/oldestCursor/dropped/events。
+每条事件含 sequence/method/params，可带 sessionId/truncated。按返回 cursor 继续轮询；dropped/truncated 时由调用者决定是否重新读取页面状态。
+CDP 模块不返回宿主 token、调试端口或其他标签页的 WebContents 对象。通用 SDK JSON 值仍有 2 MB 限制。

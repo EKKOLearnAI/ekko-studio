@@ -6,7 +6,7 @@ test('manages a plugin and runs an isolated frontend through authenticated API a
   let config: Record<string, unknown> = { title: 'My notes' }
   const calls: any[] = [], stored = new Map<string, unknown>()
   let notified = false
-  const plugin = () => ({ manifest: { id: 'notes', name: 'Notebook', version, apiVersion: 1, client: 'client.mjs', server: 'server.mjs', capabilities: ['ui', 'api.read', 'api.write', 'tools', 'storage.client'],
+  const plugin = () => ({ manifest: { id: 'notes', name: 'Notebook', version, apiVersion: 2, client: 'client.mjs', server: 'server.mjs', permissions: ['ui', 'api.read', 'api.write', 'tools', 'storage.client'],
     views: [{ id: 'home', title: 'Notebook', slot: 'page' }], navigation: { main: [{ viewId: 'home', icon: 'book' }] }, configSchema: { type: 'object', properties: { title: { type: 'string', title: 'Notebook title' }, token: { type: 'string', secret: true, title: 'Token' }, items: { type: 'array', title: 'Items', items: { type: 'string' } } } } },
     source: '/tmp/notes', installedAt: 0, enabled, status: enabled ? 'active' : 'disabled', previousVersion, config, tools: [], commands: [], actions: [] })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
@@ -16,13 +16,13 @@ test('manages a plugin and runs an isolated frontend through authenticated API a
     calls.push({ path: url.pathname, method: req.method(), body, profile: req.headers()['x-hermes-profile'], token: req.headers().authorization })
     if (url.pathname.endsWith('/client')) return route.fulfill({ json: { source: `export async function mount(root,ctx){
       let isolated=false;try{parent.localStorage.getItem('hermes_api_key')}catch{isolated=true}
-      const store=ctx.storage.namespace('projects').namespace('demo');
+      const store=ctx.state.plugin.namespace('projects').namespace('demo');
       await store.set('note', 'from browser'); const stored=await store.get('note'); const keys=await store.keys(); await store.delete('note'); const missing=await store.get('note');
-      const data=await ctx.api.studio.sessions.list(); root.textContent='sessions='+data.sessions.length+' isolated='+isolated+' profile='+ctx.identity.profile+' storage='+stored+' keys='+keys.join(',')+' missing='+(missing===undefined);
+      const data=await ctx.host.sessions.list(); root.textContent='sessions='+data.sessions.length+' isolated='+isolated+' profile='+ctx.identity.profile+' storage='+stored+' keys='+keys.join(',')+' missing='+(missing===undefined);
       let eventCount=0;const onRun=()=>{eventCount++;root.dataset.runEvents=String(eventCount)};ctx.events.on('chat.*',onRun);ctx.events.on('chat.run.started',onRun);
-      const controls=document.createElement('button');controls.textContent='Run SDK controls';controls.onclick=async()=>{await ctx.api.studio.sessions.create({title:'SDK'});await ctx.api.studio.sessions.run('s1','hello');await ctx.api.studio.sessions.stop('s1');await ctx.api.studio.groupChats.send('room','hello');await ctx.api.studio.groupChats.stop('room','Writer');await ctx.api.studio.workflows.stop('flow','run');root.dataset.controls='done'};root.append(controls);
-      const button=document.createElement('button');button.textContent='Save note';button.onclick=async()=>{ const value=await ctx.rpc('save',{text:'hello'});root.append(document.createTextNode(' saved='+value)) };root.append(button);
-      ctx.onDispose(()=>{root.textContent='disposed'})
+      const controls=document.createElement('button');controls.textContent='Run SDK controls';controls.onclick=async()=>{await ctx.host.sessions.create({title:'SDK'});await ctx.host.sessions.run('s1','hello');await ctx.host.sessions.stop('s1');await ctx.host.groupChats.send('room','hello');await ctx.host.groupChats.stop('room','Writer');await ctx.host.workflows.stop('flow','run');root.dataset.controls='done'};root.append(controls);
+      const button=document.createElement('button');button.textContent='Save note';button.onclick=async()=>{ const value=await ctx.rpc.call('save',{text:'hello'});root.append(document.createTextNode(' saved='+value)) };root.append(button);
+      ctx.lifecycle.add(()=>{root.textContent='disposed'})
     }` } })
     if (url.pathname.endsWith('/storage')) {
       expect(body.namespace).toEqual(['projects', 'demo'])

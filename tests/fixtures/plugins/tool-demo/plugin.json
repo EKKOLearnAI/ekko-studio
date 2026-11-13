@@ -2,10 +2,10 @@
   "id": "tool-demo",
   "name": "工具注入演示",
   "version": "1.0.0",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "description": "在 MCP 工具列表中查看和调用一个简单的问候工具。",
   "server": "server.mjs",
-  "capabilities": [
+  "permissions": [
     "tools"
   ],
   "author": {

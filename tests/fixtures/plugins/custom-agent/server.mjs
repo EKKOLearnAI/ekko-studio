@@ -1,15 +1,15 @@
 const version = '1.0.0'
 
 export function apply(ctx) {
-  const settings = identity => ctx.storage.namespace('settings', String(identity.userId), identity.profile)
-  ctx.rpc.register('get-settings', async (_input, run) => ({ prefix: await settings(run.identity).get('prefix') ?? 'Echo' }))
-  ctx.rpc.register('save-settings', async (input, run) => {
+  const settings = identity => ctx.state.plugin.namespace('settings', String(identity.userId), identity.profile)
+  ctx.extensions.rpc.register('get-settings', async (_input, run) => ({ prefix: await settings(run.identity).get('prefix') ?? 'Echo' }))
+  ctx.extensions.rpc.register('save-settings', async (input, run) => {
     if (typeof input?.prefix !== 'string' || input.prefix.length > 100) throw new Error('Prefix must contain at most 100 characters')
     await settings(run.identity).set('prefix', input.prefix)
     return { ok: true }
   })
-  const registration = ctx.agents.register({
-    id: 'assistant', name: 'Custom Agent', vendor: 'Example Team', agentApiVersion: 1,
+  const registration = ctx.extensions.agents.register({
+    id: 'assistant', name: 'Custom Agent', vendor: 'Example Team', agentApiVersion: 2,
     getStatus: async () => ({ installed: true, version, source: 'plugin' }),
     management: {
       settings: () => ({ viewId: 'settings' }),
@@ -19,7 +19,7 @@ export function apply(ctx) {
       global: { listModels: async () => ({ status: 'ready', source: 'sdk', scope: 'builtin', models: [{ id: 'local-echo', name: 'Local echo', isDefault: true }] }) },
       scoped: { protocols: ['chat_completions'] },
     },
-    capabilities: { surfaces: ['chat', 'group-chat', 'workflow', 'api'], streaming: true, resume: false },
+    features: { surfaces: ['chat', 'group-chat', 'workflow', 'api'], streaming: true, resume: false },
     runtime: {
       createSession() {
         return {
@@ -57,7 +57,7 @@ export function apply(ctx) {
               text = result.choices?.[0]?.message?.content
               if (typeof text !== 'string') throw new Error('Model returned no assistant text')
             }
-            await run.events.emit({ type: 'text.delta', text })
+            await run.output.emit({ type: 'text.delta', text })
             return { content: [{ type: 'text', text }], finishReason: 'stop' }
           },
           dispose() {},

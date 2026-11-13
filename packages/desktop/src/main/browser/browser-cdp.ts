@@ -37,6 +37,24 @@ export class CdpTabState {
   network: BrowserNetworkEntry[] = []
   lastPointer?: { x: number; y: number; to_x?: number; to_y?: number }
   onDragIntercepted?: (data: unknown) => void
+  private eventSequence = 0
+  private protocolEvents: Array<{ sequence: number; method: string; params: Record<string, unknown>; sessionId?: string; truncated?: boolean }> = []
+  pluginInfo() {
+    return { cursor: this.eventSequence, sessions: [...this.sessions.values()].map(({ sessionId, targetId }) => ({ sessionId, targetId })) }
+  }
+  async pluginSend(method: string, params: Record<string, unknown>, sessionId?: string): Promise<unknown> {
+    // Browser/Target ownership stays with the host; plugins address only this tab and its known child frames.
+    const domains = new Set(['Page', 'Runtime', 'DOM', 'DOMDebugger', 'CSS', 'Network', 'Fetch', 'Input', 'Emulation', 'Accessibility', 'Performance', 'Profiler', 'HeapProfiler', 'Log', 'Security', 'Audits', 'Overlay', 'Animation', 'Debugger', 'IO'])
+    if (!/^[A-Z][A-Za-z]+\.[a-zA-Z][a-zA-Z0-9]+$/.test(method) || !domains.has(method.split('.')[0])) throw new Error('Unsupported tab CDP method')
+    if (sessionId && !this.sessions.has(sessionId)) throw new Error('CDP frame session is unavailable')
+    return await this.send(method, params, sessionId)
+  }
+  pluginEvents(cursor: number, limit: number) {
+    const oldestCursor = this.protocolEvents[0]?.sequence ?? this.eventSequence + 1
+    const events = this.protocolEvents.filter(event => event.sequence > cursor).slice(0, limit)
+    return { cursor: events.at(-1)?.sequence ?? Math.max(cursor, this.eventSequence), oldestCursor,
+      dropped: cursor < oldestCursor - 1, events }
+  }
   private readonly requests = new Map<string, PendingRequest>()
   private readonly dialogWaiters = new Set<() => void>()
   private listener?: (...args: any[]) => void
@@ -63,6 +81,7 @@ export class CdpTabState {
   /** Forget session-bound state after the debugger detaches; the next attach reconfigures. */
   reset(): void {
     this.configured = false
+    this.protocolEvents = []
     this.sessions.clear()
     this.requests.clear()
     this.dialog = undefined
@@ -128,6 +147,10 @@ export class CdpTabState {
   }
 
   private handle(method: string, params: any, sessionId?: string): void {
+    const encoded = JSON.stringify(params)
+    const truncated = Buffer.byteLength(encoded) > 16_000
+    this.protocolEvents.push({ sequence: ++this.eventSequence, method, params: truncated ? {} : JSON.parse(encoded), ...(sessionId ? { sessionId } : {}), ...(truncated ? { truncated: true } : {}) })
+    if (this.protocolEvents.length > 64) this.protocolEvents.shift()
     switch (method) {
       case 'Target.attachedToTarget': {
         const child = params.sessionId as string

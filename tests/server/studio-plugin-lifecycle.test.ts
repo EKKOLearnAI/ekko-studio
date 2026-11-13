@@ -15,10 +15,10 @@ it('keeps installation, development linking, switching, upgrade failure, uninsta
   const packageAt = async (name: string, version: string, broken = false) => {
     const directory = join(home, name); await mkdir(directory)
     await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'notes', version, type: 'module' }))
-    await writeFile(join(directory, 'plugin.json'), JSON.stringify({ id: 'notes', name: 'Notes', version, apiVersion: 1,
-      repository: 'https://github.com/example/notes', capabilities: [], server: 'server.mjs', configSchema: { type: 'object', properties: { prefix: { type: 'string' } } } }))
+    await writeFile(join(directory, 'plugin.json'), JSON.stringify({ id: 'notes', name: 'Notes', version, apiVersion: 2,
+      repository: 'https://github.com/example/notes', permissions: [], server: 'server.mjs', configSchema: { type: 'object', properties: { prefix: { type: 'string' } } } }))
     await writeFile(join(directory, 'server.mjs'), broken ? 'export function apply() { throw new Error("broken release") }'
-      : `export function apply(ctx) { ctx.rpc.register('version', async () => '${version}') }`)
+      : `export function apply(ctx) { ctx.extensions.rpc.register('version', async () => '${version}') }`)
     return directory
   }
   const project = await packageAt('development', '0.1.6'), release = await packageAt('release', '0.1.4')

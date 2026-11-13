@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { PluginRuntime } from '../../packages/server/src/modules/studio/services/plugins/runtime'
 import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
 import type { AgentSession } from '../../packages/plugin-sdk/src'
-import type { Capability } from '../../packages/plugin-sdk/src'
+import type { PluginPermission } from '../../packages/plugin-sdk/src'
 
 const fixture = vi.hoisted(() => ({ home: '', sessions: new Map<string, any>(), rows: [] as any[], agents: new Map<string, any>(), lease: vi.fn(), revoked: vi.fn(), stop: vi.fn(), usage: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ config: { get appHome() { return fixture.home } } }))
@@ -42,15 +42,15 @@ import { handleAbort } from '../../packages/server/src/modules/studio/services/c
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); fixture.sessions.clear(); fixture.rows = []; fixture.agents.clear(); vi.clearAllMocks() })
-async function setup(run: AgentSession['run'], capabilities: Capability[] = ['agents']) {
+async function setup(run: AgentSession['run'], permissions: PluginPermission[] = ['agents']) {
   fixture.home = await mkdtemp(join(tmpdir(), 'studio-plugin-agent-run-')); cleanup.push(() => rm(fixture.home, { recursive: true, force: true }))
   const workspace = join(fixture.home, 'workspace'); await mkdir(workspace)
-  const owner = new PluginRuntime({ directory: fixture.home, source: fixture.home, enabled: true, config: {}, installedAt: 0, manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, server: 'server.mjs', capabilities } },
+  const owner = new PluginRuntime({ directory: fixture.home, source: fixture.home, enabled: true, config: {}, installedAt: 0, manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 2, server: 'server.mjs', permissions } },
     { userId: 1, profile: 'installer' }, new PluginStore(fixture.home), { authorize() {}, api: async () => null, emit() {}, log() {} })
-  await owner.load({ apply(ctx) { ctx.agents.register({ id: 'assistant', name: 'Assistant', vendor: 'Example', agentApiVersion: 1,
+  await owner.load({ apply(ctx) { ctx.extensions.agents.register({ id: 'assistant', name: 'Assistant', vendor: 'Example', agentApiVersion: 2,
     getStatus: async () => ({ installed: true, version: '1.0.0' }), management: {},
     modes: { global: { listModels: async () => ({ status: 'ready', source: 'sdk', scope: 'builtin', models: [{ id: 'native', name: 'Native' }] }) }, scoped: { protocols: ['chat_completions'] } },
-    capabilities: { surfaces: ['chat', 'group-chat', 'workflow', 'api'], resume: false, streaming: true }, runtime: { createSession: () => ({ run, dispose() {} }) },
+    features: { surfaces: ['chat', 'group-chat', 'workflow', 'api'], resume: false, streaming: true }, runtime: { createSession: () => ({ run, dispose() {} }) },
   }) } }); owner.activate(); cleanup.push(() => owner.close())
   fixture.agents.set('plugin:example/assistant', owner.agents.get('assistant'))
   fixture.lease.mockImplementation(async () => ({ model: { provider: 'custom:test', model: 'selected', apiMode: 'chat_completions', baseUrl: 'http://studio-proxy/v1', token: 'run-proxy-token', contextWindow: 128000, outputLimit: 8192 }, dispose: fixture.revoked }))
@@ -65,7 +65,7 @@ it('runs a global native model with text, image and file inputs and persists eac
   const f = await setup(async (input, run) => {
     received = { input, mode: run.mode, model: run.model, identity: run.identity }
     for (const part of input.input) if (part.type !== 'text') expect((await run.attachments.read(part.assetId)).byteLength).toBeGreaterThan(0)
-    await run.events.emit({ type: 'text.delta', text: 'Native reply' })
+    await run.output.emit({ type: 'text.delta', text: 'Native reply' })
     return { content: [{ type: 'text', text: 'Native reply' }], finishReason: 'stop', usage: { inputTokens: 20, outputTokens: 8, isEstimated: false } }
   })
   const image = join(f.workspace, 'image.png'), file = join(f.workspace, 'file.txt')
@@ -118,8 +118,8 @@ it('stops plugin workflow runs without calling Hermes and saves partial output w
   const started = new Promise<void>(resolve => { ready = resolve })
   const f = await setup(async (_input, run) => {
     captured = run
-    await run.events.emit({ type: 'text.delta', text: 'Partial' })
-    await run.events.emit({ type: 'tool.started', callId: 'pending', name: 'read', input: { path: 'proof.txt' } })
+    await run.output.emit({ type: 'text.delta', text: 'Partial' })
+    await run.output.emit({ type: 'tool.started', callId: 'pending', name: 'read', input: { path: 'proof.txt' } })
     ready(); return new Promise(() => {})
   })
   const pending = f.run({ source: 'workflow' }); await started
@@ -131,7 +131,7 @@ it('stops plugin workflow runs without calling Hermes and saves partial output w
   expect(fixture.rows.filter(message => message.role === 'tool')).toMatchObject([{ tool_call_id: 'pending', tool_name: 'read', finish_reason: 'error', content: 'Tool execution interrupted' }])
   expect(f.events.filter(event => event.event === 'abort.completed')).toHaveLength(1)
   expect(f.events.filter(event => event.event === 'run.completed' || event.event === 'run.failed')).toHaveLength(0)
-  await expect(captured.events.emit({ type: 'text.delta', text: 'late' })).rejects.toThrow()
+  await expect(captured.output.emit({ type: 'text.delta', text: 'late' })).rejects.toThrow()
 })
 
 it('rejects attachments outside the workspace and restores the session to idle', async () => {
@@ -158,10 +158,10 @@ it('rejects a file replaced with a symlink after the run input was authorized', 
 
 it('persists successful and failed tools and restores their results after the session cache is cleared', async () => {
   const engine = vi.fn<AgentSession['run']>().mockImplementationOnce(async (_input, run) => {
-    await run.events.emit({ type: 'tool.started', callId: 'read-1', name: 'read', input: { path: 'proof.txt' } })
-    await run.events.emit({ type: 'tool.completed', callId: 'read-1', result: { text: 'saved evidence' } })
-    await run.events.emit({ type: 'tool.started', callId: 'write-1', name: 'write', input: { path: 'missing/result.txt' } })
-    await run.events.emit({ type: 'tool.failed', callId: 'write-1', error: 'Directory missing' })
+    await run.output.emit({ type: 'tool.started', callId: 'read-1', name: 'read', input: { path: 'proof.txt' } })
+    await run.output.emit({ type: 'tool.completed', callId: 'read-1', result: { text: 'saved evidence' } })
+    await run.output.emit({ type: 'tool.started', callId: 'write-1', name: 'write', input: { path: 'missing/result.txt' } })
+    await run.output.emit({ type: 'tool.failed', callId: 'write-1', error: 'Directory missing' })
     return { content: [{ type: 'text', text: 'Read succeeded; write failed' }], finishReason: 'stop' }
   }).mockResolvedValue({ content: [{ type: 'text', text: 'Resumed' }], finishReason: 'stop' })
   const f = await setup(engine)
@@ -182,7 +182,7 @@ it('persists successful and failed tools and restores their results after the se
 
 it.each(['throw', 'unfinished'] as const)('retains an interrupted tool when the runtime ends with %s', async ending => {
   const f = await setup(async (_input, run) => {
-    await run.events.emit({ type: 'tool.started', callId: 'call-1', name: 'read', input: {} })
+    await run.output.emit({ type: 'tool.started', callId: 'call-1', name: 'read', input: {} })
     if (ending === 'throw') throw new Error('Engine failed')
     return { content: [], finishReason: 'stop' }
   })
@@ -194,8 +194,8 @@ it.each(['throw', 'unfinished'] as const)('retains an interrupted tool when the 
 it('restores JSON tool output without interpreting engine image data as a Studio upload', async () => {
   const output = [{ type: 'image', data: 'AQID', mimeType: 'image/png' }]
   const engine = vi.fn<AgentSession['run']>().mockImplementationOnce(async (_input, run) => {
-    await run.events.emit({ type: 'tool.started', callId: 'image', name: 'screenshot', input: {} })
-    await run.events.emit({ type: 'tool.completed', callId: 'image', result: output })
+    await run.output.emit({ type: 'tool.started', callId: 'image', name: 'screenshot', input: {} })
+    await run.output.emit({ type: 'tool.completed', callId: 'image', result: output })
     return { content: [{ type: 'text', text: 'Done' }], finishReason: 'stop' }
   }).mockResolvedValue({ content: [{ type: 'text', text: 'Resumed' }], finishReason: 'stop' })
   const f = await setup(engine)

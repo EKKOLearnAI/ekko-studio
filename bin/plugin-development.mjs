@@ -20,7 +20,7 @@ export async function scaffoldPlugin(destination, id) {
   await mkdir(target, { recursive: false })
   try {
     await writeFile(join(target, 'package.json'), JSON.stringify({ name: `studio-plugin-${id}`, version: '0.1.0', type: 'module', private: true }, null, 2) + '\n')
-    await writeFile(join(target, 'plugin.json'), JSON.stringify({ id, name: id, version: '0.1.0', apiVersion: 1, server: 'server.mjs', client: 'client.mjs', capabilities: ['ui'], views: [{ id: 'settings', title: id, slot: 'settings' }], navigation: { settings: [{ viewId: 'settings', icon: 'settings' }] } }, null, 2) + '\n')
+    await writeFile(join(target, 'plugin.json'), JSON.stringify({ id, name: id, version: '0.1.0', apiVersion: 2, server: 'server.mjs', client: 'client.mjs', permissions: ['ui'], views: [{ id: 'settings', title: id, slot: 'settings' }], navigation: { settings: [{ viewId: 'settings', icon: 'settings' }] } }, null, 2) + '\n')
     const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
     const sdk = await realpath(join(root, 'packages/plugin-sdk')).catch(() => realpath(join(root, 'dist/plugin-sdk')))
     await mkdir(join(target, 'sdk'))

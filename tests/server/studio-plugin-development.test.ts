@@ -26,7 +26,7 @@ async function fixture() {
   const value = () => manager.runtime(who, 'notes').invoke('rpc', 'read', null, who)
   return { home, source, manager, development, authorize, changed, put, value }
 }
-const code = (value: string) => `export function apply(ctx) { ctx.rpc.register('read', async () => ${JSON.stringify(value)}); ctx.onDispose(() => {}); }`
+const code = (value: string) => `export function apply(ctx) { ctx.extensions.rpc.register('read', async () => ${JSON.stringify(value)}); ctx.lifecycle.add(() => {}); }`
 
 it('loads the standalone OMP project from an arbitrary directory and preserves settings across development reloads', async () => {
   const home = await mkdtemp(join(tmpdir(), 'omp-development-')); cleanups.push(() => rm(home, { recursive: true, force: true }))
@@ -74,18 +74,18 @@ it('creates standalone projects through the shipped CLI, registers canonical dir
 it('lists without executing, loads in the real host, reloads nested modules and retains storage while pruning obsolete builds', async () => {
   const { source, manager, development, value, changed } = await fixture()
   await writeFile(join(source, 'nested.mjs'), 'export const value = "one"')
-  await writeFile(join(source, 'server.mjs'), 'import { value } from "./nested.mjs"; export function apply(ctx) { ctx.rpc.register("read", async () => value) }')
+  await writeFile(join(source, 'server.mjs'), 'import { value } from "./nested.mjs"; export function apply(ctx) { ctx.extensions.rpc.register("read", async () => value) }')
   expect((await development.list()).projects[0]).toMatchObject({ id: 'notes', status: 'registered' })
   await development.tick(); expect(manager.snapshot().plugins).toHaveLength(0)
   await development.start(who, 'notes', 0)
   expect(await value()).toBe('one')
-  await manager.runtime(who, 'notes').context().storage.set('saved', 'keep')
+  await manager.runtime(who, 'notes').context().state.plugin.set('saved', 'keep')
   for (const version of ['two', 'three']) {
     await writeFile(join(source, 'nested.mjs'), `export const value = "${version}"`)
     await development.tick(); await development.tick()
     expect(await value()).toBe(version)
   }
-  expect(await manager.runtime(who, 'notes').context().storage.get('saved')).toBe('keep')
+  expect(await manager.runtime(who, 'notes').context().state.plugin.get('saved')).toBe('keep')
   expect(await readdir(join(manager.store.directory(), 'versions'))).toHaveLength(2)
   expect(changed).toHaveBeenCalledTimes(3)
   expect(manager.poll(who, 0).events.filter(event => event.type === 'plugin.changed')).toHaveLength(3)
@@ -145,7 +145,7 @@ it('unlinks an active project without deleting source, installed files, storage 
   const { source, manager, development, put, value } = await fixture()
   await put(code('installed')); await development.start(who, 'notes', 0)
   const runtime = manager.runtime(who, 'notes'), installed = manager.store.read().records.notes.directory
-  await runtime.context().storage.set('saved', 'keep')
+  await runtime.context().state.plugin.set('saved', 'keep')
   await expect(development.unlink(who, 'notes', 0)).rejects.toMatchObject({ code: 'PLUGIN_REVISION' })
   expect((await development.list()).projects).toHaveLength(1)
   await development.unlink(who, 'notes', manager.snapshot().revision)
@@ -153,7 +153,7 @@ it('unlinks an active project without deleting source, installed files, storage 
   expect(manager.snapshot().plugins[0]).toMatchObject({ status: 'active' })
   expect(manager.snapshot().plugins[0].developmentDirectory).toBeUndefined()
   expect(manager.runtime(who, 'notes')).toBe(runtime)
-  expect(await runtime.context().storage.get('saved')).toBe('keep')
+  expect(await runtime.context().state.plugin.get('saved')).toBe('keep')
   await access(join(source, 'server.mjs')); await access(join(installed, 'server.mjs'))
   await put(code('unlinked change')); await development.tick(); await development.tick()
   expect(await value()).toBe('installed')

@@ -2,10 +2,10 @@
   "id": "session-dashboard",
   "name": "会话看板",
   "version": "1.1.0",
-  "apiVersion": 1,
+  "apiVersion": 2,
   "description": "查看当前 Profile 的真实会话，按 Agent 筛选、搜索标题，一键回到对话。",
   "client": "client.mjs",
-  "capabilities": [
+  "permissions": [
     "ui",
     "api.read"
   ],

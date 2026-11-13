@@ -98,7 +98,7 @@ it('checks committed PR changes and fails if the configured CI base is unavailab
 it('validates declared references and real handler input/output', async () => {
   const { contract } = await fixture()
   const handlers = new Map<string, Function>()
-  registerRpc({ rpc: { register(name: string, fn: Function) { handlers.set(name, fn) } } }, contract, 'save-settings', async () => ({ ok: 'not boolean' }))
+  registerRpc({ extensions: { rpc: { register(name: string, fn: Function) { handlers.set(name, fn) } } } }, contract, 'save-settings', async () => ({ ok: 'not boolean' }))
   await expect(handlers.get('save-settings')!({ greeting: 'hello', compact: false }, {})).rejects.toThrow(/not in enum/)
   await expect(handlers.get('save-settings')!({ greeting: 123, compact: false }, {})).rejects.toThrow(/expected string/)
   contract.storage.settings.model = 'unknown'

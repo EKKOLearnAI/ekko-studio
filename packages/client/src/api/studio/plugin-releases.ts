@@ -45,7 +45,7 @@ export function parsePluginRelease(release: any, canonical: string): PluginRelea
   if (!release) return null
   if (typeof release.id !== 'string' || !/^[a-f0-9]{64}$/.test(release.id) || normalizePluginRepository(release.repository) !== canonical) throw new Error('Invalid plugin catalog response')
   if (!release.version || !release.manifestId || !release.sourceCommit) return null
-  if (typeof release.manifestId !== 'string' || typeof release.version !== 'string' || release.apiVersion !== 1
+  if (typeof release.manifestId !== 'string' || typeof release.version !== 'string' || release.apiVersion !== 2
     || !/^[a-z][a-z0-9._-]{0,79}$/.test(release.manifestId) || release.manifestId.includes('..')
     || ['constructor', 'prototype', '__proto__'].includes(release.manifestId)
     || release.version.length > 128 || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(release.version)

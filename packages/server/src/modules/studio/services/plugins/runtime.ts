@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
-import type { ApiRequest, Capability, Dispose, HookResult, Json, PluginAction, PluginCommand, PluginContext, PluginEvent, PluginHook, PluginIdentity, PluginModule, PluginRecord, PluginTool, RunContext, ToolResult } from '../../contracts/plugins'
-import { createStudioApi } from '../../../../../../plugin-sdk/src'
+import type { ApiRequest, PluginPermission, Dispose, HookResult, Json, PluginAction, PluginCommand, PluginContext, PluginEvent, PluginHook, PluginIdentity, PluginModule, PluginRecord, PluginTool, RunContext, ToolResult } from '../../contracts/plugins'
+import { createHostApi } from '../../../../../../plugin-sdk/src'
 import { PluginEffects } from './effects'
 import { PluginError, message } from './errors'
 import { importPlugin } from './loader.cjs'
@@ -13,6 +13,7 @@ import type { PluginStore } from './store'
 import { PluginAgentRuntime } from './agent-runtime'
 
 export interface PluginPorts {
+  browser?(identity: PluginIdentity, method: string, params: Record<string, Json>, binding: string, signal: AbortSignal): Promise<Json>
   api(identity: PluginIdentity, path: string, options: ApiRequest, signal: AbortSignal): Promise<Json>
   authorize(identity: PluginIdentity): void | Promise<void>
   emit(pluginId: string, event: PluginEvent): void
@@ -34,12 +35,13 @@ export class PluginRuntime {
   readonly hooks = new Map<PluginHook, Hook[]>()
   private schedules = new Map<string, { interval: number; action: string; input: Record<string, Json> }>()
   private calls = new Set<Promise<unknown>>()
+  private readonly browserBinding = randomUUID()
   private started = false
   private invocation = new AsyncLocalStorage<{ identity: PluginIdentity; signal: AbortSignal }>()
   constructor(readonly record: PluginRecord, readonly identity: PluginIdentity, readonly store: PluginStore, readonly ports: PluginPorts) {}
-  require(capability: Capability): void {
+  require(capability: PluginPermission): void {
     this.effects.assertActive()
-    if (!this.record.manifest.capabilities.includes(capability)) throw new PluginError(`Plugin requires ${capability}`, 'PLUGIN_CAPABILITY', 403)
+    if (!this.record.manifest.permissions.includes(capability)) throw new PluginError(`Plugin requires ${capability}`, 'PLUGIN_CAPABILITY', 403)
   }
   private register<T>(map: Map<string, T>, name: string, value: T): Dispose {
     this.effects.assertActive(); identifier(name)
@@ -49,6 +51,7 @@ export class PluginRuntime {
   }
   async load(module?: PluginModule): Promise<void> {
     const m = this.record.manifest
+    if (m.apiVersion !== 2 || !Array.isArray(m.permissions)) throw new PluginError('Plugin requires migration to SDK v2', 'PLUGIN_INCOMPATIBLE', 422)
     if (!m.server) return
     try {
       module ||= await importPlugin(`${pathToFileURL(await pluginFile(this.record.directory, m.server)).href}?instance=${randomUUID()}`)
@@ -80,75 +83,97 @@ export class PluginRuntime {
   }
   private current() { return this.invocation.getStore() || { identity: this.identity, signal: this.effects.controller.signal } }
   private log(level: string, text: string, data?: Json, identity = this.current().identity) { this.ports.log(this.record.manifest.id, identity, level, text.slice(0, 4000), data) }
+  private lifecycle(effects = this.effects) {
+    return { add: effects.add.bind(effects), acquire: effects.acquire.bind(effects) }
+  }
+  private state(identity: PluginIdentity, active: () => void) {
+    const plugin = this.store.storage(this.record.manifest.id, active)
+    return { plugin, user: plugin.namespace('sdk-v2', 'users', String(identity.userId)),
+      profile: plugin.namespace('sdk-v2', 'profiles', String(identity.userId), identity.profile),
+      ...(identity.sessionId ? { session: plugin.namespace('sdk-v2', 'sessions', String(identity.userId), identity.profile, identity.sessionId) } : {}) }
+  }
+  async browserRequest(identity: PluginIdentity, signal: AbortSignal, method: string, params: Record<string, Json>): Promise<Json> {
+    if (!['tabs.list', 'tabs.create', 'tabs.close', 'cdp.attach', 'cdp.send', 'cdp.events', 'lease.release'].includes(method) || !params || typeof params !== 'object' || Array.isArray(params)) throw new PluginError('Invalid plugin browser request')
+    signal.throwIfAborted(); this.require('browser.cdp'); await this.ports.authorize(identity)
+    if (!this.ports.browser) throw new PluginError('Desktop browser is unavailable', 'PLUGIN_UNAVAILABLE', 503)
+    signal.throwIfAborted()
+    let abort!: () => void
+    const cancelled = new Promise<never>((_, reject) => { abort = () => reject(signal.reason); signal.addEventListener('abort', abort, { once: true }) })
+    try {
+      const result = await Promise.race([this.ports.browser(identity, method, json(params) as Record<string, Json>, this.browserBinding, signal), cancelled])
+      signal.throwIfAborted(); this.effects.assertActive()
+      return json(result)
+    } finally { signal.removeEventListener('abort', abort) }
+  }
   context(): PluginContext {
     const self = this
-    const assertActive = () => { this.effects.assertActive(); this.current().signal.throwIfAborted() }
-    const api = createStudioApi(<T = Json>(path: string, options?: ApiRequest) => {
+    const host = createHostApi(<T = Json>(path: string, options?: ApiRequest) => {
       const current = this.current()
       return this.api(current.identity, current.signal).request<T>(path, options)
-    })
+    }, (method, params) => { const current = this.current(); return this.browserRequest(current.identity, current.signal, method, params) })
     return {
       paths: Object.freeze({ dataDir: join(this.store.directory(), 'plugin-data', this.record.manifest.id) }),
-      agents: { register: definition => {
-        this.require('agents')
-        if (this.started) throw new PluginError('Agents must be registered during apply')
-        const agent = new PluginAgentRuntime(this, definition)
-        const remove = this.register(this.agents, definition.id, agent)
-        const close = this.effects.add(() => agent.closeSessions())
-        return { id: agent.id, dispose: async () => { remove(); await close() } }
-      } },
       plugin: Object.freeze(structuredClone(this.record.manifest)), get identity() { return Object.freeze({ ...self.current().identity }) },
       config: Object.freeze(structuredClone(this.record.config)), get signal() { return self.current().signal },
-      storage: this.store.storage(this.record.manifest.id, assertActive),
-      api, models: api.models,
+      get state() { const current = self.current(); return self.state(current.identity, () => { self.effects.assertActive(); current.signal.throwIfAborted() }) }, host,
       log: { info: (text, data) => this.log('info', text, data), warn: (text, data) => this.log('warn', text, data), error: (text, data) => this.log('error', text, data) },
-      tools: { register(tool) { self.require('tools'); validateSchema(tool.inputSchema); return self.register(self.tools, tool.name, tool) } },
-      commands: { register(command) { self.require('commands'); return self.register(self.commands, command.name, command) } },
-      rpc: { register: (name, handler) => this.register(this.rpc, name, handler) },
-      on(type, handler) {
+      extensions: {
+        agents: { register: definition => {
+          this.require('agents')
+          if (this.started) throw new PluginError('Agents must be registered during apply')
+          const agent = new PluginAgentRuntime(this, definition)
+          const remove = this.register(this.agents, definition.id, agent)
+          const close = this.effects.add(() => agent.closeSessions())
+          return { id: agent.id, dispose: async () => { remove(); await close() } }
+        } },
+        tools: { register(tool) { self.require('tools'); validateSchema(tool.inputSchema); return self.register(self.tools, tool.name, tool) } },
+        commands: { register(command) { self.require('commands'); return self.register(self.commands, command.name, command) } },
+        rpc: { register: (name, handler) => this.register(this.rpc, name, handler) },
+        hooks: { register(name, handler, priority = 0) {
+          self.require('hooks')
+          if (!['input.transform', 'context.transform', 'tool.before', 'tool.after'].includes(name) || !Number.isFinite(priority)) throw new PluginError('Unknown hook or priority')
+          const entry = { priority, handler }; const entries = self.hooks.get(name) || []; entries.push(entry); self.hooks.set(name, entries)
+          entries.sort((a, b) => a.priority - b.priority)
+          return self.effects.add(() => { const index = entries.indexOf(entry); if (index >= 0) entries.splice(index, 1) })
+        } },
+        actions: { register(action) { self.require('automation'); validateSchema(action.inputSchema); return self.register(self.actions, action.name, action) } },
+      },
+      events: { on(type, handler) {
         self.require('events')
         const entries = self.listeners.get(type) || new Set<Listener>(); self.listeners.set(type, entries); entries.add(handler)
         return self.effects.add(() => { entries.delete(handler) })
-      },
-      hooks: { register(name, handler, priority = 0) {
-        self.require('hooks')
-        if (!['input.transform', 'context.transform', 'tool.before', 'tool.after'].includes(name) || !Number.isFinite(priority)) throw new PluginError('Unknown hook or priority')
-        const entry = { priority, handler }; const entries = self.hooks.get(name) || []; entries.push(entry); entries.sort((a, b) => a.priority - b.priority); self.hooks.set(name, entries)
-        return self.effects.add(() => { const index = entries.indexOf(entry); if (index >= 0) entries.splice(index, 1) })
       } },
-      automation: {
-        register(action) { self.require('automation'); validateSchema(action.inputSchema); return self.register(self.actions, action.name, action) },
-        every(id, interval, action, input = {}) {
-          self.require('automation')
-          if (self.started) throw new PluginError('Schedules must be registered during apply')
-          if (!Number.isSafeInteger(interval) || interval < 1000 || interval > 2_147_483_647) throw new PluginError('Schedule interval must be 1 second to 24 days')
-          return self.register(self.schedules, id, { interval, action, input })
-        },
-      },
-      effect: acquire => this.effects.acquire(acquire), onDispose: dispose => { this.effects.add(dispose) },
+      scheduler: { every(id, interval, action, input = {}) {
+        self.require('automation')
+        if (self.started) throw new PluginError('Schedules must be registered during apply')
+        if (!Number.isSafeInteger(interval) || interval < 1000 || interval > 2_147_483_647) throw new PluginError('Schedule interval must be 1 second to 24 days')
+        return self.register(self.schedules, id, { interval, action, input })
+      } },
+      lifecycle: this.lifecycle(),
     }
   }
   private api(identity: PluginIdentity, signal: AbortSignal) {
-    return createStudioApi(async <T = Json>(path: string, options: ApiRequest = {}) => {
+    return createHostApi(async <T = Json>(path: string, options: ApiRequest = {}) => {
       signal.throwIfAborted(); this.require(!options.method || options.method === 'GET' ? 'api.read' : 'api.write')
       return await this.ports.api(identity, path, options, signal) as T
-    })
+    }, (method, params) => this.browserRequest(identity, signal, method, params))
   }
-  runContext(identity: PluginIdentity, signal: AbortSignal): RunContext {
+  runContext(identity: PluginIdentity, signal: AbortSignal, effects = this.effects): RunContext {
     const active = () => { this.effects.assertActive(); signal.throwIfAborted() }
     const api = this.api(identity, signal)
     return {
       identity: Object.freeze({ ...identity }), signal,
-      capabilities: Object.freeze(['api', 'events', 'tools', 'commands', 'automation', ...(identity.runtime === 'ekko-agent' ? ['input.transform', 'context.transform', 'tool.before', 'tool.after'] : [])]),
-      api, models: api.models, config: Object.freeze(structuredClone(this.record.config)),
-      storage: this.store.storage(this.record.manifest.id, active),
-      session: { get: () => { active(); if (!identity.sessionId) throw new PluginError('No session in this context'); return api.studio.sessions.get(identity.sessionId) } },
+      permissions: Object.freeze([...this.record.manifest.permissions]),
+      features: Object.freeze(['api', 'events', 'tools', 'commands', 'automation', ...(identity.runtime === 'ekko-agent' ? ['input.transform', 'context.transform', 'tool.before', 'tool.after'] : [])]),
+      host: api, lifecycle: this.lifecycle(effects), config: Object.freeze(structuredClone(this.record.config)),
+      state: this.state(identity, active),
+      session: { get: () => { active(); if (!identity.sessionId) throw new PluginError('No session in this context'); return api.sessions.get(identity.sessionId) } },
       workspace: {
         read: path => { active(); if (!identity.sessionId || !identity.workspace) throw new PluginError('No session workspace in this context'); return api.request(`/api/studio/sessions/${encodeURIComponent(identity.sessionId)}/workspace-file/read`, { query: { path } }) },
         write: (path, content) => { active(); if (!identity.sessionId || !identity.workspace) throw new PluginError('No session workspace in this context'); return api.request(`/api/studio/sessions/${encodeURIComponent(identity.sessionId)}/workspace-file/write`, { method: 'PUT', body: { path, content } }) },
       },
       tools: { call: async (name, input) => { active(); this.require('tools'); if (!this.ports.callTool) throw new PluginError('Tool dispatcher unavailable'); return this.ports.callTool(identity, name, input, signal) } },
-      ui: {
+      messages: {
         notify: (text, level = 'info') => this.emit('ui.notification', { message: text, level }, identity, active),
         emit: (type, data, options) => this.emit(type, data, identity, active, options?.audience),
       },
@@ -157,7 +182,7 @@ export class PluginRuntime {
   private emit(type: string, data: Json, identity: PluginIdentity, active: () => void, audience: 'caller' | 'plugin' = 'caller') {
     active(); this.require('ui')
     if (!['caller', 'plugin'].includes(audience)) throw new PluginError('Invalid event audience')
-    this.ports.emit(this.record.manifest.id, { id: randomUUID(), type, data: json(data), identity, timestamp: Date.now(), audience })
+    this.ports.emit(this.record.manifest.id, { id: randomUUID(), type, channel: 'message', data: json(data), identity, timestamp: Date.now(), audience })
   }
   async invoke(kind: 'rpc' | 'tool' | 'command' | 'action', name: string, input: Json, identity: PluginIdentity, signal?: AbortSignal): Promise<Json> {
     return this.run(identity, signal, async ctx => {
@@ -190,16 +215,17 @@ export class PluginRuntime {
   }
   private async run(identity: PluginIdentity, external: AbortSignal | undefined, work: (ctx: RunContext) => Promise<Json>): Promise<Json> {
     this.effects.assertActive(); await this.ports.authorize(identity)
+    const resources = new PluginEffects()
     const lifetime = new AbortController()
     const signal = AbortSignal.any([lifetime.signal, this.effects.controller.signal, AbortSignal.timeout(120_000), ...(external ? [external] : [])])
     signal.throwIfAborted()
     let rejectAbort: (() => void) | undefined
     const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = () => reject(signal.reason); signal.addEventListener('abort', rejectAbort, { once: true }) })
-    const call = this.invocation.run({ identity, signal }, () => Promise.race([Promise.resolve().then(() => work(this.runContext(identity, signal))), aborted]))
+    const call = this.invocation.run({ identity, signal }, () => Promise.race([Promise.resolve().then(() => work(this.runContext(identity, signal, resources))), aborted]))
     this.calls.add(call)
     try { return json(await call) }
     catch (error) { this.log('error', message(error), undefined, identity); throw error }
-    finally { if (rejectAbort) signal.removeEventListener('abort', rejectAbort); lifetime.abort(); this.calls.delete(call) }
+    finally { if (rejectAbort) signal.removeEventListener('abort', rejectAbort); lifetime.abort(); this.calls.delete(call); await resources.close() }
   }
 
   /** Agent instances use the coordinator's lifetime, independently of ordinary RPC timeouts. */

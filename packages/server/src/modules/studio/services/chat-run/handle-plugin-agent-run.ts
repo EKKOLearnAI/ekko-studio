@@ -37,7 +37,7 @@ export async function handlePluginAgentRun(
   const mode = data.mode || (stored?.agent_mode === 'global' ? 'global' : agent.definition.modes.scoped ? 'scoped' : 'global')
   if (!agent.definition.modes[mode]) throw new Error('Agent does not support the requested mode')
   const surface = identity.surface === 'group_chat' ? 'group-chat' : identity.surface === 'workflow' ? 'workflow' : identity.surface === 'api' ? 'api' : 'chat'
-  if (!agent.definition.capabilities.surfaces.includes(surface)) throw new Error('Agent does not support this surface')
+  if (!agent.definition.features.surfaces.includes(surface)) throw new Error('Agent does not support this surface')
   const state = getOrCreateSession(states, sessionId)
   const controller = new AbortController()
   const runId = identity.runId

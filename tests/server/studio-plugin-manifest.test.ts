@@ -9,7 +9,7 @@ import { manifest } from '../../packages/server/src/modules/studio/services/plug
 import type { PluginManifest } from '../../packages/plugin-sdk/src'
 
 const directories: string[] = []
-const definition: PluginManifest = { id: 'workspace', name: 'Workspace', version: '1.0.0', apiVersion: 1, client: 'client.mjs', capabilities: ['ui'],
+const definition: PluginManifest = { id: 'workspace', name: 'Workspace', version: '1.0.0', apiVersion: 2, client: 'client.mjs', permissions: ['ui'],
   author: { name: 'Author', url: 'https://example.com/author' }, repository: 'https://example.com/repo', keywords: ['chat'], icon: 'icon.png',
   views: [{ id: 'home', title: 'Home', slot: 'workspace', icon: 'grid' }, { id: 'preferences', title: 'Preferences', slot: 'settings' }], workspace: { sidebar: 'rooms' }, navigation: { main: [{ viewId: 'home', icon: 'icon.png' }], settings: [{ viewId: 'preferences', icon: 'settings' }] } }
 async function fixture() {
@@ -66,7 +66,7 @@ it('rejects mismatched package and plugin versions', async () => {
 })
 
 it('accepts an optional dedicated MCP name and rejects invalid or reserved names', () => {
-  const toolPlugin = { ...definition, capabilities: ['ui', 'tools'] }
+  const toolPlugin = { ...definition, permissions: ['ui', 'tools'] }
   expect(manifest(toolPlugin).mcp).toBeUndefined()
   for (const name of ['notebook-tools', 'my_tools', 'ekko-studio-plugins']) {
     expect(manifest({ ...toolPlugin, mcp: { name } }).mcp).toEqual({ name })
@@ -101,7 +101,7 @@ it('generates an installable minimal settings plugin with a single manifest', as
   await promisify(execFile)(process.execPath, [resolve('scripts/create-plugin.mjs'), target, 'my-plugin'])
   const installed = await installPackage(join(root, 'host'), target)
   try {
-    expect(installed.manifest).toMatchObject({ id: 'my-plugin', capabilities: ['ui'], views: [{ id: 'settings', title: 'my-plugin', slot: 'settings' }] })
+    expect(installed.manifest).toMatchObject({ id: 'my-plugin', permissions: ['ui'], views: [{ id: 'settings', title: 'my-plugin', slot: 'settings' }] })
     expect(installed.manifest.workspace).toBeUndefined()
   } finally { await installed.dispose() }
   expect(JSON.parse(await readFile(join(target, 'package.json'), 'utf8')).studioPlugin).toBeUndefined()

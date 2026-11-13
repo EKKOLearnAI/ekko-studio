@@ -1,5 +1,5 @@
 import type { Json, PluginManifest, Schema } from '../../contracts/plugins'
-import { PLUGIN_ICON_PATHS } from '../../contracts/plugins'
+import { PLUGIN_ICON_PATHS, PLUGIN_PERMISSIONS } from '../../contracts/plugins'
 import { PluginError } from './errors'
 import { validateDetails, validateIcon } from './manifest-details'
 
@@ -64,20 +64,20 @@ export function manifest(value: unknown): PluginManifest {
   identifier(m.id, 'plugin id')
   if (typeof m.name !== 'string' || !m.name.trim() || m.name.length > 160) throw new PluginError('Plugin name is required')
   if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(m.version || '')) throw new PluginError('Plugin requires an exact semantic version')
-  if (m.apiVersion !== 1) throw new PluginError('Unsupported plugin API version', 'PLUGIN_INCOMPATIBLE', 422)
+  if ('capabilities' in m) throw new PluginError('SDK v2 uses permissions, not capabilities', 'PLUGIN_INCOMPATIBLE', 422)
+  if (m.apiVersion !== 2) throw new PluginError('Unsupported plugin API version', 'PLUGIN_INCOMPATIBLE', 422)
   validateDetails(m)
   if (!m.server && !m.client) throw new PluginError('Plugin requires a server or client entry')
   for (const entry of [m.server, m.client].filter(Boolean)) {
     if (typeof entry !== 'string' || !/^[\w./-]+\.(?:mjs|js)$/.test(entry) || entry.startsWith('/') || entry.split('/').some(part => part === '..')) throw new PluginError('Plugin entries must be relative, compiled JavaScript files')
   }
-  const capabilities = ['api.read', 'api.write', 'tools', 'commands', 'events', 'hooks', 'automation', 'ui', 'storage.client', 'agents']
-  if (!Array.isArray(m.capabilities) || m.capabilities.some(item => !capabilities.includes(item))) throw new PluginError('Invalid plugin capabilities')
+  if (!Array.isArray(m.permissions) || m.permissions.some(item => !(PLUGIN_PERMISSIONS as readonly string[]).includes(item))) throw new PluginError('Invalid plugin permissions')
   if (m.mcp !== undefined) {
     if (!m.mcp || typeof m.mcp !== 'object' || Array.isArray(m.mcp) || Object.keys(m.mcp).some(key => key !== 'name')
       || typeof m.mcp.name !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(m.mcp.name)
       || ['constructor', 'prototype', '__proto__'].includes(m.mcp.name)) throw new PluginError('Plugin MCP name must start with a lowercase letter and contain up to 64 lowercase letters, digits, underscores or hyphens')
     if (m.mcp.name !== 'ekko-studio-plugins' && /^(?:(?:ekko|hermes)-studio(?:-|$)|hermes-web-ui(?:-|$))/.test(m.mcp.name)) throw new PluginError('Plugin MCP name is reserved by Studio')
-    if (!m.capabilities.includes('tools')) throw new PluginError('Plugin MCP configuration requires the tools capability')
+    if (!m.permissions.includes('tools')) throw new PluginError('Plugin MCP configuration requires the tools capability')
   }
   if (m.configSchema) validateSchema(m.configSchema)
   const ids = new Set<string>()
@@ -91,7 +91,7 @@ export function manifest(value: unknown): PluginManifest {
       if (!view.icon || !Object.hasOwn(PLUGIN_ICON_PATHS, view.icon)) throw new PluginError('Plugin configuration sidebar pages require a named icon')
     } else if (view.icon !== undefined && !Object.hasOwn(PLUGIN_ICON_PATHS, view.icon)) validateIcon(view.icon)
     ids.add(view.id)
-    if (!m.client || !m.capabilities.includes('ui')) throw new PluginError('Views require a client entry and ui capability')
+    if (!m.client || !m.permissions.includes('ui')) throw new PluginError('Views require a client entry and ui capability')
   }
   if (m.navigation !== undefined) {
     if (!m.navigation || typeof m.navigation !== 'object' || Array.isArray(m.navigation) || Object.keys(m.navigation).some(key => !['main', 'settings'].includes(key))) throw new PluginError('Invalid plugin navigation')

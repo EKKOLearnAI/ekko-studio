@@ -87,7 +87,12 @@ export const storage = (ctx: Context) => respond(ctx, async () => {
   const who = identity(ctx), input = body(ctx), runtime = getPluginManager().runtime(who, ctx.params.id)
   runtime.require('storage.client')
   if (input.namespace !== undefined && (!Array.isArray(input.namespace) || input.namespace.length > 16 || input.namespace.some((part: unknown) => typeof part !== 'string' || !part || part.length > 256))) throw new PluginError('Invalid storage namespace')
-  const store = runtime.runContext(who, runtime.effects.controller.signal).storage.namespace(...(input.namespace || []))
+  const scope = input.scope || 'plugin'
+  if (!['plugin', 'user', 'profile', 'session'].includes(scope)) throw new PluginError('Invalid storage scope')
+  const state = runtime.runContext(who, runtime.effects.controller.signal).state
+  const selected = state[scope as 'plugin' | 'user' | 'profile' | 'session']
+  if (!selected) throw new PluginError('Storage scope is unavailable')
+  const store = selected.namespace(...(input.namespace || []))
   switch (input.action) {
     case 'get': { const value = await store.get(input.key); return { present: value !== undefined, value: value ?? null } }
     case 'set': await store.set(input.key, json(input.value)); return { ok: true }
@@ -110,4 +115,15 @@ export const developmentStart = (ctx: Context) => respond(ctx, async () => {
 export const developmentUnlink = (ctx: Context) => respond(ctx, async () => {
   await getPluginDevelopment().unlink(management(ctx), identifier(ctx.params.id), Number(ctx.query.revision))
   return { ok: true }
+})
+
+export const browser = (ctx: Context) => respond(ctx, async () => {
+  const who = identity(ctx), input = body(ctx), runtime = getPluginManager().runtime(who, ctx.params.id)
+  const controller = new AbortController()
+  const close = () => { if (!ctx.res.writableEnded) controller.abort() }
+  ctx.res.once('close', close)
+  try {
+    const signal = AbortSignal.any([runtime.effects.controller.signal, controller.signal])
+    return await runtime.browserRequest(who, signal, input.method, input.params || {})
+  } finally { ctx.res.off('close', close) }
 })

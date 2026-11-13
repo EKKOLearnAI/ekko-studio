@@ -10,7 +10,7 @@ async function setup(page: Page, options: { unavailable?: boolean; ordinary?: bo
     cloudHeaders.push(route.request().headers())
     if (options.unavailable) return route.fulfill({ status: 503, json: { ok: false } })
     return route.fulfill({ headers: { 'Access-Control-Allow-Origin': '*' }, json: { ok: true, data: { list: [{
-      id: 'a'.repeat(64), repository, manifestId: options.differentId ? 'other' : 'notes', version: '1.10.0', apiVersion: 1,
+      id: 'a'.repeat(64), repository, manifestId: options.differentId ? 'other' : 'notes', version: '1.10.0', apiVersion: 2,
       sourceCommit: commit, installSource: `github:example/notes#${commit}`,
     }] } } })
   })
@@ -21,7 +21,7 @@ async function setup(page: Page, options: { unavailable?: boolean; ordinary?: bo
       return route.fulfill({ json: { ok: true } })
     }
     if (url.pathname === '/api/studio/plugins') return route.fulfill({ json: { revision, plugins: [{
-      manifest: { id: 'notes', name: 'Notebook', version, apiVersion: 1, repository, server: 'server.mjs', capabilities: ['tools'] },
+      manifest: { id: 'notes', name: 'Notebook', version, apiVersion: 2, repository, server: 'server.mjs', permissions: ['tools'] },
       source: 'github:example/notes#' + 'c'.repeat(40), installedAt: 0, enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [],
     }] } })
     if (url.pathname.endsWith('/events')) return route.fulfill({ json: { cursor: 0, generation: 'test', events: [] } })

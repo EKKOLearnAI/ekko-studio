@@ -11,17 +11,17 @@ import type { AgentDefinition, AgentRunContext, AgentRunInput, PluginContext } f
 const directories: string[] = [], runtimes: PluginRuntime[] = []
 afterEach(async () => { vi.unstubAllGlobals(); await Promise.all(runtimes.splice(0).map(runtime => runtime.close())); await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))) })
 function definition(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
-  return { id: 'assistant', name: 'Assistant', vendor: 'Example', agentApiVersion: 1,
+  return { id: 'assistant', name: 'Assistant', vendor: 'Example', agentApiVersion: 2,
     getStatus: async () => ({ installed: true, version: '1.0.0' }),
     management: { settings: () => ({ viewId: 'settings' }) },
     modes: { global: { listModels: async () => ({ status: 'ready', source: 'sdk', scope: 'available', models: [{ id: 'native', name: 'Native' }] }) }, scoped: { protocols: ['chat_completions'] } },
-    capabilities: { surfaces: ['chat', 'group-chat', 'workflow', 'api'], streaming: true, resume: false },
+    features: { surfaces: ['chat', 'group-chat', 'workflow', 'api'], streaming: true, resume: false },
     runtime: { createSession: () => ({ run: async input => ({ content: input.input, finishReason: 'stop' }), dispose() {} }) }, ...overrides }
 }
 async function owner(apply: (ctx: PluginContext) => void, permissions: string[] = ['agents', 'api.read']) {
   const directory = await mkdtemp(join(tmpdir(), 'studio-agent-runtime-')); directories.push(directory)
   const ports: PluginPorts = { authorize: vi.fn(), api: vi.fn(async identity => ({ userId: identity.userId })), emit() {}, log() {} }
-  const runtime = new PluginRuntime({ manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, capabilities: permissions as any, server: 'server.mjs',
+  const runtime = new PluginRuntime({ manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 2, permissions: permissions as any, server: 'server.mjs',
     views: [{ id: 'settings', title: 'Settings', slot: 'settings' }] }, enabled: true, directory, installedAt: 0, source: directory, config: {} },
   { userId: 1, profile: 'installer' }, new PluginStore(directory), ports)
   runtimes.push(runtime)
@@ -39,18 +39,18 @@ function call(agent: Awaited<ReturnType<typeof owner>>['agent'], userId = 2, ses
 it('registers namespaced agents and enforces registration permission, schema, and startup rollback', async () => {
   expect(isPluginAgentId('plugin:example/assistant')).toBe(true)
   for (const id of ['codex', 'plugin:../agent', 'plugin:example/constructor', 'plugin:example/a/b']) expect(isPluginAgentId(id)).toBe(false)
-  await expect(owner(ctx => { ctx.agents.register(definition()) }, [])).rejects.toThrow('requires agents')
-  await expect(owner(ctx => { ctx.agents.register(definition({ capabilities: { ...definition().capabilities, images: true } as any })) })).rejects.toThrow('required Agent inputs')
+  await expect(owner(ctx => { ctx.extensions.agents.register(definition()) }, [])).rejects.toThrow('requires agents')
+  await expect(owner(ctx => { ctx.extensions.agents.register(definition({ features: { ...definition().features, images: true } as any })) })).rejects.toThrow('required Agent inputs')
   let runtime: PluginContext | undefined
-  await expect(owner(ctx => { runtime = ctx; ctx.agents.register(definition()); ctx.agents.register(definition()) })).rejects.toThrow('Duplicate')
-  expect(() => runtime!.agents.register(definition())).toThrow('expired')
-  const value = await owner(ctx => { ctx.agents.register(definition()) })
+  await expect(owner(ctx => { runtime = ctx; ctx.extensions.agents.register(definition()); ctx.extensions.agents.register(definition()) })).rejects.toThrow('Duplicate')
+  expect(() => runtime!.extensions.agents.register(definition())).toThrow('expired')
+  const value = await owner(ctx => { ctx.extensions.agents.register(definition()) })
   expect(value.agent.descriptor()).toMatchObject({ id: 'plugin:example/assistant', vendor: 'Example', modes: ['global', 'scoped'], actions: { settings: true } })
-  expect(() => value.runtime.context().agents.register(definition({ id: 'late' }))).toThrow('during apply')
+  expect(() => value.runtime.context().extensions.agents.register(definition({ id: 'late' }))).toThrow('during apply')
 })
 
 it('opens Agent-only settings pages without registering either global navigation entry', async () => {
-  const value = await owner(ctx => { ctx.agents.register(definition({ management: { settings: () => ({ viewId: 'skills' }) } })) })
+  const value = await owner(ctx => { ctx.extensions.agents.register(definition({ management: { settings: () => ({ viewId: 'skills' }) } })) })
   value.runtime.record.manifest.views = [{ id: 'skills', title: 'Skills', slot: 'agent-settings', icon: 'skills' }]
   expect(value.runtime.record.manifest.navigation).toBeUndefined()
   expect(await value.agent.settings({ userId: 2, profile: 'work' })).toEqual({ name: 'studio.pluginAgentSettings', params: { pluginId: 'example', viewId: 'skills' }, query: {} })
@@ -61,32 +61,32 @@ it('binds concurrent runs and root SDK calls to actual users, isolates state, an
   const contexts: AgentRunContext[] = [], factory = vi.fn()
   const value = await owner(ctx => {
     root = ctx
-    ctx.agents.register(definition({ runtime: { createSession: session => {
+    ctx.extensions.agents.register(definition({ runtime: { createSession: session => {
       factory(session.identity.userId)
       return { async run(_input, run) {
         contexts.push(run)
-        await run.storage.set('owner', run.identity.userId)
+        await run.state.agentSession!.set('owner', run.identity.userId)
         await new Promise(resolve => setTimeout(resolve, run.identity.userId === 2 ? 15 : 1))
-        const api = await root.api.request<{ userId: number }>('/api/studio/sessions')
-        return { content: [{ type: 'text', text: `${root.identity.userId}/${api.userId}/${await run.storage.get('owner')}` }], finishReason: 'stop' }
+        const api = await root.host.request<{ userId: number }>('/api/studio/sessions')
+        return { content: [{ type: 'text', text: `${root.identity.userId}/${api.userId}/${await run.state.agentSession!.get('owner')}` }], finishReason: 'stop' }
       }, dispose() {} }
     } } }))
   })
   const [first, second] = await Promise.all([value.agent.execute(call(value.agent, 2)), value.agent.execute(call(value.agent, 3))])
   expect(first.content).toEqual([{ type: 'text', text: '2/2/2' }]); expect(second.content).toEqual([{ type: 'text', text: '3/3/3' }])
-  await expect(contexts[0].events.emit({ type: 'text.delta', text: 'late' })).rejects.toThrow()
+  await expect(contexts[0].output.emit({ type: 'text.delta', text: 'late' })).rejects.toThrow()
   await expect(contexts[0].attachments.read('late')).rejects.toThrow()
-  await expect(contexts[0].storage.get('owner')).rejects.toThrow()
+  await expect(contexts[0].state.agentSession.get('owner')).rejects.toThrow()
   await value.agent.execute(call(value.agent, 2))
   expect(factory).toHaveBeenCalledTimes(2)
 })
 
 it('passes text, images and files without capability flags and cleans per-run resources', async () => {
   const cleanup = vi.fn(), dispose = vi.fn()
-  const value = await owner(ctx => ctx.agents.register(definition({ runtime: { createSession: () => ({ async run(request, run) {
-    run.resources.add(cleanup)
+  const value = await owner(ctx => ctx.extensions.agents.register(definition({ runtime: { createSession: () => ({ async run(request, run) {
+    run.lifecycle.add(cleanup)
     for (const part of request.input) if (part.type !== 'text') { await run.attachments.resolve(part.assetId); await run.attachments.read(part.assetId) }
-    await run.events.emit({ type: 'text.delta', text: 'processed' })
+    await run.output.emit({ type: 'text.delta', text: 'processed' })
     return { content: [{ type: 'text', text: 'processed' }], finishReason: 'stop' }
   }, dispose }) } })))
   const args = call(value.agent)
@@ -100,7 +100,7 @@ it('passes text, images and files without capability flags and cleans per-run re
 it('serializes a session, cancels hung runs, disposes engines, and rejects calls after disable', async () => {
   let started!: () => void
   const ready = new Promise<void>(resolve => { started = resolve }), dispose = vi.fn()
-  const value = await owner(ctx => ctx.agents.register(definition({ runtime: { createSession: () => ({ run: async () => { started(); return new Promise(() => {}) }, dispose }) } })))
+  const value = await owner(ctx => ctx.extensions.agents.register(definition({ runtime: { createSession: () => ({ run: async () => { started(); return new Promise(() => {}) }, dispose }) } })))
   const controller = new AbortController(), pending = value.agent.execute(call(value.agent, 2, 'one', controller.signal))
   const caught = expect(pending).rejects.toThrow()
   await ready
@@ -114,7 +114,7 @@ it('serializes a session, cancels hung runs, disposes engines, and rejects calls
 it('validates management results, owns settings views, and checks exact versions before upgrading', async () => {
   let version = '1.0.0'
   const upgrade = vi.fn(async request => { version = request.version; return { installedVersion: version } })
-  const value = await owner(ctx => ctx.agents.register(definition({ getStatus: async () => ({ installed: true, version }), management: {
+  const value = await owner(ctx => ctx.extensions.agents.register(definition({ getStatus: async () => ({ installed: true, version }), management: {
     settings: () => ({ viewId: 'other-plugin-settings' }),
     checkUpdate: async () => ({ currentVersion: version, latestVersion: '2.0.0', updateAvailable: true }), upgrade,
   } })))
@@ -127,7 +127,7 @@ it('validates management results, owns settings views, and checks exact versions
 
 it('restores versioned native checkpoints only when resume is declared', async () => {
   const resumes: unknown[] = []
-  const value = await owner(ctx => ctx.agents.register(definition({ capabilities: { ...definition().capabilities, resume: true }, runtime: { createSession: context => {
+  const value = await owner(ctx => ctx.extensions.agents.register(definition({ features: { ...definition().features, resume: true }, runtime: { createSession: context => {
     resumes.push(context.resumeState)
     return { run: async () => ({ content: [], finishReason: 'stop' }), checkpoint: async () => ({ schemaVersion: 1, data: { nativeSession: 'native-1' } }), dispose() {} }
   } } })))

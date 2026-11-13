@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { pluginApiPath, publicConfig, mergeSecrets } from '../../packages/server/src/modules/studio/services/plugins/policy'
-import { createStudioApi, type Schema } from '../../packages/plugin-sdk/src'
+import { createHostApi, type Schema } from '../../packages/plugin-sdk/src'
 describe('Plugin API and configuration boundaries', () => {
   const identity = { userId: 1, profile: 'work' }
   it('pins authenticated API requests to the current profile', () => {
@@ -20,8 +20,8 @@ describe('Plugin API and configuration boundaries', () => {
   })
   it('uses existing backend paths for the shared frontend and server SDK', async () => {
     const calls: any[] = []
-    const api = createStudioApi(async (path, options) => { calls.push({ path, options }); return null as any })
-    await api.studio.sessions.get('a/b'); await api.models.respond({ model: 'demo', input: 'hello', stream: true })
+    const api = createHostApi(async (path, options) => { calls.push({ path, options }); return null as any })
+    await api.sessions.get('a/b'); await api.models.respond({ model: 'demo', input: 'hello', stream: true })
     expect(calls).toEqual([{ path: '/api/studio/sessions/a%2Fb', options: undefined }, { path: '/api/ekko-studio/models/v1/responses', options: { method: 'POST', body: { model: 'demo', input: 'hello', stream: false } } }])
   })
 })

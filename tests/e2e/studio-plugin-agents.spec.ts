@@ -5,7 +5,7 @@ import { securityHeaders } from '../../packages/server/src/modules/studio/middle
 test('manages a plugin Agent, updates dynamic choices, and edits its own isolated settings page', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   let version = '1.0.0', prefix = 'Echo'
-  const plugin = { manifest: { id: 'custom-agent', name: 'Custom Agent Example', version: '1.0.0', apiVersion: 1, client: 'client.mjs', capabilities: ['agents', 'ui'], views: [{ id: 'settings', title: 'Settings', slot: 'settings' }] }, config: {}, status: 'active', enabled: true, tools: [], commands: [], actions: [] }
+  const plugin = { manifest: { id: 'custom-agent', name: 'Custom Agent Example', version: '1.0.0', apiVersion: 2, client: 'client.mjs', permissions: ['agents', 'ui'], views: [{ id: 'settings', title: 'Settings', slot: 'settings' }] }, config: {}, status: 'active', enabled: true, tools: [], commands: [], actions: [] }
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname)
     if (path === '/api/auth/me') return route.fulfill({ json: { user: { id: 1, username: 'Tester', role: 'super_admin' } } })

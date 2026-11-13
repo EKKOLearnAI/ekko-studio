@@ -4,11 +4,11 @@ import { apply } from '../server.mjs'
 
 function setup() {
   const methods = new Map(), records = new Map()
-  apply({ rpc: { register(name, fn) { methods.set(name, fn); return () => methods.delete(name) } }, storage: {
+  apply({ extensions: { rpc: { register(name, fn) { methods.set(name, fn); return () => methods.delete(name) } } }, state: { plugin: {
     namespace(...parts) { const key = JSON.stringify(parts); return {
       async get(name) { return records.get(key + name) }, async set(name, value) { records.set(key + name, value) },
     } },
-  } })
+  } } })
   const call = (name, input, userId = 1) => methods.get(name)(input, { identity: { userId, profile: 'default' } })
   return { call, records }
 }
