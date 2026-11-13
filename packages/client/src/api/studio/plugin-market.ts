@@ -39,6 +39,18 @@ function marketPlugin(value: any): MarketPlugin {
   }
 }
 
+/** Fetch the published count without downloading catalog entries. */
+export async function fetchPluginMarketCount(signal: AbortSignal): Promise<number> {
+  const response = await fetch(`${PLUGIN_CATALOG_URL}/count`, {
+    credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', headers: { Accept: 'application/json' },
+    signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+  })
+  if (!response.ok) throw new Error('Plugin catalog count unavailable')
+  const body = await response.json(), total = body?.data?.total
+  if (body?.ok !== true || !Number.isSafeInteger(total) || total < 0) throw new Error('Invalid plugin catalog count response')
+  return total
+}
+
 /** Load every page before filtering, so categories/search include the entire directory. */
 export async function fetchPluginMarket(signal: AbortSignal): Promise<MarketPlugin[]> {
   const entries = new Map<string, MarketPlugin>()

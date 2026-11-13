@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { fetchPluginMarket } from '../../packages/client/src/api/studio/plugin-market'
+import { fetchPluginMarket, fetchPluginMarketCount } from '../../packages/client/src/api/studio/plugin-market'
 import { installedMarketPlugin, matchesPluginCategory, matchesPluginSearch } from '../../packages/client/src/plugins/catalog'
 import type { InstalledPlugin } from '../../packages/client/src/api/studio/plugins'
 
@@ -8,6 +8,28 @@ const row = (index = 1) => ({ id: index.toString(16).padStart(64, '0'), name: `P
   permissions: ['commands', 'tools'], sourceCommit: 'b'.repeat(40), installSource: `github:example/plugin-${index}#${'b'.repeat(40)}` })
 const page = (list: unknown[], total = list.length, current = 1) => Response.json({ ok: true, data: { list, total, page: current, pageSize: 100 } })
 afterEach(() => vi.unstubAllGlobals())
+
+it.each([0, 123])('fetches the published count without entries or credentials: %s', async total => {
+  const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true, data: { total } }))
+  vi.stubGlobal('fetch', fetch)
+  expect(await fetchPluginMarketCount(new AbortController().signal)).toBe(total)
+  expect(fetch).toHaveBeenCalledOnce()
+  const [url, options] = fetch.mock.calls[0]
+  expect(new URL(url).pathname).toBe('/api/studio/plugins/count')
+  expect(options).toMatchObject({ credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', headers: { Accept: 'application/json' } })
+})
+it.each([{ ok: false, data: { total: 1 } }, { ok: true, data: {} }, ...[-1, 0.5, '12', null, Number.MAX_SAFE_INTEGER + 1].map(total => ({ ok: true, data: { total } }))])('rejects an invalid catalog count %j', async body => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(body)))
+  await expect(fetchPluginMarketCount(new AbortController().signal)).rejects.toThrow('Invalid')
+})
+it('handles unavailable counts and propagates cancellation', async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(new Response('', { status: 503 }))
+  vi.stubGlobal('fetch', fetch)
+  await expect(fetchPluginMarketCount(new AbortController().signal)).rejects.toThrow('unavailable')
+  fetch.mockImplementation(async (_, options) => { options.signal.throwIfAborted(); return Response.json({}) })
+  const controller = new AbortController(); controller.abort()
+  await expect(fetchPluginMarketCount(controller.signal)).rejects.toThrow()
+})
 
 it('keeps the plugin center usable when an installed package has invalid permission metadata', () => {
   expect(matchesPluginCategory(undefined, 'all')).toBe(true)

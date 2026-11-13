@@ -7,16 +7,21 @@ function published(index: number, extra: Record<string, unknown> = {}) {
     author: { name: `Publisher ${index}` }, repositoryStars: 1234,
     permissions: ['tools'], sourceCommit: 'b'.repeat(40), installSource: `github:example/plugin-${index}#${'b'.repeat(40)}`, ...extra }
 }
-async function setup(page: Page, options: { ordinary?: boolean; unavailable?: boolean; entries?: any[] } = {}) {
+async function setup(page: Page, options: { ordinary?: boolean; unavailable?: boolean; countUnavailable?: boolean; entries?: any[] } = {}) {
   const local = { manifest: { id: 'plugin-1', name: 'Installed commands', description: 'Disabled, but still a chat-command plugin', version: '2.0.0', apiVersion: 1,
     repository: 'https://github.com/example/plugin-1', author: { name: 'Local Maintainer' }, permissions: ['commands', 'tools'] }, source: 'github:example/plugin-1#' + 'c'.repeat(40), installedAt: 0,
     enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [] }
-  const state = { plugins: [local], revision: 1, unavailable: Boolean(options.unavailable), entries: options.entries || [published(1), published(2, { name: 'Agent extension', permissions: ['agents', 'ui'] })] }
-  const installs: any[] = [], marketRequests: URL[] = [], cloudHeaders: Record<string, string>[] = []
+  const state = { plugins: [local], revision: 1, unavailable: Boolean(options.unavailable), countUnavailable: Boolean(options.countUnavailable), entries: options.entries || [published(1), published(2, { name: 'Agent extension', permissions: ['agents', 'ui'] })] }
+  const installs: any[] = [], marketRequests: URL[] = [], countRequests: URL[] = [], cloudHeaders: Record<string, string>[] = []
   if (options.ordinary) await page.addInitScript(() => localStorage.setItem('plugin_fixture_account', JSON.stringify({ sub: '2', role: 'user' })))
   await page.context().addCookies([{ name: 'cloud_cookie', value: 'private', url: 'https://api.ekkostudio.xyz' }])
   await page.route(url => url.hostname === 'api.ekkostudio.xyz', async route => {
     const url = new URL(route.request().url()); cloudHeaders.push(await route.request().allHeaders())
+    if (url.pathname === '/api/studio/plugins/count') {
+      countRequests.push(url)
+      return state.unavailable || state.countUnavailable ? route.fulfill({ status: 503, json: {} })
+        : route.fulfill({ json: { ok: true, data: { total: state.entries.length } } })
+    }
     if (url.searchParams.has('repository')) return state.unavailable ? route.fulfill({ status: 503, json: {} })
       : route.fulfill({ json: { ok: true, data: { list: state.entries.filter(entry => entry.repository === url.searchParams.get('repository')) } } })
     marketRequests.push(url)
@@ -45,17 +50,18 @@ async function setup(page: Page, options: { ordinary?: boolean; unavailable?: bo
   const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugins.ts').replaceAll('\\', '/').replace(/^\//, '')
   await page.route('**/__plugin_market__', route => route.fulfill({ contentType: 'text/html', body: `<div id="app"></div><script type="module" src="${entry}"></script>` }))
   await page.goto('/__plugin_market__')
-  return { state, installs, marketRequests, cloudHeaders }
+  return { state, installs, marketRequests, countRequests, cloudHeaders }
 }
 
 test('defaults to installed plugins, filters the full market and installs an exact release after confirmation', async ({ page }, testInfo) => {
   const entries = [...Array.from({ length: 100 }, (_, i) => published(i + 1)), published(101, { name: 'Last-page Agent', permissions: ['agents', 'ui'] })]
-  const { installs, marketRequests, cloudHeaders } = await setup(page, { entries })
+  const { installs, marketRequests, countRequests, cloudHeaders } = await setup(page, { entries })
   await expect(page.getByRole('tab').nth(0)).toContainText('已安装')
-  await expect(page.getByRole('tab').nth(1)).toHaveText('全部')
+  await expect(page.getByRole('tab').nth(1)).toHaveText('全部 101')
   await expect(page.getByRole('tab', { name: /已安装/ })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByTestId('plugin-card-plugin-1')).toBeVisible()
   expect(marketRequests).toHaveLength(0)
+  expect(countRequests).toHaveLength(1)
   await page.getByRole('button', { name: /^聊天命令/ }).click()
   await expect(page.getByTestId('plugin-card-plugin-1')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('installed-default.png'), fullPage: true })
@@ -95,6 +101,30 @@ test('defaults to installed plugins, filters the full market and installs an exa
   await page.getByRole('tab', { name: /^已安装/ }).click()
   await expect(page.getByTestId('plugin-card-plugin-101')).toBeVisible()
   for (const headers of cloudHeaders) for (const key of ['authorization', 'cookie', 'x-hermes-profile', 'referer']) expect(headers[key]).toBeUndefined()
+})
+
+test('shows zero on entry and refreshes the count without opening All or loading market entries', async ({ page }) => {
+  const { state, marketRequests, countRequests } = await setup(page, { entries: [] })
+  const all = page.getByRole('tab', { name: /^全部/ })
+  await expect(all).toHaveText('全部 0')
+  state.entries = [published(1), published(2)]
+  await page.getByRole('button', { name: '刷新', exact: true }).click()
+  await expect(all).toHaveText('全部 2')
+  expect(countRequests).toHaveLength(2)
+  expect(marketRequests).toHaveLength(0)
+  await expect(page.getByRole('tab', { name: /^已安装/ })).toHaveAttribute('aria-selected', 'true')
+})
+
+test('can browse All when the count endpoint is unavailable and recovers its count from the list', async ({ page }) => {
+  const { countRequests, marketRequests } = await setup(page, { countUnavailable: true })
+  await expect.poll(() => countRequests.length).toBe(1)
+  const all = page.getByRole('tab', { name: /^全部/ })
+  await expect(all).toHaveText('全部')
+  await expect(page.getByTestId('plugin-card-plugin-1')).toBeVisible()
+  expect(marketRequests).toHaveLength(0)
+  await all.click()
+  await expect(page.getByTestId('market-plugin-plugin-2')).toBeVisible()
+  await expect(all).toHaveText('全部 2')
 })
 
 test('shows and filters live installation statuses in All without confusing another repository', async ({ page }, testInfo) => {
