@@ -1917,12 +1917,36 @@ if (browserRelayOperation) {
     type: 'object', required: ['method', 'client_id'], additionalProperties: false,
     properties: {
       client_id: { type: 'string', minLength: 1, maxLength: 200, description: 'Stable browser MCP process identity bound with authenticated token/context to the original Desktop.' },
-      method: { type: 'string', enum: ['state', 'tabs.list', 'tabs.create', 'tabs.activate', 'tabs.close', 'lease.release', 'navigate', 'navigation.action', 'snapshot', 'text.read', 'interact', 'interact.batch', 'screenshot', 'console.read', 'console.clear'] },
+      method: { type: 'string', enum: ['cdp.attach', 'cdp.send', 'cdp.events', 'state', 'tabs.list', 'tabs.create', 'tabs.activate', 'tabs.close', 'lease.release', 'navigate', 'navigation.action', 'snapshot', 'text.read', 'interact', 'interact.batch', 'screenshot', 'console.read', 'console.clear'] },
       params: { type: 'object', additionalProperties: true },
     },
   } } } }
   browserRelayOperation.responses['403'] = { description: 'Identified Studio account required' }
   browserRelayOperation.responses['409'] = { description: 'Unavailable, ambiguous, disconnected, revoked or invalid browser operation' }
+}
+
+const pluginBrowserOperation = openapi.paths['/api/studio/plugins/{id}/browser']?.post
+if (pluginBrowserOperation) {
+  pluginBrowserOperation.summary = 'Call the plugin SDK v2 Desktop browser module'
+  pluginBrowserOperation.description = 'Requires an enabled SDK v2 plugin declaring browser.cdp. Uses the actual caller account/Profile and the original authorized Desktop binding. CDP is scoped to a tab and known iframe sessions; browser-process Browser/Target commands are unavailable. Existing control leases, user takeover, cancellation and remote-control revocation apply. No Studio authentication token or debugging endpoint is returned.'
+  pluginBrowserOperation.requestBody = { required: true, content: { 'application/json': { schema: {
+    type: 'object', required: ['method'], additionalProperties: false,
+    properties: {
+      method: { type: 'string', enum: ['tabs.list', 'tabs.create', 'tabs.close', 'cdp.attach', 'cdp.send', 'cdp.events', 'lease.release'] },
+      sessionId: { type: 'string', description: 'Optional accessible Studio session; never a CDP frame session.' },
+      params: { type: 'object', properties: {
+        tab_id: { type: 'string' }, url: { type: 'string' }, method: { type: 'string', description: 'Tab CDP Domain.command, such as Runtime.evaluate.' },
+        params: { type: 'object', additionalProperties: true }, session_id: { type: 'string', description: 'Known child-frame CDP session returned by attach.' },
+        cursor: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 64, default: 32 },
+      } },
+    },
+  } } } }
+  pluginBrowserOperation.responses = {
+    '200': { description: 'The method result directly: tabs, attach cursor/sessions, raw CDP result, paginated events or release status.' },
+    '401': { $ref: '#/components/responses/Unauthorized' },
+    '403': { description: 'Missing browser.cdp permission or account/Profile access.' },
+    '409': { description: 'Plugin/Desktop unavailable, original target lost, tab owned by another client or control revoked.' },
+  }
 }
 
 // Durable session goals are maintained by the current conversation model, separate from run plans.
