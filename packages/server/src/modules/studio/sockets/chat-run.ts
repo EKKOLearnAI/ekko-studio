@@ -1027,6 +1027,13 @@ export class ChatRunSocket {
       return sessionProfile
     }
 
+    // Per-session controls (stop, approval/clarify/location/health responses, queue
+    // edits) are not profile-scoped writes: a connection may control any session whose
+    // profile the user can access. The UI switches profiles without reconnecting
+    // (#1884), so pinning these to the handshake profile made every control silently
+    // no-op — the same reason requireSocketSessionReadAccess was relaxed for reads.
+    const requireSocketSessionControlAccess = (sessionId: string) => resolveRunProfile(sessionId)
+
     socket.on('run', async (data: {
       push_snapshot?: unknown
       input: string | ContentBlock[]
@@ -1292,7 +1299,7 @@ export class ChatRunSocket {
     socket.on('insert_queued_run', (data: { session_id?: string; queue_id?: string }) => {
       if (!data.session_id || !data.queue_id) return
       try {
-        requireSocketSessionAccess(data.session_id)
+        requireSocketSessionControlAccess(data.session_id)
       } catch {
         return
       }
@@ -1302,7 +1309,7 @@ export class ChatRunSocket {
     socket.on('cancel_queued_run', (data: { session_id?: string; queue_id?: string }) => {
       if (!data.session_id || !data.queue_id) return
       try {
-        requireSocketSessionAccess(data.session_id)
+        requireSocketSessionControlAccess(data.session_id)
       } catch {
         return
       }
@@ -1369,8 +1376,9 @@ export class ChatRunSocket {
         const sessionId = data.session_id
         let profile: string
         try {
-          profile = requireSocketSessionAccess(sessionId)
-        } catch {
+          profile = requireSocketSessionControlAccess(sessionId)
+        } catch (err) {
+          logger.warn(err, '[chat-run-socket][abort] session not controllable for %s', sessionId)
           return
         }
         this.finishTaskPlanRun(sessionId, 'abort.completed')
@@ -1399,7 +1407,7 @@ export class ChatRunSocket {
           this.syncPersonInteraction(socketUser!.id)
           return
         }
-        requireSocketSessionAccess(data.session_id)
+        requireSocketSessionControlAccess(data.session_id)
       } catch (err) {
         socket.emit('approval.resolved', {
           event: 'approval.resolved',
@@ -1487,7 +1495,7 @@ export class ChatRunSocket {
           this.syncPersonInteraction(socketUser!.id)
           return
         }
-        requireSocketSessionAccess(data.session_id)
+        requireSocketSessionControlAccess(data.session_id)
       } catch (err) {
         socket.emit('clarify.resolved', {
           event: 'clarify.resolved',
@@ -1586,7 +1594,7 @@ export class ChatRunSocket {
     }) => {
       if (!data.session_id || !data.location_request_id) return
       try {
-        requireSocketSessionAccess(data.session_id)
+        requireSocketSessionControlAccess(data.session_id)
       } catch (err) {
         socket.emit('location.resolved', {
           event: 'location.resolved',
@@ -1634,7 +1642,7 @@ export class ChatRunSocket {
       const idKey = capability === 'reminder' ? 'reminder_request_id' : 'calendar_request_id'
       if (!data.session_id || !requestId) return
       try {
-        requireSocketSessionAccess(data.session_id)
+        requireSocketSessionControlAccess(data.session_id)
       } catch (err) {
         socket.emit(resolvedEvent, {
           event: resolvedEvent,
@@ -1681,7 +1689,7 @@ export class ChatRunSocket {
     }) => {
       if (!data.session_id || !data.health_request_id) return
       try {
-        requireSocketSessionAccess(data.session_id)
+        requireSocketSessionControlAccess(data.session_id)
       } catch (err) {
         socket.emit('health.resolved', { event: 'health.resolved', session_id: data.session_id, health_request_id: data.health_request_id, resolved: false, error: err instanceof Error ? err.message : String(err) })
         return
