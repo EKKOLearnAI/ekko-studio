@@ -1123,6 +1123,19 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      cronTitle: 'اكتملت المهمة المجدولة «{name}»',
+      cronFailedTitle: 'فشلت المهمة المجدولة «{name}»',
+      outputUnavailable: 'النتيجة غير متاحة لبيئة التشغيل هذه (مهمة نصية فقط)؛ الحالة فقط.',
+      receiptUnavailable: 'لم يتوفر إيصال النتيجة الدقيق لهذا التشغيل؛ الحالة فقط.',
+      unknown: 'النتيجة غير معروفة. لن يعيد Studio تشغيل هذه المهمة.',
+      truncated: "تم اقتطاع النتيجة للعرض.",
+      scriptReportTitle: "أبلغ البرنامج النصي “{name}”",
+      scriptReportFailedTitle: "فشل البرنامج النصي “{name}”",
+      scriptReportProvenance: "تقرير استدعاء برنامج نصي من مُغلِّف Ekko (ليس إيصال تنفيذ أصلي من Hermes).",
+      scriptReportUnavailable: "لم يتم التقاط مخرجات البرنامج النصي لهذا الاستدعاء؛ الحالة فقط.",
+      scriptReportUnknown: "تقرير غير مكتمل: تمت مقاطعة استدعاء البرنامج النصي. النتيجة غير معروفة؛ لن يعيد Studio تشغيله.",
+    },
     selectMessages: "تحديد الرسائل",
     messagesSelected: "تم تحديد {count}",
     deleteSelectedMessages: "حذف المحدد",

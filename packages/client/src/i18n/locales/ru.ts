@@ -1036,6 +1036,19 @@ export default {
 
 
   chat: {
+    sessionNotice: {
+      cronTitle: 'Запланированная задача «{name}» завершена',
+      cronFailedTitle: 'Запланированная задача «{name}» завершилась ошибкой',
+      outputUnavailable: 'Для этой среды результат недоступен (только скрипт); только статус.',
+      receiptUnavailable: 'Точная квитанция результата этого запуска недоступна; только статус.',
+      unknown: 'Результат неизвестен. Studio не будет перезапускать эту задачу.',
+      truncated: "Результат сокращён для отображения.",
+      scriptReportTitle: "Скрипт «{name}» отчитался",
+      scriptReportFailedTitle: "Скрипт «{name}» завершился с ошибкой",
+      scriptReportProvenance: "Отчёт о вызове скрипта от обёртки Ekko (не нативная квитанция выполнения Hermes).",
+      scriptReportUnavailable: "Вывод скрипта для этого вызова не получен; только статус.",
+      scriptReportUnknown: "Отчёт неполный: вызов скрипта был прерван. Результат неизвестен; Studio не будет запускать его повторно.",
+    },
     selectMessages: "Выбрать сообщения",
     messagesSelected: "Выбрано: {count}",
     deleteSelectedMessages: "Удалить выбранное",

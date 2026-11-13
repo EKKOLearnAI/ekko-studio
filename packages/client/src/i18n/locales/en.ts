@@ -1130,6 +1130,19 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      cronTitle: 'Scheduled task “{name}” finished',
+      cronFailedTitle: 'Scheduled task “{name}” failed',
+      outputUnavailable: 'Result unavailable for this runtime (script-only job); status only.',
+      receiptUnavailable: 'This run\'s exact result receipt was not available; status only.',
+      unknown: 'Outcome unknown. Studio will not re-run this job.',
+      truncated: "Result truncated for display.",
+      scriptReportTitle: "Script “{name}” reported",
+      scriptReportFailedTitle: "Script “{name}” failed",
+      scriptReportProvenance: "Script invocation report from the Ekko wrapper (not a native Hermes execution receipt).",
+      scriptReportUnavailable: "Script output was not captured for this invocation; status only.",
+      scriptReportUnknown: "Report incomplete: the script invocation was interrupted. Outcome unknown; Studio will not re-run it.",
+    },
     selectMessages: "Select messages",
     messagesSelected: "{count} selected",
     deleteSelectedMessages: "Delete selected",

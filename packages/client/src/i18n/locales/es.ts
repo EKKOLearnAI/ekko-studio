@@ -1109,6 +1109,19 @@ export default {
 
   // Chat
   chat: {
+    sessionNotice: {
+      cronTitle: 'La tarea programada «{name}» terminó',
+      cronFailedTitle: 'La tarea programada «{name}» falló',
+      outputUnavailable: 'Resultado no disponible para este entorno (solo script); solo estado.',
+      receiptUnavailable: 'El comprobante exacto de esta ejecución no estaba disponible; solo estado.',
+      unknown: 'Resultado desconocido. Studio no volverá a ejecutar esta tarea.',
+      truncated: "Resultado truncado para mostrarlo.",
+      scriptReportTitle: "El script “{name}” informó",
+      scriptReportFailedTitle: "El script “{name}” falló",
+      scriptReportProvenance: "Informe de invocación del script del contenedor de Ekko (no es un recibo de ejecución nativo de Hermes).",
+      scriptReportUnavailable: "No se capturó la salida del script en esta invocación; solo estado.",
+      scriptReportUnknown: "Informe incompleto: la invocación del script se interrumpió. Resultado desconocido; Studio no la volverá a ejecutar.",
+    },
     selectMessages: "Seleccionar mensajes",
     messagesSelected: "{count} seleccionados",
     deleteSelectedMessages: "Eliminar selección",
