@@ -1095,7 +1095,8 @@ export default {
   subagent: {
     title: '백그라운드 작업', noGoal: '제목 없는 백그라운드 작업', open: '백그라운드 작업 실시간 출력 열기', close: '백그라운드 작업 출력 닫기',
     waiting: '실시간 출력을 기다리는 중…', tool: '도구', tools: '도구 호출 {count}회', tokens: '입력 {input} · 출력 {output}',
-    started: '시작됨', running: '실행 중', completed: '완료됨', failed: '실패함', cancelled: '취소됨', interrupted: '중단됨',
+    started: '시작됨', running: '실행 중', completed: '완료됨', failed: '실패함', cancelled: '취소됨', interrupted: '중단됨',    summaryTotal: 'background subtasks', resultRecycled: 'Result recycled', autoRecycle: 'Results auto-recycled', noResult: 'No result summary', expandOutput: 'Expand full output', collapseOutput: 'Collapse full output', batch: 'Batch {n}', abort: 'Abort',
+
   },
 
   realtimeVoice: {
