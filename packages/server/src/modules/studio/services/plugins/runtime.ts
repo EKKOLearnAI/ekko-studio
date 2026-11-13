@@ -11,6 +11,7 @@ import { pluginFile } from './installer'
 import { identifier, json, validate, validateSchema } from './schema'
 import type { PluginStore } from './store'
 import { PluginAgentRuntime } from './agent-runtime'
+import { toolResult, hookResult } from './agent-contracts'
 
 export interface PluginPorts {
   sessions?(identity: PluginIdentity, sessionId: string, listener: SessionListener, signal: AbortSignal, kind: 'chat' | 'bot'): Promise<HostSession>
@@ -183,6 +184,7 @@ export class PluginRuntime {
   private api(identity: PluginIdentity, signal: AbortSignal) {
     return createHostApi(async <T = Json>(path: string, options: ApiRequest = {}) => {
       signal.throwIfAborted(); this.require(!options.method || options.method === 'GET' ? 'api.read' : 'api.write')
+      if (options.body !== undefined) json(options.body)
       return await this.ports.api(identity, path, options, signal) as T
     }, (method, params) => this.browserRequest(identity, signal, method, params),
     (id, listener, kind) => this.connectSession(identity, signal, id, listener, kind))
@@ -214,13 +216,15 @@ export class PluginRuntime {
     this.ports.emit(this.record.manifest.id, { id: randomUUID(), type, channel: 'message', data: json(data), identity, timestamp: Date.now(), audience })
   }
   async invoke(kind: 'rpc' | 'tool' | 'command' | 'action', name: string, input: Json, identity: PluginIdentity, signal?: AbortSignal): Promise<Json> {
+    input = json(input)
     return this.run(identity, signal, async ctx => {
       if (kind === 'rpc') { const handler = this.rpc.get(name); if (!handler) throw new PluginError('Unknown plugin RPC', 'PLUGIN_NOT_FOUND', 404); return handler(input, ctx) }
       if (kind === 'command') { const command = this.commands.get(name); if (!command) throw new PluginError('Unknown plugin command', 'PLUGIN_NOT_FOUND', 404); return await command.execute(String(input || ''), ctx) ?? null }
       const target = kind === 'tool' ? this.tools.get(name) : this.actions.get(name)
       if (!target) throw new PluginError(`Unknown plugin ${kind}`, 'PLUGIN_NOT_FOUND', 404)
       validate(target.inputSchema, input)
-      return json(await target.execute(input as Record<string, Json>, ctx))
+      const result = await target.execute(input as Record<string, Json>, ctx)
+      return kind === 'tool' ? json(toolResult(result)) : json(result)
     })
   }
   async observe(event: PluginEvent): Promise<void> {
@@ -235,7 +239,7 @@ export class PluginRuntime {
     return await this.run(identity, signal, async ctx => {
       let current = structuredClone(value)
       for (const hook of this.hooks.get(name) || []) {
-        const result = await hook.handler(current, ctx)
+        const result = hookResult(await hook.handler(current, ctx))
         if (result.deny) return json({ deny: result.deny })
         if (result.value !== undefined) current = json(result.value)
       }

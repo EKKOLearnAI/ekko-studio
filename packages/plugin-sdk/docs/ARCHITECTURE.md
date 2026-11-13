@@ -2,6 +2,7 @@
 
 本文是与项目内 SDK 一起分发的宿主架构说明。精确类型见 项目根目录下的 `sdk/src/index.ts`、`sdk/src/agents.ts`；
 插件自己的结构见 `CONTRACTS.md`，业务设计补充在单独的项目文档中。
+完整字段与边界见 `FIELD_REFERENCE.md`，宿主业务参数与返回包装见 `HOST_API.md`；这些指南均随项目分发。
 
 ## 包与加载
 

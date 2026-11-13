@@ -25,7 +25,7 @@ async function fixture() {
 it('generates self-contained documentation, working runtime contract tests and checks without npm dependencies', async () => {
   const { project } = await fixture()
   await checkProject(project)
-  for (const file of ['AGENTS.md', 'docs/ARCHITECTURE.md', 'docs/STUDIO_CTX.md', 'docs/STUDIO_RETURNS.md', 'docs/DEVELOPMENT.md', 'docs/CONTRACTS.md', 'sdk/src/index.ts', '.github/workflows/check.yml']) await access(join(project, file))
+  for (const file of ['AGENTS.md', 'docs/ARCHITECTURE.md', 'docs/STUDIO_CTX.md', 'docs/STUDIO_RETURNS.md', 'docs/DEVELOPMENT.md', 'docs/CONTRACTS.md', 'docs/FIELD_REFERENCE.md', 'docs/HOST_API.md', 'sdk/src/index.ts', 'sdk/src/json.ts', '.github/workflows/check.yml']) await access(join(project, file))
   const check = await promisify(execFile)(process.execPath, ['scripts/plugin-harness.mjs', 'check'], { cwd: project })
   expect(check.stdout).toContain('checked')
   const tests = await promisify(execFile)(process.execPath, ['--test', 'tests/contracts.test.mjs'], { cwd: project })
@@ -33,6 +33,17 @@ it('generates self-contained documentation, working runtime contract tests and c
   const pkg = JSON.parse(await readFile(join(project, 'package.json'), 'utf8'))
   expect(pkg.scripts['docs:update']).toBeUndefined()
   await expect(access(join(project, 'contracts/changes.json'))).rejects.toThrow()
+})
+
+it('fails fast when a shipped public SDK module or field guide is missing', async () => {
+  const { project } = await fixture()
+  const file = join(project, 'sdk/src/host.ts')
+  const source = await readFile(file, 'utf8')
+  await rm(file)
+  await expect(checkProject(project)).rejects.toThrow()
+  await writeFile(file, source)
+  await rm(join(project, 'docs/FIELD_REFERENCE.md'))
+  await expect(checkProject(project)).rejects.toThrow()
 })
 
 it('accepts directly edited Markdown and field descriptions without a generation step or history file', async () => {

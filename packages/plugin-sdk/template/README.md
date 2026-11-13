@@ -5,6 +5,8 @@
 - [架构](docs/ARCHITECTURE.md)：包格式、加载、页面隔离、RPC 与 Agent 运行。
 - [ctx 能力](docs/STUDIO_CTX.md)：后端、前端、普通运行及 Agent 上下文。
 - [回传约定](docs/STUDIO_RETURNS.md)：各回调的返回结构、事件和最终结果。
+- [字段手册](docs/FIELD_REFERENCE.md)：必填、可空、默认值、单位、权限、大小限制和兼容行为。
+- [宿主业务参数](docs/HOST_API.md)：八个 host 模块的方法输入、返回包装及业务并发约束。
 - [开发规范](docs/DEVELOPMENT.md)：文档维护、测试与发布。
 - [插件数据说明](docs/CONTRACTS.md)：本项目的输入输出、存储及兼容行为。
 - [SDK 类型](sdk/src/index.ts) 与 [Agent 类型](sdk/src/agents.ts)：精确字段和签名。

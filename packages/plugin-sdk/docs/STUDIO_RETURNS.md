@@ -2,6 +2,9 @@
 
 所有 JSON 值都必须可序列化：禁止 undefined、NaN、Infinity、函数、BigInt、循环引用和未编码的二进制。
 生命周期回调允许返回 void，这是与普通 JSON RPC 的区别。错误使用 Error 或对应的明确失败结构，不能伪造成功。
+可选字段应省略，不写 undefined；JSON 边界先检查再序列化，错误值不会静默删除或转成 null。
+具体字段的必填、可空、数值单位与范围见 [FIELD_REFERENCE.md](FIELD_REFERENCE.md)。
+宿主定义的 Agent 状态、目录、更新、最终结果与流事件均执行字段校验；错误枚举、未知协议字段或缺少必填字段会拒绝。
 
 ## 普通插件
 
@@ -50,6 +53,19 @@ return { ok: false, content: '无法保存', error: '目标记录不存在' }
 宿主已有历史不要再次当作本轮输入重复提交。
 
 标准事件：
+
+| type | 必填字段 | 可选字段与限制 |
+| --- | --- | --- |
+| text.delta | text:string | 文本增量，允许空字符串 |
+| reasoning.summary.delta | text:string | 推理摘要增量，不是最终回复 |
+| status | phase:thinking/working/compressing | message?:string |
+| tool.started | callId:非空 string、name:非空 string、input:JSON 对象 | callId 在未结束时不可重复 |
+| tool.completed | callId:非空 string、result:Json | result 可为 null，但不能缺失 |
+| tool.failed | callId:非空 string、error:string | 使用与 started 相同的 callId |
+
+这些对象都含必填 type，拒绝未知字段；每条 JSON 都受大小限制。image/file 最终内容必须提供
+非空 assetId/name/mediaType；usage 的 token 计数为非负安全整数或 null，costUsd 为非负有限数或 null，
+提供 usage 时 inputTokens/outputTokens/isEstimated 三项必填。
 
 ```js
 await ctx.output.emit({ type: 'text.delta', text: '你好' })

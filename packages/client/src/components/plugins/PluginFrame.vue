@@ -7,6 +7,7 @@ import { getStoredUserId } from '@/api/client'
 import { createPluginSessionBridge } from '@/api/studio/plugin-sessions'
 import { pluginApi, pluginInvoke, pluginRequest, type InstalledPlugin, type Json, type PluginEvent } from '@/api/studio/plugins'
 import { pluginFrameDocument } from '@/plugins/frame'
+import { assertJson } from '../../../../plugin-sdk/src'
 import ModelCascader from '@/components/hermes/models/ModelCascader.vue'
 import { usePluginModelPicker } from '@/composables/usePluginModelPicker'
 
@@ -77,6 +78,15 @@ watch(() => [frame.value, props.plugin, props.profile, props.view, props.session
     if (data.type !== 'request' || !Number.isSafeInteger(data.id)) return
     const args = data.args || {}
     try {
+      // Validate plugin-owned data before HTTP JSON serialization can drop or coerce it.
+      if (data.method === 'rpc') assertJson(args.input ?? null)
+      if (data.method === 'api' && args.options?.body !== undefined) assertJson(args.options.body)
+      if (data.method === 'browser') assertJson(args.params || {})
+      if (data.method === 'storage' && args.action === 'set') assertJson(args.value)
+      if (data.method === 'session-command' && args.method === 'run') {
+        assertJson(args.args?.input)
+        if (args.args?.options !== undefined) assertJson(args.args.options)
+      }
       let value: unknown
       switch (data.method) {
         case 'session-open':

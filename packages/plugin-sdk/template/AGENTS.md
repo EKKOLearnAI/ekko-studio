@@ -1,7 +1,8 @@
 # 插件开发指引
 
 先读 README.md、docs/ARCHITECTURE.md、docs/STUDIO_CTX.md、docs/STUDIO_RETURNS.md、
-docs/DEVELOPMENT.md 和 docs/CONTRACTS.md。精确宿主类型见 sdk/src/index.ts、sdk/src/agents.ts。
+docs/FIELD_REFERENCE.md、docs/HOST_API.md、docs/DEVELOPMENT.md 和 docs/CONTRACTS.md。
+精确宿主类型见 sdk/src/index.ts 及其导出的模块；可选 JSON 字段不用时省略，不传 undefined。
 
 - 跨边界及持久化数据结构声明在 contracts/plugin.json，写清每个字段及操作的含义。
 - 使用契约校验实际输入、输出和存储，不在 handler 中另定义未登记的公开结构。
