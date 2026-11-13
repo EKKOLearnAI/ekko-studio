@@ -59,6 +59,22 @@ export interface NormalizedCustomProvider {
   extra_body?: Record<string, any>
 }
 
+/** Keep catalog readiness and runtime credential resolution on the same profile-local rules. */
+export function resolveCustomProviderApiKey(provider: NormalizedCustomProvider, envContent: string): string {
+  if (provider.api_key?.trim()) return provider.api_key.trim()
+  if (!provider.key_env) return ''
+  for (const line of envContent.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const separator = trimmed.indexOf('=')
+    if (separator < 0 || trimmed.slice(0, separator).trim() !== provider.key_env) continue
+    const raw = trimmed.slice(separator + 1).trim()
+    const quoted = (raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))
+    return (quoted ? raw.slice(1, -1) : raw).trim()
+  }
+  return ''
+}
+
 function looksLikeUrl(value: string): boolean {
   try {
     const url = new URL(value)

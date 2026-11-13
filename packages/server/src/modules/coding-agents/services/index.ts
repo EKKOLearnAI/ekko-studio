@@ -28,7 +28,7 @@ import { promisify } from 'util'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { getWebUiHome } from '../../studio/public/config'
 import { getProfileDir, PROVIDER_ENV_MAP, readConfigYamlForProfile, safeReadFile } from '../../studio/public/profile-config'
-import { getCompatibleCustomProviders } from '../../studio/contracts/provider-compat'
+import { getCompatibleCustomProviders, resolveCustomProviderApiKey } from '../../studio/contracts/provider-compat'
 import { registerClaudeCodeProxyTarget } from './claude-code/proxy'
 import { registerCodexProxyTarget, restoreCodexProxyTarget } from './codex/proxy'
 import { compactCodexThread } from './codex/compact'
@@ -719,11 +719,7 @@ async function resolveStoredProviderLaunchInput(
   if (customEntry) {
     canonicalProvider = `custom:${slugProviderName(String(customEntry.name || normalizedProvider))}`
     if (!baseUrl) baseUrl = String(customEntry.base_url || '').trim()
-    if (!apiKey) apiKey = String(customEntry.api_key || '').trim()
-    if (!apiKey) {
-      const keyEnv = String(customEntry.key_env || '').trim()
-      if (keyEnv) apiKey = parseEnvValue(envContent, keyEnv)
-    }
+    if (!apiKey) apiKey = resolveCustomProviderApiKey(customEntry, envContent)
     if (!apiMode) {
       apiMode = normalizeLaunchApiMode(
         customEntry.api_mode,

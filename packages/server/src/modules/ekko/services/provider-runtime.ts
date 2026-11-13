@@ -1,5 +1,5 @@
 import { join } from 'path'
-import { getCompatibleCustomProviders } from '../../studio/contracts/provider-compat'
+import { getCompatibleCustomProviders, resolveCustomProviderApiKey } from '../../studio/contracts/provider-compat'
 import { PROVIDER_PRESETS, assertProviderAvailable } from '../../studio/contracts/providers'
 import {
   getProfileDir,
@@ -73,8 +73,7 @@ export async function resolveEkkoProviderRuntimeConfig(input: {
   })
   if (customEntry) {
     if (!baseUrl) baseUrl = String(customEntry.base_url || '').trim()
-    if (!apiKey) apiKey = String(customEntry.api_key || '').trim()
-    if (!apiKey && customEntry.key_env) apiKey = parseEnvValue(envContent, customEntry.key_env)
+    if (!apiKey) apiKey = resolveCustomProviderApiKey(customEntry, envContent)
     if (!apiMode) apiMode = String(customEntry.api_mode || '').trim()
   }
 
