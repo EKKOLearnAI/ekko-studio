@@ -64,7 +64,7 @@ it('requires trusted administrator installation and rejects run credentials and 
 })
 it('requires developer opt-in for browser storage and shares explicit namespaces with the backend', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'plugin-storage-route-'))
-  const runtime = new PluginRuntime({ manifest: { id: 'notes', name: 'Notes', version: '1.0.0', apiVersion: 2, permissions: [] }, directory: dir, source: dir, installedAt: 0, enabled: true, config: {} }, { userId: 1, profile: 'work' }, new PluginStore(dir), { authorize() {}, emit() {}, log() {}, api: async () => null })
+  const runtime = new PluginRuntime({ manifest: { id: 'notes', name: 'Notes', version: '1.0.0', apiVersion: 1, permissions: [] }, directory: dir, source: dir, installedAt: 0, enabled: true, config: {} }, { userId: 1, profile: 'work' }, new PluginStore(dir), { authorize() {}, emit() {}, log() {}, api: async () => null })
   mocks.runtime.mockReturnValue(runtime)
   try {
     await server(async base => {

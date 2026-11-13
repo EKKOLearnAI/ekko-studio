@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 const repository = 'https://github.com/example/notes', directory = '/projects/notes'
 const releaseSource = 'github:example/notes#' + 'b'.repeat(40)
 async function setup(page: Page, options: { development?: boolean; packaged?: boolean; failed?: boolean; version?: string; empty?: boolean } = {}) {
-  const manifest = { id: 'notes', name: 'Lifecycle Notes', description: 'Plugin lifecycle fixture', apiVersion: 2, version: options.version || '0.1.6', repository, permissions: ['tools'] }
+  const manifest = { id: 'notes', name: 'Lifecycle Notes', description: 'Plugin lifecycle fixture', apiVersion: 1, version: options.version || '0.1.6', repository, permissions: ['tools'] }
   const original = { manifest, source: options.packaged ? releaseSource : directory, installedAt: 1, enabled: true,
     status: options.failed ? 'failed' : 'active', developmentDirectory: options.development ? directory : undefined,
     config: { prefix: 'saved setting' }, tools: [], commands: [], actions: [] }
@@ -14,7 +14,7 @@ async function setup(page: Page, options: { development?: boolean; packaged?: bo
   const installs: any[] = [], patches: any[] = []
   await page.route(url => url.hostname === 'api.ekkostudio.xyz', route => route.fulfill({ json: { ok: true, data: {
     list: [{ id: 'a'.repeat(64), name: manifest.name, description: manifest.description, repository, manifestId: 'notes',
-      apiVersion: 2, version: state.published, sourceCommit: 'b'.repeat(40), installSource: releaseSource, permissions: ['tools'], repositoryStars: 42 }],
+      apiVersion: 1, version: state.published, sourceCommit: 'b'.repeat(40), installSource: releaseSource, permissions: ['tools'], repositoryStars: 42 }],
     total: 1, page: 1, pageSize: 100,
   } } }))
   await page.route(url => url.hostname === '127.0.0.1' && url.pathname.startsWith('/api/'), async route => {

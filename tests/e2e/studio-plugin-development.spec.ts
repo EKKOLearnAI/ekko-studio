@@ -7,7 +7,7 @@ test('shows development projects as regular cards, enables them and unlinks whil
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   let revision = 0, watching = false, installed = false, enabled = false, linked = true, starts = 0, unlinks = 0, error = '', content = 'first build'
   const directory = '/projects/independent-notes'
-  const manifest = { id: 'notes', name: 'Dev Notes', description: 'Notes for the project', version: '0.1.0', apiVersion: 2, client: 'client.mjs', permissions: ['ui'], configSchema: { type: 'object', properties: { prefix: { type: 'string', title: 'Prefix' } } }, views: [{ id: 'home', title: 'Dev Notes', slot: 'page' }] }
+  const manifest = { id: 'notes', name: 'Dev Notes', description: 'Notes for the project', version: '0.1.0', apiVersion: 1, client: 'client.mjs', permissions: ['ui'], configSchema: { type: 'object', properties: { prefix: { type: 'string', title: 'Prefix' } } }, views: [{ id: 'home', title: 'Dev Notes', slot: 'page' }] }
   const plugin = () => ({ manifest, source: directory, installedAt: revision, enabled, status: enabled ? 'active' : 'disabled', developmentDirectory: installed && linked ? directory : undefined, config: { prefix: 'saved prefix' }, tools: [], commands: [], actions: [] })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const request = route.request(), url = new URL(request.url())
@@ -88,8 +88,8 @@ test('shows development projects as regular cards, enables them and unlinks whil
 
 test('removes a linked-only card after unlink, preserving it on failure', async ({ page }, testInfo) => {
   let linked = true, attempts = 0
-  const shipped = { manifest: { id: 'shipped', name: 'Released Plugin', version: '2.0.0', apiVersion: 2, permissions: [] }, source: '/installed/shipped', enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [] }
-  const project = { id: 'local', directory: '/projects/local', watching: false, status: 'registered', manifest: { id: 'local', name: 'Local Plugin', version: '1.2.0', apiVersion: 2, permissions: [] } }
+  const shipped = { manifest: { id: 'shipped', name: 'Released Plugin', version: '2.0.0', apiVersion: 1, permissions: [] }, source: '/installed/shipped', enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [] }
+  const project = { id: 'local', directory: '/projects/local', watching: false, status: 'registered', manifest: { id: 'local', name: 'Local Plugin', version: '1.2.0', apiVersion: 1, permissions: [] } }
   await page.route(url => url.pathname.startsWith('/api/'), route => {
     const request = route.request(), url = new URL(request.url())
     if (url.pathname === '/api/auth/me') return route.fulfill({ json: { user: { id: 1, username: 'Tester', role: 'super_admin' } } })

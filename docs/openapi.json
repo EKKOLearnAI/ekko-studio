@@ -22314,8 +22314,8 @@
         "tags": [
           "Studio Plugins"
         ],
-        "summary": "Call the plugin SDK v2 Desktop browser module",
-        "description": "Requires an enabled SDK v2 plugin declaring browser.cdp. Uses the actual caller account/Profile and the original authorized Desktop binding. CDP is scoped to a tab and known iframe sessions; browser-process Browser/Target commands are unavailable. Existing control leases, user takeover, cancellation and remote-control revocation apply. No Studio authentication token or debugging endpoint is returned.",
+        "summary": "Call the plugin SDK v1 Desktop browser module",
+        "description": "Requires an enabled SDK v1 plugin declaring browser.cdp. Uses the actual caller account/Profile and the original authorized Desktop binding. CDP is scoped to a tab and known iframe sessions; browser-process Browser/Target commands are unavailable. Existing control leases, user takeover, cancellation and remote-control revocation apply. No Studio authentication token or debugging endpoint is returned.",
         "operationId": "browser",
         "security": [
           {

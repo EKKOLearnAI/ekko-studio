@@ -5,7 +5,7 @@ async function setup(page: Page) {
   const errors: string[] = [], profiles: string[] = [], saved: unknown[] = []
   const state = { status: 200, empty: false }
   page.on('pageerror', error => errors.push(error.message))
-  const manifest = { id: 'picker', name: 'Picker demo', version: '1.0.0', apiVersion: 2, permissions: ['ui'], client: 'client.mjs',
+  const manifest = { id: 'picker', name: 'Picker demo', version: '1.0.0', apiVersion: 1, permissions: ['ui'], client: 'client.mjs',
     views: [{ id: 'home', title: 'Picker', slot: 'page' }] }
   const source = `export function mount(root,ctx){
     let current={provider:'custom:test',model:'model-a'};

@@ -33,7 +33,7 @@ return { ok: false, content: '无法保存', error: '目标记录不存在' }
 | 入口 | 返回结构 |
 | --- | --- |
 | getStatus | `{ installed, version, source?, path?, error? }` |
-| management.settings | `{ viewId, query? }`；必须是本插件声明的 settings 或 agent-settings 视图；不要求注册任何全局侧栏入口。 |
+| management.settings | `{ viewId, query? }`；必须是本插件声明的 agent-settings 视图；不要求注册任何全局侧栏入口。 |
 | management.checkUpdate | `{ currentVersion, latestVersion, updateAvailable, message? }` |
 | management.upgrade | `{ installedVersion, message? }`；输入含 version/expectedVersion，插件自行处理引擎恢复。 |
 | management.remove | `Promise<void>`；只移除受管引擎，成功后 getStatus 必须返回 installed:false，保留源码、配置、凭证及会话数据。 |
@@ -79,10 +79,10 @@ usage 的 inputTokens/outputTokens 可为 null，cacheReadTokens/costUsd 可选�
 填写实际统计或明确 isEstimated，不编造用量。取消应响应 signal 并清理，错误抛出由宿主处理终态。
 宿主生成运行 ID、持久化工具历史/最终消息并发布完成事件，插件无需自行伪造这些宿主事件。
 
-## SDK v2 返回与迁移
+## SDK v1 返回规则
 
 资源注册统一使用 lifecycle.add/acquire；业务事件与插件消息分开，Agent 运行事件通过 output.emit 发布。
-state.agentSession 是 Agent 专用的原会话分区，state.plugin 始终是插件全局存储。
+state.agentSession 是 Agent 专用会话分区，state.plugin 始终是插件全局存储。
 CDP send 返回原始协议 JSON；attach 返回 cursor 和 iframe sessions；events 返回 cursor/oldestCursor/dropped/events。
 每条事件含 sequence/method/params，可带 sessionId/truncated。按返回 cursor 继续轮询；dropped/truncated 时由调用者决定是否重新读取页面状态。
 CDP 模块不返回宿主 token、调试端口或其他标签页的 WebContents 对象。通用 SDK JSON 值仍有 2 MB 限制。

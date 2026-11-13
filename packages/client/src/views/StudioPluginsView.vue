@@ -75,7 +75,7 @@ const catalog = computed<CatalogPlugin[]>(() => snapshot.value.plugins.map(plugi
 const developmentCatalog = computed<CatalogPlugin[]>(() => projects.value.map(project => {
     const installed = catalog.value.find(plugin => plugin.manifest.id === project.id && plugin.developmentDirectory === project.directory)
     return installed ? { ...installed, development: project, developmentEntry: true } : {
-      manifest: project.manifest || { id: project.id, name: project.id, version: '', apiVersion: 2, permissions: [] },
+      manifest: project.manifest || { id: project.id, name: project.id, version: '', apiVersion: 1, permissions: [] },
       source: project.directory, installedAt: project.createdAt || 0, installed: false, enabled: false,
       status: ['missing', 'error'].includes(project.status) ? 'failed' : 'disabled', error: project.error,
       config: {}, tools: [], commands: [], actions: [], development: project, developmentEntry: true,

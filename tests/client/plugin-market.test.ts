@@ -4,7 +4,7 @@ import { installedMarketPlugin, matchesPluginCategory, matchesPluginSearch } fro
 import type { InstalledPlugin } from '../../packages/client/src/api/studio/plugins'
 
 const row = (index = 1) => ({ id: index.toString(16).padStart(64, '0'), name: `Plugin ${index}`, description: 'A published plugin',
-  repository: `https://github.com/example/plugin-${index}`, manifestId: `plugin-${index}`, version: '1.0.0', apiVersion: 2,
+  repository: `https://github.com/example/plugin-${index}`, manifestId: `plugin-${index}`, version: '1.0.0', apiVersion: 1,
   permissions: ['commands', 'tools'], sourceCommit: 'b'.repeat(40), installSource: `github:example/plugin-${index}#${'b'.repeat(40)}` })
 const page = (list: unknown[], total = list.length, current = 1) => Response.json({ ok: true, data: { list, total, page: current, pageSize: 100 } })
 afterEach(() => vi.unstubAllGlobals())
@@ -23,7 +23,7 @@ it('loads every page without credentials so filtering can find entries beyond th
 it('retains legacy or incompatible publications for browsing without an installable release', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(page([
     { ...row(1), version: null, manifestId: null, sourceCommit: null },
-    { ...row(2), apiVersion: 1 }, { ...row(3), installSource: '/tmp/arbitrary' }, { ...row(4), version: 'latest' },
+    { ...row(2), apiVersion: 2 }, { ...row(3), installSource: '/tmp/arbitrary' }, { ...row(4), version: 'latest' },
   ])))
   expect((await fetchPluginMarket(new AbortController().signal)).map(entry => entry.release)).toEqual([null, null, null, null])
 })
@@ -59,11 +59,17 @@ it('uses declared capabilities, including disabled chat commands, settings UI an
 it('marks installations by repository and manifest identity, including development installs', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(page([row()])))
   const [entry] = await fetchPluginMarket(new AbortController().signal)
-  const local: InstalledPlugin = { manifest: { id: 'plugin-1', name: 'Plugin 1', repository: entry.repository, version: '2.0.0', apiVersion: 2, permissions: [] },
+  const local: InstalledPlugin = { manifest: { id: 'plugin-1', name: 'Plugin 1', repository: entry.repository, version: '2.0.0', apiVersion: 1, permissions: [] },
     source: '/local/plugin', installedAt: 0, enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [] }
   expect(installedMarketPlugin(entry, [local])).toBe(local)
   const development = { ...local, developmentDirectory: '/work/plugin' }
   expect(installedMarketPlugin(entry, [development])).toBe(development)
   expect(installedMarketPlugin(entry, [{ ...local, source: `github:another/plugin#${'a'.repeat(40)}` }])).toBeUndefined()
   expect(installedMarketPlugin(entry, [{ ...local, manifest: { ...local.manifest, id: 'different' } }])).toBeUndefined()
+})
+
+it('requires canonical permissions from the directory instead of accepting removed aliases', async () => {
+  const { permissions, ...entry } = row(1)
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(page([{ ...entry, capabilities: permissions }])))
+  await expect(fetchPluginMarket(new AbortController().signal)).rejects.toThrow('Invalid plugin catalog entry')
 })

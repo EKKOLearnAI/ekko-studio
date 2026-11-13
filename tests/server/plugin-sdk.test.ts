@@ -10,11 +10,11 @@ import type { PluginPermission } from '../../packages/plugin-sdk/src'
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 async function fixture(permissions: PluginPermission[] = []) {
-  const home = await mkdtemp(join(tmpdir(), 'plugin-v2-'))
+  const home = await mkdtemp(join(tmpdir(), 'plugin-sdk-'))
   cleanup.push(() => rm(home, { recursive: true, force: true }))
   const browser = vi.fn(async () => ({ result: { value: 'page title' } })), api = vi.fn(async () => null)
   const runtime = new PluginRuntime({ directory: home, source: home, enabled: true, installedAt: 0, config: {},
-    manifest: { id: 'example', name: 'Example', version: '2.0.0', apiVersion: 2, permissions } },
+    manifest: { id: 'example', name: 'Example', version: '2.0.0', apiVersion: 1, permissions } },
   { userId: 1, profile: 'default' }, new PluginStore(home), { authorize() {}, browser, api, emit() {}, log() {} })
   cleanup.push(() => runtime.close())
   return { runtime, browser, api }

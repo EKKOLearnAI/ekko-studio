@@ -67,7 +67,7 @@ export class PluginManager {
       const { directory: _directory, runtimeIdentity: _runtimeIdentity, previous, ...rest } = record
       const present = packagePresent(record)
       const runtime = present ? this.runtimes.get(record.manifest.id) : undefined
-      return { ...rest, manifest: { ...rest.manifest, permissions: rest.manifest.permissions || [] }, status: !present ? 'failed' : runtime ? 'active' : record.enabled ? 'failed' : 'disabled',
+      return { ...rest, status: !present ? 'failed' : runtime ? 'active' : record.enabled ? 'failed' : 'disabled',
         previousVersion: previous?.manifest.version, error: present ? this.errors.get(record.manifest.id) : missingPackage().message,
         tools: [...(runtime?.tools.values() || [])].map(({ name, description, inputSchema, readOnly }) => ({ name, description, inputSchema, readOnly })),
         commands: [...(runtime?.commands.values() || [])].map(({ name, description }) => ({ name, description })),

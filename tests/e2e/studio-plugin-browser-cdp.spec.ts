@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test'
 import { resolve } from 'node:path'
 
-test('bridges a v2 plugin CDP call through the host, reports unavailable Desktop and allows retry', async ({ page }) => {
+test('bridges a plugin CDP call through the host, reports unavailable Desktop and allows retry', async ({ page }) => {
   const calls: any[] = [], errors: string[] = []
   let available = false
   page.on('pageerror', error => errors.push(error.message))
-  const manifest = { id: 'cdp', name: 'CDP demo', version: '2.0.0', apiVersion: 2, permissions: ['ui', 'browser.cdp'], client: 'client.mjs', views: [{ id: 'home', title: 'Browser', slot: 'page' }] }
+  const manifest = { id: 'cdp', name: 'CDP demo', version: '2.0.0', apiVersion: 1, permissions: ['ui', 'browser.cdp'], client: 'client.mjs', views: [{ id: 'home', title: 'Browser', slot: 'page' }] }
   const source = `export function mount(root,ctx){
     const button=document.createElement('button');button.textContent='Read browser title';
     const output=document.createElement('output');

@@ -1,4 +1,4 @@
-/** Studio plugin API v2. These contracts are shared by the host and browser. */
+/** Studio plugin API v1. These contracts are shared by the host and browser. */
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 export type Dispose = () => void | Promise<void>
 export interface Schema {
@@ -57,7 +57,7 @@ export interface PluginManifest {
   id: string
   name: string
   version: string
-  apiVersion: 2
+  apiVersion: 1
   description?: string
   author?: { name: string; url?: string }
   repository?: string

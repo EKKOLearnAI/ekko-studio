@@ -1,4 +1,4 @@
-/** Canonical Studio plugin SDK v2 public modules. */
+/** Canonical Studio plugin SDK v1 public modules. */
 export * from './core'
 export * from './state'
 export * from './host'

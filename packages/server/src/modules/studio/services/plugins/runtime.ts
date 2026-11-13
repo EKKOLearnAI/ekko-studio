@@ -51,7 +51,7 @@ export class PluginRuntime {
   }
   async load(module?: PluginModule): Promise<void> {
     const m = this.record.manifest
-    if (m.apiVersion !== 2 || !Array.isArray(m.permissions)) throw new PluginError('Plugin requires migration to SDK v2', 'PLUGIN_INCOMPATIBLE', 422)
+    if (m.apiVersion !== 1 || !Array.isArray(m.permissions)) throw new PluginError('Plugin requires the current SDK v1 contract', 'PLUGIN_INCOMPATIBLE', 422)
     if (!m.server) return
     try {
       module ||= await importPlugin(`${pathToFileURL(await pluginFile(this.record.directory, m.server)).href}?instance=${randomUUID()}`)
@@ -88,9 +88,9 @@ export class PluginRuntime {
   }
   private state(identity: PluginIdentity, active: () => void) {
     const plugin = this.store.storage(this.record.manifest.id, active)
-    return { plugin, user: plugin.namespace('sdk-v2', 'users', String(identity.userId)),
-      profile: plugin.namespace('sdk-v2', 'profiles', String(identity.userId), identity.profile),
-      ...(identity.sessionId ? { session: plugin.namespace('sdk-v2', 'sessions', String(identity.userId), identity.profile, identity.sessionId) } : {}) }
+    return { plugin, user: plugin.namespace('sdk', 'users', String(identity.userId)),
+      profile: plugin.namespace('sdk', 'profiles', String(identity.userId), identity.profile),
+      ...(identity.sessionId ? { session: plugin.namespace('sdk', 'sessions', String(identity.userId), identity.profile, identity.sessionId) } : {}) }
   }
   async browserRequest(identity: PluginIdentity, signal: AbortSignal, method: string, params: Record<string, Json>): Promise<Json> {
     if (!['tabs.list', 'tabs.create', 'tabs.close', 'cdp.attach', 'cdp.send', 'cdp.events', 'lease.release'].includes(method) || !params || typeof params !== 'object' || Array.isArray(params)) throw new PluginError('Invalid plugin browser request')

@@ -18,14 +18,13 @@ export interface MarketPlugin {
 
 function marketPlugin(value: any): MarketPlugin {
   const repository = normalizePluginRepository(value?.repository)
-  // Normalize older public-directory metadata at this transport boundary only.
-  const permissions = value?.permissions ?? value?.capabilities
+  const permissions = value?.permissions
   if (!repository || typeof value.id !== 'string' || !/^[a-f0-9]{64}$/.test(value.id)
     || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 160
     || typeof value.description !== 'string' || value.description.length > 4000
     || !Array.isArray(permissions) || permissions.some((item: unknown) => typeof item !== 'string')) throw new Error('Invalid plugin catalog entry')
   let release: PluginRelease | null = null
-  // Older/incompatible publications remain browsable, but cannot be installed.
+  // Invalid publications cannot be installed.
   try { release = parsePluginRelease(value, repository) } catch { /* Unverified releases have no install action. */ }
   return {
     id: value.id, repository, repositoryStars: repositoryStars(value.repositoryStars, repository), name: value.name, description: value.description,

@@ -38,7 +38,7 @@ it('executes an account-owned Bot plugin task through the scheduler and chat run
       const selection = { runtime: agentId, mode: 'global', profile: 'default', provider: '', model: 'native' };
       const events = [], received = [];
       const owner = new PluginRuntime({ directory: workspace, source: workspace, enabled: true, config: {}, installedAt: 0,
-        manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 2, server: 'server.mjs', permissions: ['agents', 'api.read'] } },
+        manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, server: 'server.mjs', permissions: ['agents', 'api.read'] } },
         { userId: installer.id, profile: 'default' }, new PluginStore(path.join(workspace, 'plugins')),
         { authorize: authorizePluginIdentity, api: async (identity, url, options) => {
           authorizePluginIdentity(identity);
@@ -46,7 +46,7 @@ it('executes an account-owned Bot plugin task through the scheduler and chat run
           assert.equal(url, '/api/studio/sessions/' + identity.sessionId + '/workspace-file/read');
           return { content: 'workspace evidence' };
         }, emit() {}, log() {} });
-      await owner.load({ apply(ctx) { ctx.extensions.agents.register({ id: 'assistant', name: 'Example', vendor: 'Fixture', agentApiVersion: 2,
+      await owner.load({ apply(ctx) { ctx.extensions.agents.register({ id: 'assistant', name: 'Example', vendor: 'Fixture', agentApiVersion: 1,
         getStatus: async () => ({ installed: true, version: '1.0.0' }), management: {},
         modes: { global: { listModels: async () => ({ status: 'ready', source: 'fixture', scope: 'configured', models: [{ id: 'native', name: 'Native' }] }) } },
         features: { surfaces: ['chat'], streaming: true, resume: false }, runtime: { createSession: () => ({ async run(input, run) {

@@ -13,7 +13,7 @@ import type { PluginContext, PluginIdentity, PluginManifest } from '../../packag
 import type { PluginRecord } from '../../packages/server/src/modules/studio/contracts/plugins'
 
 const who: PluginIdentity = { userId: 1, profile: 'one' }
-const definition: PluginManifest = { id: 'notes', name: 'Notes', version: '1.0.0', apiVersion: 2, server: 'server.mjs', client: 'client.mjs', permissions: ['tools', 'commands', 'api.read', 'api.write', 'events', 'hooks', 'automation', 'ui'], views: [{ id: 'home', title: 'Notes', slot: 'page' }] }
+const definition: PluginManifest = { id: 'notes', name: 'Notes', version: '1.0.0', apiVersion: 1, server: 'server.mjs', client: 'client.mjs', permissions: ['tools', 'commands', 'api.read', 'api.write', 'events', 'hooks', 'automation', 'ui'], views: [{ id: 'home', title: 'Notes', slot: 'page' }] }
 const directories: string[] = [], managers: PluginManager[] = []
 const ports = (): PluginPorts => ({ api: vi.fn(async (_identity, path) => ({ path })), authorize: vi.fn(), emit: vi.fn(), log: vi.fn() })
 async function home() { const dir = await mkdtemp(join(tmpdir(), 'studio-plugins-')); directories.push(dir); return dir }
@@ -216,7 +216,7 @@ describe('Studio plugin host', () => {
     const schema = { type: 'object' as const, properties: { token: { type: 'string' as const, secret: true } }, required: ['token'] }
     expect(configuration(schema, {}, false)).toEqual({})
     expect(() => configuration(schema, {})).toThrow(/missing token/)
-    expect(() => manifest({ ...definition, apiVersion: 1 })).toThrow(/Unsupported/)
+    expect(() => manifest({ ...definition, apiVersion: 2 })).toThrow(/Unsupported/)
   })
   it('binds concurrent identities and API calls while plugins explicitly partition storage by account and Profile', async () => {
     const dir = await home(), access = ports(), revoked = new Set<number>()

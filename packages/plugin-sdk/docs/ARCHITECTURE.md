@@ -6,7 +6,7 @@
 ## 包与加载
 
 一个插件是独立的 npm/文件目录包，根目录的 `plugin.json` 是唯一插件清单，
-`package.json` 负责包版本、依赖及构建命令。两者版本必须一致，当前 `apiVersion` 为 2。
+`package.json` 负责包版本、依赖及构建命令。两者版本必须一致，当前 `apiVersion` 为 1。
 至少声明 `server` 或 `client`。入口必须是编译后的 JavaScript；推荐 `.mjs`。
 后端导出 `apply(ctx)`，前端导出 `mount(element, ctx)`，均可返回清理函数。
 宿主不会提供任意服务端内部模块作为依赖。
@@ -36,8 +36,7 @@
 `agent-settings` 使用 `/studio/plugin-agent-settings/:pluginId/:viewId`，同类页面自动组成 Agent 设置导航，返回 Agent 管理；不会自动注册主侧栏或设置侧栏入口。
 `workspace.sidebar` 是可选动态侧栏视图，仅用于 workspace。
 
-迁移：旧版 `views[].slot` 自动产生全局导航的行为已移除。保留旧 slot 可继续直接打开页面；需要侧栏入口的插件应补充 navigation 与 icon。
-旧 `management.settings` 指向 settings 视图的行为仍兼容；新 Agent 建议使用 agent-settings 视图。
+页面布局由 views[].slot 声明，全局入口独立由 navigation 声明。Agent 设置回调必须指向 agent-settings 视图。
 每个视图由同一个客户端入口按 `ctx.view / slot / location` 渲染。路由变化会重新挂载。
 前端在不透明来源 iframe 内运行，不共享宿主 DOM、localStorage、登录 token。
 前端 bundle 必须自包含，框架可打包，资源需内联；iframe 不允许直接网络连接。
@@ -68,11 +67,11 @@ Agent 的 `run.state.plugin` 则由宿主按 Agent、用户、Profile、会话�
 不要记录 token，运行结束后不能继续使用它。图片和文件是必需输入能力，使用 attachments 解析，不能静默丢弃。
 宿主负责运行 ID、终态、消息持久化、审批界面及权限；插件负责引擎协议适配、进程和连接清理。
 
-## SDK v2 模块规范与迁移
+## SDK v1 模块规范
 
-SDK v2 是公开接口的主版本迁移。manifest 必须使用 `apiVersion: 2` 和 `permissions`；
-Agent 使用 `agentApiVersion: 2` 与 `features`。宿主明确拒绝旧 manifest，不静默兼容旧入口。
-升级插件代码、随包 SDK 和指南后再启用；安装版本、插件持久数据和原生 Agent 检查点相互独立，迁移不清空数据。
+SDK v1 是插件模块首次上线采用的协议基线。manifest 使用 `apiVersion: 1` 和 `permissions`；
+Agent 使用 `agentApiVersion: 1` 与 `features`。只实现这一份最新契约，不提供旧入口别名或旧字段转换。
+包版本 `version` 标识插件发布版本；权限、功能声明和协议版本分别承担不同职责。
 
 | 模块 | 唯一职责 |
 | --- | --- |

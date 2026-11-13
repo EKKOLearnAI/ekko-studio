@@ -1,4 +1,4 @@
-# Studio SDK v2 上下文与能力
+# Studio SDK v1 上下文与能力
 
 精确类型由 sdk/src/index.ts 统一导出，按 core/state/host/browser/contexts/agents 六个模块组织。
 
@@ -45,16 +45,16 @@ ui 提供 notify/confirm/prompt/navigate/selectModel；模型选择器返回规�
 页面包括 page/settings/workspace/agent-settings 和动态 workspace-sidebar，navigation.main/settings 独立声明入口。
 iframe 不共享宿主 DOM、localStorage 或登录 token；使用宿主主题变量，不直接联网。
 
-## SDK v2 规范入口
+## SDK v1 规范入口
 
 `ctx.host` 在前后端及调用上下文中使用相同业务分组：models、agents、sessions、groupChats、workflows、files、browser。
-移除旧的 api/studio 层以及根 models 别名。Agent 目录通过 host.agents.list/status/models/settings 访问，
+宿主业务统一通过 host 分组调用。Agent 目录通过 host.agents.list/status/models/settings 访问，
 注册自己的 Agent 则使用 extensions.agents.register。维护动作继续由宿主按原有管理员规则调度。
 `permissions` 是实际 manifest 权限；普通 run.features 是运行环境支持项；AgentDefinition.features 是引擎声明。
 后两者都不能作为授权判断。权限集合包含原十项及新增 `browser.cdp`。
 
-`state.plugin` 保持旧全局存储地址；user/profile/session 使用宿主绑定身份的 SDK v2 独立命名空间。
-不存在当前会话时 state.session 缺省。Agent 专用的 state.agentSession 保持原 agent-runtime 分区及检查点位置。
+`state.plugin` 是插件全局存储；user/profile/session 使用宿主绑定身份的独立命名空间。
+不存在当前会话时 state.session 缺省。Agent 专用的 state.agentSession 按 Agent、账号、Profile、会话与模式分区。
 Agent 不再覆盖默认存储。根 ctx.state 在回调内动态绑定真实身份；调用结束不能继续使用取出的存储句柄。
 前端选择 plugin/user/profile/session 范围仍需要 storage.client；它表示允许访问插件全部数据，并非用户数据授权边界。
 

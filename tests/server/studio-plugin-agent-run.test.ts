@@ -45,9 +45,9 @@ afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await
 async function setup(run: AgentSession['run'], permissions: PluginPermission[] = ['agents']) {
   fixture.home = await mkdtemp(join(tmpdir(), 'studio-plugin-agent-run-')); cleanup.push(() => rm(fixture.home, { recursive: true, force: true }))
   const workspace = join(fixture.home, 'workspace'); await mkdir(workspace)
-  const owner = new PluginRuntime({ directory: fixture.home, source: fixture.home, enabled: true, config: {}, installedAt: 0, manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 2, server: 'server.mjs', permissions } },
+  const owner = new PluginRuntime({ directory: fixture.home, source: fixture.home, enabled: true, config: {}, installedAt: 0, manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, server: 'server.mjs', permissions } },
     { userId: 1, profile: 'installer' }, new PluginStore(fixture.home), { authorize() {}, api: async () => null, emit() {}, log() {} })
-  await owner.load({ apply(ctx) { ctx.extensions.agents.register({ id: 'assistant', name: 'Assistant', vendor: 'Example', agentApiVersion: 2,
+  await owner.load({ apply(ctx) { ctx.extensions.agents.register({ id: 'assistant', name: 'Assistant', vendor: 'Example', agentApiVersion: 1,
     getStatus: async () => ({ installed: true, version: '1.0.0' }), management: {},
     modes: { global: { listModels: async () => ({ status: 'ready', source: 'sdk', scope: 'builtin', models: [{ id: 'native', name: 'Native' }] }) }, scoped: { protocols: ['chat_completions'] } },
     features: { surfaces: ['chat', 'group-chat', 'workflow', 'api'], resume: false, streaming: true }, runtime: { createSession: () => ({ run, dispose() {} }) },

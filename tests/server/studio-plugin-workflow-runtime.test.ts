@@ -29,10 +29,10 @@ it('resumes live plugin workflow, group and global chats without handing their r
       const agentId = 'plugin:example/assistant';
       const live = new Map(), releases = new Map(), waiting = new Map(), events = [], resumed = [];
       const owner = new PluginRuntime({ directory:workspace, source:workspace, enabled:true, config:{}, installedAt:0,
-        manifest:{ id:'example',name:'Example',version:'1.0.0',apiVersion: 2,server:'server.mjs',permissions:['agents'] } },
+        manifest:{ id:'example',name:'Example',version:'1.0.0',apiVersion: 1,server:'server.mjs',permissions:['agents'] } },
         { userId:user.id,profile:'default' },new PluginStore(path.join(workspace,'plugins')),
         { authorize:authorizePluginIdentity,api:async()=>null,emit(){},log(){} });
-      await owner.load({ apply(ctx) { ctx.extensions.agents.register({ id:'assistant',name:'Example',vendor:'Fixture',agentApiVersion: 2,
+      await owner.load({ apply(ctx) { ctx.extensions.agents.register({ id:'assistant',name:'Example',vendor:'Fixture',agentApiVersion: 1,
         getStatus:async()=>({installed:true,version:'1.0.0'}),management:{},
         modes:{global:{listModels:async()=>({status:'empty',source:'fixture',scope:'builtin',models:[]})}},
         features: {surfaces:['chat','workflow','group-chat'],streaming:true,resume:false},

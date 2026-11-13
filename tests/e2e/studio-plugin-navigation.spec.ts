@@ -7,12 +7,12 @@ test('keeps global entries independent and opens a three-page Agent settings sid
   let main = true, settings = true
   const wrap = (manifest: object) => ({ manifest, status: 'active', enabled: true, config: {}, tools: [], commands: [], actions: [] })
   const plugins = () => [
-    wrap({ id: 'omp', name: 'Oh My Pi', version: '0.1.7', apiVersion: 2, permissions: ['agents', 'ui'], client: 'client.mjs', navigation: {}, views: [
+    wrap({ id: 'omp', name: 'Oh My Pi', version: '0.1.7', apiVersion: 1, permissions: ['agents', 'ui'], client: 'client.mjs', navigation: {}, views: [
       { id: 'skills', title: 'Skill 管理', slot: 'agent-settings', icon: 'skills' },
       { id: 'mcp', title: 'MCP 管理', slot: 'agent-settings', icon: 'mcp' },
       { id: 'settings', title: '配置编辑', slot: 'agent-settings', icon: 'settings' },
     ] }),
-    wrap({ id: 'entry-demo', name: 'Entry demo', version: '1.0.0', apiVersion: 2, permissions: ['ui'], client: 'client.mjs', views: [{ id: 'home', title: 'Home', slot: 'page' }], navigation: {
+    wrap({ id: 'entry-demo', name: 'Entry demo', version: '1.0.0', apiVersion: 1, permissions: ['ui'], client: 'client.mjs', views: [{ id: 'home', title: 'Home', slot: 'page' }], navigation: {
       main: main ? [{ viewId: 'home', title: '主入口', icon: image }] : [],
       settings: settings ? [{ viewId: 'home', title: '设置入口', icon: 'code' }] : [],
     } }),
@@ -71,7 +71,7 @@ test('exposes plugin navigation, settings and workspaces on desktop and mobile',
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   let active = true
   const icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aUioAAAAASUVORK5CYII='
-  const plugin = () => ({ manifest: { id: 'rooms', name: 'Team rooms', version: '1.0.0', apiVersion: 2, client: 'client.mjs', permissions: ['ui'],
+  const plugin = () => ({ manifest: { id: 'rooms', name: 'Team rooms', version: '1.0.0', apiVersion: 1, client: 'client.mjs', permissions: ['ui'],
     author: { name: 'Example author' }, repository: 'https://example.com/repo', documentation: 'https://example.com/docs', license: 'MIT', keywords: ['collaboration'], icon,
     navigation: { main: [{ viewId: 'dashboard', icon }, { viewId: 'rooms', title: 'Team rooms', icon: 'chat' }], settings: [{ viewId: 'preferences', icon: 'settings' }] }, workspace: { sidebar: 'room-list' }, views: [
       { id: 'dashboard', title: 'Dashboard', slot: 'page', order: 0 },
@@ -159,7 +159,7 @@ test('exposes plugin navigation, settings and workspaces on desktop and mobile',
 test('keeps plugin headers fixed while center and page content scroll on desktop and narrow windows', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   const plugins = Array.from({ length: 18 }, (_, index) => ({ manifest: {
-    id: `demo-${index}`, name: `Demo ${index}`, description: 'Plugin content for scrolling verification.', version: '1.0.0', apiVersion: 2,
+    id: `demo-${index}`, name: `Demo ${index}`, description: 'Plugin content for scrolling verification.', version: '1.0.0', apiVersion: 1,
     client: 'client.mjs', permissions: ['ui'], views: [{ id: 'home', title: `Page ${index}`, slot: 'page' }], navigation: { main: [{ viewId: 'home', icon: 'grid' }] },
   }, source: `/tmp/demo-${index}`, enabled: true, status: 'active', config: {}, tools: [], commands: [], actions: [] }))
   await page.route(url => url.pathname.startsWith('/api/'), route => {

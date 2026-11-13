@@ -64,8 +64,8 @@ export function manifest(value: unknown): PluginManifest {
   identifier(m.id, 'plugin id')
   if (typeof m.name !== 'string' || !m.name.trim() || m.name.length > 160) throw new PluginError('Plugin name is required')
   if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(m.version || '')) throw new PluginError('Plugin requires an exact semantic version')
-  if ('capabilities' in m) throw new PluginError('SDK v2 uses permissions, not capabilities', 'PLUGIN_INCOMPATIBLE', 422)
-  if (m.apiVersion !== 2) throw new PluginError('Unsupported plugin API version', 'PLUGIN_INCOMPATIBLE', 422)
+  if ('capabilities' in m) throw new PluginError('SDK v1 uses permissions, not capabilities', 'PLUGIN_INCOMPATIBLE', 422)
+  if (m.apiVersion !== 1) throw new PluginError('Unsupported plugin API version', 'PLUGIN_INCOMPATIBLE', 422)
   validateDetails(m)
   if (!m.server && !m.client) throw new PluginError('Plugin requires a server or client entry')
   for (const entry of [m.server, m.client].filter(Boolean)) {

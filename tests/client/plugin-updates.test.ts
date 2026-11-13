@@ -4,9 +4,9 @@ import { availablePluginUpdate, comparePluginVersions, installedPluginRepository
 import type { InstalledPlugin } from '../../packages/client/src/api/studio/plugins'
 
 const repository = 'https://github.com/example/notes'
-const release: PluginRelease = { id: 'a'.repeat(64), repository, manifestId: 'notes', version: '1.10.0', apiVersion: 2,
+const release: PluginRelease = { id: 'a'.repeat(64), repository, manifestId: 'notes', version: '1.10.0', apiVersion: 1,
   sourceCommit: 'b'.repeat(40), installSource: 'github:example/notes#' + 'b'.repeat(40) }
-const plugin = (): InstalledPlugin => ({ manifest: { id: 'notes', name: 'Notes', version: '1.9.0', apiVersion: 2, permissions: [], repository },
+const plugin = (): InstalledPlugin => ({ manifest: { id: 'notes', name: 'Notes', version: '1.9.0', apiVersion: 1, permissions: [], repository },
   source: 'github:Example/Notes#' + 'c'.repeat(40), installedAt: 0, enabled: true, status: 'active', config: {}, tools: [], commands: [], actions: [] })
 afterEach(() => vi.unstubAllGlobals())
 
@@ -25,7 +25,7 @@ it('accepts an empty directory or a legacy entry without release metadata', asyn
   expect(await fetchPluginRelease(repository)).toBeNull()
   expect(await fetchPluginRelease(repository)).toBeNull()
 })
-it.each([{ repository: 'https://github.com/other/notes' }, { installSource: '/tmp/malicious' }, { sourceCommit: 'main' }, { apiVersion: 1 }])('rejects a mismatched or mutable release %j', async change => {
+it.each([{ repository: 'https://github.com/other/notes' }, { installSource: '/tmp/malicious' }, { sourceCommit: 'main' }, { apiVersion: 2 }])('rejects a mismatched or mutable release %j', async change => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ok: true, data: { list: [{ ...release, ...change }] } })))
   await expect(fetchPluginRelease(repository)).rejects.toThrow()
 })

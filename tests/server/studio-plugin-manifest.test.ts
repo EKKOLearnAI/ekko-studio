@@ -9,7 +9,7 @@ import { manifest } from '../../packages/server/src/modules/studio/services/plug
 import type { PluginManifest } from '../../packages/plugin-sdk/src'
 
 const directories: string[] = []
-const definition: PluginManifest = { id: 'workspace', name: 'Workspace', version: '1.0.0', apiVersion: 2, client: 'client.mjs', permissions: ['ui'],
+const definition: PluginManifest = { id: 'workspace', name: 'Workspace', version: '1.0.0', apiVersion: 1, client: 'client.mjs', permissions: ['ui'],
   author: { name: 'Author', url: 'https://example.com/author' }, repository: 'https://example.com/repo', keywords: ['chat'], icon: 'icon.png',
   views: [{ id: 'home', title: 'Home', slot: 'workspace', icon: 'grid' }, { id: 'preferences', title: 'Preferences', slot: 'settings' }], workspace: { sidebar: 'rooms' }, navigation: { main: [{ viewId: 'home', icon: 'icon.png' }], settings: [{ viewId: 'preferences', icon: 'settings' }] } }
 async function fixture() {

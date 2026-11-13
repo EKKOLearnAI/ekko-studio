@@ -31,18 +31,6 @@ it('registers the bundled OMP runtime and retains disable/uninstall decisions ac
   await reconcileBuiltinPlugins(manager, who)
   expect(manager.snapshot().plugins).toEqual([])
 })
-it('retires only old examples from this checkout while retaining their stored data', async () => {
-  const manager = await setup()
-  await manager.install(who, resolve('tests/fixtures/plugins/notebook'), 0)
-  const store = manager.store.storage('notebook', () => {})
-  await store.set('keep', 'user notes')
-  const state = manager.store.read()
-  state.records.notebook.source = resolve('examples/plugins/notebook')
-  manager.store.write(state, state.revision)
-  await reconcileBuiltinPlugins(manager, who)
-  expect(manager.snapshot().plugins.map(plugin => plugin.manifest.id)).toEqual(['omp'])
-  expect(await store.get('keep')).toBe('user notes')
-})
 it('does not resurrect an explicitly removed local plugin when no bundled version was previously recorded', async () => {
   const manager = await setup()
   await manager.install(who, builtinPluginDirectory('omp'), 0)

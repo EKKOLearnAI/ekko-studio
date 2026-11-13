@@ -20,14 +20,14 @@ async function fixture() {
   const dispose = vi.fn()
   let run = async () => ({ content: [], finishReason: 'stop' as const })
   const definition: AgentDefinition = {
-    id: 'worker', name: 'Worker', vendor: 'Test', agentApiVersion: 2,
+    id: 'worker', name: 'Worker', vendor: 'Test', agentApiVersion: 1,
     getStatus: async () => ({ installed, version }),
     management: { remove, upgrade, supportsAutoUpdate, checkUpdate: async () => ({ currentVersion: version, latestVersion: '2.0.0', updateAvailable: version !== '2.0.0' }) },
     modes: { global: { listModels: async () => ({ status: 'ready', source: 'fixture', scope: 'builtin', models: [] }) } },
     features: { surfaces: ['chat'], streaming: true, resume: false },
     runtime: { createSession: () => ({ run: () => run(), dispose }) },
   }
-  const runtime = new PluginRuntime({ manifest: { id: 'managed', name: 'Managed', version: '1.0.0', apiVersion: 2, permissions: ['agents'], server: 'server.mjs' }, directory: home, source: home, enabled: true, installedAt: 0, config: {} },
+  const runtime = new PluginRuntime({ manifest: { id: 'managed', name: 'Managed', version: '1.0.0', apiVersion: 1, permissions: ['agents'], server: 'server.mjs' }, directory: home, source: home, enabled: true, installedAt: 0, config: {} },
     { userId: 1, profile: 'installer' }, new PluginStore(home), { authorize() {}, api: async () => null, emit() {}, log() {} })
   await runtime.load({ apply(ctx) { ctx.extensions.agents.register(definition) } }); runtime.activate()
   cleanup.push(() => runtime.close())

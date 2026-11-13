@@ -6,7 +6,7 @@ test('manages a plugin and runs an isolated frontend through authenticated API a
   let config: Record<string, unknown> = { title: 'My notes' }
   const calls: any[] = [], stored = new Map<string, unknown>()
   let notified = false
-  const plugin = () => ({ manifest: { id: 'notes', name: 'Notebook', version, apiVersion: 2, client: 'client.mjs', server: 'server.mjs', permissions: ['ui', 'api.read', 'api.write', 'tools', 'storage.client'],
+  const plugin = () => ({ manifest: { id: 'notes', name: 'Notebook', version, apiVersion: 1, client: 'client.mjs', server: 'server.mjs', permissions: ['ui', 'api.read', 'api.write', 'tools', 'storage.client'],
     views: [{ id: 'home', title: 'Notebook', slot: 'page' }], navigation: { main: [{ viewId: 'home', icon: 'book' }] }, configSchema: { type: 'object', properties: { title: { type: 'string', title: 'Notebook title' }, token: { type: 'string', secret: true, title: 'Token' }, items: { type: 'array', title: 'Items', items: { type: 'string' } } } } },
     source: '/tmp/notes', installedAt: 0, enabled, status: enabled ? 'active' : 'disabled', previousVersion, config, tools: [], commands: [], actions: [] })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {

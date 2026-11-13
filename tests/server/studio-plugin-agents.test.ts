@@ -11,7 +11,7 @@ import type { AgentDefinition, AgentRunContext, AgentRunInput, PluginContext } f
 const directories: string[] = [], runtimes: PluginRuntime[] = []
 afterEach(async () => { vi.unstubAllGlobals(); await Promise.all(runtimes.splice(0).map(runtime => runtime.close())); await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))) })
 function definition(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
-  return { id: 'assistant', name: 'Assistant', vendor: 'Example', agentApiVersion: 2,
+  return { id: 'assistant', name: 'Assistant', vendor: 'Example', agentApiVersion: 1,
     getStatus: async () => ({ installed: true, version: '1.0.0' }),
     management: { settings: () => ({ viewId: 'settings' }) },
     modes: { global: { listModels: async () => ({ status: 'ready', source: 'sdk', scope: 'available', models: [{ id: 'native', name: 'Native' }] }) }, scoped: { protocols: ['chat_completions'] } },
@@ -21,8 +21,8 @@ function definition(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
 async function owner(apply: (ctx: PluginContext) => void, permissions: string[] = ['agents', 'api.read']) {
   const directory = await mkdtemp(join(tmpdir(), 'studio-agent-runtime-')); directories.push(directory)
   const ports: PluginPorts = { authorize: vi.fn(), api: vi.fn(async identity => ({ userId: identity.userId })), emit() {}, log() {} }
-  const runtime = new PluginRuntime({ manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 2, permissions: permissions as any, server: 'server.mjs',
-    views: [{ id: 'settings', title: 'Settings', slot: 'settings' }] }, enabled: true, directory, installedAt: 0, source: directory, config: {} },
+  const runtime = new PluginRuntime({ manifest: { id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, permissions: permissions as any, server: 'server.mjs',
+    views: [{ id: 'settings', title: 'Settings', slot: 'agent-settings', icon: 'settings' }] }, enabled: true, directory, installedAt: 0, source: directory, config: {} },
   { userId: 1, profile: 'installer' }, new PluginStore(directory), ports)
   runtimes.push(runtime)
   await runtime.load({ apply: ctx => { apply(ctx) } }); runtime.activate()

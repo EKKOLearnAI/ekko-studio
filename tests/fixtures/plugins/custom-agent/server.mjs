@@ -9,7 +9,7 @@ export function apply(ctx) {
     return { ok: true }
   })
   const registration = ctx.extensions.agents.register({
-    id: 'assistant', name: 'Custom Agent', vendor: 'Example Team', agentApiVersion: 2,
+    id: 'assistant', name: 'Custom Agent', vendor: 'Example Team', agentApiVersion: 1,
     getStatus: async () => ({ installed: true, version, source: 'plugin' }),
     management: {
       settings: () => ({ viewId: 'settings' }),

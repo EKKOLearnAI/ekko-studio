@@ -1927,8 +1927,8 @@ if (browserRelayOperation) {
 
 const pluginBrowserOperation = openapi.paths['/api/studio/plugins/{id}/browser']?.post
 if (pluginBrowserOperation) {
-  pluginBrowserOperation.summary = 'Call the plugin SDK v2 Desktop browser module'
-  pluginBrowserOperation.description = 'Requires an enabled SDK v2 plugin declaring browser.cdp. Uses the actual caller account/Profile and the original authorized Desktop binding. CDP is scoped to a tab and known iframe sessions; browser-process Browser/Target commands are unavailable. Existing control leases, user takeover, cancellation and remote-control revocation apply. No Studio authentication token or debugging endpoint is returned.'
+  pluginBrowserOperation.summary = 'Call the plugin SDK v1 Desktop browser module'
+  pluginBrowserOperation.description = 'Requires an enabled SDK v1 plugin declaring browser.cdp. Uses the actual caller account/Profile and the original authorized Desktop binding. CDP is scoped to a tab and known iframe sessions; browser-process Browser/Target commands are unavailable. Existing control leases, user takeover, cancellation and remote-control revocation apply. No Studio authentication token or debugging endpoint is returned.'
   pluginBrowserOperation.requestBody = { required: true, content: { 'application/json': { schema: {
     type: 'object', required: ['method'], additionalProperties: false,
     properties: {

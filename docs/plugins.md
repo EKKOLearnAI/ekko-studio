@@ -1,7 +1,7 @@
 # Studio 插件与 ctx SDK
 
-当前为 SDK v2，清单使用 apiVersion: 2 和 permissions，Agent 使用 agentApiVersion: 2 和 features。
-模块规范及迁移说明见 [SDK 架构](../packages/plugin-sdk/docs/ARCHITECTURE.md)，全部上下文及 CDP 用法见 [能力指南](../packages/plugin-sdk/docs/STUDIO_CTX.md)。
+当前为 SDK v1，清单使用 apiVersion: 1 和 permissions，Agent 使用 agentApiVersion: 1 和 features。
+模块规范见 [SDK 架构](../packages/plugin-sdk/docs/ARCHITECTURE.md)，全部上下文及 CDP 用法见 [能力指南](../packages/plugin-sdk/docs/STUDIO_CTX.md)。
 
 Studio 插件用于定制工作台页面、设置页面、独立工作区、Agent 运行时、工具、命令和自动化动作。
 插件中心在主导航中开放，位于自定义插件业务入口之前、API Key 之前。插件页面与其他 Studio 页面复用固定页头。
@@ -49,7 +49,7 @@ OMP 使用官方 stdio RPC：文本和推理流、原生工具事件、图片、
 ### 开发测试夹具
 
 原来的五个演示包已移入 `tests/fixtures/plugins`，只用于开发回归，不随正式插件目录发布：`session-dashboard`、`notebook`、`activity-digest`、`tool-demo`、`custom-agent`。
-启动迁移仅卸载从当前仓库旧 `examples/plugins/<id>` 路径安装的这些演示包，保留历史数据与包文件。显式从其他目录安装的同名插件不受影响。
+演示包只作为测试夹具，产品启动只加载当前内置插件清单。
 
 开发新插件使用 `node scripts/create-plugin.mjs /absolute/path/my-plugin my-plugin`，生成最小设置页面与 RPC 模板，不再复制演示业务。
 测试时可在插件中心安装夹具的绝对路径，再启用；本地安装复制目录，源码改动后需要重新安装，重载只执行已安装版本。
@@ -158,7 +158,7 @@ Studio 的 harness/build 检查 SDK 变化是否同时修改了架构、ctx 或�
 本地检查未提交变更，Build CI 检查整个 PR/push。检查只能确认文档随代码更新，语义准确性由审查负责。
 
 开发宿主在可选 build 前后运行插件 harness，检查字段说明、模型引用和文件完整性，失败保留当前运行版本。
-手动编辑 Markdown 不会导致拒绝加载。生成项目的 prepack 和 CI 同样运行检查与测试；旧插件保持原有行为。
+手动编辑 Markdown 不会导致拒绝加载。生成项目的 prepack 和 CI 同样运行检查与测试；插件必须满足当前契约。
 已创建项目保留创建时的 SDK 和文档，升级时一起更新。
 
 ## 插件中心与使用入口
@@ -182,7 +182,7 @@ Studio 的 harness/build 检查 SDK 变化是否同时修改了架构、ctx 或�
 `ctx.location.path/query` 提供页面路由，`ctx.ui.navigate()` 可切换页面或查询参数；路由变化重新挂载视图，持久化状态应存于后端。
 插件中心和业务页复用宿主固定页头，内容区独立滚动。插件不挂载到单聊 Session 列表、聊天侧边或消息下方。
 
-迁移时为需要保留的全局入口补充 navigation；旧 slot 不再隐式产生入口。保留 settings 页面与旧 Agent 设置回调无需改动运行数据。
+视图 slot 只决定页面布局；全局入口必须显式声明 navigation。Agent 设置使用专属 agent-settings 页面。
 
 例如 `/#/studio/plugins/session-dashboard/sessions` 和 `/#/studio/plugins/notebook/notes`。独立页面使用完整内容区。切换 Profile 后插件列表与导航入口不变，页面重新绑定当前调用上下文。全局禁用或卸载会移除各账号的入口与挂载实例；不存在的页面显示返回中心的提示。`ctx.ui.navigate('/studio/plugins/notebook/notes')` 可跳到其他已声明页面，实际访问仍受目标插件状态约束。
 
@@ -217,7 +217,7 @@ RPC、工具、聊天命令、钩子、业务事件和工作流始终使用实�
   "id": "my-plugin",
   "name": "My plugin",
   "version": "1.0.0",
-  "apiVersion": 2,
+  "apiVersion": 1,
   "description": "A plugin with its own workspace",
   "author": { "name": "Example team", "url": "https://example.com" },
   "repository": "https://github.com/example/my-plugin",
@@ -253,7 +253,7 @@ React/Vue 等框架可一并打包。配置 JSON Schema 支持对象、数组、
 
 作者和项目链接仅允许不含账号密码的 HTTP(S) 地址。图标允许包内相对路径的 PNG/JPEG/WebP/GIF
 （每个文件不超过 256 KB）或相应的 base64 data URL；安装器读取并内联，拒绝越界路径和符号链接。
-项目信息均可选。`apiVersion` 声明 SDK 兼容版本，当前只接受 `2`。
+项目信息均可选。`apiVersion` 声明 SDK 兼容版本，当前只接受 `1`。
 
 发布前由作者构建前后端，发布包需包含 `plugin.json`、`package.json` 和所有入口/资源。
 npm/GitHub 安装在独立版本目录安装生产依赖，禁止安装脚本；本地目录安装只复制成品。
@@ -526,7 +526,7 @@ Studio 会将插件变更通知所有已启动的 Hermes Worker，包括群聊�
 ```js
 export function apply(ctx) {
   const registration = ctx.extensions.agents.register({
-    id: 'assistant', name: 'My Agent', vendor: 'My Team', agentApiVersion: 2,
+    id: 'assistant', name: 'My Agent', vendor: 'My Team', agentApiVersion: 1,
     getStatus: async () => ({ installed: true, version: '1.0.0' }),
     management: {
       settings: () => ({ viewId: 'agent-settings' }),
@@ -568,7 +568,7 @@ export function apply(ctx) {
 `getStatus` 返回 `{installed, version, source?, path?, error?}`。普通目录不暴露安装路径。
 管理页的操作绑定 `management.settings/checkUpdate/upgrade/remove`；未提供的操作不显示。
 同时提供 `checkUpdate/upgrade` 的插件 Agent，在 `installed:false` 时显示“安装”。点击后宿主先调用 `checkUpdate` 获取准确版本，再调用 `upgrade` 完成首次安装；安装期间禁用重复操作，成功后刷新状态。已安装时显示“检查更新”及可用的版本升级操作。
-设置回调返回本插件清单中 `slot: 'agent-settings'`（兼容旧 settings）的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。该回调与两类全局导航独立，三个 Agent 页面可只声明 agent-settings 与命名 icon，不注册 navigation。
+设置回调返回本插件清单中 `slot: 'agent-settings'`的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。该回调与两类全局导航独立，三个 Agent 页面可只声明 agent-settings 与命名 icon，不注册 navigation。
 页面继续通过 `client.mjs` 的 `mount(root, ctx)` 和服务端 `ctx.extensions.rpc.register` 实现。
 生产安全策略允许视图加载 Blob 模块；iframe 保持不透明来源，自己的 CSP 禁止直接网络请求，业务调用仍经认证桥接。
 插件负责配置持久化、校验、文件格式、环境变量和启动参数，不要求宿主生成设置表单。
@@ -578,7 +578,7 @@ export function apply(ctx) {
 `upgrade({version, expectedVersion}, ctx)` 更新引擎，返回 `installedVersion`。
 `remove(ctx)` 删除插件自己管理的 Agent 引擎，成功后不返回业务数据；保留插件源码、配置、账号凭证和会话数据。
 宿主要求删除请求带 `expectedVersion`，版本改变、正在运行或正在维护时拒绝操作，完成后重新确认 `installed:false`。
-未提供删除回调的旧插件继续正常运行，管理页不显示删除按钮。
+删除回调为可选能力；未提供时管理页不显示删除按钮。
 
 `supportsAutoUpdate(ctx)` 返回当前安装是否支持无人值守更新，缺省为 false；必须同时提供 `checkUpdate/upgrade`。
 使用自定义可执行文件、外部包管理器或必须交互登录时返回 false，能力查询和开关由宿主提供：

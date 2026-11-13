@@ -97,7 +97,7 @@ export interface AgentSession {
   dispose(): void | Promise<void>
 }
 export interface AgentDefinition {
-  id: string; name: string; vendor: string; description?: string; icon?: string; agentApiVersion: 2
+  id: string; name: string; vendor: string; description?: string; icon?: string; agentApiVersion: 1
   getStatus(ctx: AgentManagementContext): Promise<AgentStatus>
   management: {
     settings?(ctx: AgentManagementContext): AgentSettingsTarget | Promise<AgentSettingsTarget>

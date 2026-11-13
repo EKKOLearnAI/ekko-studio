@@ -3,12 +3,12 @@ import { resolve } from 'node:path'
 
 function published(index: number, extra: Record<string, unknown> = {}) {
   return { id: index.toString(16).padStart(64, '0'), name: `Published ${index}`, description: 'Available from the plugin marketplace',
-    repository: `https://github.com/example/plugin-${index}`, manifestId: `plugin-${index}`, version: '1.0.0', apiVersion: 2,
+    repository: `https://github.com/example/plugin-${index}`, manifestId: `plugin-${index}`, version: '1.0.0', apiVersion: 1,
     author: { name: `Publisher ${index}` }, repositoryStars: 1234,
     permissions: ['tools'], sourceCommit: 'b'.repeat(40), installSource: `github:example/plugin-${index}#${'b'.repeat(40)}`, ...extra }
 }
 async function setup(page: Page, options: { ordinary?: boolean; unavailable?: boolean; entries?: any[] } = {}) {
-  const local = { manifest: { id: 'plugin-1', name: 'Installed commands', description: 'Disabled, but still a chat-command plugin', version: '2.0.0', apiVersion: 2,
+  const local = { manifest: { id: 'plugin-1', name: 'Installed commands', description: 'Disabled, but still a chat-command plugin', version: '2.0.0', apiVersion: 1,
     repository: 'https://github.com/example/plugin-1', author: { name: 'Local Maintainer' }, permissions: ['commands', 'tools'] }, source: 'github:example/plugin-1#' + 'c'.repeat(40), installedAt: 0,
     enabled: false, status: 'disabled', config: {}, tools: [], commands: [], actions: [] }
   const state = { plugins: [local], revision: 1, unavailable: Boolean(options.unavailable), entries: options.entries || [published(1), published(2, { name: 'Agent extension', permissions: ['agents', 'ui'] })] }
