@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { mkdtemp, mkdir, readFile, writeFile, rm, readdir, access, realpath, cp } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, rm, readdir, access, realpath, cp, stat, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { PluginDevelopment } from '../../packages/server/src/modules/studio/services/plugins/development'
@@ -94,6 +94,90 @@ it('lists without executing, loads in the real host, reloads nested modules and 
   await development.tick(); await development.tick()
   expect(await value()).toBe('three')
   expect((await development.list()).projects[0].status).toBe('registered')
+})
+
+it('ignores unchanged saves and timestamp changes but reloads same-size content edits', async () => {
+  const { source, manager, development, put, value, changed } = await fixture()
+  const file = join(source, 'server.mjs'), stamp = new Date('2020-01-01T00:00:00Z')
+  await put(code('one')); await utimes(file, stamp, stamp)
+  await development.start(who, 'notes', 0)
+  const snapshot = manager.snapshot(), runtime = manager.runtime(who, 'notes')
+  for (const touch of [
+    () => utimes(file, new Date('2020-01-02T00:00:00Z'), stamp),
+    () => utimes(file, stamp, new Date('2020-01-03T00:00:00Z')),
+    () => put(code('one')),
+  ]) {
+    await touch()
+    for (let n = 0; n < 4; n++) await development.tick()
+    expect(manager.snapshot()).toEqual(snapshot)
+    expect(manager.runtime(who, 'notes')).toBe(runtime)
+  }
+  expect(changed).toHaveBeenCalledTimes(1)
+  expect(manager.poll(who, 0).events.filter(event => event.type === 'plugin.changed')).toHaveLength(1)
+  const before = await stat(file)
+  await put(code('two')); await utimes(file, before.atime, before.mtime)
+  expect((await stat(file)).size).toBe(before.size)
+  await development.tick(); expect(await value()).toBe('one')
+  await development.tick(); expect(await value()).toBe('two')
+  expect(manager.snapshot().revision).toBe(snapshot.revision + 1)
+})
+
+it('does not loop when a build rewrites identical files outside ignored output directories', async () => {
+  const { source, manager, development, put, value, changed } = await fixture()
+  await put(code('one'))
+  const pkg = JSON.parse(await readFile(join(source, 'package.json'), 'utf8')); pkg.scripts.build = 'node compile.mjs'
+  await writeFile(join(source, 'package.json'), JSON.stringify(pkg))
+  await writeFile(join(source, 'compile.mjs'), 'import { readFileSync, writeFileSync } from "node:fs"; writeFileSync("client.mjs", readFileSync("client.mjs"))')
+  await development.start(who, 'notes', 0)
+  const initial = manager.snapshot()
+  for (let n = 0; n < 6; n++) await development.tick()
+  expect(manager.snapshot()).toEqual(initial)
+  await put(code('two'))
+  await development.tick(); await development.tick()
+  expect(await value()).toBe('two')
+  const rebuilt = manager.snapshot()
+  for (let n = 0; n < 6; n++) await development.tick()
+  expect(manager.snapshot()).toEqual(rebuilt)
+  expect(rebuilt.revision).toBe(initial.revision + 1)
+  expect(changed).toHaveBeenCalledTimes(2)
+})
+
+it('keeps edits made during a build pending for the next build', async () => {
+  const { source, manager, development, value } = await fixture()
+  await mkdir(join(source, 'dist'))
+  const definition = JSON.parse(await readFile(join(source, 'plugin.json'), 'utf8')); definition.server = 'dist/server.mjs'
+  await writeFile(join(source, 'plugin.json'), JSON.stringify(definition))
+  const pkg = JSON.parse(await readFile(join(source, 'package.json'), 'utf8')); pkg.scripts.build = 'node compile.mjs'
+  await writeFile(join(source, 'package.json'), JSON.stringify(pkg))
+  await writeFile(join(source, 'input.mjs'), code('one'))
+  await writeFile(join(source, 'compile.mjs'), `import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+    const input = readFileSync('input.mjs'); writeFileSync('dist/building', '1');
+    while (!existsSync('dist/continue')) await new Promise(resolve => setTimeout(resolve, 10));
+    writeFileSync('dist/server.mjs', input);`)
+  const build = development.start(who, 'notes', 0)
+  // Always release the compiler if an assertion fails, before closing the host.
+  cleanups.push(async () => { await writeFile(join(source, 'dist/continue'), '1'); await build.catch(() => {}) })
+  await vi.waitFor(() => access(join(source, 'dist/building')))
+  await writeFile(join(source, 'input.mjs'), code('two'))
+  await writeFile(join(source, 'dist/continue'), '1')
+  await build; expect(await value()).toBe('one')
+  await development.tick(); await development.tick()
+  expect(await value()).toBe('two')
+  const snapshot = manager.snapshot()
+  await development.tick(); await development.tick()
+  expect(manager.snapshot()).toEqual(snapshot)
+})
+
+it('requires two consecutive changed observations after a source edit is reverted', async () => {
+  const { manager, development, put, value } = await fixture()
+  await put(code('one')); await development.start(who, 'notes', 0)
+  const revision = manager.snapshot().revision
+  await put(code('two')); await development.tick()
+  await put(code('one')); await development.tick()
+  await put(code('two')); await development.tick()
+  expect(manager.snapshot().revision).toBe(revision)
+  expect(await value()).toBe('one')
+  await development.tick(); expect(await value()).toBe('two')
 })
 
 it('keeps the working runtime after activation errors and retries only after another edit', async () => {
