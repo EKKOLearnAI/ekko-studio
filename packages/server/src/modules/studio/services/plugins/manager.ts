@@ -98,10 +98,10 @@ export class PluginManager {
         if (options?.expectedVersion && pkg.manifest.version !== options.expectedVersion) throw new PluginError('Update package version does not match the published release')
         const old = state.records[id]
         if (old && !expectedId) throw new PluginError('Plugin already installed; use Update', 'PLUGIN_EXISTS', 409)
-        const next: PluginRecord = { manifest: pkg.manifest, directory: pkg.directory, source, installedAt: Date.now(), enabled: options?.enabled ?? old?.enabled ?? false,
+        const next: PluginRecord = { manifest: pkg.manifest, directory: pkg.directory, source: pkg.source, installedAt: Date.now(), enabled: options?.enabled ?? old?.enabled ?? false,
           ...(options?.developmentDirectory ? { developmentDirectory: options.developmentDirectory } : {}),
           config: configuration(pkg.manifest.configSchema, old?.config || {}, !!(options?.enabled ?? old?.enabled)), ...(old ? { previous: previousVersion(old) } : {}) }
-        if (source.startsWith('builtin:')) (state.builtinVersions ||= {})[id] = pkg.manifest.version
+        if (pkg.source.startsWith('builtin:')) (state.builtinVersions ||= {})[id] = pkg.manifest.version
         await this.replace(identity, state, id, next)
         return this.snapshot(identity)
       } catch (e) { await pkg.dispose(); throw e }

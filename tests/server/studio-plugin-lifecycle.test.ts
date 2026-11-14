@@ -25,7 +25,7 @@ it('keeps installation, development linking, switching, upgrade failure, uninsta
   const next = await packageAt('next', '0.1.7'), broken = await packageAt('broken', '0.1.7', true)
   const source = (commit: string) => 'github:example/notes#' + commit.repeat(40)
   const realInstall = installer.installPackage
-  vi.spyOn(installer, 'installPackage').mockImplementation((root, input) => realInstall(root, ({ [source('a')]: release, [source('b')]: next, [source('c')]: broken })[input] || input))
+  vi.spyOn(installer, 'installPackage').mockImplementation(async (root, input) => ({ ...await realInstall(root, ({ [source('a')]: release, [source('b')]: next, [source('c')]: broken })[input] || input), source: input }))
   const manager = new PluginManager(join(home, 'plugins'), { authorize() {}, api: async () => null, emit() {}, log() {} })
   cleanup.push(() => manager.close())
   const development = new PluginDevelopment(manager, () => {}); cleanup.push(() => development.close())

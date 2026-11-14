@@ -61,8 +61,11 @@ OMP 使用官方 stdio RPC：文本和推理流、原生工具事件、图片、
 开发新插件使用 `node scripts/create-plugin.mjs /absolute/path/my-plugin my-plugin`，生成最小设置页面与 RPC 模板，不再复制演示业务。
 测试时可在插件中心安装夹具的绝对路径，再启用；本地安装复制目录，源码改动后需要重新安装，重载只执行已安装版本。
 
-插件安装支持本地目录、`package@1.2.3` 或 `github:owner/repository#完整40位提交`。
-远程安装禁止生命周期脚本，必须提供编译后的入口。版本必须是精确版本。
+插件安装支持服务端本地绝对目录、npm 精确版本（如 `package@1.2.3`、`@scope/package@1.2.3-rc.1`）或普通 GitHub 仓库链接（如 `https://github.com/owner/repository`，也可带 `.git` 或尾随 `/`）。
+粘贴 GitHub 链接后，Studio 通过 GitHub API 读取默认分支当前提交，再按完整提交安装并记录固定来源；无需手填 hash。这里选择默认分支的源码，不自动选择最新 Release/tag；插件版本以包内 `plugin.json` 为准。
+自动解析仅支持公开仓库的 HTTPS 根地址，不接受凭证、自定义端口、查询参数、片段或 `/tree/...` 等子页面。解析超时、限流、空仓库或无法访问时不会退回可变分支安装，可稍后重试或使用本地目录。仓库移动产生重定向时，请使用新的仓库地址。
+仍支持 `github:owner/repository#完整40位小写提交`，以及 `git+https://gitlab.com/team/repository.git#完整40位小写提交`、`git+https://gitee.com/team/repository.git#完整40位小写提交`；这些固定来源不需要额外查询 GitHub API。
+远程安装禁止生命周期脚本、忽略开发依赖，必须包含 `plugin.json` 和编译后的 JavaScript 入口。npm 不支持无版本包名、`latest` 或版本范围。安装仍需要超级管理员确认信任，且新装第三方插件默认禁用。
 启停、配置、升级、回滚和卸载使用版本号防止同时修改。升级激活失败会恢复旧版本。
 依赖使用 manifest 中的精确版本，启用前必须先启用依赖；禁用依赖前要禁用使用它的插件。
 卸载释放运行资源，但保留数据与历史包目录，方便恢复；它不是清除磁盘数据操作。
