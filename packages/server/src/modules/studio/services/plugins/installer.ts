@@ -8,6 +8,7 @@ import { PLUGIN_ICON_PATHS } from '../../contracts/plugins'
 import { PluginError } from './errors'
 import { windowsCmdShimExecution } from '../../public/windows-command'
 import { builtinPluginDirectory } from './builtin-directory'
+import { resolveGithubPluginSource } from './source'
 
 export async function pluginFile(directory: string, entry: string): Promise<string> {
   const root = await realpath(directory)
@@ -38,8 +39,9 @@ export async function readManifest(directory: string, options: { validateEntries
   for (const entry of result.navigation?.main || []) entry.icon = (await icon(entry.icon))!
   return manifest(result)
 }
-export async function installPackage(root: string, source: string): Promise<{ manifest: PluginManifest; directory: string; dispose: () => Promise<void> }> {
+export async function installPackage(root: string, source: string): Promise<{ manifest: PluginManifest; directory: string; source: string; dispose: () => Promise<void> }> {
   if (typeof source !== 'string' || !source.trim() || source.length > 2048) throw new PluginError('Plugin package source is required')
+  if (!isAbsolute(source)) source = source.trim()
   const stage = join(root, 'versions', randomUUID())
   await mkdir(stage, { recursive: true, mode: 0o700 })
   const dispose = () => rm(stage, { recursive: true, force: true })
@@ -53,9 +55,10 @@ export async function installPackage(root: string, source: string): Promise<{ ma
       directory = join(stage, 'package')
       await cp(real, directory, { recursive: true, dereference: false, filter: path => !/^(?:\.git|\.env(?:\..*)?)$/.test(path.split(sep).at(-1) || '') })
     } else {
+      source = await resolveGithubPluginSource(source)
       if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+@\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(source)
         && !/^github:[\w.-]+\/[\w.-]+#[a-f0-9]{40}$/.test(source)
-        && !/^git\+https:\/\/(?:gitlab\.com|gitee\.com)\/[\w.-]+(?:\/[\w.-]+)+\.git#[a-f0-9]{40}$/.test(source)) throw new PluginError('Use an absolute directory, package@exact-version or a supported repository pinned to a full commit')
+        && !/^git\+https:\/\/(?:gitlab\.com|gitee\.com)\/[\w.-]+(?:\/[\w.-]+)+\.git#[a-f0-9]{40}$/.test(source)) throw new PluginError('Use a GitHub repository URL (https://github.com/owner/repo), an absolute directory, package@exact-version or a supported repository pinned to a full commit')
       const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
       const args = ['install', '--prefix', stage, '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund', '--package-lock=true', '--', source]
       const execution = process.platform === 'win32' ? windowsCmdShimExecution(npm, args) : { command: npm, args }
@@ -68,6 +71,6 @@ export async function installPackage(root: string, source: string): Promise<{ ma
     }
     const result = await readManifest(directory)
     if (source.startsWith('builtin:') && result.id !== source.slice(8)) throw new PluginError('Bundled plugin id does not match its directory')
-    return { manifest: result, directory, dispose }
+    return { manifest: result, directory, source, dispose }
   } catch (error) { await dispose(); throw error }
 }
