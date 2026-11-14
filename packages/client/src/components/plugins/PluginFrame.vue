@@ -58,7 +58,7 @@ watch(() => [frame.value, props.plugin, props.profile, props.view, props.session
   }
   function themeSnapshot() {
     const computed = getComputedStyle(element), theme: Record<string, string> = {}
-    for (const key of ['--text-primary', '--text-secondary', '--text-muted', '--bg-card', '--bg-secondary', '--border-color', '--accent-primary']) theme[key] = computed.getPropertyValue(key)
+    for (const key of ['--text-primary', '--text-secondary', '--text-muted', '--bg-card', '--bg-secondary', '--border-color', '--accent-primary', '--radius-component']) theme[key] = computed.getPropertyValue(key)
     return theme
   }
   const appearance = new MutationObserver(() => { if (started) send({ type: 'theme', theme: themeSnapshot() }) })
