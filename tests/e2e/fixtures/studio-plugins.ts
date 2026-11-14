@@ -5,6 +5,8 @@ import { NConfigProvider, NDialogProvider, NMessageProvider, darkTheme } from 'n
 import StudioPluginsView from '../../../packages/client/src/views/StudioPluginsView.vue'
 import PluginPageView from '../../../packages/client/src/views/PluginPageView.vue'
 import StudioNavigationRail from '../../../packages/client/src/components/layout/StudioNavigationRail.vue'
+import NavigationSettingsModal from '../../../packages/client/src/components/layout/NavigationSettingsModal.vue'
+import { useNavigationStore } from '../../../packages/client/src/stores/navigation'
 import { useProfilesStore } from '../../../packages/client/src/stores/hermes/profiles'
 import PluginNotifications from '../../../packages/client/src/components/plugins/PluginNotifications.vue'
 import PluginWorkspaceSidebar from '../../../packages/client/src/components/layout/PluginWorkspaceSidebar.vue'
@@ -77,7 +79,7 @@ const Layout = { setup() {
 } }
 const fixtureRoot = { setup: () => () => h(NConfigProvider, { theme: theme.isDark.value ? darkTheme : null,
   themeOverrides: getThemeOverrides(theme.isDark.value, theme.isComic.value, theme.customization.value, theme.hasCustomBackground.value) },
-  () => h(NDialogProvider, null, () => h(NMessageProvider, null, () => [h(PluginNotifications), h(Layout)]))) }
+  () => h(NDialogProvider, null, () => h(NMessageProvider, null, () => [h(PluginNotifications), h(NavigationSettingsModal, { show: useNavigationStore().settingsOpen, 'onUpdate:show': (show: boolean) => { useNavigationStore().settingsOpen = show } }), h(Layout)]))) }
 const root = new URLSearchParams(location.search).has('shell') ? (await import('../../../packages/client/src/App.vue')).default : fixtureRoot
 createApp(root)
   .use(pinia).use(router).use(createI18n({ legacy: false, locale: 'zh', messages: { zh } })).mount('#app')

@@ -6,6 +6,8 @@ import { useRoute } from 'vue-router'
 import { useAccountStore } from '@/stores/account'
 import ProfileAvatar from '@/components/hermes/profiles/ProfileAvatar.vue'
 import SidebarAccountControls from './SidebarAccountControls.vue'
+import { useNavigationStore } from '@/stores/navigation'
+import { useMobileNavigation } from '@/composables/usePageSidebar'
 import { useNavigationRail } from '@/composables/useNavigationRail'
 
 const props = defineProps<{ collapsed?: boolean; rail?: boolean }>()
@@ -15,6 +17,8 @@ const route = useRoute()
 const { t } = useI18n()
 const accountStore = useAccountStore()
 const showMenu = ref(false)
+const navigation = useNavigationStore()
+const mobileNavigation = useMobileNavigation()
 const footer = ref<HTMLElement | null>(null)
 const sidebarWidth = ref<number>()
 let sidebarObserver: ResizeObserver | undefined
@@ -47,6 +51,12 @@ watch(hasNavigationRail, () => { showMenu.value = false })
 
 function closeMenu() {
   showMenu.value = false
+}
+
+function openNavigationSettings() {
+  closeMenu()
+  if (mobileNavigation) mobileNavigation.open.value = false
+  navigation.settingsOpen = true
 }
 
 function handleEscape() {
@@ -112,7 +122,7 @@ async function focusMenu() {
             <span class="account-label">{{ t('settings.tabs.account') }}</span>
           </div>
         </div>
-        <SidebarAccountControls @open-modal="closeMenu" />
+        <SidebarAccountControls @open-modal="closeMenu" @open-navigation-settings="openNavigationSettings" />
       </section>
     </NPopover>
   </div>

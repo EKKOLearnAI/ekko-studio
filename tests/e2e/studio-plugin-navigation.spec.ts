@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { resolve } from 'node:path'
+import { mockSavedNavigation } from './fixtures/navigation-settings'
 
 test('keeps global entries independent and opens a three-page Agent settings sidebar with line icons', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
@@ -29,8 +30,9 @@ test('keeps global entries independent and opens a three-page Agent settings sid
   })
   const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugins.ts').replace(/^\//, '')
   await page.route('**/__independent_entries__', route => route.fulfill({ contentType: 'text/html', body: `<div id="app"></div><script type="module" src="${entry}"></script>` }))
+  await mockSavedNavigation(page, ['plugin:entry-demo/home'])
   await page.goto('/__independent_entries__#/hermes/agentManager')
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(1)
+  await expect(page.locator('.studio-navigation-rail__plugin')).toHaveCount(1)
   await expect(page.getByRole('link', { name: '主入口', exact: true }).locator('img')).toHaveAttribute('src', image)
   await page.getByTestId('agent-card-plugin:omp/omp').getByRole('button', { name: '设置', exact: true }).click()
   const sidebar = page.locator('.plugin-config-sidebar'), frame = page.frameLocator('.plugin-workspace iframe')
@@ -57,7 +59,7 @@ test('keeps global entries independent and opens a three-page Agent settings sid
   await expect(page.locator('.sidebar a[href*="/omp/"]')).toHaveCount(0)
   main = false
   await page.evaluate(() => (window as any).pluginFixture.changed())
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(0)
+  await expect(page.locator('.studio-navigation-rail__plugin')).toHaveCount(0)
   await expect(page.locator('.sidebar').getByRole('link', { name: '设置入口', exact: true })).toBeVisible()
   settings = false
   await page.evaluate(() => (window as any).pluginFixture.changed())
@@ -93,6 +95,7 @@ test('exposes plugin navigation, settings and workspaces on desktop and mobile',
   })
   const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugins.ts').replaceAll('\\', '/').replace(/^\//, '')
   await page.route('**/__plugin_navigation__', route => route.fulfill({ contentType: 'text/html', body: `<div id="app"></div><script type="module" src="${entry}"></script>` }))
+  await mockSavedNavigation(page, ['plugin:rooms/dashboard', 'plugin:rooms/rooms'])
   await page.goto('/__plugin_navigation__')
   await page.getByRole('button', { name: '详情', exact: true }).click()
   await expect(page.getByRole('link', { name: '代码仓库' })).toHaveAttribute('href', 'https://example.com/repo')
@@ -101,7 +104,7 @@ test('exposes plugin navigation, settings and workspaces on desktop and mobile',
   await page.keyboard.press('Escape')
   const rail = page.locator('.studio-navigation-rail')
   await expect(rail.getByRole('link', { name: '插件中心', exact: true })).toBeVisible()
-  await expect(rail.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
+  await expect(rail.locator('.studio-navigation-rail__plugin')).toHaveCount(2)
   await expect(rail.getByRole('link', { name: 'Room settings' })).toHaveCount(0)
   await rail.getByRole('link', { name: 'Dashboard', exact: true }).click()
   await expect(page.locator('.plugin-config-sidebar')).toHaveCount(0)
@@ -142,7 +145,7 @@ test('exposes plugin navigation, settings and workspaces on desktop and mobile',
   await expect(page.locator('.studio-mobile-navigation .plugin-config-sidebar')).toBeVisible()
   await expect(page.locator('.studio-mobile-navigation a[href*="/studio/plugin-settings/"]')).toHaveCount(0)
   await expect(page.locator('.studio-mobile-navigation .studio-navigation-rail').getByRole('link', { name: '插件中心', exact: true })).toBeVisible()
-  await expect(page.locator('.studio-mobile-navigation .studio-navigation-rail__plugins a')).toHaveCount(2)
+  await expect(page.locator('.studio-mobile-navigation .studio-navigation-rail__plugin')).toHaveCount(2)
   await page.locator('.studio-mobile-navigation').getByRole('link', { name: 'History', exact: true }).click()
   await expect(page.frameLocator('.plugin-workspace iframe').locator('#root')).toContainText('workspace:history:none')
   await expect(page.locator('.studio-mobile-navigation')).not.toBeVisible()
@@ -172,6 +175,7 @@ test('keeps plugin headers fixed while center and page content scroll on desktop
   })
   const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugins.ts').replace(/^\//, '')
   await page.route('**/__plugin_layout__', route => route.fulfill({ contentType: 'text/html', body: `<div id="app"></div><script type="module" src="${entry}"></script>` }))
+  await mockSavedNavigation(page, plugins.map(plugin => `plugin:${plugin.manifest.id}/home`))
   await page.goto('/__plugin_layout__')
   await expect(page.locator('.plugin-card')).toHaveCount(18)
   const header = page.locator('.center-header'), scroll = page.locator('.center-scroll')

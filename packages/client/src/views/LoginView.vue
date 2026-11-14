@@ -55,7 +55,7 @@ async function handlePasswordLogin() {
     const session = await loginWithPassword(username.value.trim(), password.value);
     setApiKey(session.token);
     activateUserTheme(session.userId, session.theme);
-    router.replace(resolveLoginRedirect(route.query.redirect));
+    await router.replace(resolveLoginRedirect(route.query.redirect));
   } catch (err: any) {
     if (err.status === 429 || err.status === 503) {
       errorMsg.value = t("login.tooManyAttempts");

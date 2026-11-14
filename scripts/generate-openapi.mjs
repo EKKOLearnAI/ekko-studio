@@ -102,6 +102,7 @@ const tagMappings = {
   'modules/studio/routes/mcu-devices.ts': { name: 'MCU Devices', description: 'Microcontroller device management' },
   'modules/studio/routes/mcu-firmware.ts': { name: 'MCU Firmware', description: 'Microcontroller firmware distribution' },
   'modules/studio/routes/theme.ts': { name: 'Theme', description: 'Per-user appearance settings and background image' },
+  'modules/studio/routes/navigation.ts': { name: 'Navigation', description: 'Per-user navigation entries, ordering and explicit plugin opt-in' },
   'modules/studio/routes/announcements.ts': { name: 'Announcements', description: 'Published Studio desktop announcements, newest first' },
   'modules/studio/routes/api-docs.ts': { name: 'API Docs', description: 'OpenAPI route catalog' },
   'modules/studio/routes/agent-status.ts': { name: 'Agent Status', description: 'In-memory Agent installation, version, and source status' },
@@ -2184,6 +2185,17 @@ for (const [method, suffix, operationId, summary, properties] of pluginOperation
     } } } } } : {}),
   }
 }
+const navigationSchema = { type: 'object', additionalProperties: false, required: ['items'], properties: {
+  items: { type: 'array', maxItems: 201, uniqueItems: true, items: { type: 'string' }, description: 'Ordered built-in IDs or plugin:<pluginId>/<viewId>. New plugin selections must target active registered navigation.main entries.' },
+} }
+openapi.paths['/api/navigation'].get.summary = 'Read the signed-in user navigation settings; plugins are excluded by default'
+openapi.paths['/api/navigation'].put.summary = 'Save the signed-in user navigation selection and ordering'
+openapi.paths['/api/navigation'].put.requestBody = { required: true, content: { 'application/json': { schema: navigationSchema } } }
+for (const operation of Object.values(openapi.paths['/api/navigation'])) {
+  operation.responses['200'] = { description: 'Account-scoped navigation settings', content: { 'application/json': { schema: navigationSchema } } }
+  operation.responses['401'] = { description: 'Studio login required; shared sessions cannot change navigation' }
+}
+openapi.paths['/api/navigation'].put.responses['400'] = { description: 'Invalid, duplicate or unregistered navigation entry' }
 writeFileSync(outputPath, JSON.stringify(openapi, null, 2))
 
 console.log(`✓ Generated OpenAPI spec: ${outputPath}`)

@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { resolve } from 'node:path'
+import { mockSavedNavigation } from './fixtures/navigation-settings'
 
 test('plugin pages and visible navigation follow enabled state across accounts and Profiles', async ({ page }, testInfo) => {
   let active = true, installed = true
@@ -38,11 +39,12 @@ test('plugin pages and visible navigation follow enabled state across accounts a
   })
   const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugins.ts').replaceAll('\\', '/').replace(/^\//, '')
   await page.route('**/__plugin_workspace__', route => route.fulfill({ contentType: 'text/html', body: `<div id="app"></div><script type="module" src="${entry}"></script>` }))
+  await mockSavedNavigation(page, ['plugin:alpha/home', 'plugin:alpha/report'])
   await page.goto('/__plugin_workspace__')
   await expect(page.locator('.plugin-card')).toHaveCount(3)
   await expect(page.locator('iframe')).toHaveCount(0)
   expect(clients).toHaveLength(0)
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
+  await expect(page.locator('.studio-navigation-rail__plugin')).toHaveCount(2)
   await page.getByRole('textbox', { name: '搜索插件名称、描述…' }).fill('没有结果')
   await expect(page.getByText('没有匹配的插件')).toBeVisible()
   await page.getByRole('textbox', { name: '搜索插件名称、描述…' }).fill('Beta')
@@ -69,7 +71,7 @@ test('plugin pages and visible navigation follow enabled state across accounts a
   await expect(frame.locator('#root')).toHaveText('1/default:report')
   await page.reload()
   await expect(frame.locator('#root')).toHaveText('1/default:report')
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
+  await expect(page.locator('.studio-navigation-rail__plugin')).toHaveCount(2)
   await expect(page.locator('iframe')).toHaveCount(1)
   await page.evaluate(() => (window as any).pluginFixture.navigate('/studio/plugins/alpha/home'))
   await expect(frame.locator('#root')).toHaveText('1/default:home')
@@ -81,14 +83,14 @@ test('plugin pages and visible navigation follow enabled state across accounts a
   active = false; change++
   await expect(page.getByText('此插件已禁用，请在插件中心启用。')).toBeVisible()
   await expect(page.locator('iframe')).toHaveCount(0)
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(0)
+  await expect(page.locator('.studio-navigation-rail__plugin')).toHaveCount(0)
   active = true; change++
   await expect(frame.locator('#root')).toHaveText('1/default:home')
   await page.evaluate(() => (window as any).pluginFixture.profile('slow'))
   await expect(frame.locator('#root')).toBeEmpty()
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
+  await expect(page.locator('.studio-navigation-rail__plugin')).toHaveCount(2)
   await page.evaluate(() => (window as any).pluginFixture.profile('other'))
-  await expect(page.locator('.studio-navigation-rail__plugins a')).toHaveCount(2)
+  await expect(page.locator('.studio-navigation-rail__plugin')).toHaveCount(2)
   await expect(frame.locator('#root')).toHaveText('1/other:home')
   releaseSlowProfile!()
   await expect(frame.locator('#root')).toHaveText('1/other:home')
