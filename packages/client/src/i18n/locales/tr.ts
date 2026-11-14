@@ -168,6 +168,13 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_23_1: "Avatar menüsüne gezinme ayarları eklenir: giriş ekleme, kaldırma, önizleme ve sürükleme veya klavyeyle sıralama. Hesap başına kaydedilir; kayıt başarısızsa önceki sıra geri yüklenir (#3803)",
+    new_0_8_23_2: "Web girişi ve Desktop başlangıcı kayıtlı ilk kullanılabilir girişi açar; açık bağlantılar ve yenileme hedefleri korunur, yoksa ayarlar açılır. Eklenti kısayolları elle eklenir, devre dışıyken sıraları korunur, varsayılana dönünce kaldırılır (#3803)",
+    new_0_8_23_3: "Eklentiler dizin gezintisi, elle yol, hesap favorileri ve son dizinlerle ana çalışma alanı seçicisini kullanabilir. Profile ve dizin döner; iptal son kaydı eklemez, sayfa veya Profile değişimi seçiciyi kapatır (#3797)",
+    new_0_8_23_4: "Herkese açık GitHub depolarının HTTPS kök adresinden eklenti kurulabilir; varsayılan dalın güncel commit’i bakım ve geri alma için sabitlenir. Çözümleme hatasında yeniden denenebilir veya yerel dizin kullanılabilir; güven onayı gerekir (#3806)",
+    new_0_8_23_5: "Eklenti sayfaları, çalışma alanları ve ayarları kullanılabilir pencereyi kendi boşluklarıyla doldurur. Belge, iç içe alan ve metin kutusu kaydırma çubukları Studio temasını izler; ana başlıklar, gezinme ve sandbox yalıtımı korunur (#3805)",
+    new_0_8_23_6: "Agent kartları eşit yükseklikte olur; ayrıntılı DSH sürümleri çekmeceye taşınır: kesin sürüm kurma/sabitleme, son sürümü kurma/sabitlemeyi kaldırma ve geri alma. Kartta durum ve güncelleme kalır; silme onay ister, işlem ve hatalar paylaşılır (#3804)",
+    new_0_8_23_7: "Geliştirme eklentileri yalnız dosya yolu veya içerik değişince derlenir. Aynı kayıt veya çıktı sonrası yinelenen derlemeler, yanıp sönme ve form kaybı düzeltilir; derleme sırasındaki düzenlemeler sonraki denetimlerde işlenir (#3807)",
     new_0_8_22_1: "Kurulum, yükseltme, geri alma, yapılandırma, bağımlılık denetimi ve günlüklerle genel eklenti sistemi eklenir. Sayfalar, sohbet komutları, iş akışı eylemleri, zamanlamalar, olaylar ve Agent kancaları sunulur; çağrılar gerçek kullanıcı kimliğini korur (#3763)",
     new_0_8_22_2: "Merkez Kurulu, Tümü ve Geliştirme olarak ayrılır; arama, filtre, güncelleme ve commit sabitli kurulum sunar. Kaynak değiştirme, kaldırma, yeniden deneme, ilerleme ve temalı onay düğmeleri iyileştirilir; bulut API uygunsa pazar toplamı önceden gösterilir (#3777, #3779, #3795, #3796)",
     new_0_8_22_3: "Eklenti Agent’ları sohbet, BOT, grup ve iş akışlarında akış, ek, iptal, etkileşim ve kullanımı destekler. OMP 0.2.1, özel ayarlar, Skill ve MCP yönetimiyle gelir; motor kaldırma ve isteğe bağlı otomatik güncellemeler boşta olma ve bakım kilidiyle korunur (#3774, #3781, #3783)",
