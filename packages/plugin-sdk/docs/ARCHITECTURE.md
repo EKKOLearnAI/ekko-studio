@@ -31,6 +31,9 @@
 
 `views` 声明页面布局，支持 `page`、`settings`、`workspace`、`agent-settings`；声明页面不会自动产生全局侧栏入口。
 `navigation.main` 和 `navigation.settings` 分别显式声明主侧栏与设置侧栏入口，各项包含 `viewId`、必填 `icon`，以及可选 `title/order`。
+`navigation.main` 仅注册可选入口，不会在安装、启用或升级时自动显示到外层导航栏。
+用户从头像菜单打开「导航栏设置」后，手动添加已启用插件的已注册入口；仅有 `views`、工具、Agent 设置页或 `workspace.sidebar` 不会进入候选列表。
+选择和顺序按 Studio 登录账号保存，独立于 Profile。插件停用、失败或移除注册后入口暂时隐藏，原选择保留；恢复可用后按用户原有顺序显示。`navigation.settings` 保持原有设置侧栏行为。
 两类入口可独立指向同一已声明页面；省略某个列表或设置为空数组，表示该侧栏不展示入口，页面和 Agent 设置按钮仍可用。
 设置侧栏只接受宿主命名线条 icon；主侧栏还可使用包内 PNG/JPEG/WebP/GIF 或 base64 图片，均不得省略 icon 或依赖插件头像回退。
 命名 icon 清单见 SDK 的 `PLUGIN_ICON_PATHS`。`workspace` 和 `agent-settings` 页面的专属配置侧栏也必须提供命名 `views[].icon`。

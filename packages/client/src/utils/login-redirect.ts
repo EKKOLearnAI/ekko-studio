@@ -1,4 +1,4 @@
-const DEFAULT_LOGIN_REDIRECT = '/person'
+const DEFAULT_LOGIN_REDIRECT = '/home'
 
 export function resolveLoginRedirect(value: unknown): string {
   const redirect = typeof value === 'string' ? value : ''

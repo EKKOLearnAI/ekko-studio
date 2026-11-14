@@ -7,6 +7,7 @@ import { captureProviderImport } from '@/utils/provider-import'
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
+    { path: '/home', name: 'studio.start', component: { render: () => null } },
     { path: '/studio/plugins', name: 'studio.plugins', component: () => import('@/views/StudioPluginsView.vue') },
     { path: '/studio/plugin-settings/:pluginId/:viewId', name: 'studio.pluginSettings', component: () => import('@/views/PluginPageView.vue') },
     { path: '/studio/plugin-agent-settings/:pluginId/:viewId?', name: 'studio.pluginAgentSettings', component: () => import('@/views/PluginPageView.vue') },
@@ -353,6 +354,14 @@ router.beforeEach(async (to, _from, next) => {
   // All other pages require token
   if (!hasApiKey()) {
     next({ name: 'login', query: { redirect: to.fullPath } })
+    return
+  }
+
+  if (to.name === 'studio.start') {
+    const { resolveNavigationStartup } = await import('@/utils/navigation-startup')
+    const target = await resolveNavigationStartup()
+    if (!hasApiKey()) { next({ name: 'login' }); return }
+    next(typeof target === 'string' ? { path: target, replace: true } : { ...target, replace: true })
     return
   }
 

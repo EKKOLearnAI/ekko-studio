@@ -619,6 +619,13 @@ export const USER_PROFILES_INDEXES = {
 }
 
 export const USER_THEMES_TABLE = 'user_themes'
+export const USER_NAVIGATION_TABLE = 'user_navigation'
+export const USER_NAVIGATION_SCHEMA: Record<string, string> = {
+  user_id: 'INTEGER PRIMARY KEY',
+  items_json: "TEXT NOT NULL DEFAULT '[]'",
+  schema_version: 'INTEGER NOT NULL DEFAULT 0',
+  updated_at: 'INTEGER NOT NULL',
+}
 export const USER_THEME_PRESETS_TABLE = 'user_theme_presets'
 
 export const USER_THEME_PRESETS_SCHEMA: Record<string, string> = {
@@ -1838,6 +1845,7 @@ export function initAllHermesTables(): void {
       indexes: USER_PROFILES_INDEXES,
     })
     syncTable(USER_THEMES_TABLE, USER_THEMES_SCHEMA)
+    syncTable(USER_NAVIGATION_TABLE, USER_NAVIGATION_SCHEMA)
     syncTable(USER_THEME_PRESETS_TABLE, USER_THEME_PRESETS_SCHEMA, {
       indexes: { idx_user_theme_presets_user: 'CREATE INDEX IF NOT EXISTS idx_user_theme_presets_user ON user_theme_presets(user_id)' },
     })

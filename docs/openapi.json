@@ -233,6 +233,10 @@
       "description": "Per-user appearance settings and background image"
     },
     {
+      "name": "Navigation",
+      "description": "Per-user navigation entries, ordering and explicit plugin opt-in"
+    },
+    {
       "name": "Announcements",
       "description": "Published Studio desktop announcements, newest first"
     },
@@ -11749,6 +11753,125 @@
             }
           }
         ]
+      }
+    },
+    "/api/navigation": {
+      "get": {
+        "tags": [
+          "Navigation"
+        ],
+        "summary": "Read the signed-in user navigation settings; plugins are excluded by default",
+        "description": "GET /api/navigation",
+        "operationId": "getNavigation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account-scoped navigation settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "maxItems": 201,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Ordered built-in IDs or plugin:<pluginId>/<viewId>. New plugin selections must target active registered navigation.main entries."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Studio login required; shared sessions cannot change navigation"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Navigation"
+        ],
+        "summary": "Save the signed-in user navigation selection and ordering",
+        "description": "PUT /api/navigation",
+        "operationId": "updateNavigation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Account-scoped navigation settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "maxItems": 201,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Ordered built-in IDs or plugin:<pluginId>/<viewId>. New plugin selections must target active registered navigation.main entries."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, duplicate or unregistered navigation entry"
+          },
+          "401": {
+            "description": "Studio login required; shared sessions cannot change navigation"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "items"
+                ],
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "maxItems": 201,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Ordered built-in IDs or plugin:<pluginId>/<viewId>. New plugin selections must target active registered navigation.main entries."
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/openapi.json": {

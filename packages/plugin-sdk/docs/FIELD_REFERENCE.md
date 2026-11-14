@@ -113,7 +113,7 @@ ui.selectWorkspace 的 options 仅有可选 current:string，缺省或空字符�
 | mcp? | {name:string} | 需 tools；名称 1–64 字符，字母开头，仅小写字母数字下划线连字符；默认共享 ekko-studio-plugins；独立名称不可占用宿主前缀或已安装名称 |
 | views? | PluginView[] | 最多 50 项，无重复 id；每项 id/title/slot 必填，title 非空最多 160；slot 为 page/settings/workspace/agent-settings |
 | views[].icon/order? | string / 安全整数 | workspace/agent-settings 必须有宿主命名 icon；其他允许合法图片；order 为 -10000…10000 |
-| navigation? | {main?:Entry[],settings?:Entry[]} | 每组最多 50 项，省略不显示对应全局入口 |
+| navigation? | {main?:Entry[],settings?:Entry[]} | 每组最多 50 项；main 仅注册候选入口，用户须在头像菜单的「导航栏设置」手动添加；省略不产生对应入口 |
 | Entry.viewId/icon | 必填 string | 指向已声明且在本组不重复的视图；icon 不可省略，settings 只接受命名图标，main 还允许合法图片 |
 | Entry.title/order? | string / 安全整数 | title 默认视图标题，非空最多 160；order 为 -10000…10000 |
 | workspace? | {sidebar:string} | sidebar 是独立动态侧栏视图 ID，不得与 views 中的 ID 相同，且必须已有 workspace 页面 |

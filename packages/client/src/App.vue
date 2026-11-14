@@ -2,6 +2,8 @@
 import PluginWorkspaceSidebar from "@/components/layout/PluginWorkspaceSidebar.vue";
 import { usePluginCatalog, pluginPages } from "@/composables/usePluginCatalog";
 import PluginNotifications from '@/components/plugins/PluginNotifications.vue'
+import NavigationSettingsModal from '@/components/layout/NavigationSettingsModal.vue'
+import { useNavigationStore } from '@/stores/navigation'
 import { ensureRemoteBrowserRelay, stopRemoteBrowserRelay } from '@/composables/useRemoteBrowserRelay'
 import { deploymentUrl } from '@/utils/deployment-url'
 import {
@@ -110,6 +112,7 @@ const { t, locale } = useI18n();
 const naiveLocale = computed(() => naiveLocaleFor(locale.value));
 const naiveRtl = computed(() => naiveRtlFor(locale.value));
 const appStore = useAppStore();
+const navigation = useNavigationStore();
 const profilesStore = useProfilesStore();
 watch(() => profilesStore.activeProfileName, async () => { await stopRemoteBrowserRelay(); await ensureRemoteBrowserRelay() });
 const route = useRoute();
@@ -336,6 +339,7 @@ useKeyboard();
   >
     <NMessageProvider>
       <PluginNotifications />
+      <NavigationSettingsModal v-model:show="navigation.settingsOpen" />
       <AuthEventListener />
       <NDialogProvider>
         <NNotificationProvider>

@@ -298,7 +298,7 @@ function webUiHashUrl(hashPath: string): string | null {
 }
 
 function mainRouteUrl(): string | null {
-  return webUiHashUrl('/person')
+  return webUiHashUrl('/home')
 }
 
 async function openPendingProviderImport(bootstrapped = false): Promise<void> {
