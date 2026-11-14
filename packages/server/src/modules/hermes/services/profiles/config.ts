@@ -23,6 +23,7 @@ export const PROVIDER_ENV_MAP: Record<string, { api_key_env: string; base_url_en
   'minimax-oauth': { api_key_env: '', base_url_env: '' },
   'minimax-cn': { api_key_env: 'MINIMAX_CN_API_KEY', base_url_env: 'MINIMAX_CN_BASE_URL' },
   deepseek: { api_key_env: 'DEEPSEEK_API_KEY', base_url_env: 'DEEPSEEK_BASE_URL' },
+  ionet: { api_key_env: 'IONET_API_KEY', base_url_env: 'IONET_BASE_URL' },
   alibaba: { api_key_env: 'DASHSCOPE_API_KEY', base_url_env: 'DASHSCOPE_BASE_URL' },
   'alibaba-coding-plan': { api_key_env: 'ALIBABA_CODING_PLAN_API_KEY', base_url_env: 'ALIBABA_CODING_PLAN_BASE_URL' },
   anthropic: { api_key_env: 'ANTHROPIC_API_KEY', base_url_env: 'ANTHROPIC_BASE_URL' },
