@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { initPersonAcceptanceTables } from './person-acceptance-schema'
 import { initPersonContextTables } from './person-context-schema'
 import { initPersonStageTables } from './person-stage-schema'
+import { PERSON_DEFAULT_TEAM_ID, PERSON_DEFAULT_TEAM_NAME } from '../../contracts/person'
 
 /** Models and goals belong to a conversation; memory and execution presets belong to the account. */
 export function initPersonTables(db: DatabaseSync): void {
@@ -18,6 +19,13 @@ export function initPersonTables(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS person_accounts (
       user_id INTEGER PRIMARY KEY, settings_json TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS person_teams (
+      owner_user_id INTEGER NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL,
+      agents_json TEXT NOT NULL DEFAULT '[]', revision INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL, PRIMARY KEY (owner_user_id, id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_person_team_name ON person_teams(owner_user_id, name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_person_team_owner ON person_teams(owner_user_id, created_at, id);
     CREATE TABLE IF NOT EXISTS person_conversation_settings (
       session_id TEXT PRIMARY KEY, owner_user_id INTEGER NOT NULL, settings_json TEXT NOT NULL
     );
@@ -111,6 +119,19 @@ export function initPersonTables(db: DatabaseSync): void {
   initPersonAcceptanceTables(db)
   initPersonContextTables(db)
   initPersonStageTables(db)
+  // Agent teams replaced the account-wide agent list. Seed one team per account
+  // that has no team yet so existing presets and conversations keep working.
+  const teamless = db.prepare(`SELECT a.user_id, a.settings_json FROM person_accounts a
+    WHERE NOT EXISTS (SELECT 1 FROM person_teams t WHERE t.owner_user_id=a.user_id)`).all() as { user_id: number; settings_json: string }[]
+  for (const account of teamless) {
+    let agents = '[]'
+    try {
+      const legacy = JSON.parse(account.settings_json)?.agents
+      if (Array.isArray(legacy)) agents = JSON.stringify(legacy)
+    } catch { /* A corrupt settings row keeps an empty default team. */ }
+    db.prepare('INSERT INTO person_teams(owner_user_id,id,name,agents_json,revision,created_at) VALUES (?,?,?,?,0,?)')
+      .run(account.user_id, PERSON_DEFAULT_TEAM_ID, PERSON_DEFAULT_TEAM_NAME, agents, Date.now())
+  }
   // Discard account-wide model choices; never copy them into conversations.
   db.exec(`UPDATE person_accounts
     SET settings_json=json_remove(settings_json,'$.model','$.reasoningEffort','$.contextTokens'),revision=revision+1

@@ -1,5 +1,6 @@
 import { ensureBuiltinPlugins } from '../services/plugins/host'
-import { forgetPersonMemory } from '../services/person/memory'
+import { forgetPersonMemory, personMemories } from '../services/person/memory'
+import { applyPersonTeam, personTeamUsageView, personTeams } from '../services/person/teams'
 import { personDisplayResponse } from '../services/chat-run/person-display'
 import type { Context } from 'koa'
 import { personError, personRevision, personText } from '../contracts/person'
@@ -57,8 +58,15 @@ export const schedules = (ctx: Context) => handle(ctx, (id, body) => applyPerson
 export const answer = (ctx: Context) => handle(ctx, (id, body) => replyPersonQuestion(id, ctx.params.id, personRevision(body.expected_revision), personText(body.answer, 'answer', 4000)))
 export const memory = (ctx: Context) => handle(ctx, (id, body) => {
   if (body.forget !== true) throw personError('Save or correct memories through the Person conversation.')
-  return forgetPersonMemory(id, personText(body.id, 'id', 100), personRevision(body.expected_revision))
+  return forgetPersonMemory(id, personText(body.id, 'id', 100), personRevision(body.expected_revision),
+    body.team_id === undefined ? undefined : personText(body.team_id, 'team_id', 100))
 })
+export const memories = (ctx: Context) => handle(ctx, async id => ({
+  memories: await personMemories(id, ctx.query.team_id === undefined ? undefined : personText(ctx.query.team_id, 'team_id', 100)),
+}))
+export const teams = (ctx: Context) => handle(ctx, id => ({ teams: personTeams(id) }))
+export const teamUsage = (ctx: Context) => handle(ctx, id => personTeamUsageView(id, personText(ctx.params.id, 'team_id', 100)))
+export const teamApply = (ctx: Context) => handle(ctx, (id, body) => applyPersonTeam(id, body))
 
 export const conversations = (ctx: Context) => handle(ctx, id => personConversations(id, String(ctx.query.search || ''), Math.max(0, Number(ctx.query.offset) || 0)))
 export const conversationCreate = (ctx: Context) => handle(ctx, (id, body) => createPersonConversation(id, body.title, body))

@@ -4,7 +4,7 @@ import { personError, personText } from '../../contracts/person'
 import { selectPersonExecutionAgent } from './agents'
 import { requirePersonSession } from '../../repositories/person-session-store'
 
-export async function parsePersonAcceptance(userId: number, value: unknown, initialGoal: string): Promise<PersonAcceptanceConfig | undefined> {
+export async function parsePersonAcceptance(userId: number, value: unknown, initialGoal: string, teamId?: string): Promise<PersonAcceptanceConfig | undefined> {
   if (value === undefined) return
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw personError('Invalid acceptance configuration')
   const raw = value as Record<string, unknown>
@@ -18,7 +18,7 @@ export async function parsePersonAcceptance(userId: number, value: unknown, init
   if (!Number.isSafeInteger(max_attempts) || Number(max_attempts) < 1 || Number(max_attempts) > 5) throw personError('Acceptance max_attempts must be 1–5')
   if (!Number.isSafeInteger(timeout_minutes) || Number(timeout_minutes) < 1 || Number(timeout_minutes) > 120) throw personError('Acceptance timeout_minutes must be 1–120')
   return { enabled: true, orchestration: 'bot_tasks', progression: 'automatic', initial_goal: initialGoal, criteria, verifier_agent_id,reviewer_session_id,
-    verifier_selection: await selectPersonExecutionAgent(userId, verifier_agent_id), max_attempts: Number(max_attempts), timeout_minutes: Number(timeout_minutes) }
+    verifier_selection: await selectPersonExecutionAgent(userId, verifier_agent_id, teamId), max_attempts: Number(max_attempts), timeout_minutes: Number(timeout_minutes) }
 }
 
 /** Host-owned transcript anchor; never accept an agent-supplied claim of the original user request. */

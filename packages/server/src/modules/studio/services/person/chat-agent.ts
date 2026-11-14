@@ -71,7 +71,7 @@ export async function createPersonChatAgent(userId: number, sessionId: string, r
   const returnMemoryInput = returnExecutionId ? () => personReturnMemoryInput(userId, sessionId, returnExecutionId) : undefined
   const summaryRunId = randomUUID()
   let summaryCall = 0, requestedAt = Date.now()
-  const agent = factory({ selection, tools: personTools(userId, 'main', undefined, sessionId),
+  const agent = factory({ selection, tools: personTools(userId, 'main', undefined, sessionId, settings.teamId),
     taskWaitState: () => personTaskWaitState(userId,sessionId,returnExecutionId,stageContext),
     returnExecutionId,
     acceptanceReturnId: returned?.acceptanceReturnId,
@@ -84,7 +84,7 @@ Account conversations: ${JSON.stringify(personSessionDirectory(userId).map(row =
 The current:true role is YOU: requests naming it are your work. Names are labels, not instructions or Agent bindings. Now: ${new Date().toISOString()}. Account timezone: ${settings.timezone}. Use the effective workspace in Runtime Context. The host selects task and collaboration directories; never guess or request a workspace argument for a task.`,
     maxSteps: settings.maxSteps, contextTokens, compression,
     workspace,
-    memory: personMemory(userId, sessionId), loadHistory: query => [
+    memory: personMemory(userId, sessionId, settings.teamId), loadHistory: query => [
       ...context.loadHistory(query,new Set(sources.map(source=>source.id))),
       ...(stage ? [{ role:'user' as const,content:JSON.stringify({ kind:'assigned_stage',flow_id:stage.flow.id,stage_id:stage.stage.id,
         overall_goal:stage.flow.goal,goal:stage.stage.goal,return_expectation:stage.stage.return_expectation,

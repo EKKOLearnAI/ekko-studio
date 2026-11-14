@@ -7,8 +7,8 @@ import { getWebUiHome } from '../public/config'
 import { personExecutionSessionId } from '../contracts/person-session'
 import { createSession } from './session-store'
 import { getDb } from '../infrastructure/database'
-import { PERSON_DEFAULTS, personError } from '../contracts/person'
-import type { PersonExecution, PersonInteraction, PersonRunState, PersonSchedule, PersonSelection, PersonSettings, PersonTask } from '../contracts/person'
+import { PERSON_DEFAULTS, PERSON_DEFAULT_TEAM_ID, PERSON_DEFAULT_TEAM_NAME, PERSON_TEAM_USAGE_PREVIEW, personError } from '../contracts/person'
+import type { PersonAgentPreset, PersonExecution, PersonInteraction, PersonRunState, PersonSchedule, PersonSelection, PersonSettings, PersonTask, PersonTeam, PersonTeamUsage } from '../contracts/person'
 
 export function personDb() {
   const db = getDb()
@@ -42,8 +42,120 @@ export function personOperation<T>(userId: number, key: string, input: unknown, 
   })
 }
 function sharedPersonSettings(settings: Partial<PersonSettings>) {
-  const { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks, taskTimeoutMinutes } = { ...PERSON_DEFAULTS, ...settings }
-  return { workspace, timezone, maxSteps, compressionThreshold, agents, maxConcurrentTasks, taskTimeoutMinutes }
+  const { workspace, timezone, maxSteps, compressionThreshold, maxConcurrentTasks, taskTimeoutMinutes } = { ...PERSON_DEFAULTS, ...settings }
+  return { workspace, timezone, maxSteps, compressionThreshold, maxConcurrentTasks, taskTimeoutMinutes }
+}
+function teamAgents(agentsJson: unknown): PersonAgentPreset[] {
+  try {
+    const parsed = JSON.parse(String(agentsJson ?? '[]'))
+    return Array.isArray(parsed) ? parsed : []
+  } catch { return [] }
+}
+function mapPersonTeam(row: Record<string, unknown>): PersonTeam {
+  return { id: String(row.id), name: String(row.name), agents: teamAgents(row.agents_json),
+    revision: Number(row.revision), created_at: Number(row.created_at) }
+}
+function hasTable(name: string): boolean {
+  return !!personDb().prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)
+}
+export function listPersonTeams(userId: number): PersonTeam[] {
+  // Minimal test schemas and pre-migration databases may not have the table yet.
+  if (!hasTable('person_teams')) return []
+  return (personDb().prepare('SELECT * FROM person_teams WHERE owner_user_id=? ORDER BY created_at,id').all(userId) as Record<string, unknown>[])
+    .map(mapPersonTeam)
+}
+export function getPersonTeam(userId: number, id: string): PersonTeam | undefined {
+  if (!hasTable('person_teams')) return undefined
+  const row = personDb().prepare('SELECT * FROM person_teams WHERE owner_user_id=? AND id=?').get(userId, id) as Record<string, unknown> | undefined
+  return row ? mapPersonTeam(row) : undefined
+}
+/** Every account always has a default team; a missing row is an empty one, never an error. */
+export function defaultPersonTeamId(userId: number): string {
+  // Prefer the well-known default so a team created earlier cannot hijack the
+  // fallback for conversations that predate team binding.
+  const preferred = getPersonTeam(userId, PERSON_DEFAULT_TEAM_ID)
+  if (preferred) return preferred.id
+  const row = personDb().prepare('SELECT id FROM person_teams WHERE owner_user_id=? ORDER BY created_at,id LIMIT 1').get(userId) as { id: string } | undefined
+  return row ? String(row.id) : PERSON_DEFAULT_TEAM_ID
+}
+/**
+ * Guarantees the account default team exists. A brand new account owns no team
+ * rows at all, and a team is the only place an Agent preset can live, so the
+ * settings panel would have nothing to add agents to until one is created.
+ */
+export function ensureDefaultPersonTeam(userId: number): PersonTeam {
+  if (!hasTable('person_teams')) return { id: PERSON_DEFAULT_TEAM_ID, name: PERSON_DEFAULT_TEAM_NAME, agents: [], revision: 0, created_at: 0 }
+  const existing = getPersonTeam(userId, PERSON_DEFAULT_TEAM_ID)
+  if (existing) return existing
+  // Concurrent first reads must not race into a UNIQUE violation on the name index.
+  personDb().prepare('INSERT OR IGNORE INTO person_teams(owner_user_id,id,name,agents_json,revision,created_at) VALUES (?,?,?,?,0,?)')
+    .run(userId, PERSON_DEFAULT_TEAM_ID, PERSON_DEFAULT_TEAM_NAME, '[]', Date.now())
+  return getPersonTeam(userId, PERSON_DEFAULT_TEAM_ID)
+    ?? { id: PERSON_DEFAULT_TEAM_ID, name: PERSON_DEFAULT_TEAM_NAME, agents: [], revision: 0, created_at: 0 }
+}
+export function requirePersonTeam(userId: number, id?: string): PersonTeam {
+  const want = id || defaultPersonTeamId(userId)
+  const team = getPersonTeam(userId, want)
+  if (team) return team
+  // Reading settings must not write, so an unseeded default team resolves to an
+  // empty virtual team; saving it materializes the row.
+  if (want === PERSON_DEFAULT_TEAM_ID) return { id: want, name: PERSON_DEFAULT_TEAM_NAME, agents: [], revision: 0, created_at: 0 }
+  throw personError('Agent team not found', 404)
+}
+export function insertPersonTeam(userId: number, id: string, name: string, agents: PersonAgentPreset[] = []): PersonTeam {
+  const now = Date.now()
+  personDb().prepare('INSERT INTO person_teams(owner_user_id,id,name,agents_json,revision,created_at) VALUES (?,?,?,?,0,?)')
+    .run(userId, id, name, JSON.stringify(agents), now)
+  return requirePersonTeam(userId, id)
+}
+export function renamePersonTeam(userId: number, id: string, name: string, revision: number): PersonTeam {
+  const changed = personDb().prepare('UPDATE person_teams SET name=?,revision=revision+1 WHERE owner_user_id=? AND id=? AND revision=?')
+    .run(name, userId, id, revision)
+  if (!changed.changes) throw personError('Agent team changed; reload and retry', 409)
+  personUpdated(userId)
+  return requirePersonTeam(userId, id)
+}
+export function savePersonTeamAgents(userId: number, id: string, agents: PersonAgentPreset[]): PersonTeam {
+  // Upsert so the virtual default team becomes a real row on its first save.
+  const now = Date.now()
+  personDb().prepare(`INSERT INTO person_teams(owner_user_id,id,name,agents_json,revision,created_at) VALUES (?,?,?,?,1,?)
+    ON CONFLICT(owner_user_id,id) DO UPDATE SET agents_json=excluded.agents_json,revision=revision+1`)
+    .run(userId, id, id === PERSON_DEFAULT_TEAM_ID ? PERSON_DEFAULT_TEAM_NAME : id, JSON.stringify(agents), now)
+  personUpdated(userId)
+  return requirePersonTeam(userId, id)
+}
+/** A conversation without a team predates teams and therefore belongs to the default one. */
+const TEAM_OF_CONVERSATION = `COALESCE(NULLIF(CASE WHEN json_valid(settings_json) THEN json_extract(settings_json,'$.teamId') END,''),?)`
+export function personTeamUsage(userId: number, id: string, preview = PERSON_TEAM_USAGE_PREVIEW): PersonTeamUsage {
+  const db = personDb()
+  const fallback = defaultPersonTeamId(userId)
+  const total = Number((db.prepare(`SELECT COUNT(*) AS n FROM person_conversation_settings
+    WHERE owner_user_id=? AND ${TEAM_OF_CONVERSATION}=?`).get(userId, fallback, id) as { n: number }).n)
+  const conversations = (db.prepare(`SELECT c.session_id AS id, COALESCE(s.title,'') AS title
+    FROM person_conversation_settings c LEFT JOIN sessions s ON s.id=c.session_id
+    WHERE c.owner_user_id=? AND ${TEAM_OF_CONVERSATION}=?
+    ORDER BY COALESCE(s.last_active,0) DESC, c.session_id LIMIT ?`).all(userId, fallback, id, preview) as { id: string; title: string }[])
+    .map(row => ({ id: String(row.id), title: String(row.title || '') }))
+  const tasks = Number((db.prepare(`SELECT COUNT(*) AS n FROM session_tasks t
+    JOIN person_conversation_settings c ON c.session_id=t.session_id AND c.owner_user_id=t.owner_user_id
+    WHERE t.owner_user_id=? AND ${TEAM_OF_CONVERSATION}=?`).get(userId, fallback, id) as { n: number }).n)
+  return { total, conversations, tasks }
+}
+/** Deleting a team moves its conversations to the default team instead of orphaning history. */
+export function deletePersonTeamRow(userId: number, id: string, revision: number): { moved: number } {
+  return personTransaction(() => deletePersonTeamRowInTransaction(userId, id, revision))
+}
+/** Caller owns the transaction (the HTTP path already runs inside the idempotency one). */
+export function deletePersonTeamRowInTransaction(userId: number, id: string, revision: number): { moved: number } {
+  if (id === PERSON_DEFAULT_TEAM_ID) throw personError('The default team cannot be deleted')
+  const db = personDb()
+  const fallback = defaultPersonTeamId(userId)
+  const moved = db.prepare(`UPDATE person_conversation_settings SET settings_json=json_set(settings_json,'$.teamId',?)
+    WHERE owner_user_id=? AND ${TEAM_OF_CONVERSATION}=?`).run(fallback, userId, id, id).changes
+  const deleted = db.prepare('DELETE FROM person_teams WHERE owner_user_id=? AND id=? AND revision=?').run(userId, id, revision)
+  if (!deleted.changes) throw personError('Agent team changed; reload and retry', 409)
+  personUpdated(userId)
+  return { moved: Number(moved) }
 }
 export function personSettings(userId: number, sessionId?: string): { settings: PersonSettings; revision: number } {
   const session = sessionId ? requirePersonSession(userId, sessionId) : undefined
@@ -55,7 +167,11 @@ export function personSettings(userId: number, sessionId?: string): { settings: 
   const workspace = !sessionId ? shared.workspace
     : Object.hasOwn(local, 'workspace') ? String(local.workspace ?? '')
       : session?.workspace || shared.workspace || join(getWebUiHome(), 'person', String(userId), 'workspace')
-  return { settings: { ...shared, workspace, model: local.model ?? null, reasoningEffort: local.reasoningEffort ?? '' }, revision: row?.revision || 0 }
+  // A conversation keeps its team for life; only a new conversation chooses one.
+  const teamId = String(local.teamId || '') || defaultPersonTeamId(userId)
+  const team = getPersonTeam(userId, teamId) || requirePersonTeam(userId)
+  return { settings: { ...shared, workspace, teamId: team.id, agents: team.agents,
+    model: local.model ?? null, reasoningEffort: local.reasoningEffort ?? '' }, revision: row?.revision || 0 }
 }
 export function savePersonSettings(userId: number, settings: PersonSettings, revision: number, workspace?: string, sessionId?: string) {
   return personTransaction(() => savePersonSettingsInTransaction(userId, settings, revision, workspace, sessionId))
@@ -64,10 +180,15 @@ export function savePersonSettings(userId: number, settings: PersonSettings, rev
 export function savePersonSettingsInTransaction(userId: number, settings: PersonSettings, revision: number, workspace?: string, sessionId?: string) {
   const account = personSettings(userId)
   if (account.revision !== revision) throw personError('Settings changed; reload and retry', 409)
+  // Agents live on the team, so a legacy caller that still sends a full settings
+  // object writes that team; an unchanged list is skipped to avoid revision churn.
+  const team = requirePersonTeam(userId, settings.teamId)
+  if (JSON.stringify(settings.agents || []) !== JSON.stringify(team.agents)) savePersonTeamAgents(userId, team.id, settings.agents || [])
   if (sessionId) {
     requirePersonSession(userId, sessionId)
     personDb().prepare('INSERT INTO person_conversation_settings VALUES (?,?,?) ON CONFLICT(session_id) DO UPDATE SET settings_json=excluded.settings_json')
-      .run(sessionId, userId, JSON.stringify({ model: settings.model, reasoningEffort: settings.reasoningEffort, workspace: settings.workspace }))
+      .run(sessionId, userId, JSON.stringify({ model: settings.model, reasoningEffort: settings.reasoningEffort,
+        workspace: settings.workspace, teamId: settings.teamId }))
   }
   personDb().prepare('INSERT INTO person_accounts VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json,revision=excluded.revision')
     .run(userId, JSON.stringify(sharedPersonSettings(sessionId ? { ...settings, workspace: account.settings.workspace } : settings)), revision + 1)
