@@ -1,12 +1,12 @@
-import { personError, personText } from '../../contracts/person'
+import { personError, personText, PERSON_TEAM_AGENT_LIMIT } from '../../contracts/person'
 import type { PersonAgentPreset, PersonSelection } from '../../contracts/person'
-import { personSettings } from '../../repositories/person-store'
+import { personSettings, requirePersonTeam } from '../../repositories/person-store'
 import { getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
 import { personProfiles, personSelectionApiMode, validatePersonSelection, PERSON_REASONING_EFFORTS } from './catalog'
 import { isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 
 export async function validatePersonAgents(userId: number, value: unknown): Promise<PersonAgentPreset[]> {
-  if (!Array.isArray(value) || value.length > 20) throw personError('Use at most 20 execution agents')
+  if (!Array.isArray(value) || value.length > PERSON_TEAM_AGENT_LIMIT) throw personError(`Use at most ${PERSON_TEAM_AGENT_LIMIT} execution agents`)
   const ids = new Set<string>()
   const result: PersonAgentPreset[] = []
   for (const raw of value) {
@@ -34,18 +34,28 @@ export async function validatePersonAgents(userId: number, value: unknown): Prom
   return result
 }
 
-export async function personExecutionAgents(userId: number): Promise<PersonAgentPreset[]> {
-  return personSettings(userId).settings.agents
+/** Resolving without an explicit team reads the account's default team, which keeps
+ *  call sites (and tests) that predate teams working unchanged. */
+function teamPresets(userId: number, teamId?: string): PersonAgentPreset[] {
+  return teamId ? requirePersonTeam(userId, teamId).agents : personSettings(userId).settings.agents
 }
-export function requirePersonAgents(userId: number): PersonAgentPreset[] {
-  const agents = personSettings(userId).settings.agents
-  if (!agents.length) throw personError('Configure at least one Agent preset in Person settings before chatting', 409)
+
+/** Execution agents are scoped to one team; a conversation never sees another team's presets. */
+export async function personExecutionAgents(userId: number, teamId?: string): Promise<PersonAgentPreset[]> {
+  return teamPresets(userId, teamId)
+}
+
+export function requirePersonAgents(userId: number, teamId?: string): PersonAgentPreset[] {
+  const agents = teamPresets(userId, teamId)
+  if (!agents.length) throw personError('Configure at least one Agent preset for this team in Person settings before chatting', 409)
   return agents
 }
-export async function selectPersonExecutionAgent(userId: number, id?: unknown) {
-  const agents = requirePersonAgents(userId)
+
+/** The team defaults to the caller's conversation team; tasks and sockets pass it explicitly. */
+export async function selectPersonExecutionAgent(userId: number, id?: unknown, teamId?: string) {
+  const agents = requirePersonAgents(userId, teamId)
   const preset = id ? agents.find(agent => agent.id === id) : agents.length === 1 ? agents[0] : undefined
-  if (!preset) throw personError('Choose one of the configured execution agents')
+  if (!preset) throw personError('Choose one of this team’s configured execution agents')
   await validatePersonSelection(userId, preset.selection)
   return { ...preset.selection, agentId: preset.id, agentName: preset.name }
 }
@@ -60,4 +70,9 @@ export async function personExecutionModelCatalog(userId: number) {
       model_meta: group.model_meta || {}, api_mode: group.api_mode, api_mode_by_model: group.api_mode_by_model })
   }
   return { groups, profiles }
+}
+
+/** Convenience for callers that already hold a conversation and need its team. */
+export function personConversationTeam(userId: number, sessionId?: string): string {
+  return personSettings(userId, sessionId).settings.teamId
 }
