@@ -1,6 +1,6 @@
 # Studio SDK v1 上下文与能力
 
-精确类型由 sdk/src/index.ts 统一导出，按 core/state/host/browser/sessions/bots/contexts/agents 组织源码。
+精确类型由 sdk/src/index.ts 统一导出，按 core/state/host/browser/sessions/bots/contexts/agents/http 组织源码。
 逐字段含义、单位、必填/可空/默认与限制见 [FIELD_REFERENCE.md](FIELD_REFERENCE.md)，
 宿主业务方法的输入和返回见 [HOST_API.md](HOST_API.md)。通用 Json 是开放业务数据，不代表没有业务约束。
 
@@ -37,7 +37,7 @@ sessions.run 默认启动或入队后返回；wait:true 等待终态但仍受普
 
 ## 扩展、消息和页面
 
-extensions.agents/tools/commands/hooks/actions/rpc.register 注册插件提供给宿主的能力。
+extensions.agents/tools/commands/hooks/actions/rpc/http.register 注册插件提供给宿主的能力。
 工具执行返回 ToolResult；commands 注册 /插件id:命令；hooks 只在 Ekko 支持 input.transform/context.transform/tool.before/tool.after。
 Agent 注册返回带完整 id 和 dispose 的句柄，其他注册返回 disposer。
 events.on 支持精确名称、前缀及 *，业务事件是有界内存观察流；离线恢复需查询历史并幂等处理。
@@ -61,14 +61,58 @@ iframe 不共享宿主 DOM、localStorage 或登录 token；使用宿主主题�
 宿主业务统一通过 host 分组调用。Agent 目录通过 host.agents.list/status/models/settings 访问，
 注册自己的 Agent 则使用 extensions.agents.register。维护动作继续由宿主按原有管理员规则调度。
 `permissions` 是实际 manifest 权限；普通 run.features 是运行环境支持项；AgentDefinition.features 是引擎声明。
-后两者都不能作为授权判断。权限集合包含原十项及新增 `browser.cdp`。
+后两者都不能作为授权判断。权限集合还包含 `browser.cdp` 和后端入站 HTTP 拦截所需的 `http`。
 
 `state.plugin` 是插件全局存储；user/profile/session 使用宿主绑定身份的独立命名空间。
 不存在当前会话时 state.session 缺省。Agent 专用的 state.agentSession 按 Agent、账号、Profile、会话与模式分区。
 Agent 不再覆盖默认存储。根 ctx.state 在回调内动态绑定真实身份；调用结束不能继续使用取出的存储句柄。
 前端选择 plugin/user/profile/session 范围仍需要 storage.client；它表示允许访问插件全部数据，并非用户数据授权边界。
 
-注册统一使用 extensions.agents/tools/commands/hooks/actions/rpc；每个注册返回清理句柄。
+注册统一使用 extensions.agents/tools/commands/hooks/actions/rpc/http；每个注册返回清理句柄。
+
+## 入站 HTTP 请求与响应
+
+后端在清单声明 `"permissions": ["http"]`，然后注册拦截器：
+
+```js
+export function apply(ctx) {
+  ctx.extensions.http.register({
+    name: 'rewrite-example',
+    priority: 0,
+    onRequest(request, http) {
+      if (request.url === '/api/example') {
+        request.headers['x-plugin'] = 'enabled'
+        request.body = { ...request.body, source: 'plugin' }
+      }
+    },
+    onResponse(response, http) {
+      if (http.request.url === '/api/example') {
+        response.headers['x-plugin-response'] = 'enabled'
+        response.body = { result: response.body }
+      }
+    },
+  })
+}
+```
+
+请求可改 method、url、headers、body；url 必须为 `/path?query`，改写后正常执行鉴权和路由。
+headers 使用小写键，值为 string/string[]；delete 删除，Set-Cookie 等多值头保留数组。
+请求体为已有解析器产出的 JSON、表单或文本，不读取或缓冲 multipart 上传原始流。
+onRequest 返回 void 继续，也可返回 `{status: 403, headers: {}, body: {error: 'blocked'}}` 直接响应。
+onResponse 可改 status、headers、body；只有已进入的拦截器会按逆序收到响应。
+priority 默认 0，请求升序；同值按插件 ID、注册 name 排序。每次请求固定拦截器快照，后续禁用或
+单独 dispose 的回调不再执行；重载后的新实例从下一次请求生效。
+
+http.originalUrl 是最初路径，http.request 为当前请求快照；http.signal 绑定本次回调，最长 30 秒。
+http.identity 在鉴权前缺省，鉴权后使用实际账号/Profile。鉴权前访问闭包 ctx.identity、ctx.host、
+ctx.state 会拒绝，不继承激活管理员；ctx.signal 与 ctx.log 仍可使用。HTTP 权限本身允许访问全局
+入站流量，包括请求中的鉴权头，安装时需要信任该后端代码。
+SDK 发往本机后端的内部调用仍执行原有账号/Profile 鉴权，但跳过 HTTP 再次拦截以免递归。
+
+body 保留 Koa 支持的 Buffer 和 Readable；可自行接 Transform 转换流，宿主不强制缓冲。
+已通过原生 res 直接写出的 SSE/代理响应不再进入 onResponse；WebSocket/Socket.IO 升级不属于该能力。
+CORS 提前返回、解析器拒绝的请求及在此中间件之前终止的请求也不会进入拦截。
+该能力只处理入站 HTTP，不改变 Studio 对模型或外部服务的出站 HTTP。
 定时执行使用 scheduler.every；资源使用 lifecycle.add/acquire，按所在上下文寿命清理。
 前端 events.on 订阅业务事件，messages.on 接收插件自定义页面消息；Agent output.emit 发布运行事件。
 

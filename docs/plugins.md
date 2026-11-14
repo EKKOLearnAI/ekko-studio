@@ -517,6 +517,20 @@ Studio 会将插件变更通知所有已启动的 Hermes Worker，包括群聊�
 结果保存到节点会话。调度工作流使用调度创建者身份；没有有效用户身份的任务不能调用插件。
 外部系统可通过已认证的 `POST /api/studio/plugins/:id/invoke` 调用动作。
 
+## 入站 HTTP 拦截与改写
+
+插件声明 `http` 权限，使用 `ctx.extensions.http.register({ name, priority?, onRequest?, onResponse? })`。
+请求体解析后、鉴权及路由前调用 onRequest，可修改 method/url/headers/body；返回
+`{status,headers,body}` 可直接响应。路由返回后、Koa 写出前调用 onResponse，可修改状态码、头及内容。
+请求按 priority 升序（默认 0），同值按插件 ID、名称排序；响应按已进入的拦截器逆序执行。
+禁用、卸载、重载自动释放注册并取消正在运行的回调，单次回调最长 30 秒。
+
+HTTP 权限覆盖经过中间件的所有入站账号与公开流量；鉴权前没有用户身份，不继承激活管理员的
+host/state 权限。鉴权后使用真实请求账号/Profile。SDK 内部 HTTP 调用保留原有鉴权并跳过再次拦截以免递归。
+Buffer/Readable 保留进程内类型，可转换流而无需缓冲；原生 res 已直接写出的 SSE/代理响应不再进入
+响应回调。CORS 提前响应、请求体解析错误、WebSocket 升级和外部出站 HTTP 不在此接入点。
+示例、精确字段和返回规则随 SDK 分发，见 [能力指南](../packages/plugin-sdk/docs/STUDIO_CTX.md#入站-http-请求与响应)。
+
 ## 运行与权限边界
 
 只有超级管理员的交互登录可以安装和修改可执行插件。Agent 运行凭证不能安装插件。
