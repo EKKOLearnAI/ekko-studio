@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { readdir, readFile, realpath, stat, unlink } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import type { PluginIdentity } from '../../contracts/plugins'
@@ -10,11 +11,13 @@ import { identifier, manifest } from './schema'
 import { readManifest } from './installer'
 
 interface Project { schema: 1; id: string; directory: string; createdAt: number }
-interface Progress { fingerprint?: string; pending?: string; building?: boolean; error?: string; updatedAt?: number }
-// Source projects can use any bundler. Output and dependency trees never trigger a rebuild.
+interface SourceFile { metadata: string; digest: string }
+interface Progress { files?: Map<string, SourceFile>; fingerprint?: string; pending?: string; building?: boolean; error?: string; updatedAt?: number }
+// Source projects can use any bundler. Ignore conventional output and dependency trees.
 const ignored = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', '.cache', '.DS_Store'])
-async function fingerprint(directory: string): Promise<string> {
+async function fingerprint(directory: string, progress: Progress): Promise<string> {
   const hash = createHash('sha256'); let count = 0
+  const files = new Map<string, SourceFile>()
   async function visit(root: string) {
     const entries = await readdir(root, { withFileTypes: true })
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -22,10 +25,23 @@ async function fingerprint(directory: string): Promise<string> {
       if (++count > 20_000) throw new PluginError('Development project exceeds 20000 source entries; keep generated files in dist or build')
       const file = join(root, entry.name)
       if (entry.isDirectory()) await visit(file)
-      else if (entry.isFile()) { const info = await stat(file); hash.update(JSON.stringify([file, info.size, info.mtimeMs, info.ctimeMs])) }
+      else if (entry.isFile()) {
+        const info = await stat(file, { bigint: true })
+        const metadata = `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`
+        let cached = progress.files?.get(file)
+        if (cached?.metadata !== metadata) {
+          // Metadata invalidates the cache, but only changed bytes trigger a rebuild.
+          const content = createHash('sha256')
+          for await (const chunk of createReadStream(file)) content.update(chunk)
+          cached = { metadata, digest: content.digest('hex') }
+        }
+        files.set(file, cached)
+        hash.update(JSON.stringify([file, cached.digest]))
+      }
     }
   }
   await visit(directory)
+  progress.files = files
   return hash.digest('hex')
 }
 async function build(directory: string, signal: AbortSignal): Promise<void> {
@@ -137,7 +153,7 @@ export class PluginDevelopment {
     const job = (async () => {
       try {
         await this.authorize(identity)
-        const before = attempted = await fingerprint(project.directory)
+        const before = attempted = await fingerprint(project.directory, progress)
         await build(project.directory, this.controller.signal)
         this.controller.signal.throwIfAborted()
         await this.authorize(identity)
@@ -145,6 +161,7 @@ export class PluginDevelopment {
         const state = this.manager.store.read()
         // Install checks the captured revision: disabling/uninstalling during a build wins.
         await this.manager.install(identity, project.directory, revision, project.id, { developmentDirectory: project.directory, enabled: true })
+        // Keep the pre-build content baseline so edits made while compiling are not lost.
         progress.fingerprint = before; progress.pending = undefined; progress.updatedAt = Date.now()
         await this.changed()
         // Retain current and previous snapshots, not one package directory per keystroke.
@@ -172,8 +189,8 @@ export class PluginDevelopment {
         const project = await this.project(id)
         if (project.directory !== record.developmentDirectory) throw new PluginError('Registered directory changed; start debugging again')
         await this.authorize(record.runtimeIdentity)
-        const current = await fingerprint(project.directory)
-        if (current === progress.fingerprint) continue
+        const current = await fingerprint(project.directory, progress)
+        if (current === progress.fingerprint) { progress.pending = undefined; continue }
         // Two stable observations debounce saves and avoid building partial editor writes.
         if (current !== progress.pending) { progress.pending = current; continue }
         const state = this.manager.store.read(), latest = state.records[id]

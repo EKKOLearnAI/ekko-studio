@@ -6,8 +6,9 @@ const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugins.ts').replaceA
 test('shows development projects as regular cards, enables them and unlinks while retaining installed plugins', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   let revision = 0, watching = false, installed = false, enabled = false, linked = true, starts = 0, unlinks = 0, error = '', content = 'first build'
+  let clientLoads = 0, eventPolls = 0
   const directory = '/projects/independent-notes'
-  const manifest = { id: 'notes', name: 'Dev Notes', description: 'Notes for the project', version: '0.1.0', apiVersion: 1, client: 'client.mjs', permissions: ['ui'], configSchema: { type: 'object', properties: { prefix: { type: 'string', title: 'Prefix' } } }, views: [{ id: 'home', title: 'Dev Notes', slot: 'page' }] }
+  const manifest = { id: 'notes', name: 'Dev Notes', description: 'Notes for the project', version: '0.1.0', apiVersion: 1, client: 'client.mjs', permissions: ['ui'], configSchema: { type: 'object', properties: { prefix: { type: 'string', title: 'Prefix' } } }, views: [{ id: 'home', title: 'Dev Notes', slot: 'page' }, { id: 'settings', title: 'Settings', slot: 'settings' }] }
   const plugin = () => ({ manifest, source: directory, installedAt: revision, enabled, status: enabled ? 'active' : 'disabled', developmentDirectory: installed && linked ? directory : undefined, config: { prefix: 'saved prefix' }, tools: [], commands: [], actions: [] })
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const request = route.request(), url = new URL(request.url())
@@ -22,8 +23,14 @@ test('shows development projects as regular cards, enables them and unlinks whil
       }
       return route.fulfill({ json: { ok: true } })
     }
-    if (url.pathname.endsWith('/client')) return route.fulfill({ json: { source: `export function mount(root) { root.textContent = ${JSON.stringify(content)} }` } })
-    if (url.pathname.endsWith('/events')) return route.fulfill({ json: { cursor: revision, generation: 'dev-host', events: Number(url.searchParams.get('cursor')) < revision ? [{ id: String(revision), type: 'plugin.changed', pluginId: 'notes', timestamp: Date.now(), identity: { userId: 1, profile: 'default' }, data: null }] : [] } })
+    if (url.pathname.endsWith('/client')) {
+      clientLoads++
+      return route.fulfill({ json: { source: `export function mount(root) { root.textContent = ${JSON.stringify(content)}; root.append(document.createElement('input')) }` } })
+    }
+    if (url.pathname.endsWith('/events')) {
+      eventPolls++
+      return route.fulfill({ json: { cursor: revision, generation: 'dev-host', events: Number(url.searchParams.get('cursor')) < revision ? [{ id: String(revision), type: 'plugin.changed', pluginId: 'notes', timestamp: Date.now(), identity: { userId: 1, profile: 'default' }, data: null }] : [] } })
+    }
     if (url.pathname === '/api/studio/plugins/notes' && request.method() === 'PATCH') {
       expect(body).toEqual({ revision, enabled: !enabled }); enabled = watching = !enabled; revision++
       return route.fulfill({ json: { ok: true } })
@@ -49,8 +56,23 @@ test('shows development projects as regular cards, enables them and unlinks whil
   await expect(page.locator('.plugin-card')).toHaveCount(1)
   await card.getByRole('button', { name: '打开', exact: true }).click()
   await expect(page.frameLocator('iframe').locator('#root')).toHaveText('first build')
+  for (const path of ['/studio/plugins/notes/home', '/studio/plugin-settings/notes/settings']) {
+    await page.evaluate(path => (window as any).pluginFixture.navigate(path), path)
+    const input = page.frameLocator('iframe').getByRole('textbox')
+    await input.fill('unsaved draft')
+    const loads = clientLoads, polls = eventPolls
+    const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === '/api/studio/plugins')
+    await page.evaluate(() => (window as any).pluginFixture.changed())
+    await refreshed
+    await expect.poll(() => eventPolls, { timeout: 10_000 }).toBeGreaterThanOrEqual(polls + 4)
+    await expect(input).toHaveValue('unsaved draft')
+    expect(clientLoads).toBe(loads)
+  }
+  const beforeReload = clientLoads
   content = 'rebuilt without page refresh'; revision++
   await expect(page.frameLocator('iframe').locator('#root')).toHaveText(content, { timeout: 10_000 })
+  await expect(page.frameLocator('iframe').getByRole('textbox')).toHaveValue('')
+  expect(clientLoads).toBe(beforeReload + 1)
   await page.evaluate(() => (window as any).pluginFixture.navigate('/studio/plugins'))
   await card.getByRole('button', { name: '详情', exact: true }).click()
   const drawer = page.locator('.n-drawer')
