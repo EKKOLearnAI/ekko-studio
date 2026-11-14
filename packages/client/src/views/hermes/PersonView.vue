@@ -12,7 +12,7 @@ import { usePageSidebarState } from '@/composables/usePageSidebar'
 import { batchDeleteSessions, renameSession, setSessionPinned, type SessionSummary } from '@/api/studio/sessions'
 import { ref, nextTick, onMounted, onBeforeUnmount, computed, watch, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { NInput, NButton, NAlert, NTabs, NTabPane, NDrawer, NDrawerContent, NTooltip, NModal, NPopconfirm, NDropdown, useMessage } from 'naive-ui'
+import { NInput, NButton, NAlert, NSelect, NTabs, NTabPane, NDrawer, NDrawerContent, NTooltip, NModal, NPopconfirm, NDropdown, useMessage } from 'naive-ui'
 import PageLoading from '@/components/common/PageLoading.vue'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import ChatInput from '@/components/hermes/chat/ChatInput.vue'
@@ -78,6 +78,16 @@ const showNewConversation = ref(false)
 const newConversationName = ref(personBotLabel(personBot(DEFAULT_PERSON_BOT_TYPE)!))
 const newConversationBot = ref<string>(DEFAULT_PERSON_BOT_TYPE)
 const selectedBotName = computed(() => personBotLabel(personBot(newConversationBot.value)!))
+const PERSON_LAST_TEAM_KEY = 'person:last-team'
+const newConversationTeam = ref<string>((() => { try { return localStorage.getItem(PERSON_LAST_TEAM_KEY) || '' } catch { return '' } })())
+/** Falls back to the account default until the user explicitly picks a team. */
+const newConversationTeamId = computed(() => newConversationTeam.value || data.value?.settings.teamId || data.value?.teams?.[0]?.id || '')
+const teamChoices = computed(() => (data.value?.teams || []).map(team => ({ label: team.name, value: team.id })))
+function selectDraftTeam(id: string) {
+  if (draftLocked.value) return
+  newConversationTeam.value = id
+  try { localStorage.setItem(PERSON_LAST_TEAM_KEY, id) } catch { /* Private mode keeps the in-memory choice. */ }
+}
 const personLayout = ref<HTMLElement>()
 let personDeployment: AgentDeploymentController | null = null
 const newConversationDefaults = ref<PersonSnapshot | null>(null)
@@ -131,6 +141,8 @@ function resetConversationDraft() {
   newConversationModel.value = null; newConversationEffort.value = ''
   newConversationWorkspace.value = null; duplicateBotName.value = false
   newConversationDefaults.value = null; createdConversation.value = null
+  // Keep the remembered team while it still exists; otherwise fall back to the default.
+  if (!data.value?.teams?.some(team => team.id === newConversationTeam.value)) newConversationTeam.value = ''
 }
 async function openCreateConversation() {
   if (pending.value || creating.value) return
@@ -269,6 +281,7 @@ async function createDraftConversation(text?: string, attachments?: Attachment[]
   try {
     const created = createdConversation.value ?? await personRequest<SessionSummary>('/conversations', {
       title: newConversationName.value.trim(), bot_type: newConversationBot.value,
+      ...(newConversationTeamId.value ? { team_id: newConversationTeamId.value } : {}),
       ...(newConversationModel.value ? { model: newConversationModel.value } : {}), reasoning_effort: newConversationEffort.value,
       ...(newConversationWorkspace.value?.trim() ? { workspace: newConversationWorkspace.value.trim() } : {}), expected_revision: draftDefaults.value?.revision,
     }, 'POST', lifetime.signal)
@@ -655,7 +668,10 @@ function inheritModel() {
   else void saveSettings({ use_global_default: true })
   showModelPicker.value = false
 }
-function memoryForget(memory: PersonMemory) { return act(() => personRequest('/memory', { id: memory.id, expected_revision: memory.revision, forget: true })) }
+function memoryForget(memory: PersonMemory, teamId?: string) {
+  return act(() => personRequest('/memory', { id: memory.id, expected_revision: memory.revision, forget: true,
+    ...(teamId ? { team_id: teamId } : {}) }))
+}
 function scheduleAction(schedule: PersonSchedule, action: string) { return act(() => personRequest('/schedules/apply', { schedule_id: schedule.id, action, expected_revision: schedule.revision, idempotency_key: clientUuid() })) }
 function saveSchedule(input: Record<string, unknown>) { return act(() => personRequest('/schedules/apply', input)) }
 
@@ -767,6 +783,12 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
         <template #cards>
           <PersonBotPicker :value="newConversationBot" :disabled="draftLocked" @update:value="selectDraftBot" />
         </template>
+        <div v-if="teamChoices.length > 1" class="person-team-picker">
+          <span class="tile-meta">{{ t('person.selectTeam') }}</span>
+          <NSelect :value="newConversationTeamId" :options="teamChoices" :disabled="draftLocked" size="small"
+            style="width: 200px" :aria-label="t('person.selectTeam')" @update:value="selectDraftTeam" />
+          <span class="tile-meta">{{ t('person.teamAgentsHint') }}</span>
+        </div>
         <div class="person-new-name">
           <div class="person-new-name-input">
             <NInput v-model:value="newConversationName" :maxlength="100" :disabled="draftLocked" :placeholder="t('person.botNamePlaceholder')" :status="duplicateBotName ? 'error' : undefined"
@@ -844,7 +866,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
               </NTabPane>
               <NTabPane name="agents" display-directive="show:lazy" :tab-props="{ role: 'tab', 'aria-selected': tab === 'agents' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="agents" :size="17" />{{ t('person.agentsTab') }}<span class="workspace-tab-count">{{ data.settings.agents.length }}</span></span></template>
-                <PersonAgentSettings :agents="data.settings.agents" :save-error="error" :saving="settingsWrites > 0" @save="saveSettings({ agents: JSON.parse(JSON.stringify($event)) })" />
+                <PersonAgentSettings :teams="data.teams || []" :team-id="data.settings.teamId" :save-error="error" :saving="settingsWrites > 0" @reloaded="refresh" />
               </NTabPane>
               <NTabPane name="tasks" display-directive="show:lazy" :tab-props="{ role: 'tab', 'aria-selected': tab === 'tasks' }">
                 <template #tab><span class="workspace-tab"><SessionTaskIcon :size="17" />{{ t('person.tasks') }}</span></template>
@@ -860,7 +882,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
               </NTabPane>
               <NTabPane name="memory" :tab-props="{ role: 'tab', 'aria-selected': tab === 'memory' }">
                 <template #tab><span class="workspace-tab"><PersonPanelIcon name="memory" :size="17" />{{ t('person.memory') }}<span class="workspace-tab-count">{{ data.memories.length }}</span></span></template>
-                <PersonMemoryPanel :memories="data.memories" :saving="pending" @forget="memoryForget" />
+                <PersonMemoryPanel :teams="data.teams || []" :team-id="data.settings.teamId" :memories="data.memories" :saving="pending" @forget="memoryForget" />
               </NTabPane>
             </NTabs>
           </div>
@@ -905,6 +927,8 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
 .person-chat-messages { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .person-model-hint { display: block; margin: 0 auto; border: 0; background: transparent; color: $accent-primary; cursor: pointer; font: inherit; font-size: 12px; padding: 8px; }
 .person-workspace { padding: 0 24px 28px; min-width: 0; }
+.person-team-picker { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.person-team-picker :deep(.n-select) { min-width: 180px; max-width: 260px; }
 .person-settings-tasks { height: calc(100dvh - 240px); min-height: 280px; }
 .workspace-tab { display: flex; align-items: center; gap: 8px; padding: 8px 0; font-size: 13px; }
 .workspace-tab-count { color: $text-muted; font-size: 11px; font-variant-numeric: tabular-nums; margin-inline-start: 4px; }
