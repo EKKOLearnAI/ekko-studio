@@ -44,12 +44,12 @@ const available = computed(() => plugin.value?.status === 'active' && Boolean(vi
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 .plugin-workspace { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; min-width: 0; overflow: hidden; color: $text-primary; }
-.workspace-content { display: flex; flex-direction: column; flex: 1; gap: 16px; padding: 20px; min-height: 0; overflow-y: auto; }
+.workspace-content { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
 .workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-width: 0; }
 .workspace-heading { display: flex; align-items: center; gap: 12px; min-width: 0; color: $text-muted; }
 .workspace-heading h2 { font-size: 16px; color: $text-primary; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0; }
 .back-link { color: $text-secondary; text-decoration: none; white-space: nowrap; }
 .back-link:hover { color: $text-primary; }
 .workspace-empty { flex: 1; display: grid; place-items: center; }
-@media (max-width: 600px) { .workspace-content { padding: 12px; gap: 12px; } .workspace-heading { gap: 8px; } }
+@media (max-width: 600px) { .workspace-heading { gap: 8px; } }
 </style>

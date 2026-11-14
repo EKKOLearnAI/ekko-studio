@@ -89,11 +89,11 @@ test('plugin documents and inner scrollers follow the regular page theme without
   })
   await page.mouse.move(0, 0)
   const outer = page.locator('.workspace-content')
-  // The iframe belongs to the card region, whose opacity/radius can differ from the outer content.
+  // A transparent frame wrapper inherits its containing surface instead of adding a card region.
   await expect.poll(() => frameRoot.evaluate(scrollbar)).toEqual(await hostFrame.evaluate(scrollbar))
   await expect.poll(() => inner.evaluate(scrollbar)).toEqual(await hostFrame.evaluate(scrollbar))
   const regionalStyle = await frameRoot.evaluate(scrollbar)
-  expect(regionalStyle).not.toEqual(await outer.evaluate(scrollbar))
+  expect(regionalStyle).toEqual(await outer.evaluate(scrollbar))
   await writeFile(testInfo.outputPath('theme-styles.json'), JSON.stringify({ dark: darkStyle,
     card: regionalStyle, outer: await outer.evaluate(scrollbar) }, null, 2))
   await frameRoot.evaluate(() => window.scrollTo(0, 0))
@@ -106,11 +106,10 @@ test('plugin documents and inner scrollers follow the regular page theme without
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath('plugin-dark-narrow.png') })
   await page.setViewportSize({ width: 640, height: 320 })
-  expect(await outer.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
-  const outerBox = (await outer.boundingBox())!
-  await page.mouse.move(outerBox.x + 4, outerBox.y + 4)
-  await page.mouse.wheel(0, 300)
-  await expect.poll(() => outer.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  expect(await outer.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(false)
+  await inner.focus()
+  await frame.locator('#end').focus()
+  await expect(frame.locator('#end')).toBeInViewport()
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.mouse.move(0, 0)
   await page.evaluate(async () => {
