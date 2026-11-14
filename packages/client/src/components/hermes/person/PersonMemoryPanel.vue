@@ -15,8 +15,12 @@ const items = ref<PersonMemory[]>([])
 const loading = ref(false)
 const error = ref('')
 
+/** A non-array payload must degrade to an empty list; a thrown render error blanks the panel. */
+function asMemories(value: unknown): PersonMemory[] {
+  return Array.isArray(value) ? value.filter(memory => memory && typeof memory.content === 'string') : []
+}
 const selectedTeam = computed(() => props.teams.find(team => team.id === selectedTeamId.value) || props.teams[0])
-const filtered = computed(() => items.value.filter(memory => memory.content.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
+const filtered = computed(() => asMemories(items.value).filter(memory => memory.content.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
 
 watch(() => [props.teamId, props.teams.map(team => team.id).join(',')], () => {
   if (!props.teams.some(team => team.id === selectedTeamId.value)) selectedTeamId.value = props.teamId || props.teams[0]?.id || ''
@@ -24,12 +28,12 @@ watch(() => [props.teamId, props.teams.map(team => team.id).join(',')], () => {
 // The snapshot already carries the conversation's team; other teams load on demand.
 watch(selectedTeamId, async id => {
   if (!id) { items.value = []; return }
-  if (id === props.teamId) { items.value = props.memories.map(memory => ({ ...memory })); return }
+  if (id === props.teamId) { items.value = asMemories(props.memories); return }
   loading.value = true; error.value = ''
-  try { items.value = (await personTeamMemories(id)).memories } catch (e) { error.value = String(e); items.value = [] }
+  try { items.value = asMemories((await personTeamMemories(id)).memories) } catch (e) { error.value = String(e); items.value = [] }
   finally { loading.value = false }
 }, { immediate: true })
-watch(() => props.memories, value => { if (selectedTeamId.value === props.teamId) items.value = value.map(memory => ({ ...memory })) })
+watch(() => props.memories, value => { if (selectedTeamId.value === props.teamId) items.value = asMemories(value) })
 </script>
 
 <template>

@@ -61,8 +61,8 @@ export const memory = (ctx: Context) => handle(ctx, (id, body) => {
   return forgetPersonMemory(id, personText(body.id, 'id', 100), personRevision(body.expected_revision),
     body.team_id === undefined ? undefined : personText(body.team_id, 'team_id', 100))
 })
-export const memories = (ctx: Context) => handle(ctx, id => ({
-  memories: personMemories(id, ctx.query.team_id === undefined ? undefined : personText(ctx.query.team_id, 'team_id', 100)),
+export const memories = (ctx: Context) => handle(ctx, async id => ({
+  memories: await personMemories(id, ctx.query.team_id === undefined ? undefined : personText(ctx.query.team_id, 'team_id', 100)),
 }))
 export const teams = (ctx: Context) => handle(ctx, id => ({ teams: personTeams(id) }))
 export const teamUsage = (ctx: Context) => handle(ctx, id => personTeamUsageView(id, personText(ctx.params.id, 'team_id', 100)))

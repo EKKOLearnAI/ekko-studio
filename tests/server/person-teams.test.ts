@@ -146,3 +146,18 @@ it('keeps one memory store per team and copies the legacy store into the default
   const teamDirs = readdirSync(join(root, 'person', '1', 'teams'))
   expect(new Set(teamDirs).size).toBeGreaterThanOrEqual(2)
 })
+
+it('serializes the per-team memory endpoint as an array', async () => {
+  seedLegacyAccount(1, [])
+  const created = await teams.applyPersonTeam(1, { action: 'create', name: 'Team F', idempotency_key: 'c9' })
+  const target = created.teams.find(team => team.name === 'Team F')!
+  // The handler must await the memory service: returning the pending promise made
+  // the response `{"memories":{}}`, which crashed the panel that renders it.
+  const controller = await import('../../packages/server/src/modules/studio/controllers/person')
+  const ctx = { state: { user: { id: 1, role: 'super_admin' } }, request: { body: {} },
+    query: { team_id: target.id }, set() {}, status: 200, body: undefined as any }
+  await controller.memories(ctx as any)
+  expect(ctx.status).toBe(200)
+  expect(Array.isArray(ctx.body.memories)).toBe(true)
+  expect(ctx.body.memories).toEqual([])
+})
