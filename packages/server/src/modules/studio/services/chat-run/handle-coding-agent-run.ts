@@ -30,6 +30,7 @@ export interface CodingAgentRunSocketData {
   studio_mcp_capabilities?: StudioMcpCapabilities
   interaction_context_id?: string
   task_plan_context_id?: string
+  onEvent?: (event: string, payload: Record<string, unknown>) => void
   input: string | ContentBlock[]
   session_id?: string
   profile?: string

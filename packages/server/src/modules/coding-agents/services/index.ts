@@ -3970,6 +3970,7 @@ async function startCodingAgentRunInternal(
 export async function compactStoredCodingAgentSession(
   sessionId: string,
   profile: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<{ compacted: boolean; beforeTokens?: number | null; afterTokens?: number | null }> {
   const session = getSession(sessionId)
   if (!session || (session.agent !== 'codex' && session.agent !== 'claude')) {
@@ -4007,7 +4008,7 @@ export async function compactStoredCodingAgentSession(
     command,
     env: launchEnv,
     workspaceDir: launch.workspaceDir,
-  }, nativeSessionId)
+  }, nativeSessionId, options)
 }
 
 export function sendCodingAgentRunInput(

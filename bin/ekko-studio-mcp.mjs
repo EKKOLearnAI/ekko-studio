@@ -4,8 +4,7 @@ import { createPluginTools } from './plugins.mjs'
 import { browserIntent, matchBrowserSnapshot, verifyBrowserResult } from './browser/jev.mjs'
 import { validateBrowserArguments } from './browser/arguments.mjs'
 import { browserOutput } from './browser/output.mjs'
-import { request as httpRequest } from 'node:http'
-import { request as httpsRequest } from 'node:https'
+import { fetchLongRequest } from './long-request.mjs'
 import { createInterface } from 'node:readline'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -214,33 +213,6 @@ function normalizePublicHeaders(headers) {
   return normalized
 }
 
-// User interactions can wait five minutes before producing response headers.
-// Avoid fetch's 300-second headers deadline racing that business deadline.
-async function fetchMobileConsent(url, options) {
-  return new Promise((resolve, reject) => {
-    const target = new URL(url)
-    const transport = target.protocol === 'https:' ? httpsRequest : httpRequest
-    let timer
-    const req = transport(target, { method: options.method, headers: options.headers, signal: options.signal }, res => {
-      const chunks = []
-      res.on('data', chunk => chunks.push(chunk))
-      res.on('error', error => { clearTimeout(timer); reject(error) })
-      res.on('end', () => {
-        clearTimeout(timer)
-        const text = Buffer.concat(chunks).toString('utf8')
-        const headers = new Headers()
-        for (const [name, value] of Object.entries(res.headers)) {
-          if (value != null) headers.set(name, Array.isArray(value) ? value.join(', ') : value)
-        }
-        resolve({ status: res.statusCode || 500, headers, text: async () => text })
-      })
-    })
-    timer = setTimeout(() => req.destroy(new Error('User interaction transport timed out')), 330_000)
-    req.on('error', error => { clearTimeout(timer); reject(error) })
-    req.end(options.body)
-  })
-}
-
 async function requestEnvelope(path, options = {}) {
   const profile = typeof options.profile === 'string' && options.profile.trim()
     ? options.profile.trim()
@@ -260,7 +232,13 @@ async function requestEnvelope(path, options = {}) {
     ...(profile ? { 'X-Hermes-Profile': profile } : {}),
     ...(runCredential ? { 'X-Studio-Run-Context': runCredential.context_id } : {}),
   }
-  const fetchRequest = path === '/api/studio/mobile-calendar/request' || path === '/api/studio/mobile-health/request' || path === '/api/studio/clarifications/request' ? fetchMobileConsent : fetch
+  const chatRun = path === '/api/studio/chat-run/runs'
+  const requestedTimeout = Number(body?.timeout_ms)
+  const chatTimeout = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+    ? Math.min(Math.floor(requestedTimeout), 1_800_000) : 300_000
+  const fetchRequest = chatRun
+    ? (url, requestOptions) => fetchLongRequest(url, requestOptions, chatTimeout + 30_000)
+    : path === '/api/studio/mobile-calendar/request' || path === '/api/studio/mobile-health/request' || path === '/api/studio/clarifications/request' ? fetchLongRequest : fetch
   const response = await fetchRequest(`${baseUrl()}${appendQuery(path, options.query)}`, {
     method,
     headers,

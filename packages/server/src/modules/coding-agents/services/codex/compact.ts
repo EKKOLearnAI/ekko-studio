@@ -28,8 +28,9 @@ interface JsonRpcMessage {
 export async function compactCodexThread(
   launch: CodexCompactLaunch,
   threadId: string,
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<{ compacted: boolean; beforeTokens?: number | null; afterTokens?: number | null }> {
+  options.signal?.throwIfAborted()
   const cwd = launch.workspaceDir && existsSync(launch.workspaceDir) ? launch.workspaceDir : homedir()
   const command = process.platform === 'win32' ? normalizeWindowsCommandPath(launch.command) : launch.command
   const appArgs = ['app-server', '--stdio']
@@ -51,6 +52,7 @@ export async function compactCodexThread(
     let resumeAccepted = false
     let compactAccepted = false
     let compactCompleted = false
+    let compactTurnId: string | null = null
     let settled = false
     let compactError: string | null = null
     let readyTimer: ReturnType<typeof setTimeout> | null = null
@@ -62,6 +64,7 @@ export async function compactCodexThread(
     const settle = (fn: () => void) => {
       if (settled) return
       settled = true
+      options.signal?.removeEventListener('abort', onAbort)
       if (readyTimer) clearTimeout(readyTimer)
       if (compactTimer) clearTimeout(compactTimer)
       try {
@@ -70,7 +73,11 @@ export async function compactCodexThread(
       fn()
     }
 
+    const onAbort = () => settle(() => reject(new Error('Codex compaction interrupted')))
+    options.signal?.addEventListener('abort', onAbort, { once: true })
+
     const handleLine = (line: string) => {
+      if (settled) return
       const trimmed = line.trim()
       if (!trimmed) return
       let message: JsonRpcMessage
@@ -80,7 +87,11 @@ export async function compactCodexThread(
         return
       }
 
-      if (message.method === 'thread/compacted' && String(message.params?.threadId || '') === threadId) {
+      if (message.method === 'turn/started' && compactAccepted && String(message.params?.threadId || '') === threadId) {
+        compactTurnId = String(message.params?.turn?.id || '') || null
+      }
+
+      if (message.method === 'thread/compacted' && compactAccepted && String(message.params?.threadId || '') === threadId) {
         compactCompleted = true
         settle(() => resolve({ compacted: true, beforeTokens, afterTokens }))
         return
@@ -91,6 +102,12 @@ export async function compactCodexThread(
         compactAccepted &&
         String(message.params?.threadId || '') === threadId
       ) {
+        const turn = message.params?.turn
+        if (compactTurnId && String(turn?.id || '') !== compactTurnId) return
+        if (turn?.status !== 'completed') {
+          settle(() => reject(new Error(turn?.error?.message || `Codex compaction ${turn?.status || 'ended without a completed status'}`)))
+          return
+        }
         compactCompleted = true
         settle(() => resolve({ compacted: true, beforeTokens, afterTokens }))
         return

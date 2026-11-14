@@ -1163,7 +1163,13 @@ export class ChatRunSocket {
             if (typeof data.input === 'string') {
               const codingAgentCommand = parseCodingAgentSessionCommand(data.input)
               if (codingAgentCommand) {
-                await handleCodingAgentSessionCommand(this.nsp, socket, data, codingAgentCommand, runProfile, this.sessionMap)
+                await handleCodingAgentSessionCommand(this.nsp, socket, {
+                  ...data,
+                  onEvent: (event: string, payload: any) => {
+                    this.emitPendingInteraction(runProfile, event, payload)
+                  },
+                }, codingAgentCommand, runProfile, this.sessionMap)
+                if (!state.isWorking) this.dequeueNextQueuedRun(socket, data.session_id, runProfile)
                 return
               }
             }
@@ -2101,13 +2107,23 @@ export class ChatRunSocket {
             && (socket.data?.groupRunIsCurrent?.() ?? true),
         })
         : undefined
-      started = await handleCodingAgentRun(this.nsp, socket, { ...data, studio_mcp_token_file: studioMcpTokenFile, task_plan_context_id: planContext, interaction_context_id: interactionContext, instructions, studio_mcp_capabilities: mcpCapabilities }, profile, this.sessionMap)
+      started = await handleCodingAgentRun(this.nsp, socket, {
+        ...data, studio_mcp_token_file: studioMcpTokenFile, task_plan_context_id: planContext,
+        interaction_context_id: interactionContext, instructions, studio_mcp_capabilities: mcpCapabilities,
+        onEvent: (event: string, payload: any) => {
+          data.onEvent?.(event, payload)
+          this.emitPendingInteraction(profile, event, payload)
+        },
+      }, profile, this.sessionMap)
       if (!started && credentialContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.completed', undefined, credentialContext)
     } catch (err) {
       if (credentialContext && data.session_id) this.finishTaskPlanRun(data.session_id, 'run.failed', undefined, credentialContext)
       throw err
     }
-    if (!started) return
+    if (!started) {
+      if (isCommand && data.session_id && !this.sessionMap.get(data.session_id)?.isWorking) this.dequeueNextQueuedRun(socket, data.session_id, profile)
+      return
+    }
     if (data.session_id) {
       const timestamp = Math.floor(Date.now() / 1000)
       const role = data.display_role === 'command' ? 'command' : 'user'
@@ -3196,6 +3212,15 @@ export class ChatRunSocket {
             interrupted: payload.interrupted === true || payload.boundary_interrupt === true || payload.result?.boundary_interrupt === true || payload.result?.interrupted === true,
             stop_reason: payload.stop_reason,
           })
+        } else if (event === 'abort.completed' && typeof data.input === 'string' && data.input.trim().startsWith('/')) {
+          finish({ ok: false, event: 'run.failed', output, error: 'Session command interrupted', interrupted: true })
+        } else if (event === 'session.command' && (payload.terminal === true || payload.ok === false)
+          && typeof data.input === 'string' && payload.session_id === sessionId
+          && payload.command === data.input.trim().match(/^\/([a-zA-Z][\w-]*)(?:\s|$)/)?.[1]?.toLowerCase()) {
+          const failed = payload.ok === false || payload.action === 'error'
+          finish({ ok: !failed, event: failed ? 'run.failed' : 'run.completed',
+            output: typeof payload.message === 'string' ? payload.message : output,
+            ...(failed ? { error: payload.message || 'Session command failed' } : {}) })
         } else if (event === 'run.failed') {
           finish({
             ok: false,

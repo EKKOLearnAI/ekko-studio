@@ -26,6 +26,11 @@ type ChatRunEvent = Record<string, unknown> & {
   output?: string | null
   reasoning?: string | null
   error?: unknown
+  terminal?: boolean
+  ok?: boolean
+  command?: string
+  action?: string
+  message?: string
 }
 
 const CHAT_RUN_EVENTS = [
@@ -221,6 +226,7 @@ export async function runOnce(ctx: Context) {
 
   const timeoutMs = requestTimeoutMs(body.timeout_ms)
   const includeEvents = body.include_events === true
+  const requestedCommand = typeof body.input === 'string' ? body.input.trim().match(/^\/([a-zA-Z][\w-]*)(?:\s|$)/)?.[1]?.toLowerCase() : undefined
   const token = bearerToken(ctx)
   const profile = profileFrom(ctx, body)
   if (body.wait !== undefined && typeof body.wait !== 'boolean') { ctx.status = 400; ctx.body = { error: 'wait must be boolean' }; return }
@@ -332,6 +338,21 @@ export async function runOnce(ctx: Context) {
         }
         if (eventName === 'message.delta' && typeof tagged.delta === 'string') output += tagged.delta
         if ((eventName === 'reasoning.delta' || eventName === 'thinking.delta') && typeof tagged.delta === 'string') reasoning += tagged.delta
+        if (eventName === 'abort.completed' && requestedCommand && tagged.session_id === payload.session_id) {
+          finish(409, { ok: false, status: 'failed', event: eventName, error: 'Session command interrupted' })
+          return
+        }
+        // Native slash commands do not emit run.completed/run.failed.
+        if (eventName === 'session.command' && (tagged.terminal === true || tagged.ok === false) && requestedCommand
+          && tagged.session_id === payload.session_id && tagged.command === requestedCommand) {
+          const failed = tagged.ok === false || tagged.action === 'error'
+          if (typeof tagged.message === 'string') output = tagged.message
+          finish(failed ? 500 : 200, {
+            ok: !failed, status: failed ? 'failed' : 'completed', event: eventName,
+            ...(failed ? { error: tagged.message || 'Session command failed' } : {}),
+          })
+          return
+        }
         if (eventName === 'run.completed') {
           if (typeof tagged.output === 'string' && tagged.output) output = tagged.output
           if (typeof tagged.reasoning === 'string' && tagged.reasoning) reasoning = tagged.reasoning
