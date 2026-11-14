@@ -104,6 +104,24 @@ test('keeps the team picker visible when the account has only one team', async (
   await expect(picker).toContainText('Default')
 })
 
+test('validates the chosen team, not the default team, when starting a conversation', async ({ page }) => {
+  // Regression: the draft read the sessionless snapshot, so it judged the default
+  // team's (empty) agent list even after the user picked a team that has agents.
+  const emptyDefault = [{ ...teams[0], agents: [] }, teams[1]]
+  const { created } = await openFixture(page, { teams: emptyDefault })
+  await page.locator('.new-chat-compose textarea').fill('hello')
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect(page.getByText('请先添加执行智能体')).toBeVisible()
+  expect(created).toHaveLength(0)
+
+  await page.getByRole('button', { name: '取消' }).click()
+  await page.locator('.person-team-picker [aria-label="智能体团队"]').click()
+  await page.getByText('Web Project', { exact: true }).last().click()
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+  await expect.poll(() => created.length).toBe(1)
+  expect(created[0].team_id).toBe('team-web')
+})
+
 test('lists teams in settings and previews affected conversations before deleting one', async ({ page }) => {
   const { agentSaves } = await openFixture(page, { createFirst: true, teamId: 'team-web' })
   await page.getByRole('button', { name: '设置', exact: true }).click()

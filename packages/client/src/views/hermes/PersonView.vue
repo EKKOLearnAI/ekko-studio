@@ -461,7 +461,14 @@ const draftConfig = computed(() => ({ ...currentModel.value, agent: 'ekko-agent'
 const draftReasoningEfforts = computed(() => newConversationModel.value
   ? modelReasoningEfforts(pickerGroups.value, pickerProvider.value, newConversationModel.value.model)
   : draftDefaults.value?.reasoning_efforts ?? [])
-const needsAgentSetup = computed(() => !(isNewConversation.value ? draftDefaults.value : data.value)?.settings.agents.length)
+/** A draft has not chosen a conversation yet, so its agents come from the team picker,
+ *  never from the account default that the sessionless snapshot carries. */
+const draftTeamAgents = computed(() => (data.value?.teams || []).find(team => team.id === newConversationTeamId.value)?.agents)
+const needsAgentSetup = computed(() => {
+  const agents = (isNewConversation.value ? draftTeamAgents.value : undefined)
+    ?? (isNewConversation.value ? draftDefaults.value : data.value)?.settings.agents ?? []
+  return !agents.length
+})
 function checkExecutionAgent() {
   if (!needsAgentSetup.value) return true
   showAgentSetup.value = true
