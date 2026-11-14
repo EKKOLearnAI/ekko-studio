@@ -783,7 +783,7 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
         <template #cards>
           <PersonBotPicker :value="newConversationBot" :disabled="draftLocked" @update:value="selectDraftBot" />
         </template>
-        <div v-if="teamChoices.length > 1" class="person-team-picker">
+        <div v-if="teamChoices.length" class="person-team-picker">
           <span class="tile-meta">{{ t('person.selectTeam') }}</span>
           <NSelect :value="newConversationTeamId" :options="teamChoices" :disabled="draftLocked" size="small"
             style="width: 200px" :aria-label="t('person.selectTeam')" @update:value="selectDraftTeam" />

@@ -12,7 +12,8 @@ const memories = {
   'team-web': [{ id: 'm2', content: 'Web team memory', revision: 1 }],
 } as Record<string, { id: string; content: string; revision: number }[]>
 
-async function openFixture(page: Page, options: { createFirst?: boolean; teamId?: string } = {}) {
+async function openFixture(page: Page, options: { createFirst?: boolean; teamId?: string; teams?: typeof teams } = {}) {
+  const teamList = options.teams || teams
   const created: Record<string, any>[] = []
   const memoryQueries: string[] = []
   const agentSaves: Record<string, any>[] = []
@@ -43,7 +44,7 @@ async function openFixture(page: Page, options: { createFirst?: boolean; teamId?
     else if (u.pathname === '/api/auth/avatar') json = { avatar: '' }
     else if (u.pathname === '/api/studio/person/conversations') json = { sessions: [], next_offset: null }
     else if (u.pathname === '/api/studio/sessions') json = { sessions: [], next_offset: null }
-    else if (u.pathname === '/api/studio/person/teams') json = { teams }
+    else if (u.pathname === '/api/studio/person/teams') json = { teams: teamList }
     else if (u.pathname === '/api/studio/person/memory') {
       const teamId = u.searchParams.get('team_id') || 'team-default'
       memoryQueries.push(teamId)
@@ -55,9 +56,9 @@ async function openFixture(page: Page, options: { createFirst?: boolean; teamId?
     else if (u.pathname === '/api/studio/workspace/directories') json = { directories: [] }
     else if (u.pathname === '/api/studio/workspace/folders') json = { base: '/fixture', current: '', folders: [] }
     else if (u.pathname === '/api/studio/person') json = {
-      session: u.searchParams.get('session_id') ? active : null, teams, revision: 3,
+      session: u.searchParams.get('session_id') ? active : null, teams: teamList, revision: 3,
       settings: { model: { profile: 'default', provider: 'fixture', model: 'test-model' }, reasoningEffort: '',
-        agents: (teams.find(team => team.id === (options.teamId || 'team-default')) || teams[0]).agents,
+        agents: (teamList.find(team => team.id === (options.teamId || 'team-default')) || teamList[0]).agents,
         teamId: options.teamId || 'team-default', workspace: '', timezone: 'Asia/Shanghai', maxSteps: 12,
         maxConcurrentTasks: 6, taskTimeoutMinutes: 60, compressionThreshold: null },
       busy: false, history_revision: 0, can_clear: false, inherits_global_model: true, reasoning_efforts: [],
@@ -91,6 +92,16 @@ test('creates a conversation bound to the selected team', async ({ page }) => {
   await page.getByRole('button', { name: 'Send', exact: true }).click()
   await expect.poll(() => created.length).toBe(1)
   expect(created[0].team_id).toBe('team-web')
+})
+
+test('keeps the team picker visible when the account has only one team', async ({ page }) => {
+  // A fresh account owns a single default team; hiding the picker then left the
+  // whole feature undiscoverable from the new-conversation screen.
+  await openFixture(page, { teams: [teams[0]] })
+  const picker = page.locator('.person-team-picker')
+  await expect(picker).toBeVisible()
+  await expect(picker).toContainText('智能体团队')
+  await expect(picker).toContainText('Default')
 })
 
 test('lists teams in settings and previews affected conversations before deleting one', async ({ page }) => {
