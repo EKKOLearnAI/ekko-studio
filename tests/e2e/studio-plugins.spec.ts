@@ -55,7 +55,7 @@ test('manages a plugin and runs an isolated frontend through authenticated API a
   await page.getByRole('button', { name: '安装插件', exact: true }).click()
   const install = page.getByRole('button', { name: '安装', exact: true })
   await expect(install).toBeDisabled()
-  await page.getByRole('textbox', { name: '绝对目录、package@version 或 github:owner/repo#commit' }).fill('/tmp/notes')
+  await page.locator('.plugin-install-modal').getByRole('textbox').fill('/tmp/notes')
   await page.getByRole('checkbox').check(); await install.click()
   await page.getByRole('button', { name: '启用', exact: true }).click()
   await expect(page.locator('.plugin-card')).toHaveCount(1)

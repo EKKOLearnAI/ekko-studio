@@ -1,0 +1,30 @@
+// Shared by the Studio document and opaque-origin plugin documents.
+// Keep this adapter token-only; importing the palette would reset frame themes.
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-track-piece {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: var(--radius-component, 3px);
+
+  &:hover {
+    background: var(--text-muted);
+  }
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
