@@ -20833,6 +20833,30 @@
             }
           }
         }
+      },
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get memory",
+        "description": "GET /api/studio/person/memory",
+        "operationId": "memories",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
       }
     },
     "/api/studio/person/models": {
@@ -21906,6 +21930,94 @@
             }
           }
         }
+      }
+    },
+    "/api/studio/person/teams": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get teams",
+        "description": "GET /api/studio/person/teams",
+        "operationId": "teams",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/studio/person/teams/apply": {
+      "post": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Create apply",
+        "description": "POST /api/studio/person/teams/apply",
+        "operationId": "teamApply",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/studio/person/teams/{id}/usage": {
+      "get": {
+        "tags": [
+          "Person"
+        ],
+        "summary": "Get usage",
+        "description": "GET /api/studio/person/teams/:id/usage",
+        "operationId": "teamUsage",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/studio/petdex/asset": {
