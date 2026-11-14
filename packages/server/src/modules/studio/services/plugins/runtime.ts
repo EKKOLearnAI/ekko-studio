@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
-import type { ApiRequest, PluginPermission, Dispose, HookResult, Json, PluginAction, PluginCommand, PluginContext, PluginEvent, PluginHook, PluginIdentity, PluginModule, PluginRecord, PluginTool, RunContext, ToolResult, HostSession, SessionListener } from '../../contracts/plugins'
+import type { ApiRequest, PluginPermission, Dispose, HookResult, Json, PluginAction, PluginCommand, PluginContext, PluginEvent, PluginHook, PluginHttpInterceptor, PluginIdentity, PluginModule, PluginRecord, PluginTool, RunContext, ToolResult, HostSession, SessionListener } from '../../contracts/plugins'
 import { createHostApi } from '../../../../../../plugin-sdk/src'
 import { PluginEffects } from './effects'
 import { PluginError, message } from './errors'
@@ -35,11 +35,12 @@ export class PluginRuntime {
   readonly rpc = new Map<string, Handler>()
   readonly listeners = new Map<string, Set<Listener>>()
   readonly hooks = new Map<PluginHook, Hook[]>()
+  readonly http = new Map<string, PluginHttpInterceptor>()
   private schedules = new Map<string, { interval: number; action: string; input: Record<string, Json> }>()
   private calls = new Set<Promise<unknown>>()
   private readonly browserBinding = randomUUID()
   private started = false
-  private invocation = new AsyncLocalStorage<{ identity: PluginIdentity; signal: AbortSignal }>()
+  private invocation = new AsyncLocalStorage<{ identity: PluginIdentity | null; signal: AbortSignal }>()
   constructor(readonly record: PluginRecord, readonly identity: PluginIdentity, readonly store: PluginStore, readonly ports: PluginPorts) {}
   require(capability: PluginPermission): void {
     this.effects.assertActive()
@@ -83,8 +84,12 @@ export class PluginRuntime {
     await this.effects.close()
     await Promise.allSettled([...this.calls])
   }
-  private current() { return this.invocation.getStore() || { identity: this.identity, signal: this.effects.controller.signal } }
-  private log(level: string, text: string, data?: Json, identity = this.current().identity) { this.ports.log(this.record.manifest.id, identity, level, text.slice(0, 4000), data) }
+  private current() {
+    const current = this.invocation.getStore()
+    if (current && !current.identity) throw new PluginError('Authenticated caller identity is unavailable in this HTTP callback', 'PLUGIN_FORBIDDEN', 403)
+    return { identity: current?.identity || this.identity, signal: current?.signal || this.effects.controller.signal }
+  }
+  private log(level: string, text: string, data?: Json, identity = this.invocation.getStore()?.identity || this.identity) { this.ports.log(this.record.manifest.id, identity, level, text.slice(0, 4000), data) }
   private lifecycle(effects = this.effects) {
     return { add: effects.add.bind(effects), acquire: effects.acquire.bind(effects) }
   }
@@ -143,10 +148,18 @@ export class PluginRuntime {
     return {
       paths: Object.freeze({ dataDir: join(this.store.directory(), 'plugin-data', this.record.manifest.id) }),
       plugin: Object.freeze(structuredClone(this.record.manifest)), get identity() { return Object.freeze({ ...self.current().identity }) },
-      config: Object.freeze(structuredClone(this.record.config)), get signal() { return self.current().signal },
+      config: Object.freeze(structuredClone(this.record.config)), get signal() { return self.invocation.getStore()?.signal || self.effects.controller.signal },
       get state() { const current = self.current(); return self.state(current.identity, () => { self.effects.assertActive(); current.signal.throwIfAborted() }) }, host,
       log: { info: (text, data) => this.log('info', text, data), warn: (text, data) => this.log('warn', text, data), error: (text, data) => this.log('error', text, data) },
       extensions: {
+        http: { register(interceptor) {
+          self.require('http')
+          if (!interceptor || !Number.isFinite(interceptor.priority ?? 0)
+            || (!interceptor.onRequest && !interceptor.onResponse)
+            || (interceptor.onRequest !== undefined && typeof interceptor.onRequest !== 'function')
+            || (interceptor.onResponse !== undefined && typeof interceptor.onResponse !== 'function')) throw new PluginError('Invalid HTTP interceptor')
+          return self.register(self.http, interceptor.name, Object.freeze({ ...interceptor }))
+        } },
         agents: { register: definition => {
           this.require('agents')
           if (this.started) throw new PluginError('Agents must be registered during apply')
@@ -264,6 +277,19 @@ export class PluginRuntime {
   /** Agent instances use the coordinator's lifetime, independently of ordinary RPC timeouts. */
   async withIdentity<T>(identity: PluginIdentity, external: AbortSignal, work: (signal: AbortSignal) => Promise<T> | T): Promise<T> {
     this.effects.assertActive(); await this.ports.authorize(identity)
+    return this.withInvocation(identity, external, work)
+  }
+
+  /** HTTP callbacks may run before authentication; SDK access must never inherit admin identity. */
+  async withHttpIdentity<T>(identity: PluginIdentity | undefined, external: AbortSignal, work: (signal: AbortSignal) => Promise<T> | T): Promise<T> {
+    this.require('http')
+    if (identity) await this.ports.authorize(identity)
+    try { return await this.withInvocation(identity || null, AbortSignal.any([external, AbortSignal.timeout(30_000)]), work) }
+    catch (error) { this.log('error', `HTTP callback: ${message(error)}`, undefined, identity || this.identity); throw error }
+  }
+
+  private async withInvocation<T>(identity: PluginIdentity | null, external: AbortSignal, work: (signal: AbortSignal) => Promise<T> | T): Promise<T> {
+    this.effects.assertActive()
     const lifetime = new AbortController()
     const signal = AbortSignal.any([external, lifetime.signal, this.effects.controller.signal])
     signal.throwIfAborted()

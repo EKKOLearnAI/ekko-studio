@@ -1,6 +1,7 @@
 import { registerDesktopBrowserRelay } from '../modules/studio/sockets/desktop-browser'
 import { registerPluginSessions } from '../modules/studio/sockets/plugin-sessions'
-import { startPluginHost, stopPluginHost } from '../modules/studio/services/plugins/host'
+import { getPluginManager, startPluginHost, stopPluginHost } from '../modules/studio/services/plugins/host'
+import { createPluginHttpMiddleware } from '../modules/studio/services/plugins/http'
 import { registerPluginMcpSync } from './plugin-mcp'
 import { setupMobileTerminal } from '../modules/hermes/sockets/mobile-terminal'
 import { getSessionMetadata as getTerminalSessionMetadata } from '../modules/studio/public/sessions'
@@ -503,6 +504,7 @@ export async function bootstrap() {
   // Raise body limits above the default 1mb: profile avatars and MiMo voice-clone
   // reference audio are posted as base64 data URLs before reaching handlers.
   app.use(createRequestBodyParser())
+  app.use(createPluginHttpMiddleware(getPluginManager))
   console.log('[bootstrap] cors + bodyParser registered')
 
   registerReadinessRoute(app)

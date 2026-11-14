@@ -128,6 +128,7 @@ export interface ClientModule { mount(element: HTMLElement, ctx: ClientContext):
 
 
 export interface PluginExtensions {
+  http: { register(interceptor: import('./http').PluginHttpInterceptor): Dispose }
   agents: { register(definition: import('./agents').AgentDefinition): import('./agents').AgentRegistration }
   tools: { register(tool: PluginTool): Dispose }
   commands: { register(command: PluginCommand): Dispose }

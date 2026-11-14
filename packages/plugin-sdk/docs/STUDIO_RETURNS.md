@@ -17,6 +17,8 @@
 | 聊天命令 execute | JSON 或 void；输入是原始参数字符串。 |
 | 自动化动作 execute | JSON，结构应在插件契约中声明，供工作流消费。 |
 | hooks handler | `{ value?: Json, deny?: string }`；value 替换内容，deny 拒绝；不用修改时返回空对象。 |
+| HTTP onRequest | 原地修改 request 后返回 void 继续；返回 `{status,headers,body}` 直接响应并停止后续请求回调和路由。 |
+| HTTP onResponse | 原地修改 response，返回 void/Promise<void>；不返回替代对象。 |
 | 业务观察 handler | void/Promise<void>；事件不能通过返回值修改原业务。 |
 | messages.emit | 传事件名、JSON data、可选 audience；没有业务返回值。 |
 | 前端 ui.selectModel | 宿主返回 `{profile,provider,model,apiMode?}`，关闭或取消返回 null；model 为规范 ID，不含凭证。调用方自行通过 RPC 保存；加载失败或重复打开时 Promise reject。 |
@@ -25,6 +27,13 @@
 工具 inputSchema 使用 SDK 的 Schema 子集（type/properties/items/required/enum 等）；
 它与项目 harness 的描述型 schema 分开，宿主 Schema 支持 description；不支持 $ref/anyOf 等未声明的 JSON Schema 关键字。
 复用契约模型时，先确认所有关键字都属于 SDK Schema 子集。
+
+HTTP 回调是后端进程内契约，不适用 JSON RPC 的 2 MB 限制：body 可保留 Koa 支持的 Buffer、
+Readable、null 或 undefined；普通 JSON 与 Buffer 使用副本，流保持原对象且宿主不会读取缓冲。
+返回短路响应时 status（100–999 整数）、headers（对象，可空）和 body 均须提供。
+响应体改变时宿主移除旧 Content-Length 与 ETag；插件应同步设置 Content-Type、Content-Encoding 等表示头。
+已写出头部或 `ctx.respond=false` 的原生响应不再运行响应回调；下游抛出的未处理异常仍由 Koa 处理。
+回调抛错、无效改写、30 秒超时或取消会中止当前请求，不把未成功的改写交给路由。
 
 ```js
 return { ok: true, content: '已保存', data: { id: 'note-1' } }

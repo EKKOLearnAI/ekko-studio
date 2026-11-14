@@ -27,6 +27,12 @@ export class PluginManager {
   private closing = false
   private ports: PluginPorts
   registeredAgents() { return [...this.runtimes.values()].filter(runtime => packagePresent(runtime.record)).flatMap(runtime => [...runtime.agents.values()]) }
+  httpInterceptors() {
+    return [...this.runtimes.values()].filter(runtime => !runtime.effects.controller.signal.aborted && packagePresent(runtime.record))
+      .flatMap(runtime => [...runtime.http.values()].map(interceptor => ({ runtime, interceptor })))
+      .sort((a, b) => (a.interceptor.priority ?? 0) - (b.interceptor.priority ?? 0)
+        || a.runtime.record.manifest.id.localeCompare(b.runtime.record.manifest.id) || a.interceptor.name.localeCompare(b.interceptor.name))
+  }
   constructor(home: string, ports: PluginPorts) {
     this.store = new PluginStore(home)
     this.ports = { ...ports, emit: (id, event) => { this.publish(id, event, event.audience === 'plugin'); ports.emit(id, event) },

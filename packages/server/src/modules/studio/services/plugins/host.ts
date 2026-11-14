@@ -20,6 +20,7 @@ import { configurePluginAgents } from '../agents/registry'
 import { reconcileBuiltinPlugins } from './builtin'
 import { synchronizePluginMcpServers } from './mcp'
 import { connectPluginSession } from './session-transport'
+import { pluginHttpInternalHeaders } from './http'
 
 let baseUrl = ''
 let instance: PluginManager | undefined
@@ -66,7 +67,7 @@ async function api(identity: PluginIdentity, path: string, options: ApiRequest, 
   const token = await issueModelRunJwt(user)
   const response = await fetch(`${baseUrl}${url.pathname}${url.search}`, {
     method: options.method || 'GET', signal, redirect: 'error',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Hermes-Profile': identity.profile },
+    headers: { ...pluginHttpInternalHeaders(), Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Hermes-Profile': identity.profile },
     ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
   })
   const text = await response.text()

@@ -87,7 +87,7 @@ Agent 使用 `agentApiVersion: 1` 与 `features`。只实现这一份最新契�
 | 模块 | 唯一职责 |
 | --- | --- |
 | `host` | 调用宿主 models/agents/sessions/bots/groupChats/workflows/files/browser，request 是受限 JSON 逃生口 |
-| `extensions` | 注册 agents/tools/commands/hooks/actions/rpc；不承担宿主目录查询 |
+| `extensions` | 注册 agents/tools/commands/hooks/actions/rpc/http；不承担宿主目录查询 |
 | `state` | 显式 plugin/user/profile/session/agentSession 数据作用域 |
 | `events` | 订阅宿主业务事件；只观察，不修改原业务 |
 | `messages` | 后端向插件页面发消息、前端订阅；不回流业务事件总线 |
@@ -96,10 +96,21 @@ Agent 使用 `agentApiVersion: 1` 与 `features`。只实现这一份最新契�
 | `ui` | 前端提示、确认、输入、导航、模型选择器 |
 | `lifecycle` | add/acquire 统一登记同步与异步资源；signal 是上下文根部的取消元数据 |
 
-源码按 core/state/host/browser/sessions/bots/contexts/agents 分文件，index.ts 只作为统一导出入口。
+源码按 core/state/host/browser/sessions/bots/contexts/agents/http 分文件，index.ts 只作为统一导出入口。
 插件包管理和 Agent 引擎维护属于宿主管理面；注册 Agent 的插件实现自己的管理回调。
 六种上下文分别是 PluginContext、RunContext、ClientContext、AgentManagementContext、AgentSessionContext、AgentRunContext。
 身份、配置、路径和取消信号是上下文元数据；功能入口不得再放置同义的根级别名。
+
+## 后端 HTTP 拦截
+
+清单声明独立 `http` 权限，通过 `extensions.http.register` 注册服务端入站请求和响应拦截器。
+中间件位于通用请求体解析之后、公开与鉴权路由之前；覆盖经过该位置的 API 和静态页面请求。
+请求回调升序执行，响应回调按已进入的拦截器逆序执行；同优先级按插件 ID、注册名称排序。
+请求回调可以修改路由输入，也可以直接返回完整响应。禁用、重载、卸载释放注册并取消未结束的回调。
+这是可信后端插件的全局 HTTP 权限，可接触尚未鉴权的请求及凭证头，不能当作用户级数据授权。
+鉴权前的回调没有调用者身份，闭包中的 `ctx.host/state/identity` 也不会继承激活管理员；
+鉴权后使用实际请求账号与 Profile。SDK 的内部 HTTP 传输保留原有鉴权并跳过再次拦截，避免递归。
+HTTP body 为进程内 Koa 数据，可保留 Buffer 和流，不经过前端 JSON 桥；详细契约见能力与返回指南。
 
 ## 完整单聊与 BOT
 

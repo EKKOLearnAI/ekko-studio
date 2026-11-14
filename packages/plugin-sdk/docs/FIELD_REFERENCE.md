@@ -41,7 +41,7 @@
 | paths.runtimeDir | string；AgentSession/Run | 此原生 Agent 会话的绝对运行目录，可保存原生会话文件 |
 | paths.workspaceDir | string；AgentSession/Run | 实际会话工作区绝对路径；与 runtimeDir 含义不同 |
 | host | HostApi；Plugin/Run/Client | 八个业务模块及受限 request，字段见 HOST_API.md；每次按真实身份授权 |
-| extensions | PluginExtensions；PluginContext | 注册 agents/tools/commands/hooks/actions/rpc；具体注册字段见下文 |
+| extensions | PluginExtensions；PluginContext | 注册 agents/tools/commands/hooks/actions/rpc/http；具体注册字段见下文 |
 | state | PluginState；Plugin/Run/Client | 显式存储作用域，下文说明隔离边界；AgentRun 一定有 agentSession |
 | events | on(pattern, listener)；Plugin/Client | 业务观察；需要 events；精确名称、`*` 或 `.*` 前缀。不是修改原业务的钩子 |
 | scheduler | every(id, intervalMs, action, input?)；Plugin | 需要 automation，apply 期间登记；intervalMs 是 1000–2147483647 毫秒的安全整数；input 默认 {}，action 必须已注册；同一任务不重叠，重启不补跑 |
@@ -101,7 +101,7 @@ ui.selectWorkspace 的 options 仅有可选 current:string，缺省或空字符�
 | --- | --- | --- |
 | id/name/version/apiVersion | 必填 string/string/string/1 | id 遵循标识符规则；name 非空且最多 160 字符；version 是精确 x.y.z，可带预发布后缀，须与 package.json 一致 |
 | server/client | 至少一项，string | 包内相对 .js/.mjs 成品路径，禁止绝对路径及 ..；server 导出 apply，client 导出 mount；安装不构建源码 |
-| permissions | 必填字符串数组，可空 | api.read、api.write、tools、commands、events、hooks、automation、ui、storage.client、agents、browser.cdp；旧 capabilities 不接受 |
+| permissions | 必填字符串数组，可空 | api.read、api.write、tools、commands、events、hooks、automation、ui、storage.client、agents、browser.cdp、http；旧 capabilities 不接受 |
 | description? | string | 非空，最多 4000 字符 |
 | author? | {name:string,url?:string} | name 非空最多 200 字符，url 规则同下 |
 | repository/homepage/documentation/issues/changelog? | string | HTTP(S) URL，无账号密码，最多 2048 字符 |
@@ -138,7 +138,20 @@ secret=true 从前端配置移除；前端未提交该字段时保存旧密钥�
 | actions | name、description、inputSchema、execute(input,run) | 需 automation；返回插件自定 JSON，供工作流消费 |
 | rpc | register(name,handler(input,run)) | input 为 JSON，返回 JSON；输入/输出/存储业务结构写 contracts/plugin.json 并调用校验辅助函数 |
 | hooks | name、handler(value,run) | priority 默认 0，有限 number，升序；四种 hook 见能力指南，返回 value?/deny?；deny 时拒绝，不能更换工具名称 |
+| http | name，onRequest/onResponse 至少一项 | 需 http；priority 默认 0，有限 number，请求升序、响应逆序，同优先级按插件 ID 和 name；返回 Dispose |
 | agents | AgentDefinition，见下表 | 需 agents，只能 apply 时注册；重复局部 ID 拒绝，返回完整 ID 与异步 dispose |
+
+### HTTP 进程内结构
+
+| 结构 | 字段与约束 |
+| --- | --- |
+| PluginHttpInterceptor | name 为局部标识符；priority 可选有限 number 默认 0；onRequest(request,http)/onResponse(response,http) 至少一项 |
+| PluginHttpRequest | method 为 HTTP token；url 为 `/path?query`，禁止绝对 URL、空白、反斜杠及片段；headers 为小写键的 string/string[] 字典；body 为已解析数据或 undefined |
+| PluginHttpResponse | status 为 100–999 整数；headers 字典必填可空；body 字段必填，接受 Koa JSON/text/Buffer/Readable/null/undefined |
+| PluginHttpContext | originalUrl 为最初路径；request 为当前请求快照；identity 仅在鉴权后可用，含 userId/profile/surface:http；signal 随连接断开、插件释放或 30 秒回调超时取消 |
+
+这些对象仅在后端进程内传递，不进入 RPC JSON 校验或前端桥接。onRequest 返回 void 继续，
+返回完整 PluginHttpResponse 短路；onResponse 原地修改并返回 void。流式与已提交响应边界见 STUDIO_CTX。
 
 ## Agent 字段字典
 
