@@ -20,6 +20,7 @@
 | 业务观察 handler | void/Promise<void>；事件不能通过返回值修改原业务。 |
 | messages.emit | 传事件名、JSON data、可选 audience；没有业务返回值。 |
 | 前端 ui.selectModel | 宿主返回 `{profile,provider,model,apiMode?}`，关闭或取消返回 null；model 为规范 ID，不含凭证。调用方自行通过 RPC 保存；加载失败或重复打开时 Promise reject。 |
+| 前端 ui.selectWorkspace | 宿主返回 `{profile,workspace}`，关闭/取消返回 null；workspace 为去除首尾空白的非空目录字符串。不自动绑定会话或修改插件设置；参数错误、重复打开或页面通道销毁时 reject，目录快捷项加载失败可在宿主界面重试。 |
 
 工具 inputSchema 使用 SDK 的 Schema 子集（type/properties/items/required/enum 等）；
 它与项目 harness 的描述型 schema 分开，宿主 Schema 支持 description；不支持 $ref/anyOf 等未声明的 JSON Schema 关键字。

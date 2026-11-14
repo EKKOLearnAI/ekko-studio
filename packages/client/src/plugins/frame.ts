@@ -87,6 +87,7 @@ function bootstrap(apiFactory: typeof createHostApi, loadModule: (url: string) =
         notify: (message, level = 'info') => { void call('notify', { message, level }).catch(() => {}) },
         confirm: message => call('confirm', { message }), prompt: message => call('prompt', { message }),
         selectModel: (options = {}) => call('select-model', options),
+        selectWorkspace: (options = {}) => call('select-workspace', options),
         navigate: path => { void call('navigate', { path }).catch(() => {}) },
       },
       lifecycle: { add: addResource, acquire: async acquire => {

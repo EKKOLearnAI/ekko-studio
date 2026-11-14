@@ -36,6 +36,7 @@ const props = defineProps<{
   favorite?: boolean
   favoriteDisabled?: boolean
   favoriteTitle?: string
+  rememberSelection?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -149,6 +150,7 @@ function selectBase() {
 }
 
 async function rememberSelection() {
+  if (props.rememberSelection === false) return
   const path = selectedPath.value.trim()
   if (!path) return
   try { await recordWorkspaceDirectory(path) }

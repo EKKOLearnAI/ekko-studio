@@ -59,7 +59,7 @@
 | data | Json；Client | 视图调用方提供的页面数据，未提供为 null；没有隐含固定业务字段，插件需声明/校验自己依赖的结构 |
 | rpc.call | (name,input?) => Promise<Json>；Client | name 是本插件 RPC 名，input 缺省变为 null；失败 reject，不自动重试 |
 | messages.on | (type,listener) => Dispose；Client | 接收插件自定义消息；与 events 的 business 通道分开 |
-| ui | Client | notify(message,level)、confirm(message)、prompt(message)、navigate(path)、selectModel(options?)；confirm 返回 boolean，prompt 返回 string 或取消时 null；navigate 是宿主路径 |
+| ui | Client | notify(message,level)、confirm(message)、prompt(message)、navigate(path)、selectModel(options?)、selectWorkspace(options?)；confirm 返回 boolean，prompt 返回 string 或取消时 null；navigate 是宿主路径 |
 | mode? | scoped/global；AgentManagement | 只有宿主绑定管理模式时提供；不得假设存在 |
 | progress | ({message,percent?}) => void；AgentManagement | message 为状态文本；percent 是可选进度提示，当前宿主仅记 message 日志，不保证显示百分比，不是完成回执 |
 | mode | scoped/global；AgentSession/Run | 会话绑定模式，改变后按新实例隔离；不增加权限 |
@@ -84,6 +84,14 @@ ui.selectModel 的 options 仅有可选 current:{provider,model}，两项都是�
 选择后返回必填 profile/provider/model 三个字符串，及可选 apiMode；后者可为 chat_completions、
 codex_responses、anthropic_messages、bedrock_converse、codex_app_server。取消为 null，错误 reject。
 选择器不保存配置、不发模型请求，不回传 key 或供应商地址。
+
+ui.selectWorkspace 的 options 仅有可选 current:string，缺省或空字符串表示未选择；上限 4096 字符，不允许 NUL。
+确认返回 `{profile:string,workspace:string}`：profile 由宿主绑定，workspace 为去除首尾空白的非空目录字符串。
+目录树及收藏/最近项提供宿主路径，手动路径沿用现有目录输入；此选择器不创建目录，路径有效性和访问权限
+仍由后续使用它的宿主业务方法检查。空选择不能确认；取消或关闭返回 null，参数错误或重复打开 reject。
+页面上下文失效会关闭选择器，并由页面桥接以页面已关闭错误终止未完成请求，与其他页面 API 一致。
+不自动修改插件配置或现有会话。收藏/最近目录属于当前账号，非 Profile；显式收藏立即保存，最近使用仅在确认后记录。
+选择器本身无需插件额外声明 api.read/api.write；插件后续通过 host API 使用所选路径仍须声明相应权限。
 
 ## Studio 读取的清单与注册数据
 
