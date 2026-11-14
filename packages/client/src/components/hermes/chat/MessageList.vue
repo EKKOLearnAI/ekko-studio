@@ -1224,6 +1224,7 @@ defineExpose({
             <NButton
               v-for="choice in visibleClarify.choices"
               :key="choice"
+              class="clarify-choice-button"
               size="small"
               type="primary"
               @click="handleClarify(choice)"
@@ -1496,6 +1497,23 @@ defineExpose({
   margin-top: 10px;
   padding: calc(10px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) 0;
   border-top: var(--border-width, 1px) solid $border-color;
+}
+
+// Long choices wrap inside the panel instead of running past its edge.
+.clarify-choice-button {
+  max-width: 100%;
+  height: auto;
+  min-height: var(--n-height);
+  padding-block: calc(4px * var(--spacing-scale, 1));
+  line-height: var(--line-height, 1.4);
+  white-space: normal;
+  text-align: start;
+
+  :deep(.n-button__content) {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 .clarify-float-input-row {
