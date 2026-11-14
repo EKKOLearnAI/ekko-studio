@@ -38,6 +38,8 @@ test('appends plugin Agents to the shared manager grid without description text'
   expect(ids.slice(0, 2)).toEqual(['agent-card-ekko', 'agent-card-hermes'])
   expect(ids.slice(-3)).toEqual(['agent-card-zcode', ...plugins.map(agent => `agent-card-${agent.id}`)])
   expect(ids.filter(id => id === 'agent-card-codex')).toHaveLength(1)
+  const heights = await page.locator('.coding-agent-grid > .agent-card').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().height))
+  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(1)
   const codex = page.getByTestId('agent-card-codex')
   await expect(codex).toBeVisible()
   const appearance = (card: Element) => {
