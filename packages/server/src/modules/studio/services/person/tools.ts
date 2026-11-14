@@ -8,7 +8,7 @@ import { personTaskTools } from './task-tools'
 import { personFlowTools } from './stage-tools'
 import { applyPersonSchedule } from './schedules'
 import type { PersonTool } from './model'
-import { listAssignablePersonGoals, listPersonTasks, getPersonTask, taskPersonExecutions, personEvents, listPersonSchedules, getPersonExecution } from '../../repositories/person-store'
+import { listAssignablePersonGoals, listPersonTasks, getPersonTask, taskPersonExecutions, personEvents, listPersonSchedules, getPersonExecution, personSettings } from '../../repositories/person-store'
 import { openPersonContextStore } from '../../repositories/person-context-store'
 import { personMemoryReadTools } from './memory'
 import { listPersonSessions, requirePersonSession } from '../../repositories/person-session-store'
@@ -56,7 +56,10 @@ export async function readPersonArtifact(userId: number, executionId: string, pa
   return { path: local, content: content.slice(offset, offset + 6000), next_offset: offset + 6000 < content.length ? offset + 6000 : null,
     version: `${info.size}:${info.mtimeMs}` }
 }
-export function personTools(userId: number, role: PersonRole, taskId?: string, sessionId?: string): PersonTool[] {
+export function personTools(userId: number, role: PersonRole, taskId?: string, sessionId?: string, teamId?: string): PersonTool[] {
+  // A team bounds both the agent catalogue and the memory tools; the conversation
+  // pins the team, so callers without one keep using the default team.
+  const team = teamId || (sessionId ? personSettings(userId, sessionId).settings.teamId : undefined)
   const ensureTask = (id: unknown) => { const value = personText(id, 'task_id', 100); if (taskId && taskId !== value) throw personError('Task outside role scope', 403); return value }
   const taskTools = role === 'main' ? personTaskTools(userId, sessionId || '') : []
   const tools: PersonTool[] = [
@@ -78,7 +81,7 @@ export function personTools(userId: number, role: PersonRole, taskId?: string, s
     const pending = personTaskWaitState(userId,sessionId || '',origin?.returnExecutionId,origin?.stage)
     return {waiting:pending.length > 0,execution_ids:pending.map(target => target.executionId)}
   }))
-  if (role !== 'main') tools.push(...personMemoryReadTools(userId))
+  if (role !== 'main') tools.push(...personMemoryReadTools(userId, team))
   if (role === 'main') tools.push(personTool('bot_decision_request', 'Ask for missing user input only when it materially blocks or changes the outcome, including when you cannot complete the goal and cannot identify a capable worker. Explain the specific gap and wait for their reply through the chat before dispatching affected work. Use this tool instead of leaving a blocking question in ordinary reply text. Make routine implementation choices yourself. A timeout or empty response is not consent. This never grants authorization.', { question: string, choices: { type: 'array', items: string, maxItems: 5 } }, ['question'], async () => {
     // The single-chat Agent adapter binds this definition to requestUserClarification.
     throw personError('User decisions require the single-chat runtime')
@@ -91,8 +94,8 @@ export function personTools(userId: number, role: PersonRole, taskId?: string, s
       const sessions = listPersonSessions(userId, String(args.search || '').slice(0, 200), offset, 11)
       return { current_session_id: sessionId, sessions: sessions.slice(0, 10).map(session => ({ session_id: session.id, name: session.title, last_active: session.last_active })), next_offset: sessions.length > 10 ? offset + 10 : null }
     }),
-    personTool('bot_agents_list', 'List worker Agent IDs and purposes. Follow next_offset. Assess suitability from stated purposes or verified capabilities; if no capable worker is identifiable, use bot_decision_request before dispatching.', { offset: integer }, [], async args => {
-      const agents = await personExecutionAgents(userId)
+    personTool('bot_agents_list', 'List worker Agent IDs and purposes **for the current team only**. Follow next_offset. Assess suitability from stated purposes or verified capabilities; if no capable worker is identifiable, use bot_decision_request before dispatching.', { offset: integer }, [], async args => {
+      const agents = await personExecutionAgents(userId, team)
       const offset = Math.max(0, Math.min(agents.length, Math.floor(Number(args.offset) || 0)))
       return { agents: agents.slice(offset, offset + 5), next_offset: offset + 5 < agents.length ? offset + 5 : null }
     }),
