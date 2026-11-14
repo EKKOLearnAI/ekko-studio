@@ -24,6 +24,7 @@ const manager = { setup() { return () => h('main', { style: 'padding:24px;max-wi
 const router = createRouter({ history: createWebHashHistory(), routes: [
   { path: '/', component: manager },
   { path: '/agents', component: AgentManagerView },
+  { path: '/studio/agents/:agentId/:section', name: 'codingAgent.config', component: () => import('../../../packages/client/src/views/hermes/CodingAgentConfigView.vue') },
   { path: '/studio/plugins', name: 'studio.plugins', component: manager },
   { path: '/studio/plugin-settings/:pluginId/:viewId', name: 'studio.pluginSettings', component: PluginPageView },
 ] })

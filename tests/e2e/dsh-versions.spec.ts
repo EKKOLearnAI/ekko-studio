@@ -20,7 +20,7 @@ test('pins exact versions, uses latest, restores previous, and preserves the dis
   await pin.click()
   await expect(page.getByTestId('dsh-versions')).toContainText('固定版本：0.2.2-rc.1')
   await page.getByRole('button', { name: '检查并使用最新版' }).click()
-  await expect(page.getByTestId('dsh-versions')).toContainText('固定版本：—')
+  await expect(page.getByTestId('dsh-versions')).toContainText('固定版本：未固定')
   await page.getByRole('button', { name: '恢复 0.2.2-rc.1' }).click()
   await expect(page.getByTestId('dsh-versions')).toContainText('已验证安装：0.2.1-rc.5')
   expect(requests).toEqual([{ version: '0.2.2-rc.1' }, { version: 'latest' }, { rollback: true }])

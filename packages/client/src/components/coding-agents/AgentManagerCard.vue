@@ -7,13 +7,14 @@ defineProps<{ name: string; logo: string; version?: string; description?: string
     <header class="agent-card-header">
       <div class="agent-identity">
         <img :src="logo" alt="" class="agent-logo" />
-        <div>
+        <div class="agent-identity-text">
           <div class="agent-name-row">
             <h3>{{ name }}</h3>
             <slot name="badges" />
           </div>
           <p v-if="version" class="agent-version">{{ version }}</p>
           <p v-else-if="description">{{ description }}</p>
+          <slot name="summary" />
         </div>
       </div>
     </header>
@@ -39,6 +40,7 @@ defineProps<{ name: string; logo: string; version?: string; description?: string
 }
 
 .agent-card-header { display: flex; align-items: center; }
+.agent-identity-text { min-width: 0; overflow-wrap: anywhere; }
 .agent-identity {
   display: flex;
   min-width: 0;
