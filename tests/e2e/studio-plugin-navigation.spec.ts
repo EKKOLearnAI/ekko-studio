@@ -209,8 +209,13 @@ test('keeps plugin headers fixed while center and page content scroll on desktop
   await page.setViewportSize({ width: 390, height: 400 })
   const workspaceHeader = page.locator('.workspace-header'), workspace = page.locator('.workspace-content')
   const workspaceTop = (await workspaceHeader.boundingBox())!.y
-  await workspace.evaluate(element => { element.scrollTop = element.scrollHeight })
-  await expect.poll(() => workspace.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+  // The frame fits the available window; long plugin content scrolls inside its document.
+  const pluginDocument = page.frameLocator('.plugin-workspace iframe').locator('html')
+  await page.locator('.plugin-workspace iframe').hover()
+  await page.mouse.wheel(0, 400)
+  await expect.poll(() => pluginDocument.evaluate(() => document.scrollingElement!.scrollTop)).toBeGreaterThan(100)
+  expect(await workspace.evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true)
+  expect(await workspace.evaluate(element => element.scrollTop)).toBe(0)
   expect((await workspaceHeader.boundingBox())!.y).toBe(workspaceTop)
   await expect(workspaceHeader.getByRole('button', { name: '管理插件', exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

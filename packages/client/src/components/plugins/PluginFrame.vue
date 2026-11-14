@@ -58,7 +58,7 @@ watch(() => [frame.value, props.plugin, props.profile, props.view, props.session
   }
   function themeSnapshot() {
     const computed = getComputedStyle(element), theme: Record<string, string> = {}
-    for (const key of ['--text-primary', '--text-secondary', '--text-muted', '--bg-card', '--bg-secondary', '--border-color', '--accent-primary']) theme[key] = computed.getPropertyValue(key)
+    for (const key of ['--text-primary', '--text-secondary', '--text-muted', '--bg-card', '--bg-secondary', '--border-color', '--accent-primary', '--radius-component']) theme[key] = computed.getPropertyValue(key)
     return theme
   }
   const appearance = new MutationObserver(() => { if (started) send({ type: 'theme', theme: themeSnapshot() }) })
@@ -123,7 +123,7 @@ onBeforeUnmount(() => release?.())
 </script>
 
 <template>
-  <section class="plugin-frame" :class="{ 'plugin-frame--expanded': expanded, 'plugin-frame--sidebar': sidebar }" data-theme-surface="card">
+  <section class="plugin-frame" :class="{ 'plugin-frame--expanded': expanded, 'plugin-frame--sidebar': sidebar }">
     <NAlert v-if="error" type="error">{{ error }}</NAlert>
     <iframe ref="frame" :title="`${plugin.manifest.name}: ${view}`" sandbox="allow-scripts" referrerpolicy="no-referrer" :style="expanded ? undefined : { height: `${height}px` }" />
     <ModelCascader v-if="modelPickerRequest" :show="true" :groups="modelPickerRequest.catalog.groups"
@@ -136,10 +136,8 @@ onBeforeUnmount(() => release?.())
   </section>
 </template>
 <style scoped lang="scss">
-@use '@/styles/variables' as *;
-.plugin-frame { overflow: hidden; min-width: 0; border: 1px solid $border-light; border-radius: $radius-lg; }
-.plugin-frame--sidebar { border: 0; border-radius: 0; }
-.plugin-frame--expanded { flex: 1; display: flex; flex-direction: column; min-height: 360px; }
+.plugin-frame { overflow: hidden; min-width: 0; }
+.plugin-frame--expanded { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .plugin-frame--expanded iframe { flex: 1; min-height: 0; height: 100%; }
 iframe { display: block; width: 100%; border: 0; }
 </style>
