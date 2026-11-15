@@ -42,32 +42,34 @@
 
 页面布局由 views[].slot 声明，全局入口独立由 navigation 声明。Agent 设置回调必须指向 agent-settings 视图。
 每个视图由同一个客户端入口按 `ctx.view / slot / location` 渲染。路由变化会重新挂载。
-前端在不透明来源 iframe 内运行，不共享宿主 DOM、localStorage、登录 token。
+前端在同源、无 sandbox 属性的 iframe 内运行，按可信插件代码执行，可访问宿主 DOM 和浏览器存储。
+插件使用独立的 `plugin-frame.html` 文档，不继承宿主页 CSP；该文档只限制被同源页面嵌入，不限制脚本、网络连接或资源来源。
 宿主为该文档提供与常规页面共用的细滚动条和透明轨道，颜色及滑块圆角随宿主主题更新，保留文档、内部容器和表单控件所需的滚动。
 插件页面外层复用 Studio 普通页面的留白、圆角和区域主题；iframe 本身不叠加卡片边框、圆角、阴影或根节点内边距，填满外层容器的可用区域。顶部导航、管理入口及必要侧栏仍由宿主提供。
 插件自行决定内容布局和留白，可用视口单位填满窗口，并自行设置内部滚动区域；默认主题变量继承所在内容或侧栏区域。
 主题桥同时提供字体、字号、间距及 card/input/overlay 区域的颜色、边框、圆角、阴影和滤镜变量，重置主题后移除旧覆盖。
 插件需自行消费这些变量，按区域绘制一次半透明背景；iframe 内的 backdrop-filter 只能采样本 iframe 的内容，不能采样宿主壁纸。
 插件自己的 CSS 仍可覆盖默认样式；嵌套的独立 iframe 文档不继承这些规则，需要由其内容方适配，宿主不会跨来源访问或修改它们。
-前端 bundle 必须自包含，框架可打包，资源需内联；iframe 不允许直接网络连接。
-宿主业务 API 使用 `ctx.host`，插件业务使用 `ctx.rpc.call`；不能通过相对模块或远程脚本加载额外客户端包。
+前端入口仍由宿主获取后作为 Blob 模块挂载；可打包框架，也可从外部 URL 加载模块、样式、字体和媒体，或直接使用 fetch、XHR、WebSocket。
+Blob 入口中的相对模块地址不能自动指向插件包目录，使用完整 URL 或打包进客户端入口。
+宿主业务 API 使用 `ctx.host`，插件业务使用 `ctx.rpc.call`；这些桥接调用继续检查 manifest 权限、真实用户和 Profile，不主动向 SDK 上下文注入登录凭证。
+直接网络访问仍遵循浏览器的 CORS、混合内容、安全上下文和目标服务器策略。
 
-插件音频可使用内联 `data:` 或在当前 iframe 中创建的 `blob:` URL；媒体 CSP 仅允许这两类来源，
-也适用于视频，不放行远程地址、包内相对资源或本地文件。`connect-src 'none'` 继续禁止直接请求，
-包括 `fetch(dataUrl)`；已有编码字节可直接交给 `AudioContext.decodeAudioData()`，无需 fetch。
-后端资源仍经受控 RPC/API 交付；当前桥接是有大小限制的 JSON 通道，不是二进制流式媒体代理。
-保留 `sandbox="allow-scripts"` 和不透明来源；播放音频不需要 `allow-same-origin`、麦克风或额外 manifest 权限。
+插件音视频可使用远程 URL、内联 `data:` 或当前 iframe 中创建的 `blob:` URL；宿主不再施加媒体来源白名单或禁止直接 fetch。
+包内相对资源不会自动作为插件静态文件发布，本地文件和远程媒体仍受浏览器及目标站点策略约束。
+后端资源也可经 RPC/API 交付；当前桥接是有大小限制的 JSON 通道，不是二进制流式媒体代理。
+普通媒体播放不需要额外 manifest 权限；录音仍取决于浏览器和系统授权。
 插件应提供真实点击的播放/启用声音操作，处理 `audio.play()` 的拒绝和 `AudioContext` 的 suspended 状态，
 并在 disposer 中暂停媒体、关闭音频上下文、撤销自己创建的 Blob URL。
 宿主不承诺自动播放，也不默认委派 autoplay；浏览器/WebView 的手势策略和 Electron 默认行为可能不同。
 
-视频使用同一个媒体白名单。需要静音内联自动播放时，插件在设置 src 之前配置 muted、autoplay 和 playsInline，
+需要静音内联自动播放时，插件在设置 src 之前配置 muted、autoplay 和 playsInline，
 仍要处理 play() 拒绝并保留点击播放入口；有声自动播放不受宿主保证。静音音轨仍是音轨，
 仅把录制内容变成静音不等于设置 video.muted。真实 Safari/WKWebView 还受站点设置、可见性和容器配置影响。
-`allow="autoplay"` 不会放行被 CSP 拦截的视频，也不会自动满足用户激活要求。
+`allow="autoplay"` 不会自动满足浏览器的用户激活要求。
 
 ```js
-// bytes 来自内联资源或已授权 RPC，而不是在 iframe 中 fetch 远程 URL。
+// bytes 可来自内联资源、RPC 或通过 CORS 允许的远程 fetch。
 const video = document.createElement('video')
 video.controls = true
 video.muted = true
@@ -86,8 +88,7 @@ ctx.lifecycle.add(() => {
 ```
 
 需要声音时由原生控件或真实点击回调取消静音并调用 play()；程序自行取消静音可能使播放被暂停。
-网络 MP4、HLS/DASH 分片、外站播放器 iframe 不会因上述设置而获准加载。需要远程/大文件播放时，
-应先明确资源来源和受控媒体传输方案，不能直接开放所有网络、共享宿主凭证或移除 sandbox。
+可直接加载网络 MP4、HLS/DASH 分片或外站播放器 iframe；实际可用性仍取决于编解码支持、CORS、目标站点嵌入策略和浏览器播放策略。
 
 Studio 插件页面可在普通 HTTP 下加载：宿主通道标识使用加密随机数，不依赖仅安全上下文提供的
 `crypto.randomUUID()`。HTTP localhost 与 HTTPS 通常属于安全上下文，普通局域网 HTTP 不属于；

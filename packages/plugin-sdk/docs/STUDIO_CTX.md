@@ -53,10 +53,10 @@ const selected = await ctx.ui.selectWorkspace({ current: savedWorkspace || '' })
 if (selected) await ctx.rpc.call('save-workspace', selected)
 ```
 页面包括 page/settings/workspace/agent-settings 和动态 workspace-sidebar，navigation.main/settings 独立声明入口。
-iframe 不共享宿主 DOM、localStorage 或登录 token；使用宿主主题变量，不直接联网。
-本地音频可使用内联 data/iframe 内 Blob URL，CSP 继续阻止远程媒体和直接 fetch；
-播放不增加 manifest 权限、不解除沙箱。插件处理点击播放、自动播放拒绝与资源清理，
-环境限制和 HTTP 页面说明见 `ARCHITECTURE.md` 的前端隔离说明。
+iframe 使用同源独立文档，不设置 sandbox，也不限制直接联网和资源来源；可信前端可访问宿主 DOM 和浏览器存储。
+使用宿主主题变量；业务调用通过 ctx.host/ctx.rpc，仍由宿主检查插件权限、用户与 Profile。
+音视频可使用远程 URL、内联 data 或 iframe 内 Blob URL；浏览器的 CORS、安全上下文和自动播放策略仍适用。
+插件处理点击播放、自动播放拒绝与资源清理；环境限制和 HTTP 页面说明见 `ARCHITECTURE.md`。
 主题桥同步文本、强调色、状态色、卡片/输入底色、边框，以及 `--font-family`、`--font-size-base`、
 `--spacing-scale`、`--line-height`、`--letter-spacing`、`--border-width`、`--control-height` 和 `--radius-component`。
 `--studio-color-scheme` 为 light/dark；`--theme-card-*`、`--theme-input-*`、`--theme-overlay-*` 提供

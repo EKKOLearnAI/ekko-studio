@@ -149,19 +149,21 @@ function isGroupChatAgentLinkDocument(ctx: Context): boolean {
 
 export function securityHeaders(): Middleware {
   return async (ctx, next) => {
+    const pluginDocument = (ctx.method === 'GET' || ctx.method === 'HEAD') && ctx.path === '/plugin-frame.html'
     ctx.set('X-Content-Type-Options', 'nosniff')
-    ctx.set('X-Frame-Options', 'DENY')
+    ctx.set('X-Frame-Options', pluginDocument ? 'SAMEORIGIN' : 'DENY')
     ctx.set('Referrer-Policy', 'no-referrer')
     ctx.set(
       'Cross-Origin-Opener-Policy',
       isGroupChatAgentLinkDocument(ctx) ? 'unsafe-none' : 'same-origin-allow-popups',
     )
-    ctx.set('Content-Security-Policy', [
+    // A real document avoids inheriting the Studio page's CSP through srcdoc.
+    // Trusted plugins may load arbitrary resources; only embedding is restricted.
+    ctx.set('Content-Security-Policy', pluginDocument ? "frame-ancestors 'self'" : [
       "default-src 'self'",
       "base-uri 'self'",
       "object-src 'none'",
       "frame-ancestors 'none'",
-      // Plugin views load their received module from a Blob inside an opaque-origin iframe.
       "script-src 'self' 'unsafe-inline' blob:",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",

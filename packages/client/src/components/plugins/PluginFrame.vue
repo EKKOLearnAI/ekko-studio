@@ -6,7 +6,6 @@ import { NAlert, NInput, useDialog, useMessage } from 'naive-ui'
 import { getStoredUserId } from '@/api/client'
 import { createPluginSessionBridge } from '@/api/studio/plugin-sessions'
 import { pluginApi, pluginInvoke, pluginRequest, type InstalledPlugin, type Json, type PluginEvent } from '@/api/studio/plugins'
-import { pluginFrameDocument } from '@/plugins/frame'
 import { pluginThemeSnapshot } from '@/plugins/theme'
 import { generateClientUuid } from '@/utils/client-random'
 import { assertJson } from '../../../../plugin-sdk/src'
@@ -21,7 +20,7 @@ const height = ref(180)
 const error = ref('')
 const router = useRouter(), dialog = useDialog(), message = useMessage(), { t, locale } = useI18n()
 const route = useRoute()
-const documentSource = pluginFrameDocument()
+const frameUrl = `${import.meta.env.BASE_URL}plugin-frame.html`
 const modelPicker = usePluginModelPicker()
 const { request: modelPickerRequest } = modelPicker
 const workspacePicker = usePluginWorkspacePicker()
@@ -115,7 +114,7 @@ watch(() => [frame.value, props.plugin, props.profile, props.view, props.session
   }
   window.addEventListener('message', receive)
   release = () => { send({ type: 'dispose' }); controller.abort(); appearance.disconnect(); if (timer) clearTimeout(timer); window.removeEventListener('message', receive); for (const instance of dialogs) instance.destroy() }
-  element.srcdoc = documentSource
+  element.src = frameUrl
   try { source = (await pluginRequest<{ source: string }>(profile, `/${plugin.manifest.id}/client`, undefined, 'GET', controller.signal)).source; initialize() }
   catch (cause) { if (!controller.signal.aborted) error.value = String(cause) }
 }, { flush: 'post', immediate: true })
@@ -125,7 +124,7 @@ onBeforeUnmount(() => release?.())
 <template>
   <section class="plugin-frame" :class="{ 'plugin-frame--expanded': expanded, 'plugin-frame--sidebar': sidebar }">
     <NAlert v-if="error" type="error">{{ error }}</NAlert>
-    <iframe ref="frame" :title="`${plugin.manifest.name}: ${view}`" sandbox="allow-scripts" referrerpolicy="no-referrer" :style="expanded ? undefined : { height: `${height}px` }" />
+    <iframe ref="frame" :title="`${plugin.manifest.name}: ${view}`" referrerpolicy="no-referrer" :style="expanded ? undefined : { height: `${height}px` }" />
     <ModelCascader v-if="modelPickerRequest" :show="true" :groups="modelPickerRequest.catalog.groups"
       :provider="modelPickerRequest.current?.provider" :model="modelPickerRequest.current?.model"
       :custom-models="modelPickerRequest.catalog.custom_models || {}" :display-name="modelPicker.displayName"

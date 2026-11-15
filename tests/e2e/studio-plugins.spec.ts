@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { resolve } from 'node:path'
 import { mockSavedNavigation } from './fixtures/navigation-settings'
 
-test('manages a plugin and runs an isolated frontend through authenticated API and RPC', async ({ page }, testInfo) => {
+test('manages a plugin and runs a trusted same-origin frontend through authenticated API and RPC', async ({ page }, testInfo) => {
   let revision = 0, installed = false, enabled = false, version = '1.0.0', previousVersion: string | undefined
   let config: Record<string, unknown> = { title: 'My notes' }
   const calls: any[] = [], stored = new Map<string, unknown>()
@@ -16,10 +16,10 @@ test('manages a plugin and runs an isolated frontend through authenticated API a
     if (!url.pathname.startsWith('/api/studio/plugins')) return route.fulfill({ json: {} })
     calls.push({ path: url.pathname, method: req.method(), body, profile: req.headers()['x-hermes-profile'], token: req.headers().authorization })
     if (url.pathname.endsWith('/client')) return route.fulfill({ json: { source: `export async function mount(root,ctx){
-      let isolated=false;try{parent.localStorage.getItem('hermes_api_key')}catch{isolated=true}
+      const hostAccess=parent.document.querySelector('.plugin-workspace')!==null && parent.localStorage.getItem('hermes_api_key')!==null;
       const store=ctx.state.plugin.namespace('projects').namespace('demo');
       await store.set('note', 'from browser'); const stored=await store.get('note'); const keys=await store.keys(); await store.delete('note'); const missing=await store.get('note');
-      const data=await ctx.host.sessions.list(); root.textContent='sessions='+data.sessions.length+' isolated='+isolated+' profile='+ctx.identity.profile+' storage='+stored+' keys='+keys.join(',')+' missing='+(missing===undefined);
+      const data=await ctx.host.sessions.list(); root.textContent='sessions='+data.sessions.length+' hostAccess='+hostAccess+' profile='+ctx.identity.profile+' storage='+stored+' keys='+keys.join(',')+' missing='+(missing===undefined);
       let eventCount=0;const onRun=()=>{eventCount++;root.dataset.runEvents=String(eventCount)};ctx.events.on('chat.*',onRun);ctx.events.on('chat.run.started',onRun);
       const controls=document.createElement('button');controls.textContent='Run SDK controls';controls.onclick=async()=>{await ctx.host.sessions.create({title:'SDK'});await ctx.host.sessions.run('s1','hello');await ctx.host.sessions.stop('s1');await ctx.host.groupChats.send('room','hello');await ctx.host.groupChats.stop('room','Writer');await ctx.host.workflows.stop('flow','run');root.dataset.controls='done'};root.append(controls);
       const button=document.createElement('button');button.textContent='Save note';button.onclick=async()=>{ const value=await ctx.rpc.call('save',{text:'hello'});root.append(document.createTextNode(' saved='+value)) };root.append(button);
@@ -70,7 +70,8 @@ test('manages a plugin and runs an isolated frontend through authenticated API a
   await expect(page.locator('.studio-navigation-rail').getByRole('link', { name: 'Notebook', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '打开', exact: true }).click()
   const frame = page.frameLocator('iframe')
-  await expect(frame.locator('#root')).toContainText('sessions=1 isolated=true profile=default storage=from browser keys=note missing=true')
+  await expect(frame.locator('#root')).toContainText('sessions=1 hostAccess=true profile=default storage=from browser keys=note missing=true')
+  await expect(page.locator('iframe')).not.toHaveAttribute('sandbox')
   await frame.getByRole('button', { name: 'Save note' }).click()
   await expect(frame.locator('#root')).toContainText('saved=hello')
   await expect(frame.locator('#root')).toHaveAttribute('data-run-events', '1')
