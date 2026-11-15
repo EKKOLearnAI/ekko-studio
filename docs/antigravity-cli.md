@@ -52,8 +52,10 @@ conversation). Studio persists native IDs from `init` and final `result`.
 
 `step_update` text is incremental; tool IDs are conversation + step_index, with
 repeated starts/completions suppressed. Model-step DONE is not a turn boundary.
-Only terminal `result.status=SUCCESS` can complete a turn. Missing result, unknown
-status and error/cancel/interruption fail closed, including when exit code is 0.
+A terminal `result` still wins (`result.status=SUCCESS` completes the turn; any
+other status fails closed). If the process exits with no result event, exit 0
+with non-empty assistant text completes the turn, and exit 0 with no assistant
+text or any non-zero exit still fails closed.
 Final response text is fallback-only to avoid replaying streamed text. Global
 usage sums completed model-step usage once per conversation + step_index; the
 terminal result reports cumulative conversation usage on resume. Result-only
