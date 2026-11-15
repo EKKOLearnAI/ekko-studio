@@ -1,17 +1,21 @@
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm, mkdir, cp, chmod, readFile, writeFile, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { PluginManager } from '../../packages/server/src/modules/studio/services/plugins/manager'
 import { createServer } from 'node:http'
 
+describe.skipIf(!process.env.STUDIO_TEST_OMP_DIR)('independent OMP plugin integration', () => {
 const cleanup: Array<() => Promise<void>> = [], who = { userId: 1, profile: 'work' }
-afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllGlobals() })
+afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 async function setup(executable?: string) {
   const home = await mkdtemp(join(tmpdir(), 'studio-omp-')); cleanup.push(() => rm(home, { recursive: true, force: true }))
+  vi.stubEnv('PI_CODING_AGENT_DIR', join(home, 'native'))
+  vi.stubEnv('OMP_PROFILE', '')
+  vi.stubEnv('PI_PROFILE', '')
   if (!executable) { executable = join(home, 'omp'); await cp(resolve('tests/fixtures/omp-rpc.mjs'), executable); await chmod(executable, 0o700) }
   const manager = new PluginManager(home, { authorize() {}, api: async () => null, emit() {}, log() {} }); cleanup.push(() => manager.close())
-  await manager.install(who, 'builtin:omp', 0); await manager.update(who, 'omp', manager.store.read().revision, { enabled: true })
+  await manager.install(who, resolve(process.env.STUDIO_TEST_OMP_DIR!), 0); await manager.update(who, 'omp', manager.store.read().revision, { enabled: true })
   const runtime = manager.runtime(who, 'omp'), agent = manager.registeredAgents()[0]
   const settings = { executable, defaultModel: 'custom/test-model', models: { providers: { custom: { api: 'openai-completions', baseUrl: 'http://127.0.0.1:19999/v1', apiKey: 'private-key', models: [{ id: 'test-model', name: 'Test', input: ['text', 'image'], contextWindow: 64000, maxTokens: 8192 }] } } }, config: {} }
   await runtime.invoke('rpc', 'save-settings', settings, who)
@@ -154,3 +158,4 @@ it.skipIf(!process.env.STUDIO_TEST_OMP_BINARY)('runs the real OMP binary with a 
   expect(authorization[3]).toBe('Bearer scoped-fixture-token')
   expect(authorization.slice(0, 3)).toEqual(Array(3).fill('Bearer private-key'))
 }, 60000)
+})

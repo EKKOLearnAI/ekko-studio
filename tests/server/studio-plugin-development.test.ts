@@ -7,7 +7,6 @@ import { join, resolve } from 'node:path'
 import { PluginDevelopment } from '../../packages/server/src/modules/studio/services/plugins/development'
 import { PluginManager } from '../../packages/server/src/modules/studio/services/plugins/manager'
 import { registerPlugin, scaffoldPlugin } from '../../bin/plugin-development.mjs'
-import { builtinPluginDirectory } from '../../packages/server/src/modules/studio/services/plugins/builtin-directory'
 import { reconcileBuiltinPlugins } from '../../packages/server/src/modules/studio/services/plugins/builtin'
 
 const who = { userId: 1, profile: 'default' }, cleanups: Array<() => Promise<void>> = []
@@ -28,25 +27,26 @@ async function fixture() {
 }
 const code = (value: string) => `export function apply(ctx) { ctx.extensions.rpc.register('read', async () => ${JSON.stringify(value)}); ctx.lifecycle.add(() => {}); }`
 
-it('loads the standalone OMP project from an arbitrary directory and preserves settings across development reloads', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'omp-development-')); cleanups.push(() => rm(home, { recursive: true, force: true }))
-  const source = join(home, 'independent projects/omp')
-  await cp(builtinPluginDirectory('omp'), source, { recursive: true })
+it('loads a standalone Agent project from an arbitrary directory and preserves settings across development reloads', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'agent-development-')); cleanups.push(() => rm(home, { recursive: true, force: true }))
+  const source = join(home, 'independent projects/custom-agent')
+  await cp(resolve('tests/fixtures/plugins/custom-agent'), source, { recursive: true })
   await registerPlugin(source, home)
   const manager = new PluginManager(join(home, 'plugins'), { authorize() {}, emit() {}, log() {}, api: async () => null })
   cleanups.push(() => manager.close())
-  await reconcileBuiltinPlugins(manager, who)
-  const settings = { executable: '', defaultModel: 'custom/test', models: { providers: {} }, config: {} }
-  await manager.runtime(who, 'omp').invoke('rpc', 'save-settings', settings, who)
+  await manager.install(who, source, manager.snapshot().revision)
+  await manager.update(who, 'custom-agent', manager.snapshot().revision, { enabled: true })
+  const settings = { prefix: 'Project' }
+  await manager.runtime(who, 'custom-agent').invoke('rpc', 'save-settings', settings, who)
   const development = new PluginDevelopment(manager, () => {}); cleanups.push(() => development.close())
-  await development.start(who, 'omp', manager.snapshot().revision)
-  expect((await development.list()).projects[0]).toMatchObject({ id: 'omp', status: 'watching' })
-  expect(manager.registeredAgents().map(agent => agent.id)).toEqual(['plugin:omp/omp'])
+  await development.start(who, 'custom-agent', manager.snapshot().revision)
+  expect((await development.list()).projects[0]).toMatchObject({ id: 'custom-agent', status: 'watching' })
+  expect(manager.registeredAgents().map(agent => agent.id)).toEqual(['plugin:custom-agent/assistant'])
   await writeFile(join(source, 'client.mjs'), (await readFile(join(source, 'client.mjs'), 'utf8')) + '\n// development reload\n')
   const revision = manager.snapshot().revision
   await development.tick(); await development.tick()
   expect(manager.snapshot().revision).toBeGreaterThan(revision)
-  expect(await manager.runtime(who, 'omp').invoke('rpc', 'get-settings', null, who)).toMatchObject(settings)
+  expect(await manager.runtime(who, 'custom-agent').invoke('rpc', 'get-settings', null, who)).toMatchObject(settings)
   await reconcileBuiltinPlugins(manager, who)
   expect(manager.snapshot().plugins[0].developmentDirectory).toBe(await realpath(source))
 })
