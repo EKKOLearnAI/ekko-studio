@@ -3574,6 +3574,12 @@ jobTriggered: 'Job declenche',
   },
 
   changelog: {
+    new_0_8_24_1: "Les plugins approuvés peuvent intercepter le HTTP entrant pour réécrire les requêtes analysées avant authentification et routage, modifier les réponses ou répondre directement. Priorités, flux et nettoyage à la désactivation sont pris en charge ; requêtes sortantes, WebSocket et réponses déjà envoyées sont exclus (#3809)",
+    new_0_8_24_2: "OMP est distribué séparément : les nouvelles installations de Studio ne le fournissent ni ne l’installent automatiquement. Installation et mise à jour via le centre de plugins ou un lien de développement ; instantanés, état d’activation, configuration et fichiers du moteur existants sont conservés (#3820)",
+    new_0_8_24_3: "Les pages de plugins suivent en direct la typographie, les espacements, les couleurs d’état et les thèmes de cartes, champs et superpositions de Studio. La réinitialisation du thème efface les anciennes substitutions (#3820)",
+    new_0_8_24_4: "Les pages, espaces de travail, paramètres et paramètres Agent des plugins partagent les espacements, arrondis et ombres du conteneur Studio. Les iframes remplissent la zone disponible et conservent leur défilement interne (#3822)",
+    new_0_8_24_5: "Corrige le chargement des pages de plugins en HTTP hors localhost : une UUID aléatoire cryptographique est utilisée si crypto.randomUUID est indisponible (#3823)",
+    new_0_8_24_6: "Les pages de plugins lisent les médias audio/vidéo data intégrés et Blob locaux à l’iframe, avec maintien du bac à sable et des restrictions réseau directes. La lecture sonore reste soumise à l’interaction utilisateur et aux règles de lecture automatique du navigateur (#3823)",
     new_0_8_23_1: "Ajoute les réglages de navigation au menu de l’avatar : ajouter, retirer, prévisualiser et réordonner par glisser-déposer ou clavier. Enregistrement par compte et restauration de l’ordre précédent en cas d’échec (#3803)",
     new_0_8_23_2: "La connexion Web et le démarrage Desktop ouvrent la première entrée enregistrée disponible, préservent liens explicites et actualisations, sinon ouvrent les réglages. Les raccourcis de plugins sont ajoutés manuellement, gardent leur ordre désactivés et disparaissent au rétablissement des valeurs par défaut (#3803)",
     new_0_8_23_3: "Les plugins disposent du sélecteur d’espace de travail hôte : exploration, chemins manuels, favoris et historique du compte. Il renvoie Profile et dossier ; annuler n’ajoute aucun historique, changer de page ou Profile ferme le sélecteur (#3797)",

@@ -3991,6 +3991,12 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_24_1: "Trusted plugins can intercept inbound HTTP to rewrite parsed requests before authentication and routing, modify responses or reply directly, with priorities, streams and cleanup on disable. Outbound requests, WebSockets and committed responses are excluded (#3809)",
+    new_0_8_24_2: "OMP is distributed independently: new Studio installations no longer bundle or automatically install it. Install and update through the plugin center or a development link; existing snapshots, enabled state, configuration and engine files are preserved (#3820)",
+    new_0_8_24_3: "Plugin pages follow Studio typography, spacing, status colors and card, input and overlay themes live, clearing previous overrides when the theme is reset (#3820)",
+    new_0_8_24_4: "Plugin pages, workspaces, settings and Agent settings share Studio page-container spacing, corners and shadows, while iframes fill the available area and retain internal scrolling (#3822)",
+    new_0_8_24_5: "Fix plugin pages failing to load over non-localhost HTTP by using a cryptographically random UUID fallback when crypto.randomUUID is unavailable (#3823)",
+    new_0_8_24_6: "Plugin pages can play embedded data and frame-local Blob audio/video while retaining sandbox isolation and direct network restrictions. Audible playback remains subject to user interaction and browser autoplay policies (#3823)",
     new_0_8_23_1: "Add Navigation settings to the avatar menu: add, remove, preview and reorder entries by dragging or keyboard. Save per account and restore the previous order if saving fails (#3803)",
     new_0_8_23_2: "Web login and Desktop startup open the first available saved navigation entry, preserving explicit links and refreshes, with settings as fallback. Add plugin shortcuts manually; disabling retains their order, while restoring defaults removes them (#3803)",
     new_0_8_23_3: "Plugins can use the host workspace picker with directory browsing, manual paths and account favorites/recents, returning Profile and directory. Canceling adds no recent entry; changing the page or Profile closes the picker (#3797)",

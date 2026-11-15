@@ -3574,6 +3574,12 @@ jobTriggered: 'Job ejecutado',
   },
 
   changelog: {
+    new_0_8_24_1: "Los plugins de confianza pueden interceptar HTTP entrante para reescribir solicitudes analizadas antes de la autenticación y el enrutamiento, modificar respuestas o responder directamente. Admite prioridades, flujos y limpieza al desactivar; excluye solicitudes salientes, WebSocket y respuestas ya enviadas (#3809)",
+    new_0_8_24_2: "OMP se distribuye de forma independiente. Las nuevas instalaciones de Studio ya no lo incluyen ni lo instalan automáticamente. Se instala y actualiza desde el centro de plugins o un enlace de desarrollo; se conservan las instantáneas, el estado de activación, la configuración y los archivos del motor existentes (#3820)",
+    new_0_8_24_3: "Las páginas de plugins siguen en tiempo real la tipografía, el espaciado, los colores de estado y los temas de tarjetas, entradas y capas de Studio. Al restablecer el tema se eliminan las personalizaciones anteriores (#3820)",
+    new_0_8_24_4: "Las páginas, espacios de trabajo, ajustes y ajustes de Agent de los plugins comparten el espaciado, las esquinas y las sombras del contenedor de Studio. Los iframes llenan el área disponible y mantienen el desplazamiento interno (#3822)",
+    new_0_8_24_5: "Corrige la carga de páginas de plugins por HTTP fuera de localhost mediante un UUID aleatorio criptográfico alternativo cuando crypto.randomUUID no está disponible (#3823)",
+    new_0_8_24_6: "Las páginas de plugins reproducen audio y vídeo data incrustados y Blob locales al iframe, manteniendo el aislamiento y las restricciones de red directa. La reproducción con sonido sigue sujeta a la interacción del usuario y a las políticas de reproducción automática del navegador (#3823)",
     new_0_8_23_1: "Añade ajustes de navegación al menú del avatar: agregar, quitar, previsualizar y ordenar con arrastre o teclado. Se guardan por cuenta y recuperan el orden anterior si falla el guardado (#3803)",
     new_0_8_23_2: "El inicio Web y Desktop abre la primera entrada guardada disponible; conserva enlaces explícitos y recargas, con ajustes como alternativa. Los accesos de plugins se añaden manualmente, conservan su orden al desactivarse y se eliminan al restaurar valores predeterminados (#3803)",
     new_0_8_23_3: "Los plugins pueden usar el selector de espacio de trabajo del host con exploración, rutas manuales y favoritos/recientes de la cuenta. Devuelve Profile y directorio; cancelar no añade recientes y cambiar página o Profile cierra el selector (#3797)",
