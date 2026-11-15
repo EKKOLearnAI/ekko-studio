@@ -1351,6 +1351,7 @@ export default {
     clarifyTitle: 'Der Agent hat eine Frage an Sie',
     clarifyPlaceholder: 'Geben Sie Ihre Antwort ein...',
     clarifySubmit: 'Antworten',
+    clarifySendFailed: 'Ihre Antwort wurde noch nicht bestätigt. Bitte versuchen Sie es erneut. Ihre Antwort bleibt erhalten.',
     clarifyDismiss: 'Schließen',
     interactionExpired: 'Diese Anfrage ist abgelaufen und wurde geschlossen.',
     interactionCountdown: '{time} verbleibend',

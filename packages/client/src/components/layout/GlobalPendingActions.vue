@@ -284,10 +284,10 @@ async function submitClarify(action: Extract<GlobalPendingAction, { kind: 'chat-
   if (!response || submitting[action.key]) return
   submitting[action.key] = true
   try {
-    if (action.kind === 'chat-clarify') chatStore.respondToClarifyFor(action.pending.sessionId, action.pending.clarifyId, response)
+    if (action.kind === 'chat-clarify') await chatStore.respondToClarifyFor(action.pending.sessionId, action.pending.clarifyId, response)
     else await groupChatStore.respondClarifyFor(action.pending.roomId, action.pending.clarifyId, response)
   } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
+    message.error(action.kind === 'chat-clarify' ? t('chat.clarifySendFailed') : error instanceof Error ? error.message : String(error))
   } finally {
     submitting[action.key] = false
   }
@@ -450,6 +450,9 @@ watch(pendingActions, actions => {
   }
   for (const action of actions) {
     if (handles.has(action.key)) continue
+    if (action.kind === 'chat-clarify' && clarifyDrafts[action.key] === undefined) {
+      clarifyDrafts[action.key] = action.pending.initialResponse
+    }
     handles.set(action.key, createGlobalNotification(action))
   }
 }, { deep: true, immediate: true })

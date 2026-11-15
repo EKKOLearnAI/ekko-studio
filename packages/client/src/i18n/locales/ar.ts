@@ -1406,6 +1406,7 @@ export default {
     clarifyTitle: 'لدى الوكيل سؤال لك',
     clarifyPlaceholder: 'اكتب إجابتك...',
     clarifySubmit: 'رد',
+    clarifySendFailed: 'لم يتم تأكيد وصول إجابتك. تم الاحتفاظ بها. يرجى المحاولة مجددًا.',
     clarifyDismiss: 'تجاهل',
     interactionExpired: 'انتهت مهلة هذا الطلب وتم إغلاقه.',
     interactionCountdown: 'متبقٍ {time}',
