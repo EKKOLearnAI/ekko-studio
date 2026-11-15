@@ -3574,6 +3574,12 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_8_24_1: "Vertrauenswürdige Plugins können eingehendes HTTP abfangen: geparste Anfragen vor Authentifizierung und Routing umschreiben, Antworten ändern oder direkt antworten. Prioritäten, Streams und Bereinigung beim Deaktivieren werden unterstützt; ausgehende Anfragen, WebSockets und bereits gesendete Antworten sind ausgenommen (#3809)",
+    new_0_8_24_2: "OMP wird unabhängig verteilt. Neue Studio-Installationen bündeln oder installieren OMP nicht mehr automatisch. Installation und Updates erfolgen über das Plugin-Center oder einen Entwicklungslink; vorhandene Snapshots, Aktivierungszustände, Einstellungen und Engine-Dateien bleiben erhalten (#3820)",
+    new_0_8_24_3: "Plugin-Seiten übernehmen Studio-Schriften, Abstände, Statusfarben sowie Karten-, Eingabe- und Overlay-Themes live. Beim Zurücksetzen des Themes werden frühere Überschreibungen entfernt (#3820)",
+    new_0_8_24_4: "Plugin-Seiten, Arbeitsbereiche, Einstellungen und Agent-Einstellungen verwenden einheitliche Abstände, Rundungen und Schatten des Studio-Seitencontainers. Iframes füllen den verfügbaren Bereich und behalten internes Scrollen (#3822)",
+    new_0_8_24_5: "Behebt nicht ladende Plugin-Seiten über HTTP außerhalb von localhost: Falls crypto.randomUUID fehlt, wird eine kryptografisch zufällige UUID als Ersatz verwendet (#3823)",
+    new_0_8_24_6: "Plugin-Seiten können eingebettete data- und frame-lokale Blob-Audio-/Videoinhalte abspielen. Sandbox-Isolation und direkte Netzwerkbeschränkungen bleiben erhalten; hörbare Wiedergabe unterliegt Benutzerinteraktion und den Autoplay-Regeln des Browsers (#3823)",
     new_0_8_23_1: "Navigationseinstellungen im Avatar-Menü: Einträge hinzufügen, entfernen, voranzeigen und per Ziehen oder Tastatur sortieren. Kontobezogene Speicherung mit Wiederherstellung der Reihenfolge bei Speicherfehlern (#3803)",
     new_0_8_23_2: "Web-Anmeldung und Desktop-Start öffnen den ersten verfügbaren gespeicherten Eintrag; direkte Links und Neuladen behalten ihr Ziel, sonst erscheinen die Einstellungen. Plugin-Verknüpfungen werden manuell hinzugefügt, behalten deaktiviert ihre Position und entfallen beim Zurücksetzen (#3803)",
     new_0_8_23_3: "Plugins erhalten die Host-Arbeitsbereichsauswahl mit Verzeichnisnavigation, manuellen Pfaden sowie Konto-Favoriten und Verlauf. Sie liefert Profile und Verzeichnis; Abbrechen ergänzt keinen Verlauf, Seiten- oder Profile-Wechsel schließen die Auswahl (#3797)",

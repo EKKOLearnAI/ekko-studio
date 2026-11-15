@@ -168,6 +168,12 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_24_1: "Güvenilir eklentiler, kimlik doğrulama ve yönlendirme öncesinde ayrıştırılmış istekleri yeniden yazmak, yanıtları değiştirmek veya doğrudan yanıt vermek için gelen HTTP trafiğini yakalayabilir. Öncelik, akış ve devre dışı bırakıldığında temizleme desteklenir; giden istekler, WebSocket ve gönderilmiş yanıtlar kapsam dışıdır (#3809)",
+    new_0_8_24_2: "OMP artık bağımsız dağıtılır. Yeni Studio kurulumları OMP içermez veya otomatik kurmaz. Eklenti merkezi ya da geliştirme bağlantısıyla kurulup güncellenebilir; mevcut anlık görüntüler, etkinlik durumu, yapılandırma ve motor dosyaları korunur (#3820)",
+    new_0_8_24_3: "Eklenti sayfaları Studio yazı tiplerini, aralıklarını, durum renklerini ve kart, giriş ve katman temalarını anlık izler. Tema sıfırlandığında eski geçersiz kılmalar temizlenir (#3820)",
+    new_0_8_24_4: "Eklenti sayfaları, çalışma alanları, ayarlar ve Agent ayarları Studio sayfa kapsayıcısının boşluklarını, köşelerini ve gölgelerini paylaşır. Iframe kullanılabilir alanı doldurur ve iç kaydırmayı korur (#3822)",
+    new_0_8_24_5: "localhost dışındaki HTTP adreslerinde eklenti sayfalarının yüklenmemesi düzeltildi; crypto.randomUUID kullanılamadığında kriptografik rastgele UUID yedeği kullanılır (#3823)",
+    new_0_8_24_6: "Eklenti sayfaları, yalıtımı ve doğrudan ağ kısıtlamalarını koruyarak gömülü data ve çerçeve içi Blob ses/video oynatabilir. Sesli oynatma kullanıcı etkileşimine ve tarayıcının otomatik oynatma politikalarına bağlıdır (#3823)",
     new_0_8_23_1: "Avatar menüsüne gezinme ayarları eklenir: giriş ekleme, kaldırma, önizleme ve sürükleme veya klavyeyle sıralama. Hesap başına kaydedilir; kayıt başarısızsa önceki sıra geri yüklenir (#3803)",
     new_0_8_23_2: "Web girişi ve Desktop başlangıcı kayıtlı ilk kullanılabilir girişi açar; açık bağlantılar ve yenileme hedefleri korunur, yoksa ayarlar açılır. Eklenti kısayolları elle eklenir, devre dışıyken sıraları korunur, varsayılana dönünce kaldırılır (#3803)",
     new_0_8_23_3: "Eklentiler dizin gezintisi, elle yol, hesap favorileri ve son dizinlerle ana çalışma alanı seçicisini kullanabilir. Profile ve dizin döner; iptal son kaydı eklemez, sayfa veya Profile değişimi seçiciyi kapatır (#3797)",

@@ -3574,6 +3574,12 @@ jobTriggered: 'Job acionado',
   },
 
   changelog: {
+    new_0_8_24_1: "Plugins confiáveis podem interceptar HTTP de entrada para reescrever solicitações analisadas antes da autenticação e do roteamento, modificar respostas ou responder diretamente. Oferece prioridades, fluxos e limpeza ao desativar; exclui solicitações de saída, WebSocket e respostas já enviadas (#3809)",
+    new_0_8_24_2: "OMP passa a ter distribuição independente. Novas instalações do Studio não o incluem nem o instalam automaticamente. Instale e atualize pela central de plugins ou por um link de desenvolvimento; instantâneos, estado de ativação, configurações e arquivos do mecanismo existentes são preservados (#3820)",
+    new_0_8_24_3: "As páginas de plugins acompanham em tempo real a tipografia, os espaçamentos, as cores de estado e os temas de cartões, campos e sobreposições do Studio. Redefinir o tema remove as substituições anteriores (#3820)",
+    new_0_8_24_4: "Páginas, espaços de trabalho, configurações e configurações de Agent dos plugins compartilham os espaçamentos, cantos e sombras do contêiner do Studio. Os iframes preenchem a área disponível e mantêm a rolagem interna (#3822)",
+    new_0_8_24_5: "Corrige o carregamento de páginas de plugins por HTTP fora de localhost usando um UUID aleatório criptográfico alternativo quando crypto.randomUUID não está disponível (#3823)",
+    new_0_8_24_6: "As páginas de plugins reproduzem áudio e vídeo data incorporados e Blob locais ao iframe, mantendo o isolamento e as restrições de rede direta. A reprodução com som continua sujeita à interação do usuário e às políticas de reprodução automática do navegador (#3823)",
     new_0_8_23_1: "Adiciona configurações de navegação ao menu do avatar: adicionar, remover, pré-visualizar e ordenar por arraste ou teclado. Salva por conta e restaura a ordem anterior se o salvamento falhar (#3803)",
     new_0_8_23_2: "Login Web e início Desktop abrem a primeira entrada salva disponível, preservando links explícitos e recargas, com configurações como alternativa. Atalhos de plugins são adicionados manualmente, mantêm a ordem quando desativados e são removidos ao restaurar padrões (#3803)",
     new_0_8_23_3: "Plugins podem usar o seletor de espaço de trabalho do host com navegação de diretórios, caminhos manuais e favoritos/recentes da conta. Retorna Profile e diretório; cancelar não adiciona recentes, e trocar página ou Profile fecha o seletor (#3797)",
