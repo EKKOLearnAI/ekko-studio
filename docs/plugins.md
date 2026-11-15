@@ -14,49 +14,22 @@ Studio 插件用于定制工作台页面、设置页面、独立工作区、Agen
 插件中心在主导航中开放，位于自定义插件业务入口之前、API Key 之前。插件页面与其他 Studio 页面复用固定页头。
 插件中心与 Hermes、DSH 各自的原生插件管理分开。插件安装、启用、配置和运行实例属于整个 Studio，所有账号、Profile 和任务均可使用，无需重复安装。
 
-## 内置插件与 OMP
+## 独立插件与 OMP
 
-内置插件使用与第三方插件相同的 `plugin.json`、SDK、管理和运行通道。
-OMP 源码在独立仓库 [ekko-studio-plugin-omp](https://github.com/EKKOLearnAI/ekko-studio-plugin-omp) 维护，
-Studio 通过 `package.json` / `package-lock.json` 固定提交的包依赖引用；映射在 `plugins/builtin/packages.json`。
-源码开发从已安装依赖读取，构建复制到 `dist/plugins/builtin/<id>`，随 npm 包和桌面端分发，运行时无需联网获取插件。
-升级内置 OMP 时同步更新依赖及锁文件；调试独立仓库使用 `ekko-studio plugins link /absolute/path/ekko-studio-plugin-omp`。
-Studio 启动后以有效超级管理员身份安装缺失的内置插件，首次安装默认启用。后续随 Studio 更新插件版本，保留禁用状态和数据；用户主动卸载后不自动装回，可在插件中心使用 `builtin:omp` 重新安装。无有效管理员时等待首次登录，再在读取插件或 Agent 列表时初始化。
+Studio 不再将 OMP 列为构建依赖，不随安装包分发，也不会在启动时自动安装或升级 OMP。
+OMP 在独立仓库 [ekko-studio-plugin-omp](https://github.com/EKKOLearnAI/ekko-studio-plugin-omp) 维护和发布。
+在插件中心粘贴该仓库地址或本地插件目录，确认信任并安装、启用后，即可在 Agent 管理中使用；
+引擎安装、Skill、MCP 和模型配置由插件自己的管理页面提供，详细说明以独立仓库为准。
+调试源码使用 `ekko-studio plugins link /absolute/path/ekko-studio-plugin-omp`。
 
-当前内置 **Oh My Pi（OMP）**，Agent ID 为 `plugin:omp/omp`：
-
-1. 进入 Agent 管理，OMP 引擎未安装时直接点击“安装”；宿主查询可用版本并调用插件的安装维护方法。完成后显示版本和“检查更新”，发现新版本后可升级。
-2. 安装从 OMP 官方 GitHub Release 下载当前系统架构的独立可执行文件，校验 SHA-256 和实际版本，保存到本插件数据目录。不会修改系统 Bun、全局 CLI 或用户已有 OMP 目录。网络失败会保留原来的引擎选择。
-3. 点击“设置”打开插件自己的前端与 RPC 后端。也可填写已有 OMP 可执行文件的绝对路径；这种情况下引擎由用户维护，Studio 不替换该文件。
-4. scoped 模式直接使用 Studio 当前选择的模型和本轮代理凭证，无需在插件内重复填写模型密钥。
-5. 删除只清理受管引擎及其选择记录，保留插件、设置和会话；受管安装可以开启自动更新，自定义可执行文件不支持删除或自动更新。
-6. 全局模式在 OMP 设置页填写原生 `models.yml` 的 JSON 等价结构。配置按真实调用账号与 Profile 分区，密钥只返回遮蔽值；保留遮蔽值后保存会保持原密钥。
-
-例如“模型与凭证（JSON）”：
-
-```json
-{
-  "providers": {
-    "custom": {
-      "api": "openai-completions",
-      "baseUrl": "https://your-provider.example/v1",
-      "apiKey": "YOUR_API_KEY",
-      "models": [{ "id": "your-model", "name": "Your model", "input": ["text", "image"] }]
-    }
-  }
-}
-```
-
-默认模型可填 `custom/your-model`，也可留空后从 OMP 返回给 Studio 的模型目录选择。
-“OMP 运行设置（JSON）”使用原生 `config.yml` 结构。scoped 模式由插件将宿主注入的 `apiMode/baseUrl/token/model` 写成临时原生模型配置；默认及辅助模型角色均绑定本轮 Studio 模型。每轮结束删除临时配置，原生会话文件保留供续接。
-
-OMP 使用官方 stdio RPC：文本和推理流、原生工具事件、图片、文件路径读取、会话检查点、用量、取消、受管 MCP 和交互请求通过 SDK 接入。引擎实例及会话按宿主的用户、Profile、模式与会话隔离；私密输入不通过普通问答收集。
-实现以 OMP 18.19.0 的协议验证，自动升级下载时仍会检查目标版本与平台资源。
+历史版本已安装的 OMP 保留原有安装快照、启停状态、配置、引擎和会话数据，Agent ID 仍为 `plugin:omp/omp`。
+后续通过插件中心使用独立仓库更新同一插件；取消内置不会卸载它，也不会清理其数据。
+当前 `plugins/builtin/packages.json` 为空，不再提供 OMP 的内置安装来源。
 
 ### 开发测试夹具
 
 原来的五个演示包已移入 `tests/fixtures/plugins`，只用于开发回归，不随正式插件目录发布：`session-dashboard`、`notebook`、`activity-digest`、`tool-demo`、`custom-agent`。
-演示包只作为测试夹具，产品启动只加载当前内置插件清单。
+演示包只作为测试夹具，产品启动不会自动安装它们。
 
 开发新插件使用 `node scripts/create-plugin.mjs /absolute/path/my-plugin my-plugin`，生成最小设置页面与 RPC 模板，不再复制演示业务。
 测试时可在插件中心安装夹具的绝对路径，再启用；本地安装复制目录，源码改动后需要重新安装，重载只执行已安装版本。

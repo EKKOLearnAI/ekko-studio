@@ -54,6 +54,11 @@ if (selected) await ctx.rpc.call('save-workspace', selected)
 ```
 页面包括 page/settings/workspace/agent-settings 和动态 workspace-sidebar，navigation.main/settings 独立声明入口。
 iframe 不共享宿主 DOM、localStorage 或登录 token；使用宿主主题变量，不直接联网。
+主题桥同步文本、强调色、状态色、卡片/输入底色、边框，以及 `--font-family`、`--font-size-base`、
+`--spacing-scale`、`--line-height`、`--letter-spacing`、`--border-width`、`--control-height` 和 `--radius-component`。
+`--studio-color-scheme` 为 light/dark；`--theme-card-*`、`--theme-input-*`、`--theme-overlay-*` 提供
+bg/border/radius/shadow/filter 区域变量，跟随实时主题和壁纸更新；重置时清除旧覆盖。
+这些 CSS 变量不自动改变插件布局，插件自行使用并为旧宿主保留默认值；跨 iframe 的 backdrop-filter 不能采样宿主壁纸。
 
 ## SDK v1 规范入口
 

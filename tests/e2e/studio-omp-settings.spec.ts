@@ -1,23 +1,23 @@
 import { test, expect } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { createRequire } from 'node:module'
 import { securityHeaders } from '../../packages/server/src/modules/studio/middleware/security'
 
-test('opens the built-in OMP settings in Studio locale and persists native model configuration', async ({ page }, testInfo) => {
+test('opens independently installed OMP settings in Studio locale and persists native model configuration', async ({ page }, testInfo) => {
+  test.skip(!process.env.STUDIO_TEST_OMP_DIR, 'Set STUDIO_TEST_OMP_DIR to an independent OMP plugin checkout')
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
   let saves = 0
   let settings = { executable: '', defaultModel: 'custom/test', models: { providers: { custom: { api: 'openai-completions', apiKey: '••••••••', models: [{ id: 'test' }] } } }, config: {} }
-  const require = createRequire(resolve('package.json'))
-  const manifest = JSON.parse(await readFile(require.resolve('@ekko-studio/plugin-omp/plugin.json'), 'utf8'))
-  manifest.icon = `data:image/png;base64,${(await readFile(require.resolve('@ekko-studio/plugin-omp/icon.png'))).toString('base64')}`
+  const pluginFile = (file: string) => resolve(process.env.STUDIO_TEST_OMP_DIR!, file)
+  const manifest = JSON.parse(await readFile(pluginFile('plugin.json'), 'utf8'))
+  manifest.icon = `data:image/png;base64,${(await readFile(pluginFile('icon.png'))).toString('base64')}`
   await page.route(url => url.pathname.startsWith('/api/'), async route => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname)
     if (path === '/api/auth/me') return route.fulfill({ json: { user: { id: 1, username: 'Tester', role: 'super_admin' } } })
     if (path === '/api/studio/agents') return route.fulfill({ json: { agents: [{ id: 'plugin:omp/omp', name: 'Oh My Pi', vendor: 'Stencil Labs', icon: manifest.icon, origin: 'plugin', modes: ['scoped', 'global'], actions: { settings: true, checkUpdate: true, upgrade: true }, status: { installed: false } }] } })
     if (path.endsWith('/settings')) return route.fulfill({ json: { name: 'studio.pluginAgentSettings', params: { pluginId: 'omp', viewId: 'skills' } } })
     if (path === '/api/studio/plugins') return route.fulfill({ json: { revision: 1, plugins: [{ manifest, config: {}, status: 'active', enabled: true, tools: [], commands: [], actions: [] }] } })
-    if (path.endsWith('/client')) return route.fulfill({ json: { source: await readFile(require.resolve('@ekko-studio/plugin-omp/client.mjs'), 'utf8') } })
+    if (path.endsWith('/client')) return route.fulfill({ json: { source: await readFile(pluginFile('client.mjs'), 'utf8') } })
     if (path.endsWith('/invoke')) {
       const body = route.request().postDataJSON()
       if (body.name === 'list-skills') return route.fulfill({ json: { result: { skills: [] } } })
@@ -66,12 +66,12 @@ test('opens the built-in OMP settings in Studio locale and persists native model
   expect(saves).toBe(1)
   await frame.getByRole('button', { name: '重新读取', exact: true }).click()
   await expect(frame.getByLabel('模型与凭证（JSON）')).toHaveValue(/••••••••/)
-  await page.screenshot({ path: testInfo.outputPath('builtin-omp-settings.png') })
+  await page.screenshot({ path: testInfo.outputPath('independent-omp-settings.png') })
   await page.evaluate(async () => { await (window as any).pluginFixture.theme(true) })
   await expect.poll(() => frame.getByRole('heading', { name: '配置编辑', exact: true }).evaluate(el => Number(getComputedStyle(el).color.match(/[\d.]+/)?.[0]))).toBeGreaterThan(150)
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(frame.getByRole('button', { name: '保存配置', exact: true })).toBeVisible()
   expect(await frame.locator('body').evaluate(el => el.scrollWidth <= innerWidth)).toBe(true)
-  await page.screenshot({ path: testInfo.outputPath('builtin-omp-settings-dark-mobile.png') })
+  await page.screenshot({ path: testInfo.outputPath('independent-omp-settings-dark-mobile.png') })
   expect(errors).toEqual([])
 })
