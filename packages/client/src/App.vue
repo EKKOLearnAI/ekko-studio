@@ -534,13 +534,6 @@ useKeyboard();
   overflow: hidden;
   background-color: var(--theme-card-bg, $bg-card);
 
-  &--plugin {
-    --studio-content-gutter: 0px;
-    --studio-content-radius: 0px;
-    --theme-content-radius: 0px;
-    --theme-content-shadow: none;
-  }
-
   &.no-sidebar {
     display: block;
 
