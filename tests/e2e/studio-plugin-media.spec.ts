@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { securityHeaders } from '../../packages/server/src/modules/studio/middleware/security'
 
 test.use({ launchOptions: { args: ['--autoplay-policy=document-user-activation-required',
@@ -12,6 +13,9 @@ wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22)
 wav.writeUInt32LE(16_000, 24); wav.writeUInt32LE(32_000, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34)
 wav.write('data', 36); wav.writeUInt32LE(wav.length - 44, 40)
 const audioData = `data:audio/wav;base64,${wav.toString('base64')}`
+// Synthetic H.264 baseline/AAC clip: it has an audio track, so muted and audible
+// autoplay exercise different policies without needing a remote provider.
+const videoData = `data:video/mp4;base64,${readFileSync(resolve('tests/e2e/fixtures/plugin-video.mp4')).toString('base64')}`
 
 async function mountPlugin(page: Page, source: string) {
   const headers: Record<string, string> = {}
@@ -132,4 +136,55 @@ test('handles the browser autoplay rejection separately from a successful user c
   await expect(frame.locator('#root')).toHaveAttribute('data-auto', 'NotAllowedError')
   await frame.getByRole('button', { name: 'Enable sound' }).click()
   await expect(frame.locator('#root')).toHaveAttribute('data-click', 'playing')
+})
+
+test('plays data and Blob video on click without adding iframe privileges', async ({ page }) => {
+  await mountPlugin(page, `export function mount(root) {
+    const data = ${JSON.stringify(videoData)}, bytes = Uint8Array.from(atob(data.split(',')[1]), c => c.charCodeAt(0));
+    const blob = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }));
+    for (const [id, src] of [['data', data], ['blob', blob]]) {
+      const video = document.createElement('video'); video.id = id; video.src = src;
+      video.controls = true; video.playsInline = true; video.width = 160; root.append(video);
+      const button = document.createElement('button'); button.textContent = 'Play video ' + id; root.append(button);
+      button.onclick = async () => { try { await video.play(); root.dataset[id] = 'playing' }
+        catch (error) { root.dataset[id] = error.name } };
+    }
+    return () => { root.querySelectorAll('video').forEach(video => video.pause()); URL.revokeObjectURL(blob) };
+  }`)
+  await page.goto('/__plugin_media__')
+  const frame = page.frameLocator('iframe')
+  for (const id of ['data', 'blob']) {
+    await frame.getByRole('button', { name: 'Play video ' + id }).click()
+    await expect(frame.locator('#root')).toHaveAttribute('data-' + id, 'playing')
+    await expect.poll(() => frame.locator('#' + id).evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
+    expect(await frame.locator('#' + id).evaluate((video: HTMLVideoElement) => ({ width: video.videoWidth, height: video.videoHeight })))
+      .toEqual({ width: 160, height: 90 })
+  }
+  await expect(page.locator('iframe')).toHaveAttribute('sandbox', 'allow-scripts')
+  expect(await page.locator('iframe').getAttribute('allow')).toBeNull()
+})
+
+test('allows muted inline video autoplay and provides a click fallback for audible video', async ({ page }) => {
+  await mountPlugin(page, `export function mount(root) {
+    for (const muted of [true, false]) {
+      const id = muted ? 'muted' : 'audible', video = document.createElement('video');
+      video.id = id; video.muted = muted; video.autoplay = true; video.playsInline = true;
+      video.controls = true; video.width = 160; video.src = ${JSON.stringify(videoData)}; root.append(video);
+      video.play().then(() => root.dataset[id] = 'playing', error => root.dataset[id] = error.name);
+      if (!muted) {
+        const button = document.createElement('button'); button.textContent = 'Play with sound'; root.append(button);
+        button.onclick = async () => { await video.play(); root.dataset.click = 'playing' };
+      }
+    }
+    return () => root.querySelectorAll('video').forEach(video => video.pause());
+  }`)
+  await page.goto('/__plugin_media__')
+  const frame = page.frameLocator('iframe')
+  await expect(frame.locator('#root')).toHaveAttribute('data-muted', 'playing')
+  await expect.poll(() => frame.locator('#muted').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
+  await expect(frame.locator('#muted')).toHaveJSProperty('playsInline', true)
+  await expect(frame.locator('#root')).toHaveAttribute('data-audible', 'NotAllowedError')
+  await frame.getByRole('button', { name: 'Play with sound' }).click()
+  await expect(frame.locator('#root')).toHaveAttribute('data-click', 'playing')
+  await expect.poll(() => frame.locator('#audible').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
 })

@@ -61,6 +61,34 @@
 并在 disposer 中暂停媒体、关闭音频上下文、撤销自己创建的 Blob URL。
 宿主不承诺自动播放，也不默认委派 autoplay；浏览器/WebView 的手势策略和 Electron 默认行为可能不同。
 
+视频使用同一个媒体白名单。需要静音内联自动播放时，插件在设置 src 之前配置 muted、autoplay 和 playsInline，
+仍要处理 play() 拒绝并保留点击播放入口；有声自动播放不受宿主保证。静音音轨仍是音轨，
+仅把录制内容变成静音不等于设置 video.muted。真实 Safari/WKWebView 还受站点设置、可见性和容器配置影响。
+`allow="autoplay"` 不会放行被 CSP 拦截的视频，也不会自动满足用户激活要求。
+
+```js
+// bytes 来自内联资源或已授权 RPC，而不是在 iframe 中 fetch 远程 URL。
+const video = document.createElement('video')
+video.controls = true
+video.muted = true
+video.autoplay = true
+video.playsInline = true
+const url = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }))
+video.src = url
+root.append(video)
+void video.play().catch(() => { /* 保留原生控件，让用户点击播放。 */ })
+ctx.lifecycle.add(() => {
+  video.pause()
+  video.removeAttribute('src')
+  video.load()
+  URL.revokeObjectURL(url)
+})
+```
+
+需要声音时由原生控件或真实点击回调取消静音并调用 play()；程序自行取消静音可能使播放被暂停。
+网络 MP4、HLS/DASH 分片、外站播放器 iframe 不会因上述设置而获准加载。需要远程/大文件播放时，
+应先明确资源来源和受控媒体传输方案，不能直接开放所有网络、共享宿主凭证或移除 sandbox。
+
 Studio 插件页面可在普通 HTTP 下加载：宿主通道标识使用加密随机数，不依赖仅安全上下文提供的
 `crypto.randomUUID()`。HTTP localhost 与 HTTPS 通常属于安全上下文，普通局域网 HTTP 不属于；
 页面能打开不代表录音等需要安全上下文的 API 可用，具体能力仍取决于浏览器、系统权限与部署策略。

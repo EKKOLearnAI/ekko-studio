@@ -441,6 +441,9 @@ localStorage 或登录凭证；HTTP 请求统一通过 `ctx.host`。
 在页面清理时停止播放并释放资源。自动播放受浏览器/WebView 策略影响，桌面 Electron 的行为也可能不同。
 普通局域网 HTTP 可以打开插件页面，宿主通道使用兼容该环境的加密随机数；
 这不使 HTTP 成为安全上下文，也不保证录音等受限 API 可用。详见 SDK `ARCHITECTURE.md`。
+视频复用同一媒体策略；静音内联自动播放可使用 muted/autoplay/playsInline，并处理失败后的点击播放。
+有声自动播放、Safari/WebView 的站点与容器策略仍需实测；不要通过扩大沙箱权限来绕过它们。
+SDK `ARCHITECTURE.md` 提供从已授权字节创建视频 Blob、处理自动播放及清理资源的示例。
 
 ## Agent 与工作流
 
