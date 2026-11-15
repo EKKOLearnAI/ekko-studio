@@ -57,6 +57,10 @@ export default defineConfig({
     // CSS code splitting for better caching
     cssCodeSplit: true,
     rollupOptions: {
+      input: {
+        app: resolve(__dirname, 'packages/client/index.html'),
+        plugin: resolve(__dirname, 'packages/client/plugin-frame.html'),
+      },
       output: {
         // Optimize chunk file names for better caching
         chunkFileNames: 'assets/js/[name]-[hash].js',

@@ -433,16 +433,17 @@ ctx.events.on('group.message.delta', event => {
 `ctx.events.on` 和 `ctx.lifecycle.add`。页面布局类型为 `page`、`settings`、`workspace`、`agent-settings`；
 动态工作区侧栏挂载时的 `ctx.slot` 为 `workspace-sidebar`。这些页面不绑定当前单聊会话，
 需要访问会话时由插件通过 SDK 显式指定 ID，宿主照常检查当前调用者权限。
-页面挂在独立 iframe 中，复用宿主主题变量，通过消息桥调用功能。iframe 不共享 DOM、
-localStorage 或登录凭证；HTTP 请求统一通过 `ctx.host`。
+页面挂在同源独立 iframe 中，复用宿主主题变量，通过消息桥调用功能。
+iframe 不设置 sandbox，可信插件前端可访问宿主 DOM 和浏览器存储，并直接发起网络请求或加载远程脚本、样式和媒体。
+宿主业务调用使用 `ctx.host`，插件业务使用 `ctx.rpc.call`；桥接继续检查插件权限、真实用户和 Profile。
 
-插件页面支持内联 `data:` 与 iframe 内 `blob:` 音频，保持不透明来源沙箱和直接网络请求禁用。
-不要为播放音频增加同源权限；提供点击播放/启用声音操作，处理 `play()` 拒绝和音频上下文状态，
+插件页面支持远程 URL、内联 `data:` 与 iframe 内 `blob:` 音频，资源不再受插件专用 CSP 限制。
+提供点击播放/启用声音操作，处理 `play()` 拒绝和音频上下文状态，
 在页面清理时停止播放并释放资源。自动播放受浏览器/WebView 策略影响，桌面 Electron 的行为也可能不同。
 普通局域网 HTTP 可以打开插件页面，宿主通道使用兼容该环境的加密随机数；
 这不使 HTTP 成为安全上下文，也不保证录音等受限 API 可用。详见 SDK `ARCHITECTURE.md`。
-视频复用同一媒体策略；静音内联自动播放可使用 muted/autoplay/playsInline，并处理失败后的点击播放。
-有声自动播放、Safari/WebView 的站点与容器策略仍需实测；不要通过扩大沙箱权限来绕过它们。
+视频也支持远程 URL；静音内联自动播放可使用 muted/autoplay/playsInline，并处理失败后的点击播放。
+有声自动播放、Safari/WebView 的站点与容器策略仍需实测；直接网络访问仍受 CORS、混合内容和目标站点策略影响。
 SDK `ARCHITECTURE.md` 提供从已授权字节创建视频 Blob、处理自动播放及清理资源的示例。
 
 ## Agent 与工作流
@@ -517,7 +518,7 @@ Buffer/Readable 保留进程内类型，可转换流而无需缓冲；原生 res
 
 只有超级管理员的交互登录可以安装和修改可执行插件。Agent 运行凭证不能安装插件。
 后端插件是可信 Node.js 代码，拥有 Studio 进程的操作系统权限；manifest capability
-约束 SDK 使用，不是 Node.js 沙箱。只安装可信包。前端 iframe 有独立的浏览器隔离。
+约束 SDK 使用，不是 Node.js 沙箱。前端也按可信同源代码执行，不提供浏览器沙盒隔离。只安装可信包。
 宿主状态保存在 Studio 应用目录下的 `plugins/`，不写入 Hermes Agent 状态目录。
 
 验证命令：`npx vitest run tests/server/studio-plugins.test.ts tests/server/studio-plugin-*.test.ts tests/ekko-agent/plugin-hooks.test.ts`；
@@ -578,7 +579,7 @@ export function apply(ctx) {
 同时提供 `checkUpdate/upgrade` 的插件 Agent，在 `installed:false` 时显示“安装”。点击后宿主先调用 `checkUpdate` 获取准确版本，再调用 `upgrade` 完成首次安装；安装期间禁用重复操作，成功后刷新状态。已安装时显示“检查更新”及可用的版本升级操作。
 设置回调返回本插件清单中 `slot: 'agent-settings'`的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。该回调与两类全局导航独立，三个 Agent 页面可只声明 agent-settings 与命名 icon，不注册 navigation。
 页面继续通过 `client.mjs` 的 `mount(root, ctx)` 和服务端 `ctx.extensions.rpc.register` 实现。
-生产安全策略允许视图加载 Blob 模块；iframe 保持不透明来源，自己的 CSP 禁止直接网络请求，业务调用仍经认证桥接。
+生产构建包含独立的 `plugin-frame.html`，使用不限制资源来源的文档策略，避免继承宿主页 CSP；iframe 不设置 sandbox，业务桥接仍检查认证与权限。
 插件负责配置持久化、校验、文件格式、环境变量和启动参数，不要求宿主生成设置表单。
 私有设置应以 RPC 的实际 `run.identity` 分区；URL 查询参数不构成身份或权限依据。
 

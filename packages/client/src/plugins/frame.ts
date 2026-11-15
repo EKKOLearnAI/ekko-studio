@@ -1,8 +1,8 @@
 import { createHostApi } from '../../../plugin-sdk/src'
 import type { ClientContext, ClientModule, Dispose, PluginEvent, PluginStorage, HostSession, SessionListener } from '../../../plugin-sdk/src'
-import scrollbarStyles from '@/styles/_scrollbars.scss?inline'
+import '@/styles/_scrollbars.scss'
 
-// Serialized into an opaque-origin frame. Keep this function self-contained.
+// Runs in the trusted plugin document, with its own resource policy.
 function bootstrap(apiFactory: typeof createHostApi, loadModule: (url: string) => Promise<ClientModule>) {
   let initialized = false
   window.addEventListener('message', async function initialize(event) {
@@ -113,6 +113,4 @@ function bootstrap(apiFactory: typeof createHostApi, loadModule: (url: string) =
   parent.postMessage({ type: 'studio.plugin.ready' }, '*')
 }
 
-export function pluginFrameDocument(): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'"><style>${scrollbarStyles}html,body{margin:0;background:transparent;color:var(--text-primary);font:14px system-ui}#root{box-sizing:border-box}button,input,textarea,select{font:inherit;color:inherit;background:var(--bg-secondary,transparent);border:1px solid var(--border-color);border-radius:6px;padding:6px}button{cursor:pointer}*{box-sizing:border-box}</style></head><body><main id="root"></main><script type="module">(${bootstrap.toString()})(${createHostApi.toString()},url=>import(url))</script></body></html>`
-}
+bootstrap(createHostApi, url => import(/* @vite-ignore */ url))

@@ -54,10 +54,8 @@ test('plugin documents and inner scrollers follow the regular page theme without
   expect(initial.inner).toEqual(regularStyle)
   expect(initial.textarea).toEqual(regularStyle)
   expect(initial.outer).toEqual(regularStyle)
-  await expect(page.locator('iframe')).toHaveAttribute('sandbox', 'allow-scripts')
-  expect(await frameRoot.evaluate(() => {
-    try { void parent.document; return false } catch { return true }
-  })).toBe(true)
+  await expect(page.locator('iframe')).not.toHaveAttribute('sandbox')
+  expect(await frameRoot.evaluate(() => parent.document.querySelector('.plugin-workspace') !== null)).toBe(true)
   // The document owns the long page; the outer wrapper only scrolls when its layout needs it.
   expect(await page.locator('.workspace-content').evaluate(element => element.scrollHeight <= element.clientHeight)).toBe(true)
   await inner.focus()

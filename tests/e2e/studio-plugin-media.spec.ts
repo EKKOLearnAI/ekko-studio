@@ -18,9 +18,17 @@ const audioData = `data:audio/wav;base64,${wav.toString('base64')}`
 const videoData = `data:video/mp4;base64,${readFileSync(resolve('tests/e2e/fixtures/plugin-video.mp4')).toString('base64')}`
 
 async function mountPlugin(page: Page, source: string) {
-  const headers: Record<string, string> = {}
-  await securityHeaders()({ method: 'GET', path: '/', query: {}, secure: false,
-    get: () => '', set: (name: string, value: string) => { headers[name] = value } } as any, async () => {})
+  async function documentHeaders(path: string) {
+    const headers: Record<string, string> = {}
+    await securityHeaders()({ method: 'GET', path, query: {}, secure: false,
+      get: () => '', set: (name: string, value: string) => { headers[name] = value } } as any, async () => {})
+    return headers
+  }
+  const headers = await documentHeaders('/')
+  await page.route(url => url.pathname === '/plugin-frame.html', async route => {
+    const response = await route.fetch({ url: new URL('/plugin-frame.html', test.info().project.use.baseURL).href })
+    await route.fulfill({ response, headers: { ...response.headers(), ...await documentHeaders('/plugin-frame.html') } })
+  })
   let clientRequests = 0, invokes = 0
   await page.route(url => url.pathname.startsWith('/api/'), route => {
     const request = route.request(), path = new URL(request.url()).pathname
@@ -80,13 +88,13 @@ test('opens a plugin on non-secure HTTP using a strong channel and keeps authent
   expect(errors).toEqual([])
 })
 
-test('plays inline and Blob audio on click with production CSP while retaining isolation for every plugin surface', async ({ page }) => {
+test('plays inline and Blob audio in trusted same-origin documents for every plugin surface', async ({ page }) => {
   await mountPlugin(page, mediaSource())
   // Every supported page and the dynamic sidebar share PluginFrame's document and permissions.
   for (const slot of ['page', 'settings', 'workspace', 'agent-settings', 'workspace-sidebar']) {
     await page.goto(`/__plugin_media__?slot=${slot}`)
     const host = page.locator('iframe'), frame = page.frameLocator('iframe')
-    await expect(host).toHaveAttribute('sandbox', 'allow-scripts')
+    await expect(host).not.toHaveAttribute('sandbox')
     expect(await host.getAttribute('allow')).toBeNull()
     await frame.getByRole('button', { name: 'Play data' }).click()
     await expect(frame.locator('#root')).toHaveAttribute('data-data', 'playing')
@@ -94,36 +102,43 @@ test('plays inline and Blob audio on click with production CSP while retaining i
     await frame.getByRole('button', { name: 'Play blob' }).click()
     await expect(frame.locator('#root')).toHaveAttribute('data-blob', 'playing')
     await expect.poll(() => frame.locator('audio').nth(1).evaluate((audio: HTMLAudioElement) => audio.currentTime)).toBeGreaterThan(0)
-    expect(await frame.locator('#root').evaluate(() => {
-      try { return parent.localStorage.getItem('plugin-media-sentinel') } catch { return 'isolated' }
-    })).toBe('isolated')
+    expect(await frame.locator('#root').evaluate(() => parent.localStorage.getItem('plugin-media-sentinel'))).toBe('host-only')
   }
 })
 
-test('continues to block network media and direct connections', async ({ page }) => {
-  let remoteRequests = 0
-  await page.route(url => url.hostname === 'media.invalid' || url.pathname === '/plugin-media-test.wav',
-    route => { remoteRequests++; return route.abort() })
+test('loads remote modules, styles, images and media and makes direct requests despite the host CSP', async ({ page }) => {
+  const requests = new Set<string>()
+  await page.route('https://plugin-assets.test/**', route => {
+    const path = new URL(route.request().url()).pathname
+    requests.add(path)
+    const headers = { 'Access-Control-Allow-Origin': '*' }
+    if (path === '/extra.mjs') return route.fulfill({ headers, contentType: 'text/javascript', body: 'export const value = "remote module"' })
+    if (path === '/theme.css') return route.fulfill({ headers, contentType: 'text/css', body: '#root { --plugin-remote-style: loaded; }' })
+    if (path === '/image.svg') return route.fulfill({ headers, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>' })
+    if (path === '/audio.wav') return route.fulfill({ headers, contentType: 'audio/wav', body: wav })
+    return route.fulfill({ headers, json: { value: 'direct request' } })
+  })
   await mountPlugin(page, `export async function mount(root) {
-    document.addEventListener('securitypolicyviolation', event => {
-      if (event.effectiveDirective === 'media-src') root.dataset.media = 'blocked';
-      if (event.effectiveDirective === 'connect-src') root.dataset.connection = 'blocked';
-    });
-    // The host permits its own origin; the child must still reject that network media.
-    for (const src of [new URL('/plugin-media-test.wav', document.baseURI).href, 'https://media.invalid/audio.wav']) {
-      const audio = document.createElement('audio'); audio.src = src; root.append(audio); audio.load();
-    }
-    try { await fetch(${JSON.stringify(audioData)}) } catch { root.dataset.fetch = 'failed' }
+    root.dataset.fetch = (await (await fetch('https://plugin-assets.test/data.json')).json()).value;
+    root.dataset.module = (await import('https://plugin-assets.test/extra.mjs')).value;
+    root.dataset.eval = new Function('return "allowed"')();
+    const style = document.createElement('link'); style.rel = 'stylesheet'; style.href = 'https://plugin-assets.test/theme.css'; document.head.append(style);
+    const image = new Image(); image.src = 'https://plugin-assets.test/image.svg'; root.append(image); await image.decode(); root.dataset.image = 'loaded';
+    const audio = document.createElement('audio'); audio.src = 'https://plugin-assets.test/audio.wav';
+    audio.onloadeddata = () => root.dataset.media = 'loaded'; root.append(audio); audio.load();
   }`)
   await page.goto('/__plugin_media__')
   const root = page.frameLocator('iframe').locator('#root')
-  await expect(root).toHaveAttribute('data-media', 'blocked')
-  await expect(root).toHaveAttribute('data-connection', 'blocked')
-  await expect(root).toHaveAttribute('data-fetch', 'failed')
-  expect(remoteRequests).toBe(0)
+  await expect(root).toHaveAttribute('data-fetch', 'direct request')
+  await expect(root).toHaveAttribute('data-module', 'remote module')
+  await expect(root).toHaveAttribute('data-eval', 'allowed')
+  await expect(root).toHaveAttribute('data-image', 'loaded')
+  await expect(root).toHaveAttribute('data-media', 'loaded')
+  await expect.poll(() => root.evaluate(element => getComputedStyle(element).getPropertyValue('--plugin-remote-style').trim())).toBe('loaded')
+  expect([...requests].sort()).toEqual(['/audio.wav', '/data.json', '/extra.mjs', '/image.svg', '/theme.css'])
 })
 
-test('handles the browser autoplay rejection separately from a successful user click', async ({ page }) => {
+test('handles the browser audio autoplay decision and supports explicit click playback', async ({ page }) => {
   await mountPlugin(page, `export function mount(root) {
     const audio = document.createElement('audio'); audio.src = ${JSON.stringify(audioData)}; root.append(audio);
     audio.play().then(() => root.dataset.auto = 'playing', error => root.dataset.auto = error.name);
@@ -133,12 +148,16 @@ test('handles the browser autoplay rejection separately from a successful user c
   }`)
   await page.goto('/__plugin_media__')
   const frame = page.frameLocator('iframe')
-  await expect(frame.locator('#root')).toHaveAttribute('data-auto', 'NotAllowedError')
+  // Same-origin frames may autoplay; browsers can still require a user gesture.
+  await expect(frame.locator('#root')).toHaveAttribute('data-auto', /^(playing|NotAllowedError)$/)
+  if (await frame.locator('#root').getAttribute('data-auto') === 'playing') {
+    await expect.poll(() => frame.locator('audio').evaluate((audio: HTMLAudioElement) => audio.currentTime)).toBeGreaterThan(0)
+  }
   await frame.getByRole('button', { name: 'Enable sound' }).click()
   await expect(frame.locator('#root')).toHaveAttribute('data-click', 'playing')
 })
 
-test('plays data and Blob video on click without adding iframe privileges', async ({ page }) => {
+test('plays data and Blob video on click in an unrestricted plugin document', async ({ page }) => {
   await mountPlugin(page, `export function mount(root) {
     const data = ${JSON.stringify(videoData)}, bytes = Uint8Array.from(atob(data.split(',')[1]), c => c.charCodeAt(0));
     const blob = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }));
@@ -160,7 +179,7 @@ test('plays data and Blob video on click without adding iframe privileges', asyn
     expect(await frame.locator('#' + id).evaluate((video: HTMLVideoElement) => ({ width: video.videoWidth, height: video.videoHeight })))
       .toEqual({ width: 160, height: 90 })
   }
-  await expect(page.locator('iframe')).toHaveAttribute('sandbox', 'allow-scripts')
+  await expect(page.locator('iframe')).not.toHaveAttribute('sandbox')
   expect(await page.locator('iframe').getAttribute('allow')).toBeNull()
 })
 
@@ -183,7 +202,10 @@ test('allows muted inline video autoplay and provides a click fallback for audib
   await expect(frame.locator('#root')).toHaveAttribute('data-muted', 'playing')
   await expect.poll(() => frame.locator('#muted').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
   await expect(frame.locator('#muted')).toHaveJSProperty('playsInline', true)
-  await expect(frame.locator('#root')).toHaveAttribute('data-audible', 'NotAllowedError')
+  await expect(frame.locator('#root')).toHaveAttribute('data-audible', /^(playing|NotAllowedError)$/)
+  if (await frame.locator('#root').getAttribute('data-audible') === 'playing') {
+    await expect.poll(() => frame.locator('#audible').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
+  }
   await frame.getByRole('button', { name: 'Play with sound' }).click()
   await expect(frame.locator('#root')).toHaveAttribute('data-click', 'playing')
   await expect.poll(() => frame.locator('#audible').evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0)
