@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { resolve } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 
-test('plugins own the available content window while host navigation stays usable', async ({ page }, testInfo) => {
+test('plugins share ordinary page chrome while filling their content window and keeping navigation usable', async ({ page }, testInfo) => {
   const errors: string[] = []
   page.on('pageerror', error => errors.push(error.message))
   const plugin = { manifest: { id: 'layout', name: 'Layout demo', version: '1.0.0', apiVersion: 1,
@@ -29,6 +29,24 @@ test('plugins own the available content window while host navigation stays usabl
     body: `<div id="app"></div><script type="module" src="${entry}"></script>` }))
   await page.goto('/__plugin_layout__?shell=1#/studio/plugins/layout/page')
   const frame = page.frameLocator('.plugin-workspace iframe')
+  const chrome = () => page.evaluate(() => {
+    const layout = document.querySelector('.app-layout')!, main = document.querySelector('.app-main')!
+    const rect = layout.getBoundingClientRect(), layoutStyle = getComputedStyle(layout), mainStyle = getComputedStyle(main)
+    return {
+      rightGap: innerWidth - rect.right, bottomGap: innerHeight - rect.bottom,
+      margin: layoutStyle.margin, radius: layoutStyle.borderRadius, clip: layoutStyle.clipPath,
+      mainBorder: mainStyle.borderWidth, mainRadius: mainStyle.borderRadius, mainShadow: mainStyle.boxShadow,
+    }
+  })
+  const ordinaryChrome = async () => {
+    const current = await page.evaluate(() => (window as any).pluginFixture.route())
+    const hasSidebar = await page.locator('.app-layout').evaluate(element => element.classList.contains('app-layout--shell-sidebar'))
+    await page.evaluate(path => (window as any).pluginFixture.navigate(path), hasSidebar ? '/hermes/settings' : '/hermes/agentManager')
+    await expect(page.locator('.app-layout')).not.toHaveClass(/app-layout--plugin/)
+    const reference = await chrome()
+    await page.evaluate(path => (window as any).pluginFixture.navigate(path), current)
+    return reference
+  }
   const measure = async () => ({
     host: await page.evaluate(() => {
       const selectors = ['.app-layout', '.app-main', '.workspace-content', '.plugin-frame', '.plugin-workspace iframe']
@@ -57,13 +75,18 @@ test('plugins own the available content window while host navigation stays usabl
       await expect(shell).toHaveClass(/app-shell--navigation-rail/)
     }
     await expect(frame.locator('#root')).toHaveAttribute('data-view', view)
+    const reference = await ordinaryChrome()
+    await expect(frame.locator('#root')).toHaveAttribute('data-view', view)
     await expect(frame.locator('#canvas')).toBeVisible()
     const data = await measure()
     await writeFile(testInfo.outputPath(name + '.json'), JSON.stringify(data, null, 2))
     await page.screenshot({ path: testInfo.outputPath(name + '.png') })
     const host = data.host, content = data.content, viewport = page.viewportSize()!
-    expect(host['.app-layout'].right).toBeCloseTo(viewport.width, 0)
-    expect(host['.app-layout'].bottom).toBeCloseTo(viewport.height, 0)
+    expect(await chrome()).toEqual(reference)
+    if (viewport.width > 768) {
+      expect(reference.rightGap).toBeGreaterThan(0)
+      expect(reference.bottomGap).toBeGreaterThan(0)
+    }
     for (const selector of ['.plugin-frame', '.plugin-workspace iframe']) {
       expect(host[selector].x).toBeCloseTo(host['.workspace-content'].x, 0)
       expect(host[selector].y).toBeCloseTo(host['.workspace-content'].y, 0)
@@ -75,9 +98,6 @@ test('plugins own the available content window while host navigation stays usabl
     }
     expect(host['.workspace-content'].padding).toBe('0px')
     expect(host['.workspace-content'].overflow).toBe(false)
-    expect(host['.app-main'].border).toBe('0px')
-    expect(host['.app-main'].radius).toBe('0px')
-    expect(host['.app-main'].shadow).toBe('none')
     expect(content.x).toBe(0)
     expect(content.y).toBe(0)
     expect(content.padding).toBe('0px')
@@ -100,6 +120,16 @@ test('plugins own the available content window while host navigation stays usabl
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   await expect.poll(async () => (await page.locator('.plugin-config-sidebar').boundingBox())!.width).toBeCloseTo(expandedWidth, 0)
+  await page.evaluate(() => (window as any).pluginFixture.theme(true))
+  await checkWindow('dark-preset')
+  await page.evaluate(async () => {
+    const fixture = (window as any).pluginFixture
+    await fixture.theme(false)
+    fixture.wallpaper(true)
+    fixture.appearance({ brightness: 'light', appearance: { global: { opacity: .7, radius: 24 },
+      regions: { card: { opacity: 0, radius: 28 }, content: { radius: 32, shadow: .4 } } } })
+  })
+  await checkWindow('light-wallpaper')
   await page.evaluate(async () => {
     const fixture = (window as any).pluginFixture
     await fixture.theme(true)
@@ -119,6 +149,13 @@ test('plugins own the available content window while host navigation stays usabl
   await frame.getByRole('button', { name: 'Plugin end' }).focus()
   await expect(frame.getByRole('button', { name: 'Plugin end' })).toBeInViewport()
   await page.setViewportSize({ width: 1280, height: 720 })
+  await page.evaluate(async () => {
+    const fixture = (window as any).pluginFixture
+    await fixture.theme(false)
+    fixture.wallpaper(false)
+    fixture.appearance({ brightness: 'light', appearance: { global: {}, regions: {} } })
+  })
+  await checkWindow('reset-light')
   const back = page.locator('.workspace-header .back-link')
   const destination = (await back.getAttribute('href'))!
   await back.click()
