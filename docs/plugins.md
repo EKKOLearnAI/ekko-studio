@@ -436,6 +436,12 @@ ctx.events.on('group.message.delta', event => {
 页面挂在独立 iframe 中，复用宿主主题变量，通过消息桥调用功能。iframe 不共享 DOM、
 localStorage 或登录凭证；HTTP 请求统一通过 `ctx.host`。
 
+插件页面支持内联 `data:` 与 iframe 内 `blob:` 音频，保持不透明来源沙箱和直接网络请求禁用。
+不要为播放音频增加同源权限；提供点击播放/启用声音操作，处理 `play()` 拒绝和音频上下文状态，
+在页面清理时停止播放并释放资源。自动播放受浏览器/WebView 策略影响，桌面 Electron 的行为也可能不同。
+普通局域网 HTTP 可以打开插件页面，宿主通道使用兼容该环境的加密随机数；
+这不使 HTTP 成为安全上下文，也不保证录音等受限 API 可用。详见 SDK `ARCHITECTURE.md`。
+
 ## Agent 与工作流
 
 默认情况下，启用的工具放在共享的 `ekko-studio-plugins` MCP 服务中。插件可在 `plugin.json` 中选择独立服务名：

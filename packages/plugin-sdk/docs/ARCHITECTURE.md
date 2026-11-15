@@ -51,6 +51,20 @@
 插件自己的 CSS 仍可覆盖默认样式；嵌套的独立 iframe 文档不继承这些规则，需要由其内容方适配，宿主不会跨来源访问或修改它们。
 前端 bundle 必须自包含，框架可打包，资源需内联；iframe 不允许直接网络连接。
 宿主业务 API 使用 `ctx.host`，插件业务使用 `ctx.rpc.call`；不能通过相对模块或远程脚本加载额外客户端包。
+
+插件音频可使用内联 `data:` 或在当前 iframe 中创建的 `blob:` URL；媒体 CSP 仅允许这两类来源，
+也适用于视频，不放行远程地址、包内相对资源或本地文件。`connect-src 'none'` 继续禁止直接请求，
+包括 `fetch(dataUrl)`；已有编码字节可直接交给 `AudioContext.decodeAudioData()`，无需 fetch。
+后端资源仍经受控 RPC/API 交付；当前桥接是有大小限制的 JSON 通道，不是二进制流式媒体代理。
+保留 `sandbox="allow-scripts"` 和不透明来源；播放音频不需要 `allow-same-origin`、麦克风或额外 manifest 权限。
+插件应提供真实点击的播放/启用声音操作，处理 `audio.play()` 的拒绝和 `AudioContext` 的 suspended 状态，
+并在 disposer 中暂停媒体、关闭音频上下文、撤销自己创建的 Blob URL。
+宿主不承诺自动播放，也不默认委派 autoplay；浏览器/WebView 的手势策略和 Electron 默认行为可能不同。
+
+Studio 插件页面可在普通 HTTP 下加载：宿主通道标识使用加密随机数，不依赖仅安全上下文提供的
+`crypto.randomUUID()`。HTTP localhost 与 HTTPS 通常属于安全上下文，普通局域网 HTTP 不属于；
+页面能打开不代表录音等需要安全上下文的 API 可用，具体能力仍取决于浏览器、系统权限与部署策略。
+
 `ctx.ui.selectModel()` 经页面桥接打开宿主现有的通用模型选择器；模型目录绑定该页面的 Profile，
 凭证和供应商地址留在宿主，只回传选中的模型引用。插件自行决定保存和调用，页面结束时关闭选择器。
 `ctx.ui.selectWorkspace({ current })` 同样通过桥接打开宿主目录选择器，复用目录树、手动路径、账号收藏和最近记录。
