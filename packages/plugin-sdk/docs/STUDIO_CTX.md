@@ -39,6 +39,8 @@ sessions.run 默认启动或入队后返回；wait:true 等待终态但仍受普
 
 extensions.agents/tools/commands/hooks/actions/rpc/http.register 注册插件提供给宿主的能力。
 工具执行返回 ToolResult；commands 注册 /插件id:命令；hooks 只在 Ekko 支持 input.transform/context.transform/tool.before/tool.after。
+
+`context.transform` 的宿主输入会复制为 JSON：对象中值为 undefined 的可选数据字段会省略，不修改原消息；数组中的 undefined 或空位仍会拒绝，不会变成 null。其余非 JSON 值仍会报错。此转换只用于宿主构造的 context 输入，不用于插件回传或其他 hook。
 Agent 注册返回带完整 id 和 dispose 的句柄，其他注册返回 disposer。
 events.on 支持精确名称、前缀及 *，业务事件是有界内存观察流；离线恢复需查询历史并幂等处理。
 messages.emit 默认发给当前调用者，audience=plugin 广播本插件所有账号/Profile 页面，前端通过 messages.on 接收。
