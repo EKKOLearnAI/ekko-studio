@@ -1038,6 +1038,7 @@ export default {
 
 
   chat: {
+    clarifySendFailed: 'Доставка ответа не подтверждена. Ответ сохранён. Повторите попытку.',
     selectMessages: "Выбрать сообщения",
     messagesSelected: "Выбрано: {count}",
     deleteSelectedMessages: "Удалить выбранное",

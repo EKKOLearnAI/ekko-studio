@@ -1404,6 +1404,7 @@ export default {
     clarifyTitle: 'Agent 有一個問題需要您回答',
     clarifyPlaceholder: '輸入你的回答...',
     clarifySubmit: '回覆',
+    clarifySendFailed: '回答尚未確認送達，請重試。已保留你的答案。',
     clarifyDismiss: '忽略',
     interactionExpired: '此請求已逾時，已關閉。',
     interactionCountdown: '剩餘 {time}',

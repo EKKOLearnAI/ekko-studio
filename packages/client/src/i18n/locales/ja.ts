@@ -1351,6 +1351,7 @@ export default {
     clarifyTitle: 'エージェントが質問があります',
     clarifyPlaceholder: '回答を入力...',
     clarifySubmit: '返信',
+    clarifySendFailed: '回答の送信を確認できませんでした。回答は保持されています。再試行してください。',
     clarifyDismiss: '閉じる',
     interactionExpired: 'このリクエストはタイムアウトしたため、閉じられました。',
     interactionCountdown: '残り {time}',

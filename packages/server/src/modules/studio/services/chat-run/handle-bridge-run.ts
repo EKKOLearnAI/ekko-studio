@@ -1574,6 +1574,8 @@ async function applyBridgeChunkAsync(
         event: 'clarify.resolved',
         run_id: chunk.run_id,
         clarify_id: ev.clarify_id,
+        resolved: ev.resolved,
+        reason: ev.reason,
       }
       replaceState(sessionMap, sessionId, 'clarify.resolved', payload)
       emit('clarify.resolved', payload)

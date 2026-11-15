@@ -576,6 +576,7 @@ export default {
   },
 
   chat: {
+    clarifySendFailed: 'Yanıtınızın alındığı doğrulanmadı. Yanıtınız korundu. Lütfen tekrar deneyin.',
     voiceInput: {
       backendSttRequired: 'Masaüstü uygulamasında sesli giriş için sunucu taraflı STT gerekir. Modeller → STT bölümünde yerel konuşma tanımayı etkinleştirin veya bir bulut sağlayıcısını yapılandırıp etkinleştirin.',
     },

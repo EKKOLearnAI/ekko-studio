@@ -772,12 +772,45 @@ export function respondClarify(
   clarifyId: string,
   response: string,
   transport: ChatRunTransport = 'chat-run',
-): void {
-  const socket = connectChatRun(null, transport)
-  socket.emit('clarify.respond', {
-    session_id: sessionId,
-    clarify_id: clarifyId,
-    response,
+  profile?: string,
+): Promise<void> {
+  const socket = connectChatRun(profile, transport)
+  // Resolution events work through local and relayed transports. An emit alone
+  // only queues a packet and must never be treated as an accepted answer.
+  return new Promise((resolve, reject) => {
+    const finish = (error?: Error) => {
+      clearTimeout(timer)
+      removeSocketListener(socket, 'connect', send)
+      removeSocketListener(socket, 'connect_error', failed)
+      removeSocketListener(socket, 'disconnect', failed)
+      removeSocketListener(socket, 'clarify.resolved', resolved)
+      removeSocketListener(socket, 'person.clarification.resolved', resolved)
+      error ? reject(error) : resolve()
+    }
+    const failed = () => finish(new Error('Clarification response could not be delivered. Please retry.'))
+    const resolved = (event: RunEvent & { clarify_id?: string; resolved?: boolean; stale?: boolean; outcome?: string }) => {
+      if (event.session_id !== sessionId || event.clarify_id !== clarifyId) return
+      if (event.stale || ['timeout', 'timed_out', 'cancelled', 'aborted'].includes(event.reason || event.outcome || '')) {
+        finish(new Error('Clarification has expired.'))
+      } else if (event.resolved === false) {
+        finish(new Error(event.error || 'Clarification response could not be applied.'))
+      } else {
+        finish()
+      }
+    }
+    const send = () => {
+      removeSocketListener(socket, 'connect', send)
+      socket.emit('clarify.respond', { session_id: sessionId, clarify_id: clarifyId, response })
+    }
+    const timer = setTimeout(() => finish(new Error('Clarification response was not confirmed. Please retry.')), 15_000)
+    socket.on('clarify.resolved', resolved)
+    socket.on('person.clarification.resolved', resolved)
+    socket.on('disconnect', failed)
+    socket.on('connect_error', failed)
+    // Wait outside Socket.IO's send buffer so a timed-out answer cannot be
+    // delivered unexpectedly after the user has already retried or left.
+    if (socket.connected) send()
+    else socket.on('connect', send)
   })
 }
 
@@ -803,7 +836,7 @@ export function getChatRunSocket(transport?: ChatRunTransport): Socket | null {
 export function connectChatRun(requestedProfile?: string | null, transport: ChatRunTransport = 'chat-run'): Socket {
   const normalizedRequestedProfile = requestedProfile?.trim() || null
   if (
-    chatRunSocket?.connected &&
+    chatRunSocket && (chatRunSocket.connected || chatRunSocket.active) &&
     chatRunSocketTransport === transport &&
     (!normalizedRequestedProfile || chatRunSocketProfile === normalizedRequestedProfile)
   ) {

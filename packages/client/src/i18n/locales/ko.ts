@@ -1351,6 +1351,7 @@ export default {
     clarifyTitle: '에이전트가 질문이 있습니다',
     clarifyPlaceholder: '답변 입력...',
     clarifySubmit: '답장',
+    clarifySendFailed: '답변 전달이 확인되지 않았습니다. 답변은 보관되어 있습니다. 다시 시도해 주세요.',
     clarifyDismiss: '무시',
     interactionExpired: '요청 시간이 초과되어 닫혔습니다.',
     interactionCountdown: '{time} 남음',
