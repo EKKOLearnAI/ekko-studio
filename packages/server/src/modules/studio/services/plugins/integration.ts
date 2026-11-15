@@ -1,12 +1,14 @@
 import { getPluginManager } from './host'
 import { json } from './schema'
+import { contextJson } from './context-json'
 import type { PluginHook, PluginIdentity } from '../../contracts/plugins'
 
 /** Structural adapter: the Studio host does not import a concrete agent runtime. */
 export function pluginRunHooks(identity: PluginIdentity, signal?: AbortSignal) {
   const transform = async <T>(hook: PluginHook, value: T): Promise<T> => {
     if (!getPluginManager().hasHooks(identity, hook)) return value
-    const result = await getPluginManager().transform(identity, hook, json(value), signal)
+    const input = hook === 'context.transform' ? contextJson(value) : json(value)
+    const result = await getPluginManager().transform(identity, hook, input, signal)
     if (result.deny) throw new Error(result.deny)
     return (result.value === undefined ? value : result.value) as T
   }

@@ -3,6 +3,8 @@
 所有 JSON 值都必须可序列化：禁止 undefined、NaN、Infinity、函数、BigInt、循环引用和未编码的二进制。
 生命周期回调允许返回 void，这是与普通 JSON RPC 的区别。错误使用 Error 或对应的明确失败结构，不能伪造成功。
 可选字段应省略，不写 undefined；JSON 边界先检查再序列化，错误值不会静默删除或转成 null。
+
+宿主对 `context.transform` 输入省略可选 undefined 对象字段，不改变插件回传的规则。identity hook 应返回 `{ value }`（保持不变也可返回 `{}`），不能直接返回消息数组；回传中的 undefined、函数、非有限数、循环引用等仍会被拒绝。
 具体字段的必填、可空、数值单位与范围见 [FIELD_REFERENCE.md](FIELD_REFERENCE.md)。
 宿主定义的 Agent 状态、目录、更新、最终结果与流事件均执行字段校验；错误枚举、未知协议字段或缺少必填字段会拒绝。
 
