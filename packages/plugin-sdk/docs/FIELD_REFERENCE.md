@@ -190,6 +190,8 @@ PluginEvent 必填 id/type/timestamp/identity/data；channel? 为 business/messa
 audience? 为 caller/plugin。data 是随事件类型变化的开放 JSON，不是所有事件都包含 content/delta/state。
 业务观察的 data.subject 标识对象，data.delta 为文本增量，data.summary 为摘要，data.state 为运行快照；
 订阅者必须按 type 判断和校验依赖字段，再通过 HOST_API.md 的历史接口补齐完整数据。
+宿主在交付业务事件前递归省略对象中值为 undefined 的可选字段，保留有效 null，不修改原始事件；
+数组中的 undefined、稀疏数组及其他非法 JSON 仍会拒绝。此规则不放宽插件输入、返回值或自定义消息的严格 JSON 校验。
 自定义 message 的 data 由插件自己的 events 契约定义；不能在 events.on 上等待 messages.emit 的消息。
 
 SessionEvent 必填 event:string、session_id:string，其他字段沿用核心聊天协议。

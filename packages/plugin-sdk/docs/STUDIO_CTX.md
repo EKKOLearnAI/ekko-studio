@@ -18,6 +18,12 @@ paths.dataDir 保存稳定插件私有文件；Agent paths.runtimeDir/workspaceD
 权限不因 global/scoped 模式扩大；global 使用插件原生配置，scoped 使用宿主注入的短期模型代理，不暴露上游 key。
 同一 Agent 会话实例串行运行，按 Agent、账号、Profile、会话和模式隔离。
 
+RPC、事件及动作回调中创建的定时器或 HTTP 服务会继承该调用的异步上下文，闭包里的 ctx.host/state/signal
+也绑定该调用；回调结束后继续读取会被取消。ctx.lifecycle 负责资源清理，不会延长调用或切换身份。
+需要独立页面持续取数时，可在 apply 期间注册 scheduler action，在每次动作内 await run.host 读取并更新缓存，
+独立 HTTP 服务只读取缓存。直接使用插件级 ctx.host 的长驻服务应在 apply 阶段启动，不在短期 RPC 内启动。
+后台动作需要 automation，读取接口需要 api.read；定时任务使用激活管理员的绑定 Profile，且不依赖插件页面打开。
+
 ## 宿主业务模块
 
 | host 分组 | 方法 |
@@ -125,6 +131,7 @@ CORS 提前返回、解析器拒绝的请求及在此中间件之前终止的请
 该能力只处理入站 HTTP，不改变 Studio 对模型或外部服务的出站 HTTP。
 定时执行使用 scheduler.every；资源使用 lifecycle.add/acquire，按所在上下文寿命清理。
 前端 events.on 订阅业务事件，messages.on 接收插件自定义页面消息；Agent output.emit 发布运行事件。
+后端 ctx.events.on 需要 events 权限，按账号和 Profile 授权订阅宿主业务事件，包含原生会话事件，不限于插件创建的会话。
 
 ## 单聊实时会话
 
