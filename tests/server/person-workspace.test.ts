@@ -48,6 +48,54 @@ const create = (input: Record<string, unknown> = {}, title = 'New Bot', owner = 
 const count = () => Number(db.prepare("SELECT COUNT(*) n FROM sessions WHERE id LIKE 'person-main-%'").get()!.n)
 const local = (id: string) => JSON.parse(String(db.prepare('SELECT settings_json FROM person_conversation_settings WHERE session_id=?').get(id)!.settings_json))
 
+it.each(['ekkostudio', 'custom:ekkostudio'])('restores an inherited %s model before Bot snapshot and chat admission', async provider => {
+  const accountHome = join(root, 'providers', 'users', '1')
+  mkdirSync(accountHome, { recursive: true })
+  writeFileSync(join(accountHome, 'routes.json'), JSON.stringify({ fixture: { provider: 'fixture' } }))
+  const before = store.personSettings(1)
+  const agents = [{ id: 'existing-agent', name: 'Existing', description: 'Keep this preset',
+    selection: { runtime: 'ekko' as const, mode: 'scoped' as const, profile: 'default', provider: 'fixture', model: 'test-model', apiMode: 'chat_completions' as const, reasoningEffort: '' } }]
+  store.savePersonSettings(1, { ...before.settings, agents }, before.revision)
+  // A bot created before the gateway migration continues to inherit the default.
+  const bot = await create()
+  const saved = store.personSettings(1, bot.id)
+  vi.mocked(runtime.modelConfig).mockResolvedValue({ default: 'fixture/test-model', default_provider: provider,
+    groups: [{ provider: 'fixture', models: ['test-model'], api_mode: 'chat_completions' }] })
+  const { readPersonSession, createPersonChatAgent } = await import('../../packages/server/src/modules/studio/services/person/chat-agent')
+  const effective = await readPersonSession(1, bot.id)
+  expect(effective.settings.model).toMatchObject({ provider: 'fixture', model: 'test-model', apiMode: 'chat_completions' })
+  expect(effective.inherits_global_model).toBe(true)
+  expect(effective.settings.agents).toEqual(agents)
+  const { requirePersonAgents } = await import('../../packages/server/src/modules/studio/services/person/agents')
+  expect(requirePersonAgents(1)).toEqual(agents)
+  await createPersonChatAgent(1, bot.id)
+  expect(runtime.chatAgent).toHaveBeenCalledWith(expect.objectContaining({ selection: expect.objectContaining({ provider: 'fixture', model: 'test-model' }) }))
+  expect(store.personSettings(1, bot.id)).toEqual(saved)
+})
+
+it('normalizes an explicit projected Bot selection without replacing it with the global model or changing storage', async () => {
+  const accountHome = join(root, 'providers', 'users', '1')
+  mkdirSync(accountHome, { recursive: true })
+  writeFileSync(join(accountHome, 'routes.json'), JSON.stringify({ fixture: { provider: 'fixture' } }))
+  const { effectivePersonSettings } = await import('../../packages/server/src/modules/studio/services/person/catalog')
+  const stored = store.personSettings(1)
+  stored.settings.model = { runtime: 'ekko', mode: 'scoped', profile: 'default', provider: 'ekkostudio', model: 'fixture/vendor/family/model', apiMode: 'chat_completions' }
+  const result = await effectivePersonSettings(1, stored)
+  expect(result.settings.model).toMatchObject({ provider: 'fixture', model: 'vendor/family/model' })
+  expect(result.inherits_global_model).toBe(false)
+  expect(stored.settings.model.model).toBe('fixture/vendor/family/model')
+})
+
+it.each([{ disabled: true }, { apiMode: 'bedrock_converse' }, { apiMode: 'codex_app_server' }])('does not enable an unavailable inherited gateway model: %j', async options => {
+  const accountHome = join(root, 'providers', 'users', '1')
+  mkdirSync(accountHome, { recursive: true })
+  writeFileSync(join(accountHome, 'routes.json'), JSON.stringify({ fixture: { provider: 'fixture' } }))
+  vi.mocked(runtime.modelConfig).mockResolvedValue({ default: 'fixture/test-model', default_provider: 'ekkostudio',
+    groups: [{ provider: 'fixture', models: ['test-model'], api_mode: options.apiMode || 'chat_completions', model_meta: { 'test-model': { disabled: options.disabled } } }] })
+  const { effectivePersonSettings } = await import('../../packages/server/src/modules/studio/services/person/catalog')
+  expect((await effectivePersonSettings(1)).settings.model).toBeNull()
+})
+
 it.each([undefined, null, '', '  '])('creates and persists a valid single-chat-style default for workspace=%j', async value => {
   const bot = await create(value === undefined ? {} : { workspace: value })
   const expected = join(root, '.ekko', 'workspace', 'default', bot.id)
