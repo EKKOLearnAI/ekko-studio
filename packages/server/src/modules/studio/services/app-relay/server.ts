@@ -97,7 +97,8 @@ const ALLOWED_WORKFLOW_CLIENT_EVENTS = new Set([
   'workflow.status.unsubscribe',
 ])
 const ALLOWED_TERMINAL_CLIENT_EVENTS = new Set(['terminal.capabilities', 'terminal.list', 'terminal.create', 'terminal.attach', 'terminal.read', 'terminal.input', 'terminal.resize', 'terminal.detach', 'terminal.close'])
-const ALLOWED_SOCKET_NAMESPACES = new Set(['/terminal', '/chat-run', '/group-chat', '/workflow', '/person-presence'])
+const ALLOWED_PLUGIN_CLIENT_EVENTS = new Set(['session.open', 'session.command', 'session.close'])
+const ALLOWED_SOCKET_NAMESPACES = new Set(['/plugins', '/terminal', '/chat-run', '/group-chat', '/workflow', '/person-presence'])
 const NON_STREAMING_SUPPRESSED_EVENTS = new Set([
   'message.delta',
   'message.interim',
@@ -377,7 +378,7 @@ export class LocalAppRelayServer {
       role: 'app',
       machineId,
       hostConnected: true,
-      capabilities: ['http.request', 'http.download.chunked', 'socket.chat-run', 'socket.group-chat', 'socket.workflow', 'app.entitlement', 'p2p.direct.v1'],
+      capabilities: ['http.request', 'http.download.chunked', 'socket.chat-run', 'socket.group-chat', 'socket.workflow', 'socket.plugins', 'app.entitlement', 'p2p.direct.v1'],
     })
     if (socket.data.localUserToken) this.scheduleTokenExpiry(socket)
     if (socket.data.appEntitlement) this.scheduleEntitlementExpiry(socket)
@@ -1063,6 +1064,7 @@ function isMediaHttpRequest(request: AppRelayHttpRequest): boolean {
 }
 
 function isAllowedSocketEvent(namespace: string, event: string): boolean {
+  if (namespace === '/plugins') return ALLOWED_PLUGIN_CLIENT_EVENTS.has(event)
   if (namespace === '/person-presence') return event === 'person.activity'
   if (namespace === '/terminal') return ALLOWED_TERMINAL_CLIENT_EVENTS.has(event)
   if (namespace === '/chat-run') return ALLOWED_CHAT_RUN_CLIENT_EVENTS.has(event)

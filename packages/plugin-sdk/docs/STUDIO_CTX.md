@@ -168,6 +168,11 @@ transport.connected/disconnected/error/closed 描述连接状态。调用监听�
 输入、options、事件和结果沿用 SDK JSON 限制；过大的事件会报告 transport.error，调用者可分页读取历史。
 连接寿命绑定创建它的上下文：页面卸载、插件停用、调用取消均释放资源；普通 RPC 不适合承载长期订阅。
 
+App 插件页面通过 Studio 中继使用同一实时句柄，支持单聊和 BOT 会话；局域网、云中继及 P2P
+沿用宿主账号、Profile、会话与插件权限校验，插件不会获得认证凭据。需要配套更新 App、Studio
+及云中继服务；旧中继未开放 `/plugins` 通道时会明确报告不支持。网络恢复后只重建订阅并恢复快照，
+不会重发 run 等控制指令。退出页面、切换账号/设备/Profile 时释放页面连接，不停止正在运行的任务。
+
 ## BOT 完整模块
 
 `host.bots.list/create/get/configure/clear/remove` 管理 BOT 角色及对话；create 输入沿用宿主 title、bot_type、
