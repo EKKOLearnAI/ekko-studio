@@ -1,3 +1,7 @@
+vi.mock('../../packages/server/src/modules/studio/public/provider-account', () => ({
+  providerAccountId: () => 1,
+  withProviderAccount: (_id: unknown, operation: () => unknown) => operation(),
+}))
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
@@ -8,15 +12,19 @@ const mocks = vi.hoisted(() => ({
   readConfig: vi.fn(),
   readApp: vi.fn(),
   copilotToken: vi.fn(),
+  catalogModels: vi.fn(),
 }))
 vi.mock('../../packages/server/src/modules/hermes/services/profiles/profile', () => ({
   getProfileDir: (profile: string) => join(mocks.home, profile),
   getActiveProfileName: () => 'default',
   listProfileNamesFromDisk: () => ['default', 'work'],
 }))
-vi.mock('../../packages/server/src/modules/studio/public/profile-config', async () => ({
+vi.mock('../../packages/server/src/modules/studio/public/provider-config', async () => ({
   ...await import('../../packages/server/src/modules/hermes/services/profiles/config'),
+  ...await import('../../packages/server/src/modules/hermes/services/profiles/profile'),
   readConfigYamlForProfile: mocks.readConfig,
+  readAppConfig: mocks.readApp,
+  providerDisplayLabel: (_config: unknown, _profile: string, _provider: string, label: string) => label,
 }))
 vi.mock('../../packages/server/src/modules/studio/public/app-config', () => ({
   readAppConfig: mocks.readApp,
@@ -34,7 +42,7 @@ vi.mock('../../packages/server/src/modules/hermes/services/providers/provider-ed
 }))
 vi.mock('../../packages/server/src/modules/hermes/services/providers/model-catalog-cache', () => ({
   readProviderModelCatalogCache: async () => ({ version: 1, providers: {} }),
-  resolveProviderCatalogModels: (_cache: unknown, _provider: string, _url: string, fallback: string[]) => fallback,
+  resolveProviderCatalogModels: mocks.catalogModels,
   resolveProviderCatalogEntry: () => undefined,
 }))
 vi.mock('../../packages/server/src/modules/hermes/services/providers/copilot-models', () => ({
@@ -60,8 +68,17 @@ beforeEach(async () => {
   mocks.readConfig.mockResolvedValue({})
   mocks.readApp.mockResolvedValue({ copilotEnabled: false })
   mocks.copilotToken.mockResolvedValue(null)
+  mocks.catalogModels.mockImplementation((_cache: unknown, _provider: string, _url: string, fallback: string[]) => fallback)
 })
 afterEach(async () => { await rm(mocks.home, { recursive: true, force: true }) })
+
+it('keeps the imported OpenRouter free-model catalog visible in the account Provider pool', async () => {
+  mocks.readConfig.mockResolvedValue({ providers: { openrouter: { name: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', catalog_provider: 'openrouter', runtime_provider: 'openrouter', key_env: 'OPENROUTER_API_KEY' } } })
+  mocks.catalogModels.mockImplementation((_cache: unknown, provider: string, _url: string, fallback: string[], options: any) =>
+    provider === 'openrouter' && options?.freeOnly ? ['test/model:free'] : fallback)
+  const result = await getAvailableModelConfigForProfile('work')
+  expect(result.groups.find(group => group.provider === 'openrouter')?.models).toEqual(['test/model:free'])
+})
 
 it.each(['nested tokens', 'access token', 'credential pool'])(
   'keeps every authorized keyless provider visible with %s',
@@ -180,6 +197,6 @@ it('preserves inline-key precedence over key_env', async () => {
 
   const result = await getAvailableModelConfigForProfile('work')
 
-  expect(result.groups[0]).toMatchObject({ credential_configured: true, api_key: 'inline-key' })
+  expect(result.groups[0]).toMatchObject({ credential_configured: true, api_key: '' })
   expect(resolveCustomProviderApiKey({ ...entry, source: 'providers' }, 'CN_API_KEY=env-key\n')).toBe('inline-key')
 })

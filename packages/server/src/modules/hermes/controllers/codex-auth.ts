@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto'
 import { join, dirname } from 'path'
-import { homedir } from 'os'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
+import { getActiveProfileName } from '../services/profiles/profile'
+import { getProfileDir } from '../../studio/public/provider-config'
 import { logger } from '../../studio/public/logging'
 import { resolveAuthorizedProviderRuntimeCredentials } from '../services/providers/authorized-provider-credentials'
 
@@ -14,7 +14,6 @@ const CODEX_OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token'
 const CODEX_DEFAULT_BASE_URL = 'https://chatgpt.com/backend-api/codex'
 const CODEX_REDIRECT_URI = 'https://auth.openai.com/deviceauth/callback'
 const CODEX_VERIFICATION_URL = 'https://auth.openai.com/codex/device'
-const CODEX_HOME = join(homedir(), '.codex')
 const POLL_MAX_DURATION = 15 * 60 * 1000
 const POLL_DEFAULT_INTERVAL = 5000
 
@@ -46,14 +45,6 @@ function saveAuthJson(authPath: string, data: AuthJson): void {
   writeFileSync(authPath, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 })
 }
 
-function saveCodexCliTokens(accessToken: string, refreshToken: string): void {
-  const codexHome = process.env.CODEX_HOME || CODEX_HOME
-  const codexAuthPath = join(codexHome, 'auth.json')
-  const dir = dirname(codexAuthPath)
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  writeFileSync(codexAuthPath, JSON.stringify({ tokens: { access_token: accessToken, refresh_token: refreshToken }, last_refresh: new Date().toISOString() }, null, 2) + '\n', { mode: 0o600 })
-}
-
 function requestedProfile(ctx: any): string {
   const headerProfile = typeof ctx.get === 'function' ? ctx.get('x-hermes-profile') : ''
   const queryProfile = typeof ctx.query?.profile === 'string' ? ctx.query.profile : ''
@@ -79,7 +70,6 @@ export function saveCodexOAuthTokensForProfile(profile: string, accessToken: str
   if (!auth.credential_pool) auth.credential_pool = {}
   auth.credential_pool['openai-codex'] = [{ id: `openai-codex-${Date.now()}`, label: 'OpenAI Codex', base_url: CODEX_DEFAULT_BASE_URL, access_token: accessToken, last_status: null }]
   saveAuthJson(authPath, auth)
-  saveCodexCliTokens(accessToken, refreshToken)
 }
 
 async function codexLoginWorker(session: CodexSession): Promise<void> {

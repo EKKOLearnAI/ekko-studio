@@ -53,13 +53,13 @@ const CLAUDE_PROXY_VISIBLE_MODELS = [
 ]
 
 function localProxyBaseUrl(routeKey: string): string {
-  return `http://127.0.0.1:${config.port}/api/claude-code-proxy/${routeKey}`
+  return `http://127.0.0.1:${config.port}/api/ekko-studio/models`
 }
 
 export function revokeClaudeCodeProxyTarget(routeKey: string): number { return targetRegistry.removeWhere(target => target.routeKey === routeKey) }
 
-export function registerClaudeCodeProxyTarget(input: ClaudeCodeProxyTargetInput): { baseUrl: string; token: string; routeKey: string } {
-  const target = targetRegistry.register(input)
+export function registerClaudeCodeProxyTarget(input: ClaudeCodeProxyTargetInput, persisted?: { token: string }): { baseUrl: string; token: string; routeKey: string } {
+  const target = targetRegistry.register(input, persisted)
 
   return { baseUrl: localProxyBaseUrl(target.routeKey), token: target.token, routeKey: target.routeKey }
 }
@@ -77,18 +77,18 @@ function authToken(ctx: Context): string {
 }
 
 function requireTarget(ctx: Context): ClaudeCodeProxyTarget | null {
-  const target = findTarget(String(ctx.params.key || ''))
+  const target = findTarget(String(ctx.params.key || '')) || targetRegistry.findByToken(authToken(ctx))
   if (!target) {
     ctx.status = 404
     ctx.body = { type: 'error', error: { type: 'not_found_error', message: 'Claude proxy target not found' } }
     return null
   }
-  if (authToken(ctx) !== target.token) {
+  if (authToken(ctx) !== target.token && (ctx.state as any).modelGatewayTarget !== target.routeKey) {
     ctx.status = 401
     ctx.body = { type: 'error', error: { type: 'authentication_error', message: 'Invalid Claude proxy token' } }
     return null
   }
-  return target
+  return { ...target, reasoningCodec: (ctx.state as any).modelGatewayReasoningCodec, requestHeaders: { ...(ctx.get('anthropic-beta') ? { 'anthropic-beta': ctx.get('anthropic-beta') } : {}), ...(ctx.get('anthropic-version') ? { 'anthropic-version': ctx.get('anthropic-version') } : {}) }, signal: (ctx.state as any).modelGatewaySignal || target.signal }
 }
 
 function anthropicMessagesUrl(target: ClaudeCodeProxyTarget): string {
@@ -307,11 +307,13 @@ async function callAnthropicMessages(target: ClaudeCodeProxyTarget, body: any): 
   const result = await withCustomEncryptedContentRetry(target, body, nextBody => agentRunGateway.completeJson({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model, signal: target.signal,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     headers: {
       ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
+      ...target.requestHeaders,
     },
     body: anthropicRequestBody(nextBody, target),
   }))
@@ -329,6 +331,7 @@ async function callOpenAiChat(target: ClaudeCodeProxyTarget, body: any): Promise
   const response = await agentRunGateway.completeJson({
     url: resolveChatCompletionsUrl(target.baseUrl),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model, signal: target.signal,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: anthropicToOpenAiChat(body, target),
@@ -347,6 +350,7 @@ async function callOpenAiResponses(target: ClaudeCodeProxyTarget, body: any): Pr
   const response = await agentRunGateway.completeJson({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model, signal: target.signal,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: anthropicToOpenAiResponses(body, target),
@@ -391,6 +395,7 @@ async function openAiChatToAnthropicSseStream(target: ClaudeCodeProxyTarget, bod
   const stream = await agentRunGateway.streamBytes({
     url: resolveChatCompletionsUrl(target.baseUrl),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model, signal: target.signal,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: anthropicToOpenAiChat(body, target, true),
@@ -410,11 +415,13 @@ async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: a
   const request = (nextBody: any) => agentRunGateway.streamBytes({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model, signal: target.signal,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     headers: {
       ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
+      ...target.requestHeaders,
     },
     body: anthropicRequestBody(nextBody, target),
   })
@@ -462,6 +469,7 @@ async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget
   const stream = await agentRunGateway.streamBytes({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model, signal: target.signal,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: anthropicToOpenAiResponses(body, target, true),
@@ -522,3 +530,30 @@ export async function claudeProxyMessages(ctx: Context) {
     }
   }
 }
+
+export const findClaudeProxyByToken = (token: string) => targetRegistry.findByToken(token)
+
+export async function claudeProxyCountTokens(ctx: Context) {
+  const target = requireTarget(ctx)
+  if (!target) return
+  const body = ctx.request.body as any
+  if (!Array.isArray(body?.messages)) { ctx.status = 400; ctx.body = { type: 'error', error: { type: 'invalid_request_error', message: 'messages must be an array' } }; return }
+  if (target.apiMode === 'anthropic_messages') {
+    try {
+      ctx.body = await agentRunGateway.completeJson({
+        url: `${anthropicMessagesUrl(target)}/count_tokens`,
+        ownerUserId: target.ownerUserId, profile: target.profile, provider: target.provider, model: target.model,
+        apiKey: target.apiKey, signal: target.signal,
+        headers: { 'x-api-key': target.apiKey, 'anthropic-version': '2023-06-01', ...target.requestHeaders },
+        body: anthropicRequestBody(body, target),
+      })
+    } catch (error: any) { ctx.status = error.status || 502; ctx.body = { type: 'error', error: { type: 'api_error', message: error.message } } }
+    return
+  }
+  // Other vendors do not expose an Anthropic tokenizer. Label the local
+  // conservative estimate so callers can distinguish it from native counting.
+  ctx.set('x-studio-token-count-estimated', 'true')
+  ctx.body = { input_tokens: Math.max(1, Buffer.byteLength(JSON.stringify({ messages: body.messages, system: body.system, tools: body.tools }), 'utf8')) }
+}
+
+export const findClaudeGatewayTarget = (routeKey: string) => targetRegistry.find(routeKey)

@@ -1,3 +1,4 @@
+import { withProviderAccount } from '../../public/provider-account'
 import { resolveModelReasoningEffort } from '../../../../../../shared/reasoning-effort'
 import { randomUUID } from 'node:crypto'
 import type { AgentMessage, AgentToolDefinition } from '../../../../../../ekko-agent/src/model/types'
@@ -32,7 +33,7 @@ In main chat, when missing user input materially blocks or changes the outcome, 
 Default: 1–3 sentences, user's language, result first. Acknowledge dispatched work before waiting and report the actual result on return. Omit restatement, repetition, IDs/logs. Keep routing categories (append/redirect, same/opposite direction), tool actions and queue/stop-barrier mechanics internal. Never ask users to select these modes or rewrite their full brief. Interpret ordinary corrections yourself; say naturally what changed and distinguish a stop request from confirmed termination. Give redirected work a short title matching its new goal. Reviews: issues + fixes. Expand when requested.
 Verified absolute paths: images ![label](<path>), files [label](<path>). Never read binaries as text.`
 
-export async function runPersonModel(userId: number, role: PersonRole, messages: AgentMessage[], tools: PersonTool[], signal: AbortSignal, extra = '', onEvent?: (event: unknown) => void, check?: () => void, sessionId?: string, workspace?: string) {
+async function runPersonModelImpl(userId: number, role: PersonRole, messages: AgentMessage[], tools: PersonTool[], signal: AbortSignal, extra = '', onEvent?: (event: unknown) => void, check?: () => void, sessionId?: string, workspace?: string) {
   if (role !== 'main') signal = AbortSignal.any([signal,AbortSignal.timeout(120_000)])
   const { settings, reasoning_efforts, compression, contextTokens } = await effectivePersonSettings(userId, personSettings(userId, sessionId))
   const selection = settings.model
@@ -55,3 +56,5 @@ export async function runPersonModel(userId: number, role: PersonRole, messages:
       usage: response.usage, apiDuration: (Date.now() - requestedAt) / 1000 }),
   })
 }
+
+export const runPersonModel = (...args: Parameters<typeof runPersonModelImpl>) => withProviderAccount(args[0], () => runPersonModelImpl(...args))

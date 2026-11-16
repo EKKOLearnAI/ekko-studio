@@ -1,17 +1,16 @@
 import { randomUUID } from 'crypto'
 import { startDeviceFlow, pollDeviceFlow } from '../services/providers/copilot-device-flow'
-import { saveEnvValueForProfile, updateConfigYamlForProfile } from '../../studio/public/profile-config'
+import { saveEnvValueForProfile, updateConfigYamlForProfile } from '../../studio/public/provider-config'
 import {
   invalidateAllCaches,
   resolveCopilotOAuthTokenWithSource,
   type CopilotTokenSource,
 } from '../services/providers/copilot-models'
-import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
-import { resolveAgentBridgeCommand } from '../services/bridge/manager'
-import { prepareCopilotRuntime } from '../services/providers/copilot-runtime'
+import { getActiveProfileName } from '../services/profiles/profile'
+import { getProfileDir } from '../../studio/public/provider-config'
 import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 import { join } from 'path'
-import { readAppConfig, writeAppConfig } from '../../studio/public/app-config'
+import { readAppConfig, writeAppConfig } from '../../studio/public/provider-config'
 import { readFile } from 'fs/promises'
 import { logger } from '../../studio/public/logging'
 import { preservedModelKeys } from '../services/models/model-section'
@@ -53,7 +52,7 @@ async function persistToken(token: string, profile: string): Promise<void> {
   // NOTE: 故意不写 process.env.COPILOT_GITHUB_TOKEN —— 否则该值会跨 profile 持续覆盖
   // resolveCopilotOAuthTokenWithSource 的 .env 读取，导致切到别的 profile 仍解析到当前
   // profile 的 token。invalidateAllCaches() + .env 文件本身已能保证下次解析读到新 token。
-  await prepareCopilotRuntime(resolveAgentBridgeCommand({ hermesHome: getProfileDir(profile) }), { token, enableDisabled: true })
+  await saveEnvValueForProfile(profile, 'COPILOT_GITHUB_TOKEN', token)
   await writeAppConfig({ copilotEnabled: true })
   invalidateAllCaches()
   invalidateProviderRuntime(profile, 'copilot')
@@ -186,7 +185,6 @@ export async function checkToken(ctx: any): Promise<void> {
 export async function enable(ctx: any): Promise<void> {
   const profile = requestedProfile(ctx)
   try {
-    await prepareCopilotRuntime(resolveAgentBridgeCommand({ hermesHome: getProfileDir(profile) }), { enableDisabled: true })
     await writeAppConfig({ copilotEnabled: true })
     invalidateAllCaches()
     invalidateProviderRuntime(profile, 'copilot')

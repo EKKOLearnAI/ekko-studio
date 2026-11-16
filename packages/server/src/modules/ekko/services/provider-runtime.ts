@@ -6,7 +6,7 @@ import {
   PROVIDER_ENV_MAP,
   readConfigYamlForProfile,
   safeReadFile,
-} from '../../studio/public/profile-config'
+} from '../../studio/public/provider-config'
 import {
   resolveEkkoAuthorizedProviderCredentials,
   type EkkoAuthorizedProviderCredentials,
@@ -36,11 +36,15 @@ export async function resolveEkkoProviderRuntimeConfig(input: {
 
   const profile = String(input.profile || '').trim() || 'default'
   const providerKey = providerKeyWithoutCustomPrefix(provider.toLowerCase())
-  const authorized = await resolveEkkoAuthorizedProviderCredentials(
-    profile,
-    provider,
-    input.model,
-    input.forceRefresh === true,
+  const config = await readConfigYamlForProfile(profile)
+  const envContent = await safeReadFile(join(getProfileDir(profile), '.env')) || ''
+  const customEntry = getCompatibleCustomProviders(config).find(entry => {
+    const entryKeys = [entry.name, entry.provider_key, entry.catalog_provider].filter(Boolean).flatMap(value => providerLookupCandidates(String(value)))
+    return providerLookupCandidates(provider).some(candidate => entryKeys.includes(candidate))
+  })
+  const authProvider = customEntry?.auth_provider || provider
+  const authorized = customEntry && !customEntry.auth_provider ? {} : await resolveEkkoAuthorizedProviderCredentials(
+    profile, authProvider, input.model, input.forceRefresh === true, customEntry?.auth_scope,
   )
   const authorizedValuesFirst = !!authorized.apiKey
   let baseUrl = String(
@@ -59,18 +63,6 @@ export async function resolveEkkoProviderRuntimeConfig(input: {
       : input.apiMode || authorized.apiMode || '',
   ).trim()
 
-  let config: Record<string, any> = {}
-  try {
-    config = await readConfigYamlForProfile(profile)
-  } catch {}
-  const envContent = await safeReadFile(join(getProfileDir(profile), '.env')) || ''
-
-  const customEntry = getCompatibleCustomProviders(config).find((entry) => {
-    const entryKeys = [entry.name, entry.provider_key]
-      .filter(Boolean)
-      .flatMap(value => providerLookupCandidates(String(value)))
-    return providerLookupCandidates(provider).some(candidate => entryKeys.includes(candidate))
-  })
   if (customEntry) {
     if (!baseUrl) baseUrl = String(customEntry.base_url || '').trim()
     if (!apiKey) apiKey = resolveCustomProviderApiKey(customEntry, envContent)
@@ -106,8 +98,9 @@ export function createEkkoAuthorizedProviderFetch(input: {
   provider: string
   model?: string
   accessToken?: string
+  credentialScope?: string
 }, fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)): typeof fetch {
-  if (!isAuthorizedRuntimeProvider(input.provider)) return fetchImpl
+  if (input.accessToken?.startsWith('studio_model_') || !isAuthorizedRuntimeProvider(input.provider)) return fetchImpl
 
   let accessToken = String(input.accessToken || '').trim()
   let refresh: Promise<EkkoAuthorizedProviderCredentials> | null = null
@@ -130,6 +123,7 @@ export function createEkkoAuthorizedProviderFetch(input: {
       input.provider,
       input.model,
       true,
+      input.credentialScope,
     ).finally(() => { refresh = null })
     const credentials = await refresh
     accessToken = String(credentials.apiKey || '').trim()

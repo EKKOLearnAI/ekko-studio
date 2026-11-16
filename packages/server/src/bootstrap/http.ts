@@ -1,3 +1,4 @@
+import { restoreStudioModelTargets } from './model-gateway-adapter'
 import { registerDesktopBrowserRelay } from '../modules/studio/sockets/desktop-browser'
 import { registerPluginSessions } from '../modules/studio/sockets/plugin-sessions'
 import { getPluginManager, startPluginHost, stopPluginHost } from '../modules/studio/services/plugins/host'
@@ -436,6 +437,7 @@ export async function bootstrap() {
   }
 
   try {
+    await restoreStudioModelTargets()
     const restoredCodexProxyTargets = await restorePersistedCodexProxyTargets()
     if (restoredCodexProxyTargets > 0) {
       console.log(`[bootstrap] restored ${restoredCodexProxyTargets} persisted Codex/Grok proxy target(s)`)

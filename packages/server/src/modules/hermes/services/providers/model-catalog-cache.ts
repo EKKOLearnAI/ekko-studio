@@ -1,16 +1,19 @@
+import { resolveAuthorizedProviderRuntimeCredentials as resolveAccountAuth } from '../../../studio/public/authorized-provider-runtime'
+import { listUsers } from '../../../studio/public/users'
+import { providerCredentialDir, providerAccountHome, providerAccountId, providerScopeKey, withProviderAccount, importAccountProviders } from '../../../studio/public/provider-account'
 import { openCodeSessionHeaders } from '../../../studio/public/opencode-session'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
 import { currentMiniMaxCatalogModels, PROVIDER_PRESETS } from '../../../studio/contracts/providers'
-import { readAppConfig } from '../../../studio/public/app-config'
+import { readAppConfig } from '../../../studio/public/provider-config'
 import { config } from '../../../studio/public/config'
 import { logger } from '../../../studio/public/logging'
 import { fetchProviderModels } from '../../../studio/public/provider-catalog'
-import { PROVIDER_ENV_MAP, readConfigYamlForProfile } from '../../../studio/public/profile-config'
+import { PROVIDER_ENV_MAP, readConfigYamlForProfile } from '../../../studio/public/provider-config'
 import { safeFileStore } from '../../../studio/public/safe-file-store'
 import { fetchCopilotModelsWithOAuthToken, resolveCopilotOAuthToken } from './copilot-models'
-import { getProfileDir, listProfileNamesFromDisk } from '../profiles/profile'
+import { getProfileDir, listProfileNamesFromDisk } from '../../../studio/public/provider-config'
 import { resolveAuthorizedProviderRuntimeCredentials } from './authorized-provider-credentials'
 
 export type ModelCatalogSource = 'live' | 'fallback'
@@ -48,6 +51,7 @@ export interface ProviderCatalogRefreshTarget {
   free_only?: boolean
   profile: string
   api_mode?: string
+  runtime_provider?: string
   credential_kind: 'api_key' | 'oauth' | 'copilot' | 'none'
   skip_live_fetch?: boolean
 }
@@ -61,7 +65,7 @@ interface StoredAuthCatalogCredential {
 }
 
 const CACHE_VERSION = 1
-const CACHE_PATH = join(config.appHome, 'cache', 'provider-model-catalog.json')
+const cachePath = () => join(providerAccountHome(), 'catalog.json')
 const RESERVED_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
 const KEYLESS_CATALOG_PROVIDERS = new Set(['cliproxyapi'])
 const AUTH_CATALOG_PROVIDERS = new Set([
@@ -94,8 +98,7 @@ export function providerModelCatalogKey(
   profile?: string,
 ): string {
   const base = `${provider.trim()}|${normalizeCatalogBaseUrl(baseUrl)}|${freeOnly ? 'free' : 'all'}`
-  const scopedProfile = String(profile || '').trim()
-  return scopedProfile ? `profile:${scopedProfile}|${base}` : base
+  return base
 }
 
 function uniqueModels(models: unknown): string[] {
@@ -140,7 +143,7 @@ function normalizeCache(raw: unknown): ProviderModelCatalogCache {
 
 export async function readProviderModelCatalogCache(): Promise<ProviderModelCatalogCache> {
   try {
-    const raw = await safeFileStore.readText(CACHE_PATH)
+    const raw = await safeFileStore.readText(cachePath())
     return normalizeCache(JSON.parse(raw))
   } catch (err: any) {
     if (err?.code !== 'ENOENT') {
@@ -163,6 +166,7 @@ export function resolveProviderCatalogEntry(
     if (scoped) return scoped
   }
   return cache.providers[providerModelCatalogKey(provider, baseUrl, freeOnly)]
+    || Object.values(cache.providers).find(entry => entry.provider === provider && normalizeCatalogBaseUrl(entry.base_url) === normalizeCatalogBaseUrl(baseUrl) && !!entry.free_only === freeOnly)
 }
 
 export function resolveProviderCatalogModels(
@@ -226,7 +230,7 @@ export async function writeProviderModelCatalogEntry(input: {
     if (input.previous_updated_at) entry.previous_updated_at = input.previous_updated_at
   }
 
-  await safeFileStore.updateText(CACHE_PATH, (current) => {
+  await safeFileStore.updateText(cachePath(), (current) => {
     let cache = emptyCache()
     if (current.trim()) {
       try { cache = normalizeCache(JSON.parse(current)) } catch { cache = emptyCache() }
@@ -268,6 +272,7 @@ export async function refreshProviderModelCatalog(input: {
   profiles?: string[]
   profile?: string
   api_mode?: string
+  runtime_provider?: string
   credential_kind?: ProviderCatalogRefreshTarget['credential_kind']
 }): Promise<ProviderModelCatalogEntry | null> {
   const provider = input.provider.trim()
@@ -283,6 +288,7 @@ export async function refreshProviderModelCatalog(input: {
     free_only: input.free_only,
     profile: String(input.profile || input.profiles?.[0] || '').trim(),
     api_mode: input.api_mode,
+    runtime_provider: input.runtime_provider,
     credential_kind: input.credential_kind || (input.api_key ? 'api_key' : 'none'),
   })
   if (fetched.length > 0) {
@@ -407,8 +413,9 @@ export async function fetchProviderCatalogRefreshTargetModels(
   target: ProviderCatalogRefreshTarget,
 ): Promise<string[]> {
   if (target.skip_live_fetch) return []
-  if (target.provider === 'openai-codex') return fetchCodexOAuthModels(target.api_key)
-  if (target.provider === 'copilot') {
+  const runtime = target.runtime_provider || target.provider
+  if (runtime === 'openai-codex') return fetchCodexOAuthModels(target.api_key)
+  if (runtime === 'copilot') {
     try {
       const models = await fetchCopilotModelsWithOAuthToken(target.api_key)
       return uniqueModels(models.map(model => model.id))
@@ -417,7 +424,7 @@ export async function fetchProviderCatalogRefreshTargetModels(
       return []
     }
   }
-  if (target.provider === 'claude-oauth') {
+  if (runtime === 'claude-oauth') {
     return fetchClaudeOAuthModels(target.base_url, target.api_key)
   }
   return fetchProviderModels(target.base_url, target.api_key, target.free_only === true)
@@ -498,7 +505,7 @@ async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): 
       if (!preset?.base_url) continue
       if (provider === 'copilot') {
         if (!copilotEnabled) continue
-        const oauthToken = await resolveCopilotOAuthToken(envContent, profile === 'default')
+        const oauthToken = await resolveCopilotOAuthToken(envContent, false)
         if (!oauthToken) continue
         mergeCandidate(candidates, {
           provider,
@@ -563,13 +570,15 @@ async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): 
       const name = cp.name
       const baseUrl = normalizeCatalogBaseUrl(cp.base_url)
       if (!name || !baseUrl) continue
-      const provider = providerKeyForCustom(name)
+      const provider = cp.catalog_provider || providerKeyForCustom(name)
       const presetModels = presetsByProvider.get(name)?.models || []
       // Respect the configured `models:` whitelist (v12+ dict) when present —
       // those entries should always be reachable as fallbacks even before a
       // live `/v1/models` probe runs.
       const configuredModels = cp.models ? Object.keys(cp.models) : []
-      const apiKey = cp.key_env ? env[cp.key_env] || '' : cp.api_key || ''
+      let apiKey = cp.key_env ? env[cp.key_env] || '' : cp.api_key || ''
+      if (cp.auth_provider === 'copilot') apiKey = await resolveCopilotOAuthToken(await readFile(join(providerCredentialDir(cp.auth_scope), '.env'), 'utf8').catch(() => ''), false)
+      else if (cp.auth_provider) apiKey = (await resolveAccountAuth({ profile, provider: cp.auth_provider, credentialScope: cp.auth_scope })).apiKey
       mergeCandidate(candidates, {
         provider,
         label: name,
@@ -578,7 +587,8 @@ async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): 
         fallback_models: uniqueModels([cp.model, ...configuredModels, ...presetModels]),
         profile,
         api_mode: cp.api_mode,
-        credential_kind: apiKey ? 'api_key' : 'none',
+        runtime_provider: cp.auth_provider || cp.runtime_provider,
+        credential_kind: cp.auth_provider === 'copilot' ? 'copilot' : cp.auth_provider ? 'oauth' : apiKey ? 'api_key' : 'none',
       })
     }
   }
@@ -607,6 +617,10 @@ async function runLimited<T>(items: T[], limit: number, worker: (item: T) => Pro
 }
 
 export async function refreshConfiguredProviderModelCatalogs(options: { force?: boolean } = {}): Promise<void> {
+  try { providerAccountId() } catch {
+    for (const user of listUsers().filter(user => user.status === 'active')) await withProviderAccount(user.id, async () => { await importAccountProviders(); await refreshConfiguredProviderModelCatalogs(options) })
+    return
+  }
   const cache = await readProviderModelCatalogCache()
   if (!options.force && Object.keys(cache.providers).length > 0) {
     logger.info('[model-catalog-cache] provider model catalog cache exists; skipping startup refresh')
@@ -641,6 +655,7 @@ export async function refreshConfiguredProviderModelCatalogs(options: { force?: 
           profiles,
           profile: candidate.profile,
           api_mode: candidate.api_mode,
+          runtime_provider: candidate.runtime_provider,
           credential_kind: candidate.credential_kind,
         })
       }

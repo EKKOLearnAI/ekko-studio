@@ -30,13 +30,8 @@ export function createCodexProxyRequestBodyParser(isAuthorized: (ctx: Context) =
     parsedMethods: ['POST'],
   })
   return async (ctx: Context, next: Next) => {
-    if (ctx.method !== 'POST' || !/^\/api\/codex-proxy\/[^/]+\/(?:v1\/responses|gemini\/v1beta\/models\/[^/]+)$/.test(ctx.path)) {
+    if (ctx.method !== 'POST' || !/^(?:\/api\/codex-proxy\/[^/]+|\/api\/ekko-studio\/models)\/(?:v1\/responses|(?:gemini\/)?v1beta\/models\/.+)$/.test(ctx.path) || !isAuthorized(ctx)) {
       return next()
-    }
-    if (!isAuthorized(ctx)) {
-      ctx.status = 401
-      ctx.body = { error: { type: 'authentication_error', message: 'Invalid Codex proxy token' } }
-      return
     }
     return parse(ctx, next)
   }

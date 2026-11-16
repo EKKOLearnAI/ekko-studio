@@ -1,3 +1,6 @@
+import { providerAccountHome, providerAccountId } from '../../studio/public/provider-account'
+import { saveModelTarget } from '../../studio/public/model-target-store'
+import { resolveProviderUpstream } from '../../studio/public/provider-upstream'
 import { lowestReasoningEffort } from '../../../../../shared/reasoning-effort'
 import { studioModelReasoningEffort } from '../../studio/public/model-reasoning-effort'
 import type { CodingAgentDefinition, CodingAgentConfigFileDefinition } from '../contracts/definition'
@@ -27,7 +30,7 @@ import { delimiter, dirname, join, win32 as win32Path } from 'path'
 import { promisify } from 'util'
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { getWebUiHome } from '../../studio/public/config'
-import { getProfileDir, PROVIDER_ENV_MAP, readConfigYamlForProfile, safeReadFile } from '../../studio/public/profile-config'
+import { getProfileDir, PROVIDER_ENV_MAP, readConfigYamlForProfile, safeReadFile } from '../../studio/public/provider-config'
 import { getCompatibleCustomProviders, resolveCustomProviderApiKey } from '../../studio/contracts/provider-compat'
 import { registerClaudeCodeProxyTarget } from './claude-code/proxy'
 import { registerCodexProxyTarget, restoreCodexProxyTarget } from './codex/proxy'
@@ -80,6 +83,17 @@ const PI_MCP_ADAPTER_PACKAGE = 'pi-mcp-adapter'
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org'
 const PI_PROVIDER_ID = 'hermes-studio'
 const PI_PROXY_TARGET_FILE = 'proxy-target.json'
+
+async function registerSavedCodexTarget(input: Parameters<typeof registerCodexProxyTarget>[0]) {
+  const target = registerCodexProxyTarget(input)
+  await saveModelTarget('codex_responses', input, target.token)
+  return target
+}
+async function registerSavedClaudeTarget(input: Parameters<typeof registerClaudeCodeProxyTarget>[0]) {
+  const target = registerClaudeCodeProxyTarget(input)
+  await saveModelTarget('anthropic_messages', { ...input, profile: input.profile || 'default' }, target.token)
+  return target
+}
 const PI_DYNAMIC_PROMPT_FILE = 'dynamic-system-prompt.md'
 const PI_STUDIO_EXTENSION_FILE = 'hermes-studio-runtime.ts'
 const PI_PROXY_TARGET_KEY_FILE = '.pi-proxy-target.key'
@@ -714,12 +728,17 @@ async function resolveStoredProviderLaunchInput(
   const customProviders = getCompatibleCustomProviders(config)
   const customEntry = customProviders.find((entry) => {
     const name = slugProviderName(String(entry?.name || ''))
-    return candidates.includes(`custom:${name}`) || candidates.includes(`custom_${name}`) || candidates.includes(name)
+    return entry.catalog_provider === provider || candidates.includes(`custom:${name}`) || candidates.includes(`custom_${name}`) || candidates.includes(name)
   })
   if (customEntry) {
-    canonicalProvider = `custom:${slugProviderName(String(customEntry.name || normalizedProvider))}`
+    canonicalProvider = customEntry.catalog_provider || `custom:${slugProviderName(String(customEntry.name || normalizedProvider))}`
     if (!baseUrl) baseUrl = String(customEntry.base_url || '').trim()
     if (!apiKey) apiKey = resolveCustomProviderApiKey(customEntry, envContent)
+    if (!apiKey && customEntry.auth_provider) {
+      const runtime = await resolveProviderUpstream({ profile, provider: canonicalProvider, model })
+      apiKey = runtime.apiKey || ''
+      if (!baseUrl) baseUrl = runtime.baseUrl || ''
+    }
     if (!apiMode) {
       apiMode = normalizeLaunchApiMode(
         customEntry.api_mode,
@@ -805,7 +824,7 @@ function makeAgentSessionId(): string {
 }
 
 function getScopedConfigRoot(id: CodingAgentId, scope: Required<CodingAgentConfigScope>): string {
-  return join(getWebUiHome(), CODING_AGENT_HOME_DIR, 'model', scope.profile, scope.provider, id)
+  return join(providerAccountHome(providerAccountId(scope.profile)), CODING_AGENT_HOME_DIR, 'model', scope.profile, scope.provider, id)
 }
 
 function getScopedRuntimeConfigRoot(
@@ -3328,7 +3347,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const model = String(input.model || '').trim()
   assertProviderAvailable(provider)
   const apiKey = String(input.apiKey || '').trim()
-  assertScopedCodingAgentProviderAllowed(mode, provider)
+  assertScopedCodingAgentProviderAllowed(mode, provider, true)
   if (!model) {
     const err = new Error('Model is required')
     ;(err as any).status = 400
@@ -3380,11 +3399,11 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
 
   let nativeMcpServers: Record<string, any> | undefined
   if (nativeCodingAgentSupportsScoped(tool.id)) {
-    const targetInput = { provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
+    const targetInput = { profile: scope.profile, provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
       agentId: tool.id, agentSessionId: isolatedInput.agentSessionId, chatSessionId: isolatedInput.sessionId }
     const target = nativeScopedUsesChatCompletions(tool.id, model)
-      ? registerCodexProxyTarget({ ...targetInput, profile: scope.profile })
-      : registerClaudeCodeProxyTarget(targetInput)
+      ? await registerSavedCodexTarget({ ...targetInput, profile: scope.profile })
+      : await registerSavedClaudeTarget(targetInput)
     const prepared = await prepareNativeScopedRuntime({ agentId: tool.id, rootDir, model,
       baseUrl: target.baseUrl, token: target.token, contextWindow: contextPolicy.contextWindow,
       outputLimit: contextPolicy.outputLimit })
@@ -3397,7 +3416,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       getCodingAgentManagedMcpServerConfigs(tool.id, scope.profile, input.studioMcpTokenFile))
   } else if (tool.id === 'antigravity') {
     if (!['chat_completions', 'codex_responses', 'anthropic_messages'].includes(apiMode)) throw Object.assign(new Error('Antigravity scoped API mode is unsupported'), { status: 400 })
-    const target = registerCodexProxyTarget({ profile: scope.profile, provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
+    const target = await registerSavedCodexTarget({ profile: scope.profile, provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
       agentId: tool.id, agentSessionId: isolatedInput.agentSessionId, chatSessionId: isolatedInput.sessionId })
     const prepared = await prepareAntigravityRuntime({ home: getGlobalConfigHome(), rootDir, systemPrompt: scopedSystemPrompt,
       managedMcp: getCodingAgentManagedMcpServerConfigs('antigravity', scope.profile, input.studioMcpTokenFile),
@@ -3407,7 +3426,8 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     args = ['--dangerously-skip-permissions']
   } else if (tool.id === 'claude-code') {
     const proxyTarget = baseUrl && apiKey
-      ? registerClaudeCodeProxyTarget({
+      ? await registerSavedClaudeTarget({
+          profile: scope.profile,
           provider,
           model,
           baseUrl,
@@ -3489,7 +3509,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       throw err
     }
     const proxyTarget = baseUrl && apiKey
-      ? registerCodexProxyTarget({
+      ? await registerSavedCodexTarget({
           profile: scope.profile,
           provider,
           model,
@@ -3585,7 +3605,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     // runs/<hash> directory containing its provider credentials and sessions.
     await ensurePiScopedBaseConfigFiles(scope)
     const proxyTarget = baseUrl && apiKey
-      ? registerCodexProxyTarget({
+      ? await registerSavedCodexTarget({
           profile: scope.profile,
           provider,
           model,
@@ -3661,7 +3681,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     ]
   } else if (tool.id === 'grok') {
     const proxyTarget = baseUrl && apiKey
-      ? registerCodexProxyTarget({
+      ? await registerSavedCodexTarget({
           profile: scope.profile,
           provider,
           model,
@@ -3717,7 +3737,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       ...(reasoningEffort ? ['--reasoning-effort', reasoningEffort] : []),
     ]
   } else if (tool.id === 'dsh') {
-    const proxyTarget = registerCodexProxyTarget({
+    const proxyTarget = await registerSavedCodexTarget({
       profile: scope.profile, provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
       agentId: tool.id, agentSessionId: isolatedInput.agentSessionId, chatSessionId: isolatedInput.sessionId,
     })
@@ -3742,7 +3762,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     env = {}
   } else {
     const proxyTarget = baseUrl && apiKey
-      ? registerCodexProxyTarget({
+      ? await registerSavedCodexTarget({
           profile: scope.profile,
           provider,
           model,
@@ -3866,7 +3886,7 @@ async function startCodingAgentRunInternal(
   const resolvedInput = await resolveStoredProviderLaunchInput(input, existingSession)
   const requestedMode = resolvedCodingAgentLaunchMode(id, resolvedInput.mode)
   const requestedProvider = String(resolvedInput.provider || '').trim().toLowerCase()
-  assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider)
+  assertScopedCodingAgentProviderAllowed(requestedMode, requestedProvider, true)
   if (id !== 'cursor' && requestedMode !== 'global' && (!String(resolvedInput.baseUrl || '').trim() || !String(resolvedInput.apiKey || '').trim())) {
     const err = new Error('Coding agent provider credentials are missing. Re-select the provider/model or update the provider API key before continuing this session.')
     ;(err as any).status = 400
@@ -3920,6 +3940,7 @@ async function startCodingAgentRunInternal(
     ? String(launch.provider || 'global').trim() || 'global'
     : String(resolvedInput.provider || launch.provider || '').trim() || launch.provider
   const started = codingAgentRunManager.start({
+    ownerUserId: providerAccountId(launch.profile),
     agentSessionId,
     agentId: launch.agentId,
     mode: launch.mode,
@@ -4031,7 +4052,8 @@ export function invalidateCodingAgentProviderRuntime(profileInput: string, provi
   const profile = normalizeScopeSegment(profileInput, 'default', 'profile')
   const providerIdentity = providerInput ? normalizeProviderIdentity(providerInput) : undefined
   const result = codingAgentRunManager.invalidateMatching(launch => (
-    launch.profile === profile && (providerIdentity ? launch.provider === providerIdentity : launch.mode === 'scoped')
+    launch.ownerUserId === providerAccountId(profile)
+    && launch.profile === profile && (providerIdentity ? launch.provider === providerIdentity : launch.mode === 'scoped')
   ))
   return { invalidatedRuns: result.invalidated, deferredRuns: result.deferred }
 }

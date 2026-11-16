@@ -1,3 +1,5 @@
+import { gatewayProtocol, gatewayToken } from '../public/model-gateway-adapters'
+import { authenticateInternalModelCredential } from '../public/provider-account'
 import { ownedPersonTaskSession } from '../services/person/task-chat'
 import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
 import { getSession } from '../repositories/session-store'
@@ -10,6 +12,7 @@ import { MODEL_API_KEY_PREFIX, findModelApiKey, touchModelApiKey } from '../serv
 import { ModelApiError, modelApiErrorBody } from '../services/model-api/errors'
 import {
   findUserById,
+  getDefaultProfileForUser,
   listUserProfiles,
   touchUserLogin,
   userCanAccessProfile,
@@ -60,6 +63,7 @@ declare module 'koa' {
     profile?: RequestProfile
     serverTokenAuth?: boolean
     modelApiKey?: { id: string; models: string[] }
+    modelGateway?: { userId: number; profile: string }
   }
 }
 
@@ -328,7 +332,7 @@ function isAccountModelApiPath(path: string | undefined): boolean {
   return path === '/api/studio/person' || !!path?.startsWith('/api/studio/person/')
     || path === '/api/studio/models/cloud-link' || !!path?.startsWith('/api/studio/models/cloud-link/')
     || path === '/api/studio/models/api-keys' || !!path?.startsWith('/api/studio/models/api-keys/')
-    || path === '/api/ekko-studio/models/v1/models' || path === '/api/ekko-studio/models/v1/responses'
+    || path === '/api/ekko-studio/models/v1/models' || !!gatewayProtocol(path || '')
 }
 
 /** Only session identifiers carry ownership; search text and file paths do not. */
@@ -376,15 +380,28 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
   if (!workerRefs.length && !personRefs.length && await handleSessionShareHttp(ctx, next)) return
 
   const secret = await getJwtSecret()
-  const token = requestToken(ctx)
+  const token = ctx.path.startsWith('/api/ekko-studio/models/') ? gatewayToken(ctx) || requestToken(ctx) : requestToken(ctx)
+  if (token.startsWith('studio_model_')) {
+    const allowed = (ctx.method === 'POST' && !!gatewayProtocol(ctx.path)) || (ctx.method === 'GET' && ctx.path === '/api/ekko-studio/models/v1/models')
+    const credential = allowed ? await authenticateInternalModelCredential(token) : null
+    const owner = credential ? findUserById(credential.userId) : null
+    if (!credential || !owner || owner.status !== 'active') { ctx.status = 401; ctx.body = { error: 'Invalid internal model credential' }; return }
+    ctx.state.user = toAuthenticatedUser(owner)
+    const profile = ctx.get('x-studio-profile') || credential.profile || getDefaultProfileForUser(owner.id)
+    if (ctx.get('x-studio-profile') && owner.role !== 'super_admin' && !userCanAccessProfile(owner.id, profile)) { ctx.status = 403; ctx.body = { error: 'Profile is not available for this user' }; return }
+    ctx.state.modelGateway = { userId: owner.id, profile }
+    ctx.state.profile = { name: profile }
+    await next()
+    return
+  }
   if (token.startsWith(MODEL_API_KEY_PREFIX)) {
     try {
       // Keys never authenticate UI, management, proxy or WebSocket endpoints.
       if (!(ctx.method === 'GET' && ctx.path === '/api/ekko-studio/models/v1/models')
-        && !(ctx.method === 'POST' && ctx.path === '/api/ekko-studio/models/v1/responses')) {
+        && !(ctx.method === 'POST' && !!gatewayProtocol(ctx.path))) {
         throw new ModelApiError('This key only permits Model API requests.', 403)
       }
-      if (ctx.get('authorization') !== `Bearer ${token}`) throw new ModelApiError('Send the API key in the Authorization header.', 401)
+      if (gatewayToken(ctx) !== token) throw new ModelApiError('Send the API key in the Authorization header.', 401)
       const key = findModelApiKey(token)
       if (!key) throw new ModelApiError('Invalid or revoked API key.', 401)
       const user = findUserById(key.userId)

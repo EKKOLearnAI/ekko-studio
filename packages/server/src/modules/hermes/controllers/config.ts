@@ -7,6 +7,8 @@ import { saveEnvValueForProfile } from '../../studio/public/profile-config'
 import { logger } from '../../studio/public/logging'
 import { safeFileStore } from '../../studio/public/safe-file-store'
 import { EXCLUSIVE_PLATFORM_CREDENTIAL_KEYS } from '../services/profiles/profile-credentials'
+import { updateSupplementalConfig, supplementalSections, type SupplementalSection } from '../../studio/public/supplemental-routing'
+import { readConfigYamlForProfile, updateConfigYamlForProfile } from '../../studio/public/provider-config'
 import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 
 const PLATFORM_SECTIONS = new Set([
@@ -30,6 +32,7 @@ function requestedProfile(ctx: any): string {
     'default'
 }
 
+const PROVIDER_SECTIONS = new Set(['model', 'providers', 'custom_providers', 'fallback_providers', 'auxiliary', 'moa', 'delegation'])
 const configPath = (profile: string) => join(getProfileDir(profile), 'config.yaml')
 const envPath = (profile: string) => join(getProfileDir(profile), '.env')
 
@@ -373,7 +376,13 @@ async function readProxyEnv(profile: string): Promise<Record<string, string>> {
 }
 
 async function readConfig(profile: string): Promise<Record<string, any>> {
-  return safeFileStore.readYaml(configPath(profile))
+  const original = await safeFileStore.readYaml(configPath(profile))
+  const owned = await readConfigYamlForProfile(profile)
+  for (const section of PROVIDER_SECTIONS) {
+    delete original[section]
+    if (owned[section] !== undefined) original[section] = owned[section]
+  }
+  return original
 }
 
 function configTruthy(value: unknown): boolean {
@@ -391,7 +400,7 @@ function gatewayManagementFromHermesConfig(config: Record<string, any>): 'per_pr
 async function readGatewayAutoStartForResponse(): Promise<ReturnType<typeof normalizeGatewayAutoStartConfig>> {
   const appConfig = await readAppConfig()
   const gatewayAutoStart = normalizeGatewayAutoStartConfig(appConfig.gatewayAutoStart)
-  const defaultConfig = await readConfig('default')
+  const defaultConfig = await safeFileStore.readYaml(configPath('default'))
   gatewayAutoStart.management = gatewayManagementFromHermesConfig(defaultConfig)
   return gatewayAutoStart
 }
@@ -522,7 +531,11 @@ export async function updateConfig(ctx: any) {
     }
 
     const profile = requestedProfile(ctx)
-    await safeFileStore.updateYaml(configPath(profile), (config) => {
+    if ((supplementalSections as readonly string[]).includes(section)) {
+      await updateSupplementalConfig(profile, section as SupplementalSection, current => deepMerge(current || {}, values))
+    } else if (PROVIDER_SECTIONS.has(section)) {
+      await updateConfigYamlForProfile(profile, config => { config[section] = deepMerge(config[section] || {}, values); return config })
+    } else await safeFileStore.updateYaml(configPath(profile), (config) => {
       config[section] = deepMerge(config[section] || {}, values)
       return config
     }, {
@@ -581,15 +594,11 @@ export async function updateAuxiliaryModels(ctx: any) {
   try {
     const profile = requestedProfile(ctx)
     const auxiliary = normalizeAuxiliaryConfig(body.auxiliary, { resetAuto: true })
-    await safeFileStore.updateYaml(configPath(profile), (config) => {
+    await updateSupplementalConfig(profile, 'auxiliary', (currentSection) => {
+      const config: Record<string, any> = { auxiliary: currentSection }
       if (Object.keys(auxiliary).length > 0) config.auxiliary = auxiliary
       else delete config.auxiliary
-      return config
-    }, {
-      backup: true,
-      dumpOptions: {
-        forceQuotes: true,
-      },
+      return config.auxiliary
     })
     ctx.body = { success: true, auxiliary }
   } catch (err: any) {
@@ -627,18 +636,14 @@ export async function updateDelegationModel(ctx: any) {
   try {
     const profile = requestedProfile(ctx)
     const delegation = normalizeDelegationModelConfig(body.delegation)
-    await safeFileStore.updateYaml(configPath(profile), (config) => {
+    await updateSupplementalConfig(profile, 'delegation', (currentSection) => {
+      const config: Record<string, any> = { delegation: currentSection }
       const current = isPlainRecord(config.delegation) ? { ...config.delegation } : {}
       for (const field of DELEGATION_ROUTE_FIELDS) delete current[field]
       Object.assign(current, delegation)
       if (Object.keys(current).length > 0) config.delegation = current
       else delete config.delegation
-      return config
-    }, {
-      backup: true,
-      dumpOptions: {
-        forceQuotes: true,
-      },
+      return config.delegation
     })
     ctx.body = { success: true, delegation }
   } catch (err: any) {
@@ -696,16 +701,12 @@ export async function updateFallbackProviders(ctx: any) {
   try {
     const profile = requestedProfile(ctx)
     const fallbackProviders = normalizeFallbackProviders(body.fallback_providers)
-    await safeFileStore.updateYaml(configPath(profile), (config) => {
+    await updateSupplementalConfig(profile, 'fallback_providers', (currentSection) => {
+      const config: Record<string, any> = { fallback_providers: currentSection }
       // An empty chain removes the key instead of leaving `fallback_providers: []`.
       if (fallbackProviders.length > 0) config.fallback_providers = fallbackProviders
       else delete config.fallback_providers
-      return config
-    }, {
-      backup: true,
-      dumpOptions: {
-        forceQuotes: true,
-      },
+      return config.fallback_providers
     })
     ctx.body = { success: true, fallback_providers: fallbackProviders }
   } catch (err: any) {
@@ -736,18 +737,14 @@ export async function updateMoaConfig(ctx: any) {
   try {
     const profile = requestedProfile(ctx)
     const moa = normalizeMoaConfig(body.moa)
-    await safeFileStore.updateYaml(configPath(profile), (config) => {
+    await updateSupplementalConfig(profile, 'moa', (currentSection) => {
+      const config: Record<string, any> = { moa: currentSection }
       config.moa = {
         default_preset: moa.default_preset,
         active_preset: moa.active_preset,
         presets: moa.presets,
       }
-      return config
-    }, {
-      backup: true,
-      dumpOptions: {
-        forceQuotes: true,
-      },
+      return config.moa
     })
     ctx.body = { success: true, moa }
   } catch (err: any) {

@@ -1,3 +1,4 @@
+import { bindProviderSocket } from '../public/provider-account'
 import { respondAgentInteraction } from '../services/agents/interactions'
 import { personDisplayPage, personDisplayEvents, personDisplayBackgroundTasks, personDisplayEvent } from '../services/chat-run/person-display'
 import { personSessionIds } from '../repositories/person-session-store'
@@ -873,6 +874,7 @@ export class ChatRunSocket {
   // --- Connection handler ---
 
   private onConnection(socket: Socket) {
+    bindProviderSocket(socket)
     const shared = socket.data.sessionShare as SessionShareAccess | undefined
     this.sessionStateSync.attach(socket)
     if (shared) bindSessionShareSocket(socket, shared, () => {

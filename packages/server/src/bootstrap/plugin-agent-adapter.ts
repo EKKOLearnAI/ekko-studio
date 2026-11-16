@@ -1,3 +1,4 @@
+import { withProviderAccount } from '../modules/studio/public/provider-account'
 import { configureBuiltinAgents } from '../modules/studio/services/agents/registry'
 import { getCodingAgentDefinition, getCodingAgentDefinitions, getCodingAgentStatus, getCodingAgentModels, getPluginAgentManagedMcpServerConfigs, deleteCodingAgent } from '../modules/coding-agents/services'
 import { checkAgentUpdateAndPublish, installAgentAndPublish, getAgentUpdateManager } from '../modules/coding-agents/services/update-manager'
@@ -48,11 +49,11 @@ configureBuiltinAgents({
     catch (error) { throw new PluginError(error instanceof Error ? error.message : 'Invalid update policy', 'AGENT_UPDATE_POLICY', 400) }
     return manager.snapshot()[id]
   },
-  scopedModel: async input => {
+  scopedModel: async input => withProviderAccount(input.identity.userId, async () => {
     const runtime = await resolveEkkoProviderRuntimeConfig({ profile: input.identity.profile, provider: input.provider, model: input.model, apiMode: input.apiMode })
     input.signal.throwIfAborted()
     const protocol = input.protocols.includes(input.apiMode) ? input.apiMode : input.protocols[0]
-    const targetInput = { profile: input.identity.profile, provider: input.provider, model: input.model, baseUrl: runtime.baseUrl || '', apiKey: runtime.apiKey || '', apiMode: runtime.apiMode as 'chat_completions',
+    const targetInput = { ownerUserId: input.identity.userId, profile: input.identity.profile, provider: input.provider, model: input.model, baseUrl: runtime.baseUrl || '', apiKey: runtime.apiKey || '', apiMode: runtime.apiMode as 'chat_completions',
       reasoningEffort: input.reasoningEffort, agentId: input.agentId, agentSessionId: input.identity.runId, chatSessionId: input.identity.sessionId,
       onUsageEvent: (event: { type: string; data: any }, apiDuration?: number, baseUrl?: string) => {
         if (input.signal.aborted || !['response.completed', 'response.failed', 'response.incomplete'].includes(event.type)) return
@@ -73,5 +74,5 @@ configureBuiltinAgents({
     if (input.signal.aborted) { dispose(); input.signal.throwIfAborted() }
     return { model: { provider: input.provider, model: input.model, apiMode: protocol as 'chat_completions', baseUrl: target.baseUrl, token: target.token,
       reasoningEffort: input.reasoningEffort, contextWindow: capabilities.contextWindow || null, outputLimit: capabilities.outputLimit || null }, dispose }
-  },
+  }, input.identity.profile),
 })

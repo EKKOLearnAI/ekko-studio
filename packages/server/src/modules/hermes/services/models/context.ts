@@ -1,3 +1,4 @@
+import { getProfileDir as studioProviderDir } from '../../../studio/public/provider-config'
 import { join } from 'path'
 import { readFileSync, existsSync } from 'fs'
 import yaml from 'js-yaml'
@@ -44,6 +45,7 @@ interface ModelEntry {
 }
 
 interface CustomProviderEntry {
+  catalog_provider?: string
   name?: string
   base_url?: string
   model?: string
@@ -73,11 +75,7 @@ function loadConfig(profileDir: string): any | null {
 
 // --- Profile helpers ---
 
-function getProfileDir(profile?: string): string {
-  if (!profile || profile === 'default') return HERMES_BASE
-  const dir = join(HERMES_BASE, 'profiles', profile)
-  return existsSync(dir) ? dir : HERMES_BASE
-}
+function getProfileDir(profile?: string): string { return studioProviderDir(profile || 'default') }
 
 function getDefaultModel(config: any): string | null {
   const model = config?.model
@@ -181,6 +179,8 @@ function resolveCustomProviderEntry(config: any, modelName: string, provider: st
   if (!provider || !provider.startsWith('custom')) return null
 
   const providers = getCustomProviders(config)
+  const accountProvider = providers.find(cp => cp.catalog_provider === provider)
+  if (accountProvider) return accountProvider
   if (provider !== 'custom') {
     const suffix = normalizeCustomProviderName(provider.slice('custom:'.length))
     return providers.find((cp) => normalizeCustomProviderName(String(cp?.name || '')) === suffix) || null

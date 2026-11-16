@@ -1,9 +1,17 @@
+import type { ReasoningCodec } from '../../studio/public/model-reasoning-codec'
 import { assertProviderAvailable } from '../../studio/contracts/providers'
 import { randomBytes } from 'crypto'
+import { providerAccountId, providerRequestProfile } from '../../studio/public/provider-account'
 import type { AgentApiMode } from './types'
 import type { CanonicalResponsesEvent } from './adapters/responses-stream'
 
 export interface AgentTargetInput {
+  reasoningCodec?: ReasoningCodec
+  requestHeaders?: Record<string, string>
+  requestId?: string
+  ownerUserId?: number
+  signal?: AbortSignal
+  profile?: string
   provider: string
   model: string
   baseUrl: string
@@ -40,12 +48,14 @@ export class AgentTargetRegistry<T extends AgentTargetInput> {
     assertProviderAvailable(input.provider)
     const normalized = {
       ...input,
+      ownerUserId: input.ownerUserId || providerAccountId(input.profile),
+      profile: input.profile || providerRequestProfile() || 'default',
       provider: input.provider.trim(),
       model: input.model.trim(),
       baseUrl: input.baseUrl.trim().replace(/\/+$/, ''),
       apiMode: input.apiMode || 'chat_completions',
     } as NormalizedAgentTargetInput<T>
-    const key = JSON.stringify(this.keyParts(normalized))
+    const key = JSON.stringify([normalized.ownerUserId, normalized.profile, normalized.requestId || '', ...this.keyParts(normalized)])
     const existing = this.targets.get(key)
     const routeKey = existing?.routeKey || Buffer.from(key, 'utf-8').toString('base64url')
     const token = existing?.token || persisted?.token?.trim() || `hwui_${randomBytes(24).toString('base64url')}`
@@ -65,6 +75,12 @@ export class AgentTargetRegistry<T extends AgentTargetInput> {
     for (const target of this.targets.values()) {
       if (target.routeKey === routeKey) return target
     }
+    return null
+  }
+
+  findByToken(token: string): RegisteredAgentTarget<T> | null {
+    if (!token.startsWith('hwui_')) return null
+    for (const target of this.targets.values()) if (target.token === token) return target
     return null
   }
 

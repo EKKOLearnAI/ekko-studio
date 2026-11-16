@@ -1,9 +1,9 @@
-import { readConfigYamlForProfile } from '../../public/profile-config'
+import { readConfigYamlForProfile } from '../../public/provider-config'
 
 export type RunModelGroup = { provider: string; models: string[]; model_meta?: Record<string, { reasoning?: boolean; reasoning_efforts?: string[] }> }
 
 function runtimeProvider(provider: string): string {
-  return provider === 'claude-oauth' ? 'anthropic' : provider
+  return provider
 }
 
 async function resolveDefaultModelConfig(profile: string): Promise<{ model: string; provider: string }> {

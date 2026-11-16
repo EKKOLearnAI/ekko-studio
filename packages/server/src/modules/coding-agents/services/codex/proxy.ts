@@ -1,4 +1,5 @@
-import { geminiToResponses, responsesToGemini } from '../antigravity/gemini-adapter'
+import { geminiToResponses, responsesToGemini, responsesEventsToGemini } from '../antigravity/gemini-adapter'
+import { portableResponsesRequest, portableResponsesResult, portableResponsesEvents } from '../../protocol/adapters/portable-responses'
 import { isNativeCodingAgent } from '../../../studio/contracts/agents/native-coding-agents'
 import { chatCompletionsToResponses, responsesToChatCompletion, responsesToChatCompletionSse } from '../../protocol/adapters/chat-completions'
 import { Readable } from 'stream'
@@ -50,7 +51,7 @@ const targetRegistry = new AgentTargetRegistry<CodexProxyTargetInput>(
 )
 
 function localProxyBaseUrl(routeKey: string): string {
-  return `http://127.0.0.1:${config.port}/api/codex-proxy/${routeKey}/v1`
+  return `http://127.0.0.1:${config.port}/api/ekko-studio/models/v1`
 }
 
 export function registerCodexProxyTarget(input: CodexProxyTargetInput): { baseUrl: string; token: string; routeKey: string } {
@@ -90,7 +91,7 @@ function findTarget(routeKey: string): CodexProxyTarget | null {
 
 function authToken(ctx: Context): string {
   const geminiKey = ctx.get('x-goog-api-key').trim()
-  if (geminiKey && ctx.path.includes('/gemini/')) return geminiKey
+  if (geminiKey && ctx.path.includes('/v1beta/')) return geminiKey
   const apiKey = ctx.get('x-api-key').trim()
   if (apiKey) return apiKey
   const auth = ctx.get('authorization').trim()
@@ -100,23 +101,23 @@ function authToken(ctx: Context): string {
 
 export function isAuthorizedCodexProxyRequest(ctx: Context): boolean {
   const routeKey = /^\/api\/codex-proxy\/([^/]+)\/(?:v1\/responses|gemini\/v1beta\/models\/[^/]+)$/.exec(ctx.path)?.[1] || ''
-  const target = findTarget(routeKey)
+  const target = findTarget(routeKey) || targetRegistry.findByToken(authToken(ctx))
   return Boolean(target && authToken(ctx) === target.token)
 }
 
 function requireTarget(ctx: Context): CodexProxyTarget | null {
-  const target = findTarget(String(ctx.params.key || ''))
+  const target = findTarget(String(ctx.params.key || '')) || targetRegistry.findByToken(authToken(ctx))
   if (!target) {
     ctx.status = 404
     ctx.body = { error: { type: 'not_found_error', message: 'Codex proxy target not found' } }
     return null
   }
-  if (authToken(ctx) !== target.token) {
+  if (authToken(ctx) !== target.token && (ctx.state as any).modelGatewayTarget !== target.routeKey) {
     ctx.status = 401
     ctx.body = { error: { type: 'authentication_error', message: 'Invalid Codex proxy token' } }
     return null
   }
-  return target
+  return { ...target, reasoningCodec: (ctx.state as any).modelGatewayReasoningCodec, requestHeaders: { ...(ctx.get('anthropic-beta') ? { 'anthropic-beta': ctx.get('anthropic-beta') } : {}), ...(ctx.get('anthropic-version') ? { 'anthropic-version': ctx.get('anthropic-version') } : {}) }, signal: (ctx.state as any).modelGatewaySignal || target.signal }
 }
 
 function chatCompletionsUrl(target: CodexProxyTarget): string {
@@ -141,16 +142,22 @@ export function normalizeGrokResponsesRequest(body: any): any {
   return withoutMaxOutputTokens
 }
 
+function needsPortableResponses(target: CodexProxyTarget): boolean {
+  return target.provider === 'xai-oauth' || /^https:\/\/api\.x\.ai(?:\/|$)/i.test(target.baseUrl)
+}
+
 function nativeResponsesBody(target: CodexProxyTarget, body: any, stream?: boolean): any {
-  const normalized = target.agentId === 'grok' ? normalizeGrokResponsesRequest(body) : body
+  const original = target.agentId === 'grok' ? normalizeGrokResponsesRequest(body) : body
+  const normalized = needsPortableResponses(target) ? portableResponsesRequest(original) : original
   const reasoningEffort = targetReasoningEffort(target)
-  return truncateResponsesToolOutputs({
+  const routed = {
     ...normalized,
     model: target.model,
     // Scoped clients such as OpenCode may omit effort from their native request.
     ...(reasoningEffort ? { reasoning: { ...normalized?.reasoning, effort: reasoningEffort } } : {}),
     ...(stream === undefined ? {} : { stream }),
-  })
+  }
+  return target.agentId ? truncateResponsesToolOutputs(routed) : routed
 }
 
 async function callOpenAiChat(target: CodexProxyTarget, body: any, signal?: AbortSignal): Promise<any> {
@@ -166,10 +173,11 @@ async function callOpenAiChat(target: CodexProxyTarget, body: any, signal?: Abor
   const response = await agentRunGateway.completeJson({
     url: chatCompletionsUrl(target),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: chatBody,
-    signal,
+    signal: signal || target.signal,
   })
   recordTargetUsage(target, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
   return response
@@ -186,14 +194,16 @@ async function callAnthropicMessages(target: CodexProxyTarget, body: any, signal
   const response = await agentRunGateway.completeJson({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     headers: {
       ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
+      ...target.requestHeaders,
     },
     body: anthropicBody,
-    signal,
+    signal: signal || target.signal,
   })
   recordTargetUsage(target, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
   return response
@@ -210,13 +220,14 @@ async function callOpenAiResponses(target: CodexProxyTarget, body: any, signal?:
   const response = await agentRunGateway.completeJson({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: responsesBody,
-    signal,
+    signal: signal || target.signal,
   })
   recordTargetUsage(target, { type: 'response.completed', data: { response } }, (performance.now() - startedAt) / 1000, target.baseUrl)
-  return response
+  return needsPortableResponses(target) ? portableResponsesResult(response, body) : response
 }
 
 function responsesEventStream(events: AsyncIterable<CanonicalResponsesEvent>): Readable {
@@ -291,7 +302,7 @@ async function* observe() {
       // Grok, OpenCode and DSH report the same model activity through their native
       // stdout streams. The proxy remains responsible for transport and usage
       // accounting, but must not become a second chat lifecycle source.
-      if (!isNativeCodingAgent(target.agentId) && target.agentId !== 'grok' && target.agentId !== 'opencode' && target.agentId !== 'dsh' && target.agentId !== 'antigravity') {
+      if (target.agentSessionId && !isNativeCodingAgent(target.agentId) && target.agentId !== 'grok' && target.agentId !== 'opencode' && target.agentId !== 'dsh' && target.agentId !== 'antigravity') {
         codingAgentRunManager.handleResponseEvent(target.agentSessionId, clientEvent)
       }
       yield clientEvent
@@ -311,9 +322,11 @@ async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: an
   const stream = await agentRunGateway.streamBytes({
     url: chatCompletionsUrl(target),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: chatBody,
+    signal: target.signal,
   })
   return responsesEventStream(observableResponsesEvents(target, openAiChatSseToResponsesEvents(stream, {
     ...target,
@@ -333,13 +346,16 @@ async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, b
   const stream = await agentRunGateway.streamBytes({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     headers: {
       ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
+      ...target.requestHeaders,
     },
     body: anthropicBody,
+    signal: target.signal,
   })
   return responsesEventStream(observableResponsesEvents(target, anthropicMessagesSseToResponsesEvents(stream, {
     ...target,
@@ -359,11 +375,14 @@ async function openAiResponsesSseStream(target: CodexProxyTarget, body: any, sta
   const stream = await agentRunGateway.streamBytes({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
+    ownerUserId: target.ownerUserId, profile: target.profile, model: target.model,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
     provider: target.provider,
     body: responsesBody,
+    signal: target.signal,
   })
-  return responsesEventStream(observableResponsesEvents(target, openAiResponsesSseToResponsesEvents(stream), startedAt))
+  const events = openAiResponsesSseToResponsesEvents(stream)
+  return responsesEventStream(observableResponsesEvents(target, needsPortableResponses(target) ? portableResponsesEvents(events, body) : events, startedAt))
 }
 
 export async function codexProxyResponses(ctx: Context) {
@@ -372,7 +391,7 @@ export async function codexProxyResponses(ctx: Context) {
   try {
     // Sanitize once before API-mode dispatch so native Responses, Chat
     // Completions, and Anthropic adapters all receive the same bounded history.
-    const sanitizedBody = stripHistoricalResponsesInlineImages(ctx.request.body || {})
+    const sanitizedBody = target.agentId ? stripHistoricalResponsesInlineImages(ctx.request.body || {}) : ctx.request.body || {}
     const requestBody = target.agentId === 'grok'
       ? normalizeGrokResponsesRequest(sanitizedBody)
       : sanitizedBody
@@ -423,6 +442,44 @@ export async function codingAgentProxyChatCompletions(ctx: Context) {
   if (!target) return
   const requestBody = ctx.request.body as any || {}
   try {
+    if (target.apiMode === 'chat_completions') {
+      const started = performance.now()
+      const nativeBody = { ...requestBody, model: target.model }
+      const request = { url: chatCompletionsUrl(target), apiKey: target.apiKey,
+        ownerUserId: target.ownerUserId, profile: target.profile, model: target.model, provider: target.provider,
+        sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+        body: nativeBody, signal: target.signal }
+      if (requestBody.stream === true) {
+        const source = await agentRunGateway.streamBytes(request)
+        ctx.set('Content-Type', 'text/event-stream; charset=utf-8')
+        ctx.set('Cache-Control', 'no-cache')
+        ctx.body = Readable.from((async function* () {
+          const decoder = new TextDecoder()
+          let buffer = ''
+          let usage: unknown
+          try {
+            for await (const chunk of source) {
+              buffer += decoder.decode(chunk, { stream: true })
+              let boundary: RegExpExecArray | null
+              while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
+                for (const line of buffer.slice(0, boundary.index).split(/\r?\n/)) if (line.startsWith('data:')) {
+                  try { const data = JSON.parse(line.slice(5)); if (data.usage) usage = data.usage } catch { /* SSE control frame */ }
+                }
+                buffer = buffer.slice(boundary.index + boundary[0].length)
+              }
+              if (buffer.length > 32 * 1024 * 1024) throw new Error('Provider SSE event exceeds the gateway limit')
+              yield chunk
+            }
+          } finally {
+            if (usage) recordTargetUsage(target, { type: 'response.completed', data: { response: { model: target.model, usage } } }, (performance.now() - started) / 1000, target.baseUrl)
+          }
+        })())
+      } else {
+        ctx.body = await agentRunGateway.completeJson(request)
+        recordTargetUsage(target, { type: 'response.completed', data: { response: ctx.body } }, (performance.now() - started) / 1000, target.baseUrl)
+      }
+      return
+    }
     ctx.request.body = chatCompletionsToResponses(requestBody)
     await codexProxyResponses(ctx)
     if (ctx.status >= 400) return
@@ -446,8 +503,7 @@ export async function codingAgentProxyChatCompletions(ctx: Context) {
 export async function antigravityProxyGenerate(ctx: Context) {
   const target = requireTarget(ctx)
   if (!target) return
-  if (target.agentId !== 'antigravity') { ctx.status = 403; ctx.body = { error: { message: 'Not an Antigravity target' } }; return }
-  if (!/^[^/:]+:(?:streamGenerateContent|generateContent)$/.test(String(ctx.params.operation))) { ctx.status = 400; ctx.body = { error: { message: 'Unsupported Gemini operation' } }; return }
+  if (!/^.+:(?:streamGenerateContent|generateContent)$/.test(String(ctx.params.operation))) { ctx.status = 400; ctx.body = { error: { message: 'Unsupported Gemini operation' } }; return }
   const abort = new AbortController()
   const onClose = () => { if (!ctx.res.writableEnded) abort.abort() }
   ctx.res.once('close', onClose)
@@ -455,6 +511,17 @@ export async function antigravityProxyGenerate(ctx: Context) {
   timeout.unref?.()
   try {
     const body = geminiToResponses(ctx.request.body || {})
+    if (String(ctx.params.operation).includes('streamGenerateContent')) {
+      body.stream = true
+      const stream = target.apiMode === 'anthropic_messages'
+        ? await anthropicMessagesToResponsesSseStream(target, body)
+        : target.apiMode === 'codex_responses' ? await openAiResponsesSseStream(target, body)
+          : await openAiChatToResponsesSseStream(target, body)
+      ctx.set('Cache-Control', 'no-cache')
+      ctx.set('Content-Type', 'text/event-stream; charset=utf-8')
+      ctx.body = Readable.from(responsesEventsToGemini(openAiResponsesSseToResponsesEvents(stream)))
+      return
+    }
     const response = responseForCodexClient(target, target.apiMode === 'anthropic_messages'
       ? anthropicMessageToResponses(await callAnthropicMessages(target, body, abort.signal), { ...target, mcpToolRoutes: responseMcpToolRoutes(body) })
       : target.apiMode === 'codex_responses'
@@ -471,3 +538,7 @@ export async function antigravityProxyGenerate(ctx: Context) {
     ctx.body = { error: { message: err.message || 'Antigravity provider request failed' } }
   } finally { clearTimeout(timeout); ctx.res.off('close', onClose) }
 }
+
+export const findCodexProxyByToken = (token: string) => targetRegistry.findByToken(token)
+
+export const findCodexGatewayTarget = (routeKey: string) => targetRegistry.find(routeKey)

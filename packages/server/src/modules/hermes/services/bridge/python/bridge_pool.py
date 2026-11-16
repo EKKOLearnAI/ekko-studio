@@ -175,6 +175,7 @@ class AgentSession:
     config: dict[str, Any] = field(default_factory=dict)
     running: bool = False
     current_run_id: str | None = None
+    pending_gateway_runtime: dict[str, Any] | None = field(default=None, repr=False)
     lock: threading.RLock = field(default_factory=threading.RLock)
     created_at: float = field(default_factory=time.time)
     last_used_at: float = field(default_factory=time.time)
@@ -443,6 +444,7 @@ class AgentPool:
         model: str | None = None,
         provider: str | None = None,
         background_delegation_enabled: bool | None = None,
+        gateway_runtime: dict[str, Any] | None = None,
     ) -> AgentSession:
         requested_model = str(model or "").strip()
         requested_provider = str(provider or "").strip()
@@ -453,6 +455,12 @@ class AgentPool:
         with self._lock:
             self.refresh_mcp_if_idle()
             existing = self._sessions.get(session_id)
+            if gateway_runtime and existing is not None and not existing.running:
+                if (gateway_runtime.get("api_key") != getattr(existing.agent, "api_key", None)
+                        or (requested_model and existing.config.get("model") != requested_model)
+                        or (requested_provider and existing.config.get("provider") != requested_provider)):
+                    self._destroy_session(session_id)
+                    existing = None
             refresh_session = None
             if (existing is not None and not existing.running
                     and existing.config.get("mcp_generation", 0) != self._mcp_generation
@@ -545,7 +553,7 @@ class AgentPool:
                 discovered_mcp_tools = _discover_bridge_mcp_tools()
                 cfg = _load_cfg()
                 resolved_model = requested_model or _resolve_model(cfg)
-                runtime = _resolve_runtime(resolved_model, requested_provider or None)
+                runtime = gateway_runtime or _resolve_runtime(resolved_model, requested_provider or None)
                 agent_cfg = cfg.get("agent") or {}
                 prompt = str(agent_cfg.get("system_prompt", "") or "").strip() or None
 
@@ -650,12 +658,14 @@ class AgentPool:
         model: str,
         provider: str,
         profile: str | None,
+        gateway_runtime: dict[str, Any] | None = None,
     ) -> None:
         requested_model = str(model or "").strip()
         requested_provider = str(provider or "").strip()
         if not requested_model:
             return
         old_model = str(session.config.get("model") or getattr(session.agent, "model", "") or "")
+        session.pending_gateway_runtime = gateway_runtime
         session.config["pending_model_switch"] = {
             "model": requested_model,
             "provider": requested_provider,
@@ -675,6 +685,7 @@ class AgentPool:
         profile: str | None,
         *,
         add_note: bool,
+        gateway_runtime: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         requested_model = str(model or "").strip()
         requested_provider = str(provider or "").strip()
@@ -686,7 +697,7 @@ class AgentPool:
 
         with _profile_env(target_profile):
             _refresh_worker_profile_env()
-            runtime = _resolve_runtime(requested_model, requested_provider or None)
+            runtime = gateway_runtime or _resolve_runtime(requested_model, requested_provider or None)
 
         resolved_provider = str(runtime.get("provider") or requested_provider or "")
         effective_provider = requested_provider or resolved_provider
@@ -719,6 +730,7 @@ class AgentPool:
                 "api_mode": runtime.get("api_mode"),
             })
             session.config.pop("pending_model_switch", None)
+            session.pending_gateway_runtime = None
             session.last_used_at = time.time()
             return {
                 "switched": True,
@@ -754,6 +766,7 @@ class AgentPool:
             "api_mode": runtime.get("api_mode"),
         })
         session.config.pop("pending_model_switch", None)
+        session.pending_gateway_runtime = None
         if add_note:
             session.config["pending_model_switch_note"] = self._model_switch_note(
                 old_model,
@@ -825,6 +838,7 @@ class AgentPool:
                 str(pending.get("provider") or ""),
                 str(pending.get("profile") or session.config.get("profile") or "default"),
                 add_note=False,
+                gateway_runtime=session.pending_gateway_runtime,
             )
         except Exception as exc:
             print(
@@ -850,6 +864,7 @@ class AgentPool:
         model: str,
         provider: str | None = None,
         profile: str | None = None,
+        gateway_runtime: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         requested_model = str(model or "").strip()
         requested_provider = str(provider or "").strip()
@@ -873,6 +888,7 @@ class AgentPool:
                     requested_model,
                     requested_provider,
                     profile or str(session.config.get("profile") or "default"),
+                    gateway_runtime=gateway_runtime,
                 )
                 return {
                     "session_id": session_id,
@@ -889,6 +905,7 @@ class AgentPool:
                 requested_provider,
                 profile or str(session.config.get("profile") or "default"),
                 add_note=True,
+                gateway_runtime=gateway_runtime,
             )
 
     def _install_prepersist_dedup_hook(self, agent: Any) -> None:
@@ -1057,6 +1074,7 @@ class AgentPool:
         provider: str | None = None,
         workspace: str | None = None,
         background_delegation_enabled: bool | None = None,
+        gateway_runtime: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         session = self.get_or_create(
             session_id,
@@ -1064,6 +1082,7 @@ class AgentPool:
             model=model,
             provider=provider,
             background_delegation_enabled=background_delegation_enabled,
+            gateway_runtime=gateway_runtime,
         )
         session_cwd_bound = _bind_session_workspace_cwd(session.session_id, workspace)
         try:
@@ -1842,6 +1861,7 @@ class AgentPool:
         source: str | None = None,
         reasoning_effort: str | None = None,
         background_delegation_enabled: bool | None = None,
+        gateway_runtime: dict[str, Any] | None = None,
     ) -> RunRecord:
         session = self.get_or_create(
             session_id,
@@ -1849,6 +1869,7 @@ class AgentPool:
             model=model,
             provider=provider,
             background_delegation_enabled=background_delegation_enabled,
+            gateway_runtime=gateway_runtime,
         )
         # Install after agent construction so any runtime plugin initialization
         # has completed. Rechecking on every run also recovers from a forced

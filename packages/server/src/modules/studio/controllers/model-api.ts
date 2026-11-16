@@ -1,9 +1,9 @@
-import { claimCloudUsageReceipt } from '../services/model-api/cloud-usage'
+import { serveModelGateway } from '../services/model-api/gateway'
+import type { ModelGatewayProtocol } from '../public/model-gateway-adapters'
 import { manageModelApiCloudLink } from '../services/model-api/cloud-link'
-import { Readable } from 'node:stream'
 import type { Context } from 'koa'
-import { listProfileNamesFromDisk } from '../public/profile-config'
-import { listApiModels, prepareModelResponse } from '../services/model-api/service'
+import { listProfileNamesFromDisk } from '../public/provider-config'
+import { listApiModels } from '../services/model-api/service'
 import { ModelApiError, modelApiErrorBody } from '../services/model-api/errors'
 import { listModelApiKeys, revokeModelApiKey } from '../services/model-api/keys'
 import { createAccountModelApiKey, editAccountModelApiKey } from '../services/model-api/key-management'
@@ -11,6 +11,7 @@ import { createAccountModelApiKey, editAccountModelApiKey } from '../services/mo
 function profilesForRequest(ctx: Context): string[] {
   const user = ctx.state.user
   if (!user) throw new ModelApiError('Authentication is required.', 401)
+  if (ctx.state.modelGateway) return [ctx.state.modelGateway.profile]
   // The API is account-wide. UI-selected or caller-supplied Profile headers
   // must not alter its directory or credential routing.
   return [...new Set(listProfileNamesFromDisk())]
@@ -51,40 +52,20 @@ export async function modelApiRevokeKey(ctx: Context) {
   })
 }
 
-export async function modelApiResponses(ctx: Context) {
-  const abort = new AbortController()
-  const onClose = () => { if (!ctx.res.writableEnded) abort.abort() }
-  ctx.res.once('close', onClose)
-  let streaming = false
-  try {
-    const request = await prepareModelResponse({
-      onUsage: claimCloudUsageReceipt(ctx.get('x-studio-cloud-usage'), ctx.state.user?.id, ctx.state.modelApiKey?.id),
-      profiles: profilesForRequest(ctx), accountId: ctx.state.user ? String(ctx.state.user.id) : undefined,
-      allowedModels: ctx.state.modelApiKey?.models,
-      apiKeyId: ctx.state.modelApiKey?.id,
-      body: ctx.request.body, signal: abort.signal,
-    })
-    ctx.set('x-request-id', request.id)
-    if (!request.stream) { ctx.body = await request.create(); return }
-    ctx.set('Content-Type', 'text/event-stream; charset=utf-8')
-    ctx.set('Cache-Control', 'no-cache')
-    ctx.set('X-Accel-Buffering', 'no')
-    streaming = true
-    ctx.body = Readable.from((async function* () {
-      try {
-        for await (const event of request.events()) yield `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
-      } finally {
-        abort.abort()
-        ctx.res.off('close', onClose)
-      }
-    })())
-  } catch (error) {
+async function inference(ctx: Context, protocol: ModelGatewayProtocol) {
+  try { await serveModelGateway(ctx, protocol, profilesForRequest(ctx)) }
+  catch (error) {
     const result = modelApiErrorBody(error)
-    ctx.status = result.status; ctx.body = result.body
-  } finally {
-    if (!streaming) ctx.res.off('close', onClose)
+    ctx.status = result.status
+    const message = result.body.error.message
+    ctx.body = protocol === 'anthropic_messages' ? { type: 'error', error: { type: result.status === 429 ? 'rate_limit_error' : result.status < 500 ? 'invalid_request_error' : 'api_error', message } }
+      : protocol === 'gemini_contents' ? { error: { code: result.status, status: result.status === 404 ? 'NOT_FOUND' : result.status < 500 ? 'INVALID_ARGUMENT' : 'UNAVAILABLE', message } } : result.body
   }
 }
+export const modelApiResponses = (ctx: Context) => inference(ctx, 'codex_responses')
+export const modelApiChatCompletions = (ctx: Context) => inference(ctx, 'chat_completions')
+export const modelApiMessages = (ctx: Context) => inference(ctx, 'anthropic_messages')
+export const modelApiGemini = (ctx: Context) => inference(ctx, 'gemini_contents')
 
 export async function modelApiCloudLink(ctx: Context) {
   await manageKeys(ctx, userId => manageModelApiCloudLink(userId,

@@ -1,14 +1,21 @@
 # Model API
 
-Studio exposes a stateless OpenAI Responses-compatible model endpoint:
+Studio exposes one model gateway with several native protocol entrances:
 
 - `GET /api/ekko-studio/models/v1/models`
 - `POST /api/ekko-studio/models/v1/responses`
+- `POST /api/ekko-studio/models/v1/chat/completions`
+- `POST /api/ekko-studio/models/v1/messages`
+- `POST /api/ekko-studio/models/v1/messages/count_tokens`
+- `POST /api/ekko-studio/models/v1beta/models/{provider/model}:generateContent`
+- `POST /api/ekko-studio/models/v1beta/models/{provider/model}:streamGenerateContent`
 
 Use `http://localhost:8648/api/ekko-studio/models/v1` as the OpenAI SDK `base_url`
 (replace the host and port for your instance). Authentication accepts a dedicated
 **Model API key** or a Studio **user JWT** as `Authorization: Bearer …`. Provider
-API keys stay on the server.
+API keys stay on the server. Anthropic clients may use `x-api-key`; Gemini clients
+may use `x-goog-api-key`. Set the Anthropic SDK base URL to
+`http://localhost:8648/api/ekko-studio/models` (its SDK appends `/v1/messages`).
 
 In **Models → Model API**, create a named API key and select the models it may call.
 All currently callable models are selected by default. The key stores explicit
@@ -20,7 +27,7 @@ Use it as the SDK `api_key` or `Authorization: Bearer …`. No Profile header is
 needed. The API always aggregates the caller's accessible Provider configurations;
 UI selections and caller-supplied Profile selectors do not change that directory.
 
-Keys authenticate only `GET /models` and `POST /responses` below this API base URL.
+Keys authenticate model listing and inference through these protocol entrances only.
 They cannot access Studio settings, key management, other proxies or WebSocket
 authentication. Each request rechecks the owner's active status and accessible
 Profiles. Revocation blocks new requests, without cancelling requests in progress.
@@ -44,7 +51,7 @@ Key management requires Studio user authentication:
 - `DELETE /api/studio/models/api-keys/:id` — revoke a key owned by the caller.
 
 Responses use `Cache-Control: no-store`. A key name is required (1–80 characters);
-up to 50 keys may be active per account. Settings do not modify Hermes config.
+up to 50 keys may be active per account. Key management does not modify Hermes config.
 
 ## Per-key USD budgets
 
@@ -78,41 +85,77 @@ cancellation. Costs are not reset by editing, refreshing or restarting Studio.
 
 With a Model API key, `GET /models` lists only its allowed models, and
 `POST /responses` rejects other model IDs before contacting a provider. Both
-checks also enforce the owner’s current Profile permissions. Studio user JWTs
+checks use the owner’s account Provider pool. Studio user JWTs
 retain the complete account catalog used by the management UI.
 
-The list combines configured models from every accessible Profile (all Profiles
-for a super admin), deduplicated by provider/model, with IDs
-such as `glm/glm-5.3`, `deepseek/deepseek-reasoner`, and
-`openrouter/vendor/model`. Native IDs containing slashes remain intact. The list
-includes `api_mode` and `responses_supported`; it contains no keys or upstream URLs.
-Slashes and percent signs in custom provider names are escaped in the provider
-segment (`%2F`, `%25`) to avoid collisions; use the exact ID returned by the list.
+The catalog lists the account's shared Providers, initially imported from every
+accessible Profile. IDs use a stable Provider namespace, for example
+`deepseek/deepseek-reasoner` or `openrouter/vendor/model`. Only the first slash
+separates the namespace; the complete upstream model ID remains intact. Slashes
+and percent signs in Provider names are escaped as `%2F` and `%25`.
 
-A custom provider pointing at this instance's Model API using a locally issued
-Model API key is not re-exported. It can still be used by Studio chats, but its
-cached model IDs must not create recursive copies of the public catalog.
-Providers connected to another instance with its own key remain available.
+Provider namespaces are reserved per account. Identical source configurations
+are merged; same-name Providers with different endpoints or credentials retain
+separate records and stable suffixed IDs. Every Profile of that account uses the
+same records. Previously issued Profile-derived IDs remain aliases for existing
+clients and sharing-key grants. Use IDs returned by the catalog for new clients.
+The list includes `api_mode` and `responses_supported`, with no credentials or
+upstream URLs. Self-referencing local gateways and MoA presets are excluded.
+Bedrock Converse and Codex app-server require native runtimes and return an
+explicit unsupported-mode error through this HTTP gateway.
 
-Duplicate IDs use a callable configuration before a disabled/unsupported one.
-Among equivalent candidates, `default` takes priority, followed by Profile names
-in lexical order. This order is independent of load timing or the UI's active
-Profile. Distinct models from duplicate Providers are retained and each uses its
-own source configuration. There is no retry/fallback to a different Profile.
+The selected source configuration supplies the upstream protocol and credential.
+Current upstream adapters support Chat Completions, Responses and Anthropic
+Messages; Gemini Providers using Google's OpenAI-compatible endpoint use Chat
+Completions upstream. Native Chat and Messages requests retain vendor fields;
+cross-protocol calls translate text, images, function calls/results and streamed
+responses using the shared Agent protocol codecs. Protocol-specific vendor
+features remain subject to adapter and model support.
 
-The server matches the complete ID against this unified catalog, resolves the
-source configuration's credentials and API mode, and calls the existing Ekko
-ModelClient adapter. This supports Chat Completions, Responses, Anthropic Messages and Gemini Contents,
-including configured custom providers using these protocols. Disabled models are
-not callable. MoA presets are excluded from this catalog and direct requests to
-`moa/...` return `model_not_found`; internal MoA features are unchanged.
-Bedrock Converse and Codex app-server need separate runtimes;
-they remain listed with `responses_supported: false` and requests return an
-explicit error. OpenAI Codex OAuth using the Responses HTTP transport is supported.
+OpenAI Codex subscription inference uses `/backend-api/codex/responses` without
+an inserted `/v1`. The gateway applies Codex's native streaming-only, `store=false`
+request policy and omits unsupported sampling/output-limit fields. JSON callers
+receive the collected terminal Responses object from that upstream stream.
 
-Coding Agent already performs protocol conversion in its own proxy. It remains
-separate: this endpoint reuses Ekko model adapters without starting an agent,
-executing tools, or modifying Hermes provider configuration.
+## Provider ownership and migration
+
+On the authenticated user's first access, Studio imports all accessible Profiles
+before changing primary inference configuration. Configuration, credential files,
+model context overrides and display preferences become account-owned state under
+`HERMES_WEB_UI_HOME/providers/users/<user-id>`. Import markers make this idempotent;
+private source snapshots support recovery and later imports by another user who
+shares the same Profile. Changes in Studio do not overwrite the imported backup.
+Live Provider configuration, environment credentials, OAuth state, catalog,
+display preferences and the generated internal key live directly in this account
+directory. Additional OAuth identities have Provider-owned `credentials/` slots.
+The `profiles/` directory holds source backups, import/projection metadata and
+runtime model selections; it does not partition the live Provider pool.
+
+Hermes primary inference uses Provider `ekkostudio`, the local gateway URL, an
+automatically generated internal credential, and qualified models such as
+`deepseek/deepseek-v4`. The UI continues to display separate logical Provider and
+model names. One internal credential is shared across the account's Profiles;
+HTTP calls recheck account status. Internal credentials cannot create sharing
+keys or access management APIs.
+
+Existing auxiliary, MoA, fallback and delegation configurations are **not**
+automatically rewritten. Their native Provider definitions, environment and OAuth
+files remain available. When a user edits a slot in Studio, only that slot is
+written as a gateway route. Unchanged slots in a submitted settings group remain
+native. Reads display logical names for edited slots, and continue to reflect
+native Hermes changes to untouched slots. Resetting a slot to `auto` retains
+inheritance rather than fixing it to a model.
+
+Ekko and scoped Coding/plugin Agents use the same gateway. Native CLI launch
+configuration and its gateway binding are account-scoped; upstream credentials
+are resolved from the account store after restart. Previously generated proxy
+URLs are accepted as compatibility aliases through the same authenticated
+handler. CLI modes explicitly using a machine-native account keep that mode.
+
+Messages token counting forwards to Anthropic's native endpoint when available.
+For other upstream protocols it returns a conservative byte-based estimate,
+marked by `x-studio-token-count-estimated: true`. Counting does not record a model
+inference or consume a key's inference budget.
 
 ## Requests
 
@@ -164,29 +207,27 @@ response = client.responses.create(model="deepseek/deepseek-reasoner",
     input=history, tools=tools, store=False)
 ```
 
-Reasoning output carries an opaque `encrypted_content` envelope. Preserve it:
-it retains DeepSeek reasoning content, Anthropic thinking signatures and Gemini
-thought signatures needed for valid tool continuation. Native replay is scoped to
-the Profile, provider, model, endpoint and protocol. Switching targets discards
-incompatible native data instead of forwarding another provider's encrypted data.
-The encryption key lives in Studio state as `model-api-reasoning.key`; retain this
-file across restarts/backups. Replicas serving one history must share it.
+Same-protocol calls preserve native vendor payloads. For Responses calls routed
+to Anthropic, signed thinking blocks are retained in an opaque `encrypted_content`
+envelope. Send returned reasoning items unchanged with subsequent tool results.
+Replay is scoped to the account, Profile, Provider, model, endpoint and protocol.
+The encryption key is stored as `model-api-reasoning.key` in Studio state; retain
+it across backups and restarts.
 
-This is a model-inference subset of Responses. It explicitly rejects stored
-conversations, `previous_response_id`, background requests, hosted tools, strict
-tool schemas, structured text output, remote image URLs/file IDs, forced named
-tool choice and disabling parallel tool calls. These features are not silently
-emulated. There are no response retrieval/delete routes or `/chat/completions`
-endpoint in this API.
+The gateway performs inference only; it does not execute tools or create chat
+sessions. Send complete conversation history for translated continuations. Native
+Responses features are forwarded when using a Responses upstream; this gateway
+does not implement response retrieval/delete or a universal stored-conversation
+service across vendors. Audio, video and other vendor-only modalities are not
+universally translatable.
 
 ## Usage
 
-Every attempted upstream request through this endpoint records **external** usage,
-including calls from Studio configured with its own endpoint. Authentication and
-validation failures before an upstream request do not create model usage. Existing
-chat, workflow and Coding Agent accounting stays **internal**. A Studio call to its
-own endpoint can therefore appear once in each category; these are two accounting
-views and must not be summed as a deduplicated provider bill.
+External calls through sharing keys or account JWTs record external usage once
+per request. Generated internal credentials and run-scoped CLI/plugin credentials
+retain their existing Agent/session accounting; the gateway does not add another
+external charge. Authentication and validation failures before upstream dispatch
+do not create model usage. Failure/cancellation retains reported usage.
 
 The usage page switches between Internal and External. The stats endpoint accepts
 `origin=internal|external` and defaults to internal for existing clients. API usage
