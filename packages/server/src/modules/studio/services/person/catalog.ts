@@ -13,6 +13,7 @@ import type { PersonSelection, PersonSettings } from '../../contracts/person'
 import { personSettings } from '../../repositories/person-store'
 import { readCompressionPolicy } from '../compression-policy'
 import { getModelContextLength } from '../../public/provider-runtime'
+import { logicalModelSelection } from '../../public/model-routing'
 
 export const PERSON_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
@@ -90,10 +91,14 @@ async function effectivePersonSettingsImpl(userId: number, stored = personSettin
   const profile = stored.settings.model?.profile || getActiveProfileName() || 'default'
   const catalog = profiles.includes(profile) ? await personRuntime().modelConfig(profile) : null
   let model = stored.settings.model
+  // Persisted selections and the inherited default may still contain Hermes'
+  // gateway projection. Resolve it in this account before matching the catalog.
+  if (model) model = { ...model, ...logicalModelSelection(profile, model.provider, model.model) }
   if (!model && catalog?.default) {
-    const group = catalog.groups.find(group => (!catalog.default_provider || group.provider === catalog.default_provider)
-      && group.models.includes(catalog.default) && personModelAllowed(group, catalog.default))
-    if (group) model = { runtime: 'ekko', mode: 'scoped', profile, provider: group.provider, model: catalog.default, apiMode: apiMode(group, catalog.default) }
+    const selected = logicalModelSelection(profile, catalog.default_provider, catalog.default)
+    const group = catalog.groups.find(group => (!selected.provider || group.provider === selected.provider)
+      && group.models.includes(selected.model) && personModelAllowed(group, selected.model))
+    if (group) model = { runtime: 'ekko', mode: 'scoped', profile, provider: group.provider, model: selected.model, apiMode: apiMode(group, selected.model) }
   }
   const meta = model ? catalog?.groups.find(group => group.provider === model!.provider)?.model_meta?.[model.model] : undefined
   const reasoningEfforts = !model || meta?.reasoning === false ? []
