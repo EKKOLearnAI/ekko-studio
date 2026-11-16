@@ -104,8 +104,10 @@ it.each([undefined, 'work'])('includes authorized providers in the available end
 
   expect(ctx.status).not.toBe(500)
   expect(ctx.body.groups.map((group: { provider: string }) => group.provider)).toEqual(['openai-codex'])
+  expect(ctx.body.groups[0]).toMatchObject({ supports_gateway_auth: true, api_key: '' })
+  expect(JSON.stringify(ctx.body)).not.toContain('fixture-codex')
   expect(ctx.body.profiles.find((item: { profile: string }) => item.profile === 'work').groups)
-    .toEqual(expect.arrayContaining([expect.objectContaining({ provider: 'openai-codex' })]))
+    .toEqual(expect.arrayContaining([expect.objectContaining({ provider: 'openai-codex', supports_gateway_auth: true })]))
 })
 
 it('keeps root OAuth grants and the legacy anthropic alias available in a named profile', async () => {

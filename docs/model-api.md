@@ -10,6 +10,14 @@ Studio exposes one model gateway with several native protocol entrances:
 - `POST /api/ekko-studio/models/v1beta/models/{provider/model}:generateContent`
 - `POST /api/ekko-studio/models/v1beta/models/{provider/model}:streamGenerateContent`
 
+App model pickers use `supports_gateway_auth: true` on model groups returned by
+`/api/hermes/available-models` and the Person model catalogs to enable scoped
+Coding Agent OAuth choices through the gateway. This is separate from
+`credential_configured`, which only describes stored credentials. Missing or
+false capability fields mean clients must retain their older per-agent auth
+rules; version numbers or the presence of a saved credential are not sufficient.
+This additive field does not change logical Provider/model IDs or session storage.
+
 Use `http://localhost:8648/api/ekko-studio/models/v1` as the OpenAI SDK `base_url`
 (replace the host and port for your instance). Authentication accepts a dedicated
 **Model API key** or a Studio **user JWT** as `Authorization: Bearer …`. Provider

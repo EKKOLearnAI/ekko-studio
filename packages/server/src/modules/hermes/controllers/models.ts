@@ -33,7 +33,7 @@ const PROVIDER_MODEL_CATALOG = buildProviderModelMap()
 
 type ModelMeta = { preview?: boolean; disabled?: boolean; alias?: string; reasoning?: boolean; reasoning_efforts?: string[] }
 type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
-type AvailableGroup = { provider: string; label: string; base_url: string; models: string[]; api_key: string; credential_configured?: boolean; api_mode?: ProviderApiMode; api_mode_by_model?: Record<string, ProviderApiMode | null>; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean }
+type AvailableGroup = { provider: string; label: string; base_url: string; models: string[]; api_key: string; credential_configured?: boolean; supports_gateway_auth?: boolean; api_mode?: ProviderApiMode; api_mode_by_model?: Record<string, ProviderApiMode | null>; builtin?: boolean; model_meta?: Record<string, ModelMeta>; available_models?: string[]; base_url_env?: string; provider_source?: 'custom_providers' | 'providers'; provider_key?: string; provider_editable?: boolean; editable_fields?: ProviderEditableField[]; model_refreshable?: boolean; model_refresh_reason?: string; model_restore_available?: boolean }
 type ModelVisibility = Record<string, ModelVisibilityRule>
 type CustomModels = Record<string, string[]>
 
@@ -475,6 +475,7 @@ async function buildAvailableForProfile(
       models: availableModels,
       available_models: availableModels,
       api_key: '',
+      supports_gateway_auth: true,
       credential_configured: !!api_key || extra?.credential_configured,
       ...(extra?.credential_configured !== undefined ? { credential_configured: extra.credential_configured } : {}),
       ...(apiMode ? { api_mode: apiMode } : {}),
