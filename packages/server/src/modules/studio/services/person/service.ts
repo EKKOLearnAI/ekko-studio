@@ -1,10 +1,11 @@
 import { personMemories } from './memory'
 import { readPersonSession, personChatBusy } from './chat-agent'
 import { personError, personRevision, personText } from '../../contracts/person'
-import { personSettings, savePersonSettings,
+import { personSettings, savePersonSettings, savePersonTeamAgents,
   listPersonTasks, listPersonSchedules, personInteractions } from '../../repositories/person-store'
 import { effectivePersonSettings, personModelSelection, personUser, validatePersonSelection, PERSON_REASONING_EFFORTS } from './catalog'
 import { validatePersonAgents } from './agents'
+import { personTeams } from './teams'
 import { isAbsolute } from 'node:path'
 import { normalizeDirectoryTarget, requireExistingWorkspaceDirectory } from '../workspace/directory'
 import { personHasPendingWork } from '../../repositories/person-history-store'
@@ -15,9 +16,10 @@ export async function personSnapshot(userId: number, sessionId = '', options: { 
   personUser(userId)
   const session = sessionId ? await readPersonSession(userId, sessionId) : { ...await effectivePersonSettings(userId), session: null }
   const busy = personChatBusy(userId, sessionId || undefined)
-  return { ...session, tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [],
+  const teamId = session.settings?.teamId
+  return { ...session, teams: personTeams(userId), tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100 }) : [],
     active_tasks: sessionId ? listPersonTasks(userId, '', 0, { sessionId, limit: 100, activeOnly: true }) : [],
-    active_agent_task_count: sessionId ? personBackgroundTaskCount(userId, sessionId) : 0, memories: await personMemories(userId),
+    active_agent_task_count: sessionId ? personBackgroundTaskCount(userId, sessionId) : 0, memories: await personMemories(userId, teamId),
     ...(options.includeFlows === false ? {} : sessionId ? personConversationFlows(userId,sessionId) : { flows:[],active_flow_count:0,active_flows:[] }),
     schedules: listPersonSchedules(userId), interactions: personInteractions(userId), busy,
     history_revision: session.session?.history_revision ?? 0, can_clear: !!session.session && !busy && !personHasPendingWork(userId, sessionId) }
@@ -51,7 +53,11 @@ export async function configurePerson(userId: number, input: Record<string, unkn
   if (input.reasoning_effort && !effective.reasoning_efforts.includes(input.reasoning_effort as any)) throw personError('Model does not support this reasoning effort')
   settings.reasoningEffort = effective.settings.reasoningEffort
   if (input.timezone !== undefined) { settings.timezone = personText(input.timezone, 'timezone', 100); new Intl.DateTimeFormat('en-US', { timeZone: settings.timezone }) }
-  if (input.agents !== undefined) settings.agents = await validatePersonAgents(userId, input.agents)
+  if (input.agents !== undefined) {
+    // Agents live on the team, so this legacy path writes the conversation's team.
+    settings.agents = await validatePersonAgents(userId, input.agents)
+    savePersonTeamAgents(userId, settings.teamId, settings.agents)
+  }
   if (input.compressionThreshold !== undefined) {
     const value = input.compressionThreshold
     if (value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0.05 || value > 0.95)) throw personError('Invalid compressionThreshold')

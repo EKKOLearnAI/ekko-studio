@@ -19,6 +19,25 @@ export interface PersonAgentPreset {
   description: string
   selection: PersonSelection
 }
+/** An agent team owns its execution agents and its memory store. */
+export interface PersonTeam {
+  id: string
+  name: string
+  agents: PersonAgentPreset[]
+  revision: number
+  created_at: number
+}
+/** Conversations still bound to a team; used before deleting it. */
+export interface PersonTeamUsage {
+  total: number
+  conversations: Array<{ id: string; title: string }>
+  tasks: number
+}
+export const PERSON_DEFAULT_TEAM_ID = 'team-default'
+export const PERSON_DEFAULT_TEAM_NAME = 'Default'
+export const PERSON_TEAM_AGENT_LIMIT = 20
+/** Conversation previews shown in the delete dialog; the rest collapses into a count. */
+export const PERSON_TEAM_USAGE_PREVIEW = 10
 export interface PersonTaskOrigin {
   sessionId: string
   runId: string
@@ -44,6 +63,8 @@ export interface PersonSettings {
   maxSteps: number
   compressionThreshold: number | null
   agents: PersonAgentPreset[]
+  /** Selected agent team; resolved from the conversation and never chosen by a model. */
+  teamId: string
   maxConcurrentTasks: number
   taskTimeoutMinutes: number
 }
@@ -100,7 +121,7 @@ export interface PersonSchedule {
 }
 export const PERSON_DEFAULTS: PersonSettings = {
   model: null, reasoningEffort: '', timezone: 'Asia/Shanghai', maxSteps: 12,
-  agents: [], maxConcurrentTasks: 6, taskTimeoutMinutes: 60, compressionThreshold: null, workspace: '',
+  agents: [], teamId: '', maxConcurrentTasks: 6, taskTimeoutMinutes: 60, compressionThreshold: null, workspace: '',
 }
 export function personError(message: string, status = 400): Error & { status: number } {
   return Object.assign(new Error(message), { status })

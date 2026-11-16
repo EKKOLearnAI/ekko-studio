@@ -1081,8 +1081,8 @@ export class ChatRunSocket {
         try {
           runProfile = resolveRunProfile(data.session_id, data.profile)
           if (isPersonSession(data.session_id)) {
-            requirePersonAgents(socketUser!.id)
             const { session, settings } = await ensurePersonSession(socketUser!.id, data.session_id!)
+            requirePersonAgents(socketUser!.id, settings.teamId)
             if (!settings.model) throw new Error('No available Person model')
             // Only input/queue identity comes from the client. Agent policy and resources are server-owned.
             data = { session_id: session.id, input: data.input, queue_id: data.queue_id,
@@ -1863,8 +1863,8 @@ export class ChatRunSocket {
     if (isPersonSession(data.session_id)) {
       const userId = socket.data?.user?.id
       if (!ownsPersonSession(userId, getSession(data.session_id!))) throw new Error('Session not found')
-      requirePersonAgents(userId)
       const { settings } = await ensurePersonSession(userId, data.session_id!)
+      requirePersonAgents(userId, settings.teamId)
       if (!settings.model) throw new Error('No available Person model')
       data = { session_id: data.session_id, input: data.input, queue_id: data.queue_id, onEvent: data.onEvent,
         ...(backgroundContinuationContext ? { background_delegation_id: data.background_delegation_id, autonomous: true,

@@ -71,7 +71,7 @@ async function coordinate(run: PersonExecution, nativeId: string, questionText: 
   if (question.state !== 'pending') return
   setPersonExecution(current(run), 'waiting_person')
   let decision: { answer?: string; escalation?: string } | undefined
-  const tools = personTools(run.owner_user_id, 'coordinator', run.task_id)
+  const tools = personTools(run.owner_user_id, 'coordinator', run.task_id, getPersonTask(run.owner_user_id, run.task_id).session_id)
   tools.push(personTool('bot_interaction_reply', 'Answer this worker question from existing requirements or retrieved facts; escalate only missing user intent or expanded scope.', {
     answer: { type: 'string' }, escalation: { type: 'string' }, basis: { type: 'string' },
   }, ['basis'], async args => {

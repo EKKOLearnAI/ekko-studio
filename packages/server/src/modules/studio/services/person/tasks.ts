@@ -4,7 +4,7 @@ import { interruptPersonAcceptance, personAcceptanceSessions } from '../../repos
 import { randomUUID } from 'node:crypto'
 import { personError, personRevision, personText } from '../../contracts/person'
 import type { PersonExecution, PersonTask, PersonTaskOrigin } from '../../contracts/person'
-import { personDb, personTransaction, getPersonExecution, replayPersonOperation, adoptPersonGoal, personOperation, getPersonTask, personTaskRunning, createPersonTask, updatePersonTask, enqueuePersonExecution, personEvent } from '../../repositories/person-store'
+import { personDb, personTransaction, getPersonExecution, replayPersonOperation, adoptPersonGoal, personOperation, getPersonTask, personTaskRunning, createPersonTask, updatePersonTask, enqueuePersonExecution, personEvent, personSettings } from '../../repositories/person-store'
 import { personRuntime } from '../../public/person-runtime'
 import { personUpdated } from '../../repositories/person-updates'
 import { logger } from '../../public/logging'
@@ -109,9 +109,10 @@ export async function applyPersonTask(userId: number, input: Record<string, unkn
   if (replay !== undefined) return replay
   if (Object.hasOwn(input,'acceptance') && !['create','adopt','configure_acceptance'].includes(action)) throw personError('Acceptance is configured before the first execution and cannot be removed later')
   if (action === 'configure_acceptance' && !Object.hasOwn(input,'acceptance')) throw personError('acceptance is required')
-  const acceptance = await parsePersonAcceptance(userId, input.acceptance, ['create','adopt'].includes(action) ? personText(input.goal,'goal',8000) : getPersonTask(userId,String(input.task_id)).summary)
+  const teamId = personSettings(userId, targetSession).settings.teamId
+  const acceptance = await parsePersonAcceptance(userId, input.acceptance, ['create','adopt'].includes(action) ? personText(input.goal,'goal',8000) : getPersonTask(userId,String(input.task_id)).summary, teamId)
   if (acceptance && (input.next_steps !== undefined || input.return_expectation !== undefined)) throw personError('Acceptance is unavailable for legacy task routes; use standalone background tasks')
-  const selection = ['create','adopt'].includes(action) ? await selectPersonExecutionAgent(userId, input.agent_id) : null
+  const selection = ['create','adopt'].includes(action) ? await selectPersonExecutionAgent(userId, input.agent_id, teamId) : null
   if (selection) await validatePersonSelection(userId, selection)
   if (action === 'start') await validatePersonSelection(userId, JSON.parse(getPersonTask(userId, String(input.task_id)).selection_json))
   if (action === 'verify') await validateBotVerifier(userId,getPersonTask(userId,String(input.task_id)))

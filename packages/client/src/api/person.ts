@@ -13,6 +13,9 @@ export interface PersonTaskQueueState { protectedQueueId?: string; canInsert?: b
 export interface PersonTaskQueueSnapshot extends PersonTaskQueueState { task: PersonTask; pending: { id: string; input: { type: string; text?: string; name?: string }[] }[] }
 export interface PersonSchedule { id: string; mode: 'assistant' | 'worker'; task_id: string | null; session_id: string; session_title?: string | null; bot_type?: string | null; task_title?: string | null; task_goal?: string | null; title: string; goal: string; expression: string; timezone: string; next_at: number; state: string; revision: number }
 export interface PersonMemory { id: string; content: string; revision: number }
+export interface PersonTeam { id: string; name: string; agents: PersonAgentPreset[]; revision: number; created_at: number }
+export interface PersonTeamUsage { team_id: string; default: boolean; total: number; tasks: number; conversations: Array<{ id: string; title: string }> }
+export const PERSON_DEFAULT_TEAM_ID = 'team-default'
 export interface PersonQuestion { id: string; task_id: string | null; question: string; kind: string; choices_json: string; revision: number }
 export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed'; relatedTasks?: PersonTaskReturn[] }
 export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; taskTimeoutMinutes: number; timezone: string }
@@ -60,15 +63,27 @@ export interface PersonSnapshot {
   active_tasks?: PersonTask[]
   active_agent_task_count?: number
   session: SessionSummary | null
-  settings: PersonGeneralSettings & { model: PersonModel | null; reasoningEffort: string; agents: PersonAgentPreset[]; workspace: string }; revision: number; busy: boolean
+  settings: PersonGeneralSettings & { model: PersonModel | null; reasoningEffort: string; agents: PersonAgentPreset[]; teamId: string; workspace: string }; revision: number; busy: boolean
   history_revision: number; can_clear: boolean
   inherits_global_model: boolean; reasoning_efforts: string[]
   compression: { enabled: boolean; threshold: number; globalThreshold: number }
   contextTokens: number
+  teams?: PersonTeam[]
   tasks: PersonTask[]; schedules: PersonSchedule[]; memories: PersonMemory[]; interactions: PersonQuestion[]; flows?: PersonFlow[]; active_flows?: PersonFlow[]; active_flow_count?: number
 }
 export function personRequest<T>(path = '', body?: unknown, method = 'POST', signal?: AbortSignal) {
   return request<T>(`/api/studio/person${path}`, body === undefined ? { signal } : { method, body: JSON.stringify(body), signal })
+}
+/** Teams are account-owned; every mutation carries an idempotency key. */
+export function applyPersonTeam(input: Record<string, unknown>) {
+  return personRequest<{ teams: PersonTeam[]; team?: PersonTeam; deleted?: string; conversations_moved?: number }>(
+    '/teams/apply', { idempotency_key: clientUuid(), ...input })
+}
+export function personTeamUsage(teamId: string, signal?: AbortSignal) {
+  return personRequest<PersonTeamUsage>(`/teams/${encodeURIComponent(teamId)}/usage`, undefined, 'GET', signal)
+}
+export function personTeamMemories(teamId: string, signal?: AbortSignal) {
+  return personRequest<{ memories: PersonMemory[] }>(`/memory?team_id=${encodeURIComponent(teamId)}`, undefined, 'GET', signal)
 }
 export function personTaskCanStop(task?: PersonTask | null) {
   return !!task?.execution_id && ['pending','queued','starting','running','waiting_person','waiting_user','waiting_approval','stopping'].includes(task.execution_state)

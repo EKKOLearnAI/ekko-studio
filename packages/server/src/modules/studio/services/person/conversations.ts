@@ -13,7 +13,7 @@ import { ensurePersonSession } from './chat-agent'
 import { stopPersonSessionTasks } from './tasks'
 import { stopPersonSessionFlows } from './stage-flows'
 import { DEFAULT_PERSON_BOT_TYPE, personBot } from '../../../../../../shared/person-bots'
-import { personDb, personSettings, personTransaction } from '../../repositories/person-store'
+import { personDb, personSettings, personTransaction, requirePersonTeam } from '../../repositories/person-store'
 
 export function personConversations(userId: number, query = '', offset = 0) {
   personUser(userId)
@@ -36,7 +36,9 @@ export async function createPersonConversation(userId: number, title: unknown, i
   const bot = personBot(input.bot_type ?? DEFAULT_PERSON_BOT_TYPE)
   if (!bot) throw personError('Unknown bot type')
   const stored = personSettings(userId)
-  const initial = { ...stored.settings }
+  // The team is chosen once at creation; every later lookup reads it back.
+  const team = requirePersonTeam(userId, input.team_id === undefined ? undefined : personText(input.team_id, 'team_id', 100))
+  const initial = { ...stored.settings, teamId: team.id, agents: team.agents }
   const checkRevision = () => {
     if (input.expected_revision !== undefined && personSettings(userId).revision !== personRevision(input.expected_revision)) throw personError('Settings changed; reload and retry', 409)
   }
@@ -66,7 +68,7 @@ export async function createPersonConversation(userId: number, title: unknown, i
       source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', agent_mode: 'scoped',
       profile: settings.model?.profile || 'default', workspace, push_enabled: false })
     personDb().prepare('INSERT INTO person_conversation_settings VALUES (?,?,?)')
-      .run(id, userId, JSON.stringify({ model: initial.model, reasoningEffort: settings.reasoningEffort, workspace }))
+      .run(id, userId, JSON.stringify({ model: initial.model, reasoningEffort: settings.reasoningEffort, workspace, teamId: team.id }))
   })
   personUpdated(userId)
   return (await ensurePersonSession(userId, id)).session
