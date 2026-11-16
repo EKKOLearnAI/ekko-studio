@@ -84,6 +84,13 @@ export interface AppConfig {
   // Disabled by default; users must explicitly enable it. This is a
   // Web UI-level setting, not the active Hermes profile's config.yaml.
   gatewayAutoStart?: GatewayAutoStartConfig
+
+  // Web UI-only default: whether a NEW Hermes profile should be created with
+  // compression.micro_compact enabled (rolling micro-compaction) by default.
+  // This is a Studio-level setting (persisted in appHome/config.json), not any
+  // single profile's config.yaml. It governs future `create profile` calls;
+  // existing profiles are synced via a separate bulk action.
+  microCompactDefault?: boolean
 }
 
 let cache: AppConfig | null = null
