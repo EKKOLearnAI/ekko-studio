@@ -1,8 +1,6 @@
 import { fetchProviderHttp, isCodexInferenceRequest } from '../../studio/public/provider-http'
 import { openAiResponsesSseToResponsesEvents } from './adapters/responses-stream'
 import { providerAccountId, providerRequestProfile } from '../../studio/public/provider-account'
-import { openCodeSessionHeaders } from '../../studio/public/opencode-session'
-import { openRouterAttributionHeaders } from '../../studio/public/openrouter-attribution'
 
 /** A provider request issued by a Coding Agent proxy. */
 export interface AgentGatewayRequest {

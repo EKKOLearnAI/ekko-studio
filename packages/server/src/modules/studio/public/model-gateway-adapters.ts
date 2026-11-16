@@ -12,10 +12,10 @@ export interface ModelGatewayTarget extends ModelGatewayBinding {
   reasoningEffort?: string
   onUsageEvent?: (event: { type: string; data: any }, duration?: number, baseUrl?: string) => void
 }
-interface ModelGatewayAdapters {
+export interface ModelGatewayAdapters {
   authenticate(token: string): ModelGatewayBinding | null
   handle(protocol: ModelGatewayProtocol, ctx: Context): Promise<void>
-  register(protocol: ModelGatewayProtocol, target: ModelGatewayTarget): { routeKey: string; dispose(): void }
+  register(protocol: ModelGatewayProtocol, target: ModelGatewayTarget, persisted?: { token: string }): { routeKey: string; dispose(): void }
 }
 let adapters: ModelGatewayAdapters | undefined
 export const configureModelGatewayAdapters = (next: ModelGatewayAdapters) => { adapters = next }

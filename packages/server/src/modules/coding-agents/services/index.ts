@@ -1,4 +1,6 @@
 import { providerAccountHome, providerAccountId } from '../../studio/public/provider-account'
+import { canonicalProviderId, logicalModelSelection } from '../../studio/public/model-routing'
+import { migrateSessionRuntime } from './session-runtime-migration'
 import { saveModelTarget } from '../../studio/public/model-target-store'
 import { resolveProviderUpstream } from '../../studio/public/provider-upstream'
 import { lowestReasoningEffort } from '../../../../../shared/reasoning-effort'
@@ -33,7 +35,7 @@ import { getWebUiHome } from '../../studio/public/config'
 import { getProfileDir, PROVIDER_ENV_MAP, readConfigYamlForProfile, safeReadFile } from '../../studio/public/provider-config'
 import { getCompatibleCustomProviders, resolveCustomProviderApiKey } from '../../studio/contracts/provider-compat'
 import { registerClaudeCodeProxyTarget } from './claude-code/proxy'
-import { registerCodexProxyTarget, restoreCodexProxyTarget } from './codex/proxy'
+import { registerCodexProxyTarget } from './codex/proxy'
 import { compactCodexThread } from './codex/compact'
 import { writeManagedPromptFile } from './prompt-file'
 import type { ApiMode, CodingAgentImageInput } from '../protocol/types'
@@ -695,8 +697,10 @@ async function resolveStoredProviderLaunchInput(
   const profile = String(input.profile || existingSession?.profile || 'default').trim() || 'default'
   const inputProvider = String(input.provider || '').trim()
   const storedProvider = String(existingSession?.provider || '').trim()
-  const provider = String(inputProvider || storedProvider).trim()
-  const model = String(input.model || existingSession?.model || '').trim()
+  const config = await readConfigYamlForProfile(profile)
+  const selection = logicalModelSelection(profile, inputProvider || storedProvider, String(input.model || existingSession?.model || '').trim())
+  const provider = selection.provider
+  const model = selection.model
   const workspace = input.workspace || existingSession?.workspace || undefined
   let baseUrl = String(input.baseUrl || '').trim()
   let apiKey = String(input.apiKey || '').trim()
@@ -704,6 +708,7 @@ async function resolveStoredProviderLaunchInput(
     ? normalizeStoredLaunchApiMode(existingSession?.api_mode)
     : undefined
   let apiMode = input.apiMode || storedApiMode
+  if (provider !== (inputProvider || storedProvider)) { baseUrl = ''; apiKey = ''; apiMode = undefined }
   assertProviderAvailable(provider)
   let canonicalProvider = provider
   const ignoredStaleProviderRuntime = belongsToDifferentBuiltinProvider(provider, baseUrl)
@@ -716,10 +721,6 @@ async function resolveStoredProviderLaunchInput(
     return { ...input, profile, provider: provider || input.provider, model: model || input.model, workspace, baseUrl, apiKey, apiMode }
   }
 
-  let config: Record<string, any> = {}
-  try {
-    config = await readConfigYamlForProfile(profile)
-  } catch {}
   const envContent = await safeReadFile(join(getProfileDir(profile), '.env')) || ''
   const normalizedProvider = providerKeyWithoutCustomPrefix(provider)
   const preset = PROVIDER_PRESETS.find(item => item.value === normalizedProvider)
@@ -831,6 +832,7 @@ function getScopedRuntimeConfigRoot(
   id: CodingAgentId,
   scope: Required<CodingAgentConfigScope>,
   input: Pick<CodingAgentLaunchInput, 'sessionId' | 'agentSessionId' | 'groupRuntimeScope' | 'studioMcpTokenFile'>,
+  rootDir = getScopedConfigRoot(id, scope),
 ): string {
   const groupRoomId = String(input.groupRuntimeScope?.roomId || '').trim()
   const groupAgentId = String(input.groupRuntimeScope?.agentId || '').trim()
@@ -841,14 +843,13 @@ function getScopedRuntimeConfigRoot(
       return `${readable}_${digest}`
     }
     return join(
-      getScopedConfigRoot(id, scope),
+      rootDir,
       'group-chat',
       stableSegment(groupRoomId),
       stableSegment(groupAgentId),
       ...(input.studioMcpTokenFile ? ['runs', createHash('sha256').update(input.studioMcpTokenFile).digest('hex').slice(0, 24)] : []),
     )
   }
-  const rootDir = getScopedConfigRoot(id, scope)
   const sessionId = String(input.sessionId || '').trim()
   const agentSessionId = String(input.agentSessionId || '').trim()
   if ((!sessionId || !agentSessionId) && (id === 'pi' || id === 'dsh')) {
@@ -1892,7 +1893,7 @@ export async function restorePersistedPiProxyTargets(): Promise<number> {
         || (!apiKey || isRetiredProvider(input.provider))) continue
       const restoredInput = { ...input, apiKey }
       delete restoredInput.apiKeyEncrypted
-      restoreCodexProxyTarget(restoredInput, token)
+      registerCodexProxyTarget(restoredInput, { token })
       if (legacyApiKey || encryptedVersion === 1) {
         const migratedInput = { ...input }
         delete migratedInput.apiKey
@@ -1991,7 +1992,7 @@ export async function restorePersistedCodexProxyTargets(): Promise<number> {
       }, null)
       const apiKey = String(resolved.apiKey || '').trim()
       if (!profile || !provider || !model || !baseUrl || (!apiKey || isRetiredProvider(provider))) continue
-      restoreCodexProxyTarget({
+      registerCodexProxyTarget({
         profile,
         provider,
         model,
@@ -2001,7 +2002,7 @@ export async function restorePersistedCodexProxyTargets(): Promise<number> {
         agentId: config.agentId,
         agentSessionId,
         chatSessionId,
-      }, token)
+      }, { token })
       restoredRouteKeys.add(routeKey)
       restoredCount += 1
     } catch {
@@ -3373,6 +3374,18 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       }
     : input
   const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, isolatedInput)
+  const stored = input.sessionId ? getSession(input.sessionId) : null
+  if (stored && storedCodingAgentMode(stored) === 'scoped' && stored.agent === persistedAgentId(tool.id)
+    && (stored.profile || 'default') === (input.profile || 'default')
+    && canonicalProviderId(input.profile || 'default', stored.provider || '') === provider) {
+    const oldScope = normalizeConfigScope({ profile: stored.profile, provider: stored.provider || undefined })
+    await migrateSessionRuntime({ target: rootDir, accountId: providerAccountId(input.profile),
+      agentSessionId: isolatedInput.agentSessionId, session: stored,
+      candidates: [
+        getScopedRuntimeConfigRoot(tool.id, oldScope, isolatedInput),
+        getScopedRuntimeConfigRoot(tool.id, oldScope, isolatedInput, join(getWebUiHome(), CODING_AGENT_HOME_DIR, 'model', oldScope.profile, oldScope.provider, tool.id)),
+      ] })
+  }
   const workspaceDir = input.sessionId?.startsWith('person-task-')
     ? requireExistingWorkspaceDirectory(input.workspace || '')
     : resolveLaunchWorkspaceRoot(scope, input.workspace)
@@ -3898,7 +3911,7 @@ async function startCodingAgentRunInternal(
       (existingSession.agent === persistedAgentId(id) || !existingSession.agent) &&
       (id !== 'antigravity' || !resolvedInput.workspace || resolvedInput.workspace === existingSession.workspace) &&
       (requestedMode === 'global' || (
-        String(existingSession.provider || '').trim() === String(resolvedInput.provider || '').trim() &&
+        canonicalProviderId(resolvedInput.profile || 'default', String(existingSession.provider || '').trim()) === String(resolvedInput.provider || '').trim() &&
         String(existingSession.model || '').trim() === String(resolvedInput.model || '').trim() &&
         (!String(existingSession.api_mode || '').trim() || String(existingSession.api_mode || '').trim() === String(resolvedInput.apiMode || '').trim())
       ))

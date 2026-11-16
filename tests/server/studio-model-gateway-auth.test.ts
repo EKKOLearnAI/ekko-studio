@@ -71,6 +71,8 @@ it('uses the common gateway for run credentials and honors Profile revocation', 
   const request = ctx('/api/ekko-studio/models/v1/messages', 'hwui_run', 'x-api-key')
   await modelGatewayMiddleware(request, next)
   expect(fixture.handled).toHaveBeenCalledWith('anthropic_messages', request)
+  expect(request.state.user).toMatchObject({ id: 1, username: 'fixture', role: 'user' })
+  expect(request.state.profile).toEqual({ name: 'work' })
   expect(next).not.toHaveBeenCalled()
   fixture.access = false
   await modelGatewayMiddleware(request, next)
@@ -89,4 +91,31 @@ it('serves run-scoped discovery and accepts old generated URLs through the same 
   const next = vi.fn()
   await modelGatewayMiddleware(management, next)
   expect(next).toHaveBeenCalledOnce()
+})
+
+it.each([
+  ['/api/codex-proxy/legacy/v1/responses', 'authorization', 'codex_responses'],
+  ['/api/codex-proxy/legacy/v1/chat/completions', 'authorization', 'chat_completions'],
+  ['/api/claude-code-proxy/legacy/v1/messages', 'x-api-key', 'anthropic_messages'],
+  ['/api/codex-proxy/legacy/gemini/v1beta/models/model:generateContent', 'x-goog-api-key', 'gemini_contents'],
+  ['/api/codex-proxy/legacy/gemini/v1beta/models/model:streamGenerateContent', 'x-goog-api-key', 'gemini_contents'],
+])('dispatches the legacy %s URL without a separate proxy router', async (path, header, protocol) => {
+  const request = ctx(path, 'hwui_run', header)
+  const next = vi.fn()
+  await modelGatewayMiddleware(request, next)
+  expect(fixture.handled).toHaveBeenCalledWith(protocol, request)
+  expect(next).not.toHaveBeenCalled()
+  fixture.active = false
+  await modelGatewayMiddleware(request, next)
+  expect(request.status).toBe(403)
+  expect(fixture.handled).toHaveBeenCalledOnce()
+})
+
+it.each(['codex-proxy', 'claude-code-proxy'])('serves legacy %s model discovery through the gateway', async proxy => {
+  const request = ctx(`/api/${proxy}/legacy/v1/models`, 'hwui_run', 'x-api-key', 'GET')
+  const next = vi.fn()
+  await modelGatewayMiddleware(request, next)
+  expect(request.body.data.map((model: any) => model.id)).toEqual(['model'])
+  expect(next).not.toHaveBeenCalled()
+  expect(fixture.handled).not.toHaveBeenCalled()
 })

@@ -20,7 +20,7 @@
 | 自动化动作 execute | JSON，结构应在插件契约中声明，供工作流消费。 |
 | hooks handler | `{ value?: Json, deny?: string }`；value 替换内容，deny 拒绝；不用修改时返回空对象。 |
 | HTTP onRequest | 原地修改 request 后返回 void 继续；返回 `{status,headers,body}` 直接响应并停止后续请求回调和路由。 |
-| HTTP onResponse | 原地修改 response，返回 void/Promise<void>；不返回替代对象。 |
+| HTTP onResponse | 在发送响应前原地修改 response，返回 void/Promise<void>；不返回替代对象。网关 SSE 的 body 为 Readable，可接 Transform；此回调不是流传输结束通知。 |
 | 业务观察 handler | void/Promise<void>；事件不能通过返回值修改原业务。 |
 | messages.emit | 传事件名、JSON data、可选 audience；没有业务返回值。 |
 | 前端 ui.selectModel | 宿主返回 `{profile,provider,model,apiMode?}`，关闭或取消返回 null；model 为规范 ID，不含凭证。调用方自行通过 RPC 保存；加载失败或重复打开时 Promise reject。 |

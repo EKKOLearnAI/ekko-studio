@@ -94,10 +94,13 @@ accessible Profile. IDs use a stable Provider namespace, for example
 separates the namespace; the complete upstream model ID remains intact. Slashes
 and percent signs in Provider names are escaped as `%2F` and `%25`.
 
-Provider namespaces are reserved per account. Identical source configurations
-are merged; same-name Providers with different endpoints or credentials retain
-separate records and stable suffixed IDs. Every Profile of that account uses the
-same records. Previously issued Profile-derived IDs remain aliases for existing
+Provider namespaces and names are unique per account. Migration keeps the first
+same-name Provider even when endpoints or credentials differ: the default Profile
+wins, followed by the remaining Profiles in sorted order. Names are compared
+after Unicode normalization, lowercasing and whitespace normalization. Later
+creation and renaming reject duplicate names or display labels with HTTP 409.
+Every Profile of that account uses the same records. Previously issued
+Profile-derived IDs and draft suffixed duplicate IDs remain aliases for existing
 clients and sharing-key grants. Use IDs returned by the catalog for new clients.
 The list includes `api_mode` and `responses_supported`, with no credentials or
 upstream URLs. Self-referencing local gateways and MoA presets are excluded.
@@ -131,6 +134,20 @@ directory. Additional OAuth identities have Provider-owned `credentials/` slots.
 The `profiles/` directory holds source backups, import/projection metadata and
 runtime model selections; it does not partition the live Provider pool.
 
+Session and message tables, history formats and session IDs are unchanged.
+Stored logical Provider IDs and gateway-qualified selections are resolved to the
+retained Provider when continuing a session; migration does not rewrite message
+history. Draft duplicate pools are backed up before being coalesced. Continuing
+a session on a discarded configuration uses the retained endpoint and credential,
+so its model must still be available there.
+
+Scoped Coding Agent runtimes moved from the shared application directory into
+the account directory. On continuation, Studio copies an owned session's existing
+runtime directory before preparing its launch, retaining the original files and
+native session ID. It also handles a Provider ID changed by migration. Existing
+destination histories are never replaced. Machine-native global CLI homes keep
+their existing storage layout.
+
 Hermes primary inference uses Provider `ekkostudio`, the local gateway URL, an
 automatically generated internal credential, and qualified models such as
 `deepseek/deepseek-v4`. The UI continues to display separate logical Provider and
@@ -151,6 +168,24 @@ configuration and its gateway binding are account-scoped; upstream credentials
 are resolved from the account store after restart. Previously generated proxy
 URLs are accepted as compatibility aliases through the same authenticated
 handler. CLI modes explicitly using a machine-native account keep that mode.
+Legacy URL compatibility lives in the shared model gateway middleware. The
+unmounted proxy routers/controllers and their separate model-list handlers have
+been removed; the gateway reuses the active Coding Agent protocol adapters.
+
+Gateway composition is confined to `bootstrap/model-gateway-adapter.ts`: Studio
+owns credential persistence/restoration and outbound HTTP policy; Coding Agents
+own protocol dispatch and target lifetimes behind their public adapter. Studio
+does not import concrete agent implementations.
+
+Plugins declaring `http` can intercept `/api/ekko-studio/models/*` through the
+existing global HTTP middleware. `onRequest` receives the parsed client request
+before authentication and protocol translation. Rewrites still pass normal
+credential, Profile and model-grant checks. `onResponse` receives the translated
+client response before Koa sends it, with the authenticated account and selected
+Profile (or the bound Profile for run credentials). The gateway returns SSE as
+a Readable, so plugins can attach a Transform without buffering the full stream.
+The response callback runs once before transmission, not when the stream ends;
+outgoing Provider requests are not a separate HTTP plugin interception point.
 
 Messages token counting forwards to Anthropic's native endpoint when available.
 For other upstream protocols it returns a conservative byte-based estimate,

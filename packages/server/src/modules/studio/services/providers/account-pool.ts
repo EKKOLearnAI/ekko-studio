@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { getCompatibleCustomProviders, resolveCustomProviderApiKey } from '../../contracts/provider-compat'
 import { PROVIDER_PRESETS } from '../../contracts/providers'
+import { providerNameKey } from '../../contracts/provider-identity'
 
 export interface ProviderSnapshot {
   profile: string
@@ -11,7 +12,8 @@ export interface ProviderSnapshot {
   qwen: string
 }
 export interface ProviderPoolState {
-  version: 2
+  version: 2 | 3
+  aliases?: Record<string, string>
   imports: Record<string, Record<string, string>>
   fingerprints: Record<string, string>
 }
@@ -19,6 +21,51 @@ export const providerConfigKeys = ['providers', 'custom_providers'] as const
 const oauth = new Set(['openai-codex', 'claude-oauth', 'nous', 'xai-oauth', 'qwen-oauth', 'minimax-oauth', 'copilot'])
 export const providerDigest = (value: string) => createHash('sha256').update(value).digest('hex')
 const slug = (value: string) => value.trim().toLowerCase().replace(/ /g, '-')
+export const compareProviderProfiles = (a: string, b: string) => a === b ? 0 : a === 'default' ? -1 : b === 'default' ? 1 : a.localeCompare(b)
+
+/** Upgrade the draft pool layout that generated hash-suffixed duplicates. */
+export function coalesceProviderPool(config: Record<string, any>, state: ProviderPoolState): Record<string, string> {
+  const providers = config.providers ||= {}
+  const aliases = { ...state.aliases }
+  // The draft create endpoint could append legacy list entries even after the
+  // account had migrated to a dictionary. Fold those into the same registry.
+  for (const entry of getCompatibleCustomProviders({ custom_providers: config.custom_providers || [] })) {
+    const id = entry.catalog_provider || `custom:${providerNameKey(entry.name)}`
+    const existing = Object.keys(providers).find(key => key === id || providerNameKey(providers[key]?.name || key) === providerNameKey(entry.name))
+    if (existing) { if (existing !== id) aliases[id] = existing; continue }
+    providers[id] = { ...entry, catalog_provider: id, runtime_provider: entry.runtime_provider || id }
+    delete providers[id].source
+    delete providers[id].provider_key
+  }
+  delete config.custom_providers
+  const imports = Object.keys(state.imports).sort(compareProviderProfiles).map(profile => state.imports[profile])
+  const ids = [...new Set([...imports.flatMap(aliases => Object.values(aliases)), ...Object.keys(providers)])].filter(id => providers[id])
+  const parent = Object.fromEntries(ids.map(id => [id, id]))
+  const root = (id: string): string => parent[id] && parent[id] !== id ? root(parent[id]) : id
+  const names = new Map<string, string>()
+  for (const id of ids) {
+    const keys = [providers[id].name || id, id.replace(/^custom[:_]/, ''),
+      ...imports.flatMap(aliases => Object.keys(aliases).filter(alias => aliases[alias] === id).map(alias => alias.replace(/^custom[:_]/, '')))]
+    for (const name of keys) {
+      const key = providerNameKey(name)
+      const previous = names.get(key)
+      if (previous) {
+        const pair = [root(previous), root(id)].sort((a, b) => ids.indexOf(a) - ids.indexOf(b))
+        parent[pair[1]] = pair[0]
+      } else names.set(key, id)
+    }
+  }
+  for (const id of ids) if (root(id) !== id) {
+    aliases[id] = root(id)
+    delete providers[id]
+    delete state.fingerprints[id]
+  }
+  for (const id of Object.keys(aliases)) aliases[id] = root(aliases[id])
+  for (const values of imports) for (const key of Object.keys(values)) values[key] = aliases[values[key]] || values[key]
+  state.aliases = aliases
+  state.version = 3
+  return aliases
+}
 
 export function environmentValues(raw: string): Record<string, string> {
   const result: Record<string, string> = {}
@@ -67,14 +114,16 @@ export function mergeProviderSnapshot(input: {
       credential: hasAuth ? { auth: storedAuth, pool: snapshot.auth.credential_pool?.[runtime], copilot: runtime === 'copilot' ? apiKey : undefined,
         qwen: runtime === 'qwen-oauth' ? snapshot.qwen : undefined } : apiKey,
       headers: raw.extra_headers, extra: raw.extra_body })))
-    let id = Object.keys(config.providers).find(key => state.fingerprints[key] === fingerprint
-      && (key === identity || config.providers[key]?.runtime_provider === runtime)
-      && (hasAuth || resolveCustomProviderApiKey(config.providers[key], envText(env)) === apiKey))
+    // Sources arrive in default-first order. A different endpoint/key does not
+    // create another Provider with the same identity or name.
+    const names = [identity.replace(/^custom[:_]/, ''), raw.name || identity].map(providerNameKey)
+    let id = Object.keys(config.providers).find(key => key === identity
+      || [key.replace(/^custom[:_]/, ''), config.providers[key]?.name || key].some(name => names.includes(providerNameKey(name))))
     if (!id) {
       id = identity
-      if (Object.hasOwn(config.providers, id)) id = `custom:${slug(identity.replace(/^custom[:_]/, ''))}-${fingerprint.slice(0, 10)}`
-      const scope = hasAuth && id !== identity ? fingerprint : undefined
-      const entry: Record<string, any> = { ...raw, ...(id !== identity ? { name: `${raw.name} ${Object.values(config.providers).filter((entry: any) => entry.runtime_provider === runtime).length + 1}` } : {}), catalog_provider: id, runtime_provider: runtime, api_mode: apiMode }
+      const scope = hasAuth && Object.entries(config.providers).some(([key, entry]: [string, any]) => entry.runtime_provider === runtime && state.fingerprints[key] !== fingerprint)
+        ? fingerprint : undefined
+      const entry: Record<string, any> = { ...raw, catalog_provider: id, runtime_provider: runtime, api_mode: apiMode }
       delete entry.provider_key
       delete entry.source
       if (hasAuth) {
@@ -95,7 +144,9 @@ export function mergeProviderSnapshot(input: {
             auth.credential_pool[runtime] = snapshot.auth.credential_pool[runtime]
           }
         }
-      } else if (id !== identity && apiKey) {
+      } else if (raw.api_key) {
+        delete entry.key_env
+      } else if (raw.key_env && apiKey && env[raw.key_env] !== apiKey) {
         entry.api_key = apiKey
         delete entry.key_env
       } else if (!raw.api_key && mapping?.api_key_env && apiKey) {
@@ -106,8 +157,10 @@ export function mergeProviderSnapshot(input: {
       state.fingerprints[id] = fingerprint
     }
     const entry = config.providers[id]
-    entry.models = { ...(entry.models || {}), ...(raw.models || {}) }
-    if (raw.model) entry.models[raw.model] ||= {}
+    if (state.fingerprints[id] === fingerprint) {
+      entry.models = { ...(entry.models || {}), ...(raw.models || {}) }
+      if (raw.model) entry.models[raw.model] ||= {}
+    }
     for (const name of oldNames) aliases[name] = id
   }
 
@@ -136,7 +189,8 @@ export function mergeProviderSnapshot(input: {
     const base = incomingEnv[mapping?.base_url_env] || (selected?.provider === preset.value && selected.base_url) || preset.base_url
     const models: Record<string, any> = {}
     if (selected?.provider === preset.value && selected.default) models[selected.default] ||= {}
-    add(preset.value, preset.value, { name: preset.label, base_url: base, key_env: mapping?.api_key_env, models }, [preset.value])
+    add(preset.value, preset.value, { name: preset.label, base_url: base, key_env: mapping?.api_key_env,
+      ...(selected?.provider === preset.value && selected.api_key ? { api_key: selected.api_key } : {}), models }, [preset.value])
   }
   if (selected?.base_url && !aliases[selected.provider || 'custom']) {
     const match = Object.entries(config.providers).find(([, entry]: any) => String(entry.base_url).replace(/\/+$/, '') === String(selected.base_url).replace(/\/+$/, ''))

@@ -5,6 +5,7 @@ import { chmod } from 'fs/promises'
 import { join, resolve } from 'path'
 import YAML from 'js-yaml'
 import { normalizeCustomProviderEntry } from '../../../studio/contracts/provider-compat'
+import { assertUniqueProviderNames } from '../../../studio/contracts/provider-identity'
 import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import {
   appConfigFilePath,
@@ -734,6 +735,8 @@ export async function updateProviderEditorDetail(
       }
     }
     syncAuthMetadata(auth, source, providerId, baseUrl, credentialAction, apiKey)
+    try { assertUniqueProviderNames(config, appConfig.providerLabels?.[preferenceScope]) }
+    catch (error: any) { throw new ProviderEditorError(error.message, 409, 'DUPLICATE_PROVIDER_NAME') }
 
     const files: MultiTextUpdate = {
       [paths.config]: dumpYaml(config),

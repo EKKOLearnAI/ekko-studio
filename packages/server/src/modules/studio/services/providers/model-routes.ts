@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
+import YAML from 'js-yaml'
 import { safeFileStore } from '../../public/safe-file-store'
 import { providerAccountHome } from './account-store'
 
@@ -17,10 +18,21 @@ export function splitModelRoute(value: string): { namespace: string; model: stri
   try { return { namespace: decodeURIComponent(value.slice(0, slash)), model: value.slice(slash + 1) } } catch { return null }
 }
 
-function canonicalProviderId(profile: string, provider: string): string {
+export function canonicalProviderId(profile: string, provider: string): string {
+  if (!provider) return provider
   let imports: Record<string, Record<string, string>>
-  try { imports = JSON.parse(readFileSync(join(providerAccountHome(), 'pool.json'), 'utf8')).imports || {} }
+  let aliases: Record<string, string>
+  try {
+    const home = providerAccountHome()
+    const state = JSON.parse(readFileSync(join(home, 'pool.json'), 'utf8'))
+    imports = state.imports || {}
+    aliases = state.aliases || {}
+    const cfg = YAML.load(readFileSync(join(home, 'config.yaml'), 'utf8')) as Record<string, any>
+    // A current account identity always wins over a legacy Profile alias.
+    if (Object.hasOwn(cfg?.providers || {}, provider)) return provider
+  }
   catch (error: any) { if (error.code === 'ENOENT') return provider; throw error }
+  if (aliases[provider]) return aliases[provider]
   if (imports[profile]?.[provider]) return imports[profile][provider]
   const candidates = [...new Set(Object.values(imports).map(aliases => aliases[provider]).filter(Boolean))]
   return candidates.length === 1 ? candidates[0] : provider
@@ -45,7 +57,7 @@ export async function providerRouteNamespace(profile: string, provider: string):
 
 /** Strip only the gateway namespace; an upstream model may contain many slashes. */
 export function logicalModelSelection(profile: string, provider: string, model: string): { provider: string; model: string } {
-  if (provider !== 'ekkostudio' && provider !== 'custom:ekkostudio') return { provider, model }
+  if (provider !== 'ekkostudio' && provider !== 'custom:ekkostudio') return { provider: canonicalProviderId(profile, provider), model }
   const route = splitModelRoute(model)
   if (!route) throw new Error('Invalid Studio model route')
   const routes: Routes = JSON.parse(readFileSync(join(providerAccountHome(), 'routes.json'), 'utf8'))

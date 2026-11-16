@@ -1,4 +1,5 @@
 import { codexInferenceBody, isCodexInferenceRequest } from '../services/providers/codex-requests'
+export { createProviderHttpTransport } from '../services/providers/http-transport'
 export { codexInferenceBody, isCodexInferenceRequest, withoutUnsupportedReasoning } from '../services/providers/codex-requests'
 
 export interface ProviderHttpRequest {

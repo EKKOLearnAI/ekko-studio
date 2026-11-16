@@ -5,6 +5,7 @@ import { chatCompletionsToResponses, responsesToChatCompletion, responsesToChatC
 import { Readable } from 'stream'
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
+import { gatewayToken } from '../../../studio/public/model-gateway-adapters'
 import {
   anthropicMessagesUrl as resolveAnthropicMessagesUrl,
   chatCompletionsUrl as resolveChatCompletionsUrl,
@@ -50,69 +51,33 @@ const targetRegistry = new AgentTargetRegistry<CodexProxyTargetInput>(
   input => [input.profile.trim(), input.provider, input.model, input.apiMode, input.baseUrl, input.agentSessionId || '', input.chatSessionId || ''],
 )
 
-function localProxyBaseUrl(routeKey: string): string {
+function localProxyBaseUrl(): string {
   return `http://127.0.0.1:${config.port}/api/ekko-studio/models/v1`
 }
 
-export function registerCodexProxyTarget(input: CodexProxyTargetInput): { baseUrl: string; token: string; routeKey: string } {
+export function registerCodexProxyTarget(input: CodexProxyTargetInput, persisted?: { token: string }): { baseUrl: string; token: string; routeKey: string } {
   const target = targetRegistry.register({
     ...input,
     profile: input.profile.trim(),
-  })
+  }, persisted)
 
-  return { baseUrl: localProxyBaseUrl(target.routeKey), token: target.token, routeKey: target.routeKey }
+  return { baseUrl: localProxyBaseUrl(), token: target.token, routeKey: target.routeKey }
 }
 
 export function revokeCodexProxyTarget(routeKey: string): number { return targetRegistry.removeWhere(target => target.routeKey === routeKey) }
 
-export function restoreCodexProxyTarget(
-  input: CodexProxyTargetInput,
-  token: string,
-): { baseUrl: string; token: string; routeKey: string } {
-  const target = targetRegistry.register({
-    ...input,
-    profile: input.profile.trim(),
-  }, { token })
-
-  return { baseUrl: localProxyBaseUrl(target.routeKey), token: target.token, routeKey: target.routeKey }
-}
-
-export function revokeCodexProxyTargets(profile: string, provider: string): number {
-  const normalizedProfile = String(profile || '').trim()
-  const normalizedProvider = String(provider || '').trim()
-  return targetRegistry.removeWhere(target => (
-    target.profile === normalizedProfile && target.provider === normalizedProvider
-  ))
-}
-
-function findTarget(routeKey: string): CodexProxyTarget | null {
-  return targetRegistry.find(routeKey)
-}
-
-function authToken(ctx: Context): string {
-  const geminiKey = ctx.get('x-goog-api-key').trim()
-  if (geminiKey && ctx.path.includes('/v1beta/')) return geminiKey
-  const apiKey = ctx.get('x-api-key').trim()
-  if (apiKey) return apiKey
-  const auth = ctx.get('authorization').trim()
-  const match = auth.match(/^Bearer\s+(.+)$/i)
-  return match?.[1]?.trim() || ''
-}
-
 export function isAuthorizedCodexProxyRequest(ctx: Context): boolean {
-  const routeKey = /^\/api\/codex-proxy\/([^/]+)\/(?:v1\/responses|gemini\/v1beta\/models\/[^/]+)$/.exec(ctx.path)?.[1] || ''
-  const target = findTarget(routeKey) || targetRegistry.findByToken(authToken(ctx))
-  return Boolean(target && authToken(ctx) === target.token)
+  return Boolean(targetRegistry.findByToken(gatewayToken(ctx)))
 }
 
 function requireTarget(ctx: Context): CodexProxyTarget | null {
-  const target = findTarget(String(ctx.params.key || '')) || targetRegistry.findByToken(authToken(ctx))
+  const target = targetRegistry.find(String(ctx.params.key || '')) || targetRegistry.findByToken(gatewayToken(ctx))
   if (!target) {
     ctx.status = 404
     ctx.body = { error: { type: 'not_found_error', message: 'Codex proxy target not found' } }
     return null
   }
-  if (authToken(ctx) !== target.token && (ctx.state as any).modelGatewayTarget !== target.routeKey) {
+  if (gatewayToken(ctx) !== target.token && (ctx.state as any).modelGatewayTarget !== target.routeKey) {
     ctx.status = 401
     ctx.body = { error: { type: 'authentication_error', message: 'Invalid Codex proxy token' } }
     return null
@@ -420,20 +385,6 @@ export async function codexProxyResponses(ctx: Context) {
         provider_error: err?.providerError,
       },
     }
-  }
-}
-
-export async function codexProxyModels(ctx: Context) {
-  const target = requireTarget(ctx)
-  if (!target) return
-  ctx.body = {
-    object: 'list',
-    data: [{
-      id: target.model,
-      object: 'model',
-      created: 0,
-      owned_by: target.provider,
-    }],
   }
 }
 

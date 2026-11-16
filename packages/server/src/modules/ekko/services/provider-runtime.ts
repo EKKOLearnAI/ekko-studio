@@ -12,6 +12,7 @@ import {
   type EkkoAuthorizedProviderCredentials,
 } from './auth-providers'
 import { isAuthorizedRuntimeProvider } from '../../studio/public/authorized-provider-runtime'
+import { canonicalProviderId } from '../../studio/public/model-routing'
 
 export interface EkkoProviderRuntimeConfig {
   provider: string
@@ -29,14 +30,19 @@ export async function resolveEkkoProviderRuntimeConfig(input: {
   apiMode?: string
   forceRefresh?: boolean
 }): Promise<EkkoProviderRuntimeConfig> {
-  const provider = String(input.provider || '').trim()
+  let provider = String(input.provider || '').trim()
   if (!provider) throw new Error('Ekko model provider is required')
 
   assertProviderAvailable(provider)
 
   const profile = String(input.profile || '').trim() || 'default'
-  const providerKey = providerKeyWithoutCustomPrefix(provider.toLowerCase())
   const config = await readConfigYamlForProfile(profile)
+  if (config.studio_provider_pool === 2) {
+    const canonical = canonicalProviderId(profile, provider)
+    if (canonical !== provider) input = { ...input, baseUrl: undefined, apiKey: undefined, apiMode: undefined }
+    provider = canonical
+  }
+  const providerKey = providerKeyWithoutCustomPrefix(provider.toLowerCase())
   const envContent = await safeReadFile(join(getProfileDir(profile), '.env')) || ''
   const customEntry = getCompatibleCustomProviders(config).find(entry => {
     const entryKeys = [entry.name, entry.provider_key, entry.catalog_provider].filter(Boolean).flatMap(value => providerLookupCandidates(String(value)))

@@ -67,6 +67,8 @@ export async function serveModelGateway(ctx: Context, protocol: ModelGatewayProt
   const selected = catalog.get(modelId)
   if (!selected || selected.group.model_meta?.[selected.model]?.disabled) throw new ModelApiError('Model is not available.', 404, 'model')
   const { profile, group, model } = selected
+  // HTTP response hooks run in the selected account/Profile, including sharing keys.
+  ctx.state.profile = { name: profile }
   const mode = apiMode(group, model)
   if (mode === 'bedrock_converse' || mode === 'codex_app_server') throw new ModelApiError('This provider requires a native runtime.', 501, 'model')
   const runtime = await resolveProviderUpstream({ profile, provider: group.provider, model, apiMode: mode })

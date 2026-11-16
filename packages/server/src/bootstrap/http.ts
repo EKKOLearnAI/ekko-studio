@@ -1,4 +1,4 @@
-import { restoreStudioModelTargets } from './model-gateway-adapter'
+import { restoreStudioModelTargets } from '../modules/studio/public/model-target-store'
 import { registerDesktopBrowserRelay } from '../modules/studio/sockets/desktop-browser'
 import { registerPluginSessions } from '../modules/studio/sockets/plugin-sessions'
 import { getPluginManager, startPluginHost, stopPluginHost } from '../modules/studio/services/plugins/host'
@@ -75,7 +75,7 @@ import {
   restorePersistedCodexProxyTargets,
   restorePersistedPiProxyTargets,
 } from './coding-agents'
-import { isAuthorizedCodexProxyRequest } from '../modules/coding-agents/services/codex/proxy'
+import { isAuthorizedCodexProxyRequest } from '../modules/coding-agents/public/model-gateway'
 import {
   configurePreferredHermesRuntime,
   readLockedDesktopHermesSelection,

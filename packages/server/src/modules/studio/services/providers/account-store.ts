@@ -1,4 +1,5 @@
-import { mergeProviderSnapshot, providerDigest, type ProviderSnapshot, type ProviderPoolState } from './account-pool'
+import { coalesceProviderPool, compareProviderProfiles, mergeProviderSnapshot, type ProviderSnapshot, type ProviderPoolState } from './account-pool'
+import { uniqueProviderLabels } from '../../contracts/provider-identity'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, mkdir, readFile, readdir } from 'node:fs/promises'
@@ -155,6 +156,7 @@ export async function importAccountProviders(): Promise<void> {
       for (const name of ['config.yaml', '.env', 'auth.json', '.anthropic_oauth.json', 'source-backup.json', 'import.json', 'qwen-oauth.json']) await chmod(join(dir, name), 0o600)
     }
     await upgradeAccountProviderPool()
+    await enforceUniqueProviderPool()
   })()
   importing.set(userId, pending)
   try { await pending } finally { if (importing.get(userId) === pending) importing.delete(userId) }
@@ -215,11 +217,58 @@ export function providerAccountDirectory(profile?: string): string {
   return providerAccountHome(providerAccountId(profile))
 }
 
+async function enforceUniqueProviderPool(): Promise<void> {
+  const home = providerAccountHome()
+  const statePath = join(home, 'pool.json')
+  const initial = JSON.parse(await text(statePath) || '{}')
+  if (initial.version === 3) return
+  const cfgPath = join(home, 'config.yaml')
+  const routesPath = join(home, 'routes.json')
+  const catalogPath = join(home, 'catalog.json')
+  const displayPath = join(home, 'display.json')
+  const archivePath = join(home, 'pool-v2-backup.json')
+  const settingsPaths = providerProfiles().map(profile => join(providerProfileDir(profile), 'config.yaml'))
+  const written = await safeFileStore.updateTexts<string[]>([statePath, cfgPath, routesPath, catalogPath, displayPath, archivePath, ...settingsPaths], current => {
+    const state = JSON.parse(current[statePath] || '{"version":2,"imports":{},"fingerprints":{}}') as ProviderPoolState
+    if (state.version === 3) return { files: {}, result: [] }
+    const cfg = (YAML.load(current[cfgPath] || '{}') || {}) as Record<string, any>
+    const aliases = coalesceProviderPool(cfg, state)
+    const canonical = (id: string) => aliases[id] || id
+    const files: Record<string, string> = {}
+    if (!current[archivePath]) files[archivePath] = JSON.stringify(Object.fromEntries(Object.entries(current).filter(([path]) => path !== archivePath)))
+    for (const path of [cfgPath, ...settingsPaths]) {
+      const value = path === cfgPath ? cfg : (YAML.load(current[path] || '{}') || {}) as Record<string, any>
+      if (value.model && typeof value.model === 'object') value.model.provider = canonical(value.model.provider)
+      files[path] = YAML.dump(value, { noRefs: true, lineWidth: -1 })
+    }
+    const routes = JSON.parse(current[routesPath] || '{}')
+    for (const route of Object.values(routes) as any[]) route.provider = canonical(route.provider)
+    files[routesPath] = JSON.stringify(routes)
+    if (current[catalogPath]) {
+      const catalog = JSON.parse(current[catalogPath])
+      // A discarded endpoint's model discovery must not leak into the winner.
+      catalog.providers = Object.fromEntries(Object.entries(catalog.providers || {}).filter(([, entry]: [string, any]) => canonical(entry.provider) === entry.provider))
+      files[catalogPath] = JSON.stringify(catalog)
+    }
+    if (current[displayPath]) {
+      const display = JSON.parse(current[displayPath])
+      for (const key of ['providerLabels', 'providerPreferredModels']) for (const values of Object.values(display[key] || {}) as any[]) {
+        for (const old of Object.keys(values)) if (canonical(old) !== old) delete values[old]
+      }
+      if (display.providerLabels) for (const scope of Object.keys(display.providerLabels)) display.providerLabels[scope] = uniqueProviderLabels(cfg, display.providerLabels[scope])
+      files[displayPath] = JSON.stringify(display)
+    }
+    files[statePath] = JSON.stringify(state)
+    return { files, result: Object.keys(files) }
+  }, { backup: true })
+  for (const path of written || []) await chmod(path, 0o600)
+}
+
 async function upgradeAccountProviderPool(): Promise<void> {
   const home = providerAccountHome()
   const statePath = join(home, 'pool.json')
   const initialState = JSON.parse(await text(statePath) || '{"version":2,"imports":{},"fingerprints":{}}') as ProviderPoolState
-  const names = providerProfiles().filter(profile => !Object.hasOwn(initialState.imports, profile))
+  const names = providerProfiles().filter(profile => !Object.hasOwn(initialState.imports, profile)).sort(compareProviderProfiles)
   if (!names.length) return
   const snapshots: ProviderSnapshot[] = []
   const existingRoutes = JSON.parse(await text(join(home, 'routes.json')) || '{}')

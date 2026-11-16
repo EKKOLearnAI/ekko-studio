@@ -2,6 +2,7 @@ import { Readable } from 'stream'
 import { isNativeCodingAgent } from '../../../studio/contracts/agents/native-coding-agents'
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
+import { gatewayToken } from '../../../studio/public/model-gateway-adapters'
 import {
   anthropicMessagesUrl as resolveAnthropicMessagesUrl,
   chatCompletionsUrl as resolveChatCompletionsUrl,
@@ -32,8 +33,6 @@ import { teeAsyncIterable } from '../../protocol/stream-tee'
 import { codingAgentRunManager } from '../runtime/run-manager'
 import { logger } from '../../../studio/public/logging'
 
-export type { ApiMode } from '../../protocol/types'
-
 export interface ClaudeCodeProxyTargetInput extends AgentTargetInput {}
 
 type ClaudeCodeProxyTarget = RegisteredAgentTarget<ClaudeCodeProxyTargetInput>
@@ -46,13 +45,7 @@ function recordTargetUsage(target: ClaudeCodeProxyTarget, event: CanonicalRespon
 const targetRegistry = new AgentTargetRegistry<ClaudeCodeProxyTargetInput>(
   input => [input.provider, input.model, input.apiMode, input.baseUrl, input.agentSessionId || '', input.chatSessionId || ''],
 )
-const CLAUDE_PROXY_VISIBLE_MODELS = [
-  'claude-haiku-4-5',
-  'claude-sonnet-4-6',
-  'claude-opus-4-7',
-]
-
-function localProxyBaseUrl(routeKey: string): string {
+function localProxyBaseUrl(): string {
   return `http://127.0.0.1:${config.port}/api/ekko-studio/models`
 }
 
@@ -61,29 +54,17 @@ export function revokeClaudeCodeProxyTarget(routeKey: string): number { return t
 export function registerClaudeCodeProxyTarget(input: ClaudeCodeProxyTargetInput, persisted?: { token: string }): { baseUrl: string; token: string; routeKey: string } {
   const target = targetRegistry.register(input, persisted)
 
-  return { baseUrl: localProxyBaseUrl(target.routeKey), token: target.token, routeKey: target.routeKey }
-}
-
-function findTarget(routeKey: string): ClaudeCodeProxyTarget | null {
-  return targetRegistry.find(routeKey)
-}
-
-function authToken(ctx: Context): string {
-  const apiKey = ctx.get('x-api-key').trim()
-  if (apiKey) return apiKey
-  const auth = ctx.get('authorization').trim()
-  const match = auth.match(/^Bearer\s+(.+)$/i)
-  return match?.[1]?.trim() || ''
+  return { baseUrl: localProxyBaseUrl(), token: target.token, routeKey: target.routeKey }
 }
 
 function requireTarget(ctx: Context): ClaudeCodeProxyTarget | null {
-  const target = findTarget(String(ctx.params.key || '')) || targetRegistry.findByToken(authToken(ctx))
+  const target = targetRegistry.find(String(ctx.params.key || '')) || targetRegistry.findByToken(gatewayToken(ctx))
   if (!target) {
     ctx.status = 404
     ctx.body = { type: 'error', error: { type: 'not_found_error', message: 'Claude proxy target not found' } }
     return null
   }
-  if (authToken(ctx) !== target.token && (ctx.state as any).modelGatewayTarget !== target.routeKey) {
+  if (gatewayToken(ctx) !== target.token && (ctx.state as any).modelGatewayTarget !== target.routeKey) {
     ctx.status = 401
     ctx.body = { type: 'error', error: { type: 'authentication_error', message: 'Invalid Claude proxy token' } }
     return null
@@ -477,23 +458,6 @@ async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget
   const [clientStream, observerStream] = teeAsyncIterable(stream)
   observeResponsesEvents(target, openAiResponsesSseToResponsesEvents(observerStream), startedAt)
   return anthropicEventStream(openAiResponsesSseToAnthropicEvents(clientStream, target, body?.tools))
-}
-
-export async function claudeProxyModels(ctx: Context) {
-  const target = requireTarget(ctx)
-  if (!target) return
-  const ids = [...new Set([...CLAUDE_PROXY_VISIBLE_MODELS, target.model])]
-  ctx.body = {
-    data: ids.map(id => ({
-      type: 'model',
-      id,
-      display_name: id,
-      created_at: '2026-01-01T00:00:00Z',
-    })),
-    has_more: false,
-    first_id: ids[0],
-    last_id: ids[ids.length - 1],
-  }
 }
 
 export async function claudeProxyMessages(ctx: Context) {

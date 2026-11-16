@@ -17,9 +17,10 @@ vi.mock('../../packages/server/src/modules/coding-agents/services/context-policy
 
 import { configureProviderHttp } from '../../packages/server/src/modules/studio/public/provider-http'
 import { configureModelGatewayAdapters } from '../../packages/server/src/modules/studio/public/model-gateway-adapters'
+import { codingModelGatewayAdapters } from '../../packages/server/src/modules/coding-agents/public/model-gateway'
 import { serveModelGateway, gatewayModelStream } from '../../packages/server/src/modules/studio/services/model-api/gateway'
-import { registerCodexProxyTarget, revokeCodexProxyTarget, findCodexGatewayTarget, codexProxyResponses, codingAgentProxyChatCompletions, antigravityProxyGenerate } from '../../packages/server/src/modules/coding-agents/services/codex/proxy'
-import { registerClaudeCodeProxyTarget, revokeClaudeCodeProxyTarget, claudeProxyMessages, claudeProxyCountTokens } from '../../packages/server/src/modules/coding-agents/services/claude-code/proxy'
+import { registerCodexProxyTarget, revokeCodexProxyTarget, findCodexGatewayTarget, findCodexProxyByToken, codexProxyResponses } from '../../packages/server/src/modules/coding-agents/services/codex/proxy'
+import { registerClaudeCodeProxyTarget, revokeClaudeCodeProxyTarget, findClaudeProxyByToken, claudeProxyMessages } from '../../packages/server/src/modules/coding-agents/services/claude-code/proxy'
 
 beforeEach(async () => {
   fixtures.home = await mkdtemp(join(tmpdir(), 'studio-gateway-'))
@@ -32,14 +33,11 @@ beforeEach(async () => {
   fixtures.respond = () => Response.json({ id: 'chat-1', model: 'family/model', choices: [{ index: 0, message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } })
   configureProviderHttp(async input => { fixtures.calls.push(input); return fixtures.respond(input) })
   configureModelGatewayAdapters({
-    authenticate: () => null,
-    handle: (protocol, ctx) => protocol === 'anthropic_messages' ? (ctx.path.endsWith('/count_tokens') ? claudeProxyCountTokens(ctx) : claudeProxyMessages(ctx)) : protocol === 'chat_completions' ? codingAgentProxyChatCompletions(ctx) : protocol === 'gemini_contents' ? antigravityProxyGenerate(ctx) : codexProxyResponses(ctx),
-    register: (protocol, input) => {
-      const targetInput = { ...input, ownerUserId: input.userId, apiMode: input.apiMode as 'chat_completions' }
-      const anthropic = protocol === 'anthropic_messages'
-      const target = anthropic ? registerClaudeCodeProxyTarget(targetInput) : registerCodexProxyTarget(targetInput)
+    ...codingModelGatewayAdapters,
+    register: (protocol, input, persisted) => {
+      const target = codingModelGatewayAdapters.register(protocol, input, persisted)
       fixtures.targets.push(target.routeKey)
-      return { routeKey: target.routeKey, dispose: () => { if (anthropic) revokeClaudeCodeProxyTarget(target.routeKey); else revokeCodexProxyTarget(target.routeKey) } }
+      return target
     },
   })
 })
@@ -53,6 +51,38 @@ function context(body: any, path = '/api/ekko-studio/models/v1/responses'): any 
     state: { user: { id: 1 }, modelGateway: { userId: 1, profile: 'default' }, modelGatewaySignal: new AbortController().signal },
     get: (name: string) => headers[name.toLowerCase()] || '', set: () => {}, status: 200 }
 }
+
+it.each(['codex', 'claude'] as const)('restores a persisted %s credential through the normal registry and preserves inference', async agent => {
+  const register = agent === 'codex' ? registerCodexProxyTarget : registerClaudeCodeProxyTarget
+  const revoke = agent === 'codex' ? revokeCodexProxyTarget : revokeClaudeCodeProxyTarget
+  const find = agent === 'codex' ? findCodexProxyByToken : findClaudeProxyByToken
+  const handle = agent === 'codex' ? codexProxyResponses : claudeProxyMessages
+  const input = { profile: 'default', ownerUserId: 1, provider: 'deepseek', model: 'family/model',
+    baseUrl: fixtures.baseUrl, apiKey: 'upstream-secret', apiMode: 'chat_completions' as const, agentSessionId: `restored-${agent}` }
+  const first = register(input)
+  expect(first.baseUrl).toContain('/api/ekko-studio/models')
+  revoke(first.routeKey)
+  expect(find(first.token)).toBeNull()
+  const restored = register(input, { token: first.token })
+  expect(restored.token).toBe(first.token)
+  try {
+    const request = context(agent === 'codex' ? { model: 'family/model', input: 'hi' }
+      : { model: 'family/model', max_tokens: 32, messages: [{ role: 'user', content: 'hi' }] })
+    request.get = (name: string) => agent === 'codex' && name === 'authorization' ? `Bearer ${restored.token}`
+      : agent === 'claude' && name === 'x-api-key' ? restored.token : ''
+    await handle(request)
+    expect(request.status).toBe(200)
+    expect(fixtures.calls).toHaveLength(1)
+    expect(fixtures.calls[0]).toMatchObject({ apiKey: 'upstream-secret', body: { model: 'family/model' } })
+    // Knowing a route key is insufficient without its bound credential.
+    request.params.key = restored.routeKey
+    request.get = () => ''
+    await handle(request)
+    expect(request.status).toBe(401)
+    expect(fixtures.calls).toHaveLength(1)
+  } finally { revoke(restored.routeKey) }
+  expect(find(first.token)).toBeNull()
+})
 
 it.each(['chat_completions', 'codex_responses', 'anthropic_messages', 'gemini_contents'] as const)('routes %s through the same account catalog without exposing the upstream key', async protocol => {
   const body = protocol === 'gemini_contents' ? { contents: [{ role: 'user', parts: [{ text: 'hi' }] }] }
@@ -167,28 +197,24 @@ it('accounts external requests once while internal requests keep their existing 
 
 it('keeps signed Anthropic thinking through a Responses tool continuation and fences replay by target', async () => {
   const { reasoningCodec } = await import('../../packages/server/src/modules/studio/public/model-reasoning-codec')
-  const codec = await reasoningCodec('account:1:default:anthropic:model')
   fixtures.mode = 'anthropic_messages'
   const thinking = { type: 'thinking', thinking: 'plan', signature: 'upstream-signed-thinking' }
   fixtures.respond = () => Response.json({ id: 'msg-1', model: 'family/model', content: [thinking, { type: 'tool_use', id: 'call-1', name: 'read', input: { path: 'a' } }], usage: { input_tokens: 5, output_tokens: 2 } })
   const first = context({ model: 'deepseek/family/model', input: 'hi' })
-  first.state.modelGatewayReasoningCodec = codec
   await serveModelGateway(first, 'codex_responses', ['default'])
+  const codec = first.state.modelGatewayReasoningCodec
   const reasoning = first.body.output.find((item: any) => item.type === 'reasoning')
   expect(reasoning.encrypted_content).toMatch(/^ekko_r1\./)
   expect(reasoning.encrypted_content).not.toContain(thinking.signature)
   expect(codec.decode(reasoning.encrypted_content)?.native?.data).toEqual([thinking])
   expect((await reasoningCodec('account:2:default:anthropic:model')).decode(reasoning.encrypted_content)).toBeUndefined()
   const next = context({ model: 'deepseek/family/model', input: [...first.body.output, { type: 'function_call_output', call_id: 'call-1', output: 'done' }], instructions: 'policy', tools: [{ type: 'function', name: 'read', parameters: { type: 'object' } }], tool_choice: 'required', parallel_tool_calls: false })
-  next.state.modelGatewayReasoningCodec = codec
   await serveModelGateway(next, 'codex_responses', ['default'])
   expect(fixtures.calls[1].body.messages[0].content).toEqual([thinking, { type: 'tool_use', id: 'call-1', name: 'read', input: { path: 'a' } }])
   expect(fixtures.calls[1].body).toMatchObject({ system: 'policy', tool_choice: { type: 'any', disable_parallel_tool_use: true } })
 })
 
 it('captures incremental Anthropic thinking signatures in the terminal reasoning item', async () => {
-  const { reasoningCodec } = await import('../../packages/server/src/modules/studio/public/model-reasoning-codec')
-  const codec = await reasoningCodec('stream-scope')
   fixtures.mode = 'anthropic_messages'
   const frames = [
     { type: 'message_start', message: { id: 'msg-1', usage: { input_tokens: 2 } } },
@@ -199,8 +225,8 @@ it('captures incremental Anthropic thinking signatures in the terminal reasoning
   ]
   fixtures.respond = () => new Response(frames.map(data => `event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } })
   const request = context({ model: 'deepseek/family/model', input: 'hi', stream: true })
-  request.state.modelGatewayReasoningCodec = codec
   await serveModelGateway(request, 'codex_responses', ['default'])
+  const codec = request.state.modelGatewayReasoningCodec
   let output = ''
   for await (const chunk of request.body) output += String(chunk)
   const terminal = output.split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5))).find(event => event.type === 'response.completed')

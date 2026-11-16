@@ -22,6 +22,7 @@ import { configureAuthorizedProviderRuntime } from '../../packages/server/src/mo
 import { resolveEkkoProviderRuntimeConfig } from '../../packages/server/src/modules/ekko/services/provider-runtime'
 import { saveModelTarget, savedModelTargets } from '../../packages/server/src/modules/studio/public/model-target-store'
 import { getProviderEditorDetail, updateProviderEditorDetail } from '../../packages/server/src/modules/hermes/services/providers/provider-editor'
+import { resolveBridgeRunModelConfig } from '../../packages/server/src/modules/studio/services/chat-run/model-config'
 
 let source: string
 beforeEach(async () => {
@@ -39,7 +40,7 @@ beforeEach(async () => {
     await writeFile(join(dir, '.env'), 'DEEPSEEK_API_KEY=legacy-key\nRELAY_KEY=relay-key\nTOOL_SECRET=keep-tool-secret\n')
     await writeFile(join(dir, 'auth.json'), JSON.stringify({ providers: { 'openai-codex': { tokens: { access_token: 'private-token' } } }, unrelated: 'kept' }))
   }
-  configureProviderSources({ profileDir: profile => join(source, profile), profiles: userId => userId === 1 ? ['default', 'work'] : ['default'], environmentKeys: ['DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL'], environmentMap: { deepseek: { api_key_env: 'DEEPSEEK_API_KEY', base_url_env: 'DEEPSEEK_BASE_URL' } } })
+  configureProviderSources({ profileDir: profile => join(source, profile), profiles: userId => userId === 1 ? ['work', 'default'] : ['default'], environmentKeys: ['DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL'], environmentMap: { deepseek: { api_key_env: 'DEEPSEEK_API_KEY', base_url_env: 'DEEPSEEK_BASE_URL' } } })
   configureProviderProjection(async () => [{ provider: 'deepseek', models: ['family/model'] }])
 })
 afterEach(async () => { await rm(fixture.home, { recursive: true, force: true }) })
@@ -94,6 +95,105 @@ it('retains legacy custom-prefixed Provider selections when an import uses the b
     await importAccountProviders()
     expect(await providerRouteNamespace('default', 'custom:fun-codex')).toBe(await providerRouteNamespace('default', 'fun-codex'))
     expect(logicalModelSelection('default', 'ekkostudio', 'fun-codex/vendor/model')).toEqual({ provider: 'fun-codex', model: 'vendor/model' })
+    const storedSession = { sessionProvider: 'custom:fun-codex', sessionModel: 'vendor/model' }
+    expect(await resolveBridgeRunModelConfig({ profile: 'default', ...storedSession,
+      modelGroups: [{ provider: 'fun-codex', models: ['vendor/model'] }] })).toEqual({ provider: 'fun-codex', model: 'vendor/model' })
+    expect(storedSession.sessionProvider).toBe('custom:fun-codex')
+  })
+})
+
+it('upgrades draft duplicate identities and keeps both logical and gateway session selections usable', async () => {
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    const home = providerAccountHome()
+    const config = await readConfigYamlForProfile('default')
+    const oldId = 'custom:deepseek-1234567890'
+    config.providers[oldId] = { ...config.providers.deepseek, catalog_provider: oldId, name: 'DeepSeek 2', api_key: 'discarded-key' }
+    config.custom_providers = [{ name: 'DeepSeek', base_url: 'https://discarded.invalid', api_key: 'legacy-duplicate' },
+      { name: 'unique', base_url: 'https://unique.invalid', api_key: 'unique-key' }]
+    await writeFile(join(home, 'config.yaml'), YAML.dump(config))
+    const state = JSON.parse(await readFile(join(home, 'pool.json'), 'utf8'))
+    state.version = 2
+    state.imports.work.deepseek = oldId
+    await rm(join(home, 'pool-v2-backup.json'))
+    await writeFile(join(home, 'pool.json'), JSON.stringify(state))
+    await writeFile(join(home, 'routes.json'), JSON.stringify({ 'deepseek@old': { provider: oldId } }))
+    await writeFile(join(providerProfileDir('work'), 'config.yaml'), YAML.dump({ model: { provider: oldId, default: 'family/model' } }))
+    await importAccountProviders()
+    expect(Object.keys((await readConfigYamlForProfile('work')).providers).filter(id => id.includes('deepseek'))).toEqual(['deepseek'])
+    expect((await readConfigYamlForProfile('work')).custom_providers).toBeUndefined()
+    expect((await resolveEkkoProviderRuntimeConfig({ profile: 'work', provider: 'custom:unique' })).apiKey).toBe('unique-key')
+    for (const [provider, model] of [[oldId, 'family/model'], ['ekkostudio', 'deepseek@old/family/model'], ['deepseek', 'family/model']]) {
+      expect(await resolveBridgeRunModelConfig({ profile: 'work', sessionProvider: provider, sessionModel: model,
+        modelGroups: [{ provider: 'deepseek', models: ['family/model'] }] })).toEqual({ provider: 'deepseek', model: 'family/model' })
+    }
+    expect((await resolveEkkoProviderRuntimeConfig({ profile: 'work', provider: oldId, apiKey: 'stale-key', baseUrl: 'https://discarded.invalid' })).apiKey).toBe('legacy-key')
+    expect((await readConfigYamlForProfile('work')).model.provider).toBe('deepseek')
+    expect(await readFile(join(home, 'config.yaml'), 'utf8')).not.toContain('discarded-key')
+    expect(await readFile(join(home, 'pool-v2-backup.json'), 'utf8')).toContain('discarded-key')
+    expect(JSON.parse(await readFile(join(home, 'pool.json'), 'utf8')).aliases[oldId]).toBe('deepseek')
+  })
+})
+
+it('rejects duplicate names and display labels atomically, including concurrent creation', async () => {
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    const home = providerAccountHome()
+    const before = await readFile(join(home, 'config.yaml'), 'utf8')
+    await expect(updateConfigYamlForProfile('work', config => {
+      config.custom_providers = [{ name: '  DEEPSEEK  ', base_url: 'https://other.invalid', api_key: 'other-key' }]
+      return config
+    })).rejects.toMatchObject({ status: 409 })
+    expect(await readFile(join(home, 'config.yaml'), 'utf8')).toBe(before)
+    await expect(writeAppConfig({ providerLabels: { work: { deepseek: 'relay' } } })).rejects.toMatchObject({ status: 409 })
+    const detail = await getProviderEditorDetail('work', 'deepseek')
+    await expect(updateProviderEditorDetail('work', 'deepseek', { label: ' RELAY ' }, detail.revision)).rejects.toMatchObject({ status: 409 })
+    const results = await Promise.allSettled(['one', 'two'].map(id => updateConfigYamlForProfile('default', config => {
+      config.providers[id] = { name: 'Same Name', base_url: 'https://fixture.invalid' }
+      return config
+    })))
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter(result => result.status === 'rejected')).toHaveLength(1)
+  })
+})
+
+it('retains inline primary credentials during migration', async () => {
+  await writeFile(join(source, 'default/config.yaml'), YAML.dump({ model: {
+    provider: 'anthropic', default: 'claude-sonnet', base_url: 'https://fixture.services.ai.azure.com/anthropic', api_key: 'inline-fixture-key',
+  } }))
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    expect(await resolveEkkoProviderRuntimeConfig({ profile: 'default', provider: 'anthropic' })).toMatchObject({
+      apiKey: 'inline-fixture-key', baseUrl: 'https://fixture.services.ai.azure.com/anthropic',
+    })
+    expect((await readConfigYamlForProfile('default')).model.api_key).toBeUndefined()
+  })
+})
+
+it('preserves separate credentials for differently named Providers that use the same environment key', async () => {
+  const path = join(source, 'work/config.yaml')
+  const config = YAML.load(await readFile(path, 'utf8')) as any
+  config.custom_providers = [{ name: 'relay-two', base_url: 'https://second.invalid/v1', key_env: 'RELAY_KEY' }]
+  await writeFile(path, YAML.dump(config))
+  await writeFile(join(source, 'work/.env'), 'DEEPSEEK_API_KEY=legacy-key\nRELAY_KEY=second-key\n')
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    expect((await resolveEkkoProviderRuntimeConfig({ profile: 'work', provider: 'custom:relay' })).apiKey).toBe('relay-key')
+    expect((await resolveEkkoProviderRuntimeConfig({ profile: 'default', provider: 'custom:relay-two' })).apiKey).toBe('second-key')
+  })
+})
+
+it('keeps an inline credential editable when the imported entry also names an environment key', async () => {
+  const path = join(source, 'default/config.yaml')
+  const config = YAML.load(await readFile(path, 'utf8')) as any
+  config.custom_providers[0].api_key = 'inline-key'
+  await writeFile(path, YAML.dump(config))
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    expect((await readConfigYamlForProfile('default')).providers['custom:relay'].key_env).toBeUndefined()
+    const detail = await getProviderEditorDetail('default', 'custom:relay')
+    await updateProviderEditorDetail('default', 'custom:relay', { credential_action: 'replace', api_key: 'replacement-key' }, detail.revision)
+    expect((await resolveEkkoProviderRuntimeConfig({ profile: 'default', provider: 'custom:relay' })).apiKey).toBe('replacement-key')
   })
 })
 
@@ -252,37 +352,38 @@ it('shares Provider edits and credentials across Profiles of one account while r
   })
 })
 
-it('keeps conflicting Provider configurations as separately selectable account Providers', async () => {
+it('keeps the default Provider when endpoints or credentials conflict', async () => {
   await writeFile(join(source, 'work/.env'), 'DEEPSEEK_API_KEY=work-key\nDEEPSEEK_BASE_URL=https://work.invalid/v1\nRELAY_KEY=relay-key\n')
   await withProviderAccount(1, async () => {
     await importAccountProviders()
     const first = await readConfigYamlForProfile('default')
     const second = await readConfigYamlForProfile('work')
     const entries = Object.entries(first.providers).filter(([, entry]: any) => entry.runtime_provider === 'deepseek') as Array<[string, any]>
-    expect(entries).toHaveLength(2)
-    const extra = entries.find(([id]) => id !== 'deepseek')!
-    expect(extra[0]).toMatch(/^custom:deepseek-/)
-    expect(extra[1]).toMatchObject({ api_key: 'work-key', base_url: 'https://work.invalid/v1', name: 'DeepSeek 2' })
+    expect(entries).toHaveLength(1)
+    expect(entries[0][0]).toBe('deepseek')
+    expect(entries[0][1].name).toBe('DeepSeek')
     expect(second.providers).toEqual(first.providers)
-    expect(second.model.provider).toBe(extra[0])
-    const resolved = await resolveEkkoProviderRuntimeConfig({ profile: 'default', provider: extra[0], model: 'family/model' })
-    expect(resolved).toMatchObject({ apiKey: 'work-key', baseUrl: 'https://work.invalid/v1' })
+    expect(second.model.provider).toBe('deepseek')
+    const resolved = await resolveEkkoProviderRuntimeConfig({ profile: 'work', provider: 'deepseek', model: 'family/model' })
+    expect(resolved.apiKey).toBe('legacy-key')
+    expect(resolved.baseUrl).not.toBe('https://work.invalid/v1')
+    expect(await readFile(join(providerAccountHome(), 'profile-import-backups.json'), 'utf8')).toContain('work-key')
   })
 })
 
-it('keeps conflicting OAuth grants in account-owned Provider credential slots', async () => {
+it('keeps only the first OAuth grant and backs up the discarded grant', async () => {
   await writeFile(join(source, 'work/auth.json'), JSON.stringify({ providers: { 'openai-codex': { tokens: { access_token: 'work-oauth' } } } }))
   await withProviderAccount(1, async () => {
     await importAccountProviders()
     const config = await readConfigYamlForProfile('work')
     const entries = Object.entries(config.providers).filter(([, entry]: any) => entry.auth_provider === 'openai-codex') as Array<[string, any]>
-    expect(entries).toHaveLength(2)
+    expect(entries).toHaveLength(1)
     for (const [, entry] of entries) {
       expect(entry.api_mode).toBe('codex_responses')
       expect(Object.keys(entry.models || {})).toEqual([])
     }
-    const extra = entries.find(([, entry]) => entry.auth_scope)!
-    expect(providerCredentialDir(extra[1].auth_scope)).not.toContain('/profiles/')
+    expect(entries[0][1].auth_scope).toBeUndefined()
+    expect(await readFile(join(providerAccountHome(), 'profile-import-backups.json'), 'utf8')).toContain('work-oauth')
     configureAuthorizedProviderRuntime({
       isAuthorizedRuntimeProvider: provider => provider === 'openai-codex',
       resolveAuthorizedProviderRuntimeCredentials: async input => {
@@ -291,7 +392,7 @@ it('keeps conflicting OAuth grants in account-owned Provider credential slots', 
         return { provider: input.provider, apiKey: auth.providers['openai-codex'].tokens.access_token, baseUrl: 'https://chatgpt.com/backend-api/codex', apiMode: 'codex_responses' }
       },
     })
-    expect((await resolveEkkoProviderRuntimeConfig({ profile: 'default', provider: extra[0] })).apiKey).toBe('work-oauth')
+    expect((await resolveEkkoProviderRuntimeConfig({ profile: 'default', provider: 'openai-codex' })).apiKey).toBe('private-token')
     expect((await resolveEkkoProviderRuntimeConfig({ profile: 'work', provider: 'openai-codex' })).apiKey).toBe('private-token')
   })
 })
@@ -314,12 +415,13 @@ it('edits merged Provider identities and preferences from any Profile without cr
   await withProviderAccount(1, async () => {
     await importAccountProviders()
     const config = await readConfigYamlForProfile('default')
-    const id = Object.keys(config.providers).find(id => id.startsWith('custom:deepseek-'))!
+    expect(Object.keys(config.providers).filter(id => id.includes('deepseek'))).toEqual(['deepseek'])
+    const id = 'deepseek'
     const before = await getProviderEditorDetail('work', id)
     expect(before.credential_configured).toBe(true)
-    await updateProviderEditorDetail('work', id, { label: 'Shared second provider', preferred_model: 'new/model', credential_action: 'replace', api_key: 'edited-account-key' }, before.revision)
+    await updateProviderEditorDetail('work', id, { label: 'Shared provider', preferred_model: 'new/model', credential_action: 'replace', api_key: 'edited-account-key' }, before.revision)
     const after = await getProviderEditorDetail('default', id)
-    expect(after).toMatchObject({ label: 'Shared second provider', preferred_model: 'new/model', credential_configured: true })
+    expect(after).toMatchObject({ label: 'Shared provider', preferred_model: 'new/model', credential_configured: true })
     expect((await resolveEkkoProviderRuntimeConfig({ profile: 'default', provider: id })).apiKey).toBe('edited-account-key')
     const primary = await getProviderEditorDetail('work', 'deepseek')
     await updateProviderEditorDetail('work', 'deepseek', { base_url: 'https://edited.invalid/v1' }, primary.revision)
@@ -344,12 +446,12 @@ it('upgrades an already imported account without losing edited credentials or br
     await writeFile(join(providerAccountHome(), 'catalog.json'), JSON.stringify({ version: 1, providers: { 'profile:account:1:work|deepseek|https://api.deepseek.com/v1|all': { provider: 'deepseek', profiles: ['work'], base_url: 'https://api.deepseek.com/v1', models: ['live-only-model'], updated_at: '2026-11-16T00:00:00Z' } } }))
     await importAccountProviders()
     const shared = await readConfigYamlForProfile('default')
-    expect(Object.values(shared.providers).filter((entry: any) => entry.runtime_provider === 'deepseek')).toHaveLength(2)
+    expect(Object.values(shared.providers).filter((entry: any) => entry.runtime_provider === 'deepseek')).toHaveLength(1)
     expect(await readFile(join(providerAccountHome(), '.env'), 'utf8')).toContain('default-edited')
     expect(await authenticateInternalModelCredential(token)).toMatchObject({ userId: 1 })
     const route = JSON.parse(await readFile(join(providerAccountHome(), 'routes.json'), 'utf8'))['deepseek@old']
     expect(route.profile).toBeUndefined()
-    expect(route.provider).toMatch(/^custom:deepseek-/)
+    expect(route.provider).toBe('deepseek')
     expect(Object.values(JSON.parse(await readFile(join(providerAccountHome(), 'catalog.json'), 'utf8')).providers)).toEqual(expect.arrayContaining([expect.objectContaining({ provider: route.provider, models: ['live-only-model'] })]))
     expect(await readFile(join(providerAccountHome(), 'profile-import-backups.json'), 'utf8')).toContain('work-edited')
     await writeFile(join(providerAccountHome(), '.env'), 'DEEPSEEK_API_KEY=after-upgrade\n')

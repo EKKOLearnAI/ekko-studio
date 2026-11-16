@@ -4,9 +4,19 @@ This document is the architecture contract for `packages/server/src`. It
 separates Studio-owned capabilities from the agent families while
 preserving request/response semantics and persisted data. Studio-owned HTTP
 operations use `/api/studio/*`; Hermes-owned operations use `/api/hermes/*`.
-Old server source trees are not retained. The only old Studio URL aliases are
-the centralized compatibility mappings for already-released App and MCU firmware versions in
-`modules/studio/middleware/legacy-app-api.ts`.
+Old server source trees are not retained. Released App and MCU URL aliases are
+centralized in `modules/studio/middleware/legacy-app-api.ts`. Previously generated
+Coding Agent proxy URLs are handled by `modules/studio/middleware/model-gateway.ts`;
+they do not have separate route or controller modules.
+
+The model gateway uses one composition root, `bootstrap/model-gateway-adapter.ts`.
+It injects the Coding module's public protocol adapter and the provider runtime
+resolver/authorization into Studio ports. Protocol dispatch and target lifetime
+live in `coding-agents/services/model-gateway.ts`; account credential restoration
+and outbound request policy live in `studio/services/providers`; persisted target
+records live in `studio/repositories/model-target-store.ts`. Public files expose
+these boundaries rather than implementing disk storage or bootstrap behavior.
+HTTP plugin hooks wrap the common inbound middleware once, outside these modules.
 
 All server TypeScript source lives under `modules/` or `bootstrap/`, except the
 package entrypoint `index.ts`. The boundary harness rejects any source file that
@@ -301,13 +311,9 @@ packages/server/src/
       routes/
         agents.ts
         runs.ts
-        claude-code-proxy.ts
-        codex-proxy.ts
       controllers/
         agents.ts
         runs.ts
-        claude-code-proxy.ts
-        codex-proxy.ts
       services/
         registry/
         credentials/

@@ -525,7 +525,6 @@ async function handleBridgeRunImpl(
     requestedProvider: callbackContext?.provider || data.provider,
     modelGroups: data.model_groups,
     preferRequested: Boolean(callbackContext) || data.one_shot_model === true,
-    preserveAuthorizedProvider: true,
   })
   const resolvedModel = selectedModelConfig.model
   const selectedProvider = selectedModelConfig.provider
