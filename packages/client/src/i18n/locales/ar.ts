@@ -1407,6 +1407,7 @@ export default {
     clarifyPlaceholder: 'اكتب إجابتك...',
     clarifySubmit: 'رد',
     clarifySendFailed: 'لم يتم تأكيد وصول إجابتك. تم الاحتفاظ بها. يرجى المحاولة مجددًا.',
+    approvalSendFailed: 'لم يتم تأكيد قرار الموافقة. يرجى المحاولة مجددًا.',
     clarifyDismiss: 'تجاهل',
     interactionExpired: 'انتهت مهلة هذا الطلب وتم إغلاقه.',
     interactionCountdown: 'متبقٍ {time}',

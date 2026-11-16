@@ -1414,6 +1414,7 @@ export default {
     clarifyPlaceholder: 'Type your answer...',
     clarifySubmit: 'Reply',
     clarifySendFailed: 'Your answer has not been confirmed. Please retry. Your answer has been kept.',
+    approvalSendFailed: 'Your approval decision has not been confirmed. Please retry.',
     clarifyDismiss: 'Dismiss',
     interactionExpired: 'This request has timed out and was closed.',
     interactionCountdown: '{time} remaining',

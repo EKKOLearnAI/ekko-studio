@@ -236,7 +236,8 @@ function approvalButtons(action: Extract<GlobalPendingAction, { kind: 'chat-appr
     size: 'small',
     type: choice === 'deny' ? 'error' : choice === 'once' ? 'primary' : 'default',
     secondary: choice !== 'once',
-    loading: submitting[action.key],
+    loading: submitting[action.key] || ('submitting' in pending && pending.submitting),
+    disabled: submitting[action.key] || ('submitting' in pending && pending.submitting),
     onClick: () => void submitApproval(action, choice),
   }, { default: () => labels[choice] })))
 }
@@ -245,10 +246,10 @@ async function submitApproval(action: Extract<GlobalPendingAction, { kind: 'chat
   if (submitting[action.key]) return
   submitting[action.key] = true
   try {
-    if (action.kind === 'chat-approval') chatStore.respondApprovalFor(action.pending.sessionId, action.pending.approvalId, choice)
+    if (action.kind === 'chat-approval') await chatStore.respondApprovalFor(action.pending.sessionId, action.pending.approvalId, choice)
     else await groupChatStore.respondApprovalFor(action.pending.roomId, action.pending.approvalId, choice)
   } catch (error) {
-    message.error(error instanceof Error ? error.message : String(error))
+    message.error(action.kind === 'chat-approval' ? t('chat.approvalSendFailed') : error instanceof Error ? error.message : String(error))
   } finally {
     submitting[action.key] = false
   }

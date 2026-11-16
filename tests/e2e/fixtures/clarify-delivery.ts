@@ -12,7 +12,7 @@ localStorage.setItem('hermes_active_profile_name', 'default')
 const sid = new URLSearchParams(location.search).get('bot') ? 'person-main-bot' : 'chat-session'
 const pinia = createPinia()
 const store = useChatStore(pinia)
-const session = { id: sid, title: 'Question fixture', profile: 'default', source: 'builtin_agent', agent: 'ekko-agent', messages: [], createdAt: 1, updatedAt: 1 } as Session
+const session = { id: sid, title: 'Question fixture', profile: new URLSearchParams(location.search).get('profile') || 'default', source: 'builtin_agent', agent: 'ekko-agent', messages: [], createdAt: 1, updatedAt: 1 } as Session
 store.sessions = [session]
 store.activeSession = session
 store.activeSessionId = sid
