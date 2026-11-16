@@ -650,11 +650,6 @@ function selectEffort(value: string) {
   if (isNewConversation.value) newConversationEffort.value = value
   else { optimisticEffort.value = value; void saveSettings({ reasoning_effort: value }) }
 }
-function inheritModel() {
-  if (isNewConversation.value) { newConversationModel.value = null; newConversationEffort.value = '' }
-  else void saveSettings({ use_global_default: true })
-  showModelPicker.value = false
-}
 function memoryForget(memory: PersonMemory) { return act(() => personRequest('/memory', { id: memory.id, expected_revision: memory.revision, forget: true })) }
 function scheduleAction(schedule: PersonSchedule, action: string) { return act(() => personRequest('/schedules/apply', { schedule_id: schedule.id, action, expected_revision: schedule.revision, idempotency_key: clientUuid() })) }
 function saveSchedule(input: Record<string, unknown>) { return act(() => personRequest('/schedules/apply', input)) }
@@ -827,9 +822,6 @@ onBeforeUnmount(() => { stopPersonUpdates(); disposed = true; personDeployment?.
       <ModelCascader v-model:show="showModelPicker" :groups="pickerGroups" :custom-models="{}" :display-name="displayModel"
         :provider="pickerProvider" :model="currentModel?.model" :loading="modelsLoading || settingsWrites > 0" :trigger-element="modelTrigger"
         :close-on-select="false" :title="t('chat.setModelTitle')" @select="selectModel">
-        <template #footer>
-          <NButton size="small" quaternary :disabled="creating || (!isNewConversation && (busy || settingsWrites > 0))" @click="inheritModel">{{ (isNewConversation ? !newConversationModel : data.inherits_global_model) ? t('person.followingGlobalModel') : t('person.useGlobalModel') }}</NButton>
-        </template>
       </ModelCascader>
       <ModelProtocolModal v-model:show="showModelProtocol" v-model:value="selectedModelApiMode"
         @confirm="modelProtocol.confirm" @cancel="modelProtocol.cancel" />
