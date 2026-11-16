@@ -8,7 +8,7 @@ import { deleteCompressionSnapshot, getCompressionSnapshot } from '../../reposit
 import { getUsage } from '../../repositories/usage-store'
 import { ChatContextCompressor, SUMMARY_PREFIX } from '../context-compressor'
 import { getModelContextLength } from '../../public/provider-runtime'
-import { readConfigYamlForProfile } from '../../public/profile-config'
+import { readConfigYamlForProfile } from '../../public/provider-config'
 import { readCompressionPolicy } from '../../public/compression-policy'
 import { logger } from '../../public/logging'
 import { bridgeLogger } from '../../public/logging'
