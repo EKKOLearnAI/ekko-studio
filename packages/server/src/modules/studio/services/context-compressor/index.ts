@@ -28,6 +28,7 @@ import {
   type PrimaryAgentBridgeRunResult as AgentBridgeRunResult,
 } from '../../public/chat-agent-runtime'
 import { logger } from '../../public/logging'
+import { logicalModelSelection } from '../../public/model-routing'
 import { truncateToolResultForContext } from '../chat-run/tool-result-context'
 import { estimateUsageTokensFromMessages } from '../chat-run/usage'
 import {
@@ -582,20 +583,23 @@ async function callEkkoSummarizer(
   timeoutMs: number,
   options: SummarizerOptions & { profile: string },
 ): Promise<string> {
-  const model = String(options.model || '').trim()
-  const provider = String(options.provider || '').trim()
-  if (!model || !provider) throw new Error('Ekko summarization requires a model and provider')
+  const requestedModel = String(options.model || '').trim()
+  const requestedProvider = String(options.provider || '').trim()
+  if (!requestedModel || !requestedProvider) throw new Error('Ekko summarization requires a model and provider')
 
   const runtimeConfig = await resolveEkkoProviderRuntimeConfig({
     profile: options.profile,
-    provider,
-    model,
+    provider: requestedProvider,
+    model: requestedModel,
     baseUrl: upstream,
     apiKey,
     apiMode: String(options.apiMode || '').trim() || undefined,
   })
+  // Runtime resolution imports the account's routes first. Older auxiliary
+  // settings can still contain Hermes' projected gateway provider/model pair.
+  const { provider, model } = logicalModelSelection(options.profile, runtimeConfig.provider, requestedModel)
   const { providerConfig } = resolveModelProviderConfigs({
-    provider: runtimeConfig.provider,
+    provider,
     baseUrl: runtimeConfig.baseUrl,
     apiKey: runtimeConfig.apiKey,
     model,
