@@ -248,6 +248,10 @@ const COMMON_USER_BIN_DIRS = process.platform === 'win32'
   ? []
   : [
       join(homedir(), '.local', 'bin'),
+      join(homedir(), '.opencode', 'bin'),
+      join(homedir(), '.kimi-code', 'bin'),
+      join(homedir(), '.volta', 'bin'),
+      join(homedir(), '.asdf', 'shims'),
       '/opt/homebrew/bin',
       '/usr/local/bin',
       '/usr/bin',
@@ -478,6 +482,8 @@ function extractMarkedPath(output: string): string | null {
   return value || null
 }
 
+const ANSI_PATTERN = /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-B]|[@-_])/g
+
 function compareNodeVersionDesc(left: string, right: string): number {
   const leftParts = left.replace(/^v/, '').split('.').map(part => Number.parseInt(part, 10) || 0)
   const rightParts = right.replace(/^v/, '').split('.').map(part => Number.parseInt(part, 10) || 0)
@@ -488,23 +494,49 @@ function compareNodeVersionDesc(left: string, right: string): number {
   return right.localeCompare(left)
 }
 
-function getNvmNodeBinPaths(): string {
-  if (process.platform === 'win32') return ''
-
-  const nvmDir = process.env.NVM_DIR?.trim() || join(homedir(), '.nvm')
-  const versionsDir = join(nvmDir, 'versions', 'node')
-  if (!existsSync(versionsDir)) return ''
-
+function scanNodeVersionBins(versionsDir: string, binLayout: (versionDir: string) => string): string[] {
+  if (!existsSync(versionsDir)) return []
   try {
     return readdirSync(versionsDir, { withFileTypes: true })
       .filter(entry => entry.isDirectory())
       .map(entry => entry.name)
       .sort(compareNodeVersionDesc)
-      .map(version => join(versionsDir, version, 'bin'))
+      .map(version => binLayout(join(versionsDir, version)))
       .filter(binDir => existsSync(binDir))
-      .join(delimiter)
   } catch {
-    return ''
+    return []
+  }
+}
+
+function getNvmNodeBinPaths(): string {
+  if (process.platform === 'win32') return ''
+
+  const paths: string[] = []
+  // nvm: $NVM_DIR/versions/node/<v>/bin
+  const nvmDir = process.env.NVM_DIR?.trim() || join(homedir(), '.nvm')
+  paths.push(...scanNodeVersionBins(join(nvmDir, 'versions', 'node'), versionDir => join(versionDir, 'bin')))
+  // fnm: $FNM_DIR/node-versions/<v>/installation/bin
+  const fnmDir = process.env.FNM_DIR?.trim() || join(homedir(), '.local', 'share', 'fnm')
+  paths.push(...scanNodeVersionBins(join(fnmDir, 'node-versions'), versionDir => join(versionDir, 'installation', 'bin')))
+  return paths.join(delimiter)
+}
+
+async function probeShellPath(shell: string, interactive: boolean): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      shell,
+      [...(interactive ? ['-i'] : []), '-l', '-c', `printf '\\n${PATH_MARKER_START}%s${PATH_MARKER_END}\\n' "$PATH"`],
+      {
+        encoding: 'utf-8',
+        // Interactive rc init can be slow; a hanging rc is bounded by this timeout.
+        timeout: interactive ? 8000 : 1500,
+        windowsHide: true,
+        env: process.env,
+      },
+    )
+    return extractMarkedPath(stdout.replace(ANSI_PATTERN, ''))
+  } catch {
+    return null
   }
 }
 
@@ -514,17 +546,10 @@ async function getLoginShellPath(): Promise<string | null> {
   const shell = process.env.SHELL?.trim() || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh')
   if (!existsSync(shell)) return null
 
-  try {
-    const { stdout } = await execFileAsync(shell, ['-l', '-c', `printf '\\n${PATH_MARKER_START}%s${PATH_MARKER_END}\\n' "$PATH"`], {
-      encoding: 'utf-8',
-      timeout: 1500,
-      windowsHide: true,
-      env: process.env,
-    })
-    return extractMarkedPath(stdout) || stdout.trim() || null
-  } catch {
-    return null
-  }
+  // GUI launches miss everything the interactive rc files add to PATH (fnm,
+  // volta, pnpm, opencode, ...); `-lc` alone never sources ~/.zshrc.
+  return await probeShellPath(shell, true)
+    || await probeShellPath(shell, false)
 }
 
 export function getToken(): string {
