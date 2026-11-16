@@ -774,37 +774,53 @@ export function respondClarify(
   transport: ChatRunTransport = 'chat-run',
   profile?: string,
 ): Promise<void> {
+  return respondPendingInteraction('clarify', sessionId, clarifyId, { response }, transport, profile)
+}
+
+function respondPendingInteraction(
+  kind: 'clarify' | 'approval',
+  sessionId: string,
+  requestId: string,
+  response: { response: string } | { choice: string },
+  transport: ChatRunTransport,
+  profile?: string,
+): Promise<void> {
   const socket = connectChatRun(profile, transport)
+  const label = kind === 'approval' ? 'Approval' : 'Clarification'
+  const resolutionEvents = [`${kind}.resolved`, `person.${kind === 'approval' ? 'approval' : 'clarification'}.resolved`]
   // Resolution events work through local and relayed transports. An emit alone
   // only queues a packet and must never be treated as an accepted answer.
   return new Promise((resolve, reject) => {
+    let settled = false
     const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
       removeSocketListener(socket, 'connect', send)
       removeSocketListener(socket, 'connect_error', failed)
       removeSocketListener(socket, 'disconnect', failed)
-      removeSocketListener(socket, 'clarify.resolved', resolved)
-      removeSocketListener(socket, 'person.clarification.resolved', resolved)
+      for (const event of resolutionEvents) removeSocketListener(socket, event, resolved)
       error ? reject(error) : resolve()
     }
-    const failed = () => finish(new Error('Clarification response could not be delivered. Please retry.'))
-    const resolved = (event: RunEvent & { clarify_id?: string; resolved?: boolean; stale?: boolean; outcome?: string }) => {
-      if (event.session_id !== sessionId || event.clarify_id !== clarifyId) return
+    const failed = () => finish(new Error(`${label} response could not be delivered. Please retry.`))
+    const resolved = (event: RunEvent & { clarify_id?: string; approval_id?: string; choice?: string; resolved?: boolean; stale?: boolean; outcome?: string }) => {
+      if (event.session_id !== sessionId || event[`${kind}_id`] !== requestId) return
       if (event.stale || ['timeout', 'timed_out', 'cancelled', 'aborted'].includes(event.reason || event.outcome || '')) {
-        finish(new Error('Clarification has expired.'))
+        finish(new Error(`${label} has expired.`))
       } else if (event.resolved === false) {
-        finish(new Error(event.error || 'Clarification response could not be applied.'))
+        finish(new Error(event.error || `${label} response could not be applied.`))
+      } else if ('choice' in response && event.choice && event.choice !== response.choice) {
+        finish(new Error('Approval has expired.'))
       } else {
         finish()
       }
     }
     const send = () => {
       removeSocketListener(socket, 'connect', send)
-      socket.emit('clarify.respond', { session_id: sessionId, clarify_id: clarifyId, response })
+      socket.emit(`${kind}.respond`, { session_id: sessionId, [`${kind}_id`]: requestId, ...response })
     }
-    const timer = setTimeout(() => finish(new Error('Clarification response was not confirmed. Please retry.')), 15_000)
-    socket.on('clarify.resolved', resolved)
-    socket.on('person.clarification.resolved', resolved)
+    const timer = setTimeout(() => finish(new Error(`${label} response was not confirmed. Please retry.`)), 15_000)
+    for (const event of resolutionEvents) socket.on(event, resolved)
     socket.on('disconnect', failed)
     socket.on('connect_error', failed)
     // Wait outside Socket.IO's send buffer so a timed-out answer cannot be
@@ -819,13 +835,9 @@ export function respondToolApproval(
   approvalId: string,
   choice: 'once' | 'session' | 'always' | 'deny',
   transport: ChatRunTransport = 'chat-run',
-): void {
-  const socket = connectChatRun(null, transport)
-  socket.emit('approval.respond', {
-    session_id: sessionId,
-    approval_id: approvalId,
-    choice,
-  })
+  profile?: string,
+): Promise<void> {
+  return respondPendingInteraction('approval', sessionId, approvalId, { choice }, transport, profile)
 }
 
 export function getChatRunSocket(transport?: ChatRunTransport): Socket | null {

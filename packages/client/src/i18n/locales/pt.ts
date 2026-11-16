@@ -1352,6 +1352,7 @@ export default {
     clarifyPlaceholder: 'Digite sua resposta...',
     clarifySubmit: 'Responder',
     clarifySendFailed: 'A entrega da resposta não foi confirmada. A resposta foi mantida. Tente novamente.',
+    approvalSendFailed: 'Sua decisão de aprovação não foi confirmada. Tente novamente.',
     clarifyDismiss: 'Descartar',
     interactionExpired: 'A solicitação expirou e foi fechada.',
     interactionCountdown: '{time} restante',

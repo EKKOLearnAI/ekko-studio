@@ -3,11 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, disposePinia, setActivePinia } from 'pinia'
 import { useChatStore, type Session } from '@/stores/hermes/chat'
 
-const api = vi.hoisted(() => ({ respond: vi.fn(), peer: vi.fn() }))
+const api = vi.hoisted(() => ({ respond: vi.fn(), approve: vi.fn(), peer: vi.fn() }))
 vi.mock('@/api/client', () => ({ getActiveProfileName: () => 'default', hasApiKey: () => false }))
 vi.mock('@/api/studio/background-status', () => ({ observeBackgroundStatus: () => () => {} }))
 vi.mock('@/api/studio/chat', () => ({
-  respondClarify: api.respond, onPeerUserMessage: api.peer,
+  respondClarify: api.respond, respondToolApproval: api.approve, onPeerUserMessage: api.peer,
   onUnobservedRunStarted: () => () => {}, onPersonUpdated: () => () => {}, onSessionCommand: () => () => {},
   onSessionTitleUpdated: () => () => {}, onSessionWorkspaceUpdated: () => () => {}, onSessionSettingsUpdated: () => () => {}, onRunUsageUpdated: () => () => {},
 }))
@@ -77,4 +77,38 @@ it('removes an expired Hermes question instead of leaving a phantom prompt', () 
   const { store, receive } = setup('session')
   receive({ event: 'clarify.resolved', session_id: 'session', clarify_id: 'question', resolved: false, reason: 'timed_out' })
   expect(store.activePendingClarify).toBeNull()
+})
+
+it('keeps approval retryable across navigation until the owning profile accepts it', async () => {
+  const { store, receive } = setup('session'), delivery = deferred()
+  const request = { event: 'approval.requested', session_id: 'session', approval_id: 'request', command: 'Execute', choices: ['once', 'deny'] }
+  receive(request)
+  api.approve.mockReturnValueOnce(delivery.promise)
+  const result = store.respondApproval('once')
+  expect(store.activePendingApproval?.submitting).toBe(true)
+  expect(api.approve).toHaveBeenCalledWith('session', 'request', 'once', 'chat-run', 'work')
+  await store.respondApproval('deny')
+  expect(api.approve).toHaveBeenCalledOnce()
+  store.activeSessionId = 'elsewhere'
+  receive(request)
+  store.activeSessionId = 'session'
+  expect(store.activePendingApproval?.submitting).toBe(true)
+  delivery.reject(new Error('connection closed'))
+  await expect(result).rejects.toThrow('connection closed')
+  expect(store.activePendingApproval).toMatchObject({ submitting: false, submissionFailed: true })
+  api.approve.mockResolvedValueOnce(undefined)
+  expect(await store.respondApproval('deny')).toBe('submitted')
+  expect(store.activePendingApproval).toBeNull()
+})
+
+it('does not erase a newer approval when an old response completes late', async () => {
+  const { store, receive } = setup('session'), delivery = deferred()
+  const request = { event: 'approval.requested', session_id: 'session', approval_id: 'request', command: 'Execute' }
+  receive(request)
+  api.approve.mockReturnValueOnce(delivery.promise)
+  const result = store.respondApproval('once')
+  receive({ ...request, approval_id: 'new-request' })
+  delivery.resolve()
+  await result
+  expect(store.activePendingApproval?.approvalId).toBe('new-request')
 })
