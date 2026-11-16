@@ -6,6 +6,23 @@ export interface ChangelogEntry {
 
 export const changelog: ChangelogEntry[] = [
   {
+    version: '0.8.25',
+    date: '2026-11-16',
+    changes: [
+      'changelog.new_0_8_25_1',
+      'changelog.new_0_8_25_2',
+      'changelog.new_0_8_25_3',
+      'changelog.new_0_8_25_4',
+      'changelog.new_0_8_25_5',
+      'changelog.new_0_8_25_6',
+      'changelog.new_0_8_25_7',
+      'changelog.new_0_8_25_8',
+      'changelog.new_0_8_25_9',
+      'changelog.new_0_8_25_10',
+      'changelog.new_0_8_25_11',
+    ],
+  },
+  {
     version: '0.8.24',
     date: '2026-11-15',
     changes: [
@@ -28,30 +45,6 @@ export const changelog: ChangelogEntry[] = [
       'changelog.new_0_8_23_5',
       'changelog.new_0_8_23_6',
       'changelog.new_0_8_23_7',
-    ],
-  },
-  {
-    version: '0.8.22',
-    date: '2026-11-13',
-    changes: [
-      'changelog.new_0_8_22_1',
-      'changelog.new_0_8_22_2',
-      'changelog.new_0_8_22_3',
-      'changelog.new_0_8_22_4',
-      'changelog.new_0_8_22_5',
-      'changelog.new_0_8_22_6',
-      'changelog.new_0_8_22_7',
-      'changelog.new_0_8_22_8',
-      'changelog.new_0_8_22_9',
-      'changelog.new_0_8_22_10',
-      'changelog.new_0_8_22_11',
-      'changelog.new_0_8_22_12',
-      'changelog.new_0_8_22_13',
-      'changelog.new_0_8_22_14',
-      'changelog.new_0_8_22_15',
-      'changelog.new_0_8_22_16',
-      'changelog.new_0_8_22_17',
-      'changelog.new_0_8_22_18',
     ],
   },
 ]
