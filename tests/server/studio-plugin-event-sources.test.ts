@@ -1,4 +1,7 @@
 import { expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 const mocks = vi.hoisted(() => ({ status: undefined as any, run: undefined as any }))
 vi.mock('../../packages/server/src/modules/studio/services/webhooks/business-consumers', () => ({ ensureBusinessConsumers() {} }))
 vi.mock('../../packages/server/src/modules/studio/services/webhooks/dispatcher', () => ({}))
@@ -13,6 +16,9 @@ vi.mock('../../packages/server/src/modules/studio/repositories/run-push-store', 
 import { businessEvents, type BusinessEvent } from '../../packages/server/src/modules/studio/services/webhooks/business-events'
 import { observeChatRunWebhookEvent } from '../../packages/server/src/modules/studio/services/webhooks'
 import { WorkflowSocketServer } from '../../packages/server/src/modules/studio/sockets/workflow'
+import { pluginEventData } from '../../packages/server/src/modules/studio/services/plugins/events'
+import { PluginRuntime } from '../../packages/server/src/modules/studio/services/plugins/runtime'
+import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
 
 it('publishes message/reasoning streams and tool lifecycle observations while keeping private worker streams hidden', () => {
   const received: BusinessEvent[] = [], stop = businessEvents.subscribe('plugin-wire-test', e => { received.push(e) })
@@ -44,4 +50,35 @@ it('publishes workflow started and stopped once per run transition, with persist
     expect(received.filter(e => e.type !== 'workflow.run.updated').map(e => e.type)).toEqual(['workflow.run.started', 'workflow.run.stopped'])
     expect(received.find(e => e.type === 'workflow.run.stopped')).toMatchObject({ subject: { workflow_id: 'flow', run_id: 'r' }, payload: { state: { status: 'canceled' } } })
   } finally { stop(); server.close() }
+})
+
+it('delivers native coding-agent streams and lifecycle events with optional host fields to plugin listeners', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'plugin-native-events-'))
+  const identity = { userId: 1, profile: 'work', sessionId: 'native-chat', surface: 'coding_agent' }
+  const runtime = new PluginRuntime({ directory: home, source: home, enabled: true, config: {}, installedAt: 0,
+    manifest: { id: 'native-events', name: 'Native Events', version: '1.0.0', apiVersion: 1, server: 'server.mjs', permissions: ['events'] } },
+    identity, new PluginStore(home), { authorize() {}, api: async () => null, emit() {}, log() {} })
+  const received: BusinessEvent[] = [], delivered: unknown[] = []
+  const stop = businessEvents.subscribe('plugin-native-events', event => { received.push(event) })
+  try {
+    await runtime.load({ apply(ctx) { ctx.events.on('chat.*', (event, run) => {
+      expect(run.signal.aborted).toBe(false)
+      delivered.push({ type: event.type, data: event.data, identity: run.identity })
+    }) } })
+    const input = { profile: 'work', sessionId: 'native-chat', source: 'coding_agent', agent: 'claude-code' as const }
+    observeChatRunWebhookEvent({ ...input, event: 'run.started', payload: { run_id: 'native-run' } })
+    observeChatRunWebhookEvent({ ...input, event: 'message.delta', payload: { delta: 'hello', run_id: 'native-run' } })
+    observeChatRunWebhookEvent({ ...input, event: 'reasoning.delta', payload: { delta: 'thinking', run_id: 'native-run' } })
+    observeChatRunWebhookEvent({ ...input, event: 'tool.started', payload: { name: 'search', tool_call_id: 'tool', run_id: 'native-run', apiKey: 'private' } })
+    for (const event of received) await runtime.observe({ id: event.id, type: event.type, timestamp: Date.parse(event.occurred_at), identity, data: pluginEventData(event) })
+    expect(delivered).toEqual([
+      expect.objectContaining({ type: 'chat.run.started', identity, data: expect.objectContaining({ subject: { session_id: 'native-chat', run_id: 'native-run' }, summary: { status: 'started' } }) }),
+      expect.objectContaining({ type: 'chat.message.delta', identity, data: expect.objectContaining({ delta: 'hello' }) }),
+      expect.objectContaining({ type: 'chat.reasoning.delta', identity, data: expect.objectContaining({ delta: 'thinking' }) }),
+      expect.objectContaining({ type: 'chat.tool.started', identity, data: expect.objectContaining({ summary: { status: 'started', tool_name: 'search' } }) }),
+    ])
+    expect(JSON.stringify(delivered)).not.toContain('private')
+    expect(Object.hasOwn(received[0].subject, 'queue_id')).toBe(true)
+    expect(received[0].chat?.subject.queue_id).toBeUndefined()
+  } finally { stop(); await runtime.close(); rmSync(home, { recursive: true, force: true }) }
 })

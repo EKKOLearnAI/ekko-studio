@@ -6,7 +6,7 @@ import { canReadGroupChatRoom } from '../group-chat/access'
 import { appEventEnvelope, canReceiveAppEvent } from '../webhooks/app-events'
 import type { BusinessEvent } from '../webhooks/business-events'
 import { PLUGIN_EVENT_TYPES } from '../../../../../../plugin-sdk/src'
-import { json } from './schema'
+import { contextJson } from './context-json'
 
 export function canReceivePluginEvent(user: AuthenticatedUser, event: BusinessEvent): boolean {
   if (isPrivatePersonSession(event.subject.session_id) || event.source === 'person') return canReceiveAppEvent(user, event)
@@ -29,7 +29,7 @@ export function pluginEventData(event: BusinessEvent) {
   const envelope = appEventEnvelope(event)
   const fields = Object.fromEntries(['state', 'delta', 'message_id', 'agent_id', 'agent_name', 'status', 'session']
     .filter(key => event.payload[key] !== undefined).map(key => [key, event.payload[key]]))
-  return json({ ...envelope, ...event.chat, ...fields,
+  return contextJson({ ...envelope, ...event.chat, ...fields,
     schema_version: 1, id: event.id, type: event.type, occurred_at: event.occurred_at,
     timestamp: Date.parse(event.occurred_at), profile: event.profile, source: event.source, subject: event.subject })
 }

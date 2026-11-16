@@ -20,6 +20,17 @@ it('projects normalized observations without forwarding credentials, raw content
   expect(JSON.stringify(projected)).not.toMatch(/internal|secret/)
   expect(pluginEventData(event({ type: 'internal.secret' }))).toBeNull()
 })
+it('omits nested optional host fields while preserving null and rejecting invalid event arrays', () => {
+  const state = { status: 'running', detail: undefined, steps: [{ title: 'Read', result: null, optional: undefined }] }
+  const projected = pluginEventData(event({ type: 'chat.run.updated', payload: { state } })) as any
+  expect(projected).toMatchObject({
+    state: { status: 'running', steps: [{ title: 'Read', result: null }] },
+  })
+  expect(Object.hasOwn(projected.state, 'detail')).toBe(false)
+  expect(Object.hasOwn(state, 'detail')).toBe(true)
+  expect(Object.hasOwn(state.steps[0], 'optional')).toBe(true)
+  expect(() => pluginEventData(event({ type: 'chat.run.updated', payload: { state: { steps: [undefined] } } }))).toThrow(/expected JSON data/)
+})
 it('checks group readership separately from interaction ownership and retains private Person visibility', () => {
   const group = event({ source: 'group_chat', subject: { room_id: 'room' }, type: 'group.message.delta' })
   expect(canReceivePluginEvent(user(1), group)).toBe(true); expect(canReceivePluginEvent(user(2), group)).toBe(true)
