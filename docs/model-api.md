@@ -18,6 +18,19 @@ false capability fields mean clients must retain their older per-agent auth
 rules; version numbers or the presence of a saved credential are not sufficient.
 This additive field does not change logical Provider/model IDs or session storage.
 
+New Studio/App clients set the optional query parameter `credential_format=metadata` when reading
+`/api/hermes/available-models`; `api_key` stays empty and credential readiness is
+reported by `credential_configured`. Older servers ignore this parameter, and
+it survives older relay header allowlists without a relay upgrade.
+For older clients without the parameter, configured groups receive the non-secret
+`__studio_managed_credential__` marker in `api_key` so their required-key checks
+still pass. Missing credentials remain empty. The marker cannot authenticate
+Model API requests. HTTP credential fields and Socket run payloads discard it
+before business logic, queueing or persistence; real key updates and explicit
+clears retain their semantics. Internal catalogs never contain this marker.
+This compatibility preserves existing old-App features; newly supported Coding
+OAuth choices still require an App that understands `supports_gateway_auth`.
+
 Use `http://localhost:8648/api/ekko-studio/models/v1` as the OpenAI SDK `base_url`
 (replace the host and port for your instance). Authentication accepts a dedicated
 **Model API key** or a Studio **user JWT** as `Authorization: Bearer …`. Provider

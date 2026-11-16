@@ -20,6 +20,7 @@ vi.mock('../../packages/server/src/modules/studio/services/model-api/keys', () =
 import { requireUserJwt, resolveUserProfile } from '../../packages/server/src/modules/studio/middleware/auth'
 import { configureModelGatewayAdapters } from '../../packages/server/src/modules/studio/public/model-gateway-adapters'
 import { modelGatewayMiddleware } from '../../packages/server/src/modules/studio/middleware/model-gateway'
+import { LEGACY_PROVIDER_CREDENTIAL } from '../../packages/server/src/modules/studio/contracts/legacy-provider-credential'
 
 const ctx = (path: string, token: string, header = 'authorization', method = 'POST'): any => ({
   path, method, state: {}, query: {}, headers: { [header]: header === 'authorization' ? `Bearer ${token}` : token },
@@ -32,6 +33,15 @@ beforeEach(() => {
     authenticate: token => token === 'hwui_run' ? { userId: 1, profile: 'work', model: 'model', provider: 'deepseek' } : null,
     handle: fixture.handled, register: () => { throw new Error('not used') },
   })
+})
+
+it('never authenticates the non-secret legacy readiness marker', async () => {
+  const next = vi.fn()
+  const request = ctx('/api/ekko-studio/models/v1/responses', LEGACY_PROVIDER_CREDENTIAL)
+  await requireUserJwt(request, next)
+  expect(request.status).toBe(401)
+  expect(next).not.toHaveBeenCalled()
+  expect(fixture.handled).not.toHaveBeenCalled()
 })
 
 it.each([

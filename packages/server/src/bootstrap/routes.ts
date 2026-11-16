@@ -4,6 +4,7 @@ import './provider-store-adapter'
 import './model-gateway-adapter'
 import { modelGatewayMiddleware } from '../modules/studio/middleware/model-gateway'
 import { providerAccountMiddleware } from '../modules/studio/middleware/provider-account'
+import { legacyProviderCredentials } from '../modules/studio/middleware/legacy-provider-credentials'
 import './plugin-agent-adapter'
 import { studioAgentRoutes } from '../modules/studio/routes/agents'
 import type { Context, Next } from 'koa'
@@ -104,6 +105,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
 
   // --- Auth middleware: all routes below require authentication ---
   authMiddleware.forEach((middleware) => app.use(middleware))
+  app.use(legacyProviderCredentials)
   app.use(providerAccountMiddleware)
 
   // --- Protected routes (auth required) ---
