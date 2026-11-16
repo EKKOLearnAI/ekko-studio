@@ -23,6 +23,8 @@ import { resolveEkkoProviderRuntimeConfig } from '../../packages/server/src/modu
 import { saveModelTarget, savedModelTargets } from '../../packages/server/src/modules/studio/public/model-target-store'
 import { getProviderEditorDetail, updateProviderEditorDetail } from '../../packages/server/src/modules/hermes/services/providers/provider-editor'
 import { resolveBridgeRunModelConfig } from '../../packages/server/src/modules/studio/services/chat-run/model-config'
+import { legacyProviderCredentials } from '../../packages/server/src/modules/studio/middleware/legacy-provider-credentials'
+import { LEGACY_PROVIDER_CREDENTIAL } from '../../packages/server/src/modules/studio/contracts/legacy-provider-credential'
 
 let source: string
 beforeEach(async () => {
@@ -44,6 +46,26 @@ beforeEach(async () => {
   configureProviderProjection(async () => [{ provider: 'deepseek', models: ['family/model'] }])
 })
 afterEach(async () => { await rm(fixture.home, { recursive: true, force: true }) })
+
+it('keeps stored credentials and model defaults when an old client echoes the readiness marker during an edit', async () => {
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    const home = providerAccountHome()
+    const credentials = await readFile(join(home, '.env'), 'utf8')
+    const model = (await readConfigYamlForProfile('work')).model
+    const detail = await getProviderEditorDetail('work', 'deepseek')
+    const ctx = { method: 'PATCH', path: '/api/hermes/config/providers/deepseek/editor',
+      request: { body: { api_key: LEGACY_PROVIDER_CREDENTIAL, credential_action: 'replace', label: 'Renamed DeepSeek' } } } as any
+    await legacyProviderCredentials(ctx, async () => {
+      const result = await updateProviderEditorDetail('work', 'deepseek', ctx.request.body, detail.revision)
+      expect(result.detail.credential_configured).toBe(true)
+      expect(result.changed).not.toContain('api_key_replaced')
+    })
+    expect(await readFile(join(home, '.env'), 'utf8')).toBe(credentials)
+    expect((await readConfigYamlForProfile('work')).model).toEqual(model)
+    expect((await resolveEkkoProviderRuntimeConfig({ profile: 'work', provider: 'deepseek' })).apiKey).toBe('legacy-key')
+  })
+})
 
 it('imports every accessible Profile once, keeps only provider state and preserves private backups', async () => {
   await withProviderAccount(1, async () => {

@@ -7,7 +7,10 @@ vi.mock('../../packages/server/src/modules/studio/repositories/users-store', () 
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({ getActiveProfileName: () => 'work', listProfileNamesFromDisk: () => ['work', 'other'] }))
 vi.mock('../../packages/server/src/modules/studio/public/agent-status-registry', () => ({ getAgentAvailabilitySnapshot: () => ({ agents: [{ id: 'ekko-agent', installed: true }, { id: 'codex', installed: true }] }) }))
 vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime', () => ({ getSessionAvailableModelGroups: async () => [{ provider: 'custom:fixture', models: ['fixture'], api_mode: 'chat_completions' }] }))
-vi.mock('../../packages/server/src/modules/studio/public/person-runtime', () => ({ personRuntime: () => ({ nativeModels: state.models }) }))
+vi.mock('../../packages/server/src/modules/studio/public/person-runtime', () => ({ personRuntime: () => ({
+  nativeModels: state.models,
+  modelConfig: async () => ({ groups: [{ provider: 'openai-codex', models: ['family/model'], api_mode: 'codex_responses' }] }),
+}) }))
 vi.mock('../../packages/server/src/modules/studio/repositories/person-store', () => ({ personSettings: () => ({ settings: {} }) }))
 vi.mock('../../packages/server/src/modules/studio/services/compression-policy', () => ({ readCompressionPolicy: () => ({}) }))
 vi.mock('../../packages/server/src/modules/studio/public/provider-runtime', () => ({ getModelContextLength: () => 64000 }))
@@ -16,7 +19,7 @@ vi.mock('../../packages/server/src/modules/studio/services/agents/registry', () 
   return { agentDescriptors: () => [descriptor()], agentDescriptor: (id: string) => id === state.id ? descriptor() : undefined,
     agentStatus: state.status, isPluginAgentId: (id: string) => id.startsWith('plugin:') }
 })
-import { personCapabilities, validatePersonSelection } from '../../packages/server/src/modules/studio/services/person/catalog'
+import { personCapabilities, personModelCatalog, validatePersonSelection } from '../../packages/server/src/modules/studio/services/person/catalog'
 import { validatePersonAgents } from '../../packages/server/src/modules/studio/services/person/agents'
 const selection = () => ({ runtime: state.id, mode: 'global' as const, profile: 'work', provider: '', model: 'custom/fixture', reasoningEffort: '' })
 beforeEach(() => {
@@ -46,4 +49,12 @@ it('rejects unsupported modes, surfaces, unavailable installations and changed m
 it('accepts full plugin IDs when saving a Bot execution preset', async () => {
   state.id = `plugin:${'p'.repeat(40)}/assistant`
   expect(await validatePersonAgents(2, [{ id: 'developer', name: '开发者', description: '开发任务', selection: selection() }])).toMatchObject([{ selection: { runtime: state.id } }])
+})
+it('advertises gateway auth for Bot model choices without changing logical identities', async () => {
+  const result = await personModelCatalog(2)
+  expect(result.groups).toHaveLength(2)
+  for (const group of result.groups) {
+    expect(group).toMatchObject({ provider: 'openai-codex', models: ['family/model'], supports_gateway_auth: true })
+    expect(group).not.toHaveProperty('api_key')
+  }
 })

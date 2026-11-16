@@ -76,6 +76,7 @@ async function personModelCatalogImpl(userId: number) {
       const models = group.models.filter(model => personModelAllowed(group, model))
       if (!models.length) continue
       groups.push({ profile, provider: group.provider, label: group.label || group.provider, models,
+        supports_gateway_auth: true,
         api_mode: group.api_mode, api_mode_by_model: group.api_mode_by_model,
         model_meta: Object.fromEntries(models.map(model => [model, group.model_meta?.[model] || {}])) })
     }

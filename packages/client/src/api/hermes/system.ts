@@ -144,12 +144,13 @@ export async function fetchConfigModels(): Promise<ConfigModelsResponse> {
 }
 
 export async function fetchAvailableModels(): Promise<AvailableModelsResponse> {
-  return request<AvailableModelsResponse>('/api/hermes/available-models')
+  return request<AvailableModelsResponse>('/api/hermes/available-models?credential_format=metadata')
 }
 
 export async function fetchAvailableModelsForProfile(profile: string, signal?: AbortSignal): Promise<AvailableModelsResponse> {
   const params = new URLSearchParams()
   params.set('profile', profile || 'default')
+  params.set('credential_format', 'metadata')
   return request<AvailableModelsResponse>(`/api/hermes/available-models?${params.toString()}`, { signal })
 }
 

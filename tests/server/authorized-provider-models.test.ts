@@ -52,6 +52,8 @@ vi.mock('../../packages/server/src/modules/hermes/services/providers/copilot-mod
 import { PROVIDER_ENV_MAP } from '../../packages/server/src/modules/hermes/services/profiles/config'
 import { getAvailable, getAvailableModelConfigForProfile } from '../../packages/server/src/modules/hermes/controllers/models'
 import { resolveCustomProviderApiKey } from '../../packages/server/src/modules/studio/contracts/provider-compat'
+import { legacyProviderCredentials } from '../../packages/server/src/modules/studio/middleware/legacy-provider-credentials'
+import { LEGACY_PROVIDER_CREDENTIAL } from '../../packages/server/src/modules/studio/contracts/legacy-provider-credential'
 
 const keylessProviders = Object.entries(PROVIDER_ENV_MAP)
   .filter(([, mapping]) => !mapping.api_key_env)
@@ -104,8 +106,10 @@ it.each([undefined, 'work'])('includes authorized providers in the available end
 
   expect(ctx.status).not.toBe(500)
   expect(ctx.body.groups.map((group: { provider: string }) => group.provider)).toEqual(['openai-codex'])
+  expect(ctx.body.groups[0]).toMatchObject({ supports_gateway_auth: true, api_key: '' })
+  expect(JSON.stringify(ctx.body)).not.toContain('fixture-codex')
   expect(ctx.body.profiles.find((item: { profile: string }) => item.profile === 'work').groups)
-    .toEqual(expect.arrayContaining([expect.objectContaining({ provider: 'openai-codex' })]))
+    .toEqual(expect.arrayContaining([expect.objectContaining({ provider: 'openai-codex', supports_gateway_auth: true })]))
 })
 
 it('keeps root OAuth grants and the legacy anthropic alias available in a named profile', async () => {
@@ -199,4 +203,20 @@ it('preserves inline-key precedence over key_env', async () => {
 
   expect(result.groups[0]).toMatchObject({ credential_configured: true, api_key: '' })
   expect(resolveCustomProviderApiKey({ ...entry, source: 'providers' }, 'CN_API_KEY=env-key\n')).toBe('inline-key')
+})
+
+it('adapts the real model catalog for a released App without exposing stored credentials', async () => {
+  mocks.readConfig.mockResolvedValue({ providers: { test: {
+    name: 'Test Provider', catalog_provider: 'test', base_url: 'https://model.test/v1',
+    api_key: 'fixture-upstream-secret', models: { 'model-a': {}, 'model-b': {} },
+  } } })
+  const ctx = { method: 'GET', path: '/api/hermes/available-models', query: { profile: 'work' },
+    state: {}, status: 200, get: () => '', vary: vi.fn() } as any
+  await legacyProviderCredentials(ctx, () => getAvailable(ctx))
+  expect(ctx.body.groups[0]).toMatchObject({ provider: 'test', api_key: LEGACY_PROVIDER_CREDENTIAL, credential_configured: true })
+  expect(JSON.stringify(ctx.body)).not.toContain('fixture-upstream-secret')
+  // Optional external artifact consumed by the App's compiled-page smoke test.
+  if (process.env.STUDIO_LEGACY_CATALOG_FIXTURE) {
+    await writeFile(process.env.STUDIO_LEGACY_CATALOG_FIXTURE, JSON.stringify(ctx.body))
+  }
 })
