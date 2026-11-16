@@ -2957,6 +2957,10 @@ export class CodingAgentRunManager {
           return
         }
         if (run.printCompleted) return
+        if (code === 0 && (run.printText || '').trim()) {
+          this.completeClaudePrintTurn(run, run.codexPendingUsage)
+          return
+        }
         this.failAntigravityTurn(run, run.codexPendingError || (code === 0 ? 'Antigravity exited without a terminal result event' : exitErrorMessage('Antigravity', code, run.currentChildStderr)), run.codexPendingUsage)
       },
     })
