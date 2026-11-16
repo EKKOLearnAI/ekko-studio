@@ -4,7 +4,7 @@ import yaml from 'js-yaml'
 import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
 import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import { PROVIDER_ENV_MAP } from '../profiles/config'
-import { getProfileDir } from '../profiles/profile'
+import { getProfileDir } from '../../../studio/public/provider-config'
 
 export function resolveConfiguredModelEndpoint(config: any, provider: string | null | undefined, model: string, envContent = ''): string | undefined {
   const normalized = (provider || '').trim().toLowerCase()
@@ -14,7 +14,7 @@ export function resolveConfiguredModelEndpoint(config: any, provider: string | n
   if (configuredUrl) return configuredUrl
   const providers = getCompatibleCustomProviders(config)
   const normalizeName = (name: string) => name.trim().toLowerCase().replace(/ /g, '-')
-  const named = normalized ? providers.find(entry => [entry.name, entry.provider_key || ''].some(name => normalizeName(name) === normalized.replace(/^custom:/, ''))) : undefined
+  const named = normalized ? providers.find(entry => entry.catalog_provider === normalized || [entry.name, entry.provider_key || ''].some(name => normalizeName(name) === normalized.replace(/^custom:/, ''))) : undefined
   if (named) return text(named.base_url)
   if (normalized === 'custom' || normalized.startsWith('custom:')) {
     const selectedUrl = normalized === 'custom' ? text(config?.model?.base_url) : undefined

@@ -1,3 +1,4 @@
+import { resolveAgentGatewayRuntime, resolveAgentGatewayModelConfigs } from './provider-gateway-client'
 import { pluginAgent, isPluginAgentId } from '../modules/studio/services/agents/registry'
 import { createPersonAgent } from './person-chat-agent'
 import { createPersonDefaultWorkspace } from './person-workspace'
@@ -5,8 +6,8 @@ import { AgentRuntime, AgentToolRegistry } from '../../../ekko-agent/src'
 import { personBudgetedClient } from './person-model-context'
 import { configurePersonRuntime } from '../modules/studio/public/person-runtime'
 import { getChatRunServer } from '../modules/studio/public/chat-run'
-import { createEkkoAuthorizedProviderFetch, resolveEkkoProviderRuntimeConfig } from '../modules/ekko/services/provider-runtime'
-import { createModelClient, resolveModelProviderConfigs } from '../../../ekko-agent/src'
+import { createEkkoAuthorizedProviderFetch } from '../modules/ekko/services/provider-runtime'
+import { createModelClient } from '../../../ekko-agent/src'
 import { getCodingAgentModels } from '../modules/coding-agents/services'
 import { executePersonTask, stopPersonTask } from './person-task-runtime'
 import { getAvailableModelConfigForProfile } from '../modules/hermes/controllers/models'
@@ -17,8 +18,8 @@ configurePersonRuntime({
   chatAgent: createPersonAgent,
   async model(input) {
     const selection = input.selection
-    const config = await resolveEkkoProviderRuntimeConfig({ profile: selection.profile, provider: selection.provider, model: selection.model, apiMode: selection.apiMode })
-    const { providerConfig } = resolveModelProviderConfigs({ ...config, provider: selection.provider, model: selection.model })
+    const config = await resolveAgentGatewayRuntime({ profile: selection.profile, provider: selection.provider, model: selection.model, apiMode: selection.apiMode })
+    const { providerConfig } = resolveAgentGatewayModelConfigs({ ...config, provider: selection.provider, model: selection.model })
     const client = createModelClient(providerConfig, { fetch: createEkkoAuthorizedProviderFetch({ profile: selection.profile, provider: selection.provider, model: selection.model, accessToken: config.apiKey }) })
     const guarded = personBudgetedClient(client, input)
     const registry = new AgentToolRegistry()

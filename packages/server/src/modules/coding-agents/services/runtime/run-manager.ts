@@ -97,6 +97,7 @@ try {
 }
 
 export interface CodingAgentRunLaunch {
+  ownerUserId?: number
   agentPreset?: string
   agentSessionId: string
   agentId: string

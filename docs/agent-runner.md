@@ -339,7 +339,8 @@ Status:
 
 ### Phase 6: Cleanup
 
-- Thin `claude-code-proxy.ts` and `codex-proxy.ts` into route adapters.
+- Keep Codex and Claude protocol adapters behind the shared Studio model gateway;
+  legacy proxy URLs use its compatibility middleware, without separate routers.
 - Remove duplicated conversion and SSE parsing code.
 - Revisit naming and export boundaries.
 

@@ -304,6 +304,7 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
     .replace(/:([^/]+)/g, '{$1}')
     .replace(/\{\*([^}]+)\}/g, '{$1}')
     .replace(/\*\*([^/]*)/g, '{$1}')
+    .replace(/\/\*([A-Za-z_][A-Za-z0-9_]*)/g, '/{$1}')
 
   if (!paths[openapiPath]) {
     paths[openapiPath] = {}
@@ -1807,7 +1808,7 @@ keyManagementPath.get.description = 'Requires Studio user authentication. Lists 
 keyManagementPath.get.responses = { '200': { description: 'Key metadata', content: { 'application/json': { schema: { type: 'object', properties: { keys: { type: 'array', items: keyMetadata } } } } } }, '401': { description: 'Studio login required' }, '403': { description: 'Profile access denied' } }
 keyManagementPath.post.summary = 'Create an account-wide Model API key'
 keyManagementPath.post.parameters = modelApiParameters
-keyManagementPath.post.description = 'Requires Studio user authentication. Key allows model listing and Responses inference only for the explicitly selected models; valid until revoked. Only the hash is persisted. Limit: 50 keys per account. Cache-Control: no-store.'
+keyManagementPath.post.description = 'Requires Studio user authentication. Key allows model listing and supported protocol inference only for the explicitly selected models; valid until revoked. Only the hash is persisted. Limit: 50 keys per account. Cache-Control: no-store.'
 const modelApiKeySettings = { type: 'object', required: ['name', 'models'], additionalProperties: false, properties: {
   budgetUsd: keyBudgetSchema,
   name: { type: 'string', minLength: 1, maxLength: 80 }, models: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string' }, description: 'Currently accessible, callable provider-qualified model IDs. New models are not granted automatically.' },
@@ -1828,7 +1829,7 @@ editKeyOperation.responses = { '200': { description: 'Updated key metadata witho
 const modelListOperation = openapi.paths['/api/ekko-studio/models/v1/models'].get
 modelListOperation.summary = 'List configured models with provider-qualified IDs'
 modelListOperation.parameters = modelApiParameters
-modelListOperation.description = 'Model API keys see only their explicitly allowed model IDs; Studio user JWTs see the full account catalog. Aggregates all accessible Profiles as provider/model and deduplicates IDs, preserving slashes inside native model IDs. Callable configurations win over disabled/unsupported duplicates, then default Profile, then Profile names in lexical order. Caller Profile selectors are ignored. Never returns credentials. MoA presets and self-referencing Model API providers using a locally issued Model API key are excluded from this catalog. responses_supported=false marks disabled models and providers requiring Bedrock or Codex app-server runtimes.'
+modelListOperation.description = 'Model API keys see only their explicitly allowed model IDs; Studio user JWTs see the full account catalog. Providers are stored once per account and shared by all Profiles, preserving slashes inside model IDs. Identical imported Providers merge; same-name Providers with different configurations retain separate stable IDs and credentials. Earlier Profile-derived model IDs remain compatibility aliases. Caller Profile selectors are ignored. Never returns credentials. MoA presets and self-referencing Model API providers using a locally issued Model API key are excluded from this catalog. responses_supported=false marks disabled models and providers requiring Bedrock or Codex app-server runtimes.'
 modelListOperation.responses = { ...modelApiErrors, '200': { description: 'OpenAI-compatible model list', content: { 'application/json': { schema: { type: 'object', properties: {
   object: { type: 'string', enum: ['list'] }, data: { type: 'array', items: { type: 'object', properties: {
     id: { type: 'string', example: 'glm/glm-5.3' }, object: { type: 'string', enum: ['model'] }, created: { type: 'integer' },
@@ -1838,22 +1839,51 @@ modelListOperation.responses = { ...modelApiErrors, '200': { description: 'OpenA
 const modelResponseOperation = openapi.paths['/api/ekko-studio/models/v1/responses'].post
 modelResponseOperation.summary = 'Request a configured model using OpenAI Responses format'
 modelResponseOperation.parameters = modelApiParameters
-modelResponseOperation.description = 'Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. Every attempted upstream request records external usage under the authenticated user. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations.'
+modelResponseOperation.description = 'Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. External requests record usage once under the authenticated user. Internal Agent credentials retain existing run accounting. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations.'
 modelResponseOperation.requestBody = { required: true, content: { 'application/json': { schema: {
   type: 'object', required: ['model', 'input'], properties: {
     model: { type: 'string', example: 'glm/glm-5.3' },
     input: { oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'object', description: 'Responses message, reasoning, function_call or function_call_output item.' } }] },
-    instructions: { type: 'string' }, stream: { type: 'boolean', default: false }, store: { type: 'boolean', enum: [false], default: false },
+    instructions: { type: 'string' }, stream: { type: 'boolean', default: false }, store: { type: 'boolean', default: false },
     max_output_tokens: { type: 'integer', minimum: 1 }, temperature: { type: 'number', minimum: 0, maximum: 2 },
     reasoning: { type: 'object', properties: { effort: { type: 'string', enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] }, summary: { type: 'string', enum: ['auto', 'concise', 'detailed'] } } },
-    tools: { type: 'array', items: { type: 'object', required: ['type', 'name'], properties: { type: { type: 'string', enum: ['function'] }, name: { type: 'string' }, description: { type: 'string' }, parameters: { type: 'object' }, strict: { type: 'boolean', enum: [false] } } } },
-    tool_choice: { type: 'string', enum: ['auto', 'none', 'required'] }, metadata: { type: 'object', maxProperties: 16, additionalProperties: { type: 'string', maxLength: 512 } },
+    tools: { type: 'array', items: { type: 'object', required: ['type', 'name'], properties: { type: { type: 'string', enum: ['function'] }, name: { type: 'string' }, description: { type: 'string' }, parameters: { type: 'object' }, strict: { type: 'boolean' } } } },
+    tool_choice: { oneOf: [{ type: 'string', enum: ['auto', 'none', 'required'] }, { type: 'object' }] }, metadata: { type: 'object', maxProperties: 16, additionalProperties: { type: 'string', maxLength: 512 } },
   },
 } } } }
 modelResponseOperation.responses = { ...modelApiErrors, '200': { description: 'Response object, or named Responses SSE events ending in response.completed, response.incomplete or response.failed. Usage may be null if the upstream did not report it.', headers: { 'x-request-id': { schema: { type: 'string' } } }, content: {
   'application/json': { schema: { type: 'object', properties: { id: { type: 'string' }, object: { type: 'string', enum: ['response'] }, model: { type: 'string' }, status: { type: 'string', enum: ['completed', 'incomplete', 'failed'] }, output: { type: 'array', items: { type: 'object' } }, usage: { type: 'object', nullable: true }, error: { type: 'object', nullable: true } } } },
   'text/event-stream': { schema: { type: 'string' } },
 } } }
+
+// The account gateway accepts each client's native request protocol.
+openapi.components.securitySchemes.ModelApiKey = { type: 'apiKey', in: 'header', name: 'x-api-key' }
+openapi.components.securitySchemes.GeminiApiKey = { type: 'apiKey', in: 'header', name: 'x-goog-api-key' }
+for (const [path, item] of Object.entries(openapi.paths)) {
+  if (!path.startsWith('/api/ekko-studio/models/') || !item.post) continue
+  const operation = item.post
+  operation.parameters = modelApiParameters
+  operation.security = [{ BearerAuth: [] }, { ModelApiKey: [] }, { GeminiApiKey: [] }]
+  operation.description = modelResponseOperation.description + ' Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md.'
+  if (path.endsWith('/responses')) continue
+  const counting = path.endsWith('/count_tokens')
+  const gemini = path.includes('/v1beta/')
+  operation.operationId = counting ? 'modelApiCountTokens' : path.endsWith('/messages') ? 'modelApiMessages' : path.endsWith('/chat/completions') ? 'modelApiChatCompletions' : gemini ? 'modelApiGemini' : operation.operationId
+  operation.summary = counting ? 'Count message input tokens (native or explicitly estimated)' : gemini ? 'Generate Gemini Contents through the account gateway' : path.endsWith('/messages') ? 'Request a model using Anthropic Messages' : 'Request a model using OpenAI Chat Completions'
+  const field = gemini ? 'contents' : 'messages'
+  operation.requestBody = { required: true, content: { 'application/json': { schema: {
+    type: 'object', additionalProperties: true, required: gemini ? [field] : ['model', field],
+    properties: { model: { type: 'string', example: 'deepseek/deepseek-v4' }, [field]: { type: 'array', items: { type: 'object', additionalProperties: true } }, stream: { type: 'boolean' } },
+  } } } }
+  operation.responses = { ...modelApiErrors, '200': { description: counting ? 'Input count. x-studio-token-count-estimated=true marks a conservative estimate for non-Anthropic upstreams; no inference usage is recorded.' : 'Native protocol JSON or incremental SSE', content: { 'application/json': { schema: { type: 'object', additionalProperties: true } }, ...(counting ? {} : { 'text/event-stream': { schema: { type: 'string' } } }) } } }
+  if (gemini) {
+    delete openapi.paths[path]
+    for (const verb of ['generateContent', 'streamGenerateContent']) {
+      const named = path.replace('/{operation}', '/{model}:' + verb)
+      openapi.paths[named] = { post: { ...operation, operationId: `modelApiGemini${path.includes('/gemini/') ? 'Alias' : ''}${verb}`, parameters: [...modelApiParameters, { name: 'model', in: 'path', required: true, description: 'Complete Provider/model route, including native model slashes.', schema: { type: 'string' } }] } }
+    }
+  }
+}
 
 // Named user themes use the same customization payload as /api/theme.
 const themeNameSchema = { type: 'string', minLength: 1, maxLength: 80 }

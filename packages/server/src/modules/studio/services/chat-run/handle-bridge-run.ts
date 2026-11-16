@@ -1,3 +1,4 @@
+import { withSocketProviderAccount } from '../../public/provider-account'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { isPrivatePersonSession } from '../../contracts/person-session'
 import { requirePersonWorkspace } from '../person/workspace'
@@ -56,8 +57,6 @@ import type { AuthenticatedUser } from '../../public/auth'
 import { ensureHermesRunWorkspace } from './workspace'
 import { observeRunChatPetEvent } from '../../public/pet-events'
 import { completeWorkspaceRunCheckpoint, startWorkspaceRunCheckpoint } from './workspace-diff-tracker'
-import { resolveAuthorizedProviderRuntimeCredentials } from '../../public/authorized-provider-runtime'
-import { saveEnvValueForProfile } from '../../public/profile-config'
 
 const BRIDGE_USAGE_FLUSH_DELAY_MS = 200
 const BRIDGE_TITLE_EVENT_POLL_INTERVAL_MS = 500
@@ -464,7 +463,7 @@ async function ensureBridgeFixedContext(args: {
   }
 }
 
-export async function handleBridgeRun(
+async function handleBridgeRunImpl(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
   data: { task_plan_context_id?: string; input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
@@ -526,25 +525,10 @@ export async function handleBridgeRun(
     requestedProvider: callbackContext?.provider || data.provider,
     modelGroups: data.model_groups,
     preferRequested: Boolean(callbackContext) || data.one_shot_model === true,
-    preserveAuthorizedProvider: true,
   })
   const resolvedModel = selectedModelConfig.model
   const selectedProvider = selectedModelConfig.provider
-  if (selectedProvider === 'claude-oauth') {
-    // Studio owns OAuth refresh. Resolving here happens before context
-    // estimation can create a cached Python Agent and synchronizes Claude's
-    // fresh access token into the profile ANTHROPIC_TOKEN environment.
-    const credentials = await resolveAuthorizedProviderRuntimeCredentials({
-      profile,
-      provider: selectedProvider,
-      model: resolvedModel,
-    })
-    // Hermes Agent's native Anthropic bridge reads Claude OAuth only from
-    // ANTHROPIC_TOKEN. This is intentionally Claude-specific: no other
-    // authorized provider or provider environment is touched here.
-    await saveEnvValueForProfile(profile, 'ANTHROPIC_TOKEN', credentials.apiKey)
-  }
-  const resolvedProvider = selectedProvider === 'claude-oauth' ? 'anthropic' : selectedProvider
+  const resolvedProvider = selectedProvider
   if (sessionRow && !callbackContext && data.one_shot_model !== true) {
     const updates: { model?: string; provider?: string } = {}
     if (resolvedModel && sessionRow.model !== resolvedModel) updates.model = resolvedModel
@@ -2115,3 +2099,5 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
     )
   })
 }
+
+export const handleBridgeRun = withSocketProviderAccount(handleBridgeRunImpl)

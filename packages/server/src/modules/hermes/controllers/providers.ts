@@ -2,8 +2,9 @@ import { preservedModelKeys } from '../services/models/model-section'
 import { existsSync, readFileSync } from 'fs'
 import { writeFile } from 'fs/promises'
 import { join } from 'path'
-import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
-import { updateConfigYamlForProfile, saveEnvValueForProfile, PROVIDER_ENV_MAP } from '../../studio/public/profile-config'
+import { getActiveProfileName } from '../services/profiles/profile'
+import { getProfileDir } from '../../studio/public/provider-config'
+import { updateConfigYamlForProfile, saveEnvValueForProfile, PROVIDER_ENV_MAP } from '../../studio/public/provider-config'
 import { getCompatibleCustomProviders, normalizeCustomProviderEntry } from '../../studio/contracts/provider-compat'
 import { PROVIDER_PRESETS, isRetiredProvider, RETIRED_PROVIDER_MESSAGE } from '../../studio/contracts/providers'
 import { logger } from '../../studio/public/logging'
@@ -325,6 +326,23 @@ export async function create(ctx: any) {
         throw Object.assign(new Error('Provider already exists; choose another name'), { status: 409 })
       }
       if (typeof config.model !== 'object' || config.model === null) { config.model = {} }
+      if (config.studio_provider_pool === 2) {
+        config.providers ||= {}
+        const previous = config.providers[poolKey]
+        if (create_only === true && previous) throw Object.assign(new Error('Provider already exists; choose another name'), { status: 409 })
+        const preset = PROVIDER_PRESETS.find(p => p.value === poolKey)
+        const entry = { ...previous, name: normalizedName, base_url: effectiveBaseUrl, api_key,
+          catalog_provider: poolKey, runtime_provider: previous?.runtime_provider || poolKey,
+          api_mode: customApiMode || previous?.api_mode || preset?.catalog_api_mode || preset?.api_mode || 'chat_completions',
+          model, models: { ...previous?.models, [model]: { ...previous?.models?.[model], ...(context_length && context_length > 0 ? { context_length } : {}) } } }
+        for (const key of ['key_env', 'auth_provider', 'auth_scope']) delete entry[key]
+        config.providers[poolKey] = entry
+        config.model.default = model
+        config.model.provider = poolKey
+        delete config.model.base_url
+        delete config.model.api_key
+        return config
+      }
       if (!isBuiltin) {
         if (!Array.isArray(config.custom_providers)) { config.custom_providers = [] }
         const existing = (config.custom_providers as any[]).find(
@@ -436,7 +454,7 @@ export async function update(ctx: any) {
     // try { await hermesCli.restartGateway() } catch (e: any) { logger.error(e, 'Gateway restart failed') }
     ctx.body = { success: true }
   } catch (err: any) {
-    ctx.status = 500; ctx.body = { error: err.message }
+    ctx.status = err.status === 409 ? 409 : 500; ctx.body = { error: err.message }
   }
 }
 

@@ -1,9 +1,11 @@
+import type { ReasoningCodec } from '../../../studio/public/model-reasoning-codec'
 // Shared Responses payload translation for Coding Agent provider proxies.
 import { createHash } from 'node:crypto'
 import { imageUrlToAnthropicSource, openAiImageUrl } from './multimodal'
 import { shouldPreserveReasoningContent } from './anthropic'
 
 export interface ResponsesAdapterTarget {
+  reasoningCodec?: ReasoningCodec
   model: string
   mcpToolRoutes?: McpToolRoutes
   provider?: string
@@ -764,6 +766,11 @@ function responsesToolsToChatTools(tools: unknown): any[] | undefined {
   return mapped.length ? mapped : undefined
 }
 
+/** Function-only Responses Providers use the same namespace mapping as Chat. */
+export function responseFunctionTools(body: any): any[] {
+  return (responsesToolsToChatTools(responsesAvailableTools(body)) || []).map(tool => ({ type: 'function', ...tool.function }))
+}
+
 export function responsesToOpenAiChat(body: any, target: ResponsesAdapterTarget, stream = false): any {
   const tools = responsesToolsToChatTools(responsesAvailableTools(body))
   const reasoningEffort = targetReasoningEffort(target)
@@ -819,13 +826,18 @@ function responsesToolOutputToAnthropicContent(output: unknown): string | any[] 
   return parts.map(part => String(part.text || '')).filter(Boolean).join('\n')
 }
 
-function responsesInputToAnthropicMessages(body: any): any[] {
+function responsesInputToAnthropicMessages(body: any, target: ResponsesAdapterTarget): any[] {
   const messages: any[] = []
   const input = body?.input
   if (typeof input === 'string') return [{ role: 'user', content: [{ type: 'text', text: input }] }]
 
   for (const item of Array.isArray(input) ? input : []) {
     if (!item || typeof item !== 'object') continue
+    if (item.type === 'reasoning' && item.encrypted_content) {
+      const reasoning = target.reasoningCodec?.decode(item.encrypted_content)
+      if (reasoning?.native?.format === 'anthropic-thinking-blocks' && Array.isArray(reasoning.native.data)) messages.push({ role: 'assistant', content: reasoning.native.data })
+      continue
+    }
     if (item.type === 'function_call' || item.type === 'tool_search_call') {
       messages.push({
         role: 'assistant',
@@ -862,7 +874,13 @@ function responsesInputToAnthropicMessages(body: any): any[] {
     }
   }
 
-  return messages.length ? messages : [{ role: 'user', content: [{ type: 'text', text: '' }] }]
+  if (!messages.length) return [{ role: 'user', content: [{ type: 'text', text: '' }] }]
+  return messages.reduce((merged: any[], message) => {
+    const previous = merged.at(-1)
+    if (previous?.role === message.role) previous.content.push(...message.content)
+    else merged.push({ ...message, content: [...message.content] })
+    return merged
+  }, [])
 }
 
 function responsesToolsToAnthropicTools(tools: unknown): any[] | undefined {
@@ -882,17 +900,22 @@ function responsesToolsToAnthropicTools(tools: unknown): any[] | undefined {
 export function responsesToAnthropicMessages(body: any, target: ResponsesAdapterTarget, stream = false): any {
   const tools = responsesToolsToAnthropicTools(responsesAvailableTools(body))
   const reasoningEffort = targetReasoningEffort(target)
+  const system = [body?.instructions, ...(Array.isArray(body?.input) ? body.input.filter((item: any) => ['system', 'developer'].includes(item?.role)).map((item: any) => stringifyContent(item.content)) : [])].filter(Boolean).join('\n\n')
+  const input = Array.isArray(body?.input) ? body.input.filter((item: any) => !['system', 'developer'].includes(item?.role)) : body?.input
+  const choice = body?.tool_choice
+  const toolChoice = typeof choice === 'string' ? { type: ({ auto: 'auto', none: 'none', required: 'any' } as Record<string, string>)[choice] || 'auto' }
+    : choice?.name ? { type: 'tool', name: choice.name } : { type: 'auto' }
   return {
     model: target.model,
-    messages: responsesInputToAnthropicMessages(body),
-    ...(body?.instructions ? { system: stringifyContent(body.instructions) } : {}),
+    messages: responsesInputToAnthropicMessages({ ...body, input }, target),
+    ...(system ? { system } : {}),
     max_tokens: typeof body?.max_output_tokens === 'number'
       ? body.max_output_tokens
       : target.outputLimit && target.outputLimit > 0 ? Math.floor(target.outputLimit) : 4096,
     ...(typeof body?.temperature === 'number' ? { temperature: body.temperature } : {}),
     ...(typeof body?.top_p === 'number' ? { top_p: body.top_p } : {}),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-    ...(tools?.length ? { tools } : {}),
+    ...(tools?.length ? { tools, tool_choice: { ...toolChoice, ...(body?.parallel_tool_calls === false ? { disable_parallel_tool_use: true } : {}) } } : {}),
     stream,
   }
 }
@@ -984,6 +1007,7 @@ export function anthropicMessageToResponses(data: any, target: ResponsesAdapterT
   const output: any[] = []
   const textParts: string[] = []
   const reasoningParts: string[] = []
+  const nativeReasoning = (data?.content || []).filter((block: any) => block?.type === 'thinking' || block?.type === 'redacted_thinking')
   for (const block of Array.isArray(data?.content) ? data.content : []) {
     if (block?.type === 'text' && block.text) textParts.push(String(block.text))
     if (block?.type === 'thinking' && block.thinking) reasoningParts.push(String(block.thinking))
@@ -1012,6 +1036,7 @@ export function anthropicMessageToResponses(data: any, target: ResponsesAdapterT
       type: 'reasoning',
       id: `rs_${responseId(data)}`,
       summary: [{ type: 'summary_text', text: reasoningParts.join('\n') }],
+      ...(target.reasoningCodec ? { encrypted_content: target.reasoningCodec.encode({ text: reasoningParts.join('\n'), native: { format: 'anthropic-thinking-blocks', data: nativeReasoning } }) } : {}),
     })
   }
 

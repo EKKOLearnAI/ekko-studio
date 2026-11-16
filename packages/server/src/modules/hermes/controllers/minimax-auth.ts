@@ -1,8 +1,9 @@
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { dirname, join } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
-import { updateConfigYamlForProfile } from '../../studio/public/profile-config'
+import { getActiveProfileName } from '../services/profiles/profile'
+import { getProfileDir } from '../../studio/public/provider-config'
+import { updateConfigYamlForProfile } from '../../studio/public/provider-config'
 import { logger } from '../../studio/public/logging'
 import { resolveAuthorizedProviderRuntimeCredentials } from '../services/providers/authorized-provider-credentials'
 

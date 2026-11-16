@@ -5,14 +5,16 @@ import { chmod } from 'fs/promises'
 import { join, resolve } from 'path'
 import YAML from 'js-yaml'
 import { normalizeCustomProviderEntry } from '../../../studio/contracts/provider-compat'
+import { assertUniqueProviderNames } from '../../../studio/contracts/provider-identity'
 import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
 import {
   appConfigFilePath,
   invalidateAppConfigCache,
+  readAppConfig,
   type AppConfig,
-} from '../../../studio/public/app-config'
+} from '../../../studio/public/provider-config'
 import { readProviderContextLengths, writeProviderContextLengths } from '../../../studio/public/provider-context'
-import { getProfileDir, PROVIDER_ENV_MAP } from '../../../studio/public/profile-config'
+import { getProfileDir, PROVIDER_ENV_MAP } from '../../../studio/public/provider-config'
 import { safeFileStore, type MultiTextUpdate } from '../../../studio/public/safe-file-store'
 
 export type ProviderApiMode = 'chat_completions' | 'codex_responses' | 'anthropic_messages' | 'bedrock_converse' | 'codex_app_server'
@@ -150,6 +152,11 @@ function updateEnv(raw: string | undefined, key: string, value: string | undefin
 }
 
 function findSource(config: Record<string, any>, providerId: string): ProviderSource | null {
+  for (const [key, value] of Object.entries(config.providers || {})) {
+    if ((value as any)?.catalog_provider === providerId) {
+      return { id: providerId, builtin: false, source: 'providers', sourceKey: key, configEntry: value as Record<string, any> }
+    }
+  }
   if (providerId.startsWith('custom:')) {
     if (Array.isArray(config.custom_providers)) {
       const entry = (config.custom_providers as any[]).find(item => providerKeyForCustomName(item?.name) === providerId)
@@ -282,7 +289,7 @@ function contextLengths(profile: string, providerId: string): Record<string, num
 }
 
 function appProfileValue(appConfig: AppConfig, key: 'providerLabels' | 'providerPreferredModels', profile: string, providerId: string): string {
-  const value = appConfig[key]?.[profile]?.[providerId]
+  const value = (appConfig[key]?.account || appConfig[key]?.[profile])?.[providerId]
   return typeof value === 'string' ? value.trim() : ''
 }
 
@@ -387,6 +394,7 @@ function profilePaths(profile: string) {
 }
 
 export async function getProviderEditorDetail(profile: string, providerId: string): Promise<ProviderEditorDetail> {
+  await readAppConfig()
   const paths = profilePaths(profile)
   const [rawConfig, rawEnv, rawApp] = await Promise.all([
     safeFileStore.readText(paths.config).catch(() => ''),
@@ -497,6 +505,7 @@ export async function testProviderEditorDraft(
   providerId: string,
   patch: ProviderEditorPatch,
 ): Promise<{ models: string[]; model_count: number; catalog_unavailable?: boolean }> {
+  await readAppConfig()
   const paths = profilePaths(profile)
   const [rawConfig, rawEnv, rawApp] = await Promise.all([
     safeFileStore.readText(paths.config).catch(() => ''),
@@ -644,6 +653,7 @@ export async function updateProviderEditorDetail(
   patch: ProviderEditorPatch,
   expectedRevision: string,
 ): Promise<{ before: ProviderEditorDetail; detail: ProviderEditorDetail; changed: string[] }> {
+  await readAppConfig()
   const paths = profilePaths(profile)
   let before!: ProviderEditorDetail
   let nextDetail!: ProviderEditorDetail
@@ -665,9 +675,10 @@ export async function updateProviderEditorDetail(
     const credentialAction = patch.credential_action || 'keep'
     const apiKey = String(patch.api_key || '')
 
-    if (patch.label !== undefined) setNestedProfileValue(appConfig, 'providerLabels', profile, providerId, patch.label.trim())
+    const preferenceScope = config.studio_provider_pool === 2 ? 'account' : profile
+    if (patch.label !== undefined) setNestedProfileValue(appConfig, 'providerLabels', preferenceScope, providerId, patch.label.trim())
     if (patch.preferred_model !== undefined) {
-      setNestedProfileValue(appConfig, 'providerPreferredModels', profile, providerId, patch.preferred_model.trim())
+      setNestedProfileValue(appConfig, 'providerPreferredModels', preferenceScope, providerId, patch.preferred_model.trim())
       if (!source.builtin) setExistingAlias(source.configEntry!, ['model', 'default_model', 'defaultModel'], patch.preferred_model.trim(), source.source === 'providers' ? 'default_model' : 'model')
     }
 
@@ -705,6 +716,11 @@ export async function updateProviderEditorDetail(
     }
 
     if (credentialAction !== 'keep') {
+      // An explicit key edit replaces the grant on this Provider record only.
+      if (source.configEntry?.auth_provider) {
+        delete source.configEntry.auth_provider
+        delete source.configEntry.auth_scope
+      }
       if (source.source === 'builtin_env') {
         env = updateEnv(env, source.envMapping!.api_key_env, credentialAction === 'replace' ? apiKey : undefined)
       } else {
@@ -719,6 +735,8 @@ export async function updateProviderEditorDetail(
       }
     }
     syncAuthMetadata(auth, source, providerId, baseUrl, credentialAction, apiKey)
+    try { assertUniqueProviderNames(config, appConfig.providerLabels?.[preferenceScope]) }
+    catch (error: any) { throw new ProviderEditorError(error.message, 409, 'DUPLICATE_PROVIDER_NAME') }
 
     const files: MultiTextUpdate = {
       [paths.config]: dumpYaml(config),

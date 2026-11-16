@@ -1,9 +1,13 @@
-import { openCodeSessionHeaders } from '../../studio/public/opencode-session'
-import { openRouterAttributionHeaders } from '../../studio/public/openrouter-attribution'
+import { fetchProviderHttp, isCodexInferenceRequest } from '../../studio/public/provider-http'
+import { openAiResponsesSseToResponsesEvents } from './adapters/responses-stream'
+import { providerAccountId, providerRequestProfile } from '../../studio/public/provider-account'
 
 /** A provider request issued by a Coding Agent proxy. */
 export interface AgentGatewayRequest {
   url: string
+  profile?: string
+  ownerUserId?: number
+  model?: string
   apiKey: string
   sessionId?: string
   provider?: string
@@ -27,6 +31,17 @@ export class ProviderApiError extends Error {
 export class AgentRunGateway {
   async completeJson<T = any>(request: AgentGatewayRequest): Promise<T> {
     const res = await this.post(request)
+    if (res.ok && isCodexInferenceRequest(request) && !/application\/json/i.test(res.headers.get('content-type') || '')) {
+      if (!res.body) throw new Error('Codex returned an empty stream')
+      for await (const event of openAiResponsesSseToResponsesEvents(res.body as any)) {
+        if (event.type === 'response.completed') return event.data.response as T
+        if (['response.failed', 'response.incomplete', 'error'].includes(event.type)) {
+          const response = event.data.response as any
+          throw new ProviderApiError(502, event.data, response?.error?.message || 'Codex response did not complete')
+        }
+      }
+      throw new Error('Codex stream ended before completion')
+    }
     const data = await readProviderJson(res)
     if (!res.ok) throwProviderError(res, data)
     return data as T
@@ -48,18 +63,7 @@ export class AgentRunGateway {
   }
 
   private post(request: AgentGatewayRequest): Promise<Response> {
-    return fetch(request.url, {
-      method: 'POST',
-      headers: {
-        ...openCodeSessionHeaders(request.url, request.sessionId, request.provider),
-        ...openRouterAttributionHeaders(request.url, request.provider),
-        ...(request.apiKey ? { Authorization: `Bearer ${request.apiKey}` } : {}),
-        'Content-Type': 'application/json',
-        ...request.headers,
-      },
-      body: JSON.stringify(request.body),
-      signal: request.signal,
-    })
+    return fetchProviderHttp({ ...request, ownerUserId: request.ownerUserId || providerAccountId(request.profile), profile: request.profile || providerRequestProfile() })
   }
 }
 
@@ -76,7 +80,7 @@ export function throwProviderError(res: Response, data: any): never {
   throw new ProviderApiError(
     res.status,
     data,
-    data?.error?.message || `Provider returned HTTP ${res.status}`,
+    data?.error?.message || (typeof data?.error === 'string' ? data.error : '') || data?.message || `Provider returned HTTP ${res.status}`,
   )
 }
 

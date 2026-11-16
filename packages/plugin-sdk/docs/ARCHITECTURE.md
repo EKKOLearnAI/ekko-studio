@@ -156,6 +156,10 @@ Agent 使用 `agentApiVersion: 1` 与 `features`。只实现这一份最新契�
 鉴权前的回调没有调用者身份，闭包中的 `ctx.host/state/identity` 也不会继承激活管理员；
 鉴权后使用实际请求账号与 Profile。SDK 的内部 HTTP 传输保留原有鉴权并跳过再次拦截，避免递归。
 HTTP body 为进程内 Koa 数据，可保留 Buffer 和流，不经过前端 JSON 桥；详细契约见能力与返回指南。
+统一模型网关复用同一入口，包括内部模型凭据、Coding Agent 专用凭据与分享 API key，
+不在协议适配器或出站 Provider 传输层重复注册 HTTP 钩子。请求改写先于鉴权和协议转换，
+响应回调后于网关处理、先于 Koa 发送；SSE 通过 Readable/Transform 保持流式传输。
+专用凭据的响应身份来自绑定账号/Profile，目录路由的推理响应身份来自实际选中的账号/Profile。
 
 ## 完整单聊与 BOT
 

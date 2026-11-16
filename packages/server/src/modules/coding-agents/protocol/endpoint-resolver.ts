@@ -52,6 +52,7 @@ export function responsesUrl(baseUrl: string): string {
   const path = normalizedPath(url)
   const base = url.toString().replace(/\/+$/, '')
   if (pathEndsWith(path, 'responses')) return base
+  if (/\/backend-api\/codex$/i.test(path)) return appendPath(base, 'responses')
   if (looksLikeOpenAiRoot(path)) return appendPath(base, 'responses')
   return appendPath(base, 'v1/responses')
 }

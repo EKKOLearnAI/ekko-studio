@@ -123,6 +123,13 @@ body 保留 Koa 支持的 Buffer 和 Readable；可自行接 Transform 转换流
 已通过原生 res 直接写出的 SSE/代理响应不再进入 onResponse；WebSocket/Socket.IO 升级不属于该能力。
 CORS 提前返回、解析器拒绝的请求及在此中间件之前终止的请求也不会进入拦截。
 该能力只处理入站 HTTP，不改变 Studio 对模型或外部服务的出站 HTTP。
+统一模型网关 `/api/ekko-studio/models/*` 也经过此中间件，无需额外权限：onRequest 看到协议转换前的
+入站 body，可改写后交给网关；正常鉴权、Profile 和分享 key 的模型授权检查仍会执行。
+onResponse 看到网关转换后的客户端响应；Coding Agent 专用 key 使用绑定账号/Profile，
+内部 key 和分享 key 的推理响应使用实际模型路由的账号/Profile。尚未确定 Profile 的请求没有 identity。
+网关 SSE 以 Readable 返回，onResponse 在开始发送前执行一次，可以连接 Transform 逐块处理。
+它不是传输结束通知，不应在回调里等整条流结束；需要结束通知时监听流的 end/close/error。
+http.signal 只覆盖回调寿命，不代表整条 SSE 流的寿命；后续流事件不得继续使用已结束回调的宿主能力。
 定时执行使用 scheduler.every；资源使用 lifecycle.add/acquire，按所在上下文寿命清理。
 前端 events.on 订阅业务事件，messages.on 接收插件自定义页面消息；Agent output.emit 发布运行事件。
 

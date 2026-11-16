@@ -1,3 +1,4 @@
+import { providerScopeKey, providerAccountId } from './provider-account'
 import { getDb } from '../infrastructure/database'
 import {
   MODEL_CONTEXT_INDEX,
@@ -10,6 +11,16 @@ function ensureProviderContextTable(): void {
   syncTable(MODEL_CONTEXT_TABLE, MODEL_CONTEXT_SCHEMA, {
     indexes: { idx_model_context_profile_provider_model: MODEL_CONTEXT_INDEX },
   })
+}
+
+export function importLegacyProviderContexts(profile: string, aliases: Record<string, string> = {}): void {
+  const db = getDb()
+  if (!db) return
+  ensureProviderContextTable()
+  const rows = db.prepare(`SELECT provider, model, context_limit FROM ${MODEL_CONTEXT_TABLE} WHERE profile IN (?, ?)`)
+    .all(profile, `account:${providerAccountId()}:${profile}`) as unknown as Array<{ provider: string; model: string; context_limit: number }>
+  const insert = db.prepare(`INSERT OR IGNORE INTO ${MODEL_CONTEXT_TABLE} (profile, provider, model, context_limit) VALUES (?, ?, ?, ?)`)
+  for (const row of rows) insert.run(providerScopeKey(profile), aliases[row.provider] || row.provider, row.model, row.context_limit)
 }
 
 export interface ModelContextRecord {
@@ -25,6 +36,7 @@ export type ModelContextResult =
   | { available: true; row?: ModelContextRecord }
 
 export function readModelContextRecord(profile: string, provider: string, model: string): ModelContextResult {
+  profile = providerScopeKey(profile)
   const db = getDb()
   if (!db) return { available: false }
   const row = db.prepare(
@@ -39,6 +51,7 @@ export function upsertModelContextRecord(
   model: string,
   contextLimit: number,
 ): ModelContextResult {
+  profile = providerScopeKey(profile)
   const db = getDb()
   if (!db) return { available: false }
   db.prepare(
@@ -52,6 +65,7 @@ export function upsertModelContextRecord(
 }
 
 export function readProviderContextLengths(profile: string, provider: string): Record<string, number> {
+  profile = providerScopeKey(profile)
   const db = getDb()
   if (!db) return {}
   try {
@@ -70,6 +84,7 @@ export function writeProviderContextLengths(
   provider: string,
   updates: Array<[model: string, value: number | null]>,
 ): boolean {
+  profile = providerScopeKey(profile)
   const db = getDb()
   if (!db) return false
   ensureProviderContextTable()

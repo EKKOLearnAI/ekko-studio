@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { dirname, join } from 'path'
-import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
+import { getActiveProfileName } from '../services/profiles/profile'
+import { getProfileDir } from '../../studio/public/provider-config'
 import { logger } from '../../studio/public/logging'
 import { resolveAuthorizedProviderRuntimeCredentials } from '../services/providers/authorized-provider-credentials'
 

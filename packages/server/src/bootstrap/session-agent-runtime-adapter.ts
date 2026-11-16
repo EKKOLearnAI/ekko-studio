@@ -46,7 +46,7 @@ configureSessionAgentRuntime({
     await bridge.switchSessionModel(
       sessionId,
       model,
-      provider === 'claude-oauth' ? 'anthropic' : provider,
+      provider,
       profile,
     )
   },

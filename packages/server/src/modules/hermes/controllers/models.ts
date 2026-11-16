@@ -1,3 +1,4 @@
+import { providerAccountId, withProviderAccount, providerCredentialDir } from '../../studio/public/provider-account'
 import { openCodeSessionHeaders } from '../../studio/public/opencode-session'
 import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 import { openRouterAttributionHeaders } from '../../studio/public/openrouter-attribution'
@@ -5,13 +6,14 @@ import { readFile } from 'fs/promises'
 import { isAuthorizedRuntimeProvider, readAuthorizedProviderStoredAuth } from '../services/providers/authorized-provider-credentials'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
-import { getActiveEnvPath, getActiveAuthPath, getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../services/profiles/profile'
-import { readConfigYaml, readConfigYamlForProfile, updateConfigYaml, updateConfigYamlForProfile, buildModelGroups, PROVIDER_ENV_MAP } from '../../studio/public/profile-config'
+import { getActiveProfileName } from '../services/profiles/profile'
+import { getActiveEnvPath, getActiveAuthPath, getProfileDir, listProfileNamesFromDisk } from '../../studio/public/provider-config'
+import { readConfigYaml, readConfigYamlForProfile, updateConfigYaml, updateConfigYamlForProfile, buildModelGroups, PROVIDER_ENV_MAP } from '../../studio/public/provider-config'
 import { fetchProviderModels } from '../../studio/public/provider-catalog'
-import { getCompatibleCustomProviders, resolveCustomProviderApiKey } from '../../studio/contracts/provider-compat'
+import { getCompatibleCustomProviders, resolveCustomProviderApiKey, type NormalizedCustomProvider } from '../../studio/contracts/provider-compat'
 import { buildProviderModelMap, PROVIDER_PRESETS, isRetiredProvider, RETIRED_PROVIDER_MESSAGE } from '../../studio/contracts/providers'
 import { getCopilotModelsDetailed, resolveCopilotOAuthToken, type CopilotModelMeta } from '../services/providers/copilot-models'
-import { readAppConfig, writeAppConfig, providerDisplayLabel, type ModelVisibilityRule } from '../../studio/public/app-config'
+import { readAppConfig, writeAppConfig, providerDisplayLabel, type ModelVisibilityRule } from '../../studio/public/provider-config'
 import { listUserProfiles } from '../../studio/public/users'
 import { readModelContextRecord, upsertModelContextRecord } from '../../studio/public/provider-context'
 import { getModelContextLength } from '../services/models/context'
@@ -389,7 +391,18 @@ function cachedProviderModels(
 
 // Only advertise credentials the active Hermes profile can read at execution time.
 async function isCopilotAuthorized(envContent: string, profile: string): Promise<boolean> {
-  return !!(await resolveCopilotOAuthToken(envContent, profile === 'default'))
+  return !!(await resolveCopilotOAuthToken(envContent, false))
+}
+
+async function accountProviderAuthorized(provider: NormalizedCustomProvider, profile: string): Promise<boolean> {
+  if (!provider.auth_provider) return false
+  const dir = providerCredentialDir(provider.auth_scope)
+  if (provider.auth_provider === 'qwen-oauth') {
+    const data = JSON.parse(await readFile(join(dir, 'qwen-oauth.json'), 'utf8').catch(() => '{}'))
+    return !!(data.access_token || data.refresh_token)
+  }
+  if (provider.auth_provider === 'copilot') return !!(await resolveCopilotOAuthToken(await readFile(join(dir, '.env'), 'utf8').catch(() => ''), false))
+  return !!(await readAuthorizedProviderStoredAuth(profile, provider.auth_provider, { profileDir: () => dir }))
 }
 
 async function buildAvailableForProfile(
@@ -416,7 +429,7 @@ async function buildAvailableForProfile(
         (cp) => cp.base_url?.replace(/\/+$/, '') === String(modelSection.base_url || '').replace(/\/+$/, '')
           && cp.model === currentDefault,
       )
-      if (match) currentDefaultProvider = providerKeyForCustom(String(match.name || ''))
+      if (match) currentDefaultProvider = match.catalog_provider || providerKeyForCustom(String(match.name || ''))
     }
   } else if (typeof modelSection === 'string') {
     currentDefault = modelSection.trim()
@@ -461,7 +474,8 @@ async function buildAvailableForProfile(
       base_url,
       models: availableModels,
       available_models: availableModels,
-      api_key,
+      api_key: '',
+      credential_configured: !!api_key || extra?.credential_configured,
       ...(extra?.credential_configured !== undefined ? { credential_configured: extra.credential_configured } : {}),
       ...(apiMode ? { api_mode: apiMode } : {}),
       ...(builtin ? { builtin: true } : {}),
@@ -483,6 +497,7 @@ async function buildAvailableForProfile(
   }
 
   for (const [providerKey, envMapping] of Object.entries(PROVIDER_ENV_MAP)) {
+    if (Object.values(config.providers || {}).some((entry: any) => entry.catalog_provider === providerKey)) continue
     const oauthAuthorized = providerSupportsStoredOAuth(providerKey) ? isOAuthAuthorized(providerKey) : false
     if (providerKey === 'copilot') {
       if (!copilotEnabled || !(await isCopilotAuthorized(envContent, profile))) continue
@@ -520,9 +535,9 @@ async function buildAvailableForProfile(
   const customFetches = await Promise.allSettled(
     customProviders.map(async cp => {
       if (!cp.base_url) return null
-      const providerKey = providerKeyForCustom(cp.name)
+      const providerKey = cp.catalog_provider || providerKeyForCustom(cp.name)
       const baseUrl = cp.base_url.replace(/\/+$/, '')
-      const builtinProviderKey = providerKeyWithoutCustomPrefix(providerKey)
+      const builtinProviderKey = cp.runtime_provider || providerKeyWithoutCustomPrefix(providerKey)
       const builtinPreset = PROVIDER_PRESETS.find((preset: any) => preset.value === builtinProviderKey)
       const hasStaticManifest = builtinPreset?.builtin === true
       const builtinCatalogModels = hasStaticManifest
@@ -538,10 +553,10 @@ async function buildAvailableForProfile(
         providerKey,
         baseUrl,
         [...builtinCatalogModels],
-        { hasStaticManifest, profile },
+        { hasStaticManifest, profile, freeOnly: providerKey === 'openrouter' },
       )
       const models = [...new Set([cp.model, ...configuredModels, ...resolvedCatalogModels].filter(Boolean) as string[])]
-      return { providerKey, label: cp.name, base_url: baseUrl, models, api_key: cp.api_key || '', credential_configured: !!resolveCustomProviderApiKey(cp, envContent), api_mode: cp.api_mode, builtin: hasStaticManifest, provider_source: cp.source, provider_key: cp.provider_key }
+      return { providerKey, label: cp.name, base_url: baseUrl, models, api_key: cp.api_key || '', credential_configured: !!resolveCustomProviderApiKey(cp, envContent) || await accountProviderAuthorized(cp, profile), api_mode: cp.api_mode, builtin: hasStaticManifest, provider_source: cp.source, provider_key: cp.provider_key }
     }),
   )
   for (const result of customFetches) {
@@ -583,7 +598,7 @@ async function buildAvailableForProfile(
   return { profile, default: currentDefault, default_provider: currentDefaultProvider, groups: applyCatalogModelMetadata(groupsWithCustomModels) }
 }
 
-export async function getAvailableModelConfigForProfile(profile: string) {
+async function getAvailableModelConfigForProfileImpl(profile: string) {
   const appConfig = await readAppConfig()
   const modelVisibility = normalizeModelVisibility(appConfig.modelVisibility)
   const applyCatalogModelMetadata = createCatalogModelMetadataEnricher(
@@ -827,7 +842,7 @@ export async function getAvailable(ctx: any) {
     let copilotLiveModels: CopilotModelMeta[] | null = null
     const getCopilotLive = async (): Promise<CopilotModelMeta[]> => {
       if (copilotLiveModels !== null) return copilotLiveModels
-      try { copilotLiveModels = await getCopilotModelsDetailed(envContent, getActiveProfileName() === 'default') }
+      try { copilotLiveModels = await getCopilotModelsDetailed(envContent, false) }
       catch { copilotLiveModels = [] }
       return copilotLiveModels
     }
@@ -1368,3 +1383,5 @@ export async function setModelVisibility(ctx: any) {
     ctx.body = { error: err.message }
   }
 }
+
+export const getAvailableModelConfigForProfile = (profile: string, userId?: number) => withProviderAccount(userId || providerAccountId(profile), () => getAvailableModelConfigForProfileImpl(profile), profile)

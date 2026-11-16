@@ -1,10 +1,10 @@
+import { withProviderAccount } from '../../public/provider-account'
 import { agentDescriptors, agentStatus, isPluginAgentId, agentDescriptor } from '../agents/registry'
 import { FALLBACK_REASONING_EFFORTS, resolveModelReasoningEffort } from '../../../../../../shared/reasoning-effort'
 import { findUserById, listUserProfiles, userCanAccessProfile, getDefaultProfileForUser } from '../../repositories/users-store'
 import { getActiveProfileName, listProfileNamesFromDisk } from '../../public/profile-config'
 import { getAgentAvailabilitySnapshot } from '../../public/agent-status-registry'
 import { getSessionAvailableModelGroups } from '../../public/session-agent-runtime'
-import { isScopedCodingAgentAuthProvider } from '../../contracts/provider-compat'
 import { personRuntime } from '../../public/person-runtime'
 import { resolveProviderCatalogApiMode } from '../../contracts/providers'
 import { isAgentRuntime } from '../../contracts/agents/runtime'
@@ -25,7 +25,7 @@ export function personProfiles(userId: number) {
   const user = personUser(userId)
   return listProfileNamesFromDisk().filter(p => user.role === 'super_admin' || user.profiles.includes(p)).sort()
 }
-export async function personCapabilities(userId: number, profile = getDefaultProfileForUser(userId) || 'default') {
+async function personCapabilitiesImpl(userId: number, profile = getDefaultProfileForUser(userId) || 'default') {
   personUser(userId)
   const builtins = getAgentAvailabilitySnapshot().agents.map(a => ({
     runtime: a.id === 'ekko-agent' ? 'ekko' : a.id,
@@ -53,9 +53,9 @@ export function personSelectionApiMode(group: PersonProtocolGroup, model: string
   if (requested === undefined) return configured
   if (runtime === 'hermes' && requested === configured) return configured
   if (typeof requested !== 'string' || !SELECTABLE_API_MODES.includes(requested)) throw personError('Unsupported model protocol')
-  // Hermes and subscription transports own their protocol; an override cannot make
-  // a native-only connection usable by a different runtime.
-  if (runtime === 'hermes' || isScopedCodingAgentAuthProvider(group.provider)
+  // Hermes owns its native protocol. HTTP gateway callers can select any of
+  // the gateway's supported ingress protocols, including for OAuth Providers.
+  if (runtime === 'hermes'
     || ['bedrock_converse', 'codex_app_server'].includes(configured || '')) {
     if (requested !== configured) throw personError('Runtime does not support this model protocol', 409)
   }
@@ -68,7 +68,7 @@ function personModelAllowed(group: any, model: string) {
 }
 
 /** UI catalog only: these groups never enter the model's context or expose credentials. */
-export async function personModelCatalog(userId: number) {
+async function personModelCatalogImpl(userId: number) {
   const groups = []
   for (const profile of personProfiles(userId)) {
     const catalog = await personRuntime().modelConfig(profile)
@@ -83,7 +83,7 @@ export async function personModelCatalog(userId: number) {
   return { groups }
 }
 
-export async function effectivePersonSettings(userId: number, stored = personSettings(userId)) {
+async function effectivePersonSettingsImpl(userId: number, stored = personSettings(userId)) {
   const profiles = personProfiles(userId)
   // Use Studio's global default resource, never the browser's current Profile header.
   const profile = stored.settings.model?.profile || getActiveProfileName() || 'default'
@@ -105,7 +105,7 @@ export async function effectivePersonSettings(userId: number, stored = personSet
     compression: { enabled: policy.enabled, threshold: stored.settings.compressionThreshold ?? policy.threshold, globalThreshold: policy.threshold } }
 }
 
-export async function personModelSelection(userId: number, input: Record<string, unknown>): Promise<PersonSelection> {
+async function personModelSelectionImpl(userId: number, input: Record<string, unknown>): Promise<PersonSelection> {
   const profile = String(input.profile || '')
   if (!personProfiles(userId).includes(profile)) throw personError('Execution resource is unavailable', 403)
   const provider = String(input.provider || '')
@@ -114,7 +114,7 @@ export async function personModelSelection(userId: number, input: Record<string,
   if (!group || !personModelAllowed(group, model)) throw personError('Model unavailable or changed', 409)
   return { runtime: 'ekko', mode: 'scoped', profile, provider, model, apiMode: personSelectionApiMode(group, model, input.apiMode) }
 }
-export async function validatePersonSelection(userId: number, selection: PersonSelection) {
+async function validatePersonSelectionImpl(userId: number, selection: PersonSelection) {
   const user = personUser(userId)
   if (!isAgentRuntime(selection.runtime) || !['global', 'scoped'].includes(selection.mode)) throw personError('Invalid runtime')
   if (!personProfiles(userId).includes(selection.profile) || (user.role !== 'super_admin' && !userCanAccessProfile(userId, selection.profile))) throw personError('Execution resource is unavailable', 403)
@@ -132,10 +132,19 @@ export async function validatePersonSelection(userId: number, selection: PersonS
       : !model.reasoningEfforts?.includes(selection.reasoningEffort))) throw personError('Native model does not support this reasoning effort')
     return
   }
-  if (!plugin && !['ekko','hermes'].includes(selection.runtime) && isScopedCodingAgentAuthProvider(selection.provider)) throw personError('Use native mode for subscription providers', 409)
   const groups = await getSessionAvailableModelGroups(selection.profile)
   const group = groups.find(g => g.provider === selection.provider && g.models?.includes(selection.model))
   if (selection.runtime !== 'hermes' && ['bedrock_converse','codex_app_server'].includes(selection.apiMode || '')) throw personError('Runtime does not support this model protocol', 409)
   if (!group || group.model_meta?.[selection.model]?.disabled) throw personError('Model unavailable or changed', 409)
   if (personSelectionApiMode(group, selection.model, selection.apiMode, selection.runtime) !== selection.apiMode) throw personError('Model unavailable or changed', 409)
 }
+
+export const personCapabilities = (...args: Parameters<typeof personCapabilitiesImpl>) => withProviderAccount(args[0], () => personCapabilitiesImpl(...args))
+
+export const personModelCatalog = (...args: Parameters<typeof personModelCatalogImpl>) => withProviderAccount(args[0], () => personModelCatalogImpl(...args))
+
+export const effectivePersonSettings = (...args: Parameters<typeof effectivePersonSettingsImpl>) => withProviderAccount(args[0], () => effectivePersonSettingsImpl(...args))
+
+export const personModelSelection = (...args: Parameters<typeof personModelSelectionImpl>) => withProviderAccount(args[0], () => personModelSelectionImpl(...args))
+
+export const validatePersonSelection = (...args: Parameters<typeof validatePersonSelectionImpl>) => withProviderAccount(args[0], () => validatePersonSelectionImpl(...args))

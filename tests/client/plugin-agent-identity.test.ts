@@ -47,10 +47,12 @@ it('preserves a saved plugin and its native model while the registry is still lo
   vi.stubGlobal('sessionStorage', { getItem: () => null })
   expect(loadNewChatFormPreferences(1)).toMatchObject({ agent: id, mode: 'global', nativeModels: { [id]: { model: 'custom/example', reasoningEffort: 'high' } } })
 })
-it('uses Studio credentials for plugin scoped models while retaining native CLI provider restrictions', () => {
+it('uses Studio credentials for plugin and OAuth models routed through the common gateway', () => {
   expect(usesServerManagedProviderAuth(id, 'custom:fixture')).toBe(true)
   expect(usesServerManagedProviderAuth(id, 'openai-codex')).toBe(true)
   expect(canScopedCodingAgentUseProvider(id, 'openai-codex')).toBe(true)
-  expect(canScopedCodingAgentUseProvider('codex', 'openai-codex')).toBe(false)
+  expect(canScopedCodingAgentUseProvider('codex', 'openai-codex')).toBe(true)
+  expect(usesServerManagedProviderAuth('codex', 'openai-codex')).toBe(true)
+  expect(canScopedCodingAgentUseProvider('codex', 'moa')).toBe(false)
   expect(usesServerManagedProviderAuth('codex', 'custom:fixture')).toBe(false)
 })

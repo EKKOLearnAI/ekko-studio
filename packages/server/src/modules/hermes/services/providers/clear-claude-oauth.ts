@@ -1,7 +1,6 @@
 import { readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { getProfileDir } from '../profiles/profile'
-import { saveEnvValueForProfile } from '../../../studio/public/profile-config'
+import { getProfileDir, saveEnvValueForProfile } from '../../../studio/public/provider-config'
 
 function isOAuthEntry(value: any): boolean {
   if (!value || typeof value !== 'object') return false

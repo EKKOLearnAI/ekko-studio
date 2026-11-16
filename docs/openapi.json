@@ -4157,13 +4157,284 @@
         }
       }
     },
+    "/api/ekko-studio/models/v1/chat/completions": {
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Request a model using OpenAI Chat Completions",
+        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. External requests record usage once under the authenticated user. Internal Agent credentials retain existing run accounting. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md.",
+        "operationId": "modelApiChatCompletions",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ModelApiKey": []
+          },
+          {
+            "GeminiApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Native protocol JSON or incremental SSE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or unsupported Responses feature"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed"
+          }
+        },
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "model",
+                  "messages"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "deepseek/deepseek-v4"
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ekko-studio/models/v1/messages": {
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Request a model using Anthropic Messages",
+        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. External requests record usage once under the authenticated user. Internal Agent credentials retain existing run accounting. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md.",
+        "operationId": "modelApiMessages",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ModelApiKey": []
+          },
+          {
+            "GeminiApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Native protocol JSON or incremental SSE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or unsupported Responses feature"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed"
+          }
+        },
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "model",
+                  "messages"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "deepseek/deepseek-v4"
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ekko-studio/models/v1/messages/count_tokens": {
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Count message input tokens (native or explicitly estimated)",
+        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. External requests record usage once under the authenticated user. Internal Agent credentials retain existing run accounting. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md.",
+        "operationId": "modelApiCountTokens",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ModelApiKey": []
+          },
+          {
+            "GeminiApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Input count. x-studio-token-count-estimated=true marks a conservative estimate for non-Anthropic upstreams; no inference usage is recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or unsupported Responses feature"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed"
+          }
+        },
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "model",
+                  "messages"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "deepseek/deepseek-v4"
+                  },
+                  "messages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ekko-studio/models/v1/models": {
       "get": {
         "tags": [
           "Model API"
         ],
         "summary": "List configured models with provider-qualified IDs",
-        "description": "Model API keys see only their explicitly allowed model IDs; Studio user JWTs see the full account catalog. Aggregates all accessible Profiles as provider/model and deduplicates IDs, preserving slashes inside native model IDs. Callable configurations win over disabled/unsupported duplicates, then default Profile, then Profile names in lexical order. Caller Profile selectors are ignored. Never returns credentials. MoA presets and self-referencing Model API providers using a locally issued Model API key are excluded from this catalog. responses_supported=false marks disabled models and providers requiring Bedrock or Codex app-server runtimes.",
+        "description": "Model API keys see only their explicitly allowed model IDs; Studio user JWTs see the full account catalog. Providers are stored once per account and shared by all Profiles, preserving slashes inside model IDs. Identical imported Providers merge; same-name Providers with different configurations retain separate stable IDs and credentials. Earlier Profile-derived model IDs remain compatibility aliases. Caller Profile selectors are ignored. Never returns credentials. MoA presets and self-referencing Model API providers using a locally issued Model API key are excluded from this catalog. responses_supported=false marks disabled models and providers requiring Bedrock or Codex app-server runtimes.",
         "operationId": "modelApiModels",
         "security": [
           {
@@ -4251,11 +4522,17 @@
           "Model API"
         ],
         "summary": "Request a configured model using OpenAI Responses format",
-        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. Every attempted upstream request records external usage under the authenticated user. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations.",
+        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. External requests record usage once under the authenticated user. Internal Agent credentials retain existing run accounting. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md.",
         "operationId": "modelApiResponses",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "ModelApiKey": []
+          },
+          {
+            "GeminiApiKey": []
           }
         ],
         "responses": {
@@ -4339,6 +4616,7 @@
             "description": "Upstream model request failed"
           }
         },
+        "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -4377,9 +4655,6 @@
                   },
                   "store": {
                     "type": "boolean",
-                    "enum": [
-                      false
-                    ],
                     "default": false
                   },
                   "max_output_tokens": {
@@ -4441,20 +4716,24 @@
                           "type": "object"
                         },
                         "strict": {
-                          "type": "boolean",
-                          "enum": [
-                            false
-                          ]
+                          "type": "boolean"
                         }
                       }
                     }
                   },
                   "tool_choice": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "none",
-                      "required"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "none",
+                          "required"
+                        ]
+                      },
+                      {
+                        "type": "object"
+                      }
                     ]
                   },
                   "metadata": {
@@ -4469,8 +4748,7 @@
               }
             }
           }
-        },
-        "parameters": []
+        }
       }
     },
     "/api/ekko/config": {
@@ -19561,7 +19839,7 @@
           "Model API"
         ],
         "summary": "Create an account-wide Model API key",
-        "description": "Requires Studio user authentication. Key allows model listing and Responses inference only for the explicitly selected models; valid until revoked. Only the hash is persisted. Limit: 50 keys per account. Cache-Control: no-store.",
+        "description": "Requires Studio user authentication. Key allows model listing and supported protocol inference only for the explicitly selected models; valid until revoked. Only the hash is persisted. Limit: 50 keys per account. Cache-Control: no-store.",
         "operationId": "modelApiCreateKey",
         "security": [
           {
@@ -31283,6 +31561,410 @@
           }
         }
       }
+    },
+    "/api/ekko-studio/models/gemini/v1beta/models/{model}:generateContent": {
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Generate Gemini Contents through the account gateway",
+        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. External requests record usage once under the authenticated user. Internal Agent credentials retain existing run accounting. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md.",
+        "operationId": "modelApiGeminiAliasgenerateContent",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ModelApiKey": []
+          },
+          {
+            "GeminiApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Native protocol JSON or incremental SSE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or unsupported Responses feature"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "description": "Complete Provider/model route, including native model slashes.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "contents"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "deepseek/deepseek-v4"
+                  },
+                  "contents": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ekko-studio/models/gemini/v1beta/models/{model}:streamGenerateContent": {
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Generate Gemini Contents through the account gateway",
+        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. External requests record usage once under the authenticated user. Internal Agent credentials retain existing run accounting. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md.",
+        "operationId": "modelApiGeminiAliasstreamGenerateContent",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ModelApiKey": []
+          },
+          {
+            "GeminiApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Native protocol JSON or incremental SSE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or unsupported Responses feature"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "description": "Complete Provider/model route, including native model slashes.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "contents"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "deepseek/deepseek-v4"
+                  },
+                  "contents": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ekko-studio/models/v1beta/models/{model}:generateContent": {
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Generate Gemini Contents through the account gateway",
+        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. External requests record usage once under the authenticated user. Internal Agent credentials retain existing run accounting. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md.",
+        "operationId": "modelApiGeminigenerateContent",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ModelApiKey": []
+          },
+          {
+            "GeminiApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Native protocol JSON or incremental SSE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or unsupported Responses feature"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "description": "Complete Provider/model route, including native model slashes.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "contents"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "deepseek/deepseek-v4"
+                  },
+                  "contents": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ekko-studio/models/v1beta/models/{model}:streamGenerateContent": {
+      "post": {
+        "tags": [
+          "Model API"
+        ],
+        "summary": "Generate Gemini Contents through the account gateway",
+        "description": "Model API keys enforce their saved lifetime USD budget against settled request costs. Exhausted keys and limited keys with unpriced requests return 429 before inference; already-running calls can exceed the cap. Costs follow the usage ledger pricing rules. Studio user JWTs are outside key budgets. Model API key requests must name an allowed model; ungranted IDs return 404 before any provider request. Stateless JSON or SSE inference through existing provider adapters. Supports text, base64 images on vision models, reasoning and function-tool continuations. Send full input history, including returned reasoning encrypted_content, unchanged. Protocol and credentials resolve server-side from the same unified catalog as GET /models. No Profile selector is required. External requests record usage once under the authenticated user. Internal Agent credentials retain existing run accounting. Does not execute tools or create chat sessions. See docs/model-api.md for supported features and limitations. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md. Same-protocol vendor fields are retained; translated features depend on the selected upstream adapter. See docs/model-api.md.",
+        "operationId": "modelApiGeministreamGenerateContent",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ModelApiKey": []
+          },
+          {
+            "GeminiApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Native protocol JSON or incremental SSE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or unsupported Responses feature"
+          },
+          "401": {
+            "description": "Missing, invalid or revoked Model API key, or expired Studio user JWT"
+          },
+          "403": {
+            "description": "User or Profile access denied"
+          },
+          "404": {
+            "description": "Profile or configured model not found"
+          },
+          "429": {
+            "description": "Model API key budget exhausted (insufficient_quota), or request costs are unknown (quota_cost_unknown)"
+          },
+          "501": {
+            "description": "Provider requires an unsupported direct-request runtime"
+          },
+          "502": {
+            "description": "Upstream model request failed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "description": "Complete Provider/model route, including native model slashes.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "contents"
+                ],
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "example": "deepseek/deepseek-v4"
+                  },
+                  "contents": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -31303,6 +31985,16 @@
         "in": "header",
         "name": "X-Session-Share-Token",
         "description": "sst1_ invitation secret; never accepted as a Studio login JWT."
+      },
+      "ModelApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key"
+      },
+      "GeminiApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-goog-api-key"
       }
     },
     "schemas": {

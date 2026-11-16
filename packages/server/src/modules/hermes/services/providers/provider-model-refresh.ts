@@ -16,7 +16,7 @@ import {
 } from './provider-editor'
 import { getCompatibleCustomProviders } from '../../../studio/contracts/provider-compat'
 import { PROVIDER_PRESETS } from '../../../studio/contracts/providers'
-import { readConfigYamlForProfile } from '../../../studio/public/profile-config'
+import { readConfigYamlForProfile } from '../../../studio/public/provider-config'
 
 export interface ProviderModelRefreshDiff {
   added: string[]

@@ -1,10 +1,7 @@
-import { readConfigYamlForProfile } from '../../public/profile-config'
+import { readConfigYamlForProfile } from '../../public/provider-config'
+import { logicalModelSelection } from '../../public/model-routing'
 
 export type RunModelGroup = { provider: string; models: string[]; model_meta?: Record<string, { reasoning?: boolean; reasoning_efforts?: string[] }> }
-
-function runtimeProvider(provider: string): string {
-  return provider === 'claude-oauth' ? 'anthropic' : provider
-}
 
 async function resolveDefaultModelConfig(profile: string): Promise<{ model: string; provider: string }> {
   try {
@@ -16,7 +13,7 @@ async function resolveDefaultModelConfig(profile: string): Promise<{ model: stri
     const provider = typeof modelConfig === 'object'
       ? String(modelConfig?.provider || '').trim()
       : ''
-    return { model, provider }
+    return logicalModelSelection(profile, provider, model)
   } catch {
     return { model: '', provider: '' }
   }
@@ -40,21 +37,21 @@ export async function resolveBridgeRunModelConfig(options: {
   requestedProvider?: string | null
   modelGroups?: RunModelGroup[]
   preferRequested?: boolean
-  preserveAuthorizedProvider?: boolean
 }): Promise<{ model: string; provider: string }> {
   const sessionModel = String(options.sessionModel || '').trim()
   const sessionProvider = String(options.sessionProvider || '').trim()
   const requestedModel = String(options.requestedModel || '').trim()
   const requestedProvider = String(options.requestedProvider || '').trim()
-  const candidateModel = options.preferRequested ? (requestedModel || sessionModel) : (sessionModel || requestedModel)
-  const candidateProvider = options.preferRequested ? (requestedProvider || sessionProvider) : (sessionProvider || requestedProvider)
+  const candidate = logicalModelSelection(options.profile,
+    options.preferRequested ? (requestedProvider || sessionProvider) : (sessionProvider || requestedProvider),
+    options.preferRequested ? (requestedModel || sessionModel) : (sessionModel || requestedModel))
+  const candidateModel = candidate.model
+  const candidateProvider = candidate.provider
   const hasGroups = Array.isArray(options.modelGroups) && options.modelGroups.length > 0
   const candidateAvailable = hasGroups && hasModelInGroups(options.modelGroups, candidateProvider, candidateModel)
   const shouldUseDefault = !candidateModel || !candidateProvider || (hasGroups && !candidateAvailable && !isVirtualProvider(candidateProvider))
   const selected = shouldUseDefault
     ? await resolveDefaultModelConfig(options.profile)
     : { model: candidateModel, provider: candidateProvider }
-  return options.preserveAuthorizedProvider
-    ? selected
-    : { ...selected, provider: runtimeProvider(selected.provider) }
+  return selected
 }

@@ -1,8 +1,10 @@
+import type { ReasoningCodec } from '../../../studio/public/model-reasoning-codec'
 // Shared Responses stream translation for Coding Agent provider proxies.
 import { readSseFrameTexts } from '../sse'
 import { type McpToolRoutes, normalizeResponseFunctionCall, responseToolNamespaceForName } from './responses'
 
 export interface ResponsesStreamAdapterTarget {
+  reasoningCodec?: ReasoningCodec
   model: string
   mcpToolRoutes?: McpToolRoutes
   annotateMcpToolNamespaces?: boolean
@@ -40,6 +42,9 @@ export async function* normalizeResponsesSseEvents(
   const createdAtByResponseId = new Map<string, number>()
 
   for await (const event of events) {
+    // Codex subscription streams include transport metadata outside the public
+    // Responses event schema. Typed CLI clients reject that extension.
+    if (event.type === 'response.metadata') continue
     const currentSequenceNumber = Number(event.data.sequence_number)
     const sequenceNumber = Number.isSafeInteger(currentSequenceNumber) && currentSequenceNumber >= 0
       ? currentSequenceNumber
@@ -214,7 +219,7 @@ export async function* openAiChatSseToResponsesEvents(
   }
 
   for await (const chunk of stream) {
-    buffer += decoder.decode(chunk, { stream: true })
+    buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true })
     const parsed = parseSseFrames(buffer)
     buffer = parsed.rest
 
@@ -445,7 +450,7 @@ export async function* openAiResponsesSseToResponsesEvents(
   let buffer = ''
 
   for await (const chunk of stream) {
-    buffer += decoder.decode(chunk, { stream: true })
+    buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true })
     const parsed = parseSseFrames(buffer)
     buffer = parsed.rest
 
@@ -479,6 +484,7 @@ export async function* anthropicMessagesSseToResponsesEvents(
   let textOutputIndex = -1
   let text = ''
   let reasoning = ''
+  const nativeReasoning = new Map<number, any>()
   let usage: Record<string, unknown> | undefined
   const toolBlocks = new Map<number, { id: string; name: string; arguments: string; added: boolean; outputIndex: number }>()
 
@@ -563,7 +569,7 @@ export async function* anthropicMessagesSseToResponsesEvents(
   }
 
   for await (const chunk of stream) {
-    buffer += decoder.decode(chunk, { stream: true })
+    buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true })
     const parsed = parseSseFrames(buffer)
     buffer = parsed.rest
 
@@ -589,6 +595,10 @@ export async function* anthropicMessagesSseToResponsesEvents(
 
         if (eventName === 'content_block_start' || data?.type === 'content_block_start') {
           const contentBlock = data?.content_block || {}
+          if (contentBlock.type === 'thinking' || contentBlock.type === 'redacted_thinking') {
+            nativeReasoning.set(Number(data.index || 0), { ...contentBlock })
+            yield* ensureReasoning()
+          }
           if (contentBlock.type === 'tool_use') {
             yield* ensureTool(Number(data.index || 0), String(contentBlock.id || ''), String(contentBlock.name || 'tool'))
           }
@@ -596,6 +606,9 @@ export async function* anthropicMessagesSseToResponsesEvents(
 
         if (eventName === 'content_block_delta' || data?.type === 'content_block_delta') {
           const delta = data?.delta || {}
+          const nativeBlock = nativeReasoning.get(Number(data.index || 0))
+          if (nativeBlock && delta.type === 'thinking_delta') nativeBlock.thinking = (nativeBlock.thinking || '') + (delta.thinking || '')
+          if (nativeBlock && delta.type === 'signature_delta') nativeBlock.signature = (nativeBlock.signature || '') + (delta.signature || '')
           if (delta.type === 'thinking_delta' && delta.thinking) {
             const textDelta = String(delta.thinking)
             yield* ensureReasoning()
@@ -653,6 +666,7 @@ export async function* anthropicMessagesSseToResponsesEvents(
       type: 'reasoning',
       id: reasoningId,
       summary: [{ type: 'summary_text', text: reasoning }],
+      ...(target.reasoningCodec ? { encrypted_content: target.reasoningCodec.encode({ text: reasoning, native: { format: 'anthropic-thinking-blocks', data: [...nativeReasoning.values()] } }) } : {}),
     }
     indexedOutput.push({ outputIndex: reasoningOutputIndex, item: reasoningItem })
     yield {
