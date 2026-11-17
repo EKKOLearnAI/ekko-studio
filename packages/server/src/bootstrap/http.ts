@@ -1,4 +1,5 @@
-import { restoreStudioModelTargets } from '../modules/studio/public/model-target-store'
+import { restoreStudioModelTarget } from '../modules/studio/public/model-target-store'
+import { gatewayToken } from '../modules/studio/public/model-gateway-adapters'
 import { registerDesktopBrowserRelay } from '../modules/studio/sockets/desktop-browser'
 import { registerPluginSessions } from '../modules/studio/sockets/plugin-sessions'
 import { getPluginManager, startPluginHost, stopPluginHost } from '../modules/studio/services/plugins/host'
@@ -71,9 +72,6 @@ import type { AdditionalShutdownStep, ShutdownHandler } from './lifecycle'
 import { createCodexProxyRequestBodyParser, createRequestBodyParser } from '../modules/studio/middleware/request-body-parser'
 import {
   getCodingAgentsStatus,
-  migratePersistedPiRuntimeMcpConfigs,
-  restorePersistedCodexProxyTargets,
-  restorePersistedPiProxyTargets,
 } from './coding-agents'
 import { isAuthorizedCodexProxyRequest } from '../modules/coding-agents/public/model-gateway'
 import {
@@ -428,34 +426,6 @@ export async function bootstrap() {
   }
 
   try {
-    const migratedPiMcpConfigs = await migratePersistedPiRuntimeMcpConfigs()
-    if (migratedPiMcpConfigs > 0) {
-      console.log(`[bootstrap] migrated ${migratedPiMcpConfigs} persisted Pi MCP runtime config(s) to proxy mode`)
-    }
-  } catch (err) {
-    logger.warn(err, '[bootstrap] failed to migrate persisted Pi MCP runtime configs')
-  }
-
-  try {
-    await restoreStudioModelTargets()
-    const restoredCodexProxyTargets = await restorePersistedCodexProxyTargets()
-    if (restoredCodexProxyTargets > 0) {
-      console.log(`[bootstrap] restored ${restoredCodexProxyTargets} persisted Codex/Grok proxy target(s)`)
-    }
-  } catch (err) {
-    logger.warn(err, '[bootstrap] failed to restore persisted Codex/Grok proxy targets')
-  }
-
-  try {
-    const restoredPiProxyTargets = await restorePersistedPiProxyTargets()
-    if (restoredPiProxyTargets > 0) {
-      console.log(`[bootstrap] restored ${restoredPiProxyTargets} persisted Pi proxy target(s)`)
-    }
-  } catch (err) {
-    logger.warn(err, '[bootstrap] failed to restore persisted Pi proxy targets')
-  }
-
-  try {
     const ekkoSetup = setupGlobalEkkoAgent()
     try {
       const injection = injectManagedEkkoMcpServers(ekkoSetup)
@@ -501,7 +471,11 @@ export async function bootstrap() {
   // Codex can replay inline images from its native thread. Accept a bounded,
   // authenticated request here so the proxy can remove historical image data
   // before dispatching to any provider API mode.
-  app.use(createCodexProxyRequestBodyParser(isAuthorizedCodexProxyRequest))
+  app.use(createCodexProxyRequestBodyParser(async ctx => {
+    if (isAuthorizedCodexProxyRequest(ctx)) return true
+    await restoreStudioModelTarget(gatewayToken(ctx))
+    return isAuthorizedCodexProxyRequest(ctx)
+  }))
   app.use(dshPluginUi.middleware)
   // Raise body limits above the default 1mb: profile avatars and MiMo voice-clone
   // reference audio are posted as base64 data URLs before reaching handlers.
