@@ -22,7 +22,6 @@ export const PLUGIN_PERMISSIONS = ['api.read', 'api.write', 'tools', 'commands',
 export type PluginPermission = typeof PLUGIN_PERMISSIONS[number]
 /** Host-rendered line icons; bundled raster plugin logos are also supported. */
 export const PLUGIN_ICON_PATHS = {
-  package: 'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16zM7.5 4.21 12 6.81 16.5 4.21M7.5 19.79V14.6L3 12M21 12l-4.5 2.6v5.19M3.27 6.96 12 12.01 20.73 6.96M12 22.08V12',
   settings: 'M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M8 15v6',
   skills: 'm12 2 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 17l9 5 9-5',
   mcp: 'M5 5h14v10H5zM8 19h8M12 15v4M8 10h.01M12 10h4',

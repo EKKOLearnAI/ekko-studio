@@ -11,7 +11,7 @@ import type { PluginManifest } from '../../packages/plugin-sdk/src'
 const directories: string[] = []
 const definition: PluginManifest = { id: 'workspace', name: 'Workspace', version: '1.0.0', apiVersion: 1, client: 'client.mjs', permissions: ['ui'],
   author: { name: 'Author', url: 'https://example.com/author' }, repository: 'https://example.com/repo', keywords: ['chat'], icon: 'icon.png',
-  views: [{ id: 'home', title: 'Home', slot: 'workspace', icon: 'grid' }, { id: 'preferences', title: 'Preferences', slot: 'settings' }], workspace: { sidebar: 'rooms' }, navigation: { main: [{ viewId: 'home', icon: 'icon.png' }], settings: [{ viewId: 'preferences', icon: 'package' }] } }
+  views: [{ id: 'home', title: 'Home', slot: 'workspace', icon: 'grid' }, { id: 'preferences', title: 'Preferences', slot: 'settings' }], workspace: { sidebar: 'rooms' }, navigation: { main: [{ viewId: 'home', icon: 'icon.png' }], settings: [{ viewId: 'preferences', icon: 'settings' }] } }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'plugin-manifest-')); directories.push(root)
   const source = join(root, 'source'); await mkdir(source)
@@ -29,7 +29,7 @@ it('installs standalone metadata and bundled icons without modifying the source 
   expect(installed.manifest).toMatchObject({ repository: definition.repository, author: definition.author, workspace: { sidebar: 'rooms' } })
   expect(installed.manifest.icon).toMatch(/^data:image\/png;base64,/)
   expect(installed.manifest.navigation?.main?.[0].icon).toBe(installed.manifest.icon)
-  expect(installed.manifest.navigation?.settings?.[0].icon).toBe('package')
+  expect(installed.manifest.navigation?.settings?.[0].icon).toBe('settings')
   expect(installed.manifest.views?.[0].icon).toBe('grid')
   expect(JSON.parse(await readFile(join(source, 'plugin.json'), 'utf8')).icon).toBe('icon.png')
   await installed.dispose()
