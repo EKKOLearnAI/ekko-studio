@@ -124,7 +124,7 @@ onBeforeUnmount(() => release?.())
 <template>
   <section class="plugin-frame" :class="{ 'plugin-frame--expanded': expanded, 'plugin-frame--sidebar': sidebar }">
     <NAlert v-if="error" type="error">{{ error }}</NAlert>
-    <iframe ref="frame" :title="`${plugin.manifest.name}: ${view}`" referrerpolicy="no-referrer" :style="expanded ? undefined : { height: `${height}px` }" />
+    <iframe :key="locale" ref="frame" :title="`${plugin.manifest.name}: ${view}`" referrerpolicy="no-referrer" :style="expanded ? undefined : { height: `${height}px` }" />
     <ModelCascader v-if="modelPickerRequest" :show="true" :groups="modelPickerRequest.catalog.groups"
       :provider="modelPickerRequest.current?.provider" :model="modelPickerRequest.current?.model"
       :custom-models="modelPickerRequest.catalog.custom_models || {}" :display-name="modelPicker.displayName"

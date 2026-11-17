@@ -279,9 +279,7 @@ const router = createRouter({
     },
     {
       path: '/hermes/version-preview',
-      name: 'hermes.versionPreview',
-      component: () => import('@/views/hermes/VersionPreviewView.vue'),
-      meta: { requiresSuperAdmin: true },
+      redirect: { name: 'studio.pluginSettings', params: { pluginId: 'version-preview', viewId: 'preview' } },
     },
     {
       path: '/hermes/mcp',

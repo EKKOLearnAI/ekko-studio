@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile, realpath, readdir, rm, cp, link, unlink } from 'node:fs/promises'
 import { resolve, join, dirname } from 'node:path'
 import { homedir } from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { randomUUID } from 'node:crypto'
 
 export const pluginHome = () => resolve(process.env.HERMES_WEB_UI_HOME?.trim() || process.env.HERMES_WEBUI_STATE_DIR?.trim() || join(homedir(), '.hermes-web-ui'))
@@ -20,9 +20,16 @@ export async function scaffoldPlugin(destination, id) {
   await mkdir(target, { recursive: false })
   try {
     await writeFile(join(target, 'package.json'), JSON.stringify({ name: `studio-plugin-${id}`, version: '0.1.0', type: 'module', private: true }, null, 2) + '\n')
-    await writeFile(join(target, 'plugin.json'), JSON.stringify({ id, name: id, version: '0.1.0', apiVersion: 1, server: 'server.mjs', client: 'client.mjs', permissions: ['ui'], views: [{ id: 'settings', title: id, slot: 'settings' }], navigation: { settings: [{ viewId: 'settings', icon: 'settings' }] } }, null, 2) + '\n')
     const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
     const sdk = await realpath(join(root, 'packages/plugin-sdk')).catch(() => realpath(join(root, 'dist/plugin-sdk')))
+    const { PLUGIN_LOCALES } = await import(pathToFileURL(join(sdk, 'src/localization.mjs')).href)
+    const { templateMessages } = await import(pathToFileURL(join(sdk, 'template/client.mjs')).href)
+    const i18n = Object.fromEntries(PLUGIN_LOCALES.map(locale => {
+      const labels = templateMessages[locale]
+      if (!labels) throw new Error(`Missing plugin template translations: ${locale}`)
+      return [locale, { name: id, description: labels.description.replaceAll('{id}', id), views: { settings: labels.settings } }]
+    }))
+    await writeFile(join(target, 'plugin.json'), JSON.stringify({ id, name: id, description: i18n.en.description, i18n, version: '0.1.0', apiVersion: 1, server: 'server.mjs', client: 'client.mjs', permissions: ['ui'], views: [{ id: 'settings', title: id, slot: 'settings' }], navigation: { settings: [{ viewId: 'settings', icon: 'settings' }] } }, null, 2) + '\n')
     await mkdir(join(target, 'sdk'))
     await cp(join(sdk, 'package.json'), join(target, 'sdk/package.json'))
     for (const part of ['LICENSE', 'NOTICE', 'src', 'docs', 'harness', 'template']) await cp(join(sdk, part), join(target, 'sdk', part), { recursive: true })

@@ -1,6 +1,7 @@
 export type LocaleMessages = Record<string, any>
 
-export const supportedLocales = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'es', 'de', 'pt', 'ru', 'ar', 'tr'] as const
+import { PLUGIN_LOCALES } from '../../../plugin-sdk/src/localization.mjs'
+export const supportedLocales = PLUGIN_LOCALES
 export type SupportedLocale = (typeof supportedLocales)[number]
 
 function isPlainObject(value: unknown): value is LocaleMessages {

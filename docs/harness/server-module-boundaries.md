@@ -171,7 +171,7 @@ packages/server/src/
         update/
           studio-updater.ts        # upgrades hermes-web-ui
           studio-restarter.ts
-          version-preview-manager.ts
+          update-runtime.ts
         workflow/
         group-chat/
         global-agent/

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { assertContracts } from './contracts.mjs'
 import { checkSdk, guideNames } from './sdk.mjs'
+import { validatePluginI18n } from '../src/localization.mjs'
 
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'))
 export async function checkProject(root) {
@@ -10,6 +11,7 @@ export async function checkProject(root) {
   const plugin = await readJson(join(root, 'plugin.json')), pkg = await readJson(join(root, 'package.json'))
   if (plugin.version !== pkg.version || plugin.apiVersion !== 1) throw new Error('Package/plugin versions must match and apiVersion must be 1')
   if (pkg.scripts?.['harness:check'] !== 'node scripts/plugin-harness.mjs check') throw new Error('Keep the generated harness:check command')
+  validatePluginI18n(plugin, { required: true })
   assertContracts(await readJson(join(root, 'contracts/plugin.json')))
   await checkSdk(join(root, 'sdk'))
   for (const file of ['AGENTS.md', 'README.md', 'docs/CONTRACTS.md', ...guideNames.map(name => `docs/${name}`)]) {

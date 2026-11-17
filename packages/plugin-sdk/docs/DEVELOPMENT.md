@@ -73,3 +73,11 @@ STUDIO_CTX.md、STUDIO_RETURNS.md，见 SDK 根目录 LICENSE；来源与贡献�
 创建插件和发行 CLI 会一并复制 SDK LICENSE、NOTICE；插件 docs 下也保留
 SDK-LICENSE 和 SDK-NOTICE，完整许可文本与署名不得遗漏。
 Studio 核心许可保持原范围；插件业务代码的许可由插件作者自行选择。
+
+## 国际化为新版项目必需检查
+
+生成的 plugin.json 覆盖 Studio 的全部语言，包含每种语言的名称、描述与页面标题，请替换示例文案。harness:check 和 prepack 会拒绝缺少翻译的新版项目。入口显式 title 也须覆盖全部语言，未显式指定则复用页面翻译。页面内容使用 ctx.locale，避免把多种语言拼在同一个名称中。旧版 SDK 项目不被宿主强制升级；升级 SDK 时补齐翻译与文档，不改插件 ID、视图 ID 或数据路径。
+
+插件市场列表支持可选的 i18n 名称/描述元数据，旧目录与旧条目仍显示原字段。修改名称、描述或翻译时也应增加插件版本，使目录同步能够识别新清单。
+
+完整语言集合以 SDK 的 PLUGIN_LOCALES 为准，并与 Studio UI 共用。当前为 12 种；新 SDK 检查不能仅提供中英文，也不能用回退替代缺失语言。旧插件及旧语言集保持运行兼容，升级 SDK 时补齐全部翻译。

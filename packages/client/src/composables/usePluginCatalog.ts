@@ -1,11 +1,14 @@
+import { useI18n } from 'vue-i18n'
+import { localizePluginManifest } from '../../../plugin-sdk/src'
 import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import { useProfilesStore } from '@/stores/hermes/profiles'
-import { pluginCatalog, pluginList, type PluginSnapshot } from '@/api/studio/plugins'
+import { pluginCatalog, pluginList, type PluginSnapshot, type InstalledPlugin } from '@/api/studio/plugins'
 
 export { pluginPages, pluginPageLocation, pluginNavigation } from '@/plugins/navigation'
 
 /** Installations are global. Only mounted views carry the current execution profile. */
 export function usePluginCatalog(enabled: Readonly<Ref<boolean>> = ref(true)) {
+  const { locale } = useI18n()
   const profiles = useProfilesStore()
   const profile = computed(() => profiles.activeProfileName || 'default')
   const snapshot = shallowRef<PluginSnapshot>({ revision: 0, plugins: [] })
@@ -41,5 +44,17 @@ export function usePluginCatalog(enabled: Readonly<Ref<boolean>> = ref(true)) {
   window.addEventListener('studio.plugins.changed', changed)
   window.addEventListener('focus', focused)
   onBeforeUnmount(() => { alive = false; sequence++; window.removeEventListener('studio.plugins.changed', changed); window.removeEventListener('focus', focused) })
-  return { profile, snapshot, loading, error, refresh }
+  const localized = new WeakMap<InstalledPlugin, Map<string, InstalledPlugin>>()
+  const displaySnapshot = computed(() => ({ ...snapshot.value, plugins: snapshot.value.plugins.map(plugin => {
+    if (!plugin.manifest.i18n) return plugin
+    let versions = localized.get(plugin)
+    if (!versions) { versions = new Map(); localized.set(plugin, versions) }
+    let display = versions.get(locale.value)
+    if (!display) {
+      display = { ...plugin, manifest: localizePluginManifest(plugin.manifest, locale.value) }
+      versions.set(locale.value, display)
+    }
+    return display
+  }) }))
+  return { profile, snapshot: displaySnapshot, loading, error, refresh }
 }

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NEmpty, NSpin } from 'naive-ui'
-import { pluginPages, usePluginCatalog } from '@/composables/usePluginCatalog'
+import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginFrame from '@/components/plugins/PluginFrame.vue'
 import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
@@ -11,6 +11,12 @@ import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 const route = useRoute(), router = useRouter(), { t } = useI18n()
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
 const plugin = computed(() => snapshot.value.plugins.find(item => item.manifest.id === route.params.pluginId))
+watch(() => [plugin.value, route.name, route.params.viewId] as const, ([current]) => {
+  const declared = route.params.viewId ? current?.manifest.views?.find(view => view.id === route.params.viewId) : current && pluginPages(current)[0]
+  if (!current || !declared) return
+  const target = pluginPageLocation(current, declared.id)
+  if (target.name !== route.name) void router.replace({ ...target, query: route.query, hash: route.hash })
+}, { immediate: true })
 const agentSettings = computed(() => route.name === 'studio.pluginAgentSettings')
 const pages = computed(() => plugin.value ? pluginPages(plugin.value).filter(view => agentSettings.value ? view.slot === 'agent-settings' : route.name === 'studio.pluginSettings' ? view.slot === 'settings' : ['page', 'workspace'].includes(view.slot)) : [])
 const view = computed(() => route.params.viewId ? pages.value.find(item => item.id === route.params.viewId) : pages.value[0])

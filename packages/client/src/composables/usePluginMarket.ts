@@ -1,7 +1,10 @@
-import { onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { localizePluginManifest } from '../../../plugin-sdk/src'
+import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import { fetchPluginMarket, fetchPluginMarketCount, type MarketPlugin } from '@/api/studio/plugin-market'
 
 export function usePluginMarket(enabled: Readonly<Ref<boolean>>) {
+  const { locale } = useI18n()
   const entries = shallowRef<MarketPlugin[]>([]), loading = ref(false), failed = ref(false), loaded = ref(false)
   const total = ref<number | null>(null)
   let controller: AbortController | undefined, countController: AbortController | undefined, checkedAt = 0
@@ -34,5 +37,6 @@ export function usePluginMarket(enabled: Readonly<Ref<boolean>>) {
   }, { immediate: true })
   void refreshCount()
   onBeforeUnmount(() => { controller?.abort(); countController?.abort() })
-  return { entries, total, loading, failed, loaded, refresh }
+  const displayEntries = computed(() => entries.value.map(entry => localizePluginManifest(entry, locale.value)))
+  return { entries: displayEntries, total, loading, failed, loaded, refresh }
 }

@@ -557,7 +557,7 @@ export default {
     globalAgent: 'Genel aracı', groupChat: 'Grup sohbeti', files: 'Dosyalar', devices: 'Cihazlar', connections: 'Cihaz bağlantıları',
     agentManager: 'Aracı yöneticisi', groupConversation: 'Konuşma', groupConversationShort: 'Kon', groupPlatform: 'Platform', groupAgent: 'Aracı',
     groupAgentShort: 'Aracı', groupSystem: 'Sistem', groupSystemShort: 'Sis', groupMonitoring: 'İzleme', groupMonitoringShort: 'İzl',
-    groupTools: 'Araçlar', groupToolsShort: 'Araçlar', codingAgents: 'Kodlama araçları', versionPreview: 'Sürüm önizlemesi', theme: 'Tema',
+    groupTools: 'Araçlar', groupToolsShort: 'Araçlar', codingAgents: 'Kodlama araçları', theme: 'Tema',
     settings: 'Ayarlar', connected: 'Bağlı', disconnected: 'Bağlantı kesildi', collapse: 'Menüyü daralt', expand: 'Menüyü genişlet',
     updating: 'Güncelleniyor...', updateFailed: 'Güncelleme başarısız oldu', logout: 'Çıkış yap', changelog: 'Değişiklik günlüğü',
     noChangelog: 'Değişiklik günlüğü yok', versionManagement: 'Sürüm yönetimi', updateAvailableLabel: '(Yeni sürüm)',

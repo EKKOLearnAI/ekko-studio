@@ -101,3 +101,13 @@ it('requires canonical permissions from the directory instead of accepting remov
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(page([{ ...entry, capabilities: permissions }])))
   await expect(fetchPluginMarket(new AbortController().signal)).rejects.toThrow('Invalid plugin catalog entry')
 })
+
+it('accepts optional directory translations and preserves fallback metadata for old or malformed records', async () => {
+  const i18n = { en: { name: 'Preview', description: 'Preview versions.' }, zh: { name: '预览', description: '预览版本。' } }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(page([{ ...row(1), i18n }, row(2), { ...row(3), i18n: { en: { name: '' } } }])))
+  const entries = await fetchPluginMarket(new AbortController().signal)
+  expect(entries[0].i18n).toEqual(i18n)
+  expect(entries[1].name).toBe('Plugin 2')
+  expect(entries[1].i18n).toBeUndefined()
+  expect(entries[2].i18n).toBeUndefined()
+})

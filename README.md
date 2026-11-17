@@ -238,7 +238,7 @@ See [JEV configuration and integration status](./docs/jev.md).
 
 - Device and LAN peer views for local-network discovery and peer tooling
 - MCP manager for the managed `ekko-studio-*` servers, profile injection, and `api` / `browser` / `devices` / `use` / `plan` toolsets; task plans and clarification use the dedicated `ekko-studio-interaction` server
-- Runtime version and version-preview tooling for testing newer builds in isolation
+- Runtime version management; isolated Studio version previews are provided by the independent Version Preview plugin
 - Performance monitor views for super administrators
 
 ### Authentication

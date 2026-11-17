@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createI18n } from 'vue-i18n'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, nextTick, ref } from 'vue'
 const api = vi.hoisted(() => ({ count: vi.fn(), list: vi.fn() }))
@@ -12,8 +13,9 @@ afterEach(() => wrapper?.unmount())
 function setup() {
   const enabled = ref(false)
   let market!: ReturnType<typeof usePluginMarket>
-  wrapper = mount(defineComponent({ setup() { market = usePluginMarket(enabled); return () => null } }))
-  return { enabled, market }
+  const i18n = createI18n({ legacy: false, locale: 'en', messages: { en: {}, zh: {} } })
+  wrapper = mount(defineComponent({ setup() { market = usePluginMarket(enabled); return () => null } }), { global: { plugins: [i18n] } })
+  return { enabled, market, i18n }
 }
 
 it('loads only the count on entry and refreshes it while the installed tab is active', async () => {
@@ -62,4 +64,15 @@ it('cancels pending count requests on unmount', async () => {
   resolveCount(123)
   await flushPromises()
   expect(market.total.value).toBeNull()
+})
+
+it('updates market names and descriptions when locale changes without fetching again', async () => {
+  api.list.mockResolvedValue([{ id: 'catalog', name: 'Preview', description: 'Preview Studio versions.', i18n: { en: { name: 'Preview', description: 'Preview Studio versions.' }, zh: { name: '预览', description: '预览 Studio 版本。' } } }])
+  const { enabled, market, i18n } = setup()
+  enabled.value = true
+  await nextTick(); await flushPromises()
+  expect(market.entries.value[0].name).toBe('Preview')
+  i18n.global.locale.value = 'zh'; await nextTick()
+  expect(market.entries.value[0]).toMatchObject({ name: '预览', description: '预览 Studio 版本。' })
+  expect(api.list).toHaveBeenCalledOnce()
 })

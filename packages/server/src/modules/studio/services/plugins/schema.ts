@@ -1,5 +1,5 @@
 import type { Json, PluginManifest, Schema } from '../../contracts/plugins'
-import { PLUGIN_ICON_PATHS, PLUGIN_PERMISSIONS, assertJson } from '../../../../../../plugin-sdk/src'
+import { PLUGIN_ICON_PATHS, PLUGIN_PERMISSIONS, assertJson, validatePluginI18n } from '../../../../../../plugin-sdk/src'
 import { PluginError } from './errors'
 import { validateDetails, validateIcon } from './manifest-details'
 
@@ -127,7 +127,6 @@ export function manifest(value: unknown): PluginManifest {
         if (entry.order !== undefined && (!Number.isSafeInteger(entry.order) || Math.abs(entry.order) > 10000)) throw new PluginError('Invalid plugin navigation order')
         if (typeof entry.icon !== 'string' || !entry.icon) throw new PluginError('Plugin navigation requires an explicit icon')
         if (!Object.hasOwn(PLUGIN_ICON_PATHS, entry.icon)) {
-          if (slot === 'settings') throw new PluginError('Settings navigation requires a named icon; images are not supported')
           validateIcon(entry.icon)
         }
         targets.add(entry.viewId)
@@ -143,6 +142,7 @@ export function manifest(value: unknown): PluginManifest {
     identifier(name)
     if (!/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version)) throw new PluginError('Plugin dependencies require exact versions')
   }
+  try { validatePluginI18n(m) } catch (error) { throw new PluginError(error instanceof Error ? error.message : String(error)) }
   return m
 }
 export function configuration(schema: Schema | undefined, input: Record<string, Json>, complete = true): Record<string, Json> {

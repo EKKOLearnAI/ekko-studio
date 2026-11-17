@@ -5,6 +5,7 @@ import { mkdtemp, readFile, writeFile, rm, access, cp, mkdir } from 'node:fs/pro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { scaffoldPlugin } from '../../bin/plugin-development.mjs'
+import { PLUGIN_LOCALES } from '../../packages/plugin-sdk/src/localization.mjs'
 import { checkProject } from '../../packages/plugin-sdk/harness/project.mjs'
 import { checkPluginDocs } from '../../scripts/plugin-docs-harness.mjs'
 import { assertContracts, assertSchema, assertValue, registerRpc } from '../../packages/plugin-sdk/harness/contracts.mjs'
@@ -164,4 +165,17 @@ it('checks contracts again after a build so build-generated shape changes cannot
   await expect(development.start(identity, 'harness-demo', revision)).rejects.toThrow(/description/)
   expect(manager.snapshot().revision).toBe(revision)
   expect(manager.snapshot().plugins[0].status).toBe('active')
+})
+
+it('requires every Studio language when checking a project with the new SDK', async () => {
+  const { project } = await fixture()
+  const path = join(project, 'plugin.json'), plugin = JSON.parse(await readFile(path, 'utf8'))
+  expect(Object.keys(plugin.i18n)).toEqual([...PLUGIN_LOCALES])
+  expect(plugin.i18n.ja.views.settings).toBe('設定')
+  expect(plugin.i18n.ar.views.settings).toBe('الإعدادات')
+  expect(plugin.i18n.en.views.settings).toBe('Settings')
+  expect(plugin.i18n.zh.views.settings).toBe('设置')
+  delete plugin.i18n
+  await writeFile(path, JSON.stringify(plugin))
+  await expect(checkProject(project)).rejects.toThrow(/i18n/)
 })

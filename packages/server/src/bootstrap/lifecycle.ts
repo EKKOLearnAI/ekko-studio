@@ -10,7 +10,6 @@ import { stopAppRelayClient } from '../modules/studio/services/app-relay/client'
 import { closeGlobalEkkoAgent } from '../modules/ekko/services/manager'
 import { stopChatWebhookDispatcher } from '../modules/studio/services/webhooks'
 import { shutdownSocialMessageRuntimes } from '../modules/studio/services/social-messages'
-import { stopPreviewRuntime } from './update'
 
 const DEFAULT_SHUTDOWN_FORCE_EXIT_MS = 10_000
 const DEFAULT_DESKTOP_SHUTDOWN_FORCE_EXIT_MS = 10_000
@@ -134,7 +133,6 @@ export function createShutdownHandler(
           logger.info('[shutdown] leaving managed gateways running')
         }
 
-        await runShutdownStep('Preview runtime', stopPreviewRuntime)
         await runShutdownStep('DSH plugin operations', shutdownDshPluginOperations)
         await runShutdownStep('DSH management host', shutdownDshManagement)
         await runShutdownStep('Local STT runtime', shutdownLocalSttRuntime)

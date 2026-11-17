@@ -20,7 +20,7 @@ export interface Schema {
 }
 export const PLUGIN_PERMISSIONS = ['api.read', 'api.write', 'tools', 'commands', 'events', 'hooks', 'automation', 'ui', 'storage.client', 'agents', 'browser.cdp', 'http'] as const
 export type PluginPermission = typeof PLUGIN_PERMISSIONS[number]
-/** Host-rendered line icons; settings navigation never accepts images or arbitrary SVG. */
+/** Host-rendered line icons; bundled raster plugin logos are also supported. */
 export const PLUGIN_ICON_PATHS = {
   settings: 'M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M8 15v6',
   skills: 'm12 2 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 17l9 5 9-5',
@@ -40,11 +40,11 @@ export interface PluginNavigationEntry {
   viewId: string
   /** Defaults to the target view's title. */
   title?: string
-  /** Required: named icon; main navigation also accepts bundled raster images. */
+  /** Required: named icon or bundled raster image, in either sidebar. */
   icon: string
   order?: number
 }
-export interface PluginSettingsNavigationEntry extends Omit<PluginNavigationEntry, 'icon'> { icon: PluginIconName }
+export type PluginSettingsNavigationEntry = PluginNavigationEntry
 export interface PluginView {
   id: string
   title: string
@@ -53,12 +53,21 @@ export interface PluginView {
   icon?: string
   order?: number
 }
+/** Localized display metadata. Every Studio locale is required for new SDK projects; see PLUGIN_LOCALES. */
+export interface PluginTranslation {
+  name: string
+  description: string
+  views?: Record<string, string>
+  navigation?: { main?: Record<string, string>; settings?: Record<string, string> }
+}
 export interface PluginManifest {
   id: string
   name: string
   version: string
   apiVersion: 1
   description?: string
+  /** Optional only for legacy packages; fallback strings above remain stable. */
+  i18n?: Record<string, PluginTranslation>
   author?: { name: string; url?: string }
   repository?: string
   homepage?: string

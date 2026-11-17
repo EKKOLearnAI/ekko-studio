@@ -103,6 +103,7 @@ ui.selectWorkspace 的 options 仅有可选 current:string，缺省或空字符�
 | server/client | 至少一项，string | 包内相对 .js/.mjs 成品路径，禁止绝对路径及 ..；server 导出 apply，client 导出 mount；安装不构建源码 |
 | permissions | 必填字符串数组，可空 | api.read、api.write、tools、commands、events、hooks、automation、ui、storage.client、agents、browser.cdp、http；旧 capabilities 不接受 |
 | description? | string | 非空，最多 4000 字符 |
+| i18n? | Record<BCP47,PluginTranslation> | 旧插件可省略；新版 SDK 项目必须 PLUGIN_LOCALES 全部语言的 name/description、所有 views 标题及显式导航标题；按完整语言、基础语言、英文、原字符串回退 |
 | author? | {name:string,url?:string} | name 非空最多 200 字符，url 规则同下 |
 | repository/homepage/documentation/issues/changelog? | string | HTTP(S) URL，无账号密码，最多 2048 字符 |
 | license? | string | 非空最多 200 字符 |
@@ -114,7 +115,7 @@ ui.selectWorkspace 的 options 仅有可选 current:string，缺省或空字符�
 | views? | PluginView[] | 最多 50 项，无重复 id；每项 id/title/slot 必填，title 非空最多 160；slot 为 page/settings/workspace/agent-settings |
 | views[].icon/order? | string / 安全整数 | workspace/agent-settings 必须有宿主命名 icon；其他允许合法图片；order 为 -10000…10000 |
 | navigation? | {main?:Entry[],settings?:Entry[]} | 每组最多 50 项；main 仅注册候选入口，用户须在头像菜单的「导航栏设置」手动添加；省略不产生对应入口 |
-| Entry.viewId/icon | 必填 string | 指向已声明且在本组不重复的视图；icon 不可省略，settings 只接受命名图标，main 还允许合法图片 |
+| Entry.viewId/icon | 必填 string | 指向已声明且在本组不重复的视图；icon 不可省略，main/settings 均接受命名图标或合法图片 |
 | Entry.title/order? | string / 安全整数 | title 默认视图标题，非空最多 160；order 为 -10000…10000 |
 | workspace? | {sidebar:string} | sidebar 是独立动态侧栏视图 ID，不得与 views 中的 ID 相同，且必须已有 workspace 页面 |
 
@@ -202,3 +203,10 @@ transport.connected/disconnected/error/closed 是连接状态，reason/error（�
 queue.insert/cancel 接收已存在 queueId，不接收新消息；approve 接收 approvalId/choice，clarify 接收 clarifyId/response。
 connect 的 sessionId 是 1–256 字符的已授权会话 ID，普通单聊用 sessions.connect，BOT 用 bots.connect。
 close 仅释放订阅，stop 才停止运行；断线不缓存重放指令，恢复后按快照和历史重建页面。
+
+PluginTranslation 的 `name` 非空最多 160，`description` 非空最多 4000；`views` 是已声明 viewId 到非空标题（最多 160）的映射。
+`navigation.main/settings` 是本侧栏已声明 viewId 到非空标题（最多 160）的映射，只在入口独立指定 title 时必需；不改变入口位置或图标。
+最多 32 个语言，拒绝无效或重复 BCP 47 代码、未知字段与不存在的视图/入口引用。SDK `validatePluginI18n(manifest, {required:true})` 用于新项目检查，宿主默认接受无 i18n 的旧插件。
+`localizePluginManifest(manifest, locale)` 返回显示副本；不修改源清单，旧清单原样返回。
+
+PLUGIN_LOCALES 是 Studio 与 SDK 共用的只读语言清单，当前包含 en/zh/zh-TW/ja/ko/fr/es/de/pt/ru/ar/tr。required:true 必须覆盖每一种语言的全部显示字段；默认校验允许旧插件仅提供部分语言，仍拒绝无效字段和引用。resolvePluginLocale(locale, available?) 返回完整语言、基础语言、英文中第一个可用项。
