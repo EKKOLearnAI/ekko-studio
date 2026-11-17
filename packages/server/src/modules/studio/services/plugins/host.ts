@@ -1,3 +1,5 @@
+import { pluginResources } from './resources'
+import { readStudioPackageInfo } from '../package-info'
 import { getPluginAgentUpdates } from '../agents/plugin-update-policy'
 import { join } from 'node:path'
 import type { ApiRequest, Json, PluginIdentity } from '../../contracts/plugins'
@@ -78,6 +80,8 @@ async function api(identity: PluginIdentity, path: string, options: ApiRequest, 
 export function getPluginManager(): PluginManager {
   if (instance) return instance
   instance = new PluginManager(join(config.appHome, 'plugins'), {
+    claimResource: (name, owner) => pluginResources.claim(name, owner),
+    environment: () => ({ webUiHome: config.appHome, studio: readStudioPackageInfo(), isPreview: process.env.VITE_HERMES_PREVIEW === '1' }),
     sessions: async (identity, sessionId, listener, signal, kind) => {
       const who = resolvePluginIdentity({ ...identity, sessionId })
       if (kind === 'bot' && !isPersonSession(sessionId)) throw new PluginError('Select an existing BOT conversation', 'PLUGIN_SCOPE', 403)

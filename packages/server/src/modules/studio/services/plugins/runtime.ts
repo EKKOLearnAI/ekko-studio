@@ -14,6 +14,8 @@ import { PluginAgentRuntime } from './agent-runtime'
 import { toolResult, hookResult } from './agent-contracts'
 
 export interface PluginPorts {
+  claimResource?(name: string, owner: string): import('../../contracts/plugins').PluginResourceLease
+  environment?(): import('../../contracts/plugins').PluginEnvironment
   sessions?(identity: PluginIdentity, sessionId: string, listener: SessionListener, signal: AbortSignal, kind: 'chat' | 'bot'): Promise<HostSession>
   browser?(identity: PluginIdentity, method: string, params: Record<string, Json>, binding: string, signal: AbortSignal): Promise<Json>
   api(identity: PluginIdentity, path: string, options: ApiRequest, signal: AbortSignal): Promise<Json>
@@ -38,6 +40,7 @@ export class PluginRuntime {
   readonly http = new Map<string, PluginHttpInterceptor>()
   private schedules = new Map<string, { interval: number; action: string; input: Record<string, Json> }>()
   private calls = new Set<Promise<unknown>>()
+  private resourceLeases = new Set<Dispose>()
   private readonly browserBinding = randomUUID()
   private started = false
   private invocation = new AsyncLocalStorage<{ identity: PluginIdentity | null; signal: AbortSignal }>()
@@ -61,7 +64,7 @@ export class PluginRuntime {
       if (typeof module.apply !== 'function') throw new PluginError('Server plugin must export apply(ctx)')
       const dispose = await module.apply(this.context())
       if (dispose) this.effects.add(dispose)
-    } catch (error) { await this.effects.close().catch(() => {}); throw error }
+    } catch (error) { await this.close().catch(() => {}); throw error }
   }
   activate(): void {
     this.effects.assertActive()
@@ -83,6 +86,7 @@ export class PluginRuntime {
   async close(): Promise<void> {
     await this.effects.close()
     await Promise.allSettled([...this.calls])
+    for (const release of [...this.resourceLeases]) await release()
   }
   private current() {
     const current = this.invocation.getStore()
@@ -146,6 +150,19 @@ export class PluginRuntime {
     }, (method, params) => { const current = this.current(); return this.browserRequest(current.identity, current.signal, method, params) },
     (id, listener, kind) => { const current = this.current(); return this.connectSession(current.identity, current.signal, id, listener, kind) })
     return {
+      resources: this.ports.claimResource ? { claim: async (name: string) => {
+        this.require('api.write')
+        if (typeof name !== 'string' || !/^[a-z][a-z0-9.-]{0,127}$/.test(name)) throw new PluginError('Invalid host resource name')
+        const lease = this.ports.claimResource!(name, this.browserBinding)
+        let owned = true
+        const release = async () => {
+          if (!owned) return
+          await lease.release(); owned = false; this.resourceLeases.delete(release)
+        }
+        this.resourceLeases.add(release)
+        return { data: structuredClone(lease.data), release }
+      } } : undefined,
+      environment: this.ports.environment ? Object.freeze(structuredClone(this.ports.environment())) : undefined,
       paths: Object.freeze({ dataDir: join(this.store.directory(), 'plugin-data', this.record.manifest.id) }),
       plugin: Object.freeze(structuredClone(this.record.manifest)), get identity() { return Object.freeze({ ...self.current().identity }) },
       config: Object.freeze(structuredClone(this.record.config)), get signal() { return self.invocation.getStore()?.signal || self.effects.controller.signal },

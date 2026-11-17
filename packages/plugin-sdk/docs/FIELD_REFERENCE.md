@@ -202,3 +202,25 @@ transport.connected/disconnected/error/closed 是连接状态，reason/error（�
 queue.insert/cancel 接收已存在 queueId，不接收新消息；approve 接收 approvalId/choice，clarify 接收 clarifyId/response。
 connect 的 sessionId 是 1–256 字符的已授权会话 ID，普通单聊用 sessions.connect，BOT 用 bots.connect。
 close 仅释放订阅，stop 才停止运行；断线不缓存重放指令，恢复后按快照和历史重建页面。
+
+## 服务端安装环境
+
+`PluginContext.environment` 是服务端只读快照，旧宿主/测试适配器可缺省。
+`webUiHome` 为 Web UI 状态根目录绝对路径；`studio` 为当前安装的
+`{ name, version, repositoryUrl }`，无法识别时为 null；`isPreview` 为当前进程是否为预览子实例。
+此字段不传给浏览器，不包含 token、配置密钥或 Hermes Agent home，也不新增管理员校验。
+插件必须检查缺省值并报告宿主不兼容，不能根据插件安装目录反推宿主路径。
+
+## 服务端资源租约
+
+`ctx.resources?.claim(name)` 需要 `api.write`，不校验管理员角色。旧宿主可缺省，缺省时插件应报告不兼容。
+仅宿主注册的名称可申请；未知资源返回 PLUGIN_UNAVAILABLE(503)，占用返回 PLUGIN_RESOURCE_BUSY(409)。
+返回 `{data: Json, release(): void|Promise<void>}`，data 是独立快照，release 幂等；宿主在插件
+停用、重载、卸载、关闭和 apply 失败后的资源清理成功时释放；disposer 失败时保留租约并上报失败，
+防止资源仍运行却交出所有权。所有进程和任务仍须注册 disposer。不得在资源仍运行时手动 release。
+
+`studio.version-preview` 的 data 为 `{sourceDir: string, homeDir: string}`，均为 Web UI home 下的
+历史预览目录绝对路径。仅在内置模块没有活动作业和受控运行进程时可申请；否则拒绝，不取消或杀旧任务。
+租约存续期间，内置 prepare/install/start/stop 返回 409，内置关闭 hook 跳过该资源，读取仍保留。
+插件独立实现所有预览业务；租约不提供下载/安装/启动/停止，也不转发旧 API 或替换页面。
+插件退出释放后内置模块可继续操作原有目录。旧宿主进程崩溃后的孤儿进程由插件另行验证归属后显式接管。

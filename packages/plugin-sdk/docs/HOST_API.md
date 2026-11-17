@@ -217,3 +217,12 @@ events 每条为 sequence/method/params，可能含 sessionId/truncated。游标
 单事件超 16000 字节时 params 为空且 truncated=true，按需重新读取页面状态。
 cdp.release(tabId) 返回 {ok:boolean}，只释放自己的控制租约。
 浏览器无授权共享 Desktop 或共享撤销时明确失败；不会另起浏览器 Profile，也不开放调试端口或 token。
+
+## 服务端资源租约回传
+
+`ctx.resources?.claim(name)` 返回 `{data: Json, release: Dispose}`。data 是宿主适配器元数据的
+独立快照；当前 `studio.version-preview` 为 `{sourceDir: string, homeDir: string}` 绝对路径。
+需要 api.write，不增加管理员角色判断。不存在资源为 PLUGIN_UNAVAILABLE(503)，
+资源或内置执行器忙为 PLUGIN_RESOURCE_BUSY(409)。lease 不提供预览业务 API。
+正常关闭/重载/卸载及 apply 失败清理成功后自动释放；清理失败保留租约并返回错误。
+插件应将依赖资源的工作注册到 lifecycle，不能在工作仍运行时主动 release。

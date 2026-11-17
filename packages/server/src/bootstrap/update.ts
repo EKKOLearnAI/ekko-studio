@@ -5,12 +5,16 @@ import { configureSuperAdminMiddleware } from '../modules/studio/middleware/supe
 import { updateRoutes } from '../modules/studio/routes/update'
 import {
   configureUpdateRuntime,
+  describePreviewPluginResource,
   stopPreviewRuntime,
 } from '../modules/studio/services/update/version-preview-manager'
 import { isDockerContainer } from '../modules/studio/public/runtime-environment'
 
+import { pluginResources } from '../modules/studio/services/plugins/resources'
+
 configureUpdateRuntime({ getWebUiHome, isDockerContainer })
 configureSuperAdminMiddleware(requireSuperAdmin)
+pluginResources.register('studio.version-preview', describePreviewPluginResource)
 
 export const {
   handleUpdate,

@@ -62,7 +62,23 @@ export interface PluginAction {
 }
 export type PluginHook = 'input.transform' | 'context.transform' | 'tool.before' | 'tool.after'
 export interface HookResult { value?: Json; deny?: string }
+export interface PluginEnvironment {
+  /** Absolute Web UI state home. Never the Hermes Agent home. */
+  readonly webUiHome: string
+  readonly studio: { readonly name: string; readonly version: string; readonly repositoryUrl: string } | null
+  /** Preview instances must not recursively launch another preview. */
+  readonly isPreview: boolean
+}
+export interface PluginResourceLease {
+  readonly data: Json
+  /** Idempotent. Also released after plugin lifecycle cleanup. */
+  release: Dispose
+}
 export interface PluginContext {
+  /** Server-only exclusive host resource leases; requires api.write. */
+  readonly resources?: { claim(name: string): Promise<PluginResourceLease> }
+  /** Server-only installation metadata; absent on older hosts/test adapters. */
+  readonly environment?: PluginEnvironment
   /** Stable host-owned directories, retained across plugin package upgrades. */
   readonly paths: { readonly dataDir: string }
   readonly plugin: Readonly<PluginManifest>

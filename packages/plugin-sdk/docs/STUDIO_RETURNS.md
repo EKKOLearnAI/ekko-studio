@@ -126,3 +126,12 @@ transport.connected/disconnected/error/closed 反映连接与交付状态，不�
 重连重新获取快照，不能据此假定断线期间每个增量均被补发；插件按宿主快照和历史恢复。
 close 只释放自身订阅，保持宿主任务继续运行；显式 stop 发出原有 abort 指令。
 BOT 的普通方法保留现有服务 JSON 形状及并发 revision；校验失败直接 reject。
+
+## 服务端资源租约回传
+
+`ctx.resources?.claim(name)` 返回 `{data: Json, release: Dispose}`。data 是宿主适配器元数据的
+独立快照；当前 `studio.version-preview` 为 `{sourceDir: string, homeDir: string}` 绝对路径。
+需要 api.write，不增加管理员角色判断。不存在资源为 PLUGIN_UNAVAILABLE(503)，
+资源或内置执行器忙为 PLUGIN_RESOURCE_BUSY(409)。lease 不提供预览业务 API。
+正常关闭/重载/卸载及 apply 失败清理成功后自动释放；清理失败保留租约并返回错误。
+插件应将依赖资源的工作注册到 lifecycle，不能在工作仍运行时主动 release。

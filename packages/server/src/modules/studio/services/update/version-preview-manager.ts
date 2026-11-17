@@ -1,3 +1,5 @@
+import { pluginResources } from '../plugins/resources'
+import { PluginError } from '../plugins/errors'
 import { isStudioPackageName, readStudioPackageInfo, type StudioPackageName } from '../package-info'
 import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process'
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'fs'
@@ -92,6 +94,15 @@ class PreviewRuntimeState {
 }
 
 const previewState = new PreviewRuntimeState()
+
+/** Metadata-only handoff; plugin owns its runner and does not call built-in operations. */
+export function describePreviewPluginResource() {
+  if (previewState.activeAction || previewState.process?.pid && !previewState.process.killed) {
+    throw new PluginError('Built-in version preview is busy; finish its task and stop it before enabling the plugin', 'PLUGIN_RESOURCE_BUSY', 409)
+  }
+  return { sourceDir: getPreviewDir(), homeDir: getPreviewHomeDir() }
+}
+function previewPluginOwned(): boolean { return pluginResources.claimed('studio.version-preview') }
 
 function normalizeGithubRepoUrl(raw: string): string {
   return raw
@@ -697,7 +708,7 @@ async function stopPreviewProcess() {
 }
 
 export async function stopPreviewRuntime(): Promise<void> {
-  await stopPreviewProcess()
+  if (!previewPluginOwned()) await stopPreviewProcess()
 }
 
 function assertPreviewPackage() {
@@ -872,7 +883,7 @@ function queuePreviewAction(
   normalizeError: (err: any) => { message: string; code?: string } = err => ({ message: errorMessage(err) }),
   onError?: (err: any) => Promise<void>,
 ): boolean {
-  if (!previewState.beginAction(action)) return false
+  if (previewPluginOwned() || !previewState.beginAction(action)) return false
 
   void (async () => {
     try {
@@ -899,7 +910,7 @@ function queuePreviewAction(
 
 function previewActionAlreadyRunning(ctx: any) {
   ctx.status = 409
-  ctx.body = previewPayload({ success: false, message: `Preview action already running: ${previewState.activeAction}` })
+  ctx.body = previewPayload({ success: false, message: previewPluginOwned() ? 'Version preview is managed by an active plugin; use its page or disable it first' : `Preview action already running: ${previewState.activeAction}` })
 }
 
 function previewActionAccepted(ctx: any) {
@@ -1303,6 +1314,7 @@ export async function startPreview(ctx: any) {
 }
 
 export async function stopPreview(ctx: any) {
+  if (previewPluginOwned()) { previewActionAlreadyRunning(ctx); return }
   appendPreviewActionLog('stop preview requested')
   await stopPreviewProcess()
   ctx.body = previewPayload({ success: true })
