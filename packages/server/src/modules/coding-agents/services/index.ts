@@ -17,7 +17,7 @@ import { prioritizeManagedNpmBin } from './managed-command-path'
 import { readTomlAssignment } from './toml-assignment'
 import { studioMcpCapabilities } from '../../studio/public/runs/mcp-capabilities'
 import { pluginMcpServers, mergePluginMcpServers } from '../../studio/public/plugin-mcp'
-import { DshManagedInstall, validateDshInstallOptions, type DshInstallOptions } from './dsh/managed-install'
+import { DshManagedInstall, validateDshInstallOptions } from './dsh/managed-install'
 import { preflightDsh } from './dsh/preflight'
 import { prepareDshRuntime, DSH_API_KEY_ENV } from './dsh/runtime-config'
 import { readDshMcpServers, validateDshSettings } from './dsh/config'
@@ -2803,7 +2803,9 @@ export async function checkUpdateAgent(id: string): Promise<CodingAgentUpdateRes
   }
 }
 
-export async function installCodingAgent(id: string, options: DshInstallOptions = {}): Promise<CodingAgentMutationResult> {
+export interface CodingAgentInstallOptions { version?: string; rollback?: boolean }
+
+export async function installCodingAgent(id: string, options: CodingAgentInstallOptions = {}): Promise<CodingAgentMutationResult> {
   const tool = getCodingAgentDefinition(id)
   if (!tool) {
     const err = new Error('Unknown coding agent')
@@ -2811,7 +2813,15 @@ export async function installCodingAgent(id: string, options: DshInstallOptions 
     throw err
   }
   if (tool.id === 'dsh') validateDshInstallOptions(options)
-  else if (options.version !== undefined || options.rollback !== undefined) throw Object.assign(new Error('Version selection is available for DSH only'), { status: 400 })
+  else {
+    if (options.rollback !== undefined) throw Object.assign(new Error('Rollback is available for DSH only'), { status: 400 })
+    if (options.version !== undefined) {
+      if (!codingAgentUsesNpm(tool.id)) throw Object.assign(new Error('Version selection requires an npm-managed coding agent'), { status: 400 })
+      if (typeof options.version !== 'string' || (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(options.version) && options.version !== 'latest')) {
+        throw Object.assign(new Error('Version must be an exact npm version or latest'), { status: 400 })
+      }
+    }
+  }
   if (installingTools.has(tool.id) || deletingTools.has(tool.id)) {
     const err = new Error('Install is already running')
     ;(err as any).status = 409
@@ -2836,7 +2846,8 @@ export async function installCodingAgent(id: string, options: DshInstallOptions 
           },
         })
       } else {
-        await runNpm(withCodingAgentRegistry(tool.id, ['install', '-g', tool.packageName]), { timeout: 10 * 60_000, env })
+        const packageSpec = options.version ? `${tool.packageName}@${options.version}` : tool.packageName
+        await runNpm(withCodingAgentRegistry(tool.id, ['install', '-g', packageSpec]), { timeout: 10 * 60_000, env })
       }
       if (tool.id === 'pi' && !userSettingsProvidesPiMcpAdapter(await readPiSettings())) {
         await installBundledPiMcpAdapter()
