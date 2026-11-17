@@ -158,6 +158,7 @@ export interface AppRelaySocketOpenRequest {
   auth?: Record<string, unknown>
   query?: Record<string, string | number | boolean | undefined>
   stream?: boolean
+  chatResume?: { session_id: string; id: string; timeline?: boolean }
 }
 
 export interface AppRelaySocketEventRequest {
@@ -180,6 +181,7 @@ export interface AppRelaySocketResponse {
   event?: string
   stream?: boolean
   payload?: unknown
+  chatResumeAccepted?: boolean
   error?: { code: string; message: string }
 }
 
@@ -286,6 +288,7 @@ export class AppRelayClient {
           timestamp,
           signature,
           replaceExistingHost: this.options.replaceExistingHost,
+          chatResumeOnOpen: true,
           machine: this.options.machineInfo,
         })
       },
