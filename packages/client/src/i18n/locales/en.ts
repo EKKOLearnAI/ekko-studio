@@ -3961,6 +3961,11 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_27_1: "Fix HTTP 400 errors when upgrading npm-managed Coding Agents to a selected version; support exact target versions or latest, while retaining DSH-only rollback and existing restrictions for manually installed agents (#3855)",
+    new_0_8_27_2: "Fix ByteString errors when Chinese or special-character Provider names are sent in model gateway headers, for both regular and streaming inference; preserve legacy headers and literal percent signs without migrating existing configuration (#3856)",
+    new_0_8_27_3: "Restore model proxy credentials on first use instead of scanning all historical records at startup; merge concurrent restores of the same credential, limit the restored cache to 128 entries, and check current account, Profile and model permissions using current upstream credentials (#3857)",
+    new_0_8_27_4: "Import old Codex, Grok and Pi proxy configurations through a one-time startup task; the first upgrade still scans legacy data, preserves original files and leaves ambiguously owned shared credentials unassigned. Old and new continuation credentials coexist after restart, and cold credentials retain larger request-body support after authentication (#3857)",
+    new_0_8_27_5: "Accept CC-Switch models[].slug catalogs across Studio and Profile model discovery, manual fetch, connection tests, refresh and restore; prefer array-valued data and model id, filter empty identifiers and preserve existing Gemini catalog handling (#3858)",
     new_0_8_26_1: "App plugin pages can connect to live sessions over LAN and cloud relays, with open, command, close, streaming events and acknowledgements under existing account/Profile checks; companion App and cloud relay updates are required (#3839)",
     new_0_8_26_2: "Fix Antigravity turns incorrectly failing after a non-empty answer and exit code 0; empty answers, non-zero exits and explicit errors still fail (#3830)",
     new_0_8_26_3: "Fix local Desktop plugins failing to connect host.browser to the built-in browser; local and remote modes share the signed-in main window relay with account/Profile, lease and navigation checks. Update both Desktop and Web UI (#3843)",
