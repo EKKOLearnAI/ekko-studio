@@ -17,5 +17,5 @@ export function resolveAgentGatewayModelConfigs(input: ResolveModelProviderConfi
   return { ...original, fallbackProviderConfig: undefined,
     providerConfig: { ...original.providerConfig, id: 'ekkostudio', type: 'openai-compatible' as const,
       apiMode: 'codex_responses' as const, requestStyle: 'openai-responses' as const,
-      headers: { 'x-studio-provider': input.provider } } }
+      headers: { 'x-studio-provider': encodeURIComponent(input.provider), 'x-studio-provider-encoding': 'uri' } } }
 }
