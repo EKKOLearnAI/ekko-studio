@@ -6035,7 +6035,9 @@ bool readMcuWsBytes(uint8_t *buffer, size_t length, uint32_t timeoutMs = 100) {
       yield();
     }
   }
-  return read == length;
+  if (read == length) return true;
+  closeMcuSocketTransport(F("incomplete frame"));
+  return false;
 }
 
 void resetMcuSocketReconnect() {
