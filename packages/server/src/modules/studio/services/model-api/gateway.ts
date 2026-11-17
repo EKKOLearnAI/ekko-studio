@@ -60,7 +60,13 @@ export async function serveModelGateway(ctx: Context, protocol: ModelGatewayProt
   // In-process Ekko clients keep logical model IDs. Their internal credential
   // binds the Profile; a provider header disambiguates the model in that scope.
   if (ctx.state.modelGateway && ctx.get('x-studio-provider')) {
-    modelId = qualifyModelRoute(await providerRouteNamespace(ctx.state.modelGateway.profile, ctx.get('x-studio-provider')), modelId)
+    let provider = ctx.get('x-studio-provider')
+    // HTTP headers cannot carry Unicode. Decode only explicitly encoded values
+    // so legacy provider names containing literal percent escapes stay intact.
+    if (ctx.get('x-studio-provider-encoding') === 'uri') {
+      try { provider = decodeURIComponent(provider) } catch { throw new ModelApiError('Invalid provider encoding.', 400, 'provider') }
+    }
+    modelId = qualifyModelRoute(await providerRouteNamespace(ctx.state.modelGateway.profile, provider), modelId)
   }
   modelId = await canonicalModelRoute(modelId)
   if (ctx.state.modelApiKey && !(await Promise.all(ctx.state.modelApiKey.models.map(canonicalModelRoute))).includes(modelId)) throw new ModelApiError('Model is not available.', 404, 'model')

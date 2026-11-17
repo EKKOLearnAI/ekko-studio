@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
+import { createModelClient } from '../../packages/ekko-agent/src/model/registry'
+import { resolveAgentGatewayModelConfigs } from '../../packages/server/src/bootstrap/provider-gateway-client'
 
 const fixtures = vi.hoisted(() => ({ home: '', targets: [] as string[], provider: 'deepseek', baseUrl: 'https://upstream.invalid/v1', model: 'family/model', mode: 'chat_completions', calls: [] as any[], respond: undefined as any }))
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ config: { port: 18648, get appHome() { return fixtures.home } } }))
@@ -96,6 +98,59 @@ it.each(['chat_completions', 'codex_responses', 'anthropic_messages', 'gemini_co
   expect(JSON.stringify(ctx.body)).not.toContain('server-side-secret')
   if (protocol === 'gemini_contents') expect(ctx.body.candidates[0].content.parts).toEqual([{ text: 'hello' }])
   else expect(ctx.body.model).toBe('deepseek/family/model')
+})
+
+it.each(['custom:硅基流动', 'custom:中转/%2F%25 +🚀', 'custom:relay'])('round-trips %s through the Ekko client and gateway', async provider => {
+  fixtures.provider = provider
+  fixtures.respond = (input: any) => input.body.stream
+    ? new Response('data: {"id":"chat-1","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}\n\ndata: {"id":"chat-1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })
+    : Response.json({ id: 'chat-1', model: fixtures.model, choices: [{ index: 0, message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }] })
+  const { providerConfig } = resolveAgentGatewayModelConfigs({ provider, model: fixtures.model,
+    baseUrl: 'http://localhost/api/ekko-studio/models/v1', apiKey: 'studio_model_fixture' })
+  const client = createModelClient(providerConfig, { fetch: async (url, init) => {
+    // Use Fetch's real header validation, where raw Chinese names previously failed.
+    const request = new Request(url, init)
+    const body = await request.json()
+    expect(body.model).toBe('family/model')
+    const ctx = context(body, new URL(request.url).pathname)
+    ctx.get = (name: string) => request.headers.get(name) || ''
+    await serveModelGateway(ctx, 'codex_responses', ['default'])
+    if (ctx.body instanceof Readable) {
+      const stream = ctx.body
+      const bytes = Readable.from((async function* () {
+        for await (const chunk of stream) yield Buffer.from(chunk)
+      })())
+      return new Response(Readable.toWeb(bytes) as ReadableStream, { headers: { 'content-type': 'text/event-stream' } })
+    }
+    return Response.json(ctx.body, { status: ctx.status })
+  } })
+  const request = { model: fixtures.model, messages: [{ role: 'user' as const, content: 'hi' }] }
+  expect((await client.create(request)).content).toBe('hello')
+  let content = ''
+  for await (const event of client.stream(request)) {
+    if (event.type === 'error') throw new Error(event.error)
+    if (event.type === 'text-delta') content += event.text
+  }
+  expect(content).toBe('hello')
+  expect(fixtures.calls).toHaveLength(2)
+  for (const call of fixtures.calls) expect(call).toMatchObject({ apiKey: 'server-side-secret', body: { model: 'family/model' } })
+})
+
+it('keeps legacy unencoded provider headers literal, including percent escapes', async () => {
+  fixtures.provider = 'custom:literal%2F%25'
+  const ctx = context({ model: fixtures.model, input: 'hi' })
+  ctx.get = (name: string) => name === 'x-studio-provider' ? fixtures.provider : ''
+  await serveModelGateway(ctx, 'codex_responses', ['default'])
+  expect(ctx.status).toBe(200)
+  expect(fixtures.calls).toHaveLength(1)
+})
+
+it('rejects malformed encoded provider headers before dispatch', async () => {
+  const ctx = context({ model: fixtures.model, input: 'hi' })
+  const headers: Record<string, string> = { 'x-studio-provider': 'custom%3A%broken', 'x-studio-provider-encoding': 'uri' }
+  ctx.get = (name: string) => headers[name] || ''
+  await expect(serveModelGateway(ctx, 'codex_responses', ['default'])).rejects.toMatchObject({ status: 400 })
+  expect(fixtures.calls).toHaveLength(0)
 })
 
 it('accepts native Responses fields rather than applying the former restricted sharing schema', async () => {

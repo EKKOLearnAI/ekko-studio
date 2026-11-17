@@ -208,6 +208,14 @@ Legacy URL compatibility lives in the shared model gateway middleware. The
 unmounted proxy routers/controllers and their separate model-list handlers have
 been removed; the gateway reuses the active Coding Agent protocol adapters.
 
+Ekko keeps logical model IDs and sends the Provider ID in `x-studio-provider`.
+This internal header uses `encodeURIComponent` with
+`x-studio-provider-encoding: uri`, so Chinese and other Unicode Provider names
+remain valid HTTP headers.
+The gateway decodes it before account routing; older unencoded headers retain
+their literal meaning, including percent signs. Stored Provider names and IDs
+do not need to change.
+
 Gateway composition is confined to `bootstrap/model-gateway-adapter.ts`: Studio
 owns credential persistence/restoration and outbound HTTP policy; Coding Agents
 own protocol dispatch and target lifetimes behind their public adapter. Studio
