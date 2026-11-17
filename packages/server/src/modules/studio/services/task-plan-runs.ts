@@ -132,6 +132,25 @@ export class TaskPlanRuns {
     if (contextId) this.finish(contextId, state)
   }
 
+  /**
+   * Finish the session's binding only while it still belongs to `runId`.
+   * A resumed run can deliver its terminal event after the session already moved
+   * on to a newer turn, and that late event must not end the newer binding: the
+   * originating turn loses its context_id and every later plan or goal write in
+   * that turn fails with 409.
+   */
+  finishRun(sessionId: string, runId: string, executionState: TerminalState): void {
+    const contextId = this.sessions.get(sessionId)
+    if (!contextId) return
+    const binding = this.bindings.get(contextId)
+    if (!binding) return
+    const state = binding.resolve()
+    const owned = [binding.runId, binding.snapshot?.run_id, state?.runId, state?.activeRunMarker, state?.responseRun?.runMarker]
+      .filter((value): value is string => Boolean(value))
+    if (!owned.length || !owned.includes(runId)) return
+    this.finish(contextId, executionState)
+  }
+
 }
 
 export function taskPlanRunInstruction(): string {
