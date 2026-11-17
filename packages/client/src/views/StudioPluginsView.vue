@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NCheckbox, NEmpty, NInput, NSelect, NTag, NDrawer, NDrawerContent, NModal, NTabs, NTab, NTabPane, NSpin, useDialog, useMessage } from 'naive-ui'
 import { isStoredSuperAdmin } from '@/api/client'
 import { pluginList, pluginRequest, pluginInvoke, type InstalledPlugin, type PluginDevelopmentProject, type Json } from '@/api/studio/plugins'
+import { localizePluginManifest } from '../../../plugin-sdk/src'
 import { pluginPages, pluginPageLocation, usePluginCatalog } from '@/composables/usePluginCatalog'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import PluginIcon from '@/components/plugins/PluginIcon.vue'
@@ -24,7 +25,7 @@ import type { PluginRelease } from '@/api/studio/plugin-releases'
 import { pluginCategories as categories, matchesPluginCategory, matchesPluginSearch, installedMarketPlugin, type PluginCategory } from '@/plugins/catalog'
 import { pluginRepository, pluginUpdateState, pluginInstallationKind, publishedPluginAction, samePluginInstallation, type PublishedPluginAction } from '@/plugins/updates'
 
-const { t } = useI18n(), dialog = useDialog(), message = useMessage(), router = useRouter(), route = useRoute()
+const { t, locale } = useI18n(), dialog = useDialog(), message = useMessage(), router = useRouter(), route = useRoute()
 const { profile, snapshot, loading, error, refresh } = usePluginCatalog()
 const { updates: availableUpdates, releases: publishedReleases, unavailable: unavailableRepositories, failed: updateCheckFailed, checking: checkingUpdates, refresh: refreshUpdates } = usePluginUpdates(computed(() => snapshot.value.plugins))
 const busy = ref(false), actionError = ref(''), source = ref(''), trusted = ref(false), showInstall = ref(false)
@@ -75,7 +76,7 @@ const catalog = computed<CatalogPlugin[]>(() => snapshot.value.plugins.map(plugi
 const developmentCatalog = computed<CatalogPlugin[]>(() => projects.value.map(project => {
     const installed = catalog.value.find(plugin => plugin.manifest.id === project.id && plugin.developmentDirectory === project.directory)
     return installed ? { ...installed, development: project, developmentEntry: true } : {
-      manifest: project.manifest || { id: project.id, name: project.id, version: '', apiVersion: 1, permissions: [] },
+      manifest: project.manifest ? localizePluginManifest(project.manifest, locale.value) : { id: project.id, name: project.id, version: '', apiVersion: 1, permissions: [] },
       source: project.directory, installedAt: project.createdAt || 0, installed: false, enabled: false,
       status: ['missing', 'error'].includes(project.status) ? 'failed' : 'disabled', error: project.error,
       config: {}, tools: [], commands: [], actions: [], development: project, developmentEntry: true,

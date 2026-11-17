@@ -1,3 +1,4 @@
+import { validatePluginI18n, type PluginManifest } from '../../../../plugin-sdk/src'
 import { PLUGIN_CATALOG_URL, normalizePluginRepository, parsePluginRelease, repositoryStars, type PluginRelease } from './plugin-releases'
 
 export interface MarketPlugin {
@@ -6,6 +7,7 @@ export interface MarketPlugin {
   repositoryStars: number | null
   name: string
   description: string
+  i18n?: PluginManifest['i18n']
   manifestId: string | null
   version: string | null
   permissions: string[]
@@ -26,7 +28,13 @@ function marketPlugin(value: any): MarketPlugin {
   let release: PluginRelease | null = null
   // Invalid publications cannot be installed.
   try { release = parsePluginRelease(value, repository) } catch { /* Unverified releases have no install action. */ }
+  let i18n: PluginManifest['i18n']
+  if (value.i18n !== undefined) {
+    try { validatePluginI18n({ name: value.name, description: value.description, i18n: value.i18n }); i18n = value.i18n }
+    catch { /* Legacy/malformed directory metadata keeps its fallback strings. */ }
+  }
   return {
+    ...(i18n ? { i18n } : {}),
     id: value.id, repository, repositoryStars: repositoryStars(value.repositoryStars, repository), name: value.name, description: value.description,
     manifestId: typeof value.manifestId === 'string' ? value.manifestId : null,
     version: typeof value.version === 'string' ? value.version : null,

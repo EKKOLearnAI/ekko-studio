@@ -165,3 +165,13 @@ it('checks contracts again after a build so build-generated shape changes cannot
   expect(manager.snapshot().revision).toBe(revision)
   expect(manager.snapshot().plugins[0].status).toBe('active')
 })
+
+it('requires bilingual metadata when checking a project with the new SDK', async () => {
+  const { project } = await fixture()
+  const path = join(project, 'plugin.json'), plugin = JSON.parse(await readFile(path, 'utf8'))
+  expect(plugin.i18n.en.views.settings).toBe('Settings')
+  expect(plugin.i18n.zh.views.settings).toBe('设置')
+  delete plugin.i18n
+  await writeFile(path, JSON.stringify(plugin))
+  await expect(checkProject(project)).rejects.toThrow(/i18n/)
+})

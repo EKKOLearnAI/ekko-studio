@@ -160,7 +160,7 @@ Studio 的 harness/build 检查 SDK 变化是否同时修改了架构、ctx 或�
 
 `views[].title/icon/order` 定义页面标题、专属导航图标和排序。workspace 和 agent-settings 页面必须声明宿主命名线条 icon。
 导航项包含 `viewId`、必填 `icon`，以及可选的 `title/order`；标题默认使用目标页面标题，顺序默认 0，同序保持声明顺序。
-同一页面可以分别注册到两类全局导航，两类导航独立设置标题、图标及排序。主侧栏接受命名 icon、包内 PNG/JPEG/WebP/GIF 或 base64 图片；设置侧栏只接受命名 icon，统一颜色、尺寸和描边。
+同一页面可以分别注册到两类全局导航，两类导航独立设置标题、图标及排序。主侧栏与设置侧栏都接受命名 icon、包内 PNG/JPEG/WebP/GIF 或 base64 图片；设置入口保留插件声明的图标与名称，不替换成统一设置图标。
 命名 icon 为 `settings/skills/mcp/code/terminal/bot/folder/book/chart/grid/history/chat`；原始 SVG、远程图片和缺少 icon 的导航声明会被拒绝。
 
 `workspace.sidebar` 可指定一个不与页面 ID 重复的动态侧栏视图，调用同一个客户端入口，`ctx.slot === 'workspace-sidebar'`。
@@ -739,3 +739,18 @@ The independent cloud server reads root `plugin.json` when a submission is appro
 The plugin center checks the public cloud directory when opened, refreshed, focused after five minutes, and every five minutes while mounted. Requests include only the normalized repository URL, with no local token, cookie, Profile, or referrer. Local lists remain usable when the cloud is unavailable. A matching repository, manifest ID and API version plus a higher semantic version produces an update badge. Development installations are excluded.
 
 Only interactive super administrators can install an update, after confirming trust in the executable code. The selected immutable source and expected manifest version are sent to the existing installer, which verifies the ID and version before replacing the installation and preserves its configuration, enabled state, and rollback version. In addition to `github:owner/repo#<40-character-commit>`, published GitLab.com and Gitee packages use `git+https://<host>/<repository>.git#<40-character-commit>`; moving branch or tag references are rejected.
+
+## 插件名称、描述与入口国际化
+
+保留 `name`、`description`、`views[].title` 和可选导航 `title` 的字符串作为旧宿主与旧插件兼容值。
+新版 SDK 项目必须声明 `i18n.en`、`i18n.zh`，包含 `name`、`description`，并用 `views: {viewId: title}` 翻译每个页面。
+独立声明了导航 title 时，还须提供 `navigation: {main?: {viewId: title}, settings?: {viewId: title}}`；省略导航 title 时沿用本语言的页面标题。
+其他语言可按 BCP 47 代码增加，显示按完整语言代码、基础语言、英文、原字符串依次回退。安装目录、插件 ID、视图 ID、数据与权限不随语言变化。
+Studio 的插件中心、详情、页面标题与两类侧栏统一使用这些翻译；插件内容仍须根据 `ctx.locale` 自行国际化，切换语言会重新挂载。
+没有 i18n 的已发布插件仍可安装、启用和更新，原名称、描述、图标与入口保持可用。升级 SDK 时一起补齐翻译；新版项目的 harness:check/prepack 检查为必需项。
+
+```json
+{"name":"Version Preview","description":"Preview Studio versions.","i18n":{"en":{"name":"Version Preview","description":"Preview Studio versions.","views":{"preview":"Version Preview"}},"zh":{"name":"版本预览","description":"预览 Studio 版本。","views":{"preview":"版本预览"}}}}
+```
+
+插件市场列表支持可选的 i18n 名称/描述元数据，旧目录与旧条目仍显示原字段。修改名称、描述或翻译时也应增加插件版本，使目录同步能够识别新清单。

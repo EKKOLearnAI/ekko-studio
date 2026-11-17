@@ -36,7 +36,8 @@ export async function readManifest(directory: string, options: { validateEntries
   }
   if (result.icon) result.icon = await icon(result.icon)
   for (const view of result.views || []) if (view.icon) view.icon = await icon(view.icon)
-  for (const entry of result.navigation?.main || []) entry.icon = (await icon(entry.icon))!
+  for (const slot of ['main', 'settings'] as const)
+    for (const entry of result.navigation?.[slot] || []) entry.icon = (await icon(entry.icon))!
   return manifest(result)
 }
 export async function installPackage(root: string, source: string): Promise<{ manifest: PluginManifest; directory: string; source: string; dispose: () => Promise<void> }> {

@@ -37,7 +37,7 @@ Desktop 仅允许当前 Studio 主文档持有浏览器连接能力，插件不�
 用户从头像菜单打开「导航栏设置」后，手动添加已启用插件的已注册入口；仅有 `views`、工具、Agent 设置页或 `workspace.sidebar` 不会进入候选列表。
 选择和顺序按 Studio 登录账号保存，独立于 Profile。插件停用、失败或移除注册后入口暂时隐藏，原选择保留；恢复可用后按用户原有顺序显示。`navigation.settings` 保持原有设置侧栏行为。
 两类入口可独立指向同一已声明页面；省略某个列表或设置为空数组，表示该侧栏不展示入口，页面和 Agent 设置按钮仍可用。
-设置侧栏只接受宿主命名线条 icon；主侧栏还可使用包内 PNG/JPEG/WebP/GIF 或 base64 图片，均不得省略 icon 或依赖插件头像回退。
+主侧栏与设置侧栏都接受宿主命名线条 icon、包内 PNG/JPEG/WebP/GIF 或 base64 图片，均不得省略 icon 或依赖插件头像回退。
 命名 icon 清单见 SDK 的 `PLUGIN_ICON_PATHS`。`workspace` 和 `agent-settings` 页面的专属配置侧栏也必须提供命名 `views[].icon`。
 `agent-settings` 使用 `/studio/plugin-agent-settings/:pluginId/:viewId`，同类页面自动组成 Agent 设置导航，返回 Agent 管理；不会自动注册主侧栏或设置侧栏入口。
 `workspace.sidebar` 是可选动态侧栏视图，仅用于 workspace。
@@ -182,3 +182,18 @@ BOT 业务与 `host.agents` 的执行引擎目录分别归属；创建 BOT 仍�
 
 无效已安装清单保持失败状态，可从插件中心更新或卸载；缺失权限元数据不会使整个页面崩溃。
 宿主不把旧字段转换为新契约，启用前必须通过当前清单校验。
+
+## 插件名称、描述与入口国际化
+
+保留 `name`、`description`、`views[].title` 和可选导航 `title` 的字符串作为旧宿主与旧插件兼容值。
+新版 SDK 项目必须声明 `i18n.en`、`i18n.zh`，包含 `name`、`description`，并用 `views: {viewId: title}` 翻译每个页面。
+独立声明了导航 title 时，还须提供 `navigation: {main?: {viewId: title}, settings?: {viewId: title}}`；省略导航 title 时沿用本语言的页面标题。
+其他语言可按 BCP 47 代码增加，显示按完整语言代码、基础语言、英文、原字符串依次回退。安装目录、插件 ID、视图 ID、数据与权限不随语言变化。
+Studio 的插件中心、详情、页面标题与两类侧栏统一使用这些翻译；插件内容仍须根据 `ctx.locale` 自行国际化，切换语言会重新挂载。
+没有 i18n 的已发布插件仍可安装、启用和更新，原名称、描述、图标与入口保持可用。升级 SDK 时一起补齐翻译；新版项目的 harness:check/prepack 检查为必需项。
+
+```json
+{"name":"Version Preview","description":"Preview Studio versions.","i18n":{"en":{"name":"Version Preview","description":"Preview Studio versions.","views":{"preview":"Version Preview"}},"zh":{"name":"版本预览","description":"预览 Studio 版本。","views":{"preview":"版本预览"}}}}
+```
+
+插件市场列表支持可选的 i18n 名称/描述元数据，旧目录与旧条目仍显示原字段。修改名称、描述或翻译时也应增加插件版本，使目录同步能够识别新清单。

@@ -43,7 +43,6 @@ it('separates page declarations from navigation and requires explicit, suitable 
   expect(manifest({ ...definition, views: [...definition.views!, agentView] }).views?.at(-1)).toEqual(agentView)
   for (const navigation of [
     { main: [{ viewId: 'home' }] }, { settings: [{ viewId: 'preferences' }] },
-    { settings: [{ viewId: 'preferences', icon: 'icon.png' }] },
     { settings: [{ viewId: 'preferences', icon: 'unknown-icon' }] },
     { main: [{ viewId: 'missing', icon: 'grid' }] },
     { main: [{ viewId: 'home', icon: 'grid' }, { viewId: 'home', icon: 'chat' }] },
@@ -108,4 +107,12 @@ it('generates an installable minimal settings plugin with a single manifest', as
     expect(installed.manifest.workspace).toBeUndefined()
   } finally { await installed.dispose() }
   expect(JSON.parse(await readFile(join(target, 'package.json'), 'utf8')).studioPlugin).toBeUndefined()
+})
+
+it('keeps bundled plugin logos in settings navigation just as in main navigation', async () => {
+  const { root, source } = await fixture()
+  await writeFile(join(source, 'plugin.json'), JSON.stringify({ ...definition, navigation: { settings: [{ viewId: 'preferences', icon: 'icon.png' }] } }))
+  const installed = await installPackage(join(root, 'host'), source)
+  expect(installed.manifest.navigation?.settings?.[0].icon).toBe(installed.manifest.icon)
+  await installed.dispose()
 })

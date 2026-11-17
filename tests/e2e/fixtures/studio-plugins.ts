@@ -20,6 +20,7 @@ import { usePluginCatalog, pluginPages } from '../../../packages/client/src/comp
 import { useAppStore } from '../../../packages/client/src/stores/hermes/app'
 import { createRouter, createWebHashHistory, RouterView } from 'vue-router'
 import zh from '../../../packages/client/src/i18n/locales/zh'
+import en from '../../../packages/client/src/i18n/locales/en'
 import { useTheme } from '../../../packages/client/src/composables/useTheme'
 import { getThemeOverrides } from '../../../packages/client/src/styles/theme'
 import '../../../packages/client/src/styles/global.scss'
@@ -37,8 +38,10 @@ const router = createRouter({ history: createWebHashHistory(), routes: [
   ...['person', 'chat', 'groupChat', 'workflow', 'history', 'connections', 'agentManager', 'models', 'usage', 'apiRelay', 'settings', 'logs', 'performance', 'skillsUsage', 'theme', 'petdex', 'profiles'].map(name => ({ path: '/hermes/' + name, name: 'hermes.' + name, component: name === 'agentManager' ? PluginAgentsPanel : placeholder })),
 ] })
 const pinia = createPinia()
+const fixtureI18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } })
 await theme.setBrightness('light')
 ;(window as any).pluginFixture = { route: () => router.currentRoute.value.fullPath, navigate: (path: string) => router.push(path),
+  locale(value: 'zh' | 'en') { fixtureI18n.global.locale.value = value },
   profile(name: string) { useProfilesStore(pinia).activeProfileName = name; localStorage.setItem('hermes_active_profile_name', name) }, changed() { window.dispatchEvent(new Event('studio.plugins.changed')) },
   account(id: number, role: string) { localStorage.setItem('plugin_fixture_account', JSON.stringify({ sub: String(id), role })); location.reload() },
   appearance: theme.previewThemeSettings,
@@ -82,4 +85,4 @@ const fixtureRoot = { setup: () => () => h(NConfigProvider, { theme: theme.isDar
   () => h(NDialogProvider, null, () => h(NMessageProvider, null, () => [h(PluginNotifications), h(NavigationSettingsModal, { show: useNavigationStore().settingsOpen, 'onUpdate:show': (show: boolean) => { useNavigationStore().settingsOpen = show } }), h(Layout)]))) }
 const root = new URLSearchParams(location.search).has('shell') ? (await import('../../../packages/client/src/App.vue')).default : fixtureRoot
 createApp(root)
-  .use(pinia).use(router).use(createI18n({ legacy: false, locale: 'zh', messages: { zh } })).mount('#app')
+  .use(pinia).use(router).use(fixtureI18n).mount('#app')
