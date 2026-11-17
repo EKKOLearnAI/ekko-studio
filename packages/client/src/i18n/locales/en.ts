@@ -3961,6 +3961,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_28_1: "Creating or renaming a file reports a conflict if the destination exists. The editor saves to the profile or workspace where the file was opened and keeps edits made during a save marked as unsaved. (#3865)",
+    new_0_8_28_2: "Workspace downloads stream from disk. Broken links no longer hide other entries in the directory, and concurrent uploads keep their files separate. (#3865)",
+    new_0_8_28_3: "Workflow and Person schedules calculate the next run in the selected time zone, including leap days and daylight saving transitions. Invalid schedules are paused while the others keep running. (#3865)",
+    new_0_8_28_4: "Clicking a Person completion notification in the browser opens the corresponding session, including when Studio is deployed under a subpath. (#3865)",
+    new_0_8_28_5: "Ekko updates message statistics faster in long conversations. If an OpenAI-compatible model returns an error after sending part of a reply, Ekko surfaces the upstream error. (#3865)",
+    new_0_8_28_6: "Plugin upgrades and uninstalls clear unused packages and retain versions available for rollback. The built-in desktop browser recovers readable profiles from a partially damaged index and backs up the original. (#3865)",
+    new_0_8_28_7: "Fixed a save failure when editing Bot execution agents if an existing Hermes preset uses a different HTTP model protocol from the current provider settings. (#3863)",
+    new_0_8_28_8: "Hermes and Bot clarification replies are confirmed directly to the sender, even just after reconnecting or while the Bot handles another turn. Expired questions are cleared, and temporary failures can be retried. (#3864)",
     new_0_8_27_1: "Fix HTTP 400 errors when upgrading npm-managed Coding Agents to a selected version; support exact target versions or latest, while retaining DSH-only rollback and existing restrictions for manually installed agents (#3855)",
     new_0_8_27_2: "Fix ByteString errors when Chinese or special-character Provider names are sent in model gateway headers, for both regular and streaming inference; preserve legacy headers and literal percent signs without migrating existing configuration (#3856)",
     new_0_8_27_3: "Restore model proxy credentials on first use instead of scanning all historical records at startup; merge concurrent restores of the same credential, limit the restored cache to 128 entries, and check current account, Profile and model permissions using current upstream credentials (#3857)",
