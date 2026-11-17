@@ -48,6 +48,8 @@ export async function resolveEkkoProviderRuntimeConfig(input: {
     const entryKeys = [entry.name, entry.provider_key, entry.catalog_provider].filter(Boolean).flatMap(value => providerLookupCandidates(String(value)))
     return providerLookupCandidates(provider).some(candidate => entryKeys.includes(candidate))
   })
+  const accountRecord = config.studio_provider_pool === 2 && !!customEntry
+  if (accountRecord) input = { ...input, baseUrl: undefined, apiKey: undefined, apiMode: undefined }
   const authProvider = customEntry?.auth_provider || provider
   const authorized = customEntry && !customEntry.auth_provider ? {} : await resolveEkkoAuthorizedProviderCredentials(
     profile, authProvider, input.model, input.forceRefresh === true, customEntry?.auth_scope,
@@ -82,7 +84,7 @@ export async function resolveEkkoProviderRuntimeConfig(input: {
       ? parseEnvValue(envContent, envMapping.base_url_env) || preset?.base_url || ''
       : preset?.base_url || ''
   }
-  if (!apiKey && envMapping?.api_key_env) {
+  if (!accountRecord && !apiKey && envMapping?.api_key_env) {
     apiKey = parseEnvValue(envContent, envMapping.api_key_env)
   }
   if (!apiMode) apiMode = String(preset?.api_mode || '').trim()

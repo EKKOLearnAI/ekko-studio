@@ -458,7 +458,7 @@ async function buildAvailableForProfile(
     const availableModels = [...new Set(models)]
     const apiMode = providerApiMode(provider, extra?.api_mode)
     const displayLabel = providerDisplayLabel(appConfig, profile, provider, label)
-    const editor = providerEditorCapabilities(provider)
+    const editor = providerEditorCapabilities(provider, config)
     const refresh = providerModelRefreshCapabilities(apiMode)
     const catalogEntry = resolveProviderCatalogEntry(modelCatalogCache, provider, base_url, {
       freeOnly: provider === 'openrouter',
@@ -498,6 +498,7 @@ async function buildAvailableForProfile(
   }
 
   for (const [providerKey, envMapping] of Object.entries(PROVIDER_ENV_MAP)) {
+    if (config.studio_provider_pool === 2 && Object.values(config.providers || {}).some((entry: any) => entry.runtime_provider === providerKey)) continue
     if (Object.values(config.providers || {}).some((entry: any) => entry.catalog_provider === providerKey)) continue
     const oauthAuthorized = providerSupportsStoredOAuth(providerKey) ? isOAuthAuthorized(providerKey) : false
     if (providerKey === 'copilot') {
@@ -556,7 +557,11 @@ async function buildAvailableForProfile(
         [...builtinCatalogModels],
         { hasStaticManifest, profile, freeOnly: providerKey === 'openrouter' },
       )
-      const models = [...new Set([cp.model, ...configuredModels, ...resolvedCatalogModels].filter(Boolean) as string[])]
+      const liveCatalog = config.studio_provider_pool === 2 && resolveProviderCatalogEntry(modelCatalogCache, providerKey, baseUrl, { profile, freeOnly: providerKey === 'openrouter' })?.source === 'live'
+      const models = includeConfiguredDefaultModel(providerKey,
+        [...new Set((liveCatalog ? resolvedCatalogModels : [cp.model, ...configuredModels, ...resolvedCatalogModels]).filter(Boolean) as string[])],
+        currentDefault, currentDefaultProvider)
+      if (cp.auth_provider === 'copilot' && !copilotEnabled) return null
       return { providerKey, label: cp.name, base_url: baseUrl, models, api_key: cp.api_key || '', credential_configured: !!resolveCustomProviderApiKey(cp, envContent) || await accountProviderAuthorized(cp, profile), api_mode: cp.api_mode, builtin: hasStaticManifest, provider_source: cp.source, provider_key: cp.provider_key }
     }),
   )

@@ -28,7 +28,8 @@ export async function synchronizeHermesProvider(profile: string): Promise<void> 
   const cfg = await readConfigYamlForProfile(profile)
   const edits = await readSupplementalEdits(profile)
   const credential = await internalModelCredential(profile)
-  const stamp = createHash('sha256').update(JSON.stringify([cfg, edits, credential.token, studioModelGatewayUrl()])).digest('hex')
+  const catalog = await safeFileStore.readText(join(providerAccountHome(), 'catalog.json')).catch(() => '')
+  const stamp = createHash('sha256').update(JSON.stringify([cfg, edits, catalog, credential.token, studioModelGatewayUrl()])).digest('hex')
   const marker = join(dir, 'projection.json')
   const sourceConfig = parse(await safeFileStore.readText(join(providerSourceDir(profile), 'config.yaml')).catch(() => ''))
   if (await safeFileStore.readText(marker).catch(() => '') === stamp
