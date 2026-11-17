@@ -224,7 +224,20 @@ export async function* openAiChatSseToResponsesEvents(
     buffer = parsed.rest
 
     for (const event of parsed.events) {
-      for (const dataLine of extractSseData(event)) {
+      const dataLines = extractSseData(event)
+      if (!dataLines.length && /(?:^|\n):/.test(event)) {
+        // SDKs discard SSE comments. Translate upstream keep-alives into a
+        // native Responses event so clients can distinguish waiting from a
+        // dead stream without inventing text or completing the response.
+        yield {
+          type: 'response.in_progress',
+          data: {
+            type: 'response.in_progress',
+            response: { id, object: 'response', status: 'in_progress', model: target.model, output: [] },
+          },
+        }
+      }
+      for (const dataLine of dataLines) {
         if (!dataLine || dataLine === '[DONE]') continue
         const data = safeJsonParse(dataLine)
         if (data?.usage && typeof data.usage === 'object') {
@@ -362,6 +375,7 @@ export async function* openAiChatSseToResponsesEvents(
       type: 'reasoning',
       id: reasoningId,
       summary: [{ type: 'summary_text', text: reasoning }],
+      ...(target.reasoningCodec ? { encrypted_content: target.reasoningCodec.encode({ text: reasoning }) } : {}),
     }
     indexedOutput.push({ outputIndex: reasoningOutputIndex, item: reasoningItem })
     yield {

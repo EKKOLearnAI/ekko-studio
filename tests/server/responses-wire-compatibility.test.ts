@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { normalizeResponsesSseEvents } from '../../packages/server/src/modules/coding-agents/protocol/adapters/responses-stream'
+import { normalizeResponsesSseEvents, openAiChatSseToResponsesEvents } from '../../packages/server/src/modules/coding-agents/protocol/adapters/responses-stream'
 import { geminiToResponses, responsesToGemini, responsesEventsToGemini } from '../../packages/server/src/modules/coding-agents/services/antigravity/gemini-adapter'
 import { withoutUnsupportedReasoning } from '../../packages/server/src/modules/studio/services/providers/codex-requests'
 
@@ -43,4 +43,23 @@ it('removes reasoning controls only for a known non-reasoning model', () => {
 it('ignores native Gemini sentinel signatures instead of passing them to another Provider for decryption', () => {
   expect(geminiToResponses({ contents: [{ role: 'model', parts: [{ thoughtSignature: 'skip_thought_signature_validator', functionCall: { name: 'read', args: {} } }] }] }).input)
     .toEqual([expect.objectContaining({ type: 'function_call', name: 'read' })])
+})
+
+it('relays upstream keep-alive comments as Responses activity before model output arrives', async () => {
+  let modelOutputRead = false
+  async function* upstream() {
+    yield Buffer.from(': keep-alive\n\n')
+    modelOutputRead = true
+    yield Buffer.from('data: {"choices":[{"delta":{"content":"OK"}}]}\n\n')
+    yield Buffer.from('data: [DONE]\n\n')
+  }
+  const events = openAiChatSseToResponsesEvents(upstream(), { model: 'deepseek-v4-pro' })
+  expect((await events.next()).value?.type).toBe('response.created')
+  const heartbeat = (await events.next()).value
+  expect(heartbeat).toMatchObject({ type: 'response.in_progress', data: { response: { status: 'in_progress', output: [] } } })
+  expect(modelOutputRead).toBe(false)
+  const remaining = []
+  for await (const event of events) remaining.push(event)
+  expect(remaining.find(event => event.type === 'response.output_text.delta')?.data.delta).toBe('OK')
+  expect(remaining.at(-1)?.type).toBe('response.completed')
 })

@@ -234,6 +234,53 @@ it('captures incremental Anthropic thinking signatures in the terminal reasoning
   expect(codec.decode(reasoning.encrypted_content)?.native?.data).toEqual([{ type: 'thinking', thinking: 'plan', signature: 'signed' }])
 })
 
+it.each([false, true])('preserves DeepSeek reasoning through a Responses client tool continuation (stream=%s)', async stream => {
+  const reasoning = '先读取文件，再判断结果。'
+  const call = { id: 'call-1', type: 'function', function: { name: 'read', arguments: '{"path":"a"}' } }
+  fixtures.respond = () => stream
+    ? new Response([
+      { choices: [{ delta: { reasoning_content: reasoning } }] },
+      { choices: [{ delta: { tool_calls: [{ ...call, index: 0 }] } }] },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+    ].map(data => `data: ${JSON.stringify(data)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })
+    : Response.json({ id: 'chat-1', choices: [{ message: { role: 'assistant', content: null, reasoning_content: reasoning, tool_calls: [call] }, finish_reason: 'tool_calls' }] })
+  const first = context({ model: 'deepseek/family/model', input: 'hi', stream })
+  await serveModelGateway(first, 'codex_responses', ['default'])
+  let response = first.body
+  if (stream) {
+    let output = ''
+    for await (const chunk of first.body) output += String(chunk)
+    response = output.split('\n').filter(line => line.startsWith('data:')).map(line => JSON.parse(line.slice(5))).find(event => event.type === 'response.completed').response
+  }
+  const reasoningItem = response.output.find((item: any) => item.type === 'reasoning')
+  expect(reasoningItem.encrypted_content).toMatch(/^ekko_r1\./)
+  expect(first.state.modelGatewayReasoningCodec.decode(reasoningItem.encrypted_content)?.text).toBe(reasoning)
+  // Hermes retains encrypted reasoning, emits a textless assistant item, then
+  // replays the function call. A summary alone does not survive its converter.
+  const next = context({ model: 'deepseek/family/model', input: [
+    { type: 'reasoning', encrypted_content: reasoningItem.encrypted_content, summary: [] },
+    { role: 'assistant', content: '' },
+    ...response.output.filter((item: any) => item.type === 'function_call'),
+    { type: 'function_call_output', call_id: 'call-1', output: 'done' },
+  ] })
+  fixtures.respond = () => Response.json({ id: 'chat-2', choices: [{ message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }] })
+  await serveModelGateway(next, 'codex_responses', ['default'])
+  expect(next.status).toBe(200)
+  expect(fixtures.calls[1].body.messages.find((message: any) => message.tool_calls)?.reasoning_content).toBe(reasoning)
+})
+
+it.each(['deepseek', 'openai-api'])('repairs missing tool reasoning only for compatible Providers (%s)', async provider => {
+  fixtures.provider = provider
+  const request = context({ model: `${provider}/family/model`, input: [
+    { type: 'function_call', call_id: 'old-call', name: 'read', arguments: '{}' },
+    { type: 'function_call_output', call_id: 'old-call', output: 'done' },
+  ] })
+  await serveModelGateway(request, 'codex_responses', ['default'])
+  const message = fixtures.calls[0].body.messages.find((message: any) => message.tool_calls)
+  if (provider === 'deepseek') expect(message.reasoning_content).toBe(' ')
+  else expect(message).not.toHaveProperty('reasoning_content')
+})
+
 it('releases a streaming target even if the client disconnects before its first read', async () => {
   fixtures.respond = () => new Response('data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })
   const request = context({ model: 'deepseek/family/model', input: 'hi', stream: true })
