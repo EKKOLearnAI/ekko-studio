@@ -1833,9 +1833,10 @@ function persistedPiRuntimeRoots(): string[] {
   return roots
 }
 
-export async function restorePersistedPiProxyTargets(): Promise<number> {
+export async function restorePersistedPiProxyTargets(options: { acceptProfile?: (profile: string) => boolean; persistOnly?: boolean } = {}): Promise<number> {
   let restoredCount = 0
   for (const root of persistedPiRuntimeRoots()) {
+    let savingCredential = false
     const targetPath = join(root, PI_PROXY_TARGET_FILE)
     let content = await safeReadFile(targetPath)
     if (!content) {
@@ -1851,6 +1852,7 @@ export async function restorePersistedPiProxyTargets(): Promise<number> {
         const keyParts = JSON.parse(Buffer.from(routeKey, 'base64url').toString('utf-8'))
         if (!Array.isArray(keyParts) || keyParts.length < 5) continue
         const [profile, provider, model, apiMode, baseUrl, agentSessionId = '', chatSessionId = ''] = keyParts.map(value => String(value || ''))
+        if (options.acceptProfile && !options.acceptProfile(profile)) continue
         const resolved = await resolveStoredProviderLaunchInput({
           profile,
           provider,
@@ -1893,7 +1895,13 @@ export async function restorePersistedPiProxyTargets(): Promise<number> {
         || (!apiKey || isRetiredProvider(input.provider))) continue
       const restoredInput = { ...input, apiKey }
       delete restoredInput.apiKeyEncrypted
-      registerCodexProxyTarget(restoredInput, { token })
+      if (options.acceptProfile && !options.acceptProfile(input.profile)) continue
+      if (!options.persistOnly) registerCodexProxyTarget(restoredInput, { token })
+      if (options.persistOnly) {
+        savingCredential = true
+        await saveModelTarget('codex_responses', input, token)
+        savingCredential = false
+      }
       if (legacyApiKey || encryptedVersion === 1) {
         const migratedInput = { ...input }
         delete migratedInput.apiKey
@@ -1904,7 +1912,8 @@ export async function restorePersistedPiProxyTargets(): Promise<number> {
       }
       await chmod(targetPath, 0o600)
       restoredCount += 1
-    } catch {
+    } catch (error) {
+      if (savingCredential) throw error
       // Ignore invalid or legacy files; preparing the launch rewrites them.
     }
   }
@@ -1966,10 +1975,11 @@ function tomlSectionString(content: string, sectionName: string, key: string): s
   return ''
 }
 
-export async function restorePersistedCodexProxyTargets(): Promise<number> {
+export async function restorePersistedCodexProxyTargets(options: { acceptProfile?: (profile: string) => boolean; persistOnly?: boolean } = {}): Promise<number> {
   let restoredCount = 0
   const restoredRouteKeys = new Set<string>()
   for (const config of persistedCodexProxyConfigs()) {
+    let savingCredential = false
     const content = await safeReadFile(config.path)
     if (!content) continue
     const proxyBaseUrl = tomlSectionString(content, 'model_providers.custom', 'base_url')
@@ -1981,6 +1991,7 @@ export async function restorePersistedCodexProxyTargets(): Promise<number> {
       if (!Array.isArray(keyParts) || keyParts.length < 5) continue
       const [profile, provider, model, apiMode, baseUrl, agentSessionId = '', chatSessionId = ''] =
         keyParts.map(value => String(value || ''))
+      if (options.acceptProfile && !options.acceptProfile(profile)) continue
       const resolved = await resolveStoredProviderLaunchInput({
         mode: 'scoped',
         profile,
@@ -1992,7 +2003,7 @@ export async function restorePersistedCodexProxyTargets(): Promise<number> {
       }, null)
       const apiKey = String(resolved.apiKey || '').trim()
       if (!profile || !provider || !model || !baseUrl || (!apiKey || isRetiredProvider(provider))) continue
-      registerCodexProxyTarget({
+      const restoredInput = {
         profile,
         provider,
         model,
@@ -2002,10 +2013,17 @@ export async function restorePersistedCodexProxyTargets(): Promise<number> {
         agentId: config.agentId,
         agentSessionId,
         chatSessionId,
-      }, { token })
+      }
+      if (options.persistOnly) {
+        savingCredential = true
+        await saveModelTarget('codex_responses', restoredInput, token)
+        savingCredential = false
+      }
+      else registerCodexProxyTarget(restoredInput, { token })
       restoredRouteKeys.add(routeKey)
       restoredCount += 1
-    } catch {
+    } catch (error) {
+      if (savingCredential) throw error
       // Ignore stale or invalid runtime configs; preparing the next launch rewrites them.
     }
   }

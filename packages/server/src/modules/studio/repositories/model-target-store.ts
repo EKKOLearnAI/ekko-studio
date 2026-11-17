@@ -42,3 +42,21 @@ export async function savedModelTargets(): Promise<SavedModelTarget[]> {
   }
   return result
 }
+
+/** Read one credential by its digest; never enumerate an account's history. */
+export async function savedModelTarget(userId: number, token: string): Promise<SavedModelTarget | null> {
+  if (!/^hwui_[A-Za-z0-9_-]{1,128}$/.test(token)) return null
+  const path = join(providerAccountHome(userId), 'model-targets', `${createHash('sha256').update(token).digest('hex')}.json`)
+  try {
+    const record = JSON.parse(await safeFileStore.readText(path)) as SavedModelTarget
+    if (!record || record.ownerUserId !== userId || record.token !== token
+      || !['codex_responses', 'anthropic_messages', 'chat_completions', 'gemini_contents'].includes(record.protocol)
+      || typeof record.profile !== 'string' || !record.profile
+      || typeof record.provider !== 'string' || !record.provider
+      || typeof record.model !== 'string' || !record.model) return null
+    return record
+  } catch (error: any) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return null
+    throw error
+  }
+}

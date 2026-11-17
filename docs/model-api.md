@@ -213,6 +213,22 @@ owns credential persistence/restoration and outbound HTTP policy; Coding Agents
 own protocol dispatch and target lifetimes behind their public adapter. Studio
 does not import concrete agent implementations.
 
+Saved native CLI credentials are loaded on demand. Startup does not rebuild their
+targets or validate every historical model selection. On the first request for a
+saved credential, Studio reads its SHA-256-named record in each active account,
+checks ownership, Profile access and the current model configuration, then
+registers that target with current upstream credentials. Concurrent requests for
+the same credential share the lookup. Restored targets use a 128-entry LRU cache;
+credential and route lookups in the protocol registry are indexed. Normal session
+continuation still prepares its own target through the existing launch path.
+
+The old shared Codex/Grok and Pi configuration directories are imported into these
+account-owned credential records once by the startup-task registry. The completion
+marker prevents subsequent launches from rescanning those directories. Shared
+legacy credentials with ambiguous account ownership are left alone; continuing
+the session creates an account-scoped credential. This does not change the
+one-time Hermes Provider import or the on-demand Hermes gateway projection.
+
 Plugins declaring `http` can intercept `/api/ekko-studio/models/*` through the
 existing global HTTP middleware. `onRequest` receives the parsed client request
 before authentication and protocol translation. Rewrites still pass normal

@@ -49,3 +49,10 @@ profiles. Completion is scoped to the Hermes root directory, not each profile.
 Once completed, later imports of old profiles into that same root are not
 rescanned. Changes that must run again need a new task ID or an explicit import
 upgrade step, rather than changing the implementation behind a completed ID.
+
+`2026-11-17-legacy-model-target-index-v1` imports the old shared Coding Agent
+proxy credentials into account-owned model-target records and applies the old
+Pi MCP upgrade once. It is scoped to the Studio data home. Later launches skip
+the old runtime-directory scans; saved credentials are loaded individually when
+used. A shared legacy Profile without one unambiguous owner is not assigned to
+an arbitrary account. Normal session continuation prepares its own credential.

@@ -3,6 +3,7 @@ import { gatewayProtocol, gatewayToken, modelGatewayAdapters } from '../public/m
 import { withProviderAccount } from '../public/provider-account'
 import { findUserById, userCanAccessProfile } from '../public/users'
 import { toAuthenticatedUser } from './auth'
+import { restoreStudioModelTarget } from '../public/model-target-store'
 
 /** Run-scoped model credentials authenticate only inference, never management. */
 export async function modelGatewayMiddleware(ctx: Context, next: Next): Promise<void> {
@@ -11,7 +12,7 @@ export async function modelGatewayMiddleware(ctx: Context, next: Next): Promise<
   const protocol = ctx.method === 'POST' ? gatewayProtocol(path) : undefined
   const listing = ctx.method === 'GET' && path === '/api/ekko-studio/models/v1/models'
   if (!protocol && !listing) return next()
-  const binding = modelGatewayAdapters().authenticate(gatewayToken(ctx))
+  const binding = await restoreStudioModelTarget(gatewayToken(ctx))
   if (!binding) return next()
   const user = findUserById(binding.userId)
   if (user?.status !== 'active' || (user.role !== 'super_admin' && !userCanAccessProfile(user.id, binding.profile))) { ctx.status = 403; ctx.body = { error: 'Model credential owner is unavailable' }; return }
