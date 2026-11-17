@@ -3,5 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
-  "exports": { ".": { "types": "./src/index.ts", "default": "./src/index.ts" } }
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "license": "MIT"
 }

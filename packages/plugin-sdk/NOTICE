@@ -1,0 +1,22 @@
+Studio Plugin SDK licensing
+===========================
+
+The SDK implementation, public types, harness, templates and all included SDK
+guides are made available under the MIT license in LICENSE. This includes
+docs/STUDIO_CTX.md and docs/STUDIO_RETURNS.md.
+This license grant is limited to the SDK. Studio host/core code remains governed
+by the Studio repository license. Downloaded applications and npm dependencies
+retain their own licenses.
+
+Source and contributor attribution
+---------------------------------
+The SDK and guides originate from EKKOLearnAI/ekko-studio.
+docs/STUDIO_CTX.md and docs/STUDIO_RETURNS.md include contributions by
+widechaos (十方空烬 · Ember / Renchao Wu),
+submitted in EKKOLearnAI/ekko-studio pull request #3827:
+https://github.com/EKKOLearnAI/ekko-studio/pull/3827
+Source commit: ed442c0908e9cbde2971bbbe411a6a1a9e7b45f8
+
+Generated/embedded plugins may carry the same guides twice, under sdk/docs/
+and under the plugin's docs/. The MIT license applies to both copies. Keep the
+MIT license text and this attribution notice with redistributed SDK materials.

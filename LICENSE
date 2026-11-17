@@ -56,3 +56,13 @@ For the purposes of this License:
 On the Change Date (2029-05-10), this License will automatically convert to
 the Apache License 2.0, at which point all users may use the Licensed Work
 under the terms of the Apache License 2.0.
+
+---
+
+Separately licensed Studio Plugin SDK
+
+The SDK implementation, public types, harness, templates and all SDK documentation
+under packages/plugin-sdk are separately licensed under MIT, as specified in
+packages/plugin-sdk/LICENSE and packages/plugin-sdk/NOTICE. The root Business
+Source License does not apply to these SDK materials. This exception does not
+relicense the Studio host/core.
