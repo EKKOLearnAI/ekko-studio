@@ -16,15 +16,15 @@ let stopAuth: (() => void) | null = null
 let cancelConnection: (() => void) | null = null
 let resumeTimer: ReturnType<typeof setTimeout> | null = null
 
-// In remote mode the Desktop browser is shared automatically whenever this
-// renderer is logged in; dropped connections are retried in the background.
+// Local plugins and remote Agents use the same account/Profile-bound relay.
+// Connect whenever the main Desktop renderer is logged in, in either mode.
 const RESUME_DELAY_MS = 5000
 
 /** Connect the Desktop browser relay if possible; never throws and never prompts. */
 export async function ensureRemoteBrowserRelay(): Promise<void> {
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null }
   const bridge = desktopBridge()
-  if (remoteBrowserEnabled.value || cancelConnection || !bridge?.remoteMode || !bridge.browser?.remoteRequest || !bridge.browser.setRemoteControl || !getApiKey()) return
+  if (remoteBrowserEnabled.value || cancelConnection || !bridge?.browser?.remoteRequest || !bridge.browser.setRemoteControl || !getApiKey()) return
   try { await startRemoteBrowserRelay() } catch (error) { console.warn('[desktop-browser] remote control is not connected', error) }
 }
 
@@ -53,7 +53,7 @@ export async function startRemoteBrowserRelay(): Promise<void> {
   await stopRemoteBrowserRelay()
   const startedGeneration = generation
   const bridge = desktopBridge()
-  if (!bridge?.remoteMode || !bridge.browser?.remoteRequest || !getApiKey()) throw new Error('Remote Desktop browser requires a Studio login and updated Desktop client')
+  if (!bridge?.browser?.remoteRequest || !getApiKey()) throw new Error('Desktop browser requires a Studio login and updated Desktop client')
   try {
     if (!await bridge.browser.setRemoteControl?.(true)) return
   } catch (error) { await stopRemoteBrowserRelay(); throw error }
