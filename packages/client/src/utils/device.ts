@@ -16,3 +16,18 @@ export function isMobileDevice() {
   // touch/pointer/screen traits still distinguish the phone from a PC.
   return hasTouch && hasCoarsePointer && screenShortEdge <= 1024
 }
+
+/**
+ * Whether pressing Enter in a chat composer should send the message.
+ *
+ * Virtual keyboards never report Shift, so "Shift+Enter inserts a newline" is
+ * unreachable on phones and tablets (W3C uievents#542). There, Enter has to
+ * insert the newline and sending must go through the send button.
+ */
+export function enterShouldSendMessage(
+  event: Pick<KeyboardEvent, 'key' | 'shiftKey'>,
+  mobile = isMobileDevice(),
+): boolean {
+  if (event.key !== 'Enter' || event.shiftKey) return false
+  return !mobile
+}

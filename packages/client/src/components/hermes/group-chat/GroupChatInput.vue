@@ -12,6 +12,7 @@ import { buildMentionOptions, type MentionOption } from './mention-options'
 import type { GroupChatMention } from '@/api/studio/group-chat'
 import type { Attachment } from '@/stores/hermes/chat'
 import { clampChatInputHeight, isMobileChatInputViewport } from '@/utils/chat-input-height'
+import { enterShouldSendMessage } from '@/utils/device'
 import VoiceDialogueControls from '@/components/hermes/chat/VoiceDialogueControls.vue'
 import { normalizeComposerVoiceTranscript, useComposerVoiceInput } from '@/composables/useComposerVoiceInput'
 import {
@@ -543,8 +544,10 @@ function handleKeydown(e: KeyboardEvent) {
         }
     }
 
-    if (e.key !== 'Enter' || e.shiftKey) return
     if (isComposing.value || e.isComposing || e.keyCode === 229) return
+    // Soft keyboards cannot send Shift+Enter (W3C uievents#542), so on touch
+    // devices Enter inserts a newline and the send button submits instead.
+    if (!enterShouldSendMessage(e)) return
     e.preventDefault()
     handleSend()
 }
@@ -788,6 +791,7 @@ function openAttachmentPreview(attachment: Attachment) {
                 :style="textareaHeight ? { height: textareaHeight + 'px' } : {}"
                 :placeholder="t('groupChat.inputPlaceholder')"
                 rows="1"
+                :enterkeyhint="isMobileViewport ? 'enter' : 'send'"
                 :readonly="isSending"
                 @keydown="handleKeydown"
                 @compositionstart="handleCompositionStart"
