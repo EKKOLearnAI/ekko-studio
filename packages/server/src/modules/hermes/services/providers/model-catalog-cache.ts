@@ -480,7 +480,10 @@ async function profileStoredAuthCredential(profile: string, provider: string): P
   }
 }
 
-async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): Promise<RefreshCandidate[]> {
+async function collectRefreshCandidates(
+  profiles = listProfileNamesFromDisk(),
+  requestedProvider?: string,
+): Promise<RefreshCandidate[]> {
   const candidates = new Map<string, RefreshCandidate>()
   const presetsByProvider = new Map(PROVIDER_PRESETS.map(preset => [preset.value, preset]))
   const appConfig = await readAppConfig().catch((): { copilotEnabled?: boolean } => ({}))
@@ -501,6 +504,7 @@ async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): 
       : ''
 
     for (const [provider, mapping] of Object.entries(PROVIDER_ENV_MAP)) {
+      if (requestedProvider !== undefined && provider !== requestedProvider) continue
       const preset = presetsByProvider.get(provider)
       if (!preset?.base_url) continue
       if (provider === 'copilot') {
@@ -571,6 +575,9 @@ async function collectRefreshCandidates(profiles = listProfileNamesFromDisk()): 
       const baseUrl = normalizeCatalogBaseUrl(cp.base_url)
       if (!name || !baseUrl) continue
       const provider = cp.catalog_provider || providerKeyForCustom(name)
+      // Resolve only the requested provider's credentials for a single refresh;
+      // an unrelated expired OAuth session must not block its catalog request.
+      if (requestedProvider !== undefined && provider !== requestedProvider) continue
       const presetModels = presetsByProvider.get(name)?.models || []
       // Respect the configured `models:` whitelist (v12+ dict) when present —
       // those entries should always be reachable as fallbacks even before a
@@ -600,7 +607,7 @@ export async function resolveProviderCatalogRefreshTarget(
   profile: string,
   provider: string,
 ): Promise<ProviderCatalogRefreshTarget | null> {
-  const candidates = await collectRefreshCandidates([profile])
+  const candidates = await collectRefreshCandidates([profile], provider)
   return candidates.find(candidate => candidate.provider === provider) || null
 }
 
