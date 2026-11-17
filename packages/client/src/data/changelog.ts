@@ -17,6 +17,7 @@ export const changelog: ChangelogEntry[] = [
       'changelog.new_0_8_28_6',
       'changelog.new_0_8_28_7',
       'changelog.new_0_8_28_8',
+      'changelog.new_0_8_28_9',
     ],
   },
   {

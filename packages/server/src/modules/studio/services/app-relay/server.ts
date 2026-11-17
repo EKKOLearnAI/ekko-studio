@@ -378,6 +378,7 @@ export class LocalAppRelayServer {
       role: 'app',
       machineId,
       hostConnected: true,
+      chatResumeOnOpen: true,
       capabilities: ['http.request', 'http.download.chunked', 'socket.chat-run', 'socket.group-chat', 'socket.workflow', 'socket.plugins', 'app.entitlement', 'p2p.direct.v1'],
     })
     if (socket.data.localUserToken) this.scheduleTokenExpiry(socket)
@@ -588,6 +589,13 @@ export class LocalAppRelayServer {
     localSocket.onAny((event: string, ...args: unknown[]) => {
       this.handleLocalSocketEvent(socket, bridge, event, args.length <= 1 ? args[0] : args)
     })
+    const resume = request.chatResume
+    if (namespace === '/chat-run' && String(request.query?.session_state) !== '1'
+      && resume && typeof resume.session_id === 'string' && resume.session_id.length > 0 && resume.session_id.length <= 256
+      && typeof resume.id === 'string' && resume.id.length <= 128) {
+      localSocket.emit('app.resume', { session_id: resume.session_id, id: resume.id, timeline: resume.timeline === true })
+      return { id, ok: true, namespace, stream: bridge.stream, chatResumeAccepted: true }
+    }
     return { id, ok: true, namespace: bridge.namespace, stream: bridge.stream }
   }
 
