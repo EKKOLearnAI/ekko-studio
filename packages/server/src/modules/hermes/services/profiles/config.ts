@@ -239,12 +239,13 @@ export async function fetchProviderModels(baseUrl: string, apiKey: string, freeO
       logger.warn('available-models %s returned %d', modelsUrl, res.status)
       return []
     }
-    const data = await res.json() as { data?: Array<{ id: string }> }
-    if (!Array.isArray(data.data)) {
+    const data = await res.json() as { data?: Array<{ id?: unknown; slug?: unknown }>; models?: Array<{ id?: unknown; slug?: unknown }> }
+    const rawModels = Array.isArray(data?.data) ? data.data : data?.models
+    if (!Array.isArray(rawModels)) {
       logger.warn('available-models %s returned unexpected format', modelsUrl)
       return []
     }
-    let models = data.data.map(m => m.id)
+    let models = rawModels.map(m => String(m?.id || m?.slug || '').trim()).filter(Boolean)
     // Gemini returns model IDs with "models/" prefix. Strip to avoid double
     // prefix when Hermes native adapter constructs .../models/{model}:generateContent
     if (base.includes('generativelanguage.googleapis.com')) {

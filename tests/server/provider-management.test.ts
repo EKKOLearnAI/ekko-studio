@@ -32,9 +32,9 @@ import { configureAuthorizedProviderRuntime } from '../../packages/server/src/mo
 import { configureProviderProjection, synchronizeHermesProvider } from '../../packages/server/src/modules/studio/public/provider-projection'
 import { refreshConfiguredProviderModelCatalogs, readProviderModelCatalogCache, resolveProviderCatalogRefreshTarget, writeProviderModelCatalogEntry } from '../../packages/server/src/modules/hermes/services/providers/model-catalog-cache'
 import { refreshProviderModels, restoreProviderModels } from '../../packages/server/src/modules/hermes/services/providers/provider-model-refresh'
-import { getAvailableModelGroupsForProfile } from '../../packages/server/src/modules/hermes/controllers/models'
+import { fetchProviderModelList, getAvailableModelGroupsForProfile } from '../../packages/server/src/modules/hermes/controllers/models'
 import { remove, update } from '../../packages/server/src/modules/hermes/controllers/providers'
-import { getProviderEditorDetail, updateProviderEditorDetail } from '../../packages/server/src/modules/hermes/services/providers/provider-editor'
+import { getProviderEditorDetail, testProviderEditorDraft, updateProviderEditorDetail } from '../../packages/server/src/modules/hermes/services/providers/provider-editor'
 import { resolveEkkoProviderRuntimeConfig } from '../../packages/server/src/modules/ekko/services/provider-runtime'
 
 let source: string
@@ -75,7 +75,8 @@ it('refreshes only the requested Provider even when another OAuth grant is missi
   })
 })
 
-it('keeps a successful global refresh in the shared catalog when an unrelated grant fails', async () => {
+it.each(['data', 'models'] as const)('keeps a successful global %s refresh in the shared catalog when an unrelated grant fails', async format => {
+  fixture.fetch.mockImplementation(async () => Response.json(format === 'data' ? { data: [{ id: 'new-model' }] } : { models: [{ slug: 'new-model' }] }))
   await withProviderAccount(1, async () => {
     await importAccountProviders()
     await addBrokenOAuth()
@@ -240,7 +241,8 @@ it('updates pooled credentials through the released Provider update endpoint', a
   })
 })
 
-it('shows and restores an authoritative refreshed list and projects it back to Hermes', async () => {
+it.each(['data', 'models'] as const)('shows and restores an authoritative %s refreshed list and projects it back to Hermes', async format => {
+  fixture.fetch.mockImplementation(async () => Response.json(format === 'data' ? { data: [{ id: 'new-model' }] } : { models: [{ slug: 'new-model' }] }))
   await withProviderAccount(1, async () => {
     await importAccountProviders()
     await updateConfigYamlForProfile('default', config => {
@@ -258,5 +260,82 @@ it('shows and restores an authoritative refreshed list and projects it back to H
     expect(await readFile(join(source, 'default/config.yaml'), 'utf8')).toContain('new-model')
     await restoreProviderModels('work', 'deepseek')
     expect((await getAvailableModelGroupsForProfile('default')).find(group => group.provider === 'deepseek')!.models).toContain('removed-model')
+  })
+})
+
+it('tests a Responses Provider draft against a CC-Switch catalog with its stored credential', async () => {
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    fixture.fetch.mockImplementation(async () => Response.json({ models: [null, { slug: 'new-model' }, { slug: 'new-model' }] }))
+    expect(await testProviderEditorDraft('default', 'deepseek', { api_mode: 'codex_responses' })).toEqual({ models: ['new-model'], model_count: 1 })
+    expect(fixture.fetch.mock.calls[0][1].headers.Authorization).toBe('Bearer account-key')
+    expect(Object.values((await readProviderModelCatalogCache()).providers)).toEqual([])
+  })
+})
+
+it.each([
+  { label: 'OpenAI', body: { data: [{ id: 'z:free' }, { id: 'a:free' }, { id: 'paid' }, { id: 'a:free' }] }, models: ['a:free', 'z:free'] },
+  { label: 'CC-Switch', body: { models: [null, {}, { slug: ' ' }, { slug: ' z:free ' }, { slug: 'a:free' }, { slug: 'paid' }, { slug: 'a:free' }] }, models: ['a:free', 'z:free'] },
+  { label: 'data priority', body: { data: [{ id: 'a:free', slug: 'ignored:free' }], models: [{ slug: 'ignored:free' }] }, models: ['a:free'] },
+  { label: 'non-array data fallback', body: { data: {}, models: [{ slug: 'a:free' }] }, models: ['a:free'] },
+  { label: 'empty data priority', body: { data: [], models: [{ slug: 'ignored:free' }] }, models: [] },
+])('manually fetches $label and saves the filtered catalog only when requested', async ({ body, models }) => {
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    fixture.fetch.mockResolvedValue(Response.json(body))
+    const ctx = { request: { body: { provider: 'custom:relay', label: 'Relay', base_url: 'https://relay.invalid/v1/', api_key: 'draft-key', freeOnly: true, update_cache: true } } } as any
+    await fetchProviderModelList(ctx)
+    expect(ctx.body).toEqual({ models })
+    expect(fixture.fetch).toHaveBeenCalledWith('https://relay.invalid/v1/models', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer draft-key' }), signal: expect.any(AbortSignal),
+    }))
+    expect(Object.values((await readProviderModelCatalogCache()).providers)).toEqual([
+      expect.objectContaining({ provider: 'custom:relay', label: 'Relay', models, source: 'live', free_only: true }),
+    ])
+  })
+})
+
+it('keeps manual fetches without cache opt-in read-only and supports an absent API key', async () => {
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    fixture.fetch.mockImplementation(async () => Response.json({ models: [{ slug: 'new-model' }] }))
+    const ctx = { request: { body: { provider: 'deepseek', base_url: 'https://relay.invalid' } } } as any
+    await fetchProviderModelList(ctx)
+    expect(ctx.body).toEqual({ models: ['new-model'] })
+    expect(fixture.fetch.mock.calls[0][1].headers.Authorization).toBeUndefined()
+    expect(Object.values((await readProviderModelCatalogCache()).providers)).toEqual([])
+  })
+})
+
+it.each(['format', 'http', 'json', 'timeout'] as const)('keeps manual %s errors and the last-good cache', async failure => {
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    await writeProviderModelCatalogEntry({ provider: 'deepseek', label: 'DeepSeek', base_url: 'https://api.deepseek.com', models: ['last-good'], source: 'live' })
+    if (failure === 'timeout') fixture.fetch.mockRejectedValue(new DOMException('timed out', 'TimeoutError'))
+    else fixture.fetch.mockResolvedValue(failure === 'http' ? new Response('', { status: 401 }) : failure === 'json' ? new Response('invalid JSON') : Response.json({ models: {} }))
+    const ctx = { request: { body: { provider: 'deepseek', base_url: 'https://api.deepseek.com', update_cache: true } } } as any
+    await fetchProviderModelList(ctx)
+    expect(ctx.status).toBe(failure === 'timeout' ? 504 : 502)
+    expect(ctx.body.error).toBeTypeOf('string')
+    if (failure === 'format') expect(ctx.body.error).toBe('Provider returned unexpected format')
+    if (failure === 'http') expect(ctx.body.error).toBe('Provider returned HTTP 401')
+    expect(Object.values((await readProviderModelCatalogCache()).providers)).toEqual([
+      expect.objectContaining({ models: ['last-good'], source: 'live' }),
+    ])
+  })
+})
+
+it.each([{ models: [] }, { models: {} }])('keeps the last-good catalog when CC-Switch refresh returns %j', async body => {
+  await withProviderAccount(1, async () => {
+    await importAccountProviders()
+    await writeProviderModelCatalogEntry({ provider: 'deepseek', label: 'DeepSeek', base_url: 'https://api.deepseek.com', models: ['last-good'], source: 'live' })
+    fixture.fetch.mockImplementation(async () => Response.json(body))
+    await expect(refreshProviderModels('default', 'deepseek', { confirm: true })).rejects.toMatchObject({
+      code: Array.isArray(body.models) ? 'PROVIDER_EMPTY_CATALOG' : 'PROVIDER_TEST_FAILED',
+    })
+    await refreshConfiguredProviderModelCatalogs({ force: true })
+    expect(Object.values((await readProviderModelCatalogCache()).providers)).toEqual([
+      expect.objectContaining({ models: ['last-good'], source: 'live' }),
+    ])
   })
 })
