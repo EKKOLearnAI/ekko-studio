@@ -4,7 +4,7 @@ import { InstallationCoordinator } from './installation-coordinator'
 import { deviceWindowEndpoint, focusDeviceWindow, ownDeviceWindow } from './device-window-owner'
 import { spawn } from 'node:child_process'
 import { deviceInstanceLaunch, prepareDeviceInstance, DEVICE_INSTANCE_ENV } from './device-instance'
-import { revokesRemoteBrowserGrant } from './browser-remote-navigation'
+import { browserRelayDocument, revokesRemoteBrowserGrant } from './browser-remote-navigation'
 import {
   app,
   BrowserWindow,
@@ -1370,10 +1370,11 @@ function browserForEvent(event: IpcMainInvokeEvent): BrowserManager {
   return browserManager
 }
 
-// Remote renderer gets an explicit capability, never the local broker's secrets.
+// The authenticated main renderer gets a capability in local and remote mode,
+// never the local broker's secrets. Server-side user/Profile checks select it.
 let remoteBrowserGrantCleanup: (() => void) | null = null
 let remoteBrowserGrantGeneration = 0
-let remoteBrowserGrant: { clientId: string; token: string; endpoint: string } | null = null
+let remoteBrowserGrant: { clientId: string; token: string; endpoint: string; studioUrl: string } | null = null
 function revokeRemoteBrowserGrant(notify = true): void {
   remoteBrowserGrantCleanup?.(); remoteBrowserGrantCleanup = null
   remoteBrowserGrantGeneration++
@@ -1383,13 +1384,14 @@ function revokeRemoteBrowserGrant(notify = true): void {
 }
 ipcMain.handle('hermes-desktop:browser-remote-control', async (event, enable: unknown) => {
   browserForEvent(event)
+  const studioUrl = browserRelayDocument(event.senderFrame?.url || '', serverUrl, event.senderFrame === event.sender.mainFrame)
   if (enable !== true) { revokeRemoteBrowserGrant(); return false }
-  if (!activeRemoteServerUrl || !browserBroker || !mainWindow) throw new Error('Remote device browser is unavailable')
+  if (!browserBroker || !mainWindow) throw new Error('Desktop browser is unavailable')
   revokeRemoteBrowserGrant(false)
   const generation = remoteBrowserGrantGeneration
   const owner = mainWindow.webContents
   const remoteUrl = activeRemoteServerUrl
-  // Clicking the browser-panel switch is the explicit grant. Do not prompt twice.
+  // The authenticated renderer owns this connection. Do not prompt twice.
   if (owner.isDestroyed()) return false
   // Hash/router changes and subframe navigation do not replace the trusted
   // Studio document. Revoke only when its top-level document is replaced.
@@ -1409,14 +1411,15 @@ ipcMain.handle('hermes-desktop:browser-remote-control', async (event, enable: un
   })
   const session = await registration.json() as { client_id: string; session_token: string }
   if (!registration.ok || !session.client_id || !session.session_token) throw new Error('Browser relay registration failed')
-  if (generation !== remoteBrowserGrantGeneration || owner.isDestroyed() || mainWindow?.webContents !== owner || activeRemoteServerUrl !== remoteUrl) { browserBroker?.revokeClient(session.client_id); return false }
-  remoteBrowserGrant = { clientId: session.client_id, token: session.session_token, endpoint: descriptor.endpoint }
+  if (generation !== remoteBrowserGrantGeneration || owner.isDestroyed() || mainWindow?.webContents !== owner || activeRemoteServerUrl !== remoteUrl || serverUrl !== studioUrl) { browserBroker?.revokeClient(session.client_id); return false }
+  remoteBrowserGrant = { clientId: session.client_id, token: session.session_token, endpoint: descriptor.endpoint, studioUrl }
   return true
 })
 ipcMain.handle('hermes-desktop:browser-remote-request', async (event, input: unknown) => {
   browserForEvent(event)
+  const studioUrl = browserRelayDocument(event.senderFrame?.url || '', serverUrl, event.senderFrame === event.sender.mainFrame)
   const grant = remoteBrowserGrant
-  if (!grant || !activeRemoteServerUrl) throw new Error('Desktop browser remote control has not been authorized')
+  if (!grant || grant.studioUrl !== studioUrl) throw new Error('Desktop browser remote control has not been authorized')
   const response = await fetch(grant.endpoint, {
     method: 'POST', headers: { Authorization: `Bearer ${grant.token}`, 'Content-Type': 'application/json', 'X-Hermes-Browser-Client': grant.clientId },
     body: JSON.stringify(input), signal: AbortSignal.timeout(300_000),

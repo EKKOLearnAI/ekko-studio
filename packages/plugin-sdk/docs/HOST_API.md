@@ -217,3 +217,5 @@ events 每条为 sequence/method/params，可能含 sessionId/truncated。游标
 单事件超 16000 字节时 params 为空且 truncated=true，按需重新读取页面状态。
 cdp.release(tabId) 返回 {ok:boolean}，只释放自己的控制租约。
 浏览器无授权共享 Desktop 或共享撤销时明确失败；不会另起浏览器 Profile，也不开放调试端口或 token。
+本地 Desktop 与连接远程 Studio 的 Desktop 使用同一账号/Profile 绑定通道，由已登录主窗口建立。
+两种模式下 tabs 和 CDP 的参数及返回不变；退出登录或切换 Profile 后旧连接及调用失效。
