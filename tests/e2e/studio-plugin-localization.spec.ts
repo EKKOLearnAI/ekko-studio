@@ -3,6 +3,24 @@ import { resolve } from 'node:path'
 import { PLUGIN_LOCALES } from '../../packages/plugin-sdk/src/localization.mjs'
 import { templateMessages } from '../../packages/plugin-sdk/template/client.mjs'
 
+test('legacy built-in preview URL opens the plugin center with no preview plugin installed', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('hermes_api_key', `test.${btoa(JSON.stringify({ sub: '1', role: 'super_admin' }))}.fixture`)
+    localStorage.setItem('hermes_active_profile_name', 'default')
+  })
+  await page.routeWebSocket('**/socket.io/**', () => {})
+  await page.route(url => url.pathname.startsWith('/api/') || url.pathname === '/health', route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === '/health') return route.fulfill({ json: { status: 'ok' } })
+    if (path === '/api/auth/me') return route.fulfill({ json: { user: { id: 1, username: 'Tester', role: 'super_admin' } } })
+    if (path === '/api/hermes/profiles') return route.fulfill({ json: { profiles: [{ name: 'default', active: true }] } })
+    if (path === '/api/studio/plugins') return route.fulfill({ json: { revision: 1, plugins: [] } })
+    return route.fulfill({ json: {} })
+  })
+  await page.goto('/#/hermes/version-preview')
+  await expect(page).toHaveURL(/#\/studio\/plugins$/)
+})
+
 test('settings entries preserve plugin logos and localized names while legacy packages and old page links remain usable', async ({ page }, testInfo) => {
   const icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aUioAAAAASUVORK5CYII='
   const installed = (id: string, name: string, extra = {}) => ({ manifest: { id, name, description: '旧插件描述', apiVersion: 1, version: '1.0.0', permissions: ['ui'], client: 'client.mjs',
