@@ -1358,10 +1358,10 @@ const pluginError = description => ({ description, content: { 'application/json'
 } } } })
 const pluginAuth = { security: [{ BearerAuth: [] }], tags: ['Coding Agents'] }
 const codingAgentInstall = openapi.paths['/api/coding-agents/{id}/install'].post
-codingAgentInstall.description = 'Install or update a coding agent. DSH candidates use isolated prefixes and must pass ACP compatibility/startup checks before activation. Empty options honor the current pin. Version/rollback options are DSH-only.'
+codingAgentInstall.description = 'Install or update a coding agent. npm-managed agents accept an exact target version or latest. DSH candidates use isolated prefixes and must pass ACP compatibility/startup checks before activation; empty DSH options honor the current pin. Rollback is DSH-only.'
 codingAgentInstall.requestBody = { required: false, content: { 'application/json': { schema: {
   type: 'object', properties: {
-    version: { type: 'string', description: 'DSH exact npm version, or latest to explicitly remove a pin after successful activation.' },
+    version: { type: 'string', description: 'Exact npm version or latest for npm-managed agents. For DSH, latest explicitly removes a pin after successful activation.' },
     rollback: { type: 'boolean', description: 'DSH only: revalidate and restore the previous working graph, then pin it. Mutually exclusive with version.' },
   },
 } } } }

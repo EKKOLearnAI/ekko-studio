@@ -1,7 +1,6 @@
-import type { DshInstallOptions } from './dsh/managed-install'
 import { config } from '../../studio/public/config'
 import { AgentUpdatePolicy } from '../../studio/public/agent-update-policy'
-import { getCodingAgentDefinitions, checkUpdateAgent, installCodingAgent } from './index'
+import { getCodingAgentDefinitions, checkUpdateAgent, installCodingAgent, type CodingAgentInstallOptions } from './index'
 import { codingAgentRunManager } from './runtime/run-manager'
 import { lockAgentUpdate, agentPreparing, agentActivityRevision } from './update-lock'
 const policy = new AgentUpdatePolicy(config.appHome, {
@@ -34,7 +33,7 @@ export async function getAgentUpdateManager():Promise<AgentUpdatePolicy>{
  await started;return policy
 }
 
-export async function installAgentAndPublish(id: string, options: DshInstallOptions = {}) {
+export async function installAgentAndPublish(id: string, options: CodingAgentInstallOptions = {}) {
   await loadPolicy()
   return policy.installAndRefresh(id, async () => {
     const release = lockAgentUpdate(id)
