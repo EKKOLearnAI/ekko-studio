@@ -186,14 +186,105 @@ BOT 业务与 `host.agents` 的执行引擎目录分别归属；创建 BOT 仍�
 ## 插件名称、描述与入口国际化
 
 保留 `name`、`description`、`views[].title` 和可选导航 `title` 的字符串作为旧宿主与旧插件兼容值。
-新版 SDK 项目必须声明 `i18n.en`、`i18n.zh`，包含 `name`、`description`，并用 `views: {viewId: title}` 翻译每个页面。
+新版 SDK 项目必须覆盖 `PLUGIN_LOCALES` 中 Studio 支持的全部语言，逐种提供 `name`、`description`，并用 `views: {viewId: title}` 翻译每个页面。
 独立声明了导航 title 时，还须提供 `navigation: {main?: {viewId: title}, settings?: {viewId: title}}`；省略导航 title 时沿用本语言的页面标题。
 其他语言可按 BCP 47 代码增加，显示按完整语言代码、基础语言、英文、原字符串依次回退。安装目录、插件 ID、视图 ID、数据与权限不随语言变化。
 Studio 的插件中心、详情、页面标题与两类侧栏统一使用这些翻译；插件内容仍须根据 `ctx.locale` 自行国际化，切换语言会重新挂载。
-没有 i18n 的已发布插件仍可安装、启用和更新，原名称、描述、图标与入口保持可用。升级 SDK 时一起补齐翻译；新版项目的 harness:check/prepack 检查为必需项。
+没有 i18n 或只覆盖旧语言集的已发布插件仍可安装、启用和更新，原名称、描述、图标与入口保持可用。升级 SDK 时一起补齐翻译；新版项目的 harness:check/prepack 检查为必需项。
 
 ```json
-{"name":"Version Preview","description":"Preview Studio versions.","i18n":{"en":{"name":"Version Preview","description":"Preview Studio versions.","views":{"preview":"Version Preview"}},"zh":{"name":"版本预览","description":"预览 Studio 版本。","views":{"preview":"版本预览"}}}}
+{
+  "name": "Version Preview",
+  "description": "Preview Studio versions with isolated source, data and services.",
+  "i18n": {
+    "en": {
+      "name": "Version Preview",
+      "description": "Preview Studio versions with isolated source, data and services.",
+      "views": {
+        "preview": "Version Preview"
+      }
+    },
+    "zh": {
+      "name": "版本预览",
+      "description": "独立预览 Studio 版本，自动管理源码、数据目录与运行服务。",
+      "views": {
+        "preview": "版本预览"
+      }
+    },
+    "zh-TW": {
+      "name": "版本預覽",
+      "description": "獨立預覽 Studio 版本，自動管理原始碼、資料目錄與執行服務。",
+      "views": {
+        "preview": "版本預覽"
+      }
+    },
+    "ja": {
+      "name": "バージョンプレビュー",
+      "description": "ソースコード、データ、サービスを分離して Studio の各バージョンをプレビューします。",
+      "views": {
+        "preview": "バージョンプレビュー"
+      }
+    },
+    "ko": {
+      "name": "버전 미리보기",
+      "description": "소스 코드, 데이터 및 서비스를 격리해 Studio 버전을 미리 봅니다.",
+      "views": {
+        "preview": "버전 미리보기"
+      }
+    },
+    "fr": {
+      "name": "Aperçu de version",
+      "description": "Prévisualisez les versions de Studio avec du code source, des données et des services isolés.",
+      "views": {
+        "preview": "Aperçu de version"
+      }
+    },
+    "es": {
+      "name": "Vista previa de versión",
+      "description": "Previsualiza versiones de Studio con código, datos y servicios aislados.",
+      "views": {
+        "preview": "Vista previa de versión"
+      }
+    },
+    "de": {
+      "name": "Versionsvorschau",
+      "description": "Studio-Versionen mit getrenntem Quellcode, eigenen Daten und Diensten in der Vorschau ausführen.",
+      "views": {
+        "preview": "Versionsvorschau"
+      }
+    },
+    "pt": {
+      "name": "Prévia de versão",
+      "description": "Visualize versões do Studio com código-fonte, dados e serviços isolados.",
+      "views": {
+        "preview": "Prévia de versão"
+      }
+    },
+    "ru": {
+      "name": "Предпросмотр версий",
+      "description": "Предварительный просмотр версий Studio с изолированными исходным кодом, данными и службами.",
+      "views": {
+        "preview": "Предпросмотр версий"
+      }
+    },
+    "ar": {
+      "name": "معاينة الإصدار",
+      "description": "عاين إصدارات Studio باستخدام شيفرة مصدرية وبيانات وخدمات معزولة.",
+      "views": {
+        "preview": "معاينة الإصدار"
+      }
+    },
+    "tr": {
+      "name": "Sürüm önizlemesi",
+      "description": "Studio sürümlerini yalıtılmış kaynak kodu, veri ve hizmetlerle önizleyin.",
+      "views": {
+        "preview": "Sürüm önizlemesi"
+      }
+    }
+  }
+}
 ```
 
 插件市场列表支持可选的 i18n 名称/描述元数据，旧目录与旧条目仍显示原字段。修改名称、描述或翻译时也应增加插件版本，使目录同步能够识别新清单。
+
+Studio 与 SDK 共用 `PLUGIN_LOCALES` 语言清单，当前包含 en、zh、zh-TW、ja、ko、fr、es、de、pt、ru、ar、tr 共 12 种。新项目的名称、描述、全部页面和显式导航标题必须逐种提供；缺少任一项即检查失败，不能以英文回退代替翻译。回退仅用于旧插件、旧语言集或未知语言的运行兼容。创建模板同时提供全部语言的描述、设置标题与保存文案。插件文档自动使用 ctx.locale 设置 lang/dir，阿拉伯语为 RTL。

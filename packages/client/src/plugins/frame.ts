@@ -9,6 +9,8 @@ function bootstrap(apiFactory: typeof createHostApi, loadModule: (url: string) =
     if (initialized || event.source !== parent || event.data?.type !== 'studio.plugin.init') return
     initialized = true
     const { channel, source, context, theme } = event.data
+    document.documentElement.lang = context.locale || 'en'
+    document.documentElement.dir = /^ar(?:-|$)/i.test(context.locale || '') ? 'rtl' : 'ltr'
     const pending = new Map<number, { resolve(value: any): void; reject(reason: Error): void }>()
     const listeners = new Map<string, Set<(value: PluginEvent) => void>>()
     const sessions = new Map<string, SessionListener>()

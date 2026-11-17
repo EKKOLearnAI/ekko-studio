@@ -53,7 +53,7 @@ export interface PluginView {
   icon?: string
   order?: number
 }
-/** Localized display metadata. English and Chinese are required for new SDK projects. */
+/** Localized display metadata. Every Studio locale is required for new SDK projects; see PLUGIN_LOCALES. */
 export interface PluginTranslation {
   name: string
   description: string

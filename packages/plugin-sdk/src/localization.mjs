@@ -1,8 +1,10 @@
+export const PLUGIN_LOCALES = Object.freeze(['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'es', 'de', 'pt', 'ru', 'ar', 'tr']);
+
 /** Display metadata is additive: legacy fallback strings remain valid SDK v1. */
 export function validatePluginI18n(manifest, { required = false } = {}) {
   const translations = manifest.i18n;
   if (translations === undefined) {
-    if (required) throw new Error('New plugins require i18n.en and i18n.zh names, descriptions and entry titles');
+    if (required) throw new Error(`New plugins require i18n names, descriptions and entry titles for every Studio locale: ${PLUGIN_LOCALES.join(', ')}`);
     return;
   }
   const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -38,8 +40,8 @@ export function validatePluginI18n(manifest, { required = false } = {}) {
     }
     locales.set(canonical, value);
   }
-  for (const locale of ['en', 'zh']) {
-    const value = locales.get(locale);
+  for (const locale of required ? PLUGIN_LOCALES : []) {
+    const value = locales.get(locale.toLowerCase());
     if (!value) throw new Error(`Plugin i18n requires ${locale} translations`);
     for (const id of views) text(value.views?.[id], `${locale}.views.${id}`);
     for (const slot of ['main', 'settings'])
@@ -67,4 +69,11 @@ export function localizePluginManifest(manifest, locale) {
     }),
   ]));
   return result;
+}
+
+/** Match a complete locale, its base language, then English. */
+export function resolvePluginLocale(locale, available = PLUGIN_LOCALES) {
+  const requested = String(locale || 'en').replaceAll('_', '-').toLowerCase();
+  const locales = new Map(available.map(key => [key.toLowerCase(), key]));
+  return locales.get(requested) || locales.get(requested.split('-')[0]) || locales.get('en') || available[0] || 'en';
 }

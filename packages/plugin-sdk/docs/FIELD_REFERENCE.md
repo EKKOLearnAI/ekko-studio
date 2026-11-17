@@ -103,7 +103,7 @@ ui.selectWorkspace 的 options 仅有可选 current:string，缺省或空字符�
 | server/client | 至少一项，string | 包内相对 .js/.mjs 成品路径，禁止绝对路径及 ..；server 导出 apply，client 导出 mount；安装不构建源码 |
 | permissions | 必填字符串数组，可空 | api.read、api.write、tools、commands、events、hooks、automation、ui、storage.client、agents、browser.cdp、http；旧 capabilities 不接受 |
 | description? | string | 非空，最多 4000 字符 |
-| i18n? | Record<BCP47,PluginTranslation> | 旧插件可省略；新版 SDK 项目必须 en/zh 的 name/description、所有 views 标题及显式导航标题；按完整语言、基础语言、英文、原字符串回退 |
+| i18n? | Record<BCP47,PluginTranslation> | 旧插件可省略；新版 SDK 项目必须 PLUGIN_LOCALES 全部语言的 name/description、所有 views 标题及显式导航标题；按完整语言、基础语言、英文、原字符串回退 |
 | author? | {name:string,url?:string} | name 非空最多 200 字符，url 规则同下 |
 | repository/homepage/documentation/issues/changelog? | string | HTTP(S) URL，无账号密码，最多 2048 字符 |
 | license? | string | 非空最多 200 字符 |
@@ -208,3 +208,5 @@ PluginTranslation 的 `name` 非空最多 160，`description` 非空最多 4000�
 `navigation.main/settings` 是本侧栏已声明 viewId 到非空标题（最多 160）的映射，只在入口独立指定 title 时必需；不改变入口位置或图标。
 最多 32 个语言，拒绝无效或重复 BCP 47 代码、未知字段与不存在的视图/入口引用。SDK `validatePluginI18n(manifest, {required:true})` 用于新项目检查，宿主默认接受无 i18n 的旧插件。
 `localizePluginManifest(manifest, locale)` 返回显示副本；不修改源清单，旧清单原样返回。
+
+PLUGIN_LOCALES 是 Studio 与 SDK 共用的只读语言清单，当前包含 en/zh/zh-TW/ja/ko/fr/es/de/pt/ru/ar/tr。required:true 必须覆盖每一种语言的全部显示字段；默认校验允许旧插件仅提供部分语言，仍拒绝无效字段和引用。resolvePluginLocale(locale, available?) 返回完整语言、基础语言、英文中第一个可用项。

@@ -19,6 +19,7 @@ import { navigationRailKey } from '../../../packages/client/src/composables/useN
 import { usePluginCatalog, pluginPages } from '../../../packages/client/src/composables/usePluginCatalog'
 import { useAppStore } from '../../../packages/client/src/stores/hermes/app'
 import { createRouter, createWebHashHistory, RouterView } from 'vue-router'
+import { loadLocaleMessages, type SupportedLocale } from '../../../packages/client/src/i18n/messages'
 import zh from '../../../packages/client/src/i18n/locales/zh'
 import en from '../../../packages/client/src/i18n/locales/en'
 import { useTheme } from '../../../packages/client/src/composables/useTheme'
@@ -38,10 +39,10 @@ const router = createRouter({ history: createWebHashHistory(), routes: [
   ...['person', 'chat', 'groupChat', 'workflow', 'history', 'connections', 'agentManager', 'models', 'usage', 'apiRelay', 'settings', 'logs', 'performance', 'skillsUsage', 'theme', 'petdex', 'profiles'].map(name => ({ path: '/hermes/' + name, name: 'hermes.' + name, component: name === 'agentManager' ? PluginAgentsPanel : placeholder })),
 ] })
 const pinia = createPinia()
-const fixtureI18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } })
+const fixtureI18n = createI18n({ legacy: false, locale: 'zh', messages: { zh, en } as Record<string, any> })
 await theme.setBrightness('light')
 ;(window as any).pluginFixture = { route: () => router.currentRoute.value.fullPath, navigate: (path: string) => router.push(path),
-  locale(value: 'zh' | 'en') { fixtureI18n.global.locale.value = value },
+  async locale(value: SupportedLocale) { fixtureI18n.global.setLocaleMessage(value, await loadLocaleMessages(value)); fixtureI18n.global.locale.value = value; document.documentElement.lang = value; document.documentElement.dir = value === 'ar' ? 'rtl' : 'ltr' },
   profile(name: string) { useProfilesStore(pinia).activeProfileName = name; localStorage.setItem('hermes_active_profile_name', name) }, changed() { window.dispatchEvent(new Event('studio.plugins.changed')) },
   account(id: number, role: string) { localStorage.setItem('plugin_fixture_account', JSON.stringify({ sub: String(id), role })); location.reload() },
   appearance: theme.previewThemeSettings,

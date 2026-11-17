@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { resolve } from 'node:path'
+import { PLUGIN_LOCALES } from '../../packages/plugin-sdk/src/localization.mjs'
+import { templateMessages } from '../../packages/plugin-sdk/template/client.mjs'
 
 test('settings entries preserve plugin logos and localized names while legacy packages and old page links remain usable', async ({ page }, testInfo) => {
   const icon = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aUioAAAAASUVORK5CYII='
@@ -9,6 +11,11 @@ test('settings entries preserve plugin logos and localized names while legacy pa
   const preview = installed('version-preview', 'Version Preview', { description: 'Preview Studio versions.', icon,
     i18n: { en: { name: 'Version Preview', description: 'Preview Studio versions.', views: { preview: 'Version Preview' } },
       zh: { name: '版本预览', description: '预览 Studio 版本。', views: { preview: '版本预览' } } } })
+  const displayNames = { 'zh-TW': '版本預覽', ja: 'バージョンプレビュー', ko: '버전 미리보기', fr: 'Aperçu de version', es: 'Vista previa de versión', de: 'Versionsvorschau', pt: 'Prévia de versão', ru: 'Предпросмотр версий', ar: 'معاينة الإصدار', tr: 'Sürüm önizlemesi' }
+  for (const locale of PLUGIN_LOCALES) if (!preview.manifest.i18n[locale]) {
+    const labels = templateMessages[locale]
+    preview.manifest.i18n[locale] = { name: displayNames[locale], description: labels.description.replaceAll('{id}', 'preview'), views: { preview: displayNames[locale] } }
+  }
   const legacy = installed('legacy', '旧插件固定名称')
   await page.routeWebSocket('**/socket.io/**', () => {})
   await page.route(url => url.pathname.startsWith('/api/') || url.pathname === '/health', route => {
@@ -43,6 +50,17 @@ test('settings entries preserve plugin logos and localized names while legacy pa
   await expect(page.locator('.workspace-heading h2')).toHaveText('Version Preview')
   await expect(page.frameLocator('.plugin-workspace iframe').locator('#root')).toHaveText('Plugin preview content')
   await page.screenshot({ path: testInfo.outputPath('settings-en.png') })
+  for (const locale of PLUGIN_LOCALES) {
+    await page.evaluate(locale => (window as any).pluginFixture.locale(locale), locale)
+    await expect(sidebar.getByRole('link', { name: preview.manifest.i18n[locale].name, exact: true })).toBeVisible()
+    await expect(page.locator('.workspace-heading h2')).toHaveText(preview.manifest.i18n[locale].name)
+    await expect(page.frameLocator('.plugin-workspace iframe').locator('html')).toHaveAttribute('lang', locale)
+    await expect(page.frameLocator('.plugin-workspace iframe').locator('html')).toHaveAttribute('dir', locale === 'ar' ? 'rtl' : 'ltr')
+    await page.evaluate(() => (window as any).pluginFixture.navigate('/studio/plugins'))
+    await expect(page.getByTestId('plugin-card-version-preview').locator('.card-description')).toHaveText(preview.manifest.i18n[locale].description)
+    await page.evaluate(() => (window as any).pluginFixture.navigate('/studio/plugin-settings/version-preview/preview'))
+  }
+  await page.evaluate(() => (window as any).pluginFixture.locale('en'))
   await page.evaluate(() => (window as any).pluginFixture.navigate('/studio/plugins'))
   await expect(page.locator('.card-description').filter({ hasText: 'Preview Studio versions.' })).toBeVisible()
   await expect(page.locator('.card-description').filter({ hasText: '旧插件描述' })).toBeVisible()

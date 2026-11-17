@@ -13,4 +13,4 @@ docs/FIELD_REFERENCE.md、docs/HOST_API.md、docs/DEVELOPMENT.md 和 docs/CONTRA
 - 使用真实 run.identity 分区数据；登记资源清理并响应 signal。
 - UI、工具及 Agent 使用已声明的 Studio 通道；不依赖宿主源码、数据库或登录凭证。
 
-- 新版插件必须提供 i18n.en / i18n.zh 的名称、描述、页面及显式导航标题；界面按 ctx.locale 国际化。保留 fallback 字符串及稳定 ID，升级 SDK 时补齐翻译。
+- 新版插件必须在 manifest.i18n 中为 PLUGIN_LOCALES 列出的每种语言提供名称、描述、页面及显式导航标题；界面按 ctx.locale 国际化。保留 fallback 字符串及稳定 ID，升级 SDK 时补齐翻译。

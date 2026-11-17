@@ -36,4 +36,4 @@ Studio 提供的指南由 Studio 主仓库维护；升级 SDK 时一起更新这
 docs/SDK-LICENSE 与 docs/SDK-NOTICE 保留指南的许可文本与署名。
 本项目业务代码的许可由插件作者自行选择，SDK 的 MIT 许可不改变 Studio 核心的许可。
 
-插件名称、描述和每个入口标题必须在 plugin.json 的 i18n.en / i18n.zh 中填写。界面按 ctx.locale 切换语言，缺少其他语言时回退英文；不要用“中文 / English”拼接名称。旧清单字符串保留作兼容回退。
+插件名称、描述和每个入口标题必须在 plugin.json 的 i18n 中按 PLUGIN_LOCALES 列出的全部 Studio 语言填写。界面按 ctx.locale 切换语言；新项目缺少任意 Studio 语言将检查失败，回退仅用于旧插件或未知语言；不要用“中文 / English”拼接名称。旧清单字符串保留作兼容回退。
