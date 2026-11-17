@@ -485,10 +485,12 @@ export async function fetchProviderCatalogForTest(baseUrl: string, apiKey: strin
       }
       let body: any
       try { body = JSON.parse(text) } catch { throw new ProviderEditorError('Provider returned invalid JSON', 422, 'PROVIDER_TEST_FAILED') }
-      const rawModels = endpoint.protocol === 'gemini' ? body?.models : body?.data
+      const rawModels = endpoint.protocol === 'gemini'
+        ? body?.models
+        : Array.isArray(body?.data) ? body.data : body?.models
       if (!Array.isArray(rawModels)) throw new ProviderEditorError('Provider returned an unsupported model catalog', 422, 'PROVIDER_TEST_FAILED')
       if (rawModels.length > PROVIDER_TEST_MAX_MODELS) throw new ProviderEditorError('Provider returned more than 10,000 models', 422, 'PROVIDER_MODEL_LIMIT_EXCEEDED')
-      const models = rawModels.map((item: any) => String(item?.id || item?.name || '').replace(/^models\//, '').trim()).filter(Boolean)
+      const models = rawModels.map((item: any) => String(item?.id || item?.slug || item?.name || '').replace(/^models\//, '').trim()).filter(Boolean)
       if (models.length === 0) throw new ProviderEditorError('Provider returned an empty model catalog', 422, 'PROVIDER_EMPTY_CATALOG')
       return [...new Set(models)]
     }

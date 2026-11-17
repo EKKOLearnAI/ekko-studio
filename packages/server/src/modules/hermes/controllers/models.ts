@@ -1102,15 +1102,16 @@ export async function fetchProviderModelList(ctx: any) {
       return
     }
 
-    const data = await res.json() as { data?: Array<{ id?: unknown }> }
-    if (!Array.isArray(data.data)) {
+    const data = await res.json() as { data?: Array<{ id?: unknown; slug?: unknown }>; models?: Array<{ id?: unknown; slug?: unknown }> }
+    const rawModels = Array.isArray(data?.data) ? data.data : data?.models
+    if (!Array.isArray(rawModels)) {
       ctx.status = 502
       ctx.body = { error: 'Provider returned unexpected format' }
       return
     }
 
-    let models = data.data
-      .map(m => String(m?.id || '').trim())
+    let models = rawModels
+      .map(m => String(m?.id || m?.slug || '').trim())
       .filter(Boolean)
     if (freeOnly) models = models.filter(m => m.endsWith(':free'))
     const uniqueModels = Array.from(new Set(models)).sort()
