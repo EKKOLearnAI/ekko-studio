@@ -73,9 +73,12 @@ it('does not erase a newer question when an old response completes late', async 
   expect(store.activePendingClarify?.clarifyId).toBe('new-question')
 })
 
-it('removes an expired Hermes question instead of leaving a phantom prompt', () => {
+it.each([
+  { reason: 'timed_out' },
+  { error: "'unknown clarify request: question'" },
+])('removes an expired Hermes question (%j)', detail => {
   const { store, receive } = setup('session')
-  receive({ event: 'clarify.resolved', session_id: 'session', clarify_id: 'question', resolved: false, reason: 'timed_out' })
+  receive({ event: 'clarify.resolved', session_id: 'session', clarify_id: 'question', resolved: false, ...detail })
   expect(store.activePendingClarify).toBeNull()
 })
 

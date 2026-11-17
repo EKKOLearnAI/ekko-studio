@@ -41,6 +41,7 @@ export function formatPendingInteractionTime(remainingMs: number): string {
 
 export function isPendingInteractionExpiredError(error: unknown): boolean {
   const message = String(error instanceof Error ? error.message : error || '').toLowerCase()
+  if (message.includes('unknown clarify request')) return true
   const interaction = message.includes('approval') || message.includes('clarification')
   return interaction && (message.includes('timed out')
     || message.includes('expired')
