@@ -155,6 +155,13 @@ directory. Additional OAuth identities have Provider-owned `credentials/` slots.
 The `profiles/` directory holds source backups, import/projection metadata and
 runtime model selections; it does not partition the live Provider pool.
 
+Refreshing one Provider resolves only its own credentials. A global refresh skips
+unavailable grants and keeps the last working catalog when a probe fails. Live
+catalogs and their restore snapshots are shared across Profiles, and catalog
+changes update the Hermes gateway projection. Removing a Provider clears its
+account record, catalog and runtime selections; credentials still referenced by
+another Provider are retained. Source backups and other accounts are unchanged.
+
 Session and message tables, history formats and session IDs are unchanged.
 Stored logical Provider IDs and gateway-qualified selections are resolved to the
 retained Provider when continuing a session; migration does not rewrite message

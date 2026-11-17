@@ -20,6 +20,13 @@ import { refreshProviderModels, restoreProviderModels } from '../services/provid
 import { appendProviderAuditEvent } from '../../studio/public/provider-audit'
 import { invalidateProviderRuntime } from '../../studio/public/provider-runtime'
 import { clearClaudeOAuthCredentials } from '../services/providers/clear-claude-oauth'
+import { removeAccountProvider } from '../../studio/public/provider-management'
+import { readConfigYamlForProfile } from '../../studio/public/provider-config'
+import { providerProfiles } from '../../studio/public/provider-account'
+
+function invalidateAccountProvider(providerId: string): void {
+  for (const profile of providerProfiles()) invalidateProviderRuntime(profile, providerId)
+}
 
 const OPTIONAL_API_KEY_PROVIDERS = new Set(['cliproxyapi', 'xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth'])
 const DIRECT_CONFIG_PROVIDERS = new Set(['xai-oauth', 'openai-codex', 'claude-oauth', 'minimax-oauth'])
@@ -185,7 +192,7 @@ export async function patchEditor(ctx: any) {
       expectedRevision(ctx),
     )
     if (result.changed.some(field => field === 'api_key_replaced' || field === 'api_key_cleared' || field === 'base_url' || field === 'api_mode')) {
-      invalidateProviderRuntime(profile, providerId)
+      invalidateAccountProvider(providerId)
     }
     setRevisionHeader(ctx, result.detail.revision)
     appendAuditSafely({
@@ -408,6 +415,7 @@ export async function create(ctx: any) {
       delete config.model.api_key
       return config
     })
+    invalidateAccountProvider(poolKey)
     // TODO: Test if provider works without gateway restart
     // try { await hermesCli.restartGateway() } catch (e: any) { logger.error(e, 'Gateway restart failed') }
     ctx.body = { success: true }
@@ -424,6 +432,19 @@ export async function update(ctx: any) {
   const customApiMode = normalizeApiMode(api_mode)
   try {
     const profile = requestedProfile(ctx)
+    if ((await readConfigYamlForProfile(profile)).studio_provider_pool === 2) {
+      const before = await getProviderEditorDetail(profile, poolKey)
+      await updateProviderEditorDetail(profile, poolKey, {
+        ...(name !== undefined ? { label: name } : {}),
+        ...(base_url !== undefined ? { base_url } : {}),
+        ...(model !== undefined ? { preferred_model: model } : {}),
+        ...(api_mode !== undefined ? { api_mode } : {}),
+        ...(api_key !== undefined ? { credential_action: api_key ? 'replace' : 'clear', api_key } : {}),
+      }, before.revision)
+      invalidateAccountProvider(poolKey)
+      ctx.body = { success: true }
+      return
+    }
     const isCustom = poolKey.startsWith('custom:')
     if (isCustom) {
       const found = await updateConfigYamlForProfile(profile, (config) => {
@@ -467,6 +488,15 @@ export async function remove(ctx: any) {
   const requestedProviderKey = typeof query?.providerKey === 'string' ? query.providerKey.trim() : ''
   try {
     const profile = requestedProfile(ctx)
+    const accountRemoved = await removeAccountProvider(profile, poolKey)
+    if (accountRemoved !== null) {
+      if (!accountRemoved) {
+        ctx.status = 404; ctx.body = { error: `Provider "${poolKey}" not found` }; return
+      }
+      invalidateAccountProvider(poolKey)
+      ctx.body = { success: true }
+      return
+    }
     const isCustom = poolKey.startsWith('custom:')
     const removed = await updateConfigYamlForProfile(profile, async (config) => {
       if (isCustom) {
@@ -529,6 +559,6 @@ export async function remove(ctx: any) {
     // try { await hermesCli.restartGateway() } catch (e: any) { logger.error(e, 'Gateway restart failed') }
     ctx.body = { success: true }
   } catch (err: any) {
-    ctx.status = 500; ctx.body = { error: err.message }
+    ctx.status = err.status === 409 ? 409 : 500; ctx.body = { error: err.message }
   }
 }

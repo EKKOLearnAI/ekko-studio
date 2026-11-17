@@ -245,7 +245,7 @@ function credentialInfo(
   }
   const normalized = normalizeCustomProviderEntry(source.configEntry, source.sourceKey || '', source.source === 'providers' ? 'providers' : 'custom_providers')
   const envKey = normalized?.key_env
-  const value = envKey ? env.get(envKey) || '' : String(normalized?.api_key || '')
+  const value = String(normalized?.api_key || '') || (envKey ? env.get(envKey) || '' : '')
   return { configured: !!value.trim(), value, ...(envKey ? { envKey } : {}) }
 }
 
@@ -270,10 +270,12 @@ function editableFields(source: ProviderSource): ProviderEditableField[] {
   return fields
 }
 
-export function providerEditorCapabilities(providerId: string): {
+export function providerEditorCapabilities(providerId: string, config?: Record<string, any>): {
   editable: boolean
   editable_fields: ProviderEditableField[]
 } {
+  const source = config && findSource(config, providerId)
+  if (source && !source.configEntry?.auth_provider) return { editable: true, editable_fields: editableFields(source) }
   if (providerId.startsWith('custom:')) {
     return { editable: true, editable_fields: [...CUSTOM_PROVIDER_EDITABLE_FIELDS] }
   }
@@ -723,10 +725,16 @@ export async function updateProviderEditorDetail(
       }
       if (source.source === 'builtin_env') {
         env = updateEnv(env, source.envMapping!.api_key_env, credentialAction === 'replace' ? apiKey : undefined)
+      } else if (config.studio_provider_pool === 2) {
+        // Imported environment keys can be shared by several records. Detach
+        // this record instead of modifying another Provider's credential.
+        deleteAliases(source.configEntry!, ['key_env', 'api_key_env', 'keyEnv', 'apiKeyEnv', 'api_key', 'apiKey'])
+        if (credentialAction === 'replace') source.configEntry!.api_key = apiKey
       } else {
         const normalized = normalizeCustomProviderEntry(source.configEntry, source.sourceKey || '', source.source === 'providers' ? 'providers' : 'custom_providers')
         if (normalized?.key_env) {
           env = updateEnv(env, normalized.key_env, credentialAction === 'replace' ? apiKey : undefined)
+          deleteAliases(source.configEntry!, ['api_key', 'apiKey'])
         } else if (credentialAction === 'replace') {
           setExistingAlias(source.configEntry!, ['api_key', 'apiKey'], apiKey, 'api_key')
         } else {
@@ -734,7 +742,7 @@ export async function updateProviderEditorDetail(
         }
       }
     }
-    syncAuthMetadata(auth, source, providerId, baseUrl, credentialAction, apiKey)
+    if (config.studio_provider_pool !== 2) syncAuthMetadata(auth, source, providerId, baseUrl, credentialAction, apiKey)
     try { assertUniqueProviderNames(config, appConfig.providerLabels?.[preferenceScope]) }
     catch (error: any) { throw new ProviderEditorError(error.message, 409, 'DUPLICATE_PROVIDER_NAME') }
 
