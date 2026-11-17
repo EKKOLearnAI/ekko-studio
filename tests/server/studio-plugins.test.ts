@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
@@ -34,6 +34,24 @@ async function source(dir: string, version = '1.0.0', code = server) {
 afterEach(async () => { for (const manager of managers.splice(0)) await manager.close(); for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }); vi.useRealTimers() })
 
 describe('Studio plugin host', () => {
+  it('keeps only current and rollback packages through updates and uninstall', async () => {
+    const root = await home()
+    const manager = new PluginManager(root, ports())
+    managers.push(manager)
+    const project = await source(root)
+    await manager.install(who, project, 0)
+    const versions = join(manager.store.directory(), 'versions')
+    await manager.install(who, project, 1, 'notes')
+    await manager.install(who, project, 2, 'notes')
+    const retained = await readdir(versions)
+    expect(retained).toHaveLength(2)
+    await manager.update(who, 'notes', 3, { action: 'rollback' })
+    expect((await readdir(versions)).sort()).toEqual(retained.sort())
+    await manager.update(who, 'notes', 4, { action: 'uninstall' })
+    expect(await readdir(versions)).toEqual([])
+    expect(await readFile(join(project, 'server.mjs'), 'utf8')).toBe(server)
+  })
+
   it('reports a deleted package as unavailable and allows uninstalling the stale record', async () => {
     const dir = await home(), manager = new PluginManager(dir, ports()); managers.push(manager)
     const project = await source(dir)
