@@ -279,7 +279,7 @@ const router = createRouter({
     },
     {
       path: '/hermes/version-preview',
-      redirect: { name: 'studio.pluginSettings', params: { pluginId: 'version-preview', viewId: 'preview' } },
+      redirect: { name: 'studio.plugins' },
     },
     {
       path: '/hermes/mcp',
