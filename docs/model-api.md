@@ -141,6 +141,14 @@ an inserted `/v1`. The gateway applies Codex's native streaming-only, `store=fal
 request policy and omits unsupported sampling/output-limit fields. JSON callers
 receive the collected terminal Responses object from that upstream stream.
 
+When Chat Completions thinking models are exposed through Responses, the gateway
+seals their reasoning text in `encrypted_content` for clients such as Hermes to
+retain and replay. The gateway restores that text for subsequent tool calls;
+DeepSeek-compatible history without captured reasoning receives a non-empty
+placeholder. Upstream SSE keep-alive comments become `response.in_progress`
+events so Responses clients can observe an active connection during inference
+queues or long thinking pauses.
+
 ## Provider ownership and migration
 
 On the authenticated user's first access, Studio imports all accessible Profiles

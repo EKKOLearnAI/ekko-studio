@@ -587,7 +587,12 @@ function inlineReasoningText(item: any): string {
   return ''
 }
 
-function responsesReasoningText(item: any): string {
+function responsesReasoningText(item: any, target: ResponsesAdapterTarget): string {
+  if (item?.encrypted_content && target.reasoningCodec) {
+    // Responses clients retain opaque reasoning for replay; summaries may be
+    // omitted or shortened. A foreign target's envelope must not be replayed.
+    return target.reasoningCodec.decode(item.encrypted_content)?.text || ''
+  }
   const inline = inlineReasoningText(item)
   if (inline) return inline
 
@@ -632,10 +637,10 @@ function responsesInputToChatMessages(body: any, target: ResponsesAdapterTarget)
       messages.push({
         role: 'assistant',
         content: null,
-        // Synthetic/replayed tool calls may have no reasoning item. Keep the
-        // required field present, matching Ekko's Chat Completions adapter.
+        // Older/replayed tool calls may have no reasoning item. DeepSeek
+        // rejects an empty string, so retain its non-empty history fallback.
         ...(preserveReasoningContent
-          ? { reasoning_content: pendingReasoning }
+          ? { reasoning_content: pendingReasoning || ' ' }
           : {}),
         tool_calls: pendingToolCalls,
       })
@@ -669,7 +674,7 @@ function responsesInputToChatMessages(body: any, target: ResponsesAdapterTarget)
     if (!item || typeof item !== 'object') continue
     if (item.type === 'reasoning') {
       flushCompletedToolCalls()
-      const reasoning = responsesReasoningText(item)
+      const reasoning = responsesReasoningText(item, target)
       if (reasoning.startsWith(pendingReasoning)) pendingReasoning = reasoning
       else if (reasoning && !pendingReasoning.endsWith(reasoning)) pendingReasoning += reasoning
       continue
@@ -707,10 +712,13 @@ function responsesInputToChatMessages(body: any, target: ResponsesAdapterTarget)
         role,
         content: responseContentToOpenAiChat(item.content),
         ...(role === 'assistant' && preserveReasoningContent
-          ? { reasoning_content: inlineReasoningText(item) || pendingReasoning }
+          ? { reasoning_content: inlineReasoningText(item) || pendingReasoning || ' ' }
           : {}),
       })
-      pendingReasoning = ''
+      // Hermes may put an empty assistant message between the reasoning item
+      // and its function calls. Keep the same turn's reasoning until the tool
+      // group or a non-assistant message closes it.
+      pendingReasoning = role === 'assistant' ? inlineReasoningText(item) || pendingReasoning : ''
     }
   }
   flushCompletedToolCalls()
@@ -969,6 +977,7 @@ export function openAiChatToResponses(data: any, target: ResponsesAdapterTarget)
       type: 'reasoning',
       id: `rs_${responseId(data)}`,
       summary: [{ type: 'summary_text', text: reasoningText }],
+      ...(target.reasoningCodec ? { encrypted_content: target.reasoningCodec.encode({ text: reasoningText }) } : {}),
     })
   }
 
