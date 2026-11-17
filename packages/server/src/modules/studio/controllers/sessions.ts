@@ -81,10 +81,11 @@ import {
 } from '../services/workspace/manager'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { getMessageSelectionGroups } from '../public/sessions'
-import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
-import { buildFileContentHeaders, getFilePreviewDescriptor } from '../services/files/file-preview'
+import { isSensitivePath, MAX_EDIT_SIZE } from '../services/files/file-policy'
+import { fileContent, statIfPresent, renameWithoutOverwrite } from '../services/files/file-operations'
+import { serveWorkspaceFile } from '../services/files/file-preview'
 import { decorateWorkspaceEntries, getWorkspaceFileGitDiff } from '../services/files/workspace-git-status'
-import { copyFile, mkdir, readFile, readdir, rename as fsRename, rm as fsRm, stat as fsStat, writeFile } from 'fs/promises'
+import { copyFile, mkdir, readFile, readdir, rm as fsRm, stat as fsStat, writeFile } from 'fs/promises'
 import { normalize as pathNormalize, resolve as pathResolve } from 'path'
 
 function getPendingDeletedSessionIds(): Set<string> {
@@ -907,7 +908,7 @@ async function resolveSessionPreviewFile(ctx: any, pathValue: unknown) {
 function handleWorkspaceFileError(ctx: any, err: any): void {
   if (err?.handled) return
   const status = Number(err?.status || 0)
-  ctx.status = status >= 400 ? status : err?.code === 'ENOENT' ? 404 : 500
+  ctx.status = status >= 400 ? status : err?.code === 'ENOENT' ? 404 : err?.code === 'EEXIST' ? 409 : 500
   ctx.body = { error: err?.message || 'Failed to access workspace file', code: err?.code || 'workspace_file_error' }
 }
 
@@ -928,9 +929,10 @@ export async function listWorkspaceFiles(ctx: any) {
         return entry
       } catch { return null }
     }))).filter((entry): entry is typeof entries[number] => entry !== null) : entries
-    const mapped = await Promise.all(visibleEntries.map(async entry => {
+    const mapped = (await Promise.all(visibleEntries.map(async entry => {
       const entryFullPath = pathResolve(fullPath, entry.name)
-      const stat = await fsStat(entryFullPath)
+      const stat = await statIfPresent(entryFullPath)
+      if (!stat) return null
       return {
         name: entry.name,
         path: workspaceRelativePath(workspace, entryFullPath),
@@ -939,7 +941,7 @@ export async function listWorkspaceFiles(ctx: any) {
         size: stat.size,
         modTime: stat.mtime.toISOString(),
       }
-    }))
+    }))).filter(entry => entry !== null)
     mapped.sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
       return a.name.localeCompare(b.name)
@@ -995,55 +997,16 @@ export async function diffWorkspaceFile(ctx: any) {
 export async function readWorkspaceFileContent(ctx: any) {
   try {
     const { relativePath, fullPath } = await resolveSessionPreviewFile(ctx, ctx.query.path)
-    const info = await fsStat(fullPath)
-    if (!info.isFile()) {
-      ctx.status = 400
-      ctx.body = { error: 'Not a file', code: 'not_a_file' }
-      return
-    }
-
-    const download = String(ctx.query?.download || '') === '1'
-    const textPreview = String(ctx.query?.text || '') === '1'
-    const descriptor = getFilePreviewDescriptor(relativePath)
-    if (!download && !textPreview && !descriptor) {
-      ctx.status = 415
-      ctx.body = { error: 'File type is not supported for preview', code: 'unsupported_preview' }
-      return
-    }
-    const maxBytes = download ? MAX_DOWNLOAD_SIZE : textPreview ? MAX_EDIT_SIZE : descriptor!.maxBytes
-    if (info.size > maxBytes) {
-      ctx.status = 413
-      ctx.body = {
-        error: download ? 'File too large to download' : 'File too large to preview',
-        code: 'file_too_large',
-      }
-      return
-    }
-
-    const data = await readFile(fullPath)
-    if (data.length > maxBytes) {
-      ctx.status = 413
-      ctx.body = {
-        error: download ? 'File too large to download' : 'File too large to preview',
-        code: 'file_too_large',
-      }
-      return
-    }
-    const headers = buildFileContentHeaders({
-      fileName: relativePath,
-      mime: textPreview ? 'text/plain; charset=utf-8' : descriptor?.mime || 'application/octet-stream',
-      size: data.length,
-      download,
-    })
-    for (const [name, value] of Object.entries(headers)) ctx.set(name, value)
-    ctx.body = data
+    const download = ctx.query?.download === '1'
+    const text = ctx.query?.text === '1'
+    await serveWorkspaceFile(ctx, fullPath, relativePath, download, text)
   } catch (err: any) {
     handleWorkspaceFileError(ctx, err)
   }
 }
 
 export async function writeWorkspaceFile(ctx: any) {
-  const body = ctx.request.body as { path?: unknown; content?: unknown }
+  const body = ctx.request.body as { path?: unknown; content?: unknown; createOnly?: boolean }
   try {
     const { relativePath, fullPath } = await resolveSessionWorkspaceFile(ctx, body?.path)
     if (isSensitivePath(relativePath)) {
@@ -1051,14 +1014,13 @@ export async function writeWorkspaceFile(ctx: any) {
       ctx.body = { error: 'Cannot modify sensitive file', code: 'permission_denied' }
       return
     }
-    const content = typeof body?.content === 'string' ? body.content : ''
-    const data = Buffer.from(content, 'utf-8')
+    const data = fileContent(body?.content)
     if (data.length > MAX_EDIT_SIZE) {
       ctx.status = 413
       ctx.body = { error: 'Content too large', code: 'file_too_large' }
       return
     }
-    await writeFile(fullPath, data)
+    await writeFile(fullPath, data, { flag: body?.createOnly === true ? 'wx' : 'w' })
     ctx.body = { ok: true, path: relativePath }
   } catch (err: any) {
     handleWorkspaceFileError(ctx, err)
@@ -1107,7 +1069,7 @@ export async function renameWorkspaceFile(ctx: any) {
       ctx.body = { error: 'Cannot rename sensitive file', code: 'permission_denied' }
       return
     }
-    await fsRename(oldTarget.fullPath, newTarget.fullPath)
+    await renameWithoutOverwrite(oldTarget.fullPath, newTarget.fullPath)
     ctx.body = { ok: true }
   } catch (err: any) {
     handleWorkspaceFileError(ctx, err)
@@ -2140,7 +2102,7 @@ export async function createWorkspaceFolder(ctx: any) {
 
 export async function renameWorkspaceFolder(ctx: any) {
   const { dirname, join } = await import('path')
-  const { rename, stat } = await import('fs/promises')
+  const { stat } = await import('fs/promises')
   const { path, name } = ctx.request.body as { path?: string; name?: string }
   const folderName = String(name || '').trim()
   const currentPath = String(path || '').trim()
@@ -2178,7 +2140,7 @@ export async function renameWorkspaceFolder(ctx: any) {
       ctx.body = { error: 'Path is not a directory' }
       return
     }
-    await fsRename(resolvedCurrent.fullPath, targetPath)
+    await renameWithoutOverwrite(resolvedCurrent.fullPath, targetPath)
     ctx.body = { ok: true }
   } catch (err: any) {
     ctx.status = err?.code === 'EEXIST' ? 409 : err?.code === 'ENOENT' ? 404 : 500

@@ -96,6 +96,7 @@ async function loadFromRoute() {
   try {
     await ensureProfilesLoaded()
 
+    if (generation !== loadGeneration) return
     const profile = scopedProfile.value
     const filePath = routeFilePath.value
     const directoryPath = filePath
@@ -110,7 +111,7 @@ async function loadFromRoute() {
       })
     }
 
-    if (filePath) {
+    if (generation === loadGeneration && filePath) {
       await filesStore.openEditor(filePath, { profile })
     }
   } finally {
@@ -158,7 +159,7 @@ watch(
       </div>
       </PageHeader>
       <div class="profile-config-editor-content">
-        <FileEditor v-if="filesStore.editingFile" :custom-close="closeProfileConfigEditor" />
+        <FileEditor v-if="filesStore.editingFile?.profile === scopedProfile && filesStore.editingFile.path === routeFilePath" :custom-close="closeProfileConfigEditor" />
       </div>
     </template>
     <FilePreview v-else-if="filesStore.previewFile" />

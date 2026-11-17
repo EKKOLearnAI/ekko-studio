@@ -43,10 +43,10 @@ export async function readFile(path: string, profile?: string | null): Promise<{
   return request<{ content: string; path: string; size: number }>(`/api/studio/files/read?${params.toString()}`)
 }
 
-export async function writeFile(path: string, content: string, profile?: string | null): Promise<void> {
+export async function writeFile(path: string, content: string, profile?: string | null, createOnly = false): Promise<void> {
   await request<{ ok: boolean }>('/api/studio/files/write', {
     method: 'PUT',
-    body: JSON.stringify({ path, content, profile: normalizeProfile(profile) || undefined }),
+    body: JSON.stringify({ path, content, createOnly: createOnly || undefined, profile: normalizeProfile(profile) || undefined }),
   })
 }
 

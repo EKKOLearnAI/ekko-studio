@@ -38,6 +38,7 @@ export class AppUploadError extends Error {
   }
 }
 
+const opening = new Set<string>()
 const sessions = new Map<string, AppUploadSession>()
 
 export async function openAppUpload(input: {
@@ -51,7 +52,7 @@ export async function openAppUpload(input: {
 }): Promise<{ id: string; nextOffset: number; maxChunkBytes: number }> {
   const id = String(input.id || '').trim()
   if (!UPLOAD_ID_PATTERN.test(id)) throw new AppUploadError('invalid_upload_id', 'Invalid upload id')
-  if (sessions.has(id)) throw new AppUploadError('upload_exists', 'Upload id is already active', 409)
+  if (opening.has(id) || sessions.has(id)) throw new AppUploadError('upload_exists', 'Upload id is already active', 409)
   const name = safeDisplayName(input.name)
   const size = Number(input.size)
   if (!Number.isSafeInteger(size) || size < 0) throw new AppUploadError('invalid_upload_size', 'Invalid upload size')
@@ -59,29 +60,34 @@ export async function openAppUpload(input: {
     throw new AppUploadError('upload_too_large', 'File is too large (max 50MB)', 413)
   }
 
-  const uploadDir = input.uploadDir || getProfileUploadDir(input.profile)
-  await mkdir(uploadDir, { recursive: true })
-  const extension = safeExtension(name)
-  const storageId = randomBytes(12).toString('hex')
-  const partPath = join(uploadDir, `.${storageId}.app-upload-part`)
-  const savedPath = join(uploadDir, `${storageId}${extension}`)
-  await writeFile(partPath, new Uint8Array(), { flag: 'wx' })
-  const session: AppUploadSession = {
-    id,
-    owner: input.owner,
-    profile: input.profile,
-    name,
-    size,
-    receivedBytes: 0,
-    partPath,
-    savedPath,
-    timer: setTimeout(() => undefined, 1),
-    writing: false,
+  opening.add(id)
+  try {
+    const uploadDir = input.uploadDir || getProfileUploadDir(input.profile)
+    await mkdir(uploadDir, { recursive: true })
+    const extension = safeExtension(name)
+    const storageId = randomBytes(12).toString('hex')
+    const partPath = join(uploadDir, `.${storageId}.app-upload-part`)
+    const savedPath = join(uploadDir, `${storageId}${extension}`)
+    await writeFile(partPath, new Uint8Array(), { flag: 'wx' })
+    const session: AppUploadSession = {
+      id,
+      owner: input.owner,
+      profile: input.profile,
+      name,
+      size,
+      receivedBytes: 0,
+      partPath,
+      savedPath,
+      timer: setTimeout(() => undefined, 1),
+      writing: false,
+    }
+    clearTimeout(session.timer)
+    session.timer = expiryTimer(session)
+    sessions.set(id, session)
+    return { id, nextOffset: 0, maxChunkBytes: APP_UPLOAD_CHUNK_BYTES }
+  } finally {
+    opening.delete(id)
   }
-  clearTimeout(session.timer)
-  session.timer = expiryTimer(session)
-  sessions.set(id, session)
-  return { id, nextOffset: 0, maxChunkBytes: APP_UPLOAD_CHUNK_BYTES }
 }
 
 export async function appendAppUploadChunk(input: {

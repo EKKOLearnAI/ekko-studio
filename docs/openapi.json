@@ -14104,6 +14104,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The destination already exists."
           }
         },
         "requestBody": {
@@ -14224,6 +14227,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "A file or directory already exists at this path."
           }
         },
         "requestBody": {
@@ -14236,12 +14242,18 @@
                   "content": {
                     "type": "string"
                   },
+                  "createOnly": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Reject an existing destination instead of editing it."
+                  },
                   "path": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "path"
+                  "path",
+                  "content"
                 ]
               }
             }
@@ -17023,7 +17035,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "boolean"
+              "type": "boolean",
+              "enum": [
+                "1"
+              ]
             }
           },
           {
@@ -17039,7 +17054,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "boolean"
+              "type": "boolean",
+              "enum": [
+                "1"
+              ]
             }
           }
         ]
@@ -17296,6 +17314,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The destination already exists."
           }
         },
         "parameters": [
@@ -17352,6 +17373,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "A file or directory already exists at this path."
           }
         },
         "parameters": [
@@ -17372,14 +17396,21 @@
                 "type": "object",
                 "properties": {
                   "content": {
-                    "type": "object",
-                    "additionalProperties": true
+                    "type": "string"
+                  },
+                  "createOnly": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Reject an existing destination instead of editing it."
                   },
                   "path": {
-                    "type": "object",
-                    "additionalProperties": true
+                    "type": "string"
                   }
-                }
+                },
+                "required": [
+                  "path",
+                  "content"
+                ]
               }
             }
           }
@@ -26394,7 +26425,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "boolean"
+              "type": "boolean",
+              "enum": [
+                "1"
+              ]
             }
           },
           {
@@ -26410,7 +26444,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "boolean"
+              "type": "boolean",
+              "enum": [
+                "1"
+              ]
             }
           }
         ],
@@ -26697,6 +26734,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The destination already exists."
           }
         },
         "parameters": [
@@ -26758,6 +26798,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "A file or directory already exists at this path."
           }
         },
         "parameters": [
@@ -26778,14 +26821,21 @@
                 "type": "object",
                 "properties": {
                   "content": {
-                    "type": "object",
-                    "additionalProperties": true
+                    "type": "string"
+                  },
+                  "createOnly": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Reject an existing destination instead of editing it."
                   },
                   "path": {
-                    "type": "object",
-                    "additionalProperties": true
+                    "type": "string"
                   }
-                }
+                },
+                "required": [
+                  "path",
+                  "content"
+                ]
               }
             }
           }

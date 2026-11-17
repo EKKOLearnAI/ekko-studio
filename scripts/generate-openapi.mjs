@@ -2226,6 +2226,20 @@ for (const operation of Object.values(openapi.paths['/api/navigation'])) {
   operation.responses['401'] = { description: 'Studio login required; shared sessions cannot change navigation' }
 }
 openapi.paths['/api/navigation'].put.responses['400'] = { description: 'Invalid, duplicate or unregistered navigation entry' }
+for (const base of [
+  '/api/studio/files',
+  '/api/studio/sessions/{id}/workspace-file',
+  '/api/studio/group-chat/rooms/{roomId}/workspace-file',
+]) {
+  const write = openapi.paths[base + '/write'].put
+  const schema = write.requestBody.content['application/json'].schema
+  schema.required = ['path', 'content']
+  schema.properties.path = { type: 'string' }
+  schema.properties.content = { type: 'string' }
+  schema.properties.createOnly = { type: 'boolean', default: false, description: 'Reject an existing destination instead of editing it.' }
+  write.responses['409'] = { description: 'A file or directory already exists at this path.' }
+  openapi.paths[base + '/rename'].post.responses['409'] = { description: 'The destination already exists.' }
+}
 writeFileSync(outputPath, JSON.stringify(openapi, null, 2))
 
 console.log(`✓ Generated OpenAPI spec: ${outputPath}`)
