@@ -1,3 +1,4 @@
+import { getActiveProfileName } from '@/api/client'
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as filesApi from '@/api/studio/files'
@@ -63,12 +64,14 @@ export const useFilesStore = defineStore('files', () => {
   const loading = ref(false)
   const sortBy = ref<'name' | 'size' | 'modTime'>('name')
   const sortOrder = ref<'asc' | 'desc'>('asc')
+  let editorRequestSeq = 0
   let fetchRequestSeq = 0
   let previewRequestSeq = 0
 
   const editingFile = ref<{
     path: string
     content: string
+    profile?: string | null
     originalContent: string
     language: string
     workspaceSessionId?: string
@@ -197,20 +200,22 @@ export const useFilesStore = defineStore('files', () => {
   }
 
   async function openEditor(filePath: string, options: { profile?: string | null } = {}) {
-    previewFile.value = null
-    if (currentWorkspaceRoomId.value) {
+    if (options.profile === undefined && currentWorkspaceRoomId.value) {
       await openGroupWorkspaceEditor(currentWorkspaceRoomId.value, filePath)
       return
     }
-    if (currentWorkspaceSessionId.value) {
+    if (options.profile === undefined && currentWorkspaceSessionId.value) {
       await openSessionWorkspaceEditor(currentWorkspaceSessionId.value, filePath)
       return
     }
-    const profile = resolveProfile(options.profile)
-    currentProfile.value = profile
+    const profile = (options.profile === undefined ? currentProfile.value : normalizeProfile(options.profile)) || getActiveProfileName()
+    const request = ++editorRequestSeq
+    closePreview()
     const result = await filesApi.readFile(filePath, profile)
+    if (request !== editorRequestSeq) return
     editingFile.value = {
       path: filePath,
+      profile,
       content: result.content,
       originalContent: result.content,
       language: getLanguageFromPath(filePath),
@@ -218,8 +223,10 @@ export const useFilesStore = defineStore('files', () => {
   }
 
   async function openSessionWorkspaceEditor(sessionId: string, filePath: string) {
-    previewFile.value = null
+    const request = ++editorRequestSeq
+    closePreview()
     const result = await readSessionWorkspaceFile(sessionId, filePath)
+    if (request !== editorRequestSeq) return
     editingFile.value = {
       path: result.path,
       content: result.content,
@@ -231,8 +238,10 @@ export const useFilesStore = defineStore('files', () => {
   }
 
   async function openGroupWorkspaceEditor(roomId: string, filePath: string) {
-    previewFile.value = null
+    const request = ++editorRequestSeq
+    closePreview()
     const result = await readGroupWorkspaceFile(roomId, filePath)
+    if (request !== editorRequestSeq) return
     editingFile.value = {
       path: result.path,
       content: result.content,
@@ -243,34 +252,46 @@ export const useFilesStore = defineStore('files', () => {
     }
   }
 
+  let pendingSave: Promise<void> | undefined
   async function saveEditor() {
-    if (!editingFile.value) return
-    if (editingFile.value.workspaceRoomId && editingFile.value.workspaceRelativePath) {
-      await writeGroupWorkspaceFile(
-        editingFile.value.workspaceRoomId,
-        editingFile.value.workspaceRelativePath,
-        editingFile.value.content,
-      )
-    } else if (editingFile.value.workspaceSessionId && editingFile.value.workspaceRelativePath) {
-      await writeSessionWorkspaceFile(
-        editingFile.value.workspaceSessionId,
-        editingFile.value.workspaceRelativePath,
-        editingFile.value.content,
-      )
-    } else {
-      await filesApi.writeFile(editingFile.value.path, editingFile.value.content, currentProfile.value)
+    const file = editingFile.value
+    if (!file) return
+    const content = file.content
+    const write = async () => {
+      if (file.workspaceRoomId && file.workspaceRelativePath) {
+        await writeGroupWorkspaceFile(
+          file.workspaceRoomId,
+          file.workspaceRelativePath,
+          content,
+        )
+      } else if (file.workspaceSessionId && file.workspaceRelativePath) {
+        await writeSessionWorkspaceFile(
+          file.workspaceSessionId,
+          file.workspaceRelativePath,
+          content,
+        )
+      } else {
+        await filesApi.writeFile(file.path, content, file.profile)
+      }
+      file.originalContent = content
     }
-    editingFile.value.originalContent = editingFile.value.content
+    const operation = pendingSave ? pendingSave.then(write, write) : write()
+    pendingSave = operation
+    try {
+      await operation
+    } finally {
+      if (pendingSave === operation) pendingSave = undefined
+    }
   }
 
-  function closeEditor() { editingFile.value = null }
+  function closeEditor() { ++editorRequestSeq; editingFile.value = null }
 
   async function openPreview(entry: FileEntry, options: { profile?: string | null } = {}) {
     const profile = resolveProfile(options.profile)
     currentProfile.value = profile
     const type = getFilePreviewKind(entry.name)
     if (!type) return
-    editingFile.value = null
+    closeEditor()
     const common = {
       path: entry.path,
       name: entry.name,
@@ -419,9 +440,9 @@ export const useFilesStore = defineStore('files', () => {
 
   async function createFile(name: string) {
     const path = currentPath.value ? `${currentPath.value}/${name}` : name
-    if (currentWorkspaceRoomId.value) await writeGroupWorkspaceFile(currentWorkspaceRoomId.value, path, '')
-    else if (currentWorkspaceSessionId.value) await writeSessionWorkspaceFile(currentWorkspaceSessionId.value, path, '')
-    else await filesApi.writeFile(path, '', currentProfile.value)
+    if (currentWorkspaceRoomId.value) await writeGroupWorkspaceFile(currentWorkspaceRoomId.value, path, '', true)
+    else if (currentWorkspaceSessionId.value) await writeSessionWorkspaceFile(currentWorkspaceSessionId.value, path, '', true)
+    else await filesApi.writeFile(path, '', currentProfile.value, true)
     await fetchEntries(undefined)
   }
 

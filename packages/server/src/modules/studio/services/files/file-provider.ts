@@ -1,8 +1,9 @@
-import { readFile, stat as fsStat, readdir, mkdir, rm, rename, copyFile as fsCopyFile, writeFile as fsWriteFile } from 'fs/promises'
+import { readFile, stat as fsStat, readdir, mkdir, rm, copyFile as fsCopyFile, writeFile as fsWriteFile } from 'fs/promises'
 import { resolve, normalize, isAbsolute, basename, join } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { existsSync, readFileSync } from 'fs'
+import { renameWithoutOverwrite } from './file-operations'
 import YAML from 'js-yaml'
 import { config } from '../../public/config'
 import { getActiveProfileDir, getProfileDir } from '../../public/profile-config'
@@ -16,6 +17,40 @@ const execOpts = { windowsHide: true }
 
 // Backend command timeout (default 30s)
 const BACKEND_TIMEOUT = 30_000
+
+// All remote providers already depend on GNU coreutils for ls and stat.
+const remoteRename = `
+  if [ "$1" = "$2" ]; then test -e "$1" || test -L "$1"; exit $?; fi
+  if [ -e "$2" ] || [ -L "$2" ]; then exit 73; fi
+  mv -nT -- "$1" "$2"
+  status=$?
+  if { [ -e "$1" ] || [ -L "$1" ]; } && { [ -e "$2" ] || [ -L "$2" ]; }; then exit 73; fi
+  exit "$status"
+`
+const remoteWrite = 'cat > "$1"'
+const remoteCreate = `
+  if [ -e "$1" ] || [ -L "$1" ]; then exit 73; fi
+  set -C
+  write_contents() { cat >&3 || return 74; }
+  write_contents 3>"$1"
+  status=$?
+  if [ "$status" != 0 ] && [ "$status" != 74 ] && { [ -e "$1" ] || [ -L "$1" ]; }; then exit 73; fi
+  exit "$status"
+`
+
+async function remoteFileCommand(program: string, args: string[], input?: Buffer): Promise<void> {
+  const command = execFileAsync(program, args, { timeout: BACKEND_TIMEOUT, ...execOpts })
+  // The subprocess exit status reports an early close (including a name conflict).
+  command.child.stdin?.on('error', () => {})
+  command.child.stdin?.end(input)
+  try {
+    await command
+  } catch (error: any) {
+    if (error.code === 73) throw Object.assign(new Error('Destination already exists'), { code: 'EEXIST' })
+    if (error.killed) throw Object.assign(new Error('Backend timeout'), { code: 'backend_timeout' })
+    throw Object.assign(new Error(error.message), { code: 'backend_error' })
+  }
+}
 
 export interface FileEntry {
   name: string
@@ -42,7 +77,7 @@ export interface FileProvider {
   exists(filePath: string): Promise<boolean>
   listDir(dirPath: string): Promise<FileEntry[]>
   stat(filePath: string): Promise<FileStat>
-  writeFile(filePath: string, content: Buffer): Promise<void>
+  writeFile(filePath: string, content: Buffer, createOnly?: boolean): Promise<void>
   deleteFile(filePath: string): Promise<void>
   deleteDir(dirPath: string): Promise<void>
   renameFile(oldPath: string, newPath: string): Promise<void>
@@ -187,9 +222,9 @@ export class LocalFileProvider implements FileProvider {
     }
   }
 
-  async writeFile(filePath: string, content: Buffer): Promise<void> {
+  async writeFile(filePath: string, content: Buffer, createOnly?: boolean): Promise<void> {
     const p = validatePath(filePath)
-    await fsWriteFile(p, content)
+    await fsWriteFile(p, content, { flag: createOnly ? 'wx' : 'w' })
   }
 
   async deleteFile(filePath: string): Promise<void> {
@@ -209,7 +244,7 @@ export class LocalFileProvider implements FileProvider {
   async renameFile(oldPath: string, newPath: string): Promise<void> {
     const op = validatePath(oldPath)
     const np = validatePath(newPath)
-    await rename(op, np)
+    await renameWithoutOverwrite(op, np)
   }
 
   async mkDir(dirPath: string): Promise<void> {
@@ -343,16 +378,10 @@ export class DockerFileProvider implements FileProvider {
     }
   }
 
-  async writeFile(filePath: string, content: Buffer): Promise<void> {
+  async writeFile(filePath: string, content: Buffer, createOnly?: boolean): Promise<void> {
     const p = validatePath(filePath)
-    try {
-      await execFileAsync('docker', [
-        'exec', '-i', this.containerName, 'sh', '-c', `cat > '${p.replace(/'/g, "'\\''")}'`,
-      ], { timeout: BACKEND_TIMEOUT, input: content, ...execOpts } as any)
-    } catch (err: any) {
-      if (err.code === 'ETIMEDOUT' || err.killed) throw Object.assign(new Error('Backend timeout'), { code: 'backend_timeout' })
-      throw Object.assign(new Error(`Docker error: ${err.message}`), { code: 'backend_error' })
-    }
+    const script = createOnly ? remoteCreate : remoteWrite
+    await remoteFileCommand('docker', ['exec', '-i', this.containerName, 'sh', '-c', script, 'sh', p], content)
   }
 
   async deleteFile(filePath: string): Promise<void> {
@@ -378,12 +407,7 @@ export class DockerFileProvider implements FileProvider {
   async renameFile(oldPath: string, newPath: string): Promise<void> {
     const op = validatePath(oldPath)
     const np = validatePath(newPath)
-    try {
-      await execFileAsync('docker', ['exec', this.containerName, 'mv', op, np], { timeout: BACKEND_TIMEOUT, ...execOpts })
-    } catch (err: any) {
-      if (err.code === 'ETIMEDOUT' || err.killed) throw Object.assign(new Error('Backend timeout'), { code: 'backend_timeout' })
-      throw Object.assign(new Error(`Docker error: ${err.message}`), { code: 'backend_error' })
-    }
+    await remoteFileCommand('docker', ['exec', this.containerName, 'sh', '-c', remoteRename, 'sh', op, np])
   }
 
   async mkDir(dirPath: string): Promise<void> {
@@ -505,16 +529,10 @@ export class SSHFileProvider implements FileProvider {
     }
   }
 
-  async writeFile(filePath: string, content: Buffer): Promise<void> {
+  async writeFile(filePath: string, content: Buffer, createOnly?: boolean): Promise<void> {
     const p = validatePath(filePath)
-    try {
-      await execFileAsync('ssh', [
-        ...this.sshArgs(), `cat > ${this.shellEscape(p)}`,
-      ], { timeout: BACKEND_TIMEOUT, input: content, ...execOpts } as any)
-    } catch (err: any) {
-      if (err.code === 'ETIMEDOUT' || err.killed) throw Object.assign(new Error('Backend timeout'), { code: 'backend_timeout' })
-      throw Object.assign(new Error(`SSH error: ${err.message}`), { code: 'backend_error' })
-    }
+    const script = createOnly ? remoteCreate : remoteWrite
+    await remoteFileCommand('ssh', [...this.sshArgs(), ['sh', '-c', script, 'sh', p].map(arg => this.shellEscape(arg)).join(' ')], content)
   }
 
   async deleteFile(filePath: string): Promise<void> {
@@ -540,12 +558,7 @@ export class SSHFileProvider implements FileProvider {
   async renameFile(oldPath: string, newPath: string): Promise<void> {
     const op = validatePath(oldPath)
     const np = validatePath(newPath)
-    try {
-      await execFileAsync('ssh', [...this.sshArgs(), `mv ${this.shellEscape(op)} ${this.shellEscape(np)}`], { timeout: BACKEND_TIMEOUT, ...execOpts })
-    } catch (err: any) {
-      if (err.code === 'ETIMEDOUT' || err.killed) throw Object.assign(new Error('Backend timeout'), { code: 'backend_timeout' })
-      throw Object.assign(new Error(`SSH error: ${err.message}`), { code: 'backend_error' })
-    }
+    await remoteFileCommand('ssh', [...this.sshArgs(), ['sh', '-c', remoteRename, 'sh', op, np].map(arg => this.shellEscape(arg)).join(' ')])
   }
 
   async mkDir(dirPath: string): Promise<void> {
@@ -644,16 +657,10 @@ export class SingularityFileProvider implements FileProvider {
     }
   }
 
-  async writeFile(filePath: string, content: Buffer): Promise<void> {
+  async writeFile(filePath: string, content: Buffer, createOnly?: boolean): Promise<void> {
     const p = validatePath(filePath)
-    try {
-      await execFileAsync('singularity', [
-        'exec', this.imagePath, 'sh', '-c', `cat > '${p.replace(/'/g, "'\\''")}'`,
-      ], { timeout: BACKEND_TIMEOUT, input: content, ...execOpts } as any)
-    } catch (err: any) {
-      if (err.code === 'ETIMEDOUT' || err.killed) throw Object.assign(new Error('Backend timeout'), { code: 'backend_timeout' })
-      throw Object.assign(new Error(`Singularity error: ${err.message}`), { code: 'backend_error' })
-    }
+    const script = createOnly ? remoteCreate : remoteWrite
+    await remoteFileCommand('singularity', ['exec', this.imagePath, 'sh', '-c', script, 'sh', p], content)
   }
 
   async deleteFile(filePath: string): Promise<void> {
@@ -679,12 +686,7 @@ export class SingularityFileProvider implements FileProvider {
   async renameFile(oldPath: string, newPath: string): Promise<void> {
     const op = validatePath(oldPath)
     const np = validatePath(newPath)
-    try {
-      await execFileAsync('singularity', ['exec', this.imagePath, 'mv', op, np], { timeout: BACKEND_TIMEOUT, ...execOpts })
-    } catch (err: any) {
-      if (err.code === 'ETIMEDOUT' || err.killed) throw Object.assign(new Error('Backend timeout'), { code: 'backend_timeout' })
-      throw Object.assign(new Error(`Singularity error: ${err.message}`), { code: 'backend_error' })
-    }
+    await remoteFileCommand('singularity', ['exec', this.imagePath, 'sh', '-c', remoteRename, 'sh', op, np])
   }
 
   async mkDir(dirPath: string): Promise<void> {

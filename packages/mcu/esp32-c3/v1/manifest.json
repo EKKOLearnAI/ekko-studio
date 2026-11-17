@@ -10,8 +10,8 @@
   "hardware": {
     "board": "ESP32-C3 board with SSD1306-compatible OLED",
     "i2c": {
-      "sda": 3,
-      "scl": 4
+      "sda": 0,
+      "scl": 1
     },
     "oledAddress": "0x3C"
   },

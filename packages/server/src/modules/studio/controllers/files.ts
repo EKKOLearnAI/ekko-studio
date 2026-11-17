@@ -4,6 +4,7 @@ import {
   isSensitivePath,
   MAX_EDIT_SIZE,
 } from '../services/files/file-provider'
+import { fileContent } from '../services/files/file-operations'
 import { MultipartParseError, parseMultipartBoundary, parseMultipartFilename, splitMultipart } from '../public/multipart'
 
 function requestedProfile(ctx: any): string | undefined {
@@ -26,6 +27,8 @@ function handleError(ctx: any, err: any) {
   const code = err.code || 'unknown'
   const statusMap: Record<string, number> = {
     missing_path: 400,
+    invalid_content: 400,
+    EEXIST: 409,
     invalid_path: 400,
     not_found: 404,
     ENOENT: 404,
@@ -114,7 +117,7 @@ export async function write(ctx: any) {
     return
   }
   try {
-    const buf = Buffer.from(content || '', 'utf-8')
+    const buf = fileContent(content)
     if (buf.length > MAX_EDIT_SIZE) {
       ctx.status = 413
       ctx.body = { error: 'Content too large', code: 'file_too_large' }
@@ -122,7 +125,7 @@ export async function write(ctx: any) {
     }
     const absPath = resolveRequestPath(ctx, relativePath)
     const provider = await createRequestFileProvider(ctx)
-    await provider.writeFile(absPath, buf)
+    await provider.writeFile(absPath, buf, ctx.request.body.createOnly === true)
     ctx.body = { ok: true, path: relativePath }
   } catch (err: any) {
     handleError(ctx, err)

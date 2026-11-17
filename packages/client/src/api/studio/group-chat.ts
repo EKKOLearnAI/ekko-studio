@@ -633,9 +633,9 @@ export async function downloadGroupWorkspaceFile(roomId: string, path: string, f
     saveBlob(blob, fileName)
 }
 
-export async function writeGroupWorkspaceFile(roomId: string, path: string, content: string): Promise<void> {
+export async function writeGroupWorkspaceFile(roomId: string, path: string, content: string, createOnly = false): Promise<void> {
     await request(`/api/studio/group-chat/rooms/${encodeURIComponent(roomId)}/workspace-file/write`, {
-        method: 'PUT', body: JSON.stringify({ path, content }),
+        method: 'PUT', body: JSON.stringify({ path, content, createOnly: createOnly || undefined }),
     })
 }
 

@@ -8,7 +8,7 @@ and desktop discovery, MCU voice interaction, remote relay access, and OTA.
 ## Hardware
 
 - Chip: ESP32-C3, 16MB flash
-- I2C OLED: SDA GPIO3, SCL GPIO4, address `0x3C`
+- Default firmware I2C OLED: SDA GPIO0, SCL GPIO1, address `0x3C`
 
 The current partition table uses the first 4MB for its dual-OTA layout. The
 remaining physical flash is reserved for future storage or partition changes.

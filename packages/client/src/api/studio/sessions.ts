@@ -349,12 +349,13 @@ export async function writeSessionWorkspaceFile(
   sessionId: string,
   path: string,
   content: string,
+  createOnly = false,
 ): Promise<void> {
   await request<{ ok: boolean }>(
     `/api/studio/sessions/${encodeURIComponent(sessionId)}/workspace-file/write`,
     {
       method: 'PUT',
-      body: JSON.stringify({ path, content }),
+      body: JSON.stringify({ path, content, createOnly: createOnly || undefined }),
     },
   )
 }

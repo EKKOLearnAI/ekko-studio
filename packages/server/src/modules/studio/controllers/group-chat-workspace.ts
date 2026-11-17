@@ -1,5 +1,5 @@
-import { basename, resolve as pathResolve } from 'path'
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises'
+import { resolve as pathResolve } from 'path'
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises'
 import { canManageGroupChatRoom } from '../services/group-chat/access'
 import { getGroupChatRuntimeServer } from '../services/group-chat/runtime'
 import {
@@ -7,12 +7,13 @@ import {
 } from '../services/group-chat/workspace-files'
 import { resolveWorkspacePath } from '../services/workspace/manager'
 import {
-    buildFileContentHeaders,
+    serveWorkspaceFile,
+    fileContent,
+    statIfPresent,
+    renameWithoutOverwrite,
     decorateWorkspaceEntries,
-    getFilePreviewDescriptor,
     getWorkspaceFileGitDiff,
     isSensitivePath,
-    MAX_DOWNLOAD_SIZE,
     MAX_EDIT_SIZE,
 } from '../public/workspace-files'
 
@@ -33,7 +34,7 @@ function roomWorkspace(ctx: any): string {
 }
 
 function handleWorkspaceError(ctx: any, error: any): void {
-    ctx.status = Number(error?.status || (error?.code === 'ENOENT' ? 404 : 500))
+    ctx.status = Number(error?.status || (error?.code === 'ENOENT' ? 404 : error?.code === 'EEXIST' ? 409 : 500))
     ctx.body = {
         error: error?.message || 'Failed to access group chat workspace',
         code: error?.code || 'workspace_file_error',
@@ -59,9 +60,10 @@ export async function listWorkspaceFiles(ctx: any): Promise<void> {
         const info = await stat(fullPath)
         if (!info.isDirectory()) throw Object.assign(new Error('Not a directory'), { status: 400, code: 'not_a_directory' })
         const dirEntries = await readdir(fullPath, { withFileTypes: true })
-        const entries = await Promise.all(dirEntries.map(async entry => {
+        const entries = (await Promise.all(dirEntries.map(async entry => {
             const entryFullPath = pathResolve(fullPath, entry.name)
-            const entryStat = await stat(entryFullPath)
+            const entryStat = await statIfPresent(entryFullPath)
+            if (!entryStat) return null
             return {
                 name: entry.name,
                 path: groupWorkspaceRelativePath(workspace, entryFullPath),
@@ -70,7 +72,7 @@ export async function listWorkspaceFiles(ctx: any): Promise<void> {
                 size: entryStat.size,
                 modTime: entryStat.mtime.toISOString(),
             }
-        }))
+        }))).filter(entry => entry !== null)
         entries.sort((a, b) => a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1)
         const decorated = await decorateWorkspaceEntries(workspace, relativePath, entries)
         ctx.body = {
@@ -111,31 +113,9 @@ export async function diffWorkspaceFile(ctx: any): Promise<void> {
 export async function readWorkspaceFileContent(ctx: any): Promise<void> {
     try {
         const { relativePath, fullPath } = await resolveRoomPreviewPath(ctx, ctx.query.path)
-        const info = await stat(fullPath)
-        if (!info.isFile()) throw Object.assign(new Error('Not a file'), { status: 400, code: 'not_a_file' })
-
-        const download = String(ctx.query?.download || '') === '1'
-        const textPreview = String(ctx.query?.text || '') === '1'
-        const descriptor = getFilePreviewDescriptor(relativePath)
-        if (!download && !textPreview && !descriptor) {
-            throw Object.assign(new Error('File type is not supported for preview'), { status: 415, code: 'unsupported_preview' })
-        }
-        const maxBytes = download ? MAX_DOWNLOAD_SIZE : textPreview ? MAX_EDIT_SIZE : descriptor!.maxBytes
-        if (info.size > maxBytes) {
-            throw Object.assign(new Error(download ? 'File too large to download' : 'File too large to preview'), { status: 413, code: 'file_too_large' })
-        }
-        const data = await readFile(fullPath)
-        if (data.length > maxBytes) {
-            throw Object.assign(new Error(download ? 'File too large to download' : 'File too large to preview'), { status: 413, code: 'file_too_large' })
-        }
-        const headers = buildFileContentHeaders({
-            fileName: basename(relativePath),
-            mime: textPreview ? 'text/plain; charset=utf-8' : descriptor?.mime || 'application/octet-stream',
-            size: data.length,
-            download,
-        })
-        for (const [name, value] of Object.entries(headers)) ctx.set(name, value)
-        ctx.body = data
+        const download = ctx.query?.download === '1'
+        const text = ctx.query?.text === '1'
+        await serveWorkspaceFile(ctx, fullPath, relativePath, download, text)
     } catch (error) {
         handleWorkspaceError(ctx, error)
     }
@@ -143,12 +123,12 @@ export async function readWorkspaceFileContent(ctx: any): Promise<void> {
 
 export async function writeWorkspaceFile(ctx: any): Promise<void> {
     try {
-        const body = ctx.request.body as { path?: unknown; content?: unknown }
+        const body = ctx.request.body as { path?: unknown; content?: unknown; createOnly?: boolean }
         const { relativePath, fullPath } = await resolveRoomPath(ctx, body?.path)
         if (isSensitivePath(relativePath)) throw Object.assign(new Error('Cannot modify sensitive file'), { status: 403, code: 'permission_denied' })
-        const data = Buffer.from(typeof body?.content === 'string' ? body.content : '', 'utf-8')
+        const data = fileContent(body?.content)
         if (data.length > MAX_EDIT_SIZE) throw Object.assign(new Error('Content too large'), { status: 413, code: 'file_too_large' })
-        await writeFile(fullPath, data)
+        await writeFile(fullPath, data, { flag: body?.createOnly === true ? 'wx' : 'w' })
         ctx.body = { ok: true, path: relativePath }
     } catch (error) {
         handleWorkspaceError(ctx, error)
@@ -186,7 +166,7 @@ export async function renameWorkspaceFile(ctx: any): Promise<void> {
         if (isSensitivePath(oldTarget.relativePath) || isSensitivePath(newTarget.relativePath)) {
             throw Object.assign(new Error('Cannot rename sensitive file'), { status: 403, code: 'permission_denied' })
         }
-        await rename(oldTarget.fullPath, newTarget.fullPath)
+        await renameWithoutOverwrite(oldTarget.fullPath, newTarget.fullPath)
         ctx.body = { ok: true }
     } catch (error) {
         handleWorkspaceError(ctx, error)

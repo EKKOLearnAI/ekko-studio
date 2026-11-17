@@ -53,33 +53,58 @@ export function assertWorkflowScheduleCron(schedule: string): void {
   values(fields[4], 0, 6)
 }
 
-function zoned(date: number, timezone: string): number[] {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone,
-    minute: 'numeric',
-    hour: 'numeric',
-    day: 'numeric',
-    month: 'numeric',
-    weekday: 'short',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(date))
-  const value = (type: string) => Number(parts.find(part => part.type === type)?.value)
-  const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(parts.find(part => part.type === 'weekday')?.value || '')
-  return [value('minute'), value('hour'), value('day'), value('month'), weekday]
-}
-
+// Compare Gregorian calendar fields before resolving a wall-clock time to UTC.
+// A repeated local minute can have two offsets; a skipped minute has no valid offset.
 export function nextWorkflowScheduleAt(schedule: string, timezone: string, after: number): number {
   assertWorkflowScheduleCron(schedule)
-  new Intl.DateTimeFormat('en-US', { timeZone: timezone })
-  const fields = normalizeWorkflowSchedule(schedule).split(/\s+/).map((field, index) => values(field, [0, 0, 1, 1, 0][index], [59, 23, 31, 12, 6][index]))
-  let candidate = Math.floor(after / MINUTE) * MINUTE + MINUTE
-  const limit = candidate + 366 * 24 * 60 * MINUTE
-  while (candidate <= limit) {
-    const parts = zoned(candidate, timezone)
-    if (parts.every((value, index) => fields[index].has(value))) return candidate
-    candidate += MINUTE
+  const fields = normalizeWorkflowSchedule(schedule).split(/\s+/)
+  const minutes = [...values(fields[0], 0, 59)].sort((a, b) => a - b)
+  const hours = [...values(fields[1], 0, 23)].sort((a, b) => a - b)
+  const days = values(fields[2], 1, 31)
+  const months = values(fields[3], 1, 12)
+  const weekdays = values(fields[4], 0, 6)
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+  })
+  const hour = 60 * MINUTE
+  const day = 24 * hour
+  function wallTime(instant: number): number {
+    const parts = Object.fromEntries(formatter.formatToParts(instant).map(part => [part.type, Number(part.value)]))
+    return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute)
   }
-  throw new Error('schedule has no occurrence in the next year')
+  function matchesDay(date: Date): boolean {
+    return months.has(date.getUTCMonth() + 1) && days.has(date.getUTCDate()) && weekdays.has(date.getUTCDay())
+  }
+  const first = Math.floor(after / MINUTE) * MINUTE + MINUTE
+  const local = new Date(wallTime(first))
+  if (matchesDay(local) && hours.includes(local.getUTCHours()) && minutes.includes(local.getUTCMinutes())) return first
+
+  // All IANA offsets lie within one day of UTC. Gregorian date/weekday patterns repeat every 400 years.
+  const start = Math.floor(first / day) * day - day
+  let best = Infinity
+  for (let date = start; date <= start + 146099 * day && date - day < best; date += day) {
+    if (!matchesDay(new Date(date))) continue
+    const offsets = new Set<number>()
+    for (let probe = date - day; probe <= date + 2 * day; probe += 6 * hour) {
+      offsets.add(wallTime(probe) - probe)
+    }
+    for (const offset of offsets) {
+      search: for (const h of hours) {
+        for (const m of minutes) {
+          const wall = date + h * hour + m * MINUTE
+          const candidate = wall - offset
+          if (candidate >= best) break search
+          if (candidate >= first && wallTime(candidate) === wall) {
+            best = candidate
+            break search
+          }
+        }
+      }
+    }
+  }
+  if (Number.isFinite(best)) return best
+  throw new Error('schedule has no possible calendar occurrence')
 }
 
 async function validateScheduledExecution(workflow: WorkflowRecord, schedule: WorkflowScheduleRecord): Promise<void> {
@@ -133,14 +158,19 @@ export class WorkflowScheduleService {
   private async process(schedule: WorkflowScheduleRecord, now: number): Promise<void> {
     if (!schedule.enabled) return
     const next = schedule.next_run_at
-    if (next == null) {
-      updateWorkflowSchedule(schedule.id, { next_run_at: nextWorkflowScheduleAt(schedule.schedule, schedule.timezone, now) })
+    if (next != null && next > now) return
+    let following: number
+    try {
+      following = nextWorkflowScheduleAt(schedule.schedule, schedule.timezone, now)
+    } catch (error) {
+      updateWorkflowSchedule(schedule.id, { enabled: false, last_error: String(error) })
       return
     }
-    if (next > now) return
-
+    if (next == null) {
+      updateWorkflowSchedule(schedule.id, { next_run_at: following })
+      return
+    }
     const identity = claimWorkflowScheduleTrigger(schedule, next)
-    const following = nextWorkflowScheduleAt(schedule.schedule, schedule.timezone, now)
     if (!identity) {
       updateWorkflowSchedule(schedule.id, { next_run_at: following })
       return

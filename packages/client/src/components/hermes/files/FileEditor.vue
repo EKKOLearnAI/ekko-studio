@@ -78,6 +78,13 @@ onMounted(() => {
     },
   })
 
+  watch(() => filesStore.editingFile, file => {
+    if (!file || !editor) return
+    const model = editor.getModel()
+    if (model) monaco.editor.setModelLanguage(model, file.language)
+    editor.setValue(file.content)
+  }, { flush: 'sync' })
+
   syncEditorTheme()
   editor.onDidChangeModelContent(() => {
     if (filesStore.editingFile) {
@@ -97,6 +104,7 @@ onBeforeUnmount(() => {
 })
 
 async function handleSave() {
+  if (saving.value) return
   saving.value = true
   try {
     await filesStore.saveEditor()

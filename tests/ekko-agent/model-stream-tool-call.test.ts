@@ -46,6 +46,22 @@ async function streamToolCalls(deltas: ToolDelta[][]) {
   return events.message.toolCalls ?? []
 }
 
+it('propagates an error after a partial reply', async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    response.end('data: {"choices":[{"delta":{"content":"partial"}}]}\n\ndata: {"error":{"message":"upstream interrupted"}}\n\ndata: [DONE]\n\n')
+  })
+  servers.push(server)
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const client = createModelClient({
+    id: 'test', type: 'openai-compatible', defaultModel: 'fixture',
+    baseUrl: 'http://127.0.0.1:' + (server.address() as AddressInfo).port + '/v1',
+  })
+  const stream = client.stream({ messages: [{ role: 'user', content: 'hello' }] })[Symbol.asyncIterator]()
+  expect((await stream.next()).value).toMatchObject({ type: 'text-delta', text: 'partial' })
+  await expect(stream.next()).rejects.toThrow('upstream interrupted')
+})
+
 describe('OpenAI-compatible streamed tool identity', () => {
   it.each(['id', 'name', 'both'] as const)('preserves a known tool identity when continuation %s is empty', async empty => {
     const continuation = {

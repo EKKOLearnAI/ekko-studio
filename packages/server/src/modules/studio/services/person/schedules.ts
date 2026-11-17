@@ -1,3 +1,4 @@
+import { logger } from '../../public/logging'
 import { randomUUID } from 'node:crypto'
 import { personError, personText, personRevision } from '../../contracts/person'
 import type { PersonSchedule } from '../../contracts/person'
@@ -76,7 +77,17 @@ export function applyPersonSchedule(userId: number, input: Record<string, unknow
 export function tickPersonSchedules(now = Date.now()) {
   const due = personDb().prepare("SELECT * FROM person_schedules WHERE state='active' AND next_at<=? ORDER BY next_at LIMIT 20").all(now) as unknown as PersonSchedule[]
   for (const schedule of due) {
-    const next = schedule.kind === 'once' ? schedule.next_at : nextWorkflowScheduleAt(schedule.expression, schedule.timezone, now)
+    let next = schedule.next_at
+    if (schedule.kind === 'cron') {
+      try {
+        next = nextWorkflowScheduleAt(schedule.expression, schedule.timezone, now)
+      } catch (error) {
+        personDb().prepare("UPDATE person_schedules SET state='paused', revision=revision+1 WHERE id=? AND revision=? AND next_at=? AND state='active'")
+          .run(schedule.id, schedule.revision, schedule.next_at)
+        logger.warn(error, '[person-schedule] invalid schedule %s', schedule.id)
+        continue
+      }
+    }
     personTransaction(() => {
       const db = personDb()
       const claimed = db.prepare("UPDATE person_schedules SET next_at=?,state=? WHERE id=? AND revision=? AND next_at=? AND state='active'")

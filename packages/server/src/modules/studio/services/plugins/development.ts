@@ -158,15 +158,11 @@ export class PluginDevelopment {
         this.controller.signal.throwIfAborted()
         await this.authorize(identity)
         if ((await this.project(project.id)).directory !== project.directory) throw new PluginError('Development registration changed during build')
-        const state = this.manager.store.read()
         // Install checks the captured revision: disabling/uninstalling during a build wins.
         await this.manager.install(identity, project.directory, revision, project.id, { developmentDirectory: project.directory, enabled: true })
         // Keep the pre-build content baseline so edits made while compiling are not lost.
         progress.fingerprint = before; progress.pending = undefined; progress.updatedAt = Date.now()
         await this.changed()
-        // Retain current and previous snapshots, not one package directory per keystroke.
-        const obsolete = state.records[project.id]?.previous
-        if (obsolete?.developmentDirectory === project.directory) await this.manager.pruneDevelopmentPackage(obsolete.directory)
       } catch (error) {
         progress.error = message(error)
         if (!(error instanceof PluginError && error.code === 'PLUGIN_REVISION')) {

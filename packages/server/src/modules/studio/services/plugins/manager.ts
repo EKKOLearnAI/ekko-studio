@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readFile, rm } from 'node:fs/promises'
-import { join, relative, sep, dirname } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import type { ApiRequest, HookResult, Json, PluginEvent, PluginHook, PluginIdentity, PluginRecord, PluginSnapshot, ToolResult } from '../../contracts/plugins'
 import { PluginError, message } from './errors'
 import { installPackage, pluginFile } from './installer'
@@ -139,6 +139,7 @@ export class PluginManager {
       if (old?.enabled) await this.mount(old.runtimeIdentity || identity, old).catch(e => this.errors.set(key, message(e)))
       throw error
     }
+    if (old) await this.pruneReplacedPackages(state, old)
   }
   async update(identity: PluginIdentity, id: string, revision: number, input: { enabled?: boolean; config?: Record<string, Json>; action?: 'reload' | 'rollback' | 'uninstall' | 'stop-development' }): Promise<PluginSnapshot> {
     identifier(id)
@@ -233,12 +234,23 @@ export class PluginManager {
     writeJson(file, entries.slice(-200))
   }
   logs(_identity: PluginIdentity, id: string) { return readJson<Json[]>(join(this.store.directory(), 'logs', `${identifier(id)}.json`), () => []) }
-  async pruneDevelopmentPackage(directory: string): Promise<void> {
+  private async pruneReplacedPackages(state: PluginState, old: PluginRecord): Promise<void> {
     const versions = join(this.store.directory(), 'versions')
-    const parts = relative(versions, directory).split(sep)
-    if (parts.length !== 2 || !/^[a-f0-9-]{36}$/.test(parts[0]) || parts[1] !== 'package') return
-    if (Object.values(this.store.read().records).some(record => record.directory === directory || record.previous?.directory === directory)) return
-    await rm(dirname(directory), { recursive: true, force: true }).catch(() => {})
+    const stageOf = (directory?: string) => {
+      if (!directory) return
+      const [stage, ...parts] = relative(versions, directory).split(sep)
+      if (!/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(stage)) return
+      const path = parts.join('/')
+      if (path === 'package' || /^node_modules\/(?:@[\w.-]+\/)?[\w.-]+$/.test(path)) return stage
+    }
+    const retained = new Set(Object.values(state.records).flatMap(record => [
+      stageOf(record.directory), stageOf(record.previous?.directory),
+    ]))
+    for (const stage of new Set([stageOf(old.directory), stageOf(old.previous?.directory)])) {
+      if (stage && !retained.has(stage)) {
+        await rm(join(versions, stage), { recursive: true, force: true }).catch(() => {})
+      }
+    }
   }
   async close(): Promise<void> {
     this.closing = true
