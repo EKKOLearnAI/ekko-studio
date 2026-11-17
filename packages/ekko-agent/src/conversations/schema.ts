@@ -77,4 +77,12 @@ export const EKKO_CONVERSATION_MIGRATIONS: EkkoDatabaseMigration[] = [
       `)
     },
   },
+  {
+    component: 'conversations',
+    version: 2,
+    migrate(database) {
+      // NULL marks older histories whose derived preview and counters need one refresh.
+      database.exec('ALTER TABLE ' + EKKO_SESSIONS_TABLE + ' ADD COLUMN message_preview TEXT')
+    },
+  },
 ]

@@ -73,8 +73,8 @@ export class EkkoConversationStore {
       INSERT INTO ${EKKO_SESSIONS_TABLE} (
         id, profile, source, agent, agent_mode, agent_session_id,
         agent_native_session_id, user_id, model, provider, api_mode, title,
-        parent_session_id, started_at, last_active, workspace, category_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        parent_session_id, started_at, last_active, workspace, category_id, message_preview
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')
     `).run(
       id,
       nonempty(input.profile, 'default'),
@@ -204,22 +204,39 @@ export class EkkoConversationStore {
 
   addMessages(inputs: AddEkkoMessageInput[]): EkkoMessage[] {
     if (inputs.length === 0) return []
-    const sessionIds = new Set(inputs.map(input => normalizedIdentifier(input.sessionId, 'session id')))
-    for (const sessionId of sessionIds) {
-      if (!this.getSession(sessionId)) throw new Error(`Ekko session not found: ${sessionId}`)
-    }
-
     return this.database.transaction(() => {
       const insert = this.messageInsertStatement()
+      const read = this.connection.prepare('SELECT * FROM ' + EKKO_MESSAGES_TABLE + ' WHERE id = ?')
+      const lookup = this.connection.prepare('SELECT message_preview FROM ' + EKKO_SESSIONS_TABLE + ' WHERE id = ?')
+      const totals = new Map<string, { count: number; calls: number; preview: string; legacy: boolean }>()
       const messages: EkkoMessage[] = []
       for (const input of inputs) {
+        const id = normalizedIdentifier(input.sessionId, 'session id')
+        let total = totals.get(id)
+        if (!total) {
+          const session = lookup.get(id)
+          if (!session) throw new Error('Ekko session not found: ' + id)
+          total = { count: 0, calls: 0, preview: String(session.message_preview ?? ''), legacy: session.message_preview == null }
+          totals.set(id, total)
+        }
         const message = insertMessage(insert, input)
-        const row = this.connection.prepare(
-          `SELECT * FROM ${EKKO_MESSAGES_TABLE} WHERE id = ?`,
-        ).get(message.id) as DatabaseRow
-        messages.push(mapMessage(row))
+        const saved = mapMessage(read.get(message.id) as DatabaseRow)
+        messages.push(saved)
+        total.count++
+        total.calls += saved.toolCalls?.length ?? 0
+        if (!total.preview && saved.role === 'user') total.preview = compactPreview(saved.content)
       }
-      for (const sessionId of sessionIds) this.recomputeSessionMessageStats(sessionId, false)
+      const update = this.connection.prepare(`
+        UPDATE ${EKKO_SESSIONS_TABLE}
+        SET message_count = message_count + ?, tool_call_count = tool_call_count + ?,
+            preview = ?, message_preview = ?,
+            last_active = (SELECT MAX(timestamp) FROM ${EKKO_MESSAGES_TABLE} WHERE session_id = ?)
+        WHERE id = ?
+      `)
+      for (const [id, total] of totals) {
+        if (total.legacy) this.recomputeSessionMessageStats(id, false)
+        else update.run(total.count, total.calls, total.preview, total.preview, id, id)
+      }
       return messages
     })
   }
@@ -364,7 +381,7 @@ export class EkkoConversationStore {
     const previewRow = rows.find(row => row.role === 'user' && String(row.content || '').trim())
     const preview = previewRow ? compactPreview(String(previewRow.content)) : ''
     const lastActive = rows.length > 0
-      ? Math.max(...rows.map(row => Number(row.timestamp || 0)))
+      ? rows.reduce((latest, row) => Math.max(latest, Number(row.timestamp)), -Infinity)
       : Number((this.connection.prepare(
           `SELECT started_at FROM ${EKKO_SESSIONS_TABLE} WHERE id = ?`,
         ).get(sessionId) as DatabaseRow | undefined)?.started_at || timestamp())
@@ -372,11 +389,11 @@ export class EkkoConversationStore {
       UPDATE ${EKKO_SESSIONS_TABLE}
       SET message_count = ?,
           tool_call_count = ?,
-          preview = ?,
+          preview = ?, message_preview = ?,
           last_active = ?,
           history_revision = history_revision + ?
       WHERE id = ?
-    `).run(rows.length, toolCallCount, preview, lastActive, incrementRevision ? 1 : 0, sessionId)
+    `).run(rows.length, toolCallCount, preview, preview, lastActive, incrementRevision ? 1 : 0, sessionId)
   }
 }
 

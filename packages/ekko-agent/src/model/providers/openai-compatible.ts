@@ -209,6 +209,11 @@ export class OpenAICompatibleModelClient implements ModelClient {
 
           const chunk = parseJson<OpenAIChatResponse>(event)
           if (!chunk) continue
+          if (chunk.error) {
+            throw new ModelProviderError(chunk.error.message ?? 'Model provider returned an error.', {
+              provider: this.provider, details: chunk.error,
+            })
+          }
           responseId = chunk.id ?? responseId
           responseModel = chunk.model ?? responseModel
 
