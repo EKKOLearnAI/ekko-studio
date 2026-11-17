@@ -68,8 +68,8 @@ storage/checkpoints 声明 model、正整数 version 和 scope；迁移逻辑由
 
 ## SDK 许可
 
-SDK 代码、类型、harness 和模板采用独立 MIT 许可，见 SDK 根目录 LICENSE。
-STUDIO_CTX.md、STUDIO_RETURNS.md 两份含第三方贡献的指南保留原 BSL 1.1，见 NOTICE
-和 LICENSES；不要把这些指南改标为 MIT。Studio 核心许可保持原范围。
-创建插件和发行 CLI 会一并复制 SDK LICENSE、NOTICE、LICENSES；插件 docs 下也保留
-SDK-NOTICE 和 LICENSES，完整许可文本与署名不得遗漏。SDK 许可不替插件作者选择业务代码许可。
+SDK 代码、类型、harness、模板和全部宿主指南统一采用独立 MIT 许可，包括
+STUDIO_CTX.md、STUDIO_RETURNS.md，见 SDK 根目录 LICENSE；来源与贡献者署名见 NOTICE。
+创建插件和发行 CLI 会一并复制 SDK LICENSE、NOTICE；插件 docs 下也保留
+SDK-LICENSE 和 SDK-NOTICE，完整许可文本与署名不得遗漏。
+Studio 核心许可保持原范围；插件业务代码的许可由插件作者自行选择。

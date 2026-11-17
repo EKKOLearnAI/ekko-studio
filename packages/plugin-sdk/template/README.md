@@ -31,7 +31,7 @@ Studio 提供的指南由 Studio 主仓库维护；升级 SDK 时一起更新这
 
 ## SDK 许可
 
-随附 SDK 的代码、类型、harness 和模板采用 [MIT](sdk/LICENSE)。
-两份含第三方贡献的指南保留原 BSL，详情见 [SDK 许可声明](sdk/NOTICE)
-和 docs/SDK-NOTICE；sdk/LICENSES 与 docs/LICENSES 保留完整原许可文本。
+随附 SDK 的代码、类型、harness、模板和全部宿主指南统一采用 [MIT](sdk/LICENSE)，
+包括 STUDIO_CTX.md、STUDIO_RETURNS.md。来源与贡献者署名见 [SDK 声明](sdk/NOTICE)。
+docs/SDK-LICENSE 与 docs/SDK-NOTICE 保留指南的许可文本与署名。
 本项目业务代码的许可由插件作者自行选择，SDK 的 MIT 许可不改变 Studio 核心的许可。

@@ -25,7 +25,7 @@ async function fixture() {
 it('generates self-contained documentation, working runtime contract tests and checks without npm dependencies', async () => {
   const { project } = await fixture()
   await checkProject(project)
-  for (const file of ['AGENTS.md', 'docs/ARCHITECTURE.md', 'docs/STUDIO_CTX.md', 'docs/STUDIO_RETURNS.md', 'docs/DEVELOPMENT.md', 'docs/CONTRACTS.md', 'docs/FIELD_REFERENCE.md', 'docs/HOST_API.md', 'sdk/src/index.ts', 'sdk/src/json.ts', 'sdk/LICENSE', 'sdk/NOTICE', 'sdk/LICENSES/Studio-SDK-LICENSE.txt', 'sdk/LICENSES/BUSL-1.1.txt', 'docs/SDK-NOTICE', 'docs/LICENSES/Studio-SDK-LICENSE.txt', 'docs/LICENSES/BUSL-1.1.txt', '.github/workflows/check.yml']) await access(join(project, file))
+  for (const file of ['AGENTS.md', 'docs/ARCHITECTURE.md', 'docs/STUDIO_CTX.md', 'docs/STUDIO_RETURNS.md', 'docs/DEVELOPMENT.md', 'docs/CONTRACTS.md', 'docs/FIELD_REFERENCE.md', 'docs/HOST_API.md', 'sdk/src/index.ts', 'sdk/src/json.ts', 'sdk/LICENSE', 'sdk/NOTICE', 'docs/SDK-NOTICE', 'docs/SDK-LICENSE', '.github/workflows/check.yml']) await access(join(project, file))
   const check = await promisify(execFile)(process.execPath, ['scripts/plugin-harness.mjs', 'check'], { cwd: project })
   expect(check.stdout).toContain('checked')
   const tests = await promisify(execFile)(process.execPath, ['--test', 'tests/contracts.test.mjs'], { cwd: project })
@@ -35,6 +35,7 @@ it('generates self-contained documentation, working runtime contract tests and c
   const sdkPackage = JSON.parse(await readFile(join(project, 'sdk/package.json'), 'utf8'))
   expect(sdkPackage.license).toBe('MIT')
   expect(await readFile(join(project, 'sdk/LICENSE'), 'utf8')).toContain('MIT License')
+  expect(await readFile(join(project, 'docs/SDK-LICENSE'), 'utf8')).toBe(await readFile(join(project, 'sdk/LICENSE'), 'utf8'))
   expect(await readFile(join(project, 'docs/SDK-NOTICE'), 'utf8')).toBe(await readFile(join(project, 'sdk/NOTICE'), 'utf8'))
   await expect(access(join(project, 'contracts/changes.json'))).rejects.toThrow()
 })
