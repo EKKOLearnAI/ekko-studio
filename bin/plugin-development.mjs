@@ -25,7 +25,7 @@ export async function scaffoldPlugin(destination, id) {
     const sdk = await realpath(join(root, 'packages/plugin-sdk')).catch(() => realpath(join(root, 'dist/plugin-sdk')))
     await mkdir(join(target, 'sdk'))
     await cp(join(sdk, 'package.json'), join(target, 'sdk/package.json'))
-    for (const part of ['src', 'docs', 'harness', 'template']) await cp(join(sdk, part), join(target, 'sdk', part), { recursive: true })
+    for (const part of ['LICENSE', 'NOTICE', 'LICENSES', 'src', 'docs', 'harness', 'template']) await cp(join(sdk, part), join(target, 'sdk', part), { recursive: true })
     await cp(join(sdk, 'template'), target, { recursive: true })
     const pkg = JSON.parse(await readFile(join(target, 'package.json'), 'utf8'))
     pkg.scripts = { dev: 'ekko-studio plugins dev .', 'harness:check': 'node scripts/plugin-harness.mjs check', test: 'node --test tests/*.test.mjs', prepack: 'npm run harness:check && npm test && npm run build --if-present && npm run harness:check' }
@@ -33,6 +33,8 @@ export async function scaffoldPlugin(destination, id) {
     await writeFile(join(target, 'package.json'), JSON.stringify(pkg, null, 2) + '\n')
     await writeFile(join(target, '.gitignore'), 'node_modules/\ndist/\n.env\n.env.*\n')
     await cp(join(sdk, 'docs'), join(target, 'docs'), { recursive: true })
+    await cp(join(sdk, 'NOTICE'), join(target, 'docs/SDK-NOTICE'))
+    await cp(join(sdk, 'LICENSES'), join(target, 'docs/LICENSES'), { recursive: true })
     return target
   } catch (error) { await rm(target, { recursive: true, force: true }); throw error }
 }

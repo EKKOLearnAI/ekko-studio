@@ -65,3 +65,11 @@ object 声明 properties、required、additionalProperties；array 声明 items�
 操作的 input/output 引用 models 中的名称；事件声明 model 和 caller/plugin audience。
 storage/checkpoints 声明 model、正整数 version 和 scope；迁移逻辑由插件实现。
 宿主 inputSchema 是 SDK Schema 子集，支持 description；只有全部字段都属于 SDK Schema 子集时才可复用文档模型。
+
+## SDK 许可
+
+SDK 代码、类型、harness 和模板采用独立 MIT 许可，见 SDK 根目录 LICENSE。
+STUDIO_CTX.md、STUDIO_RETURNS.md 两份含第三方贡献的指南保留原 BSL 1.1，见 NOTICE
+和 LICENSES；不要把这些指南改标为 MIT。Studio 核心许可保持原范围。
+创建插件和发行 CLI 会一并复制 SDK LICENSE、NOTICE、LICENSES；插件 docs 下也保留
+SDK-NOTICE 和 LICENSES，完整许可文本与署名不得遗漏。SDK 许可不替插件作者选择业务代码许可。

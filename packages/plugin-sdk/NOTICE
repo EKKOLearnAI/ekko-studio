@@ -1,0 +1,37 @@
+Studio Plugin SDK licensing
+===========================
+
+The SDK implementation, public types, harness, templates and EKKOLearnAI-authored
+SDK guides are made available under the MIT license in LICENSE.
+This license grant is limited to the SDK. Studio host/core code remains governed
+by the Studio repository license. Downloaded applications and npm dependencies
+retain their own licenses.
+
+Retained third-party documentation exception
+-------------------------------------------
+The following two guides retain their original Business Source License 1.1;
+they are NOT covered by the SDK MIT grant:
+
+  docs/STUDIO_CTX.md
+  docs/STUDIO_RETURNS.md
+
+These guides include contributions by widechaos (十方空烬 · Ember / Renchao Wu),
+submitted in EKKOLearnAI/ekko-studio pull request #3827:
+https://github.com/EKKOLearnAI/ekko-studio/pull/3827
+Source commit: ed442c0908e9cbde2971bbbe411a6a1a9e7b45f8
+
+No assignment or MIT relicensing right is asserted for that contribution.
+For clarity, both complete guide files, including their SDK updates, remain
+under their original license. Their contents and attribution are retained.
+
+The original repository license, including EKKOLearnAI as Licensor, the
+non-commercial Additional Use Grant, Change Date 2029-05-10 and Apache-2.0
+Change License, is reproduced verbatim in LICENSES/Studio-SDK-LICENSE.txt.
+The complete Business Source License 1.1 text, including the MariaDB license-text
+copyright notice, is reproduced verbatim in LICENSES/BUSL-1.1.txt.
+Redistribution of these guides must preserve these notices and license terms;
+the MIT grant does not remove their original use restrictions.
+
+Generated/embedded plugins may carry the same guides twice, under sdk/docs/
+and under the plugin's docs/. This exception applies to both copies. Keep this
+NOTICE and the LICENSES directory with either copy when redistributing it.
