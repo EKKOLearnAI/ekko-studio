@@ -1505,6 +1505,10 @@ export class ChatRunSocket {
       if (isPersonSession(data.session_id) && data.clarify_id.startsWith('person-interaction:')) {
         try {
           await answerPersonChatInteraction(socketUser!.id, data.clarify_id, data.response || '', false, data.session_id!)
+          // A concurrent Bot turn can defer the session-wide question update.
+          socket.emit('clarify.resolved', {
+            event: 'clarify.resolved', session_id: data.session_id, clarify_id: data.clarify_id, resolved: true, reason: 'response',
+          })
           this.syncPersonInteraction(socketUser!.id)
         } catch (error) {
           socket.emit('clarify.resolved', { event: 'clarify.resolved', session_id: data.session_id, clarify_id: data.clarify_id, resolved: false, error: String(error) })
@@ -1558,7 +1562,8 @@ export class ChatRunSocket {
       try {
         if (shared && !buildResumeEvents(this.sessionMap.get(data.session_id)?.events || []).some(entry => entry.event === 'clarify.requested' && entry.data?.clarify_id === data.clarify_id)) throw new Error('Clarification does not belong to this session')
         const result = await this.bridge.clarifyRespond(data.clarify_id, data.response || '')
-        const resolved = Boolean((result as any)?.resolved)
+        const resolved = result.resolved === true
+        this.clearClarifyEventState(data.session_id, data.clarify_id)
         this.emitToSession(socket, data.session_id, 'clarify.resolved', {
           event: 'clarify.resolved',
           clarify_id: data.clarify_id,
@@ -1568,15 +1573,16 @@ export class ChatRunSocket {
             error: 'Clarification is no longer pending.',
           } : {}),
         })
-        if (resolved) {
-          this.clearClarifyEventState(data.session_id, data.clarify_id)
-        }
       } catch (err) {
+        const error = err instanceof Error ? err.message : String(err)
+        // Older Hermes brokers report a missing route as an RPC error.
+        const stale = /unknown (?:clarify|clarification) request\b/i.test(error)
+        if (stale) this.clearClarifyEventState(data.session_id, data.clarify_id)
         this.emitToSession(socket, data.session_id, 'clarify.resolved', {
           event: 'clarify.resolved',
           clarify_id: data.clarify_id,
           resolved: false,
-          error: err instanceof Error ? err.message : String(err),
+          ...(stale ? { stale: true, error: 'Clarification is no longer pending.' } : { error }),
         })
       }
     })
@@ -3683,8 +3689,10 @@ export class ChatRunSocket {
     this.emitPendingInteraction(profile, event, tagged)
     const display = personDisplayEvent(sessionId, event, tagged)
     if (display === null) return
-    this.nsp.to(`session:${sessionId}`).emit(event, display)
-    if (!this.nsp.adapter.rooms.get(`session:${sessionId}`)?.size && socket.connected) {
+    const room = `session:${sessionId}`
+    this.nsp.to(room).emit(event, display)
+    // A new connection can submit before it rejoins a room that still has viewers.
+    if (socket.connected && !this.nsp.adapter.rooms.get(room)?.has(socket.id)) {
       socket.emit(event, display)
     }
   }
