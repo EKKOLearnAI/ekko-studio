@@ -54,10 +54,9 @@ export function personSelectionApiMode(group: PersonProtocolGroup, model: string
   if (requested === undefined) return configured
   if (runtime === 'hermes' && requested === configured) return configured
   if (typeof requested !== 'string' || !SELECTABLE_API_MODES.includes(requested)) throw personError('Unsupported model protocol')
-  // Hermes owns its native protocol. HTTP gateway callers can select any of
-  // the gateway's supported ingress protocols, including for OAuth Providers.
-  if (runtime === 'hermes'
-    || ['bedrock_converse', 'codex_app_server'].includes(configured || '')) {
+  // Hermes also uses the HTTP gateway, so saved HTTP choices need not match
+  // the current upstream protocol. Native-only protocols cannot be translated.
+  if (['bedrock_converse', 'codex_app_server'].includes(configured || '')) {
     if (requested !== configured) throw personError('Runtime does not support this model protocol', 409)
   }
   return requested
