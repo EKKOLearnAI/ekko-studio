@@ -167,10 +167,9 @@ it.each(['finished','failed','interrupted'] as const)('yields to a queued %s cal
         : {content:`Reported ${terminal} task result.`,finishReason:'stop'})
       callbackResult = await run(model,execution.id)
       expect(model.requests()).toBe(3)
-      const sessions = await import('../../packages/server/src/modules/studio/repositories/session-store')
-      const messageId = sessions.addMessage({session_id:'person-main-1',role:'assistant',content:callbackResult.output.content,
-        run_marker:callbackResult.runId,finish_reason:'stop'})
-      data.onEvent('run.completed',{run_id:callbackResult.runId,message_id:messageId,output:callbackResult.output.content})
+      const {reply,receipt} = await f.reportDelivery(execution.id,callbackResult.output.content,callbackResult.runId)
+      expect(receipt).toMatchObject({executionId:execution.id,state:terminal})
+      data.onEvent('run.completed',{run_id:callbackResult.runId,message_id:reply?.messageId,output:callbackResult.output.content,person_task_return:receipt})
       server.markExternalRunCompleted('person-main-1','run.completed')
     } finally { finish() }
   })
@@ -205,6 +204,163 @@ it.each(['finished','failed','interrupted'] as const)('yields to a queued %s cal
   expect(f.db.prepare('SELECT state FROM person_deliveries WHERE execution_id=?').get(execution.id)!.state).toBe('delivered')
   await delivery.deliverPersonResults()
   expect(f.runtime.deliver).toHaveBeenCalledTimes(1)
+})
+
+async function resultSocket(execute?: (data: any) => Promise<void>) {
+  const {ChatRunSocket} = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+  const server: any = Object.create(ChatRunSocket.prototype)
+  const state = {isWorking:false,queue:[],events:[],messages:[]}
+  server.sessionMap = new Map([['person-main-1',state]])
+  server.nsp = {adapter:{rooms:new Map()},sockets:new Map(),to:()=>({emit:vi.fn()})}
+  if (execute) server.executeRun = vi.fn(async (_socket, data) => {
+    await execute(data)
+    server.markExternalRunCompleted('person-main-1','run.completed')
+  })
+  vi.mocked(f.runtime.deliver).mockImplementation(result => server.deliverPersonResult(result))
+  return {server,state}
+}
+
+function deliveryState(executionId: string) {
+  return f.db.prepare('SELECT state,wait_for_json,claim_id,error FROM person_deliveries WHERE execution_id=?').get(executionId)!
+}
+
+function resultReceipts() {
+  return f.db.prepare('SELECT execution_id,assistant_message_id FROM person_task_returns ORDER BY CAST(assistant_message_id AS INTEGER)').all()
+}
+
+it('reports A and B once when A yields until B reports, including after reopening SQLite', async () => {
+  const a = await f.create({title:'A'})
+  await f.run(a.task.id)
+  const b = await f.create({title:'B'})
+  const {deliverPersonResults} = await import('../../packages/server/src/modules/studio/services/person/delivery')
+  const attempts: string[] = []
+  let client: ModelClient
+  vi.doMock('../../packages/server/src/modules/studio/public/provider-account',async importOriginal=>({
+    ...await importOriginal<object>(), withSocketProviderAccount:(operation:unknown)=>operation,
+  }))
+  vi.doMock('../../packages/server/src/modules/studio/public/chat-agent-runtime',async importOriginal=>({
+    ...await importOriginal<object>(),
+    resolveChatEkkoProviderRuntimeConfig:async()=>({apiMode:'chat_completions'}),
+    resolveChatEkkoModelProviderConfigs:()=>({providerConfig:{provider:'fixture'}}),
+    getChatEkkoModelRequestTimeoutMs:()=>1000,
+    createChatEkkoAuthorizedProviderFetch:()=>undefined,
+    createChatEkkoModelClient:()=>client,
+    chatEkkoAgentReasoningText:()=>'',serializeChatEkkoAgentReasoningDetails:()=>null,
+  }))
+  const {server} = await resultSocket()
+  const {handleEkkoAgentRun} = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+  server.executeRun = vi.fn((socket,data,profile,skip,context)=>{
+    const executionId = context.personDelivery.executionId
+    attempts.push(executionId)
+    client = scripted(step => step === 1
+      ? {content:'',toolCalls:[call('bot_tasks_wait')]}
+      : {content:executionId === a.execution.id ? 'A final result' : 'B final result',finishReason:'stop'}).client
+    return handleEkkoAgentRun(server.nsp,socket,{...data,resolved_mcp_servers:{}},profile,
+      server.sessionMap,server.dequeueNextQueuedRun.bind(server),skip,context)
+  })
+  vi.doUnmock('../../packages/server/src/modules/studio/public/provider-account')
+  vi.doUnmock('../../packages/server/src/modules/studio/public/chat-agent-runtime')
+
+  await deliverPersonResults()
+  await vi.waitFor(() => expect(deliveryState(a.execution.id)).toMatchObject({state:'pending',error:'',wait_for_json:JSON.stringify([b.execution.id])}))
+  expect(resultReceipts()).toEqual([])
+  expect(f.get(a.task.id).execution_state).toBe('finished')
+  await f.reopen()
+  await deliverPersonResults()
+  expect(deliveryState(a.execution.id).state).toBe('pending')
+  expect(server.executeRun).toHaveBeenCalledTimes(1)
+
+  await f.run(b.task.id)
+  await deliverPersonResults()
+  await vi.waitFor(() => expect(deliveryState(b.execution.id).state).toBe('delivered'))
+  await deliverPersonResults()
+  await vi.waitFor(() => expect(deliveryState(a.execution.id).state).toBe('delivered'))
+  await deliverPersonResults()
+  expect(attempts).toEqual([a.execution.id,b.execution.id,a.execution.id])
+  expect(resultReceipts().map(row=>row.execution_id)).toEqual([b.execution.id,a.execution.id])
+  const finalReplies = f.db.prepare("SELECT content FROM messages WHERE session_id='person-main-1' AND role='assistant' AND finish_reason='stop' ORDER BY id").all()
+  expect(finalReplies).toEqual([{content:'B final result'},{content:'A final result'}])
+})
+
+it.each(['interrupted','provider failure','receipt write failure'])('retries %s and ignores duplicate or stale deliveries', async failure => {
+  const {task,execution} = await f.create()
+  await f.run(task.id)
+  const {deliverPersonResults,persistPersonDeliveryReply,retryPersonDelivery} = await import('../../packages/server/src/modules/studio/services/person/delivery')
+  const {addMessage} = await import('../../packages/server/src/modules/studio/repositories/session-store')
+  const writeAgain = vi.fn(()=>({messageId:addMessage({session_id:'person-main-1',role:'assistant',content:'Duplicate'})}))
+  let attempt = 0
+  const {server,state} = await resultSocket(async data => {
+    const result = vi.mocked(f.runtime.deliver).mock.lastCall![0]
+    await server.deliverPersonResult(result)
+    expect(state.queue).toHaveLength(0)
+    if (++attempt === 1 && failure !== 'receipt write failure') {
+      if (failure === 'provider failure') data.onEvent('run.failed',{error:'Provider unavailable'})
+      return
+    }
+    if (attempt === 2) {
+      const first = vi.mocked(f.runtime.deliver).mock.calls[0][0]
+      const stale = {userId:first.user.id,executionId:execution.id,claimId:first.claimId}
+      expect(() => persistPersonDeliveryReply(stale,'person-main-1',writeAgain)).toThrow(/no longer current/)
+      expect(writeAgain).not.toHaveBeenCalled()
+      retryPersonDelivery(stale,'A late error before the new claim commits')
+      expect(deliveryState(execution.id)).toMatchObject({state:'queued',claim_id:result.claimId,error:''})
+    }
+    await f.reportDelivery(execution.id)
+  })
+
+  if (failure === 'receipt write failure') {
+    f.db.exec("CREATE TRIGGER reject_receipt BEFORE INSERT ON person_task_returns BEGIN SELECT RAISE(ABORT, 'Receipt write failed'); END")
+  }
+  await deliverPersonResults()
+  await vi.waitFor(() => expect(deliveryState(execution.id)).toMatchObject({state:'pending',error:expect.any(String)}))
+  expect(deliveryState(execution.id).error).not.toBe('')
+  expect(resultReceipts()).toEqual([])
+  expect(f.db.prepare("SELECT content FROM messages WHERE session_id='person-main-1' AND role='assistant'").all()).toEqual([])
+  expect(f.get(task.id).execution_state).toBe('finished')
+
+  await deliverPersonResults()
+  expect(server.executeRun).toHaveBeenCalledTimes(1)
+  if (failure === 'receipt write failure') f.db.exec('DROP TRIGGER reject_receipt')
+  f.db.prepare('UPDATE person_deliveries SET updated_at=0 WHERE execution_id=?').run(execution.id)
+  const old = vi.mocked(f.runtime.deliver).mock.calls[0][0]
+  const oldClaim = {userId:old.user.id,executionId:execution.id,claimId:old.claimId}
+  await deliverPersonResults()
+  await vi.waitFor(() => expect(deliveryState(execution.id).state).toBe('delivered'))
+  expect(deliveryState(execution.id).claim_id).not.toBe(old.claimId)
+
+  expect(() => persistPersonDeliveryReply(oldClaim,'person-main-1',writeAgain)).toThrow(/no longer current/)
+  expect(writeAgain).not.toHaveBeenCalled()
+  retryPersonDelivery(oldClaim,'A late error')
+  await server.deliverPersonResult(old)
+  // Reconciliation uses the durable receipt even if a replay puts the result back in the outbox.
+  f.db.prepare("UPDATE person_deliveries SET state='pending' WHERE execution_id=?").run(execution.id)
+  await deliverPersonResults()
+  expect(deliveryState(execution.id)).toMatchObject({state:'delivered',error:''})
+  expect(server.executeRun).toHaveBeenCalledTimes(2)
+  expect(f.execute).toHaveBeenCalledTimes(1)
+  expect(resultReceipts()).toHaveLength(1)
+  expect(f.db.prepare("SELECT content FROM messages WHERE session_id='person-main-1' AND role='assistant'").all())
+    .toEqual([{content:'Reported the task result.'}])
+})
+
+it('recovers a claim lost before the result reply commits when Studio restarts', async () => {
+  const {task,execution} = await f.create()
+  await f.run(task.id)
+  const {deliverPersonResults} = await import('../../packages/server/src/modules/studio/services/person/delivery')
+  await deliverPersonResults()
+  const first = deliveryState(execution.id)
+  expect(first).toMatchObject({state:'queued',claim_id:expect.any(String)})
+  expect(resultReceipts()).toEqual([])
+
+  await f.reopen()
+  f.runner.startPersonWork()
+  expect(deliveryState(execution.id).state).toBe('pending')
+  vi.mocked(f.runtime.deliver).mockImplementation(async result=>{ await f.reportDelivery(result.executionId) })
+  await deliverPersonResults()
+  expect(deliveryState(execution.id).state).toBe('delivered')
+  expect(deliveryState(execution.id).claim_id).not.toBe(first.claim_id)
+  expect(resultReceipts()).toHaveLength(1)
+  expect(f.execute).toHaveBeenCalledTimes(1)
 })
 
 it('keeps waiting acknowledgements out of completion notices and App push envelopes',async()=>{

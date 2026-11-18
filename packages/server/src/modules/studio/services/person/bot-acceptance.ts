@@ -249,12 +249,16 @@ export function claimAutomaticReview(run: PersonExecution) {
 export function finishAutomaticReview(run: PersonExecution, error: string) {
   const review=automaticReview(run)
   if (!review) return false
-  personTransaction(() => {
-    const reason=error || 'Bot returned without recording an acceptance decision; retrying the saved report'
-    if (review.attempt.decision_attempts>=3) blockAutomaticReview(run,review.root,`Acceptance decision could not be recorded after 3 Bot turns: ${reason}`.slice(0,2000))
-    else personDb().prepare("UPDATE person_deliveries SET state='pending',error=?,updated_at=? WHERE execution_id=? AND state='queued'").run(reason,Date.now(),run.id)
-  })
+  const reason=error || 'Bot returned without recording an acceptance decision; retrying the saved report'
+  if (review.attempt.decision_attempts>=3) blockAutomaticReview(run,review.root,`Acceptance decision could not be recorded after 3 Bot turns: ${reason}`.slice(0,2000))
+  else personDb().prepare("UPDATE person_deliveries SET state='pending',error=?,updated_at=? WHERE execution_id=? AND state='queued'").run(reason,Date.now(),run.id)
   return true
+}
+
+/** Yielding to a dependency does not spend an acceptance decision attempt. */
+export function deferAutomaticReview(run: PersonExecution) {
+  const review = automaticReview(run)
+  if (review) personDb().prepare('UPDATE person_acceptance_attempts SET decision_attempts=MAX(0,decision_attempts-1) WHERE id=?').run(review.attempt.id)
 }
 export function interruptBotVerification(run:PersonExecution,reason:string) {
   const db=personDb(),row=db.prepare('SELECT execution_id,id FROM person_acceptance_attempts WHERE verification_execution_id=?').get(run.id)

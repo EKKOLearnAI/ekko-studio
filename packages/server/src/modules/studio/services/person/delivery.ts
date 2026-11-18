@@ -1,17 +1,20 @@
+import { randomUUID } from 'node:crypto'
 import type { PersonExecution, PersonTaskOrigin } from '../../contracts/person'
+import type { PersonDeliveryClaim } from '../../contracts/person-session'
 import type { ContentBlock } from '../../contracts/runs/session'
 import type { PersonResultDelivery } from '../../public/person-runtime'
 import { personError } from '../../contracts/person'
 import { ownsPersonSession } from '../../contracts/person-session'
 import { getSession, getSessionDetail } from '../../repositories/session-store'
 import { personDb, getPersonExecution, getPersonTask, personTransaction } from '../../repositories/person-store'
+import { hasCommittedPersonTaskReturn, savePersonTaskReturn } from '../../repositories/person-return-store'
 import { personUpdated } from '../../repositories/person-updates'
 import { personRuntime } from '../../public/person-runtime'
 import { personUser } from './catalog'
 import { personFlowSummary, personRequirements } from '../../contracts/person-flow'
 import { assertPersonStage, personTaskStage } from '../../repositories/person-stage-store'
 import { failPersonStage } from './stage-flows'
-import { botAcceptanceContext, claimAutomaticReview, finishAutomaticReview } from './bot-acceptance'
+import { botAcceptanceContext, claimAutomaticReview, deferAutomaticReview, finishAutomaticReview } from './bot-acceptance'
 
 type ReturnTurn = { userId: number; executionId: string; controller: AbortController; finished: Promise<void> }
 const activeReturns = new Set<ReturnTurn>()
@@ -61,26 +64,72 @@ export function readyPersonDelivery(run: PersonExecution) {
   personDb().prepare("UPDATE person_deliveries SET state='pending',updated_at=? WHERE execution_id=? AND state='waiting'").run(Date.now(), run.id)
   personUpdated(run.owner_user_id)
 }
-export function finishPersonDelivery(userId: number, executionId: string, ok: boolean, error = '', acceptanceReturnId = '') {
-  const db = personDb()
-  const row = db.prepare("SELECT origin_json FROM person_deliveries WHERE execution_id=? AND owner_user_id=? AND state='queued'").get(executionId,userId)
-  if(!row || (JSON.parse(String(row.origin_json)).acceptanceReturnId || '')!==acceptanceReturnId) return
-  if (finishAutomaticReview(getPersonExecution(userId,executionId),error)) { personUpdated(userId); return }
-  const stage = row ? (JSON.parse(String(row.origin_json)) as PersonTaskOrigin).stage : undefined
-  if (!ok && stage) {
-    const detail = error || 'Stage worker result delivery failed'
-    db.prepare("UPDATE person_deliveries SET state='failed',error=?,updated_at=? WHERE execution_id=? AND owner_user_id=? AND state='queued'").run(detail.slice(0,1000),Date.now(),executionId,userId)
-    failPersonStage(userId,stage,detail)
-    personUpdated(userId)
-    return
-  }
-  personDb().prepare("UPDATE person_deliveries SET state=?,error=?,updated_at=? WHERE execution_id=? AND owner_user_id=? AND state='queued'")
-    .run(ok ? 'delivered' : 'pending', error.slice(0,1000), Date.now(), executionId, userId)
+function claimedPersonDelivery({ userId, executionId, claimId, acceptanceReturnId = '' }: PersonDeliveryClaim) {
+  const row = personDb().prepare(`SELECT origin_json,state FROM person_deliveries
+    WHERE execution_id=? AND owner_user_id=? AND claim_id=? AND claim_id!=''`).get(executionId,userId,claimId)
+  if (!row) return
+  const origin = JSON.parse(String(row.origin_json)) as PersonTaskOrigin
+  if ((origin.acceptanceReturnId || '') === acceptanceReturnId) return { origin, state: row.state }
+}
+
+export function personDeliveryClaimIsCurrent(claim: PersonDeliveryClaim) {
+  return claimedPersonDelivery(claim)?.state === 'queued'
+    && personDeliveryCurrent(claim.userId,claim.executionId,claim.acceptanceReturnId || '')
+}
+
+/** A result reply and its receipt must commit together before releasing the durable claim. */
+export function persistPersonDeliveryReply<T extends { messageId: number | undefined }>(
+  claim: PersonDeliveryClaim, sessionId: string, writeReply: () => T, waitFor?: string[],
+) {
+  const {userId,executionId,acceptanceReturnId = ''} = claim
+  const persisted = personTransaction(() => {
+    const delivery = claimedPersonDelivery(claim)
+    if (delivery?.origin.sessionId !== sessionId || !ownsPersonSession(userId,getSession(sessionId))) {
+      throw personError('Result callback is no longer current',409)
+    }
+    // Explicit host transitions (such as a task handoff) consume the result themselves.
+    if (delivery.state === 'handled') return {reply:writeReply(),receipt:undefined}
+    if (delivery.state !== 'queued' || !personDeliveryCurrent(userId,executionId,acceptanceReturnId)) {
+      throw personError('Result callback is no longer current',409)
+    }
+    const db = personDb(), run = getPersonExecution(userId,executionId)
+    if (waitFor !== undefined) {
+      const reply = writeReply()
+      if (!reply.messageId) throw Error('Could not persist the task waiting reply')
+      deferAutomaticReview(run)
+      db.prepare("UPDATE person_deliveries SET state='pending',error='',wait_for_json=?,updated_at=? WHERE execution_id=?")
+        .run(JSON.stringify(waitFor),Date.now(),executionId)
+      return {reply,receipt:undefined}
+    }
+    if (finishAutomaticReview(run,'')) return {reply:undefined,receipt:undefined}
+    const reply = writeReply()
+    const receipt = savePersonTaskReturn(userId,executionId,sessionId,reply.messageId,acceptanceReturnId)
+    if (!receipt) throw Error('Could not persist the task result receipt')
+    db.prepare("UPDATE person_deliveries SET state='delivered',error='',updated_at=? WHERE execution_id=?").run(Date.now(),executionId)
+    return {reply,receipt}
+  })
+  personUpdated(userId)
+  return persisted
+}
+
+export function retryPersonDelivery(claim: PersonDeliveryClaim, error: string) {
+  const {userId,executionId} = claim
+  const stage = personTransaction(() => {
+    const delivery = claimedPersonDelivery(claim)
+    if (delivery?.state !== 'queued') return
+    if (finishAutomaticReview(getPersonExecution(userId,executionId),error)) return
+    const stage = delivery.origin.stage
+    personDb().prepare("UPDATE person_deliveries SET state=?,error=?,updated_at=? WHERE execution_id=?")
+      .run(stage ? 'failed' : 'pending',error.slice(0,1000),Date.now(),executionId)
+    return stage
+  })
+  if (stage) failPersonStage(userId,stage,error)
   personUpdated(userId)
 }
-export function cancelPersonDelivery(userId: number, executionId: string, acceptanceReturnId = '') {
-  personDb().prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id=? AND owner_user_id=? AND state='queued' AND COALESCE(json_extract(origin_json,'$.acceptanceReturnId'),'')=?")
-    .run(Date.now(), executionId, userId,acceptanceReturnId)
+export function cancelPersonDelivery({userId,executionId,claimId,acceptanceReturnId = ''}: PersonDeliveryClaim) {
+  personDb().prepare(`UPDATE person_deliveries SET state='cancelled',updated_at=?
+    WHERE execution_id=? AND owner_user_id=? AND claim_id=? AND state='queued' AND COALESCE(json_extract(origin_json,'$.acceptanceReturnId'),'')=?`)
+    .run(Date.now(),executionId,userId,claimId,acceptanceReturnId)
 }
 export function personDeliveryCurrent(userId: number, executionId: string, expectedReturnId?: string) {
   const run = getPersonExecution(userId, executionId)
@@ -105,42 +154,56 @@ export function assertPersonDeliveryOrigin(userId: number, origin?: PersonTaskOr
 }
 export async function deliverPersonResults() {
   const db = personDb()
-  const rows = db.prepare("SELECT * FROM person_deliveries WHERE state='pending' AND (error='' OR updated_at<?) ORDER BY updated_at LIMIT 20")
-    .all(Date.now() - 60_000) as { execution_id: string; owner_user_id: number; origin_json: string }[]
-  for (const row of rows) {
-    if (!personDeliveryCurrent(row.owner_user_id, row.execution_id)) {
-      db.prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id=?").run(row.execution_id)
-      continue
-    }
-    const run = getPersonExecution(row.owner_user_id, row.execution_id)
-    const task = getPersonTask(row.owner_user_id, run.task_id)
-    const { manualFollowup: ownFollowup, ...origin } = JSON.parse(row.origin_json) as PersonTaskOrigin & Pick<PersonResultDelivery, 'manualFollowup'>
-    if (origin.sessionId !== task.session_id) {
-      db.prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id=?").run(run.id)
-      continue
-    }
-    // Deleting the source conversation must not recreate it or replay private history.
-    if (!ownsPersonSession(row.owner_user_id, getSession(origin.sessionId))) {
-      db.prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id=?").run(run.id)
-      continue
-    }
+  const runnable = `d.state='pending' AND (d.error='' OR d.updated_at<?)
+    AND NOT EXISTS (
+      SELECT 1 FROM json_each(d.wait_for_json) w JOIN person_deliveries dependency ON dependency.execution_id=w.value
+      WHERE dependency.owner_user_id=d.owner_user_id AND dependency.state IN ('waiting','pending','queued')
+    )`
+  const candidates = db.prepare(`SELECT d.execution_id FROM person_deliveries d WHERE ${runnable}
+    ORDER BY d.updated_at LIMIT 20`).all(Date.now() - 60_000)
+  for (const {execution_id} of candidates) {
+    const delivery = personTransaction(() => {
+      // Another admission or workflow transition can run while an earlier result joins its session.
+      const row = db.prepare(`SELECT * FROM person_deliveries d WHERE ${runnable} AND d.execution_id=?`)
+        .get(Date.now() - 60_000,String(execution_id)) as {execution_id:string;owner_user_id:number;origin_json:string} | undefined
+      if (!row) return
+      const {owner_user_id: userId, execution_id: executionId} = row
+      if (!personDeliveryCurrent(userId,executionId)) {
+        db.prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id=?").run(executionId)
+        return
+      }
+      const run = getPersonExecution(userId,executionId)
+      const task = getPersonTask(userId,run.task_id)
+      const {manualFollowup:ownFollowup,...origin} = JSON.parse(row.origin_json) as PersonTaskOrigin & Pick<PersonResultDelivery, 'manualFollowup'>
+      // Deleting the source conversation must not recreate it or replay private history.
+      if (origin.sessionId !== task.session_id || !ownsPersonSession(userId,getSession(origin.sessionId))) {
+        db.prepare("UPDATE person_deliveries SET state='cancelled' WHERE execution_id=?").run(executionId)
+        return
+      }
+      if (hasCommittedPersonTaskReturn(userId,executionId,origin.acceptanceReturnId || '')) {
+        db.prepare("UPDATE person_deliveries SET state='delivered',error='',updated_at=? WHERE execution_id=?").run(Date.now(),executionId)
+        personUpdated(userId)
+        return
+      }
+      const claimId = randomUUID()
+      db.prepare("UPDATE person_deliveries SET state='queued',error='',claim_id=?,wait_for_json='[]',updated_at=? WHERE execution_id=?")
+        .run(claimId,Date.now(),executionId)
+      if (claimAutomaticReview(run)) return {run,task,origin,ownFollowup,userId,claimId}
+    })
+    if (!delivery) continue
+    const {run,task,origin,ownFollowup,userId,claimId} = delivery
     try {
-      const admitted=personTransaction(() => {
-        const claimed=db.prepare("UPDATE person_deliveries SET state='queued',error='',updated_at=? WHERE execution_id=? AND state='pending'").run(Date.now(),run.id)
-        return !!claimed.changes && claimAutomaticReview(run)
-      })
-      if (!admitted) continue
-      const user = personUser(row.owner_user_id)
+      const user = personUser(userId)
       const context = personFlowSummary(task)
       const acceptance = botAcceptanceContext(run)
       // A linked review reports on the developer's request, without marking future Bot turns manual.
       const development = acceptance?.kind === 'verification' ? db.prepare('SELECT origin_json FROM person_deliveries WHERE execution_id=? AND owner_user_id=?')
-        .get(String(acceptance.development_execution_id), row.owner_user_id) : undefined
+        .get(String(acceptance.development_execution_id), userId) : undefined
       const manualFollowup = ownFollowup || (development ? JSON.parse(String(development.origin_json)).manualFollowup as PersonResultDelivery['manualFollowup'] : undefined)
-      await personRuntime().deliver({ user, origin, executionId: run.id, taskId: task.id, title: task.title,
+      await personRuntime().deliver({ user, origin, executionId: run.id, claimId, taskId: task.id, title: task.title,
         status: run.state, output: run.output.slice(0,12000), error: run.error.slice(0,2000),
         acceptance, ...(manualFollowup ? { manualFollowup } : {}),
         ...(context.flow ? { returnExpectation: context.return_expectation, flow: context.flow } : {}) })
-    } catch (error) { finishPersonDelivery(row.owner_user_id, run.id, false, String(error),origin.acceptanceReturnId) }
+    } catch (error) { retryPersonDelivery({userId,executionId:run.id,claimId,acceptanceReturnId:origin.acceptanceReturnId},String(error)) }
   }
 }

@@ -2,6 +2,7 @@ import type { AgentRuntime } from '../agents/runtime'
 import type { ChatMessage } from './messages'
 import type { RunMode } from './surface'
 import type { RunUsageSummary } from './run-usage'
+import type { PersonDeliveryClaim } from '../person-session'
 
 export interface EkkoBackgroundContinuationContext {
   version: 1
@@ -10,6 +11,7 @@ export interface EkkoBackgroundContinuationContext {
   originStep: number
   messages: any[]
   memoryPolicy: 'disabled'
+  personDelivery?: PersonDeliveryClaim
 }
 
 export interface HermesBackgroundContinuationContext {
@@ -62,7 +64,7 @@ export interface SessionMessage {
 export interface QueuedRun {
   personStageDelivery?: { userId: number; deliveryId: string }
   /** Internal account-bound Person result delivery. */
-  personDelivery?: { userId: number; executionId: string; acceptanceReturnId?: string }
+  personDelivery?: PersonDeliveryClaim
   /** Internal admission check, never serialized or supplied by the client. */
   authorize?: () => Promise<void>
   /** Captured at admission, independent of whichever socket drains the queue. */
@@ -201,6 +203,7 @@ export interface SessionState {
   bridgeCompressionResults?: Record<string, BridgeCompressionResult>
   backgroundTasks?: Record<string, Record<string, unknown>>
   backgroundDelegations?: Record<string, BackgroundDelegationState>
+  activePersonDeliveryClaimId?: string
   /** Process-local by design; callbacks after a Studio restart are rejected instead of using live history. */
   backgroundContinuationContexts?: Record<string, BackgroundContinuationContext>
 }

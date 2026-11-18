@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 export const personExecutionSessionId = (executionId: string) => `person-task-${executionId}`
 
 export interface PersonResultIdentity { executionId: string; acceptanceReturnId?: string }
+export interface PersonDeliveryClaim extends PersonResultIdentity { userId: number; claimId: string }
 export function personResultQueueId(executionId: string, acceptanceReturnId?: string) {
   return `person-result:${executionId}${acceptanceReturnId ? `:${acceptanceReturnId}` : ''}`
 }

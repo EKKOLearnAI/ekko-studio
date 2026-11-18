@@ -11,7 +11,6 @@ async function reviewer() {
   return 'person-main-reviewer'
 }
 async function decideReports() {
-  const {finishPersonDelivery}=await import('../../packages/server/src/modules/studio/services/person/delivery')
   vi.mocked(f.runtime.deliver).mockImplementation(async result => {
     if(result.acceptance?.next_action==='review') {
       const tools=f.personTaskTools(1,result.origin.sessionId)
@@ -21,7 +20,7 @@ async function decideReports() {
         {...result.origin,runId:randomUUID(),returnExecutionId:result.executionId})
       expect(recorded).toMatchObject({ok:true,instruction:expect.stringContaining('host automatically')})
     }
-    finishPersonDelivery(1,result.executionId,true,'',result.origin.acceptanceReturnId)
+    await f.reportDelivery(result.executionId)
   })
 }
 async function pump(check:()=>void) {
@@ -264,8 +263,10 @@ it('retains cross-Bot dependency locks without duplicating the linked verifier i
 })
 
 it.each([false,true])('retries a missing decision boundedly and exposes a blocker; callback error=%s',async failed=>{
-  const {finishPersonDelivery}=await import('../../packages/server/src/modules/studio/services/person/delivery')
-  vi.mocked(f.runtime.deliver).mockImplementation(async result=>finishPersonDelivery(1,result.executionId,!failed,failed?'Bot provider failed':'',result.origin.acceptanceReturnId))
+  vi.mocked(f.runtime.deliver).mockImplementation(async result=>{
+    if(failed) throw new Error('Bot provider failed')
+    await f.reportDelivery(result.executionId)
+  })
   const {task}=await f.create({acceptance})
   let reopened=false
   await vi.waitFor(async()=>{
