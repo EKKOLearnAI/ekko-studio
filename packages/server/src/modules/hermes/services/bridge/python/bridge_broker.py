@@ -192,9 +192,13 @@ class BridgeBroker:
                 self._record_response_routes(profile, key or profile, resp)
             resp.setdefault("loaded", True)
             return resp
-        except OSError:
-            # The worker exited or its socket vanished after the running check; treat as unloaded.
+        except (FileNotFoundError, ConnectionRefusedError):
+            # The socket vanished or nothing listens on it: the worker exited after the running check.
             return dict(not_loaded)
+        except OSError as e:
+            # Resets, permission errors, timeouts etc. do not prove the worker or run stopped.
+            # Report the error so callers can stay conservative instead of assuming idle.
+            return {"ok": False, "error": f"worker status unavailable: {e}"}
         except RuntimeError as e:
             return {"ok": False, "error": str(e)}
 

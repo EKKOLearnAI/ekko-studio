@@ -41,6 +41,16 @@ class StatusIfLoadedTests(unittest.TestCase):
                 self.assertEqual(broker.handle({'action': 'status_if_loaded', 'session_id': 's1'}), COLD)
                 self.assertFalse(worker.calls[0][1])
 
+    def test_ambiguous_communication_errors_are_not_unloaded(self):
+        for error in (ConnectionResetError(104, 'reset'), PermissionError(13, 'denied'), TimeoutError('timed out'), BrokenPipeError(32, 'pipe')):
+            with self.subTest(error=type(error).__name__):
+                broker, _ = self.broker(error)
+                resp = broker.handle({'action': 'status_if_loaded', 'session_id': 's1'})
+                self.assertFalse(resp['ok'])
+                self.assertIn('worker status unavailable', resp['error'])
+                self.assertNotIn('loaded', resp)
+                self.assertNotIn('running', resp)
+
     def test_skipped_worker_is_unloaded(self):
         broker, _ = self.broker({'ok': True, 'skipped': True})
         self.assertEqual(broker._status_if_loaded({'session_id': 's1'}), COLD)

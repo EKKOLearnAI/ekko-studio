@@ -7,6 +7,6 @@ it('treats a missing or unreachable worker socket as an unloaded session in stat
   const { stderr } = await promisify(execFile)(process.platform === 'win32' ? 'python' : 'python3', ['-B', resolve('tests/server/fixtures/hermes-status-if-loaded.py')], {
     env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' }, timeout: 20_000,
   })
-  expect(stderr).toContain('Ran 5 tests')
+  expect(stderr).toContain('Ran 6 tests')
   expect(stderr).toContain('OK')
 })
