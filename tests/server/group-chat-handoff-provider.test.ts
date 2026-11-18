@@ -9,6 +9,9 @@ import { GroupChatServer, type RoomInfo } from '../../packages/server/src/module
 const { bridgeChat } = vi.hoisted(() => ({ bridgeChat: vi.fn() }))
 beforeEach(() => { bridgeChat.mockReset() })
 
+vi.mock('../../packages/server/src/modules/studio/infrastructure/database', () => ({
+  getDb: () => null,
+}))
 vi.mock('../../packages/server/src/modules/studio/repositories/users-store', () => ({
   findUserById: (id: number) => ({ id, username: 'member', role: 'user', status: 'active' }),
   listUserProfiles: () => [{ profile_name: 'target-profile' }],
