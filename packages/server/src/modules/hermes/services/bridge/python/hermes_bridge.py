@@ -244,9 +244,9 @@ class WorkerProcess(_transport.WorkerProcess):
         _sync_transport_patches()
         super().start()
 
-    def request(self, req: dict[str, Any], timeout: float | None = None) -> dict[str, Any]:
+    def request(self, req: dict[str, Any], timeout: float | None = None, *, start_if_needed: bool = True) -> dict[str, Any]:
         _sync_transport_patches()
-        return super().request(req, timeout)
+        return super().request(req, timeout, start_if_needed=start_if_needed)
 
 
 class BridgeBroker(_broker.BridgeBroker):

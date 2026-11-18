@@ -176,19 +176,29 @@ class BridgeBroker:
                 key = self._normalize_worker_key(profile, req.get("worker_key") if "worker_key" in req else None)
             worker = self._workers.get(key or profile)
 
+        not_loaded = {"ok": True, "session_id": session_id, "exists": False, "running": False, "loaded": False}
         if worker is None or not getattr(worker, "running", False):
-            return {"ok": True, "session_id": session_id, "exists": False, "running": False, "loaded": False}
+            return dict(not_loaded)
 
         forwarded = dict(req)
         forwarded["action"] = "status"
         forwarded["profile"] = profile
         forwarded.pop("worker_key", None)
         try:
-            resp = worker.request(forwarded, self._worker_request_timeout(req))
+            resp = worker.request(forwarded, self._worker_request_timeout(req), start_if_needed=False)
+            if resp.get("skipped"):
+                return dict(not_loaded)
             if resp.get("exists") is not False:
                 self._record_response_routes(profile, key or profile, resp)
             resp.setdefault("loaded", True)
             return resp
+        except (FileNotFoundError, ConnectionRefusedError):
+            # The socket vanished or nothing listens on it: the worker exited after the running check.
+            return dict(not_loaded)
+        except OSError as e:
+            # Resets, permission errors, timeouts etc. do not prove the worker or run stopped.
+            # Report the error so callers can stay conservative instead of assuming idle.
+            return {"ok": False, "error": f"worker status unavailable: {e}"}
         except RuntimeError as e:
             return {"ok": False, "error": str(e)}
 
