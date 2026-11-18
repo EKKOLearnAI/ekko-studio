@@ -200,9 +200,8 @@ elif action in {"approve", "reject"}:
     pending_before = wa.get_pending(wa_subsystem, pending_id)
     memory_store = None
     if subsystem == "memory" and action == "approve":
-        from tools.memory_tool import MemoryStore
-        memory_store = MemoryStore()
-        memory_store.load_from_disk()
+        from tools.memory_tool import load_on_disk_store
+        memory_store = load_on_disk_store()
     output = handle_pending_subcommand(
         wa_subsystem,
         [action, pending_id],
