@@ -78,21 +78,21 @@ test('appends plugin Agents to the shared manager grid without description text'
 
 test('reveals the Agent manager when the status request never responds', async ({ page }) => {
   test.setTimeout(45_000)
-  const stalled = Promise.withResolvers<void>()
-  await page.route(url => url.pathname.startsWith('/api/'), async route => {
-    if (new URL(route.request().url()).pathname === '/api/agents/status') {
-      await stalled.promise
-      await route.abort().catch(() => {})
-      return
+  await page.addInitScript(() => {
+    const fetch = window.fetch
+    window.fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href)
+      if (url.pathname !== '/api/agents/status') return fetch(input, init)
+      return new Promise<Response>((_, reject) => {
+        const signal = init?.signal
+        if (signal?.aborted) reject(signal.reason)
+        else signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
     }
-    await route.fulfill({ json: {} })
   })
-  try {
-    await openManager(page)
-    await expect(page.locator('.agent-manager-panel')).toHaveAttribute('aria-busy', 'true')
-    await expect(page.getByTestId('agent-card-ekko')).toBeVisible({ timeout: 15_000 })
-    await expect(page.locator('.agent-manager-panel')).toHaveAttribute('aria-busy', 'false')
-  } finally {
-    stalled.resolve()
-  }
+  await page.route(url => url.pathname.startsWith('/api/'), route => route.fulfill({ json: {} }))
+  await openManager(page)
+  await expect(page.locator('.agent-manager-panel')).toHaveAttribute('aria-busy', 'true')
+  await expect(page.getByTestId('agent-card-ekko')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.agent-manager-panel')).toHaveAttribute('aria-busy', 'false')
 })
