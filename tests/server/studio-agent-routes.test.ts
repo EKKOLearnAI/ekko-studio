@@ -9,13 +9,15 @@ import { PluginRuntime } from '../../packages/server/src/modules/studio/services
 import { PluginStore } from '../../packages/server/src/modules/studio/services/plugins/store'
 import { manifest } from '../../packages/server/src/modules/studio/services/plugins/schema'
 
-const state = vi.hoisted(() => ({ user: { id: 2, role: 'super_admin' } as any, shared: false, agents: [] as any[], updates: null as any }))
+const state = vi.hoisted(() => ({ user: { id: 2, role: 'super_admin' } as any, shared: false, agents: [] as any[], updates: null as any,
+  reconcile: vi.fn(async () => {}),
+}))
 vi.mock('../../packages/server/src/modules/studio/services/agents/plugin-update-policy', async importOriginal => {
   const actual = await importOriginal<any>()
   return { ...actual, getPluginAgentUpdates: () => state.updates }
 })
 vi.mock('../../packages/server/src/modules/studio/services/plugins/host', () => ({
-  ensureBuiltinPlugins: async () => {},
+  ensureBuiltinPlugins: state.reconcile,
   getPluginManager: () => ({ registeredAgents: () => state.agents }),
   resolvePluginIdentity: (identity: any) => identity,
 }))
@@ -24,12 +26,13 @@ vi.mock('../../packages/server/src/modules/studio/public/auth', () => ({
 }))
 vi.mock('../../packages/server/src/modules/studio/services/auth/run-mcp-credentials', () => ({ runMcpCredentials: { recognizes: (token: string) => token === 'run-token' } }))
 import { studioAgentRoutes } from '../../packages/server/src/modules/studio/routes/agents'
+import { agentStatusRoutes } from '../../packages/server/src/modules/studio/routes/agent-status'
 import { configureBuiltinAgents, configurePluginAgents } from '../../packages/server/src/modules/studio/services/agents/registry'
 import { PluginAgentUpdates } from '../../packages/server/src/modules/studio/services/agents/plugin-update-policy'
 
 const cleanup: Array<() => Promise<void>> = []
-afterEach(async () => { state.user = { id: 2, role: 'super_admin' }; state.shared = false; state.agents = []; for (const dispose of cleanup.splice(0).reverse()) await dispose() })
-async function server() {
+afterEach(async () => { state.user = { id: 2, role: 'super_admin' }; state.shared = false; state.agents = []; state.reconcile.mockClear(); vi.restoreAllMocks(); for (const dispose of cleanup.splice(0).reverse()) await dispose() })
+async function server(slowStatus?: (signal: AbortSignal) => Promise<never>) {
   let version = '1.0.0'
   const actors: number[] = [], upgraded = vi.fn()
   const checkUpdate = vi.fn(async (_context: unknown) => ({ currentVersion: version, latestVersion: '2.0.0', updateAvailable: version !== '2.0.0' }))
@@ -39,13 +42,18 @@ async function server() {
     manifest: manifest({ id: 'example', name: 'Example', version: '1.0.0', apiVersion: 1, server: 'server.mjs', client: 'client.mjs', permissions: ['agents', 'ui'], views: [{ id: 'settings', title: 'Settings', slot: 'agent-settings', icon: 'settings' }] }) },
   { userId: 1, profile: 'installer' }, new PluginStore(directory), { authorize() {}, api: async () => null, emit() {}, log() {} })
   cleanup.push(() => runtime.close())
-  await runtime.load({ apply(ctx) { ctx.extensions.agents.register({ id: 'assistant', name: 'Example Agent', vendor: 'Example Team', agentApiVersion: 1,
-    getStatus: async context => { actors.push(context.identity.userId); return { installed: true, version, path: '/private/executable' } },
-    management: { settings: () => ({ viewId: 'settings' }), checkUpdate, supportsAutoUpdate: () => true,
-      upgrade: async input => { upgraded(input); version = input.version; return { installedVersion: version } } },
-    modes: { global: { listModels: async context => ({ status: 'ready', source: 'sdk', scope: 'configured', models: [{ id: `model-${context.identity.userId}`, name: 'Native' }] }) } },
-    features: { surfaces: ['chat'], streaming: true, resume: false }, runtime: { createSession: () => ({ run: async () => ({ content: [], finishReason: 'stop' }), dispose() {} }) },
-  }) } }); runtime.activate(); state.agents = [...runtime.agents.values()]
+  await runtime.load({ apply(ctx) {
+    const definition = {
+      id: 'assistant', name: 'Example Agent', vendor: 'Example Team', agentApiVersion: 1,
+      getStatus: async context => { actors.push(context.identity.userId); return { installed: true, version, path: '/private/executable' } },
+      management: { settings: () => ({ viewId: 'settings' }), checkUpdate, supportsAutoUpdate: () => true,
+        upgrade: async input => { upgraded(input); version = input.version; return { installedVersion: version } } },
+      modes: { global: { listModels: async context => ({ status: 'ready', source: 'sdk', scope: 'configured', models: [{ id: `model-${context.identity.userId}`, name: 'Native' }] }) } },
+      features: { surfaces: ['chat'], streaming: true, resume: false }, runtime: { createSession: () => ({ run: async () => ({ content: [], finishReason: 'stop' }), dispose() {} }) },
+    } satisfies Parameters<typeof ctx.extensions.agents.register>[0]
+    ctx.extensions.agents.register(definition)
+    if (slowStatus) ctx.extensions.agents.register({ ...definition, id: 'slow', getStatus: context => slowStatus(context.signal) })
+  } }); runtime.activate(); state.agents = [...runtime.agents.values()]
   configurePluginAgents(() => state.agents)
   state.updates = new PluginAgentUpdates(directory, () => state.agents)
   const legacyCheck = vi.fn(async () => ({ currentVersion: 'old', latestVersion: 'new', updateAvailable: true }))
@@ -54,13 +62,49 @@ async function server() {
     models: async () => ({}), checkUpdate: legacyCheck, upgrade: async () => ({}), scopedModel: async () => { throw new Error('unused') },
   })
   const app = new Koa()
-  app.use(bodyParser()); app.use(async (ctx, next) => { ctx.state.user = state.user; ctx.state.profile = { name: 'work' }; ctx.state.sessionShare = state.shared; await next() }); app.use(studioAgentRoutes.routes())
+  app.use(bodyParser()); app.use(async (ctx, next) => { ctx.state.user = state.user; ctx.state.profile = { name: 'work' }; ctx.state.sessionShare = state.shared; await next() }); app.use(studioAgentRoutes.routes()); app.use(agentStatusRoutes.routes())
   const http = app.listen(0, '127.0.0.1'); await once(http, 'listening')
   cleanup.push(async () => { http.closeAllConnections(); await new Promise<void>(resolve => http.close(() => resolve())) })
-  const base = `http://127.0.0.1:${(http.address() as any).port}/api/studio/agents`
-  const request = (suffix: string, body?: object, token = '') => fetch(base + suffix, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, ...(body ? { body: JSON.stringify(body) } : {}) })
-  return { request, actors, upgraded, legacyCheck, checkUpdate, updates: state.updates as PluginAgentUpdates, id: '/' + encodeURIComponent('plugin:example/assistant') }
+  const base = `http://127.0.0.1:${(http.address() as any).port}`
+  const request = (suffix: string, body?: object, token = '') => fetch(`${base}/api/studio/agents${suffix}`, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, ...(body ? { body: JSON.stringify(body) } : {}) })
+  return { base, request, actors, upgraded, legacyCheck, checkUpdate, updates: state.updates as PluginAgentUpdates, id: '/' + encodeURIComponent('plugin:example/assistant') }
 }
+
+it('returns built-in and responsive Agents while plugin reconciliation and one probe are stalled', async () => {
+  const getStatus = vi.fn((_signal: AbortSignal) => new Promise<never>(() => {}))
+  const { base } = await server(getStatus)
+  const initialization = Promise.withResolvers<void>()
+  state.reconcile.mockReturnValue(initialization.promise)
+  const deadline = new AbortController()
+  const timeout = AbortSignal.timeout
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => ms === 5_000 ? deadline.signal : timeout(ms))
+  try {
+    const pending = ['/api/agents/status', '/api/agents/availability', '/api/studio/agents'].map(path =>
+      fetch(base + path, { signal: timeout(3_000) }).then(async response => {
+        expect(response.ok).toBe(true)
+        return (await response.json()).agents
+      }),
+    )
+    const all = Promise.all(pending)
+    void all.catch(() => {})
+    await vi.waitFor(() => expect(getStatus).toHaveBeenCalledTimes(3))
+    deadline.abort(new DOMException('Agent status timed out', 'TimeoutError'))
+    const [status, availability, manager] = await all
+    for (const snapshot of [status, availability]) {
+      expect(snapshot).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'ekko-agent', installed: true, source: 'built-in' }),
+        expect.objectContaining({ id: 'plugin:example/assistant', installed: true }),
+        expect.objectContaining({ id: 'plugin:example/slow', installed: false }),
+      ]))
+    }
+    expect(availability.find(agent => agent.id === 'ekko-agent').available).toBe(true)
+    expect(manager.find(agent => agent.id === 'plugin:example/slow').status).toMatchObject({ installed: false, error: 'Agent status timed out' })
+    for (const [signal] of getStatus.mock.calls) expect(signal.aborted).toBe(true)
+  } finally {
+    initialization.resolve()
+    state.reconcile.mockImplementation(async () => {})
+  }
+})
 
 it('publishes plugin vendor/actions and native models under the actual caller and preserves builtin routing', async () => {
   const { request, actors, id, legacyCheck } = await server()

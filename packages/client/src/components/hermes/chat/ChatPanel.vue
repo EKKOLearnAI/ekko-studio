@@ -919,12 +919,13 @@ function handleNewChatEscape(event: KeyboardEvent) {
 
 watch(() => router.currentRoute.value.fullPath, () => closeNewChatPage());
 const NEW_CHAT_AGENT_STORAGE_KEY = "hermes_new_chat_agent_v1";
+const DEFAULT_NEW_CHAT_AGENT = "ekko-agent";
 function loadNewChatAgent(): "hermes" | ChatCodingAgentId {
   try {
     const saved = localStorage.getItem(NEW_CHAT_AGENT_STORAGE_KEY);
-    return isPluginAgentId(saved) ? saved : AGENT_OPTIONS.find(option => option.value === saved)?.value || AGENT_OPTIONS[0].value;
+    return isPluginAgentId(saved) ? saved : AGENT_OPTIONS.find(option => option.value === saved)?.value || DEFAULT_NEW_CHAT_AGENT;
   } catch {
-    return AGENT_OPTIONS[0].value;
+    return DEFAULT_NEW_CHAT_AGENT;
   }
 }
 let preferredNewChatAgent = loadNewChatAgent();
@@ -1066,8 +1067,13 @@ const mostRecentDefaultWorkspace = computed(() => {
 
 const newChatAgentAvailability = ref<AgentAvailabilitySnapshot | null>(null);
 const newChatAgentOptions = computed(() => AGENT_OPTIONS.filter(option =>
-  agentInstallationState(newChatAgentAvailability.value, option.value) === "installed" && agentSupportsSurface(option.value, 'chat'),
+  option.value === DEFAULT_NEW_CHAT_AGENT
+    || (agentInstallationState(newChatAgentAvailability.value, option.value) === "installed" && agentSupportsSurface(option.value, 'chat')),
 ));
+
+function selectPreferredNewChatAgent() {
+  newChatAgent.value = newChatAgentOptions.value.find(option => option.value === preferredNewChatAgent)?.value || DEFAULT_NEW_CHAT_AGENT;
+}
 
 const newChatApiModeOptions = computed(() => [
   { label: t("codingAgents.protocolOpenAiChat"), value: "chat_completions" },
@@ -1339,8 +1345,7 @@ async function refreshNewChatAgentAvailability(sequence: number) {
     const availability = await fetchAgentAvailabilitySnapshot();
     if (!isCurrentNewChatOptionsLoad(sequence)) return;
     newChatAgentAvailability.value = availability;
-    newChatAgent.value = newChatAgentOptions.value.find(option => option.value === preferredNewChatAgent)?.value
-      || newChatAgentOptions.value[0]?.value || AGENT_OPTIONS[0].value;
+    selectPreferredNewChatAgent();
   } catch {
     if (isCurrentNewChatOptionsLoad(sequence) && !newChatAgentAvailability.value) {
       message.error(t("codingAgents.loadFailed"));
@@ -1391,7 +1396,7 @@ async function openNewChatPage(options: { preserveSidebar?: boolean } = {}) {
   restoringNewChatForm = true;
   newChatApiModeManual.value = saved?.apiModeManual ?? !!saved?.apiMode;
   preferredNewChatAgent = saved?.agent || loadNewChatAgent();
-  newChatAgent.value = preferredNewChatAgent;
+  selectPreferredNewChatAgent();
   newChatAgentMode.value = saved?.mode || "scoped";
   newChatAgentPreset.value = saved?.agentPreset;
   newChatReasoningEffort.value = saved?.reasoningEffort || "";
@@ -3063,7 +3068,7 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
             <NewChatPage v-if="showNewChatPage" :title="t('chat.newChatCardTitle')" :subtitle="t('chat.newChatCardSubtitle')">
               <template #cards>
                 <NewChatAgentCards :value="newChatAgent" :options="newChatAgentOptions"
-                  :loading="newChatAgentLoading" :disabled="newChatLoading || newChatAgentLoading"
+                  :loading="newChatAgentLoading" :disabled="newChatLoading"
                   @update:value="handleNewChatAgentChange" />
               </template>
                 <div class="new-chat-config-bar">

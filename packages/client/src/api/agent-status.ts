@@ -36,6 +36,8 @@ export interface AgentAvailabilitySnapshot {
 
 export type AgentInstallationState = 'installed' | 'not-installed' | 'unknown'
 
+const AGENT_SNAPSHOT_TIMEOUT_MS = 10_000
+
 const AGENT_STATUS_ALIASES: Record<string, AgentStatusId> = {
   hermes: 'hermes',
   ekko: 'ekko-agent',
@@ -96,13 +98,13 @@ export function agentInstallationState(
 }
 
 export async function fetchAgentAvailabilitySnapshot(): Promise<AgentAvailabilitySnapshot> {
-  const value = await request<AgentAvailabilitySnapshot>('/api/agents/availability')
+  const value = await request<AgentAvailabilitySnapshot>('/api/agents/availability', { signal: AbortSignal.timeout(AGENT_SNAPSHOT_TIMEOUT_MS) })
   syncPluginAgentOptions((value.agents || []).filter(agent => agent.id.startsWith('plugin:')).map(agent => ({ ...agent, origin: 'plugin' })) as unknown as StudioAgent[])
   return value
 }
 
 export async function fetchAgentStatusSnapshot(): Promise<AgentStatusSnapshot> {
-  const value = await request<AgentStatusSnapshot>('/api/agents/status')
+  const value = await request<AgentStatusSnapshot>('/api/agents/status', { signal: AbortSignal.timeout(AGENT_SNAPSHOT_TIMEOUT_MS) })
   syncPluginAgentOptions((value.agents || []).filter(agent => agent.id.startsWith('plugin:')).map(agent => ({ ...agent, origin: 'plugin' })) as unknown as StudioAgent[])
   return value
 }
