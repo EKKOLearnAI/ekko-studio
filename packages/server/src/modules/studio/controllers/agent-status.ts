@@ -1,6 +1,5 @@
-import { ensureBuiltinPlugins } from '../services/plugins/host'
 import type { Context } from 'koa'
-import { agentDescriptors, agentStatus } from '../services/agents/registry'
+import { listAgentStatuses } from '../services/agents/inventory'
 import {
   getAgentAvailabilitySnapshot,
   getAgentStatusSnapshot,
@@ -8,10 +7,9 @@ import {
 
 async function plugins(ctx: Context) {
   if (!ctx.state.user || ctx.state.sessionShare) return []
-  await ensureBuiltinPlugins()
-  return Promise.all(agentDescriptors().filter(agent => agent.origin === 'plugin').map(async descriptor => {
-    try { const status = await agentStatus(descriptor.id, { userId: ctx.state.user!.id, profile: ctx.state.profile?.name || 'default' }); return { ...descriptor, installed: status.installed, available: status.installed, source: 'plugin', version: status.version } }
-    catch { return { ...descriptor, installed: false, available: false, source: 'plugin', version: '' } }
+  const agents = await listAgentStatuses({ userId: ctx.state.user.id, profile: ctx.state.profile?.name || 'default' }, 'plugin')
+  return agents.map(({ status, ...descriptor }) => ({
+    ...descriptor, installed: status.installed, available: status.installed, source: 'plugin', version: status.version,
   }))
 }
 export async function availability(ctx: Context) {

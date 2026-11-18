@@ -1,5 +1,11 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
+
+async function openManager(page: Page) {
+  const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugin-agents.ts').replace(/^\//, '')
+  await page.route('**/__plugin_cards__', route => route.fulfill({ contentType: 'text/html', body: `<div id="app"></div><script type="module" src="${entry}"></script>` }))
+  await page.goto('/__plugin_cards__#/agents')
+}
 
 test('appends plugin Agents to the shared manager grid without description text', async ({ page }, testInfo) => {
   const errors: string[] = []
@@ -22,9 +28,7 @@ test('appends plugin Agents to the shared manager grid without description text'
     if (path === '/api/coding-agents/update-policies') return route.fulfill({ json: { agents: {} } })
     return route.fulfill({ json: {} })
   })
-  const entry = '/@fs/' + resolve('tests/e2e/fixtures/studio-plugin-agents.ts').replace(/^\//, '')
-  await page.route('**/__plugin_cards__', route => route.fulfill({ contentType: 'text/html', body: `<div id="app"></div><script type="module" src="${entry}"></script>` }))
-  await page.goto('/__plugin_cards__#/agents')
+  await openManager(page)
   const installed = page.getByTestId(`agent-card-${plugins[0].id}`)
   const absent = page.getByTestId(`agent-card-${plugins[1].id}`)
   await expect(installed).toBeVisible()
@@ -70,4 +74,25 @@ test('appends plugin Agents to the shared manager grid without description text'
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.screenshot({ path: testInfo.outputPath('agent-cards-mobile.png') })
   expect(errors).toEqual([])
+})
+
+test('reveals the Agent manager when the status request never responds', async ({ page }) => {
+  test.setTimeout(45_000)
+  await page.addInitScript(() => {
+    const fetch = window.fetch
+    window.fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href)
+      if (url.pathname !== '/api/agents/status') return fetch(input, init)
+      return new Promise<Response>((_, reject) => {
+        const signal = init?.signal
+        if (signal?.aborted) reject(signal.reason)
+        else signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    }
+  })
+  await page.route(url => url.pathname.startsWith('/api/'), route => route.fulfill({ json: {} }))
+  await openManager(page)
+  await expect(page.locator('.agent-manager-panel')).toHaveAttribute('aria-busy', 'true')
+  await expect(page.getByTestId('agent-card-ekko')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.agent-manager-panel')).toHaveAttribute('aria-busy', 'false')
 })
