@@ -1,0 +1,2 @@
+f18fd07e1d170bcf2c9d7de545aae722e74aeb23508f6ce39c9bf66a1560d822  release/stackchan-cores3-2.9.1-voice.3-app-0x10000.bin
+c7ee62bded852d1e183df00f8b3ecbfb017ceb2d5c47034b07de914518fe200d  release/stackchan-cores3-2.9.1-voice.3-full-0x0.bin

@@ -1,0 +1,34 @@
+name: Build examples
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+
+jobs:
+  build-examples:
+    name: Build for ${{ matrix.idf_target }} on ${{ matrix.idf_ver }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        idf_ver: ["release-v4.4", "release-v5.0", "release-v5.1", "release-v5.2", "latest"]
+        idf_target: ["esp32", "esp32s2", "esp32s3", "esp32c2", "esp32c3"]
+        exclude:
+          - idf_ver: "release-v4.4"
+            idf_target: esp32c2 # ESP32C2 support started with version 5.0
+    container: espressif/idf:${{ matrix.idf_ver }}
+    steps:
+      - uses: actions/checkout@v1
+        with:
+          submodules: 'true'
+      - name: esp-idf build
+        env:
+          IDF_TARGET: ${{ matrix.idf_target }}
+        shell: bash
+        working-directory: examples/camera_example
+        run: |
+          . ${IDF_PATH}/export.sh
+          export PEDANTIC_FLAGS="-DIDF_CI_BUILD -Werror -Werror=deprecated-declarations -Werror=unused-variable -Werror=unused-but-set-variable -Werror=unused-function"
+          export EXTRA_CFLAGS="${PEDANTIC_FLAGS} -Wstrict-prototypes"
+          export EXTRA_CXXFLAGS="${PEDANTIC_FLAGS}"
+          idf.py build
