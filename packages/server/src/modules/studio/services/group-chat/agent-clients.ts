@@ -12,6 +12,7 @@ import { recordBridgeModelUsage } from '../usage/bridge-model-usage'
 import { groupRunUser } from './run-user'
 import { runMcpCredentials } from '../auth/run-mcp-credentials'
 import type { AuthenticatedUser } from '../../public/auth'
+import { withProviderAccount, withoutProviderAccount } from '../../public/provider-account'
 import { io, Socket } from 'socket.io-client'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { getToken } from '../../public/auth'
@@ -1161,6 +1162,7 @@ export class AgentClient implements GroupAgentExecutor {
         roomId: string,
         msg: MentionMessage,
         runtimeContext: GroupRuntimeContext,
+        executionUser: AuthenticatedUser | undefined,
         onStatus?: (status: 'compressing' | 'replying' | 'ready', extra?: Record<string, unknown>) => void,
     ): Promise<void> {
         if (!this.chatRunService) throw new Error('Chat run service is not ready')
@@ -1224,7 +1226,6 @@ export class AgentClient implements GroupAgentExecutor {
                                 : 'codex'
             const usesGlobalCodingAgent = this.agentMode === 'global' && codingAgentId !== 'ekko-agent'
             const groupSystemPrompt = this.groupSystemPrompt(roomId, msg)
-            const executionUser = groupRunUser(this.storage, roomId, this.profile, msg)
             const result = await this.chatRunService.runAndWait({
                 input: this.groupRuntimeInput(msg, runtimeContext),
                 session_id: sessionId,
@@ -1409,10 +1410,22 @@ export class AgentClient implements GroupAgentExecutor {
         onStatus?: (status: 'compressing' | 'replying' | 'ready', extra?: Record<string, unknown>) => void,
     ): Promise<void> {
         logger.debug(`[AgentClients] ${this.name} mentioned by ${msg.senderName}: "${msg.content.slice(0, 50)}"`)
-        if (this.agent !== 'hermes') {
-            await this.replyToMentionWithChatRun(roomId, msg, runtimeContext, onStatus)
-            return
-        }
+        const executionUser = groupRunUser(this.storage, roomId, this.profile, msg)
+        const reply = () => this.agent === 'hermes'
+            ? this.replyToMentionWithHermes(roomId, msg, runtimeContext, onStatus)
+            : this.replyToMentionWithChatRun(roomId, msg, runtimeContext, executionUser, onStatus)
+        // A queue can drain messages from several senders in the same async scope.
+        return executionUser
+            ? withProviderAccount(executionUser.id, reply, this.profile)
+            : withoutProviderAccount(reply)
+    }
+
+    private async replyToMentionWithHermes(
+        roomId: string,
+        msg: MentionMessage,
+        runtimeContext: GroupRuntimeContext,
+        onStatus?: (status: 'compressing' | 'replying' | 'ready', extra?: Record<string, unknown>) => void,
+    ): Promise<void> {
         const runMessageId = groupMessageId(roomId, this.profile, this.name)
         const pushRoot = findPushRunLink('group_root', roomId, msg.handoffChainId || msg.messageId || '')
         if (pushRoot) linkPushRun('group_runtime', roomId, runMessageId, pushRoot)

@@ -4194,13 +4194,13 @@ export class GroupChatServer {
     private onConnection(socket: Socket): void {
         bindProviderSocket(socket)
         bindLegacyAppEvents(socket, 'group', event => Boolean(event.subject.room_id && this.canSocketObserveRoom(socket, event.subject.room_id)))
-        const auth = socket.handshake.auth as { userId?: string; name?: string; description?: string; source?: string; agentSocketSecret?: string; authUserId?: number }
+        const auth = socket.handshake.auth as { userId?: string; name?: string; description?: string; source?: string; agentSocketSecret?: string }
         const requestedSource = auth.source === 'agent' && auth.agentSocketSecret === GROUP_CHAT_AGENT_SOCKET_SECRET ? 'agent' : 'human'
         const authenticatedUser = socket.data.authUser as AuthenticatedUser | undefined
-        const authUserId = requestedSource === 'human'
-            ? authenticatedUser?.id ?? (typeof auth.authUserId === 'number' && auth.authUserId > 0 ? auth.authUserId : undefined)
-            : undefined
-        const userId = authUserId ? authenticatedGroupUserId(authUserId) : auth.userId || socket.id
+        const authUserId = requestedSource === 'human' ? authenticatedUser?.id : undefined
+        const suppliedUserId = typeof auth.userId === 'string' ? auth.userId : ''
+        const userId = authUserId ? authenticatedGroupUserId(authUserId)
+            : suppliedUserId && !suppliedUserId.startsWith('auth:') ? suppliedUserId : socket.id
         const userName = auth.name || authenticatedUser?.username || `User-${userId.slice(0, 6)}`
         const description = auth.description || ''
 
@@ -4271,9 +4271,8 @@ export class GroupChatServer {
         if (!room) return false
         const authUser = socket.data?.authUser as AuthenticatedUser | undefined
         if (!authUser) {
-            // With authentication disabled, handshake userId/authUserId values are client-controlled.
-            // They may identify a joined in-context member, but must never grant off-room global
-            // approval visibility or authority based on persisted membership alone.
+            // Unauthenticated identities may identify joined members but cannot grant
+            // off-room approval visibility or authority through persisted membership.
             const joined = this.getOnlineRoomMember(socket, roomId)
             return Boolean(joined && joined.member.source === 'human')
         }
@@ -4618,8 +4617,7 @@ export class GroupChatServer {
             if (!storedRoom) this.storage.saveRoom(roomId, roomId)
         }
 
-        // Look up the user's avatar via their numeric users.id from the web UI session.
-        // Falls back to name-based lookup for clients that don't pass authUserId.
+        // Look up the authenticated account's avatar, or use the guest's room avatar.
         let userAvatar = isInviteGuest
             ? requestedAvatar || existingMember?.avatar || ''
             : existingMember?.avatar || ''

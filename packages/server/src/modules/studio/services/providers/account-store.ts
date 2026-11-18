@@ -73,6 +73,10 @@ export function withProviderAccount<T>(userId: number | string, operation: () =>
   return scopes.run({ userId: id, profile }, operation)
 }
 
+export function withoutProviderAccount<T>(operation: () => T): T {
+  return scopes.exit(operation)
+}
+
 export function withSocketProviderAccount<T extends (...args: any[]) => Promise<any>>(operation: T): T {
   return ((...args: Parameters<T>) => withProviderAccount(args[1]?.data?.user?.id, async () => {
     await importAccountProviders()
