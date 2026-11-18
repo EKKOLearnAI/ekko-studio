@@ -6,12 +6,14 @@ import { assertPersonStageTask, personTaskStage } from '../../repositories/perso
 
 /** Only durable work that can still wake this Bot is a reason to yield. */
 export function personTaskWaitState(userId: number, sessionId: string, returnExecutionId?: string, stage?: PersonStageContext) {
+  // Parked results may already depend on this callback. Only wait on runnable dependencies here.
   const rows = personDb().prepare(`SELECT d.execution_id,d.state,e.state AS execution_state,e.task_id
     FROM person_deliveries d JOIN person_executions e ON e.id=d.execution_id AND e.owner_user_id=d.owner_user_id
     JOIN session_tasks t ON t.id=e.task_id AND t.owner_user_id=e.owner_user_id
     WHERE d.owner_user_id=? AND t.session_id=? AND t.status!='closed' AND t.requirements_revision=e.requirements_revision
-    AND d.state IN ('waiting','pending','queued') AND d.execution_id!=?`)
-    .all(userId,sessionId,returnExecutionId || '')
+    AND d.state IN ('waiting','pending','queued') AND d.execution_id!=?
+    AND (?='' OR d.wait_for_json='[]')`)
+    .all(userId,sessionId,returnExecutionId || '',returnExecutionId || '')
   return rows.flatMap(row => {
     if (stage) {
       const linked = personTaskStage(userId,String(row.task_id))

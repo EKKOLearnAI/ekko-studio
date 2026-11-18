@@ -14,7 +14,7 @@ export interface PersonTaskQueueSnapshot extends PersonTaskQueueState { task: Pe
 export interface PersonSchedule { id: string; mode: 'assistant' | 'worker'; task_id: string | null; session_id: string; session_title?: string | null; bot_type?: string | null; task_title?: string | null; task_goal?: string | null; title: string; goal: string; expression: string; timezone: string; next_at: number; state: string; revision: number }
 export interface PersonMemory { id: string; content: string; revision: number }
 export interface PersonQuestion { id: string; task_id: string | null; question: string; kind: string; choices_json: string; revision: number }
-export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed'; relatedTasks?: PersonTaskReturn[] }
+export interface PersonTaskReturn { taskId: string; executionId: string; assistantMessageId: string; title: string; summary: string; agent: string; state: 'finished' | 'failed' | 'interrupted'; relatedTasks?: PersonTaskReturn[] }
 export interface PersonGeneralSettings { compressionThreshold: number | null; maxSteps: number; maxConcurrentTasks: number; taskTimeoutMinutes: number; timezone: string }
 export interface PersonFlow {
   timeline_at?: number | null

@@ -51,7 +51,7 @@ export interface PersonResultDelivery {
 }
 export interface PersonRuntimePort {
   createDefaultWorkspace?(profile: string, sessionId: string): string
-  deliver(input: PersonResultDelivery): Promise<void>
+  deliver(input: PersonResultDelivery & { claimId: string }): Promise<void>
   deliverStage?(input: { user: AuthenticatedUser; context: import('../contracts/person-stage').PersonStageContext; sessionId: string; input: string }): Promise<void>
   chatAgent?(input: PersonChatAgentOptions): {
     sessionWorkspaceDirectory(sessionId: string): string

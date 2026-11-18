@@ -8,6 +8,8 @@ import { finishPersonStageTurn, waitPersonStageTurn } from '../person/stage-flow
 import { startPersonStageRun, stageDecisionEvent } from '../../repositories/person-stage-confirmations'
 import type { PersonStageContext } from '../../contracts/person-stage'
 import { createPersonChatAgent } from '../person/chat-agent'
+import { persistPersonDeliveryReply } from '../person/delivery'
+import { personTaskWaitState } from '../person/task-wait'
 import { requirePersonWorkspace } from '../person/workspace'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { completeRunUsage } from '../../repositories/run-usage-store'
@@ -509,12 +511,14 @@ async function handleEkkoAgentRunImpl(
   const personReturn = backgroundContinuationContext?.runtime === 'ekko'
     && backgroundContinuationContext.subagentId === data.background_delegation_id
     ? parsePersonResultQueueId(data.background_delegation_id) : undefined
+  const personDelivery = personReturn && isPersonSession(sessionId) && backgroundContinuationContext?.runtime === 'ekko'
+    ? backgroundContinuationContext.personDelivery : undefined
   const personStageDeliveryId = isPersonSession(sessionId) && backgroundContinuationContext?.runtime === 'ekko'
     && backgroundContinuationContext.subagentId === data.background_delegation_id && data.background_delegation_id?.startsWith('person-stage:')
     ? data.background_delegation_id.slice('person-stage:'.length) : undefined
   const agent = isPersonSession(sessionId) ? personStageDeliveryId
     ? await createPersonChatAgent(Number(authenticatedUserId),sessionId,undefined,personStageDeliveryId)
-    : await createPersonChatAgent(Number(authenticatedUserId), sessionId, personReturn) : getGlobalEkkoAgent(profile)
+    : await createPersonChatAgent(Number(authenticatedUserId), sessionId, personDelivery || personReturn) : getGlobalEkkoAgent(profile)
   const personStageContext = 'personStageContext' in agent ? agent.personStageContext as PersonStageContext : undefined
   state.ekkoBoundaryInterrupt = agent.requestBoundaryInterrupt
     ? (expectedRunId: string) => agent.requestBoundaryInterrupt({ sessionId, expectedRunId }) : undefined
@@ -1625,6 +1629,12 @@ async function handleEkkoAgentRunImpl(
     const hadToolActivity = result.steps.some((step: any) => step.type === 'tool')
     const boundaryInterrupted = result.output.finishReason === 'boundary_interrupt'
     const waitingForTasks = result.output.finishReason === 'waiting_for_tasks'
+    if (personDelivery) {
+      abortController.signal.throwIfAborted()
+      if (boundaryInterrupted || result.output.finishReason === 'max_steps' || !result.output.content?.trim()) {
+        throw new Error('The task result reply was interrupted or incomplete')
+      }
+    }
     if (!boundaryInterrupted && !assistantText.trim() && !assistantReasoning.trim() && !hadToolActivity) {
       const error = 'Model provider returned an empty response after streaming and non-streaming attempts.'
       logger.warn({
@@ -1656,12 +1666,13 @@ async function handleEkkoAgentRunImpl(
       })
       return
     }
+    let personTaskReturn: ReturnType<typeof persistPersonDeliveryReply>['receipt']
     if (assistantText.trim() || assistantReasoning.trim()) {
       const reasoningDetails = serializeAgentReasoningDetails(result.output.reasoning)
-      const { ids: [assistantId] } = persistRunMessages(state, {
+      const writeReply = () => persistRunMessages(state, {
         sessionId,
         runMarker: persistedRunMarker,
-        appendToState: true,
+        appendToState: !personDelivery,
         messages: [{
           role: 'assistant',
           content: assistantText,
@@ -1672,7 +1683,22 @@ async function handleEkkoAgentRunImpl(
           reasoning_content: assistantReasoning || null,
         }],
       })
-      if (assistantId != null) assistantMessageId = String(assistantId)
+      if (personDelivery) {
+        const waitFor = waitingForTasks
+          ? personTaskWaitState(personDelivery.userId,sessionId,personDelivery.executionId,personStageContext).map(target => target.executionId)
+          : undefined
+        const {reply,receipt} = persistPersonDeliveryReply(personDelivery,sessionId,() => {
+          const {ids,messages} = writeReply()
+          return {messageId:ids[0],messages}
+        },waitFor)
+        if (!reply) throw new Error('The task result still needs its acceptance decision')
+        state.messages.push(...reply.messages)
+        assistantMessageId = String(reply.messageId)
+        personTaskReturn = receipt
+      } else {
+        const {ids:[assistantId]} = writeReply()
+        if (assistantId != null) assistantMessageId = String(assistantId)
+      }
     }
     if (!usageInput && !usageOutput) {
       const usage = estimateUsageTokensFromMessages([
@@ -1711,6 +1737,7 @@ async function handleEkkoAgentRunImpl(
       event: 'run.completed',
       run_id: runId || result.runId,
       message_id: assistantMessageId || undefined,
+      ...(personTaskReturn ? { person_task_return: personTaskReturn } : {}),
       output: assistantText,
       context: result.context,
       ...(result.output.finishReason === 'max_steps' ? { stop_reason: 'max_steps' } : {}),

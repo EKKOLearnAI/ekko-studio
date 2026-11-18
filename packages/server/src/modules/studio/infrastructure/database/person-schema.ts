@@ -96,9 +96,23 @@ export function initPersonTables(db: DatabaseSync): void {
       PRIMARY KEY(session_id, assistant_message_id)
     );
   `)
-  if (!db.prepare('PRAGMA table_info(person_task_returns)').all().some(column => column.name === 'development_execution_id')) {
+  const deliveryColumns = db.prepare('PRAGMA table_info(person_deliveries)').all()
+  if (!deliveryColumns.some(column => column.name === 'claim_id')) {
+    db.exec("ALTER TABLE person_deliveries ADD COLUMN claim_id TEXT NOT NULL DEFAULT ''")
+  }
+  if (!deliveryColumns.some(column => column.name === 'wait_for_json')) {
+    db.exec("ALTER TABLE person_deliveries ADD COLUMN wait_for_json TEXT NOT NULL DEFAULT '[]'")
+  }
+  const returnColumns = db.prepare('PRAGMA table_info(person_task_returns)').all()
+  if (!returnColumns.some(column => column.name === 'development_execution_id')) {
     db.exec('ALTER TABLE person_task_returns ADD COLUMN development_execution_id TEXT')
   }
+  if (!returnColumns.some(column => column.name === 'callback_return_id')) {
+    db.exec('ALTER TABLE person_task_returns ADD COLUMN callback_return_id TEXT')
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_person_committed_return
+    ON person_task_returns(owner_user_id, execution_id, callback_return_id)
+    WHERE callback_return_id IS NOT NULL`)
   const executionColumns = db.prepare('PRAGMA table_info(person_executions)').all()
   for (const [name, definition] of Object.entries({
     queue_priority: 'INTEGER NOT NULL DEFAULT 0',

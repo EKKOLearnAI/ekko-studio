@@ -43,7 +43,7 @@ export function advancePersonFlow(task: PersonTask, message: unknown, origin?: P
   if (next) requirePersonSession(task.owner_user_id, next.session_id)
   // Retire old callbacks in the same commit that changes ownership, so retries cannot advance twice.
   db.prepare("UPDATE person_deliveries SET state='cancelled',updated_at=? WHERE execution_id IN (SELECT id FROM person_executions WHERE task_id=?) AND state IN ('waiting','pending','queued')").run(now, task.id)
-  db.prepare("UPDATE person_deliveries SET state='delivered',updated_at=? WHERE execution_id=?").run(now, run.id)
+  db.prepare("UPDATE person_deliveries SET state='handled',updated_at=? WHERE execution_id=?").run(now, run.id)
   if (!next) {
     flow.completed = true
     db.prepare("UPDATE session_tasks SET requirements_json=?,status='completed',completion_evidence=?,completed_at=?,updated_at=?,revision=revision+1 WHERE id=?")

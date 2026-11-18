@@ -7,8 +7,7 @@ let f: AcceptanceFixture
 beforeEach(async () => {
   f = await acceptanceFixture()
   vi.mocked(f.runtime.model).mockRejectedValue(new Error('Manual follow-ups must not call the coordinator'))
-  const { finishPersonDelivery } = await import('../../packages/server/src/modules/studio/services/person/delivery')
-  vi.mocked(f.runtime.deliver).mockImplementation(async result => finishPersonDelivery(1, result.executionId, true, '', result.origin.acceptanceReturnId))
+  vi.mocked(f.runtime.deliver).mockImplementation(async result => { await f.reportDelivery(result.executionId) })
 })
 afterEach(async context => {
   try { expect(f.runtime.model).not.toHaveBeenCalled() }

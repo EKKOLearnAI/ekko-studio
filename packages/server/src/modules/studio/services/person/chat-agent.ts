@@ -51,7 +51,7 @@ export async function ensurePersonSession(userId: number, id: string) {
 }
 
 /** Called only after account ownership has been checked at the transport boundary. */
-export async function createPersonChatAgent(userId: number, sessionId: string, returned?: PersonResultIdentity, stageDeliveryId?: string) {
+export async function createPersonChatAgent(userId: number, sessionId: string, returned?: PersonResultIdentity & {claimId?: string}, stageDeliveryId?: string) {
   const returnExecutionId = returned?.executionId
   requirePersonSession(userId, sessionId)
   const returnOrigin = returnExecutionId ? personDb().prepare('SELECT origin_json FROM person_deliveries WHERE execution_id=? AND owner_user_id=?').get(returnExecutionId,userId) : undefined
@@ -101,9 +101,13 @@ The current:true role is YOU: requests naming it are your work. Names are labels
       requirePersonSession(userId, sessionId)
       if (stageContext) assertPersonStage(userId,stageContext,sessionId)
       if (returnExecutionId) {
-        const delivery = personDb().prepare('SELECT state,origin_json FROM person_deliveries WHERE execution_id=? AND owner_user_id=?').get(returnExecutionId, userId)
+        const delivery = personDb().prepare('SELECT state,origin_json,claim_id FROM person_deliveries WHERE execution_id=? AND owner_user_id=?').get(returnExecutionId, userId)
         const origin = delivery ? JSON.parse(String(delivery.origin_json)) : undefined
-        if (!delivery || ['cancelled','handled','failed'].includes(String(delivery.state)) || origin.sessionId !== sessionId
+        const sameClaim = !!returned?.claimId && delivery?.claim_id === returned.claimId
+        const inactive = returned?.claimId
+          ? !sameClaim || !['queued','handled'].includes(String(delivery?.state))
+          : ['cancelled','handled','failed'].includes(String(delivery?.state))
+        if (!delivery || inactive || origin.sessionId !== sessionId
           || (origin.acceptanceReturnId || '') !== (returned?.acceptanceReturnId || '')) throw personError('Task result callback was cancelled or superseded', 409)
       }
       context.assertCurrent()

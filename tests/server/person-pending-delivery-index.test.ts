@@ -48,7 +48,8 @@ function seed() {
   delivery('closed', 'waiting', 'finished', 'closed')
   delivery('stale', 'waiting', 'finished', 'open', 2)
   delivery('other', 'waiting', 'finished', 'open', 1, '{"sessionId":"person-main-other"}')
-  db.prepare(`INSERT INTO person_deliveries VALUES ('orphan',1,?,'waiting',0,'')`).run(JSON.stringify({ sessionId: session }))
+  db.prepare(`INSERT INTO person_deliveries(execution_id,owner_user_id,origin_json,state,updated_at)
+    VALUES ('orphan',1,?,'waiting',0)`).run(JSON.stringify({ sessionId: session }))
 }
 
 function plan() {

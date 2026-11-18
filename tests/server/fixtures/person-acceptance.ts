@@ -34,7 +34,7 @@ export async function acceptanceFixture(options: { automatic?: boolean } = {}) {
   vi.doMock('../../../packages/server/src/modules/studio/services/usage/usage-recorder', () => ({ recordSessionUsage: vi.fn() }))
   const schema = await import('../../../packages/server/src/modules/studio/infrastructure/database/schemas')
   schema.initAllHermesTables()
-  const { createSession } = await import('../../../packages/server/src/modules/studio/repositories/session-store')
+  const { addMessage, createSession } = await import('../../../packages/server/src/modules/studio/repositories/session-store')
   for (const owner of [1, 2]) createSession({ id: `person-main-${owner}`, studio_user_id: owner, user_id: owner, title: 'Fixture', workspace, source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', profile: 'default' })
   const store = await import('../../../packages/server/src/modules/studio/repositories/person-store')
   const tasks = await import('../../../packages/server/src/modules/studio/services/person/tasks')
@@ -116,6 +116,15 @@ export async function acceptanceFixture(options: { automatic?: boolean } = {}) {
     const task=get(taskId), round=db.prepare('SELECT * FROM person_acceptance_attempts WHERE execution_id=? AND ordinal=?').get(task.execution_id!,receipt(task.execution_id!).attempt)!
     return tasks.applyPersonTask(1,{action:'record_acceptance',task_id:task.id,expected_revision:task.revision,expected_execution_id:task.execution_id,verification_execution_id:round.verification_execution_id,report:report || decisions.get(String(round.session_id)),idempotency_key:randomUUID()},undefined,origin)
   }
+  async function reportDelivery(executionId: string, content = 'Reported the task result.', runId?: string) {
+    const {persistPersonDeliveryReply} = await import('../../../packages/server/src/modules/studio/services/person/delivery')
+    const result = vi.mocked(runtime.deliver).mock.calls.findLast(([entry]) => entry.executionId === executionId)?.[0]
+    if (!result) throw new Error('No claimed task delivery')
+    const {claimId,origin:{sessionId,acceptanceReturnId}} = result
+    return persistPersonDeliveryReply({userId:result.user.id,executionId,claimId,acceptanceReturnId},sessionId,() => ({
+      messageId:addMessage({session_id:sessionId,role:'assistant',content,run_marker:runId,finish_reason:'stop'}),
+    }))
+  }
   async function reopen() {
     await runner.stopPersonWork()
     db.close(); db = new DatabaseSync(databasePath)
@@ -133,6 +142,6 @@ export async function acceptanceFixture(options: { automatic?: boolean } = {}) {
     }
     db.close(); rmSync(workspace, { recursive: true, force: true }); vi.restoreAllMocks()
   }
-  return { get db() { return db }, workspace, databasePath, store, tasks, runner, schedules, detail, chat, personTaskTools, schema, runtime, execute, get, receipt, report, assessment, decisions, worker, create, settle, run, verify, repair, record, reopen, close }
+  return { get db() { return db }, workspace, databasePath, store, tasks, runner, schedules, detail, chat, personTaskTools, schema, runtime, execute, get, receipt, report, assessment, decisions, worker, create, settle, run, verify, repair, record, reportDelivery, reopen, close }
 }
 export type AcceptanceFixture = Awaited<ReturnType<typeof acceptanceFixture>>

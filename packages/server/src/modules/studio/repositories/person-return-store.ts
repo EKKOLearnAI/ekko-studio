@@ -4,7 +4,7 @@ import { personDb, getPersonExecution, getPersonTask } from './person-store'
 
 interface TaskReturn {
   taskId: string; executionId: string; assistantMessageId: string; title: string
-  summary: string; agent: string; state: 'finished' | 'failed'; relatedTasks?: TaskReturn[]
+  summary: string; agent: string; state: 'finished' | 'failed' | 'interrupted'; relatedTasks?: TaskReturn[]
 }
 
 /** The optional development link is captured at callback completion, never inferred from a later verdict. */
@@ -25,13 +25,13 @@ function readTaskReturns(userId: number, sessionId: string, ids: string[]): Task
 }
 
 /** Bind a return receipt to its persisted reply, never to the latest conversation turn. */
-export function savePersonTaskReturn(userId: number, executionId: string, sessionId: string, messageId: unknown) {
+export function savePersonTaskReturn(userId: number, executionId: string, sessionId: string, messageId: unknown, callbackReturnId?: string) {
   if (!ownsPersonSession(userId, getSession(sessionId)) || !messageId) return undefined
   const db = personDb()
   const message = db.prepare("SELECT id FROM messages WHERE session_id=? AND id=? AND role='assistant'").get(sessionId, String(messageId))
   if (!message) return undefined
   const execution = getPersonExecution(userId, executionId)
-  if (execution.state !== 'finished' && execution.state !== 'failed') return undefined
+  if (!['finished', 'failed', 'interrupted'].includes(execution.state)) return undefined
   const task = getPersonTask(userId, execution.task_id)
   if (execution.requirements_revision !== task.requirements_revision) return undefined
   const delivery = db.prepare('SELECT origin_json,state FROM person_deliveries WHERE execution_id=? AND owner_user_id=?').get(executionId, userId)
@@ -45,9 +45,14 @@ export function savePersonTaskReturn(userId: number, executionId: string, sessio
     JOIN session_tasks t ON t.id=e.task_id AND t.owner_user_id=e.owner_user_id AND t.session_id=?
     WHERE v.verification_execution_id=? AND v.state='passed'`).get(userId, sessionId, executionId)
   db.prepare(`INSERT OR IGNORE INTO person_task_returns
-    (session_id,assistant_message_id,execution_id,owner_user_id,title,state,development_execution_id) VALUES (?,?,?,?,?,?,?)`)
-    .run(sessionId, String(messageId), executionId, userId, task.title, execution.state, development?.id ?? null)
+    (session_id,assistant_message_id,execution_id,owner_user_id,title,state,development_execution_id,callback_return_id) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(sessionId, String(messageId), executionId, userId, task.title, execution.state, development?.id ?? null, callbackReturnId ?? null)
   return readTaskReturns(userId, sessionId, [String(messageId)])[0]
+}
+
+export function hasCommittedPersonTaskReturn(userId: number, executionId: string, callbackReturnId: string) {
+  return !!personDb().prepare(`SELECT 1 FROM person_task_returns
+    WHERE owner_user_id=? AND execution_id=? AND callback_return_id=?`).get(userId, executionId, callbackReturnId)
 }
 
 export function withPersonTaskReturns<T extends { id?: unknown; role?: unknown; display_role?: unknown }>(sessionId: string, messages: T[]): Array<T & { person_task_return?: TaskReturn }> {

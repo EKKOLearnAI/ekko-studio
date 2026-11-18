@@ -14,12 +14,11 @@ const complete = (id: string) => f.db.prepare("UPDATE session_tasks SET status='
 it('opens the original execution for a cross-Bot acceptance return and keeps its pending report visible', async () => {
   const { createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
   const { createPersonChatAgent } = await import('../../packages/server/src/modules/studio/services/person/chat-agent')
-  const { finishPersonDelivery } = await import('../../packages/server/src/modules/studio/services/person/delivery')
   const { personBackgroundTaskCount } = await import('../../packages/server/src/modules/studio/repositories/person-presence-store')
   const reviewer = 'person-main-reviewer'
   createSession({ id: reviewer, studio_user_id: 1, user_id: 1, title: '暖暖', workspace: f.workspace, source: 'builtin_agent', agent: 'ekko-agent', agent_preset: 'person', profile: 'default' })
   const { task, execution } = await f.create({ acceptance: { ...acceptance, reviewer_session_id: reviewer } })
-  await f.run(task.id); await f.runner.tickPersonWork(); finishPersonDelivery(1, execution.id, true)
+  await f.run(task.id); await f.runner.tickPersonWork(); await f.reportDelivery(execution.id)
   const review = await f.verify(task.id); await f.run(review.task.id)
   await f.record(task.id, undefined, { sessionId: reviewer, runId: 'review-bot', messages: [], returnExecutionId: review.execution.id })
   await f.runner.tickPersonWork()
@@ -41,7 +40,7 @@ it('opens the original execution for a cross-Bot acceptance return and keeps its
   expect(f.store.listPersonTasks(1, '', 0, { sessionId: 'person-main-1', activeOnly: true })).toMatchObject([{ id: task.id, status: 'completed', execution_id: execution.id }])
   const opened = await f.chat.personTaskChat(1, task.id, identity.executionId)
   expect(opened.session?.id).toBe(execution.session_id)
-  finishPersonDelivery(1, execution.id, true, '', identity.acceptanceReturnId)
+  await f.reportDelivery(execution.id)
   expect(personBackgroundTaskCount(1, 'person-main-1')).toBe(0)
   expect(f.store.listPersonTasks(1, '', 0, { sessionId: 'person-main-1', activeOnly: true })).toEqual([])
   f.db.prepare("UPDATE person_deliveries SET origin_json=json_set(origin_json,'$.acceptanceReturnId','newer-review') WHERE execution_id=?").run(execution.id)
@@ -534,12 +533,13 @@ it('requires an explicit issue reconciliation without requiring a formatted veri
 
 it('routes a named reviewing Bot back to the original developer for repair and then the SAME Bot for recheck', async () => {
   const {createSession}=await import('../../packages/server/src/modules/studio/repositories/session-store')
-  const {finishPersonDelivery}=await import('../../packages/server/src/modules/studio/services/person/delivery')
   const reviewer='person-main-reviewer'
   createSession({id:reviewer,studio_user_id:1,user_id:1,title:'暖暖',workspace:f.workspace,source:'builtin_agent',agent:'ekko-agent',agent_preset:'person',profile:'default'})
   f.worker('41')
   const {task,execution}=await f.create({acceptance:{...acceptance,reviewer_session_id:reviewer}})
-  await f.run(task.id);await f.runner.tickPersonWork();finishPersonDelivery(1,execution.id,true)
+  await f.run(task.id);await f.runner.tickPersonWork()
+  const stale = vi.mocked(f.runtime.deliver).mock.lastCall![0]
+  await f.reportDelivery(execution.id)
   const first=await f.verify(task.id)
   expect(first.task.session_id).toBe(reviewer)
   expect(JSON.parse(String(f.db.prepare('SELECT origin_json FROM person_task_origins WHERE task_id=?').get(first.task.id)!.origin_json))).toMatchObject({sessionId:reviewer,messages:[]})
@@ -554,10 +554,11 @@ it('routes a named reviewing Bot back to the original developer for repair and t
   const recorded:any=await control.execute({action:'record_acceptance',task_ref:root.task.task_ref,verification_execution_id:first.execution.id,report:f.decisions.get(first.execution.session_id)},origin)
   expect(recorded).toMatchObject({ok:true,task:{acceptance_state:'repair_required'},instruction:expect.stringContaining('original developer Bot')})
   expect(f.db.prepare('SELECT state FROM person_deliveries WHERE execution_id=?').get(execution.id)!.state).toBe('pending')
-  const {personDeliveryCurrent,cancelPersonDelivery}=await import('../../packages/server/src/modules/studio/services/person/delivery')
+  const {personDeliveryCurrent,cancelPersonDelivery,retryPersonDelivery}=await import('../../packages/server/src/modules/studio/services/person/delivery')
   f.db.prepare("UPDATE person_deliveries SET state='queued' WHERE execution_id=?").run(execution.id)
-  finishPersonDelivery(1,execution.id,true)
-  cancelPersonDelivery(1,execution.id)
+  const staleClaim = {userId:1,executionId:execution.id,claimId:stale.claimId,acceptanceReturnId:stale.origin.acceptanceReturnId}
+  retryPersonDelivery(staleClaim,'Late failure')
+  cancelPersonDelivery(staleClaim)
   expect(f.db.prepare('SELECT state FROM person_deliveries WHERE execution_id=?').get(execution.id)!.state).toBe('queued')
   expect(personDeliveryCurrent(1,execution.id,'')).toBe(false)
   expect(personDeliveryCurrent(1,execution.id,first.execution.id)).toBe(true)
