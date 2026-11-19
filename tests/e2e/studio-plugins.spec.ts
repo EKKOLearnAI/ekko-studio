@@ -58,6 +58,7 @@ test('manages a plugin and runs a trusted same-origin frontend through authentic
   await page.locator('.plugin-install-modal').getByRole('textbox').fill('/tmp/notes')
   await page.getByRole('checkbox').check(); await install.click()
   await page.getByRole('button', { name: '启用', exact: true }).click()
+  await page.locator('.n-dialog').getByRole('button', { name: '启用', exact: true }).click()
   await expect(page.locator('.plugin-card')).toHaveCount(1)
   await expect(page.locator('iframe')).toHaveCount(0)
   await expect(page.locator('.studio-navigation-rail').getByRole('link', { name: 'Notebook', exact: true })).toHaveCount(0)
