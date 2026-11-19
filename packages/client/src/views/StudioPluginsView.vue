@@ -558,7 +558,7 @@ async function logs(id: string) {
 .market-risk-note { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border: 1px solid rgba(var(--accent-primary-rgb), .2); border-radius: $radius-sm; background: rgba(var(--accent-primary-rgb), .06); color: $text-secondary; font-size: 12px; line-height: 1.7; }
 .market-risk-note-icon { background: $accent-primary; }
 .plugin-risk-note { padding: 10px 12px; border-radius: $radius-sm; background: rgba(var(--accent-primary-rgb), .06); font-size: 12px; }
-.third-party-note { padding: 10px 12px; border-inline-start: 3px solid $warning; border-radius: $radius-sm; background: rgba(var(--warning-rgb), .08); font-size: 12px; }
+.third-party-note { padding: 10px 12px; border-radius: $radius-sm; background: rgba(var(--warning-rgb), .08); font-size: 12px; }
 .permission-note { font-size: 12px; color: $text-muted; }
 .developer-banner { display: flex; align-items: center; gap: 16px; padding: 18px 20px; background: $bg-card; border: 1px solid $border-light; border-radius: $radius-lg; }
 .developer-icon { flex-shrink: 0; color: $text-secondary; }
