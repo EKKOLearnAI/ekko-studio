@@ -51,6 +51,7 @@ export function providerProfileDir(profile: string): string {
   return join(providerAccountHome(providerAccountId(profile)), 'profiles', digest(profile || 'default'))
 }
 
+export const providerRequestAccountId = () => scopes.getStore()?.userId
 export const providerRequestProfile = () => scopes.getStore()?.profile
 
 export function providerSourceDir(profile: string): string {
