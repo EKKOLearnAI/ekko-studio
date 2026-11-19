@@ -2,6 +2,7 @@ import { socketEndpoint } from '@/utils/deployment-url'
 import type { TaskPlanSnapshot } from '@/utils/task-plan'
 import { io, type Socket } from 'socket.io-client'
 import { disconnectBackgroundStatusObservers } from './background-status'
+import { pendingChatInboxSocket } from './pending-chat-inbox'
 import { onAuthInvalidated } from '../auth-invalidation'
 import { getBaseUrlValue, getApiKey } from '../client'
 import type { ChatCodingAgentId } from '../coding-agents'
@@ -785,7 +786,7 @@ function respondPendingInteraction(
   transport: ChatRunTransport,
   profile?: string,
 ): Promise<void> {
-  const socket = connectChatRun(profile, transport)
+  const socket = (transport === 'chat-run' && pendingChatInboxSocket(profile)) || connectChatRun(profile, transport)
   const label = kind === 'approval' ? 'Approval' : 'Clarification'
   const resolutionEvents = [`${kind}.resolved`, `person.${kind === 'approval' ? 'approval' : 'clarification'}.resolved`]
   // Resolution events work through local and relayed transports. An emit alone
@@ -883,6 +884,7 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
 
   const namespace = transport === 'global-agent' ? '/global-agent' : '/chat-run'
   chatRunSocket = io(socketEndpoint(baseUrl, namespace).url, {
+    forceNew: true,
     path: socketEndpoint(baseUrl, namespace).path,
     auth: { token },
     query: { profile },

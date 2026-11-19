@@ -573,11 +573,15 @@ export const useGroupChatStore = defineStore('groupChat', () => {
         pendingClarifies.value = new Map(pendingClarifies.value)
     }
 
-    function replacePendingApprovalSnapshots(approvals: unknown) {
-        if (!Array.isArray(approvals)) return
-        pendingApprovals.value.clear()
-        for (const pending of approvals) upsertPendingApproval(pending as any)
-        pendingApprovals.value = new Map(pendingApprovals.value)
+    function restorePendingInteractions(approvals: unknown, clarifies: unknown) {
+        if (Array.isArray(approvals)) {
+            pendingApprovals.value = new Map()
+            for (const approval of approvals) upsertPendingApproval(approval)
+        }
+        if (Array.isArray(clarifies)) {
+            pendingClarifies.value = new Map()
+            for (const clarify of clarifies) upsertPendingClarify(clarify)
+        }
     }
     const userId = ref(getStoredUserId())
     const userName = ref(getStoredGroupUserName() || getStoredUsername() || '')
@@ -1030,8 +1034,9 @@ export const useGroupChatStore = defineStore('groupChat', () => {
             realtimeJoinedRoomId.value = null
             realtimeJoinedSocketId.value = null
             error.value = null
-            socket.emit('load_pending_approvals', {}, (res: { pendingApprovals?: unknown } | undefined) => {
-                replacePendingApprovalSnapshots(res?.pendingApprovals)
+            const generation = connectionGeneration
+            socket.emit('load_pending_approvals', {}, (res: { pendingApprovals?: unknown; pendingClarifies?: unknown } | undefined) => {
+                if (boundSocket === socket && generation === connectionGeneration) restorePendingInteractions(res?.pendingApprovals, res?.pendingClarifies)
             })
             socket.emit('load_room_agent_activities', {}, (res: { activities?: unknown } | undefined) => {
                 replaceActiveAgentRuns(res?.activities)

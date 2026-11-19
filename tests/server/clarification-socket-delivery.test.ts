@@ -38,9 +38,13 @@ async function clarificationSocketFixture() {
   const address = http.address()
   if (!address || typeof address === 'string') throw new Error('Expected a TCP address')
   const clients: Socket[] = []
-  const client = async (profile: string) => {
-    const socket = connect(`http://127.0.0.1:${address.port}/chat-run`, { transports: ['websocket'], query: { profile } })
+  const openClient = (profile: string, query: Record<string, string> = {}) => {
+    const socket = connect(`http://127.0.0.1:${address.port}/chat-run`, { transports: ['websocket'], query: { profile, ...query } })
     clients.push(socket)
+    return socket
+  }
+  const client = async (profile: string) => {
+    const socket = openClient(profile)
     await result(socket, 'connect')
     return socket
   }
@@ -50,7 +54,7 @@ async function clarificationSocketFixture() {
     await io.close()
     await fixture.close('clarification-socket-delivery')
   }
-  return { fixture, namespace, chat, client, close, approvalRespond, clarifyRespond }
+  return { fixture, namespace, chat, client, openClient, close, approvalRespond, clarifyRespond }
 }
 
 it.each([
@@ -136,6 +140,55 @@ it.each(['plugin', 'ekko', 'mcp'] as const)('delivers %s runtime confirmations t
     expect(h.clarifyRespond).not.toHaveBeenCalled()
   } finally {
     controller.abort()
+    await h.close()
+  }
+})
+
+it('restores only live and authorized global popups on a new connection without opening their sessions', async () => {
+  const h = await clarificationSocketFixture()
+  try {
+    const { sessionId, state, submitter, emit } = await sessionSockets(h, 'default')
+    const old = Date.now() - 90_000
+    emit('approval.requested', { approval_id: 'done', requested_at: old, timeout_ms: 300_000 })
+    emit('approval.resolved', { approval_id: 'done', resolved: true })
+    emit('approval.requested', { approval_id: 'expired', requested_at: old, timeout_ms: 1_000 })
+    emit('approval.requested', { approval_id: 'pending', requested_at: old, timeout_ms: 300_000 })
+    emit('approval.resolved', { approval_id: 'pending', resolved: false, error: 'Temporary failure' })
+    emit('clarify.requested', { clarify_id: 'question', question: 'Which release?', requested_at: old, timeout_ms: 300_000 })
+    for (const [id, profile, source, isWorking] of [
+      ['other-profile', 'other', 'cli', true], ['group', 'default', 'group_chat', true],
+      ['person-task-private', 'default', 'cli', true], ['inactive', 'default', 'cli', false],
+    ] as const) {
+      h.chat['sessionMap'].set(id, { ...state, profile, source, isWorking })
+    }
+    // Other output can evict the request from the bounded transcript while the tool still waits.
+    for (let index = 0; index < 205; index++) emit('message.delta', { delta: 'x' })
+    expect(state.events.some(entry => entry.event === 'approval.requested')).toBe(false)
+    const { execution } = await h.fixture.create()
+    const botQuestion = h.fixture.store.addPersonInteraction(1, execution, 'bot-input', 'Choose a branch', ['A','B'], 'question')
+    h.fixture.store.setPersonExecution(execution, 'waiting_user')
+    const snapshot = async () => {
+      const socket = h.openClient('default', { pending_interactions: '1' })
+      const { events } = await result(socket, 'pending.interactions.snapshot')
+      expect([...h.namespace.sockets.get(socket.id!)!.rooms].filter(room => room.startsWith('session:'))).toEqual([])
+      socket.disconnect()
+      return events
+    }
+    const events = await snapshot()
+    expect(events).toHaveLength(3)
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ session_id: sessionId, approval_id: 'pending' }),
+      expect.objectContaining({ session_id: sessionId, clarify_id: 'question' }),
+      expect.objectContaining({ session_id: 'person-main-1', clarify_id: `person-interaction:${botQuestion.id}:${botQuestion.revision}`, durable: true }),
+    ]))
+    expect(events.find((item: any) => item.approval_id)?.remaining_timeout_ms).toBeLessThanOrEqual(210_000)
+    h.approvalRespond.mockResolvedValue({ resolved: true })
+    const confirmed = result(submitter, 'approval.resolved')
+    submitter.emit('approval.respond', { session_id: sessionId, approval_id: 'pending', choice: 'deny' })
+    expect(await confirmed).toMatchObject({ resolved: true })
+    emit('clarify.resolved', { clarify_id: 'question', resolved: true })
+    expect(await snapshot()).toHaveLength(1)
+  } finally {
     await h.close()
   }
 })

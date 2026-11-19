@@ -82,6 +82,7 @@ import {
 import { handleBridgeRun, resumeBridgeRun } from '../services/chat-run/handle-bridge-run'
 import { handleCodingAgentRun } from '../services/chat-run/handle-coding-agent-run'
 import { handlePluginAgentRun } from '../services/chat-run/handle-plugin-agent-run'
+import { PendingChatInteractions } from '../services/chat-run/pending-interactions'
 import { isPluginAgentId, closePluginAgentSession } from '../services/agents/registry'
 import { handleEkkoAgentRun, type EkkoAgentRunSocketData } from '../services/chat-run/handle-ekko-agent-run'
 import { handleEkkoSessionCommand, parseEkkoRunCommand } from '../services/chat-run/ekko-session-command'
@@ -463,6 +464,7 @@ export class ChatRunSocket {
   /** sessionId → session state (messages, working status, events, run tracking) */
   private sessionMap = new Map<string, SessionState>()
   private readonly runAdmissions = new Map<string, Promise<void>>()
+  private readonly pendingChatInteractions = new PendingChatInteractions()
   private readonly ekkoExecutions = new Map<string, symbol>()
   private hermesQueueInsertionOperations = new Map<string, Promise<void>>()
   private readonly taskPlanRuns = new TaskPlanRuns(saveTaskPlan, (sessionId, snapshot) => {
@@ -902,22 +904,12 @@ export class ChatRunSocket {
           const subject = { session_id: sessionId, run_id: runId, workflow_id: state.webhookWorkflowId }
           if (source !== 'workflow') result.push(stateEvent('chat.run.updated', profile, subject,
             { state: { session_id: sessionId, status: 'running', timestamp: Date.now(), started_at: state.runStartedAt } }))
-          const pending = new Map<string, BusinessEvent>()
-          for (const { event, data } of buildResumeEvents(state.events)) {
-            if (!['approval.requested', 'approval.resolved', 'clarify.requested', 'clarify.resolved'].includes(event)) continue
+          for (const { event, data } of this.pendingChatInteractions.snapshot(state)) {
             const id = data?.approval_id || data?.clarify_id
-            if (!id) continue
-            const key = `${event.split('.')[0]}:${id}`
-            if (event.endsWith('.resolved')) {
-              if (!data.stale && (data.resolved !== false || ['timeout', 'aborted', 'cancelled', 'canceled'].includes(data.reason))) pending.delete(key)
-              continue
-            }
-            if (data.remaining_timeout_ms === 0) continue
             const type = `chat.${event.replace('clarify.', 'clarification.')}`
-            pending.set(key, stateEvent(type, profile, { ...subject,
+            result.push(stateEvent(type, profile, { ...subject,
               ...(event.startsWith('approval.') ? { approval_id: id } : { clarification_id: id }) }, data))
           }
-          result.push(...pending.values())
           for (const card of getSessionTaskPlans(sessionId, [], true, runId)) {
             if (card.run_id !== runId) continue
             const event = planStateEvent(profile, subject, card)
@@ -939,6 +931,9 @@ export class ChatRunSocket {
     const mobileTarget = socket.data.mobileDeviceTarget as MobileDeviceTarget | undefined
     if (mobileTarget) socket.join(mobileDeviceRoom(mobileTarget))
     if (!shared) { socket.join('studio-account'); socket.join(`pending-interactions:${currentProfile()}`) }
+    if (!shared && socketUser && socket.handshake.query?.pending_interactions === '1') {
+      socket.emit('pending.interactions.snapshot', { events: this.pendingInboxEvents(socketUser, currentProfile()) })
+    }
     socket.emit('session.activity.snapshot', {
       event: 'session.activity.snapshot',
       profile: currentProfile(),
@@ -3681,6 +3676,31 @@ export class ChatRunSocket {
     return true
   }
 
+  private pendingInboxEvents(user: AuthenticatedUser, profile: string) {
+    const events: Record<string, unknown>[] = []
+    for (const [sid, state] of this.sessionMap) {
+      if (!state.isWorking || isPrivatePersonSession(sid)) continue
+      const session = getSession(sid)
+      if ((state.profile || session?.profile || 'default') !== profile || (state.source || session?.source) === 'group_chat') continue
+      for (const { event, data } of this.pendingChatInteractions.snapshot(state)) events.push({ ...data, event, session_id: sid })
+    }
+    // BOT requests follow the owner across profiles. Idle worker questions survive a host restart.
+    for (const sid of personSessionIds(user.id)) {
+      const session = getSession(sid)
+      if (!ownsPersonSession(user.id, session) || session?.is_archived) continue
+      if (!this.isSessionRunning(sid)) {
+        const durable = personChatInteraction(user.id, sid)
+        if (durable) events.push(durable.data)
+        continue
+      }
+      for (const { event, data } of personDisplayEvents(sid, buildResumeEvents(pendingChatEkkoInteractions(sid)))) {
+        if (data.remaining_timeout_ms === 0) continue
+        events.push({ ...data, event, session_id: sid })
+      }
+    }
+    return events
+  }
+
   private pendingInteractionRoom(profile: string, sessionId: string): string | undefined {
     if (isPrivatePersonSession(sessionId)) return undefined
     const source = sessionId ? this.sessionMap.get(sessionId)?.source || getSession(sessionId)?.source : undefined
@@ -3710,6 +3730,8 @@ export class ChatRunSocket {
       }
       return
     }
+    const state = this.sessionMap.get(payload?.session_id)
+    if (state) this.pendingChatInteractions.observe(state, event, payload)
     this.emitSessionActivity(profile, event, payload)
     if (event !== 'approval.requested' && event !== 'approval.resolved'
       && event !== 'clarify.requested' && event !== 'clarify.resolved'

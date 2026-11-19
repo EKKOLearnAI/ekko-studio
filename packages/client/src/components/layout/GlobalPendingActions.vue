@@ -9,6 +9,7 @@ import PendingInteractionCountdown from '@/components/hermes/chat/PendingInterac
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { connectChatRun, getChatRunSocket } from '@/api/studio/chat'
+import { observePendingChatInbox } from '@/api/studio/pending-chat-inbox'
 import { copyToClipboard } from '@/utils/clipboard'
 import { playCompletionSound } from '@/utils/completion-sound'
 import { showSystemNotification } from '@/utils/completion-notification'
@@ -466,6 +467,18 @@ onMounted(() => {
   void groupChatStore.connect().catch(() => undefined)
   loadApprovalSoundSetting()
 })
+
+watch(() => profilesStore.activeProfileName || 'default', (profile, _, cleanup) => {
+  cleanup(observePendingChatInbox(profile,
+    event => chatStore.applyPendingInboxEvent(event, profile),
+    events => {
+      for (const event of events) {
+        if (event.approval_id) announcedKeys.add(`chat-approval:${event.session_id}:${event.approval_id}`)
+        if (event.clarify_id) announcedKeys.add(`chat-clarify:${event.session_id}:${event.clarify_id}`)
+      }
+      chatStore.restorePendingInbox(events, profile)
+    }))
+}, { immediate: true })
 
 watch(() => profilesStore.activeProfileName, profile => {
   resetWorkflowSubscriptions(profile)
