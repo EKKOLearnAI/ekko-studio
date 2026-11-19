@@ -82,6 +82,7 @@ import {
 import { handleBridgeRun, resumeBridgeRun } from '../services/chat-run/handle-bridge-run'
 import { handleCodingAgentRun } from '../services/chat-run/handle-coding-agent-run'
 import { handlePluginAgentRun } from '../services/chat-run/handle-plugin-agent-run'
+import { AccountPendingInbox, isAccountPendingInbox } from './account-pending-inbox'
 import { PendingChatInteractions } from '../services/chat-run/pending-interactions'
 import { isPluginAgentId, closePluginAgentSession } from '../services/agents/registry'
 import { handleEkkoAgentRun, type EkkoAgentRunSocketData } from '../services/chat-run/handle-ekko-agent-run'
@@ -109,7 +110,8 @@ import type {
   SessionState,
 } from '../services/chat-run/types'
 import { authenticateUserToken, inspectAppUserToken, isAuthEnabled, type AuthenticatedUser } from '../public/auth'
-import { userCanAccessProfile } from '../repositories/users-store'
+import { findUserById, userCanAccessProfile } from '../repositories/users-store'
+import { onUserAccessChanged } from '../repositories/user-access-updates'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observePersonPresenceEvent } from '../services/person/presence'
 import { SessionStateSync } from '../services/session-state'
@@ -464,6 +466,7 @@ export class ChatRunSocket {
   /** sessionId → session state (messages, working status, events, run tracking) */
   private sessionMap = new Map<string, SessionState>()
   private readonly runAdmissions = new Map<string, Promise<void>>()
+  private readonly accountInbox = new AccountPendingInbox<Record<string, unknown>>()
   private readonly pendingChatInteractions = new PendingChatInteractions()
   private readonly ekkoExecutions = new Map<string, symbol>()
   private hermesQueueInsertionOperations = new Map<string, Promise<void>>()
@@ -834,6 +837,7 @@ export class ChatRunSocket {
     const token = socket.handshake.auth?.token as string | undefined
     const shareToken = socketShareToken(socket.handshake.auth)
     if (shareToken) {
+      if (isAccountPendingInbox(socket)) return next(new Error('An account login is required'))
       try {
         const access = await authenticateSessionShare(shareToken, String(socket.handshake.auth?.appAccessToken || ''))
         assertShareProfile(access, socket.handshake.query?.profile)
@@ -846,6 +850,10 @@ export class ChatRunSocket {
     const appToken = token ? await inspectAppUserToken(token) : null
     if (appToken) {
       if (appToken.status !== 'active' || !appToken.user) return next(new Error('App device authentication failed'))
+      if (isAccountPendingInbox(socket)) {
+        socket.data.user = appToken.user
+        return next()
+      }
       const profile = String(socket.handshake.query?.profile || 'default')
       if (!this.canAccessProfile(appToken.user, profile)) return next(new Error('Profile access denied'))
       const rawPlatform = String(socket.handshake.query?.platform || '').trim().toLowerCase()
@@ -867,7 +875,7 @@ export class ChatRunSocket {
       return next(new Error('Authentication failed'))
     }
     const socketProfile = String(socket.handshake.query?.profile || 'default').trim() || 'default'
-    if (socketProfile && !this.canAccessProfile(user, socketProfile)) {
+    if (!isAccountPendingInbox(socket) && socketProfile && !this.canAccessProfile(user, socketProfile)) {
       return next(new Error('Profile access denied'))
     }
     socket.data.user = user
@@ -877,6 +885,10 @@ export class ChatRunSocket {
   // --- Connection handler ---
 
   private onConnection(socket: Socket) {
+    if (isAccountPendingInbox(socket)) {
+      this.accountInbox.attach(socket, user => this.pendingInboxEvents(user))
+      return
+    }
     bindProviderSocket(socket)
     const shared = socket.data.sessionShare as SessionShareAccess | undefined
     this.sessionStateSync.attach(socket)
@@ -1023,6 +1035,23 @@ export class ChatRunSocket {
         throw new Error(`Profile "${sessionProfile}" is not available for this user`)
       }
       return sessionProfile
+    }
+
+    if (socketUser && !shared) {
+      const stop = onUserAccessChanged(socketUser.id, () => {
+        const user = findUserById(socketUser.id)
+        if (!user || user.status !== 'active' || !this.canAccessProfile(user, currentProfile())) {
+          socket.disconnect()
+          return
+        }
+        socketUser.role = user.role
+        for (const room of socket.rooms) {
+          if (!room.startsWith('session:')) continue
+          try { requireSocketSessionReadAccess(room.slice('session:'.length)) }
+          catch { void socket.leave(room) }
+        }
+      })
+      socket.on('disconnect', stop)
     }
 
     socket.on('run', async (data: {
@@ -3676,26 +3705,31 @@ export class ChatRunSocket {
     return true
   }
 
-  private pendingInboxEvents(user: AuthenticatedUser, profile: string) {
+  private pendingInboxEvents(user: AuthenticatedUser, profile?: string) {
     const events: Record<string, unknown>[] = []
     for (const [sid, state] of this.sessionMap) {
       if (!state.isWorking || isPrivatePersonSession(sid)) continue
       const session = getSession(sid)
-      if ((state.profile || session?.profile || 'default') !== profile || (state.source || session?.source) === 'group_chat') continue
-      for (const { event, data } of this.pendingChatInteractions.snapshot(state)) events.push({ ...data, event, session_id: sid })
+      const runProfile = state.profile || session?.profile || 'default'
+      const sessionProfile = session?.profile || runProfile
+      if ((state.source || session?.source) === 'group_chat' || (profile && runProfile !== profile)
+        || !this.canAccessProfile(user, sessionProfile) || (sessionProfile !== runProfile && !this.canAccessProfile(user, runProfile))) continue
+      for (const { event, data } of this.pendingChatInteractions.snapshot(state)) {
+        events.push({ ...data, event, session_id: sid, profile: sessionProfile, session_source: session?.source })
+      }
     }
     // BOT requests follow the owner across profiles. Idle worker questions survive a host restart.
     for (const sid of personSessionIds(user.id)) {
       const session = getSession(sid)
-      if (!ownsPersonSession(user.id, session) || session?.is_archived) continue
+      if (!session || !ownsPersonSession(user.id, session) || session.is_archived) continue
       if (!this.isSessionRunning(sid)) {
         const durable = personChatInteraction(user.id, sid)
-        if (durable) events.push(durable.data)
+        if (durable) events.push({ ...durable.data, profile: session.profile || 'default' })
         continue
       }
       for (const { event, data } of personDisplayEvents(sid, buildResumeEvents(pendingChatEkkoInteractions(sid)))) {
         if (data.remaining_timeout_ms === 0) continue
-        events.push({ ...data, event, session_id: sid })
+        events.push({ ...data, event, session_id: sid, profile: session.profile || 'default' })
       }
     }
     return events
@@ -3724,6 +3758,7 @@ export class ChatRunSocket {
       const data = interaction ? { ...display, event: name }
         : { event: name, session_id: session!.id, run_id: payload.run_id, notification_id: notice!.id,
           timestamp: Date.now(), output: foregroundNotificationPreview(notice!.kind, session, preview).content }
+      if (interaction) this.accountInbox.publish({ ...display, event, profile: session!.profile || profile }, user => user.id === userId)
       // Reuse the authenticated chat transports and their existing notification handlers.
       for (const namespace of ['/chat-run', '/global-agent']) {
         this.io.of(namespace).to(personNotificationRoom(userId)).emit(name, data)
@@ -3740,7 +3775,24 @@ export class ChatRunSocket {
       && event !== 'reminder.requested' && event !== 'reminder.resolved'
       && event !== 'health.requested' && event !== 'health.resolved') return
     const inbox = this.pendingInteractionRoom(profile, payload?.session_id || '')
-    if (inbox) this.nsp.to(inbox).emit(event, payload)
+    if (!inbox) return
+    if (!event.startsWith('approval.') && !event.startsWith('clarify.')) {
+      this.nsp.to(inbox).emit(event, payload)
+      return
+    }
+    const session = getSession(payload.session_id)
+    const sessionProfile = session?.profile || profile
+    if (sessionProfile === profile) {
+      this.nsp.to(inbox).emit(event, payload)
+    } else {
+      // A run can execute on a different Profile from the session that owns its reply.
+      for (const id of this.nsp.adapter.rooms.get(inbox) || []) {
+        const recipient = this.nsp.sockets.get(id)
+        if (recipient?.data.user && this.canAccessProfile(recipient.data.user, sessionProfile)) recipient.emit(event, payload)
+      }
+    }
+    this.accountInbox.publish({ ...payload, event, profile: sessionProfile, session_source: session?.source }, user =>
+      this.canAccessProfile(user, sessionProfile) && (sessionProfile === profile || this.canAccessProfile(user, profile)))
   }
 
   private emitSessionActivity(profile: string, event: string, payload: any) {

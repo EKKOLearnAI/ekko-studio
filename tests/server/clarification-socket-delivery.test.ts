@@ -9,7 +9,7 @@ function result(socket: Socket, event: string) {
   return once(socket, event, { signal: AbortSignal.timeout(2000) }).then(([payload]) => payload)
 }
 
-async function clarificationSocketFixture() {
+async function clarificationSocketFixture(authenticate = false) {
   const fixture = await acceptanceFixture()
   const http = createServer()
   const io = new Server(http)
@@ -29,8 +29,9 @@ async function clarificationSocketFixture() {
   const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
   const chat = new ChatRunSocket(io)
   const namespace = io.of('/chat-run')
+  if (authenticate) namespace.use(chat['authMiddleware'].bind(chat))
   namespace.on('connection', socket => {
-    socket.data.user = { id: 1, role: 'super_admin', status: 'active' }
+    if (!authenticate) socket.data.user = { id: 1, role: 'super_admin', status: 'active' }
     chat['onConnection'](socket)
   })
   http.listen(0, '127.0.0.1')
@@ -38,8 +39,9 @@ async function clarificationSocketFixture() {
   const address = http.address()
   if (!address || typeof address === 'string') throw new Error('Expected a TCP address')
   const clients: Socket[] = []
-  const openClient = (profile: string, query: Record<string, string> = {}) => {
-    const socket = connect(`http://127.0.0.1:${address.port}/chat-run`, { transports: ['websocket'], query: { profile, ...query } })
+  const openClient = (profile: string | null, query: Record<string, string> = {}, token?: string, namespace = '/chat-run') => {
+    const socket = connect(`http://127.0.0.1:${address.port}${namespace}`, { forceNew: true, transports: ['websocket'],
+      auth: { token }, query: { ...(profile && { profile }), ...query } })
     clients.push(socket)
     return socket
   }
@@ -54,7 +56,7 @@ async function clarificationSocketFixture() {
     await io.close()
     await fixture.close('clarification-socket-delivery')
   }
-  return { fixture, namespace, chat, client, openClient, close, approvalRespond, clarifyRespond }
+  return { fixture, io, namespace, chat, client, openClient, close, approvalRespond, clarifyRespond }
 }
 
 it.each([
@@ -352,4 +354,119 @@ it('keeps the Hermes question pending after a transient Bridge error and accepts
   } finally {
     await h.close()
   }
+})
+
+async function accountFixture() {
+  vi.stubEnv('AUTH_JWT_SECRET', 'isolated-account-inbox-test')
+  const h = await clarificationSocketFixture(true)
+  const users = await import('../../packages/server/src/modules/studio/repositories/users-store')
+  const real = await vi.importActual<typeof users>('../../packages/server/src/modules/studio/repositories/users-store')
+  vi.spyOn(users, 'findUserById').mockImplementation(real.findUserById)
+  vi.spyOn(users, 'listUserProfiles').mockImplementation(real.listUserProfiles)
+  vi.spyOn(users, 'userCanAccessProfile').mockImplementation(real.userCanAccessProfile)
+  const profiles = await import('../../packages/server/src/modules/studio/public/profile-config')
+  vi.spyOn(profiles, 'listProfileNamesFromDisk').mockReturnValue(['default', 'work', 'private'])
+  const { issueUserJwt } = await import('../../packages/server/src/modules/studio/middleware/auth')
+  const user = real.createUser({ username: 'two-profiles', password: 'fixture', profiles: ['default', 'work'] })!
+  const other = real.createUser({ username: 'work-only', password: 'fixture', profiles: ['work'] })!
+  const token = await issueUserJwt(user)
+  const otherToken = await issueUserJwt(other)
+  const inbox = (token: string, namespace = '/chat-run') => h.openClient(null, { pending_interactions: 'account' }, token, namespace)
+  const close = async () => { try { await h.close() } finally { vi.unstubAllEnvs() } }
+  return { ...h, user, token, other, otherToken, real, inbox, close }
+}
+
+it('delivers exactly the linked Profiles and the owner’s private Bot to authenticated account inboxes', async () => {
+  const h = await accountFixture()
+  try {
+    const { createSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+    const request = (sid: string, id: string) => h.chat.emitExternalEvent(sid, 'clarify.requested', {
+      event: 'clarify.requested', clarify_id: id, question: 'Pick a version', timeout_ms: 300_000,
+    })
+    for (const profile of ['default', 'work', 'private']) {
+      const sid = 'chat-' + profile
+      createSession({ id: sid, profile, source: 'cli', studio_user_id: h.user.id })
+      h.chat['sessionMap'].set(sid, { profile, source: 'cli', isWorking: true, messages: [], events: [], queue: [] })
+      request(sid, 'question-' + profile)
+    }
+    const first = h.inbox(h.token)
+    const snapshot = 'pending.interactions.snapshot'
+    const ids = (data: { events: Array<{ session_id: string; profile: string }> }) => [...new Map(data.events.map(e => [e.session_id, e.profile])).entries()].sort()
+    expect(ids(await result(first, snapshot))).toEqual([['chat-default', 'default'], ['chat-work', 'work']])
+    const second = h.inbox(h.otherToken)
+    expect(ids(await result(second, snapshot))).toEqual([['chat-work', 'work']])
+    expect(h.namespace.sockets.get(first.id!)!.eventNames()).not.toContain('run')
+    expect(h.namespace.sockets.get(first.id!)!.eventNames()).not.toContain('approval.respond')
+    expect(await result(h.inbox('invalid'), 'connect_error')).toMatchObject({ message: 'Authentication failed' })
+    expect(await result(h.inbox('sst1_guest'), 'connect_error')).toMatchObject({ message: 'An account login is required' })
+    expect(await result(h.openClient('default', {}, h.otherToken), 'connect_error')).toMatchObject({ message: 'Profile access denied' })
+
+    const previousConnection = h.openClient('work', {}, h.otherToken)
+    await result(previousConnection, 'connect')
+    const profileRequests: string[] = []
+    previousConnection.on('clarify.requested', e => profileRequests.push(e.clarify_id))
+    createSession({ id: 'mixed-ownership', profile: 'private', source: 'cli' })
+    h.chat['sessionMap'].set('mixed-ownership', { profile: 'work', source: 'cli', isWorking: true, messages: [], events: [], queue: [] })
+    const received: string[] = []
+    second.on('pending.interaction', e => received.push(e.clarify_id))
+    request('mixed-ownership', 'hidden-session')
+    request('chat-private', 'hidden')
+    const defaultOnly = result(first, 'pending.interaction')
+    request('chat-default', 'also-hidden')
+    expect(await defaultOnly).toMatchObject({ clarify_id: 'also-hidden' })
+    const ownerBot = result(first, 'pending.interaction')
+    request('person-main-' + h.user.id, 'owner-only')
+    expect(await ownerBot).toMatchObject({ clarify_id: 'owner-only' })
+    const profileVisible = result(previousConnection, 'clarify.requested')
+    const visible = result(second, 'pending.interaction')
+    request('chat-work', 'allowed')
+    expect(await visible).toMatchObject({ session_id: 'chat-work', profile: 'work' })
+    expect(received).toEqual(['allowed'])
+    await profileVisible
+    expect(profileRequests).toEqual(['allowed'])
+
+    const disconnected = result(previousConnection, 'disconnect')
+    const changed = result(second, snapshot)
+    h.real.replaceUserProfiles(h.other.id, ['default', 'private'])
+    expect(ids(await changed)).toEqual([['chat-default', 'default'], ['chat-private', 'private']])
+    expect(await disconnected).toBe('io server disconnect')
+    request('chat-work', 'revoked')
+    const newlyLinked = result(second, 'pending.interaction')
+    request('chat-private', 'now-visible')
+    expect(await newlyLinked).toMatchObject({ clarify_id: 'now-visible', profile: 'private' })
+    expect(received).toEqual(['allowed', 'now-visible'])
+  } finally { await h.close() }
+})
+
+it('follows workflow approvals created after connection and reconciles them when account grants change', async () => {
+  const h = await accountFixture()
+  const { WorkflowSocketServer } = await import('../../packages/server/src/modules/studio/sockets/workflow')
+  const { getWorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+  const manager = getWorkflowManager()
+  const workflow = new WorkflowSocketServer(h.io, manager)
+  workflow.init()
+  try {
+    const socket = h.inbox(h.otherToken, '/workflow')
+    const snapshot = 'pending.interactions.snapshot'
+    expect(await result(socket, snapshot)).toEqual({ events: [] })
+    const records = ['work', 'private'].map(profile => manager.create({ name: profile + ' flow', profile }))
+    const { createWorkflowRun } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const statuses = records.map(record => ({ ...manager.getRuntimeStatus(record.id),
+      runId: createWorkflowRun({ workflow_id: record.id, profile: record.profile, user_id: h.user.id }).id,
+      pendingApprovals: [{ nodeId: 'gate', executionId: 'review' }] }))
+    vi.spyOn(manager, 'listRuntimeStatuses').mockReturnValue(statuses)
+    const received: string[] = []
+    socket.on('pending.interaction', e => received.push(e.profile))
+    workflow['emitRuntimeStatus'](statuses[1])
+    const granted = result(socket, 'pending.interaction')
+    workflow['emitRuntimeStatus'](statuses[0])
+    expect(await granted).toMatchObject({ workflowId: records[0].id, profile: 'work', title: 'work flow' })
+    expect(received).toEqual(['work'])
+    const changed = result(socket, snapshot)
+    h.real.replaceUserProfiles(h.other.id, ['private'])
+    expect((await changed).events).toEqual([expect.objectContaining({ workflowId: records[1].id, profile: 'private' })])
+    const resolved = result(socket, 'pending.interaction')
+    workflow['emitRuntimeStatus']({ ...statuses[1], pendingApprovals: [] })
+    expect(await resolved).toMatchObject({ workflowId: records[1].id, pendingApprovals: [] })
+  } finally { workflow.close(); await h.close() }
 })

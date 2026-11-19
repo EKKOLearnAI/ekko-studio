@@ -2,7 +2,6 @@ import { socketEndpoint } from '@/utils/deployment-url'
 import type { TaskPlanSnapshot } from '@/utils/task-plan'
 import { io, type Socket } from 'socket.io-client'
 import { disconnectBackgroundStatusObservers } from './background-status'
-import { pendingChatInboxSocket } from './pending-chat-inbox'
 import { onAuthInvalidated } from '../auth-invalidation'
 import { getBaseUrlValue, getApiKey } from '../client'
 import type { ChatCodingAgentId } from '../coding-agents'
@@ -99,6 +98,7 @@ export interface RunEvent {
     output_tokens: number
     total_tokens: number
   }
+  session_source?: string
   /** session_id tag added by server for client-side filtering */
   session_id?: string
   /** Generated session title from session.title.updated. */
@@ -786,7 +786,10 @@ function respondPendingInteraction(
   transport: ChatRunTransport,
   profile?: string,
 ): Promise<void> {
-  const socket = (transport === 'chat-run' && pendingChatInboxSocket(profile)) || connectChatRun(profile, transport)
+  // A background Profile's reply must not replace the active conversation's socket.
+  const separate = transport === 'chat-run' && !!profile && !!chatRunSocket
+    && (chatRunSocketTransport !== transport || chatRunSocketProfile !== profile)
+  const socket = separate ? openChatSocket(profile, transport) : connectChatRun(profile, transport)
   const label = kind === 'approval' ? 'Approval' : 'Clarification'
   const resolutionEvents = [`${kind}.resolved`, `person.${kind === 'approval' ? 'approval' : 'clarification'}.resolved`]
   // Resolution events work through local and relayed transports. An emit alone
@@ -801,6 +804,8 @@ function respondPendingInteraction(
       removeSocketListener(socket, 'connect_error', failed)
       removeSocketListener(socket, 'disconnect', failed)
       for (const event of resolutionEvents) removeSocketListener(socket, event, resolved)
+      stopAuth?.()
+      if (separate) socket.disconnect()
       error ? reject(error) : resolve()
     }
     const failed = () => finish(new Error(`${label} response could not be delivered. Please retry.`))
@@ -820,6 +825,7 @@ function respondPendingInteraction(
       removeSocketListener(socket, 'connect', send)
       socket.emit(`${kind}.respond`, { session_id: sessionId, [`${kind}_id`]: requestId, ...response })
     }
+    const stopAuth = separate ? onAuthInvalidated(failed) : undefined
     const timer = setTimeout(() => finish(new Error(`${label} response was not confirmed. Please retry.`)), 15_000)
     for (const event of resolutionEvents) socket.on(event, resolved)
     socket.on('disconnect', failed)
@@ -846,6 +852,24 @@ export function getChatRunSocket(transport?: ChatRunTransport): Socket | null {
   return chatRunSocket
 }
 
+function openChatSocket(profile: string, transport: ChatRunTransport): Socket {
+  const namespace = transport === 'global-agent' ? '/global-agent' : '/chat-run'
+  const endpoint = socketEndpoint(getBaseUrlValue(), namespace)
+  return io(endpoint.url, {
+    forceNew: true,
+    path: endpoint.path,
+    auth: { token: getApiKey() },
+    query: { profile },
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 30000,
+    randomizationFactor: 0.5,
+    timeout: 30000,
+  })
+}
+
 export function connectChatRun(requestedProfile?: string | null, transport: ChatRunTransport = 'chat-run'): Socket {
   const normalizedRequestedProfile = requestedProfile?.trim() || null
   if (
@@ -864,9 +888,6 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
     chatRunSocketProfile = null
   }
 
-  const baseUrl = getBaseUrlValue()
-  const token = getApiKey()
-
   // Get active profile from store (authoritative source)
   let profile = normalizedRequestedProfile || 'default'
   try {
@@ -882,20 +903,7 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
   chatRunSocketProfile = profile
   chatRunSocketTransport = transport
 
-  const namespace = transport === 'global-agent' ? '/global-agent' : '/chat-run'
-  chatRunSocket = io(socketEndpoint(baseUrl, namespace).url, {
-    forceNew: true,
-    path: socketEndpoint(baseUrl, namespace).path,
-    auth: { token },
-    query: { profile },
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 30000,
-    randomizationFactor: 0.5,
-    timeout: 30000,
-  })
+  chatRunSocket = openChatSocket(profile, transport)
 
   // Retained callbacks from a replaced/invalidated socket must not dispatch
   // into handlers registered by a later authenticated session.

@@ -7,7 +7,7 @@ import { isKnownEkkoSessionCommand } from '@/utils/hermes/bridge-session-command
 import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
 import { applyPersonTimelinePage, applyPersonFlowUpdate, preservePersonTimelineWindow } from '@/utils/person-timeline'
-import type { PendingInboxEvent } from '@/api/studio/pending-chat-inbox'
+import type { PendingInboxEvent } from '@/api/studio/pending-inbox'
 import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
@@ -422,6 +422,7 @@ export function formatMessageWithReference(reference: MessageReference, content:
 export interface PendingApproval {
   sessionId: string
   inboxProfile?: string
+  sessionSource?: string
   approvalId: string
   command: string
   description: string
@@ -437,6 +438,7 @@ export interface PendingApproval {
 export interface PendingClarify {
   sessionId: string
   inboxProfile?: string
+  sessionSource?: string
   clarifyId: string
   question: string
   choices: string[] | null
@@ -3509,6 +3511,7 @@ function createChatState(scopedSessionId?: string) {
       sessionId: sid,
       approvalId,
       inboxProfile: inboxProfile ?? sameRequest?.inboxProfile,
+      sessionSource: evt.session_source ?? sameRequest?.sessionSource,
       submitting: sameRequest?.submitting,
       submissionFailed: sameRequest?.submissionFailed,
       command: String((evt as any).command || ''),
@@ -3561,6 +3564,7 @@ function createChatState(scopedSessionId?: string) {
       sessionId: sid,
       clarifyId,
       inboxProfile: inboxProfile ?? sameQuestion?.inboxProfile,
+      sessionSource: evt.session_source ?? sameQuestion?.sessionSource,
       question: String((evt as any).question || ''),
       choices: Array.isArray((evt as any).choices) ? (evt as any).choices : null,
       initialResponse: sameQuestion?.initialResponse ?? String((evt as any).initial_response || ''),
@@ -3607,23 +3611,23 @@ function createChatState(scopedSessionId?: string) {
     pendingClarifies.value = new Map(pendingClarifies.value)
   }
 
-  function applyPendingInboxEvent(event: RunEvent, profile: string) {
-    if (event.event === 'approval.requested') setPendingApproval(event, profile)
-    if (event.event === 'clarify.requested') setPendingClarify(event, profile)
+  function applyPendingInboxEvent(event: PendingInboxEvent) {
+    if (event.event === 'approval.requested') setPendingApproval(event, event.profile)
+    if (event.event === 'clarify.requested') setPendingClarify(event, event.profile)
     if (event.event === 'approval.resolved') clearPendingApproval(event)
     if (event.event === 'clarify.resolved') clearPendingClarify(event)
   }
 
-  function restorePendingInbox(events: PendingInboxEvent[], profile: string) {
+  function restorePendingInbox(events: PendingInboxEvent[]) {
     const approvals = new Map(events.filter(e => e.approval_id).map(e => [e.session_id, e.approval_id]))
     const clarifications = new Map(events.filter(e => e.clarify_id).map(e => [e.session_id, e.clarify_id]))
     for (const [sid, pending] of pendingApprovals.value) {
-      if (pending.inboxProfile === profile && approvals.get(sid) !== pending.approvalId) dismissPendingApprovalFor(sid, pending.approvalId)
+      if (pending.inboxProfile && approvals.get(sid) !== pending.approvalId) dismissPendingApprovalFor(sid, pending.approvalId)
     }
     for (const [sid, pending] of pendingClarifies.value) {
-      if (pending.inboxProfile === profile && clarifications.get(sid) !== pending.clarifyId) dismissPendingClarifyFor(sid, pending.clarifyId)
+      if (pending.inboxProfile && clarifications.get(sid) !== pending.clarifyId) dismissPendingClarifyFor(sid, pending.clarifyId)
     }
-    for (const event of events) applyPendingInboxEvent(event, profile)
+    for (const event of events) applyPendingInboxEvent(event)
   }
 
   function clearPendingInteractions(sessionId: string) {
@@ -3660,8 +3664,10 @@ function createChatState(scopedSessionId?: string) {
 
   function pendingResponseRoute(pending: PendingApproval | PendingClarify) {
     const session = sessions.value.find(item => item.id === pending.sessionId)
-    const local = pending.inboxProfile !== undefined || pending.sessionId.startsWith('person-main-')
-    return { transport: local ? 'chat-run' as const : runtimeTransport(), profile: session?.profile || pending.inboxProfile }
+    const person = pending.sessionId.startsWith('person-main-')
+    const local = !!pending.inboxProfile || person
+    const profile = person && pending.inboxProfile ? getProfileName() : pending.inboxProfile || session?.profile
+    return { transport: local ? 'chat-run' as const : runtimeTransport(), profile }
   }
 
   async function respondToClarifyFor(sessionId: string, clarifyId: string, response: string): Promise<PendingInteractionSubmitResult> {
