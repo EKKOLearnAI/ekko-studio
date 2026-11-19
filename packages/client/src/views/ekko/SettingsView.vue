@@ -308,7 +308,7 @@ onBeforeUnmount(() => {
                 <NInputNumber v-model:value="form.logging.maxBytes" :min="1" :step="1048576" size="small" class="input-sm" @update:value="value => value != null && saveDebouncedChange()" />
               </SettingRow>
               <SettingRow :label="t('ekkoConfig.promptInstructions')" :hint="t('ekkoConfig.promptInstructionsHint')">
-                <NDynamicTags v-model:value="form.prompt.instructions" class="input-lg" @update:value="saveImmediateChange" />
+                <NDynamicTags v-model:value="form.prompt.instructions" class="input-lg prompt-instructions" @update:value="saveImmediateChange" />
               </SettingRow>
               <SettingRow :label="t('ekkoConfig.schemaVersion')" :hint="t('ekkoConfig.readonlyConfigHint')">
                 <span class="readonly-value">{{ schemaVersion }}</span>
@@ -350,6 +350,35 @@ onBeforeUnmount(() => {
 .input-sm { width: 120px; }
 .input-md { width: 240px; }
 .input-lg { width: 360px; }
+
+// A prompt is prose, not a short tag: keep its close control inside the row.
+.prompt-instructions {
+  max-width: 100%;
+  min-width: 0;
+
+  :deep(.n-space > div) {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  :deep(.n-tag) {
+    max-width: 100%;
+    min-width: 0;
+    height: auto;
+    padding-block: 4px;
+  }
+
+  :deep(.n-tag__content) {
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+  }
+
+  :deep(.n-tag__close) {
+    flex-shrink: 0;
+  }
+}
 
 .readonly-value {
   color: $text-secondary;
