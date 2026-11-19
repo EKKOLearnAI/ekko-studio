@@ -405,3 +405,19 @@ it.each([{ stream: false, missingContentType: false }, { stream: false, missingC
     expect(output).toContain('OK')
   } else expect(request.body).toMatchObject({ model: 'openai-codex/gpt-5.4', status: 'completed', output: final.output })
 })
+
+it.each([false, true].flatMap(stream => [undefined, 'low', 'none'].map(reasoningEffort => ({ stream, reasoningEffort }))))('preserves Responses effort through the Chat upstream proxy ($stream, $reasoningEffort)', async ({ stream, reasoningEffort }) => {
+  fixtures.respond = () => stream
+    ? new Response('data: {"id":"chat-1","choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })
+    : Response.json({ id: 'chat-1', choices: [{ message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }] })
+  const target = registerCodexProxyTarget({ profile: 'default', ownerUserId: 1, provider: 'custom:fixture', model: 'gemini-4-argon',
+    baseUrl: fixtures.baseUrl, apiKey: 'synthetic-key', apiMode: 'chat_completions', reasoningEffort })
+  fixtures.targets.push(target.routeKey)
+  const request = context({ input: 'ping', reasoning: { effort: 'high' }, stream })
+  request.get = name => name === 'authorization' ? `Bearer ${target.token}` : ''
+  await codexProxyResponses(request)
+  if (request.body instanceof Readable) for await (const _chunk of request.body) { /* Drain the local SSE fixture. */ }
+  expect(request.status).toBe(200)
+  expect(fixtures.calls).toHaveLength(1)
+  expect(fixtures.calls[0].body).toMatchObject({ model: 'gemini-4-argon', reasoning_effort: reasoningEffort || 'high', stream })
+})
