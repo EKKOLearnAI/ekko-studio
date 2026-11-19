@@ -507,10 +507,28 @@ def _ensure_agent_imports() -> None:
         if exc.name != "hermes_bootstrap":
             raise
         # Older Hermes runtimes do not have a bootstrap module.
+    _install_platform_tls_trust()
     _apply_openrouter_attribution_override()
     from bridge_mcp import install_studio_mcp_env
 
     install_studio_mcp_env()
+
+
+def _install_platform_tls_trust() -> None:
+    """Install Hermes' platform TLS trust before Hermes dependencies load.
+
+    Libraries such as botocore bind ``ssl.SSLContext`` at import time. If
+    truststore replaces it afterwards, building a new context recurses in the
+    ``SSLContext.options`` setter, so this must run before any agent import.
+    """
+    try:
+        from agent.ssl_verify import install_truststore
+    except ImportError as exc:
+        if exc.name not in ("agent", "agent.ssl_verify"):
+            raise
+        # Older Hermes runtimes do not manage platform TLS trust.
+        return
+    install_truststore()
 
 
 def _apply_openrouter_attribution_override() -> None:
