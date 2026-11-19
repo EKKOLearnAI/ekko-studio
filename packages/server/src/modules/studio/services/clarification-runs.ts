@@ -4,7 +4,7 @@ type RunState = { isWorking: boolean; isAborting?: boolean; activeRunMarker?: st
 type Binding = { sessionId: string; profile: string; resolve: () => RunState | undefined; runId?: string }
 type Reason = 'response' | 'dismissed' | 'timeout' | 'cancelled'
 type Result = { clarify_id: string; response: string; reason: Reason }
-type Pending = { contextId: string; sessionId: string; finish: (reason: Reason, response?: string) => void }
+type Pending = { contextId: string; sessionId: string; finish: (reason: Reason, response?: string) => boolean }
 export const CLARIFICATION_TIMEOUT_MS = 300_000
 
 export class ClarificationError extends Error {
@@ -56,15 +56,16 @@ export class ClarificationRuns {
     const clarifyId = randomUUID()
     return new Promise((resolve, reject) => {
       const finish = (reason: Reason, response = '') => {
-        if (!this.pending.delete(clarifyId)) return
+        if (!this.pending.delete(clarifyId)) return false
         clearTimeout(timer)
         signal?.removeEventListener('abort', onAbort)
         try {
           this.publish(binding.sessionId, 'clarify.resolved', {
             event: 'clarify.resolved', run_id: runId, clarify_id: clarifyId, resolved: true, reason,
           })
-        } catch (error) { reject(error); return }
+        } catch (error) { reject(error); return false }
         resolve({ clarify_id: clarifyId, response, reason })
+        return true
       }
       const onAbort = () => finish('cancelled')
       const timer = setTimeout(() => finish('timeout'), CLARIFICATION_TIMEOUT_MS)
@@ -96,8 +97,7 @@ export class ClarificationRuns {
       pending.finish('cancelled')
       return { handled: true, resolved: false }
     }
-    pending.finish(response ? 'response' : 'dismissed', response)
-    return { handled: true, resolved: true }
+    return { handled: true, resolved: pending.finish(response ? 'response' : 'dismissed', response) }
   }
 
   finishSession(sessionId: string, contextId?: string): void {

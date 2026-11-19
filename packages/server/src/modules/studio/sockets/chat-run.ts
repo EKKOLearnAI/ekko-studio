@@ -1394,16 +1394,33 @@ export class ChatRunSocket {
       }
     })
 
+    const authorizeAndAnswerPersonInteraction = async (sessionId: string, kind: 'approval' | 'clarify', id: string, value: string) => {
+      const approval = kind === 'approval'
+      if (sessionId.startsWith('person-task-')) {
+        requireSocketSessionReadAccess(sessionId)
+        await answerPersonTaskInteraction(socketUser!.id, sessionId, id, value, approval)
+      } else {
+        requireSocketSessionAccess(sessionId)
+        if (!isPersonSession(sessionId) || !id.startsWith('person-interaction:')) return false
+        if (!await answerPersonChatInteraction(socketUser!.id, id, value, approval, sessionId)) {
+          throw new Error('Question expired or changed')
+        }
+      }
+      // The Bot can defer its session-wide update while another turn is running.
+      const event = `${kind}.resolved`
+      socket.emit(event, {
+        event, session_id: sessionId, resolved: true,
+        ...(approval ? { approval_id: id, choice: value } : { clarify_id: id, reason: 'response' }),
+      })
+      this.syncPersonInteraction(socketUser!.id)
+      return true
+    }
+
     socket.on('approval.respond', async (data: { session_id?: string; approval_id?: string; choice?: string }) => {
       if (!data.session_id || !data.approval_id) return
       try {
-        if (data.session_id.startsWith('person-task-')) {
-          requireSocketSessionReadAccess(data.session_id)
-          await answerPersonTaskInteraction(socketUser!.id, data.session_id, data.approval_id, data.choice || '', true)
-          this.syncPersonInteraction(socketUser!.id)
-          return
-        }
-        requireSocketSessionAccess(data.session_id)
+        if (await authorizeAndAnswerPersonInteraction(data.session_id, 'approval', data.approval_id, data.choice || '')) return
+        if (this.answerPublishedInteraction(socket, data.session_id, 'approval', data.approval_id, data.choice || 'deny')) return
       } catch (err) {
         socket.emit('approval.resolved', {
           event: 'approval.resolved',
@@ -1413,33 +1430,6 @@ export class ChatRunSocket {
           resolved: false,
           error: err instanceof Error ? err.message : String(err),
         })
-        return
-      }
-      if (isPersonSession(data.session_id) && data.approval_id.startsWith('person-interaction:')) {
-        try {
-          await answerPersonChatInteraction(socketUser!.id, data.approval_id, data.choice || '', true, data.session_id!)
-          this.syncPersonInteraction(socketUser!.id)
-        } catch (error) {
-          socket.emit('approval.resolved', { event: 'approval.resolved', session_id: data.session_id, approval_id: data.approval_id, resolved: false, error: String(error) })
-        }
-        return
-      }
-      if (respondAgentInteraction(data.session_id, data.approval_id, 'approval', data.choice || 'deny').handled) return
-      const ekkoResult = respondToEkkoToolApproval(
-        data.session_id,
-        data.approval_id,
-        data.choice,
-      )
-      if (ekkoResult.handled) {
-        if (!ekkoResult.resolved) {
-          this.emitToSession(socket, data.session_id, 'approval.resolved', {
-            event: 'approval.resolved',
-            approval_id: data.approval_id,
-            choice: ekkoResult.choice,
-            resolved: false,
-            error: 'Approval does not belong to this session.',
-          })
-        }
         return
       }
       const codingAgentResult = codingAgentRunManager.resolveApproval(
@@ -1485,13 +1475,8 @@ export class ChatRunSocket {
     socket.on('clarify.respond', async (data: { session_id?: string; clarify_id?: string; response?: string }) => {
       if (!data.session_id || !data.clarify_id) return
       try {
-        if (data.session_id.startsWith('person-task-')) {
-          requireSocketSessionReadAccess(data.session_id)
-          await answerPersonTaskInteraction(socketUser!.id, data.session_id, data.clarify_id, data.response || '', false)
-          this.syncPersonInteraction(socketUser!.id)
-          return
-        }
-        requireSocketSessionAccess(data.session_id)
+        if (await authorizeAndAnswerPersonInteraction(data.session_id, 'clarify', data.clarify_id, data.response || '')) return
+        if (this.answerPublishedInteraction(socket, data.session_id, 'clarify', data.clarify_id, data.response || '')) return
       } catch (err) {
         socket.emit('clarify.resolved', {
           event: 'clarify.resolved',
@@ -1500,46 +1485,6 @@ export class ChatRunSocket {
           resolved: false,
           error: err instanceof Error ? err.message : String(err),
         })
-        return
-      }
-      if (isPersonSession(data.session_id) && data.clarify_id.startsWith('person-interaction:')) {
-        try {
-          await answerPersonChatInteraction(socketUser!.id, data.clarify_id, data.response || '', false, data.session_id!)
-          // A concurrent Bot turn can defer the session-wide question update.
-          socket.emit('clarify.resolved', {
-            event: 'clarify.resolved', session_id: data.session_id, clarify_id: data.clarify_id, resolved: true, reason: 'response',
-          })
-          this.syncPersonInteraction(socketUser!.id)
-        } catch (error) {
-          socket.emit('clarify.resolved', { event: 'clarify.resolved', session_id: data.session_id, clarify_id: data.clarify_id, resolved: false, error: String(error) })
-        }
-        return
-      }
-      if (respondAgentInteraction(data.session_id, data.clarify_id, 'clarify', data.response || '').handled) return
-      const mcpResult = this.clarificationRuns.respond(data.session_id, data.clarify_id, data.response)
-      if (mcpResult.handled) {
-        if (!mcpResult.resolved) socket.emit('clarify.resolved', {
-          event: 'clarify.resolved', session_id: data.session_id, clarify_id: data.clarify_id,
-          resolved: false, error: 'Clarification could not be applied.',
-        })
-        return
-      }
-      const ekkoResult = respondToEkkoClarification(
-        data.session_id,
-        data.clarify_id,
-        data.response,
-      )
-      if (ekkoResult.handled) {
-        if (!ekkoResult.resolved) {
-          this.emitToSession(socket, data.session_id, 'clarify.resolved', {
-            event: 'clarify.resolved',
-            clarify_id: data.clarify_id,
-            resolved: false,
-            error: 'Clarification does not belong to this session.',
-          })
-        } else {
-          this.clearClarifyEventState(data.session_id, data.clarify_id)
-        }
         return
       }
       const codingAgentResult = codingAgentRunManager.resolveClarification(
@@ -3705,6 +3650,43 @@ export class ChatRunSocket {
     }
   }
 
+  private answerPublishedInteraction(socket: Socket, sessionId: string, kind: 'approval' | 'clarify', id: string, value: string): boolean {
+    const approval = kind === 'approval'
+    const label = approval ? 'Approval' : 'Clarification'
+    let result: { handled: boolean; resolved: boolean; stale?: boolean; choice?: string } =
+      respondAgentInteraction(sessionId, id, kind, value)
+    let error = result.stale ? `${label} is no longer pending.` : `${label} could not be applied.`
+    if (!result.handled && !approval) result = this.clarificationRuns.respond(sessionId, id, value)
+    if (!result.handled) {
+      result = approval ? respondToEkkoToolApproval(sessionId, id, value) : respondToEkkoClarification(sessionId, id, value)
+      if (!result.handled) return false
+      if (!approval && result.resolved) this.clearClarifyEventState(sessionId, id)
+      error = `${label} does not belong to this session.`
+    }
+
+    // These brokers already publish successful resolutions to the session and its inbox.
+    // A replacement connection can submit before it receives either broadcast.
+    if (result.resolved) {
+      if (socket.rooms.has(`session:${sessionId}`)) return true
+      const inbox = this.pendingInteractionRoom(this.resolvePetEventProfile(sessionId, {}), sessionId)
+      if (inbox && socket.rooms.has(inbox)) return true
+    }
+    const event = `${kind}.resolved`
+    socket.emit(event, {
+      event, session_id: sessionId, resolved: result.resolved,
+      ...(approval ? { approval_id: id, choice: result.choice ?? value } : { clarify_id: id }),
+      ...(!result.resolved && { error }),
+      ...(result.stale && { stale: true }),
+    })
+    return true
+  }
+
+  private pendingInteractionRoom(profile: string, sessionId: string): string | undefined {
+    if (isPrivatePersonSession(sessionId)) return undefined
+    const source = sessionId ? this.sessionMap.get(sessionId)?.source || getSession(sessionId)?.source : undefined
+    return source === 'group_chat' ? undefined : `pending-interactions:${profile}`
+  }
+
   private emitPendingInteraction(profile: string, event: string, payload: any) {
     if (isPrivatePersonSession(payload?.session_id)) {
       const session = getSession(payload.session_id)
@@ -3735,12 +3717,8 @@ export class ChatRunSocket {
       && event !== 'calendar.requested' && event !== 'calendar.resolved'
       && event !== 'reminder.requested' && event !== 'reminder.resolved'
       && event !== 'health.requested' && event !== 'health.resolved') return
-    const sessionId = typeof payload?.session_id === 'string' ? payload.session_id : ''
-    const source = sessionId
-      ? this.sessionMap.get(sessionId)?.source || getSession(sessionId)?.source
-      : undefined
-    if (source === 'group_chat') return
-    this.nsp.to(`pending-interactions:${profile}`).emit(event, payload)
+    const inbox = this.pendingInteractionRoom(profile, payload?.session_id || '')
+    if (inbox) this.nsp.to(inbox).emit(event, payload)
   }
 
   private emitSessionActivity(profile: string, event: string, payload: any) {

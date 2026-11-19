@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { agentRunInteractions, respondAgentInteraction } from '../../packages/server/src/modules/studio/services/agents/interactions'
+import { buildResumeEvents } from '../../packages/server/src/modules/studio/services/chat-run/resume-payload'
 
 afterEach(() => vi.useRealTimers())
 function setup(sessionId = 'session') {
@@ -11,7 +12,7 @@ function setup(sessionId = 'session') {
 it('binds approval responses to the owning session and treats denial as a closed, unapproved request', async () => {
   const f = setup(), result = f.interactions.approve({ operationId: 'write', title: 'Write file', details: 'Write the selected file' })
   const id = f.events[0].approval_id
-  expect(respondAgentInteraction('other', id, 'approval', 'once')).toEqual({ handled: true, resolved: false })
+  expect(respondAgentInteraction('other', id, 'approval', 'once')).toEqual({ handled: true, resolved: false, stale: true })
   expect(respondAgentInteraction('session', id, 'approval', 'always')).toEqual({ handled: true, resolved: false })
   expect(respondAgentInteraction('session', id, 'approval', 'deny')).toEqual({ handled: true, resolved: true })
   expect(await result).toEqual({ outcome: 'denied' })
@@ -40,6 +41,9 @@ it('distinguishes clarification answers, dismissal and cancellation and removes 
 it('times out without granting approval and rejects invalid questions before publishing', async () => {
   vi.useFakeTimers()
   const f = setup(), approval = f.interactions.approve({ operationId: 'op', title: 'Execute', details: 'Execute selected operation' })
+  const request = f.events[0]
+  const [replay] = buildResumeEvents([{ event: request.event, data: request }], Date.now() + 240_000)
+  expect(replay.data.remaining_timeout_ms).toBe(60_000)
   await vi.advanceTimersByTimeAsync(300_000)
   expect(await approval).toEqual({ outcome: 'timeout' })
   await expect(f.interactions.clarify({ question: '', choices: [] })).rejects.toThrow('Invalid')
