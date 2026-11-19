@@ -43,7 +43,7 @@ test('shows the newer version and upgrades the exact published commit after conf
   await expect(card.getByRole('button', { name: '更新到 v1.10.0', exact: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('plugin-update-dark-narrow.png'), fullPage: true })
   await card.getByRole('button', { name: '更新到 v1.10.0', exact: true }).click()
-  await expect(page.getByText(/确认信任此插件并运行其代码/)).toBeVisible()
+  await expect(page.getByText(/仅在信任其代码时继续/)).toBeVisible()
   expect(installs).toHaveLength(0)
   await page.getByRole('button', { name: '取消', exact: true }).click()
   await card.getByRole('button', { name: '更新到 v1.10.0', exact: true }).click()

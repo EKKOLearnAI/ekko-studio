@@ -31,6 +31,7 @@ const { updates: availableUpdates, releases: publishedReleases, unavailable: una
 const busy = ref(false), actionError = ref(''), source = ref(''), trusted = ref(false), showInstall = ref(false)
 const installing = ref(false), installingId = ref(''), installConfirmationOpen = ref(false)
 let installConfirmationSequence = 0
+const confirmedEnable = new Set<string>()
 const scope = ref<'installed' | 'all' | 'development'>('installed')
 function scopeKeydown(event: KeyboardEvent) {
   const tabs = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="tab"]')]
@@ -122,15 +123,19 @@ function manageMarket(plugin: MarketPlugin) {
   if (installed) { selectedMarket.value = undefined; details(installed) }
 }
 function installMarket(plugin: MarketPlugin) {
-  if (marketAction(plugin) && plugin.release) installPublished(plugin.release, plugin.name, marketInstalled(plugin))
+  if (marketAction(plugin) && plugin.release) installPublished(plugin.release, plugin.name, marketInstalled(plugin), plugin.author?.name)
 }
-function installPublished(release: PluginRelease, name: string, installed?: InstalledPlugin) {
+function installPublished(release: PluginRelease, name: string, installed?: InstalledPlugin, author?: string) {
   const action = publishedPluginAction(installed, release)
   if (!canManage.value || !action) return
+  const contentKey = action === 'switch' ? 'switchMarketConfirm'
+    : action === 'upgrade' ? (installed?.enabled ? 'updateConfirmEnabled' : 'updateConfirm') : 'marketInstallConfirm'
+  const content = t('studioPlugins.' + contentKey, { name, current: installed?.manifest.version || '', version: release.version,
+    repository: release.repository, author: author?.trim() || t('studioPlugins.authorUnknown') })
+    + (installed?.enabled && action === 'switch' ? '\n\n' + t('studioPlugins.updateEnabledNotice') : '')
   confirmInstallation({
     title: actionLabel(action, release.version),
-    content: t('studioPlugins.' + (action === 'switch' ? 'switchMarketConfirm' : action === 'upgrade' ? 'updateConfirm' : 'marketInstallConfirm'),
-      { name, current: installed?.manifest.version, version: release.version, repository: release.repository }),
+    content,
     positiveText: actionLabel(action, release.version),
   }, () => performInstallation(release.manifestId, async () => {
     const latest = await pluginList(), current = latest.plugins.find(local => local.manifest.id === release.manifestId)
@@ -222,7 +227,7 @@ async function performInstallation(id: string, work: () => Promise<unknown>) {
 }
 function upgrade(plugin: InstalledPlugin) {
   const release = localRelease(plugin)
-  if (release) installPublished(release, plugin.manifest.name, plugin)
+  if (release) installPublished(release, plugin.manifest.name, plugin, plugin.manifest.author?.name)
 }
 async function update(plugin: InstalledPlugin, input: object) {
   const revision = 'config' in input ? configRevisions.value[plugin.manifest.id] : snapshot.value.revision
@@ -258,8 +263,16 @@ function activateLinkedPlugin(plugin: CatalogPlugin, label: 'common.enable' | 's
   confirmInstallation({ title: t(label), content: t('studioPlugins.devTrust', { path: plugin.development!.directory }), positiveText: t(label) }, activate)
 }
 function enablePlugin(plugin: CatalogPlugin) {
-  if (plugin.development && plugin.development.status !== 'missing') activateLinkedPlugin(plugin, 'common.enable')
-  else void update(plugin, { enabled: true })
+  if (plugin.development && plugin.development.status !== 'missing') { activateLinkedPlugin(plugin, 'common.enable'); return }
+  const key = plugin.manifest.id + '@' + plugin.manifest.version
+  const enable = () => update(plugin, { enabled: true })
+  if (confirmedEnable.has(key)) { void enable(); return }
+  confirmInstallation({
+    title: t('common.enable'),
+    content: t('studioPlugins.enableConfirm', { name: plugin.manifest.name, author: plugin.manifest.author?.name?.trim() || t('studioPlugins.authorUnknown'),
+      repository: pluginRepository(plugin) || t('studioPlugins.repositoryUnknown') }),
+    positiveText: t('common.enable'),
+  }, async () => { const ok = await enable(); if (ok) confirmedEnable.add(key); return ok })
 }
 function reloadPlugin(plugin: CatalogPlugin) {
   if (plugin.development && plugin.development.status !== 'missing') activateLinkedPlugin(plugin, 'studioPlugins.reload')
@@ -292,6 +305,7 @@ async function logs(id: string) {
 <template>
   <main class="studio-plugins">
     <PageHeader><header class="page-header center-header"><h2 class="header-title">{{ t('studioPlugins.title') }}</h2><NButton quaternary size="small" :loading="loading || (scope === 'all' && marketLoading)" @click="reloadCatalog">{{ t('mcp.refresh') }}</NButton></header></PageHeader>
+    <div class="plugin-risk-banner-wrap"><div class="plugin-risk-banner" role="note"><span class="plugin-risk-banner-icon" aria-hidden="true">!</span><span>{{ t('studioPlugins.thirdPartyRisk') }}</span></div></div>
     <div class="center-scroll">
     <div class="center-content">
       <aside class="developer-banner" data-theme-surface="card" :aria-label="t('studioPlugins.developTitle')">
@@ -326,6 +340,7 @@ async function logs(id: string) {
       </div>
       <section id="plugin-catalog-panel" class="catalog-panel" role="tabpanel" :aria-labelledby="'plugins-tab-' + scope">
       <NAlert v-if="scope === 'all' && marketFailed" type="warning">{{ t('studioPlugins.marketUnavailable') }} <NButton text :loading="marketLoading" @click="refreshMarket(true)">{{ t('common.retry') }}</NButton></NAlert>
+      <div v-if="scope === 'all'" class="market-risk-note" role="note"><span class="market-risk-note-icon" aria-hidden="true">i</span><span>{{ t('studioPlugins.marketThirdPartyNotice') }}</span></div>
       <div class="search-row">
         <NInput v-model:value="search" clearable size="large" :placeholder="t('studioPlugins.search')" :aria-label="t('studioPlugins.search')">
           <template #prefix><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></svg></template>
@@ -412,6 +427,7 @@ async function logs(id: string) {
       <div class="detail-stack">
         <p>{{ t('studioPlugins.installHint') }}</p>
         <NInput v-model:value="source" :disabled="installing" :placeholder="t('studioPlugins.source')" :aria-label="t('studioPlugins.source')" />
+        <p class="plugin-risk-note">{{ t('studioPlugins.installRiskNote') }}</p>
         <NCheckbox v-model:checked="trusted" :disabled="installing" :aria-disabled="installing">{{ t('studioPlugins.trust') }}</NCheckbox>
         <PluginInstallFeedback v-if="installing" loading />
         <NAlert v-if="actionError" type="error">{{ actionError }}</NAlert>
@@ -471,6 +487,7 @@ async function logs(id: string) {
                   <div class="actions"><a v-for="link in pluginLinks(selected)" :key="link.key" :href="link.url" target="_blank" rel="noopener noreferrer"><span>{{ t('studioPlugins.' + link.key) }}</span><ExternalLinkIcon /></a></div>
                   <div class="capability-list"><NTag v-for="keyword in selected.manifest.keywords || []" :key="keyword" size="small" :bordered="false">{{ keyword }}</NTag></div>
                 </div>
+                <p v-if="!selected.source.startsWith('builtin:')" class="third-party-note">{{ t('studioPlugins.thirdPartySourceNote') }}</p>
                 <h4>{{ t('studioPlugins.availableIn') }}</h4>
                 <div v-if="pluginPages(selected).length" class="view-list">
                   <RouteLinkItem v-for="view in pluginPages(selected)" :key="view.id" :to="pluginPageLocation(selected, view.id)" class="view-link"><span>{{ view.title }}</span><ChevronRightIcon /></RouteLinkItem>
@@ -478,6 +495,7 @@ async function logs(id: string) {
                 <p v-else>{{ t('studioPlugins.noPage') }}</p>
                 <div class="capability-list"><NTag v-for="slot in [...new Set(pluginPages(selected).map(view => view.slot))]" :key="slot" size="small">{{ t('studioPlugins.slot_' + slot) }}</NTag></div>
                 <h4>{{ t('studioPlugins.capabilities') }}</h4>
+                <p class="permission-note">{{ t('studioPlugins.permissionBoundary') }}</p>
                 <div class="capability-list"><NTag v-for="capability in selected.manifest.permissions" :key="capability" size="small" :bordered="false">{{ capability }}</NTag></div>
                 <div class="operation-list"><p v-for="operation in [...selected.tools, ...selected.commands, ...selected.actions]" :key="operation.name"><strong>{{ operation.name }}</strong><span>{{ operation.description }}</span></p></div>
               </div>
@@ -533,6 +551,15 @@ async function logs(id: string) {
 .center-header h2 { margin: 0; font-size: 16px; }
 .center-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px; }
 .center-content { width: 100%; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; padding: 24px 8px; }
+.plugin-risk-banner-wrap { padding: 12px 24px 0; }
+.plugin-risk-banner { display: flex; align-items: flex-start; gap: 10px; max-width: 1200px; margin: 0 auto; padding: 10px 14px; border: 1px solid rgba(var(--warning-rgb), .35); border-radius: $radius-sm; background: rgba(var(--warning-rgb), .08); color: $text-secondary; font-size: 12px; line-height: 1.7; }
+.plugin-risk-banner-icon, .market-risk-note-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; color: $bg-card; font-size: 11px; font-weight: 700; line-height: 1; }
+.plugin-risk-banner-icon { background: $warning; }
+.market-risk-note { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border: 1px solid rgba(var(--accent-primary-rgb), .2); border-radius: $radius-sm; background: rgba(var(--accent-primary-rgb), .06); color: $text-secondary; font-size: 12px; line-height: 1.7; }
+.market-risk-note-icon { background: $accent-primary; }
+.plugin-risk-note { padding: 10px 12px; border-radius: $radius-sm; background: rgba(var(--accent-primary-rgb), .06); font-size: 12px; }
+.third-party-note { padding: 10px 12px; border-radius: $radius-sm; background: rgba(var(--warning-rgb), .08); font-size: 12px; }
+.permission-note { font-size: 12px; color: $text-muted; }
 .developer-banner { display: flex; align-items: center; gap: 16px; padding: 18px 20px; background: $bg-card; border: 1px solid $border-light; border-radius: $radius-lg; }
 .developer-icon { flex-shrink: 0; color: $text-secondary; }
 .developer-copy { flex: 1; min-width: 0; }

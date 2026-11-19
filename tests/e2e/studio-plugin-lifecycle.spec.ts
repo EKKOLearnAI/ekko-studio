@@ -109,7 +109,7 @@ test('uninstalls development copies independently of linking and keeps released 
   await page.getByRole('tab', { name: /^已安装/ }).click()
   await expect(local.locator('.version')).toHaveText('v0.1.4')
   await expect(local.getByText('开发', { exact: true })).toHaveCount(0)
-  await local.getByRole('button', { name: '启用', exact: true }).click()
+  await local.getByRole('button', { name: '启用', exact: true }).click(); await confirm(page, '启用')
   await expect(local.getByText('运行中', { exact: true })).toBeVisible(); expect(state.starts).toBe(0)
   await page.getByRole('tab', { name: /开发插件/ }).click()
   await expect(local.locator('.version')).toHaveText('v0.1.6')
