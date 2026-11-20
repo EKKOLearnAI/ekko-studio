@@ -782,6 +782,7 @@ export function responseFunctionTools(body: any): any[] {
 export function responsesToOpenAiChat(body: any, target: ResponsesAdapterTarget, stream = false): any {
   const tools = responsesToolsToChatTools(responsesAvailableTools(body))
   const reasoningEffort = targetReasoningEffort(target)
+    || targetReasoningEffort({ reasoningEffort: body?.reasoning?.effort })
   return {
     model: target.model,
     messages: responsesInputToChatMessages(body, target),
