@@ -3961,6 +3961,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_29_1: "Chat approvals and clarification answers now receive confirmation. Use the popup in the upper-right corner to handle chat and workflow approvals and clarification requests across the profiles linked to your account. Pending requests refresh after reconnecting. (#3886)",
+    new_0_8_29_2: "The Plugin Center now warns about third-party plugins. It asks for confirmation before enabling one and shows available author and repository details when installing, updating, or switching sources. It also warns when an enabled plugin may run new code immediately. (#3879)",
+    new_0_8_29_3: "Person resumes delivering background task results after the tasks they depend on finish. Pending results survive a Studio restart, and retries avoid duplicate delivery. (#3869)",
+    new_0_8_29_4: "An unresponsive plugin status check no longer prevents Agent management from loading. Built-in Ekko remains available when starting a one-to-one chat, even if availability is still loading or the check fails. (#3874)",
+    new_0_8_29_5: "Group chat handoffs now look up models using the initiating account and the receiving Agent’s profile. This fixes cases where Hermes or Ekko could not use a configured provider after taking over. (#3875)",
+    new_0_8_29_6: "Approving a Hermes memory write now respects the current profile’s memory limits and enabled settings. (#3872)",
+    new_0_8_29_7: "Fixed false reconnect failures when a Hermes worker has exited. Checking session status no longer starts a worker that has already stopped. (#3867)",
+    new_0_8_29_8: "Fixed a TLS initialization issue that could prevent Hermes from connecting to Amazon Bedrock models over HTTPS. (#3878)",
     new_0_8_28_1: "Creating or renaming a file reports a conflict if the destination exists. The editor saves to the profile or workspace where the file was opened and keeps edits made during a save marked as unsaved. (#3865)",
     new_0_8_28_2: "Workspace downloads stream from disk. Broken links no longer hide other entries in the directory, and concurrent uploads keep their files separate. (#3865)",
     new_0_8_28_3: "Workflow and Person schedules calculate the next run in the selected time zone, including leap days and daylight saving transitions. Invalid schedules are paused while the others keep running. (#3865)",
