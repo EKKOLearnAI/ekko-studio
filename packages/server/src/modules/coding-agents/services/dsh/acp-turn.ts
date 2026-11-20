@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { StringDecoder } from 'node:string_decoder'
 import type { CodingAgentImageInput } from '../../protocol/types'
+import { resolveDshModelValue } from './model-option'
 import { dshReasoningEffort } from './runtime-config'
 import { DSH_STREAM_METHOD, DSH_USAGE_METHOD } from './stream-plugin'
 import { logger } from '../../../studio/public/logging'
@@ -174,8 +175,10 @@ export class DshAcpTurn {
     this.callbacks.session(this.sessionId)
     let options = session.configOptions || []
     if (input.modelValue) {
+      // DSH only accepts its own opaque provider/model value; global-mode
+      // launches carry a bare model name that must be resolved first.
       const configured = await this.request('session/set_config_option', {
-        sessionId: this.sessionId, configId: 'model', value: input.modelValue,
+        sessionId: this.sessionId, configId: 'model', value: resolveDshModelValue(options, input.modelValue),
       })
       options = configured.configOptions || options
     }
