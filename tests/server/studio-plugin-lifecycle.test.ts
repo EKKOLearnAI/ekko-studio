@@ -10,6 +10,35 @@ import { registerPlugin } from '../../bin/plugin-development.mjs'
 const who = { userId: 1, profile: 'default' }, cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 
+it('selects the first active compression plugin and updates selection on disable or uninstall', async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'plugin-compression-lifecycle-')))
+  cleanup.push(() => rm(home, { recursive: true, force: true }))
+  const manager = new PluginManager(join(home, 'plugins'), { authorize() {}, api: async () => null, emit() {}, log() {} })
+  cleanup.push(() => manager.close())
+  const revision = () => manager.snapshot().revision
+  const selected = () => manager.compressionSummarizer()?.record.manifest.id
+
+  for (const id of ['z-summary', 'a-summary']) {
+    const directory = join(home, id)
+    await mkdir(directory)
+    const manifest = { id, name: id, version: '1.0.0', apiVersion: 1, permissions: ['compression'], server: 'server.mjs' }
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: id, version: manifest.version, type: 'module' }))
+    await writeFile(join(directory, 'plugin.json'), JSON.stringify(manifest))
+    await writeFile(join(directory, 'server.mjs'), 'export function apply(ctx) { ctx.extensions.compression.register(() => "Summary") }')
+    await manager.install(who, directory, revision())
+  }
+
+  expect(selected()).toBeUndefined()
+  await manager.update(who, 'z-summary', revision(), { enabled: true })
+  expect(selected()).toBe('z-summary')
+  await manager.update(who, 'a-summary', revision(), { enabled: true })
+  expect(selected()).toBe('a-summary')
+  await manager.update(who, 'a-summary', revision(), { enabled: false })
+  expect(selected()).toBe('z-summary')
+  await manager.update(who, 'z-summary', revision(), { action: 'uninstall' })
+  expect(selected()).toBeUndefined()
+})
+
 it('keeps installation, development linking, switching, upgrade failure, uninstall and reinstall consistent in the real host', async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'plugin-lifecycle-'))); cleanup.push(() => rm(home, { recursive: true, force: true }))
   const packageAt = async (name: string, version: string, broken = false) => {

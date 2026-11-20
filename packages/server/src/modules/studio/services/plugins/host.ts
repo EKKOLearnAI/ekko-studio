@@ -100,6 +100,9 @@ export function getPluginManager(): PluginManager {
   configurePluginAgents(() => instance?.registeredAgents() || [])
   return instance
 }
+export function getActiveCompressionSummarizer() {
+  return instance?.compressionSummarizer()
+}
 export function getPluginDevelopment(): PluginDevelopment {
   return development ||= new PluginDevelopment(getPluginManager(), identity => {
     authorizePluginIdentity(identity)

@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import type { ApiRequest, PluginPermission, Dispose, HookResult, Json, PluginAction, PluginCommand, PluginContext, PluginEvent, PluginHook, PluginHttpInterceptor, PluginIdentity, PluginModule, PluginRecord, PluginTool, RunContext, ToolResult, HostSession, SessionListener } from '../../contracts/plugins'
+import type { CompressionSummaryInput, PluginCompressionSummarizer } from '../../contracts/plugins'
 import { createHostApi } from '../../../../../../plugin-sdk/src'
 import { PluginEffects } from './effects'
 import { PluginError, message } from './errors'
@@ -36,6 +37,7 @@ export class PluginRuntime {
   readonly listeners = new Map<string, Set<Listener>>()
   readonly hooks = new Map<PluginHook, Hook[]>()
   readonly http = new Map<string, PluginHttpInterceptor>()
+  private compressionSummarizer?: PluginCompressionSummarizer
   private schedules = new Map<string, { interval: number; action: string; input: Record<string, Json> }>()
   private calls = new Set<Promise<unknown>>()
   private readonly browserBinding = randomUUID()
@@ -168,6 +170,14 @@ export class PluginRuntime {
           const close = this.effects.add(() => agent.closeSessions())
           return { id: agent.id, dispose: async () => { remove(); await close() } }
         } },
+        compression: { register(summarize) {
+          self.require('compression')
+          if (typeof summarize !== 'function' || self.compressionSummarizer) {
+            throw new PluginError('Register exactly one compression summarizer per plugin')
+          }
+          self.compressionSummarizer = summarize
+          return self.effects.add(() => { self.compressionSummarizer = undefined })
+        } },
         tools: { register(tool) { self.require('tools'); validateSchema(tool.inputSchema); return self.register(self.tools, tool.name, tool) } },
         commands: { register(command) { self.require('commands'); return self.register(self.commands, command.name, command) } },
         rpc: { register: (name, handler) => this.register(this.rpc, name, handler) },
@@ -258,6 +268,39 @@ export class PluginRuntime {
       }
       return json({ value: current })
     }) as HookResult
+  }
+
+  get hasCompressionSummarizer(): boolean {
+    return this.compressionSummarizer !== undefined
+  }
+
+  async summarizeCompression(input: CompressionSummaryInput, identity: PluginIdentity): Promise<string | null> {
+    const summarize = this.compressionSummarizer
+    if (!summarize) return null
+    const deadline = AbortSignal.timeout(10_000)
+    let expire!: () => void
+    const expired = new Promise<never>((_, reject) => {
+      expire = () => reject(deadline.reason)
+      deadline.addEventListener('abort', expire, { once: true })
+    })
+    try {
+      const call = this.run(identity, deadline, async ctx => {
+        let result: string | null
+        try {
+          result = await summarize(Object.freeze({ ...input }), ctx)
+        } catch {
+          // Plugin errors may contain the private transcript.
+          throw new PluginError('Compression summarizer failed')
+        }
+        if (result === null) return null
+        if (typeof result !== 'string' || !result.trim()) throw new PluginError('Invalid compression summary')
+        return result.trim()
+      })
+      // Keep Studio's fallback bounded even if plugin cleanup is still pending.
+      return await Promise.race([call, expired]) as string | null
+    } finally {
+      deadline.removeEventListener('abort', expire)
+    }
   }
   private async run(identity: PluginIdentity, external: AbortSignal | undefined, work: (ctx: RunContext) => Promise<Json>): Promise<Json> {
     this.effects.assertActive(); await this.ports.authorize(identity)

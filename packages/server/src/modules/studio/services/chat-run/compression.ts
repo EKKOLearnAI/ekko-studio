@@ -3,17 +3,22 @@
  * apply snapshot-aware compression and LLM summarization.
  */
 
-import { getSession } from '../../repositories/session-store'
+import { getSession, type HermesSessionRow } from '../../repositories/session-store'
 import { deleteCompressionSnapshot, getCompressionSnapshot } from '../../repositories/compression-snapshot'
 import { getUsage } from '../../repositories/usage-store'
-import { ChatContextCompressor, SUMMARY_PREFIX } from '../context-compressor'
+import { ChatContextCompressor, countTokens, SUMMARY_PREFIX } from '../context-compressor'
 import { getModelContextLength } from '../../public/provider-runtime'
 import { readConfigYamlForProfile } from '../../public/provider-config'
 import { readCompressionPolicy } from '../../public/compression-policy'
+import { providerAccountId } from '../../public/provider-account'
+import { isBuiltinEkkoAgent } from '../../contracts/history-source'
+import { isPrivatePersonSession } from '../../contracts/person-session'
+import type { CompressionHistoryMessage } from '../../contracts/plugins'
 import { logger } from '../../public/logging'
 import { bridgeLogger } from '../../public/logging'
 import { calcAndUpdateUsage, estimateUsageTokensFromMessages, updateMessageContextTokenUsage } from './usage'
 import { readSessionStateFromDb } from './load-state'
+import { truncateToolResultForContext } from './tool-result-context'
 import {
   assembleCursorSnapshotHistory,
   buildDbHistory as queryDbHistory,
@@ -192,6 +197,65 @@ async function getRunChatCompressionConfig(profile: string, contextLength: numbe
       tailMessageCount: protectLastN,
     },
   }
+}
+
+function buildPluginCompressionHistory(messages: readonly ChatMessage[]): CompressionHistoryMessage[] {
+  return messages.map(message => {
+    const { role, name, tool_call_id, tool_calls } = message
+    const content = Array.isArray(message.content)
+      ? message.content.map(({ type, text, path }) => ({
+          type,
+          ...(text === undefined ? {} : { text }),
+          ...(path === undefined ? {} : { path }),
+        }))
+      : role === 'tool' ? truncateToolResultForContext(message.content) : message.content
+    return {
+      role,
+      content,
+      ...(name === undefined ? {} : { name }),
+      ...(tool_call_id === undefined ? {} : { tool_call_id }),
+      ...(tool_calls === undefined ? {} : {
+        tool_calls: tool_calls.map(call => ({
+          id: call.id,
+          type: call.type,
+          function: { name: call.function.name, arguments: call.function.arguments },
+        })),
+      }),
+    }
+  })
+}
+
+function createSingleChatCompressor(config: Partial<CompressorConfig> | undefined, session: HermesSessionRow | null): ChatContextCompressor {
+  if (!session || isPrivatePersonSession(session.id) || !['cli', 'api_server', 'builtin_agent'].includes(session.source)) {
+    return new ChatContextCompressor({ config })
+  }
+
+  const profile = session.profile || 'default'
+  return new ChatContextCompressor({
+    config,
+    async summarize(input, messages) {
+      try {
+        const { getActiveCompressionSummarizer } = await import('../plugins/host')
+        const runtime = getActiveCompressionSummarizer()
+        if (!runtime) return null
+        const identity = {
+          userId: providerAccountId(),
+          profile,
+          sessionId: session.id,
+          runtime: isBuiltinEkkoAgent(session.agent) ? 'ekko-agent' : 'hermes',
+          surface: session.source,
+          workspace: session.workspace || undefined,
+        }
+        const history = buildPluginCompressionHistory(messages)
+        const summary = await runtime.summarizeCompression({ ...input, history }, identity)
+        if (summary !== null && countTokens(summary) > input.summaryBudget) throw new Error('Compression summary exceeds budget')
+        return summary
+      } catch {
+        logger.warn({ profile, sessionId: session.id }, '[context-compress] plugin summary unavailable; using built-in summarizer')
+        return null
+      }
+    },
+  })
 }
 
 /**
@@ -470,7 +534,7 @@ export async function compressHistory(
       model: modelContext.model || session?.model,
       provider: modelContext.provider || session?.provider,
     })
-    const compressor = new ChatContextCompressor({ config: compressionConfig })
+    const compressor = createSingleChatCompressor(compressionConfig, session)
     const result = await compressor.compress(history, upstream, apiKey, sessionId, {
       profile: summarizerProfile,
       model: summarizerModelContext.model,
@@ -618,7 +682,7 @@ export async function forceCompressBridgeHistory(
     snapshotAware: true,
   }, '[chat-run-socket] bridge forced compression started')
 
-  const compressor = new ChatContextCompressor({ config: compressionConfig.compressor })
+  const compressor = createSingleChatCompressor(compressionConfig.compressor, session)
   const summarizerProfile = session?.profile || profile || 'default'
   const summarizerModelContext = await resolveCompressionModelContext(summarizerProfile, {
     ...modelContext,

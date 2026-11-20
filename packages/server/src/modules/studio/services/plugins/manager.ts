@@ -27,6 +27,12 @@ export class PluginManager {
   private closing = false
   private ports: PluginPorts
   registeredAgents() { return [...this.runtimes.values()].filter(runtime => packagePresent(runtime.record)).flatMap(runtime => [...runtime.agents.values()]) }
+  compressionSummarizer(): PluginRuntime | undefined {
+    return [...this.runtimes.values()]
+      .filter(runtime => runtime.hasCompressionSummarizer && !runtime.effects.controller.signal.aborted)
+      .sort((a, b) => a.record.manifest.id.localeCompare(b.record.manifest.id))
+      .find(runtime => packagePresent(runtime.record))
+  }
   httpInterceptors() {
     return [...this.runtimes.values()].filter(runtime => !runtime.effects.controller.signal.aborted && packagePresent(runtime.record))
       .flatMap(runtime => [...runtime.http.values()].map(interceptor => ({ runtime, interceptor })))

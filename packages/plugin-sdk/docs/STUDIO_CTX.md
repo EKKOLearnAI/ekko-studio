@@ -43,7 +43,7 @@ sessions.run 默认启动或入队后返回；wait:true 等待终态但仍受普
 
 ## 扩展、消息和页面
 
-extensions.agents/tools/commands/hooks/actions/rpc/http.register 注册插件提供给宿主的能力。
+extensions.agents/tools/commands/hooks/actions/rpc/http/compression.register 注册插件提供给宿主的能力。
 工具执行返回 ToolResult；commands 注册 /插件id:命令；hooks 只在 Ekko 支持 input.transform/context.transform/tool.before/tool.after。
 
 `context.transform` 的宿主输入会复制为 JSON：对象中值为 undefined 的可选数据字段会省略，不修改原消息；数组中的 undefined 或空位仍会拒绝，不会变成 null。其余非 JSON 值仍会报错。此转换只用于宿主构造的 context 输入，不用于插件回传或其他 hook。
@@ -84,7 +84,23 @@ bg/border/radius/shadow/filter 区域变量，跟随实时主题和壁纸更新�
 Agent 不再覆盖默认存储。根 ctx.state 在回调内动态绑定真实身份；调用结束不能继续使用取出的存储句柄。
 前端选择 plugin/user/profile/session 范围仍需要 storage.client；它表示允许访问插件全部数据，并非用户数据授权边界。
 
-注册统一使用 extensions.agents/tools/commands/hooks/actions/rpc/http；每个注册返回清理句柄。
+注册统一使用 extensions.agents/tools/commands/hooks/actions/rpc/http/compression；每个注册返回清理句柄。
+
+## 单聊压缩摘要
+
+后端插件在清单声明 `"permissions": ["compression"]`，并用
+`ctx.extensions.compression.register(handler)` 注册一个摘要函数。插件在 Studio 插件中心启用后生效，
+适用于全部 Profile 的普通单聊。多个摘要插件同时启用时，Studio 按插件 ID 排序并使用第一个可用插件。
+
+Studio 只在 Hermes 或 Ekko 普通单聊需要新摘要时调用摘要插件。回调接收
+`{ transcript, history, previousSummary?, summaryBudget }` 与真实调用者的 `RunContext`。
+`transcript` 是 Studio 已选段并拼接后的对话文本。`history` 是同一段消息的结构化副本，
+按消息顺序提供 `role`、`content`、可选的 `name`、`tool_calls` 和 `tool_call_id`。
+内容块提供类型、文本或路径，文本工具结果沿用上下文裁剪，工具参数保持完整字符串。
+首尾保留的原文由 Studio 组装，增量压缩时上一版摘要单独放在 `previousSummary`。
+`summaryBudget` 是返回摘要正文的 token 上限。Studio 继续负责触发、消息保留、快照和会话事件。
+插件可以通过 `run.signal` 响应取消。没有启用的摘要插件、返回 `null`、插件不可用、
+异步调用超过 10 秒、抛错或返回无效摘要时，Studio 使用内置摘要流程。
 
 ## 入站 HTTP 请求与响应
 
