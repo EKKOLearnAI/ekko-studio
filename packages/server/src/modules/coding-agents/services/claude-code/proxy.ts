@@ -3,6 +3,7 @@ import { isNativeCodingAgent } from '../../../studio/contracts/agents/native-cod
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
 import { gatewayToken } from '../../../studio/public/model-gateway-adapters'
+import type { CodexRequestAffinity } from '../../../studio/public/provider-http'
 import {
   anthropicMessagesUrl as resolveAnthropicMessagesUrl,
   chatCompletionsUrl as resolveChatCompletionsUrl,
@@ -28,14 +29,14 @@ import {
   openAiResponsesSseToResponsesEvents,
   type CanonicalResponsesEvent,
 } from '../../protocol/adapters/responses-stream'
-import { agentRunGateway, ProviderApiError } from '../../protocol/gateway'
+import { agentRunGateway, codexRequestAffinity, ProviderApiError } from '../../protocol/gateway'
 import { teeAsyncIterable } from '../../protocol/stream-tee'
 import { codingAgentRunManager } from '../runtime/run-manager'
 import { logger } from '../../../studio/public/logging'
 
 export interface ClaudeCodeProxyTargetInput extends AgentTargetInput {}
 
-type ClaudeCodeProxyTarget = RegisteredAgentTarget<ClaudeCodeProxyTargetInput>
+type ClaudeCodeProxyTarget = RegisteredAgentTarget<ClaudeCodeProxyTargetInput> & { codexAffinity?: CodexRequestAffinity }
 
 function recordTargetUsage(target: ClaudeCodeProxyTarget, event: CanonicalResponsesEvent, apiDuration?: number, baseUrl?: string) {
   if (target.onUsageEvent) target.onUsageEvent(event, apiDuration, baseUrl)
@@ -69,7 +70,8 @@ function requireTarget(ctx: Context): ClaudeCodeProxyTarget | null {
     ctx.body = { type: 'error', error: { type: 'authentication_error', message: 'Invalid Claude proxy token' } }
     return null
   }
-  return { ...target, reasoningCodec: (ctx.state as any).modelGatewayReasoningCodec, requestHeaders: { ...(ctx.get('anthropic-beta') ? { 'anthropic-beta': ctx.get('anthropic-beta') } : {}), ...(ctx.get('anthropic-version') ? { 'anthropic-version': ctx.get('anthropic-version') } : {}) }, signal: (ctx.state as any).modelGatewaySignal || target.signal }
+  return { ...target, reasoningCodec: (ctx.state as any).modelGatewayReasoningCodec, requestHeaders: { ...(ctx.get('anthropic-beta') ? { 'anthropic-beta': ctx.get('anthropic-beta') } : {}), ...(ctx.get('anthropic-version') ? { 'anthropic-version': ctx.get('anthropic-version') } : {}) }, signal: (ctx.state as any).modelGatewaySignal || target.signal,
+    codexAffinity: target.apiMode === 'codex_responses' ? codexRequestAffinity(ctx, target) : undefined }
 }
 
 function anthropicMessagesUrl(target: ClaudeCodeProxyTarget): string {
@@ -333,6 +335,7 @@ async function callOpenAiResponses(target: ClaudeCodeProxyTarget, body: any): Pr
     apiKey: target.apiKey,
     ownerUserId: target.ownerUserId, profile: target.profile, model: target.model, signal: target.signal,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    codexAffinity: target.codexAffinity,
     provider: target.provider,
     body: anthropicToOpenAiResponses(body, target),
   })
@@ -452,6 +455,7 @@ async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget
     apiKey: target.apiKey,
     ownerUserId: target.ownerUserId, profile: target.profile, model: target.model, signal: target.signal,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    codexAffinity: target.codexAffinity,
     provider: target.provider,
     body: anthropicToOpenAiResponses(body, target, true),
   })

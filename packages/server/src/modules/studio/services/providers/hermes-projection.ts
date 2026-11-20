@@ -6,7 +6,7 @@ import { chmod } from 'node:fs/promises'
 import YAML from 'js-yaml'
 import { config } from '../../public/config'
 import { safeFileStore } from '../../public/safe-file-store'
-import { internalModelCredential, providerProfileDir, providerSourceDir, providerAccountHome } from './account-store'
+import { bindInternalModelSession, internalModelCredential, providerProfileDir, providerSourceDir, providerAccountHome } from './account-store'
 import { providerRouteNamespace, qualifyModelRoute, logicalModelSelection } from './model-routes'
 
 interface Group { provider: string; models: string[]; base_url?: string }
@@ -95,12 +95,13 @@ export async function synchronizeHermesProvider(profile: string): Promise<void> 
   await Promise.all([configPath, marker].map(path => chmod(path, 0o600)))
 }
 
-export async function hermesGatewaySelection(profile: string, provider: string, model: string) {
+export async function hermesGatewaySelection(profile: string, provider: string, model: string, sessionId?: string) {
   const selected = logicalModelSelection(profile, provider, model)
   if (selected.provider === 'moa') return { model: selected.model, provider: selected.provider }
   await synchronizeHermesProvider(profile)
   const credential = await internalModelCredential(profile)
   const routedModel = qualifyModelRoute(await providerRouteNamespace(profile, selected.provider), selected.model)
+  const token = sessionId ? bindInternalModelSession(credential, profile, sessionId) : credential.token
   return { provider: 'ekkostudio', model: routedModel,
-    gateway_runtime: { provider: 'custom', api_mode: 'codex_responses', base_url: studioModelGatewayUrl(), api_key: credential.token } }
+    gateway_runtime: { provider: 'custom', api_mode: 'codex_responses', base_url: studioModelGatewayUrl(), api_key: token } }
 }

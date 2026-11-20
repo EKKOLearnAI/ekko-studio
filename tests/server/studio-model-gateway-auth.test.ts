@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest'
 
-const fixture = vi.hoisted(() => ({ active: true, access: true, internal: true, handled: vi.fn(), touched: vi.fn() }))
+const fixture = vi.hoisted(() => ({ active: true, access: true, internal: true, sessionId: undefined as string | undefined, handled: vi.fn(), touched: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/services/auth/token-auth', () => ({ getToken: async () => 'fixture-jwt-secret' }))
 vi.mock('../../packages/server/src/modules/studio/services/session-shares/http-access', () => ({ handleSessionShareHttp: async () => false }))
 vi.mock('../../packages/server/src/modules/studio/services/auth/run-mcp-credentials', () => ({ runMcpCredentials: { recognizes: () => false } }))
@@ -9,7 +9,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/users-store', () 
   listUserProfiles: () => [{ profile_name: 'work' }], userCanAccessProfile: () => fixture.access,
 }))
 vi.mock('../../packages/server/src/modules/studio/public/provider-account', () => ({
-  authenticateInternalModelCredential: async () => fixture.internal ? { userId: 1, profile: 'work' } : null,
+  authenticateInternalModelCredential: async () => fixture.internal ? { userId: 1, profile: 'work', sessionId: fixture.sessionId } : null,
   withProviderAccount: (_id: unknown, operation: () => unknown) => operation(),
 }))
 vi.mock('../../packages/server/src/modules/studio/services/model-api/keys', () => ({
@@ -29,6 +29,7 @@ const ctx = (path: string, token: string, header = 'authorization', method = 'PO
 beforeEach(() => {
   vi.clearAllMocks()
   fixture.active = fixture.access = fixture.internal = true
+  fixture.sessionId = undefined
   configureModelGatewayAdapters({
     authenticate: token => token === 'hwui_run' ? { userId: 1, profile: 'work', model: 'model', provider: 'deepseek' } : null,
     handle: fixture.handled, register: () => { throw new Error('not used') },
@@ -66,6 +67,26 @@ it('limits internal credentials to inference and keeps the credential-bound Prof
   await requireUserJwt(management, next)
   expect(management.status).toBe(401)
   expect(next).not.toHaveBeenCalled()
+})
+
+it('uses the native session scope and denies conflicts or revoked Profile access', async () => {
+  fixture.sessionId = 'opaque-session'
+  const request = ctx('/api/ekko-studio/models/v1/responses', 'studio_model_valid')
+  request.headers.session_id = 'caller-claim'
+  const next = vi.fn()
+  await requireUserJwt(request, next)
+  expect(next).toHaveBeenCalledOnce()
+  expect(request.state.modelGateway).toEqual({ userId: 1, profile: 'work', sessionId: 'opaque-session' })
+
+  const conflicting = ctx('/api/ekko-studio/models/v1/responses', 'studio_model_valid')
+  conflicting.headers['x-studio-profile'] = 'different'
+  await requireUserJwt(conflicting, next)
+  expect(conflicting.status).toBe(403)
+  fixture.access = false
+  const revoked = ctx('/api/ekko-studio/models/v1/responses', 'studio_model_valid')
+  await requireUserJwt(revoked, next)
+  expect(revoked.status).toBe(403)
+  expect(next).toHaveBeenCalledOnce()
 })
 
 it('rejects invalid, revoked and disabled-owner sharing credentials before dispatch', async () => {

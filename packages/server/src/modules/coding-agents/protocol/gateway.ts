@@ -1,19 +1,30 @@
-import { fetchProviderHttp, isCodexInferenceRequest } from '../../studio/public/provider-http'
+import type { Context } from 'koa'
+import { fetchProviderHttp, isCodexInferenceRequest, type ProviderHttpRequest, type CodexRequestAffinity } from '../../studio/public/provider-http'
 import { openAiResponsesSseToResponsesEvents } from './adapters/responses-stream'
 import { providerAccountId, providerRequestProfile } from '../../studio/public/provider-account'
 
 /** A provider request issued by a Coding Agent proxy. */
-export interface AgentGatewayRequest {
-  url: string
-  profile?: string
-  ownerUserId?: number
-  model?: string
-  apiKey: string
-  sessionId?: string
-  provider?: string
-  body: unknown
-  headers?: Record<string, string>
-  signal?: AbortSignal
+export type AgentGatewayRequest = ProviderHttpRequest
+
+/** Call after target authorization. A routeKey and a requestId identify requests, not sessions. */
+export function codexRequestAffinity(ctx: Context, target: { chatSessionId?: string; agentSessionId?: string; agentId?: string }): CodexRequestAffinity {
+  const promptCacheKey = (ctx.request.body as { prompt_cache_key?: unknown } | undefined)?.prompt_cache_key
+  const boundSession = ctx.state.modelGateway?.sessionId
+  if (boundSession) return { scope: 'bridge', sessionId: boundSession, promptCacheKey }
+  const underscored = ctx.get('session_id')
+  const hyphenated = ctx.get('session-id')
+  const claimed = underscored && hyphenated && underscored !== hyphenated ? '' : underscored || hyphenated
+  const sessionId = /^[A-Za-z0-9._~:@/+\-=]{1,256}$/.test(claimed) ? claimed : undefined
+  // Plugin targets use agentSessionId for the run. Native targets keep it across continuations.
+  const nativeSession = target.agentId && !target.agentId.startsWith('plugin:') ? target.agentSessionId : undefined
+  const targetSession = nativeSession || target.chatSessionId || target.agentSessionId
+  if (targetSession) {
+    return { scope: JSON.stringify(['scoped', target.agentId, target.chatSessionId, targetSession]),
+      sessionId: sessionId || targetSession, promptCacheKey }
+  }
+  const scope = ctx.state.modelApiKey ? JSON.stringify(['share', ctx.state.modelApiKey.id])
+    : ctx.state.modelGateway ? 'internal-client' : 'user-api'
+  return { scope, sessionId, promptCacheKey }
 }
 
 export class ProviderApiError extends Error {

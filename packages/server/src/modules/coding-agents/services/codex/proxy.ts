@@ -6,6 +6,7 @@ import { Readable } from 'stream'
 import type { Context } from 'koa'
 import { config } from '../../../studio/public/config'
 import { gatewayToken } from '../../../studio/public/model-gateway-adapters'
+import type { CodexRequestAffinity } from '../../../studio/public/provider-http'
 import {
   anthropicMessagesUrl as resolveAnthropicMessagesUrl,
   chatCompletionsUrl as resolveChatCompletionsUrl,
@@ -31,7 +32,7 @@ import {
   openAiResponsesSseToResponsesEvents,
   type CanonicalResponsesEvent,
 } from '../../protocol/adapters/responses-stream'
-import { agentRunGateway } from '../../protocol/gateway'
+import { agentRunGateway, codexRequestAffinity } from '../../protocol/gateway'
 import { codingAgentRunManager } from '../runtime/run-manager'
 import { codingAgentOutputLimit } from '../context-policy'
 import { normalizeTokenUsage } from '../../../studio/public/usage'
@@ -40,7 +41,7 @@ export interface CodexProxyTargetInput extends AgentTargetInput {
   profile: string
 }
 
-type CodexProxyTarget = RegisteredAgentTarget<CodexProxyTargetInput>
+type CodexProxyTarget = RegisteredAgentTarget<CodexProxyTargetInput> & { codexAffinity?: CodexRequestAffinity }
 
 function recordTargetUsage(target: CodexProxyTarget, event: CanonicalResponsesEvent, apiDuration?: number, baseUrl?: string) {
   if (target.onUsageEvent) target.onUsageEvent(event, apiDuration, baseUrl)
@@ -82,7 +83,8 @@ function requireTarget(ctx: Context): CodexProxyTarget | null {
     ctx.body = { error: { type: 'authentication_error', message: 'Invalid Codex proxy token' } }
     return null
   }
-  return { ...target, reasoningCodec: (ctx.state as any).modelGatewayReasoningCodec, requestHeaders: { ...(ctx.get('anthropic-beta') ? { 'anthropic-beta': ctx.get('anthropic-beta') } : {}), ...(ctx.get('anthropic-version') ? { 'anthropic-version': ctx.get('anthropic-version') } : {}) }, signal: (ctx.state as any).modelGatewaySignal || target.signal }
+  return { ...target, reasoningCodec: (ctx.state as any).modelGatewayReasoningCodec, requestHeaders: { ...(ctx.get('anthropic-beta') ? { 'anthropic-beta': ctx.get('anthropic-beta') } : {}), ...(ctx.get('anthropic-version') ? { 'anthropic-version': ctx.get('anthropic-version') } : {}) }, signal: (ctx.state as any).modelGatewaySignal || target.signal,
+    codexAffinity: target.apiMode === 'codex_responses' ? codexRequestAffinity(ctx, target) : undefined }
 }
 
 function chatCompletionsUrl(target: CodexProxyTarget): string {
@@ -187,6 +189,7 @@ async function callOpenAiResponses(target: CodexProxyTarget, body: any, signal?:
     apiKey: target.apiKey,
     ownerUserId: target.ownerUserId, profile: target.profile, model: target.model,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    codexAffinity: target.codexAffinity,
     provider: target.provider,
     body: responsesBody,
     signal: signal || target.signal,
@@ -342,6 +345,7 @@ async function openAiResponsesSseStream(target: CodexProxyTarget, body: any, sta
     apiKey: target.apiKey,
     ownerUserId: target.ownerUserId, profile: target.profile, model: target.model,
     sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    codexAffinity: target.codexAffinity,
     provider: target.provider,
     body: responsesBody,
     signal: target.signal,
@@ -352,7 +356,10 @@ async function openAiResponsesSseStream(target: CodexProxyTarget, body: any, sta
 
 export async function codexProxyResponses(ctx: Context) {
   const target = requireTarget(ctx)
-  if (!target) return
+  if (target) await respondWithCodexTarget(ctx, target)
+}
+
+async function respondWithCodexTarget(ctx: Context, target: CodexProxyTarget) {
   try {
     // Sanitize once before API-mode dispatch so native Responses, Chat
     // Completions, and Anthropic adapters all receive the same bounded history.
@@ -432,7 +439,7 @@ export async function codingAgentProxyChatCompletions(ctx: Context) {
       return
     }
     ctx.request.body = chatCompletionsToResponses(requestBody)
-    await codexProxyResponses(ctx)
+    await respondWithCodexTarget(ctx, target)
     if (ctx.status >= 400) return
     if (requestBody.stream === true) {
       const source = ctx.body as AsyncIterable<Uint8Array | string>

@@ -63,7 +63,7 @@ declare module 'koa' {
     profile?: RequestProfile
     serverTokenAuth?: boolean
     modelApiKey?: { id: string; models: string[] }
-    modelGateway?: { userId: number; profile: string }
+    modelGateway?: { userId: number; profile: string; sessionId?: string }
   }
 }
 
@@ -387,9 +387,13 @@ export async function requireUserJwt(ctx: Context, next: Next): Promise<void> {
     const owner = credential ? findUserById(credential.userId) : null
     if (!credential || !owner || owner.status !== 'active') { ctx.status = 401; ctx.body = { error: 'Invalid internal model credential' }; return }
     ctx.state.user = toAuthenticatedUser(owner)
-    const profile = ctx.get('x-studio-profile') || credential.profile || getDefaultProfileForUser(owner.id)
-    if (ctx.get('x-studio-profile') && owner.role !== 'super_admin' && !userCanAccessProfile(owner.id, profile)) { ctx.status = 403; ctx.body = { error: 'Profile is not available for this user' }; return }
-    ctx.state.modelGateway = { userId: owner.id, profile }
+    const requestedProfile = ctx.get('x-studio-profile')
+    const profile = (credential.sessionId ? credential.profile : requestedProfile) || credential.profile || getDefaultProfileForUser(owner.id)
+    if ((credential.sessionId && requestedProfile && requestedProfile !== profile)
+      || ((requestedProfile || credential.sessionId) && owner.role !== 'super_admin' && !userCanAccessProfile(owner.id, profile))) {
+      ctx.status = 403; ctx.body = { error: 'Profile is not available for this user' }; return
+    }
+    ctx.state.modelGateway = { userId: owner.id, profile, ...(credential.sessionId && { sessionId: credential.sessionId }) }
     ctx.state.profile = { name: profile }
     await next()
     return
