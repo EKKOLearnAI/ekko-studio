@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { connectChatRun, disconnectChatRun, respondClarify, respondToolApproval } from '@/api/studio/chat'
+import { connectChatRun, disconnectChatRun, getChatRunSocket, respondClarify, respondToolApproval } from '@/api/studio/chat'
 
 const mocks = vi.hoisted(() => ({ io: vi.fn() }))
 vi.mock('socket.io-client', () => ({ io: mocks.io }))
@@ -44,6 +44,9 @@ it.each(['clarify', 'approval'])('answers %s on the request profile after the UI
   expect(socket.sent[0][0]).toBe(`${kind}.respond`)
   socket.receive(`${kind}.resolved`, { session_id: 'session', [`${kind}_id`]: 'request', resolved: true, choice: 'once' })
   await result
+  expect(socket.active).toBe(false)
+  expect(getChatRunSocket()).toBe(oldSocket)
+  expect(oldSocket.connected).toBe(true)
 })
 
 it('keeps approval pending until its own server confirmation and rejects a failed submission', async () => {

@@ -1,17 +1,17 @@
 import { randomUUID } from 'node:crypto'
 
 type Kind = 'approval' | 'clarify'
-type Pending = { sessionId: string; runId: string; kind: Kind; finish(outcome: string, response?: string): void }
+type Pending = { sessionId: string; runId: string; kind: Kind; finish(outcome: string, response?: string): boolean }
 const pending = new Map<string, Pending>()
 
 /** Responses enter only through already-authorized Studio socket/group routes. */
 export function respondAgentInteraction(sessionId: string, id: string, kind: Kind, response: string) {
   if (!id.startsWith('plugin-agent:')) return { handled: false, resolved: false }
   const value = pending.get(id)
-  if (!value || value.sessionId !== sessionId || value.kind !== kind) return { handled: true, resolved: false }
+  if (!value || value.sessionId !== sessionId || value.kind !== kind) return { handled: true, resolved: false, stale: true }
   if (kind === 'approval' && !['once', 'deny'].includes(response)) return { handled: true, resolved: false }
-  value.finish(kind === 'approval' ? response === 'once' ? 'approved' : 'denied' : response ? 'answered' : 'dismissed', response)
-  return { handled: true, resolved: true }
+  const outcome = kind === 'approval' ? (response === 'once' ? 'approved' : 'denied') : (response ? 'answered' : 'dismissed')
+  return { handled: true, resolved: value.finish(outcome, response) }
 }
 
 export function agentRunInteractions(input: { sessionId: string; runId: string; signal: AbortSignal; deadlineAt: number; emit(event: string, payload: Record<string, unknown>): void }) {
@@ -19,23 +19,35 @@ export function agentRunInteractions(input: { sessionId: string; runId: string; 
     input.signal.throwIfAborted()
     const id = `plugin-agent:${randomUUID()}`
     return new Promise((resolve, reject) => {
-      const timeoutMs = Math.max(1, Math.min(300_000, input.deadlineAt - Date.now()))
+      const requestedAt = Date.now()
+      const timeoutMs = Math.max(1, Math.min(300_000, input.deadlineAt - requestedAt))
       let timer: ReturnType<typeof setTimeout>
       let settled = false
       const finish = (outcome: string, text?: string) => {
-        if (settled) return
+        if (settled) return false
         settled = true; clearTimeout(timer); pending.delete(id); input.signal.removeEventListener('abort', abort)
         try { input.emit(`${kind}.resolved`, { [`${kind}_id`]: id, resolved: true, outcome, ...(kind === 'approval' ? { choice: text || 'deny' } : { response: text || '' }) }) }
-        catch (error) { reject(error); return }
+        catch (error) { reject(error); return false }
         resolve({ outcome, ...(kind === 'clarify' && outcome === 'answered' ? { text: text || '' } : {}) })
+        return true
       }
       const abort = () => finish('cancelled')
       timer = setTimeout(() => finish('timeout'), timeoutMs); timer.unref()
       pending.set(id, { sessionId: input.sessionId, runId: input.runId, kind, finish })
       input.signal.addEventListener('abort', abort, { once: true })
       if (input.signal.aborted) { abort(); return }
-      try { input.emit(`${kind}.requested`, { ...request, [`${kind}_id`]: id, timeout_ms: timeoutMs, countdown_deadline: Date.now() + timeoutMs }) }
-      catch (error) { settled = true; clearTimeout(timer); pending.delete(id); input.signal.removeEventListener('abort', abort); reject(error) }
+      try {
+        input.emit(`${kind}.requested`, {
+          ...request, [`${kind}_id`]: id, requested_at: requestedAt,
+          timeout_ms: timeoutMs, countdown_deadline: requestedAt + timeoutMs,
+        })
+      } catch (error) {
+        settled = true
+        clearTimeout(timer)
+        pending.delete(id)
+        input.signal.removeEventListener('abort', abort)
+        reject(error)
+      }
     })
   }
   return {
