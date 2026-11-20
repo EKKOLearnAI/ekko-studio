@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto'
+import { providerRequestAccountId, withProviderAccount } from '../../public/provider-account'
+import { findUserById, userCanAccessProfile } from '../../repositories/users-store'
 import {
   createGroupEkkoAuthorizedProviderFetch,
   createGroupEkkoModelClient,
@@ -609,15 +611,21 @@ export class GroupRoomSummaryService {
     return output
   }
 
-  private async runBareEkkoSummary(input: {
-    profile: string
-    provider: string
-    model: string
-    apiMode: string
-    previousSummary: string
-    messages: CleanGroupMessage[]
-    roomId: string
-  }): Promise<string> {
+  private async runBareEkkoSummary(input: Parameters<GroupSummaryRunner>[0]): Promise<string> {
+    // Preserve an authenticated caller; background runs can use only the
+    // persisted room owner, never an arbitrary account from the user list.
+    if (providerRequestAccountId()) return this.runBareEkkoSummaryWithAccount(input)
+    const ownerId = this.storage.getRoom(input.roomId)?.ownerAuthUserId
+    if (ownerId == null) return this.runBareEkkoSummaryWithAccount(input)
+    const owner = Number.isSafeInteger(ownerId) && ownerId > 0 ? findUserById(ownerId) : null
+    if (!owner || owner.status !== 'active'
+      || (owner.role !== 'super_admin' && !userCanAccessProfile(owner.id, input.profile))) {
+      throw Object.assign(new Error('Room summary owner cannot access this Profile'), { status: 403 })
+    }
+    return withProviderAccount(owner.id, () => this.runBareEkkoSummaryWithAccount(input), input.profile)
+  }
+
+  private async runBareEkkoSummaryWithAccount(input: Parameters<GroupSummaryRunner>[0]): Promise<string> {
     const runtimeConfig = await resolveGroupEkkoProviderRuntimeConfig({
       profile: input.profile,
       provider: input.provider,
