@@ -1,5 +1,5 @@
 import { ModelProviderError, isRetryableStatus } from './errors'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { openCodeSessionHeaders } from './opencode-session'
 import { openRouterAttributionHeaders } from './openrouter-attribution'
 import type { ModelProviderConfig, ModelRequest } from './types'
@@ -11,13 +11,17 @@ export function modelRequestHeaders(
   request: ModelRequest,
   defaults: Record<string, string> = {},
 ): HeadersInit {
-  let sessionId = typeof request.metadata?.session_id === 'string' ? request.metadata.session_id.trim() : ''
+  const declaredSession = typeof request.metadata?.session_id === 'string' ? request.metadata.session_id.trim() : ''
+  let sessionId = declaredSession
   if (!sessionId) {
     sessionId = requestSessions.get(request) || randomUUID()
     requestSessions.set(request, sessionId)
   }
   return requestHeaders(config, {
     ...openCodeSessionHeaders(config.baseUrl || '', sessionId, config.id),
+    ...(declaredSession && config.id === 'ekkostudio' && config.apiKey?.startsWith('studio_model_')
+      && /^http:\/\/127\.0\.0\.1:\d+\/api\/ekko-studio\/models\/v1\/?$/.test(config.baseUrl || '')
+      ? { session_id: createHash('sha256').update(declaredSession).digest('base64url') } : {}),
     ...defaults,
   })
 }

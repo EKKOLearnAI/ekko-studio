@@ -451,7 +451,8 @@ export class AgentBridgeClient {
       const startedAt = Date.now()
       const action = String(payload.action || '')
       if (['chat', 'context_estimate', 'switch_session_model'].includes(action) && payload.model && payload.provider) {
-        payload = { ...payload, ...await hermesGatewaySelection(String(payload.profile || 'default'), String(payload.provider), String(payload.model)) }
+        const sessionId = typeof payload.session_id === 'string' ? payload.session_id.trim() : undefined
+        payload = { ...payload, ...await hermesGatewaySelection(String(payload.profile || 'default'), String(payload.provider), String(payload.model), sessionId) }
       }
       const shouldLogRequest = action !== 'get_output' && action !== 'background_poll'
       const runtimeContext = shouldLogRequest ? this.runtimeContext(payload) : undefined

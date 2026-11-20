@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { chmod, mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createServer } from 'node:net'
+import { once } from 'node:events'
 import YAML from 'js-yaml'
 
 const fixture = vi.hoisted(() => ({ home: '', enabled: true }))
@@ -25,6 +27,7 @@ import { getProviderEditorDetail, updateProviderEditorDetail } from '../../packa
 import { resolveBridgeRunModelConfig } from '../../packages/server/src/modules/studio/services/chat-run/model-config'
 import { legacyProviderCredentials } from '../../packages/server/src/modules/studio/middleware/legacy-provider-credentials'
 import { LEGACY_PROVIDER_CREDENTIAL } from '../../packages/server/src/modules/studio/contracts/legacy-provider-credential'
+import { AgentBridgeClient } from '../../packages/server/src/modules/hermes/services/bridge/client'
 
 let source: string
 beforeEach(async () => {
@@ -254,6 +257,68 @@ it('issues user-bound automatic credentials and pins bridge credentials independ
   expect(selection.model).toBe('deepseek/family/model')
   fixture.enabled = false
   expect(await authenticateInternalModelCredential(one.token)).toBeNull()
+})
+
+it('binds projected Hermes request credentials to an opaque, stable account, Profile and session', async () => {
+  const projected = async (owner: number, profile: string, sessionId: string) => withProviderAccount(owner, async () => {
+    await importAccountProviders()
+    const selection = await hermesGatewaySelection(profile, 'deepseek', 'family/model', sessionId)
+    return selection.gateway_runtime!.api_key
+  })
+  const session = 'fixture-chat-标识'
+  const first = await projected(1, 'default', session)
+  expect(first).not.toContain(session)
+  expect(first).not.toContain((await withProviderAccount(1, () => internalModelCredential('default'))).token)
+  expect(await projected(1, 'default', session)).toBe(first)
+  const firstBinding = await authenticateInternalModelCredential(first)
+  expect(firstBinding).toMatchObject({ userId: 1, profile: 'default', sessionId: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) })
+  for (const [owner, profile, id] of [[1, 'default', 'another-session'], [2, 'default', session], [1, 'work', session]] as const) {
+    const token = await projected(owner, profile, id)
+    expect(token).not.toBe(first)
+    const binding = await authenticateInternalModelCredential(token)
+    expect(binding).toMatchObject({ userId: owner, profile, sessionId: expect.any(String) })
+    expect(binding!.sessionId).not.toBe(firstBinding!.sessionId)
+  }
+  expect(await authenticateInternalModelCredential(first.replace('_1.', '_2.'))).toBeNull()
+  expect(await authenticateInternalModelCredential(first.replace('.ZGVmYXVsdA.', '.d29yaw.'))).toBeNull()
+  fixture.enabled = false
+  expect(await authenticateInternalModelCredential(first)).toBeNull()
+})
+
+it('uses the same authenticated session for Bridge chat, context estimate and model switch', async () => {
+  const received: { action: string; session_id: string; gateway_runtime: { api_key: string } }[] = []
+  const backend = createServer(socket => {
+    socket.setEncoding('utf8')
+    let buffer = ''
+    socket.on('data', text => {
+      buffer += text
+      if (!buffer.endsWith('\n')) return
+      received.push(JSON.parse(buffer))
+      socket.end('{"ok":true}\n')
+    })
+  }).listen(0, '127.0.0.1')
+  await once(backend, 'listening')
+  const bridge = new AgentBridgeClient({ endpoint: `tcp://127.0.0.1:${(backend.address() as { port: number }).port}` })
+  try {
+    await withProviderAccount(1, async () => {
+      await importAccountProviders()
+      for (const action of ['context_estimate', 'chat', 'switch_session_model']) {
+        await bridge.request({ action, profile: 'work', session_id: 'same-bridge-session',
+          provider: 'deepseek', model: 'family/model' })
+      }
+      await bridge.request({ action: 'chat', profile: 'work', session_id: 'other-bridge-session',
+        provider: 'deepseek', model: 'family/model' })
+    })
+    expect(received.map(request => request.action)).toEqual(['context_estimate', 'chat', 'switch_session_model', 'chat'])
+    const tokens = received.map(request => request.gateway_runtime.api_key)
+    expect(tokens.slice(0, 3)).toEqual(Array(3).fill(tokens[0]))
+    expect(tokens[3]).not.toBe(tokens[0])
+    const binding = await authenticateInternalModelCredential(tokens[0])
+    expect(binding).toMatchObject({ userId: 1, profile: 'work', sessionId: expect.any(String) })
+    expect(await authenticateInternalModelCredential(tokens[3])).not.toMatchObject({ sessionId: binding!.sessionId })
+  } finally {
+    await new Promise<void>(resolve => backend.close(() => resolve()))
+  }
 })
 
 it('does not change a source Profile or persist a poisoned snapshot when import validation fails', async () => {

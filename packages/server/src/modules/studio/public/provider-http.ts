@@ -2,6 +2,12 @@ import { codexInferenceBody, isCodexInferenceRequest } from '../services/provide
 export { createProviderHttpTransport } from '../services/providers/http-transport'
 export { codexInferenceBody, isCodexInferenceRequest, withoutUnsupportedReasoning } from '../services/providers/codex-requests'
 
+export interface CodexRequestAffinity {
+  scope: string
+  sessionId?: string
+  promptCacheKey?: unknown
+}
+
 export interface ProviderHttpRequest {
   url: string
   apiKey: string
@@ -10,6 +16,7 @@ export interface ProviderHttpRequest {
   provider?: string
   model?: string
   sessionId?: string
+  codexAffinity?: CodexRequestAffinity
   body: unknown
   headers?: Record<string, string>
   signal?: AbortSignal

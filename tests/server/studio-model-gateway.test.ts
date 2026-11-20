@@ -7,17 +7,19 @@ import { Readable } from 'node:stream'
 import { createModelClient } from '../../packages/ekko-agent/src/model/registry'
 import { resolveAgentGatewayModelConfigs } from '../../packages/server/src/bootstrap/provider-gateway-client'
 
-const fixtures = vi.hoisted(() => ({ home: '', targets: [] as string[], provider: 'deepseek', baseUrl: 'https://upstream.invalid/v1', model: 'family/model', mode: 'chat_completions', calls: [] as any[], respond: undefined as any }))
+const fixtures = vi.hoisted(() => ({ home: '', targets: [] as string[], provider: 'deepseek', baseUrl: 'https://upstream.invalid/v1', model: 'family/model', mode: 'chat_completions', calls: [] as any[], respond: undefined as any, providerConfig: {} as Record<string, unknown> }))
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ config: { port: 18648, get appHome() { return fixtures.home } } }))
 vi.mock('../../packages/server/src/modules/studio/public/provider-account', () => ({ providerAccountId: () => 1, providerRequestProfile: () => 'default', withProviderAccount: (_id: unknown, task: any) => task() }))
 vi.mock('../../packages/server/src/modules/studio/public/model-routing', () => ({ canonicalModelRoute: async (value: string) => value, providerRouteNamespace: async (_profile: string, provider: string) => provider, qualifyModelRoute: (provider: string, model: string) => `${provider}/${model}` }))
 vi.mock('../../packages/server/src/modules/studio/public/provider-upstream', () => ({ resolveProviderUpstream: async () => ({ provider: fixtures.provider, baseUrl: fixtures.baseUrl, apiKey: 'server-side-secret', apiMode: fixtures.mode }) }))
+vi.mock('../../packages/server/src/modules/studio/public/provider-config', () => ({ readConfigYamlForProfile: async () => ({ providers: { [fixtures.provider]: fixtures.providerConfig } }) }))
+vi.mock('../../packages/server/src/modules/studio/public/provider-runtime', () => ({ getModelRuntimeCapabilities: () => undefined }))
 vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime', () => ({ getSessionAvailableModelGroups: async () => [{ provider: fixtures.provider, models: [fixtures.model], api_mode: fixtures.mode, api_key: '', base_url: fixtures.baseUrl }] }))
 vi.mock('../../packages/server/src/modules/studio/public/usage', () => ({ normalizeTokenUsage: (usage: any) => ({ inputTokens: usage.input_tokens ?? usage.prompt_tokens ?? 0, outputTokens: usage.output_tokens ?? usage.completion_tokens ?? 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, isEstimated: false }), normalizeUsageCost: () => undefined, recordSessionUsage: vi.fn() }))
 vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({ codingAgentRunManager: { handleProxyUsageEvent: vi.fn() } }))
 vi.mock('../../packages/server/src/modules/coding-agents/services/context-policy', () => ({ codingAgentOutputLimit: () => 8192 }))
 
-import { configureProviderHttp } from '../../packages/server/src/modules/studio/public/provider-http'
+import { configureProviderHttp, createProviderHttpTransport } from '../../packages/server/src/modules/studio/public/provider-http'
 import { configureModelGatewayAdapters } from '../../packages/server/src/modules/studio/public/model-gateway-adapters'
 import { codingModelGatewayAdapters } from '../../packages/server/src/modules/coding-agents/public/model-gateway'
 import { serveModelGateway, gatewayModelStream } from '../../packages/server/src/modules/studio/services/model-api/gateway'
@@ -32,6 +34,7 @@ beforeEach(async () => {
   fixtures.model = 'family/model'
   fixtures.mode = 'chat_completions'
   fixtures.calls = []
+  fixtures.providerConfig = {}
   fixtures.respond = () => Response.json({ id: 'chat-1', model: 'family/model', choices: [{ index: 0, message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } })
   configureProviderHttp(async input => { fixtures.calls.push(input); return fixtures.respond(input) })
   configureModelGatewayAdapters({
@@ -405,6 +408,210 @@ it.each([{ stream: false, missingContentType: false }, { stream: false, missingC
     expect(output).toContain('OK')
   } else expect(request.body).toMatchObject({ model: 'openai-codex/gpt-5.4', status: 'completed', output: final.output })
 })
+
+function captureCodexTransport(baseUrl = 'https://chatgpt.com/backend-api/codex') {
+  fixtures.provider = 'openai-codex'
+  fixtures.model = 'gpt-6.1-sol'
+  fixtures.baseUrl = baseUrl
+  fixtures.mode = 'codex_responses'
+  const outgoing: { url: string; request: any; headers: Headers }[] = []
+  const response = { id: 'resp-fixture', object: 'response', model: fixtures.model, status: 'completed',
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'OK' }] }],
+    usage: { input_tokens: 2304, input_tokens_details: { cached_tokens: 2048 }, output_tokens: 2, total_tokens: 2306 } }
+  configureProviderHttp(createProviderHttpTransport({
+    headers: () => ({ originator: 'codex_cli_rs' }),
+    createFetch: () => (async (url, init) => {
+      outgoing.push({ url: String(url), request: JSON.parse(String(init?.body)), headers: new Headers(init?.headers) })
+      return new Response(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`,
+        { headers: { 'content-type': 'text/event-stream' } })
+    }) satisfies typeof fetch,
+  }))
+  return outgoing
+}
+
+function contextHeaders(request: any, headers: Record<string, string>) {
+  const get = request.get
+  request.get = (name: string) => headers[name.toLowerCase()] ?? get(name)
+}
+
+async function readGatewayBody(request: any) {
+  if (!(request.body instanceof Readable)) return JSON.stringify(request.body)
+  let output = ''
+  for await (const chunk of request.body) output += chunk
+  return output
+}
+
+it.each([
+  ['codex_responses', false], ['codex_responses', true],
+  ['chat_completions', false], ['chat_completions', true],
+  ['anthropic_messages', false], ['anthropic_messages', true],
+  ['gemini_contents', false], ['gemini_contents', true],
+] as const)('uses final Codex affinity for %s (stream=%s)', async (protocol, stream) => {
+  const wire = captureCodexTransport()
+  const model = 'openai-codex/gpt-6.1-sol'
+  const path = protocol === 'gemini_contents'
+    ? `/api/ekko-studio/models/v1beta/models/${model}:${stream ? 'streamGenerateContent' : 'generateContent'}`
+    : '/api/ekko-studio/models/v1/responses'
+  const body = protocol === 'gemini_contents' ? { contents: [{ role: 'user', parts: [{ text: 'hello' }] }] }
+    : protocol === 'codex_responses' ? { model, input: 'hello', stream }
+      : { model, messages: [{ role: 'user', content: 'hello' }], max_tokens: 30, stream }
+  const request = context({ ...body, prompt_cache_key: 'provided-cache-key' }, path)
+  request.state.modelGateway.sessionId = 'bound-session'
+  contextHeaders(request, { session_id: 'client-spoof', 'x-client-request-id': 'caller-tracing-id' })
+  await serveModelGateway(request, protocol, ['default'])
+  expect(request.status).toBe(200)
+  await readGatewayBody(request)
+  expect(wire).toHaveLength(1)
+  expect(wire[0].url).toBe('https://chatgpt.com/backend-api/codex/responses')
+  expect(wire[0].request).toMatchObject({ stream: true, store: false, include: ['reasoning.encrypted_content'] })
+  expect(wire[0].headers.get('authorization')).toBe('Bearer server-side-secret')
+  expect(wire[0].headers.get('originator')).toBe('codex_cli_rs')
+  expect(wire[0].headers.get('session_id')).toMatch(/^studio_s_/)
+  expect(wire[0].headers.get('session_id')).not.toContain('client-spoof')
+  expect(wire[0].headers.get('x-client-request-id')).toBe(wire[0].request.prompt_cache_key)
+  expect(wire[0].request.prompt_cache_key).toMatch(/^studio_p_/)
+
+  const overridden = context({ ...body, prompt_cache_key: 'overridden-cache-key' }, path)
+  overridden.state.modelGateway.sessionId = 'bound-session'
+  await serveModelGateway(overridden, protocol, ['default'])
+  expect(overridden.status).toBe(200)
+  await readGatewayBody(overridden)
+  expect(wire[1].headers.get('session_id')).toBe(wire[0].headers.get('session_id'))
+  expect(wire[1].headers.get('x-client-request-id')).toBe(wire[1].request.prompt_cache_key)
+  expect(wire[1].request.prompt_cache_key).not.toBe(wire[0].request.prompt_cache_key)
+})
+
+it.each([undefined, 'same-client-key'])('keeps affinity stable and isolates account and session with key %s', async promptCacheKey => {
+  const wire = captureCodexTransport()
+  for (const [owner, session, input] of [[1, 's-1', 'first'], [1, 's-1', 'follow-up'], [1, 's-2', 'first'], [2, 's-1', 'first']] as const) {
+    const request = context({ model: 'openai-codex/gpt-6.1-sol', input, instructions: 'fixed', prompt_cache_key: promptCacheKey })
+    request.state.user.id = owner
+    request.state.modelGateway = { userId: owner, profile: 'default', sessionId: session }
+    contextHeaders(request, { session_id: input })
+    await serveModelGateway(request, 'codex_responses', ['default'])
+    expect(request.body.usage.input_tokens_details.cached_tokens).toBe(2048)
+  }
+  const identities = wire.map(({ headers, request }) => [headers.get('session_id'), request.prompt_cache_key])
+  expect(identities[0]).toEqual(identities[1])
+  expect(identities[2][0]).not.toBe(identities[0][0])
+  expect(identities[2][1]).not.toBe(identities[0][1])
+  expect(identities[3][0]).not.toBe(identities[0][0])
+  expect(identities[3][1]).not.toBe(identities[0][1])
+})
+
+it('scopes declared sessions to their sharing key and handles both input spellings', async () => {
+  const wire = captureCodexTransport()
+  const target = registerCodexProxyTarget({ ownerUserId: 1, profile: 'default', provider: fixtures.provider,
+    model: fixtures.model, baseUrl: fixtures.baseUrl, apiKey: 'fixture', apiMode: 'codex_responses' })
+  try {
+    for (const [key, header] of [['share-a', 'session_id'], ['share-a', 'session-id'], ['share-b', 'session_id']]) {
+      const request = context({ input: 'fixture', prompt_cache_key: 'same' })
+      delete request.state.modelGateway
+      request.state.modelApiKey = { id: key }
+      contextHeaders(request, { authorization: `Bearer ${target.token}`, [header]: 'external-session' })
+      await codexProxyResponses(request)
+      expect(request.status).toBe(200)
+    }
+  } finally { revokeCodexProxyTarget(target.routeKey) }
+  expect(wire[0].headers.get('session_id')).toBe(wire[1].headers.get('session_id'))
+  expect(wire[0].request.prompt_cache_key).toBe(wire[1].request.prompt_cache_key)
+  expect(wire[2].headers.get('session_id')).not.toBe(wire[0].headers.get('session_id'))
+  expect(wire[2].request.prompt_cache_key).not.toBe(wire[0].request.prompt_cache_key)
+})
+
+it('carries Ekko runtime session metadata through the local gateway across calls', async () => {
+  const wire = captureCodexTransport()
+  const { providerConfig } = resolveAgentGatewayModelConfigs({ provider: fixtures.provider, model: fixtures.model,
+    baseUrl: 'http://127.0.0.1:18648/api/ekko-studio/models/v1', apiKey: 'studio_model_fixture' })
+  const client = createModelClient(providerConfig, { fetch: async (url, init) => {
+    const inbound = new Headers(init?.headers)
+    const request = context(JSON.parse(String(init?.body)), new URL(url).pathname)
+    request.get = (name: string) => inbound.get(name) || ''
+    await serveModelGateway(request, 'codex_responses', ['default'])
+    return Response.json(request.body, { status: request.status })
+  } })
+  for (const sessionId of ['session-a', 'session-a', 'session-b', undefined]) {
+    const response = await client.create({ messages: [{ role: 'user', content: 'hello' }],
+      metadata: sessionId ? { session_id: sessionId } : undefined })
+    expect(response.content).toBe('OK')
+  }
+  expect(wire[0].headers.get('session_id')).toBeTruthy()
+  expect(wire[1].headers.get('session_id')).toBe(wire[0].headers.get('session_id'))
+  expect(wire[2].headers.get('session_id')).not.toBe(wire[0].headers.get('session_id'))
+  expect(wire[3].headers.get('session_id')).toBeNull()
+})
+
+it('aligns the client request header with the winning model or request body override', async () => {
+  const wire = captureCodexTransport()
+  const modelOverride = 'model-level-key'
+  fixtures.providerConfig = {
+    extra_body: { prompt_cache_key: 'provider-level-key' },
+    extra_headers: { 'Session-ID': 'fixed-session', 'X-CLIENT-REQUEST-ID': 'fixed-request', 'x-compatible': 'provider-setting' },
+    models: { [fixtures.model]: { extra_body: { prompt_cache_key: modelOverride } } },
+  }
+  for (const override of [undefined, modelOverride, 'request-wins'.repeat(12)]) {
+    const request = context({ model: 'openai-codex/gpt-6.1-sol', input: 'fixture', ...(override && { prompt_cache_key: override }) })
+    request.state.modelGateway.sessionId = 'bound-session'
+    await serveModelGateway(request, 'codex_responses', ['default'])
+  }
+  expect(wire[0].request.prompt_cache_key).toBe(wire[1].request.prompt_cache_key)
+  expect(wire[2].request.prompt_cache_key).not.toBe(wire[0].request.prompt_cache_key)
+  for (const { request, headers } of wire) {
+    expect(headers.get('x-client-request-id')).toBe(request.prompt_cache_key)
+    expect(request.prompt_cache_key.length).toBeLessThanOrEqual(64)
+    expect(headers.get('session_id')).toBe(wire[0].headers.get('session_id'))
+    expect(headers.get('session-id')).toBeNull()
+    expect(headers.get('x-compatible')).toBe('provider-setting')
+  }
+})
+
+it('does not treat a per-request ID, malformed session or fixed header as a conversation', async () => {
+  const wire = captureCodexTransport()
+  fixtures.providerConfig = { extra_headers: { session_id: 'fixed', 'x-client-request-id': 'fixed' } }
+  for (const key of [undefined, 'explicit-key']) {
+    const request = context({ model: 'openai-codex/gpt-6.1-sol', input: 'fixture', prompt_cache_key: key })
+    contextHeaders(request, { session_id: 'duplicate-a, duplicate-b', 'x-client-request-id': 'one-request-only' })
+    await serveModelGateway(request, 'codex_responses', ['default'])
+  }
+  expect(wire[0].headers.get('x-client-request-id')).toBeNull()
+  expect(wire[0].request.prompt_cache_key).toBeUndefined()
+  expect(wire[1].headers.get('x-client-request-id')).toBe(wire[1].request.prompt_cache_key)
+  for (const { headers } of wire) expect(headers.get('session_id')).toBeNull()
+})
+
+it('keeps a plugin chat stable across run credentials and isolates its client sessions', async () => {
+  const wire = captureCodexTransport()
+  for (const [run, claim] of [['r-1', 'thread-a'], ['r-2', 'thread-a'], ['r-3', 'thread-b']]) {
+    const target = registerCodexProxyTarget({ ownerUserId: 1, profile: 'default', provider: fixtures.provider, model: fixtures.model,
+      apiKey: 'upstream-secret', apiMode: 'codex_responses', baseUrl: fixtures.baseUrl, chatSessionId: 'persisted-chat',
+      agentId: 'plugin:fixture/agent', agentSessionId: run })
+    try {
+      const request = context({ input: 'fixture', prompt_cache_key: 'same' })
+      contextHeaders(request, { authorization: `Bearer ${target.token}`, 'session-id': claim })
+      await codexProxyResponses(request)
+      expect(request.status).toBe(200)
+    } finally { revokeCodexProxyTarget(target.routeKey) }
+  }
+  expect(wire[0].headers.get('session_id')).toBeTruthy()
+  expect(wire[0].headers.get('session_id')).toBe(wire[1].headers.get('session_id'))
+  expect(wire[0].request.prompt_cache_key).toBe(wire[1].request.prompt_cache_key)
+  expect(wire[2].headers.get('session_id')).not.toBe(wire[0].headers.get('session_id'))
+  expect(wire[2].request.prompt_cache_key).not.toBe(wire[0].request.prompt_cache_key)
+})
+
+it.each(['https://chatgpt.com.relay.invalid/backend-api/codex', 'https://api.openai.com/v1', 'http://chatgpt.com/backend-api/codex'])(
+  'preserves relay behavior and does not attach generated Codex affinity to %s', async baseUrl => {
+    const wire = captureCodexTransport(baseUrl)
+    fixtures.providerConfig = { extra_headers: { 'x-client-request-id': 'relay-configured' } }
+    const request = context({ model: 'openai-codex/gpt-6.1-sol', input: 'fixture', prompt_cache_key: 'relay-key' })
+    request.state.modelGateway.sessionId = 'bound-session'
+    await serveModelGateway(request, 'codex_responses', ['default'])
+    expect(request.status).toBe(200)
+    expect(wire[0].headers.get('session_id')).toBeNull()
+    expect(wire[0].headers.get('x-client-request-id')).toBe('relay-configured')
+    expect(wire[0].request.prompt_cache_key).toBe('relay-key')
+  },
+)
 
 it.each([false, true].flatMap(stream => [undefined, 'low', 'none'].map(reasoningEffort => ({ stream, reasoningEffort }))))('preserves Responses effort through the Chat upstream proxy ($stream, $reasoningEffort)', async ({ stream, reasoningEffort }) => {
   fixtures.respond = () => stream
