@@ -19,6 +19,7 @@
 | 聊天命令 execute | JSON 或 void；输入是原始参数字符串。 |
 | 自动化动作 execute | JSON，结构应在插件契约中声明，供工作流消费。 |
 | hooks handler | `{ value?: Json, deny?: string }`；value 替换内容，deny 拒绝；不用修改时返回空对象。 |
+| compression handler | 返回非空摘要正文，token 数须在 `summaryBudget` 内。返回 `null` 交由内置摘要器处理。Studio 校验后自行组装上下文及写入快照。 |
 | HTTP onRequest | 原地修改 request 后返回 void 继续；返回 `{status,headers,body}` 直接响应并停止后续请求回调和路由。 |
 | HTTP onResponse | 在发送响应前原地修改 response，返回 void/Promise<void>；不返回替代对象。网关 SSE 的 body 为 Readable，可接 Transform；此回调不是流传输结束通知。 |
 | 业务观察 handler | void/Promise<void>；事件不能通过返回值修改原业务。 |

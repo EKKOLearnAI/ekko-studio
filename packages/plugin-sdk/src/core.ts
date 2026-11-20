@@ -18,7 +18,7 @@ export interface Schema {
   maxItems?: number
   secret?: boolean
 }
-export const PLUGIN_PERMISSIONS = ['api.read', 'api.write', 'tools', 'commands', 'events', 'hooks', 'automation', 'ui', 'storage.client', 'agents', 'browser.cdp', 'http'] as const
+export const PLUGIN_PERMISSIONS = ['api.read', 'api.write', 'tools', 'commands', 'events', 'hooks', 'automation', 'ui', 'storage.client', 'agents', 'browser.cdp', 'http', 'compression'] as const
 export type PluginPermission = typeof PLUGIN_PERMISSIONS[number]
 /** Host-rendered line icons; bundled raster plugin logos are also supported. */
 export const PLUGIN_ICON_PATHS = {

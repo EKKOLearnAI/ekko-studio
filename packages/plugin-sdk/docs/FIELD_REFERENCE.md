@@ -101,7 +101,7 @@ ui.selectWorkspace 的 options 仅有可选 current:string，缺省或空字符�
 | --- | --- | --- |
 | id/name/version/apiVersion | 必填 string/string/string/1 | id 遵循标识符规则；name 非空且最多 160 字符；version 是精确 x.y.z，可带预发布后缀，须与 package.json 一致 |
 | server/client | 至少一项，string | 包内相对 .js/.mjs 成品路径，禁止绝对路径及 ..；server 导出 apply，client 导出 mount；安装不构建源码 |
-| permissions | 必填字符串数组，可空 | api.read、api.write、tools、commands、events、hooks、automation、ui、storage.client、agents、browser.cdp、http；旧 capabilities 不接受 |
+| permissions | 必填字符串数组，可空 | api.read、api.write、tools、commands、events、hooks、automation、ui、storage.client、agents、browser.cdp、http、compression；旧 capabilities 不接受 |
 | description? | string | 非空，最多 4000 字符 |
 | i18n? | Record<BCP47,PluginTranslation> | 旧插件可省略；新版 SDK 项目必须 PLUGIN_LOCALES 全部语言的 name/description、所有 views 标题及显式导航标题；按完整语言、基础语言、英文、原字符串回退 |
 | author? | {name:string,url?:string} | name 非空最多 200 字符，url 规则同下 |

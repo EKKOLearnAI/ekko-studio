@@ -62,6 +62,33 @@ export interface PluginAction {
 }
 export type PluginHook = 'input.transform' | 'context.transform' | 'tool.before' | 'tool.after'
 export interface HookResult { value?: Json; deny?: string }
+export interface CompressionHistoryMessage {
+  readonly role: string
+  readonly content: string | readonly {
+    readonly type: 'text' | 'image' | 'file'
+    readonly text?: string
+    readonly path?: string
+  }[]
+  readonly name?: string
+  readonly tool_call_id?: string
+  readonly tool_calls?: readonly {
+    readonly id: string
+    readonly type: string
+    readonly function: { readonly name: string; readonly arguments: string }
+  }[]
+}
+export interface CompressionSummaryInput {
+  readonly transcript: string
+  /** The same selected segment as transcript, in message order. */
+  readonly history: readonly CompressionHistoryMessage[]
+  readonly previousSummary?: string
+  readonly summaryBudget: number
+}
+/** Return a summary body or null to use Studio's built-in summarizer. */
+export type PluginCompressionSummarizer = (
+  input: CompressionSummaryInput,
+  ctx: RunContext,
+) => string | null | Promise<string | null>
 export interface PluginContext {
   /** Stable host-owned directories, retained across plugin package upgrades. */
   readonly paths: { readonly dataDir: string }
@@ -130,6 +157,7 @@ export interface ClientModule { mount(element: HTMLElement, ctx: ClientContext):
 export interface PluginExtensions {
   http: { register(interceptor: import('./http').PluginHttpInterceptor): Dispose }
   agents: { register(definition: import('./agents').AgentDefinition): import('./agents').AgentRegistration }
+  compression: { register(summarize: PluginCompressionSummarizer): Dispose }
   tools: { register(tool: PluginTool): Dispose }
   commands: { register(command: PluginCommand): Dispose }
   rpc: { register(name: string, handler: (input: Json, ctx: RunContext) => Promise<Json> | Json): Dispose }
