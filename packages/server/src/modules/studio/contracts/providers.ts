@@ -457,6 +457,23 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     ],
   },
   {
+    // OpenAI-compatible gateway; llmtr/ models are hosted in Turkey, other
+    // vendor/model ids are routed to their vendors.
+    label: 'LLMTR',
+    value: 'llmtr',
+    builtin: true,
+    base_url: 'https://llmtr.com/v1',
+    api_mode: 'chat_completions',
+    catalog_api_mode: 'chat_completions',
+    models: [
+      'llmtr/qwen3-8-27b',
+      'llmtr/qwen3-6-35b',
+      'llmtr/gemma-4',
+      'llmtr/muse-glimmer-30b-tr',
+      'llmtr/qwen3-5-4b',
+    ],
+  },
+  {
     label: 'CLIProxyAPI',
     value: 'cliproxyapi',
     builtin: true,
