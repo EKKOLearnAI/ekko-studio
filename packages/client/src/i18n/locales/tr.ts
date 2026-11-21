@@ -168,6 +168,12 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_30_1: "Eklentiler, standart Hermes ve Ekko bire bir sohbetlerinde otomatik veya elle bağlam sıkıştırma sırasında özet oluşturabilir. Eklenti geçerli bir özet sunmazsa Studio yerleşik özetleyiciyi kullanır. (#3891)",
+    new_0_8_30_2: "Grup sohbeti, istek hesabı olmadan arka planda güncellenen bir özet oluşturduğunda Studio, sağlayıcıyı yetkili oda sahibinin hesabıyla bulur. Diğer hesapların model ayarları ayrı kalır. (#3885)",
+    new_0_8_30_3: "Resmî Codex OAuth kullanılan isteklerde ağ geçidi, oturum tanımlayıcılarını ve istem önbelleği anahtarlarını hesap, profil ve oturum bazında ayırır. Giden istek kimliği son önbellek anahtarıyla eşleşir. (#3892)",
+    new_0_8_30_4: "Bir Responses isteği Chat Completions biçimine dönüştürülürken rota değer belirtmemişse istekteki geçerli akıl yürütme düzeyi kullanılır. Rotada açıkça belirtilen ayarlar önceliklidir. (#3884)",
+    new_0_8_30_5: "Bir araç çağrısından sonra Grok Responses API üzerinden devam ederken Codex’in şifreli akıl yürütmeyi yeniden kullanmasını engelleyebilen biçim sorunu düzeltildi. (#3895)",
+    new_0_8_30_6: "Unix’te Git ile kurulan Hermes birden çok başlatma betiği üzerinden çalıştırıldığında Studio’nun Python ortamını bulamaması ve Hermes Bridge’i başlatamaması düzeltildi. (#3897)",
     new_0_8_29_1: "Sohbette onay gönderildiğinde veya açıklama isteği yanıtlandığında alındı bildirimi gösterilir. Studio’nun sağ üst köşesindeki pencereden hesaba bağlı profillerin sohbet ve iş akışı onayları ile açıklama istekleri işlenebilir. Yeniden bağlanınca bekleyen istekler güncellenir. (#3886)",
     new_0_8_29_2: "Eklenti Merkezi üçüncü taraf eklentilerin risklerini gösterir ve etkinleştirmeden önce onay ister. Kurulum, güncelleme veya kaynak değişiminde varsa geliştirici ve depo bilgileri gösterilir. Etkin bir eklentinin yeni kodu hemen çalıştırabileceği de belirtilir. (#3879)",
     new_0_8_29_3: "Person, bağımlı olduğu görevler tamamlanınca arka plan görevlerinin sonuçlarını iletmeye devam eder. Bekleyen sonuçlar Studio yeniden başlatılsa da korunur ve yeniden denemelerde aynı sonuç iki kez iletilmez. (#3869)",

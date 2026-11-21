@@ -3544,6 +3544,12 @@ jobTriggered: 'Job ejecutado',
   },
 
   changelog: {
+    new_0_8_30_1: "Los plugins pueden generar resúmenes de compresión de contexto para chats individuales normales de Hermes y Ekko, tanto en la compresión automática como en la manual. Studio usa el generador integrado cuando el plugin no proporciona un resumen válido. (#3891)",
+    new_0_8_30_2: "Cuando un chat grupal genera un resumen acumulativo en segundo plano sin una cuenta asociada a la solicitud, Studio usa la cuenta autorizada del propietario de la sala para buscar el proveedor y mantiene separada la configuración de otras cuentas. (#3885)",
+    new_0_8_30_3: "Para las solicitudes con OAuth oficial de Codex, la pasarela aísla los identificadores de sesión y las claves de caché de prompts por cuenta, perfil y sesión. El ID de la solicitud saliente coincide con la clave de caché final. (#3892)",
+    new_0_8_30_4: "Al convertir una solicitud de Responses a Chat Completions, Studio conserva el nivel de razonamiento válido de la solicitud si la ruta no especifica uno. La configuración explícita de la ruta sigue teniendo prioridad. (#3884)",
+    new_0_8_30_5: "Se corrigió un problema de formato que podía impedir que Codex reutilizara el razonamiento cifrado mediante la API Responses de Grok al continuar después de llamar a una herramienta. (#3895)",
+    new_0_8_30_6: "Se corrigió un problema por el que Studio no podía encontrar el entorno de Python ni iniciar Hermes Bridge en Unix cuando una instalación de Hermes basada en Git se ejecutaba a través de varios scripts de inicio. (#3897)",
     new_0_8_29_1: "Las aprobaciones y respuestas a solicitudes de aclaración en el chat ahora reciben confirmación. El panel de la esquina superior derecha permite atender aprobaciones de chat y de flujos de trabajo y solicitudes de aclaración de los perfiles vinculados a la cuenta. Los pendientes se actualizan al reconectar. (#3886)",
     new_0_8_29_2: "El Centro de plugins advierte sobre los plugins de terceros y pide confirmación antes de habilitarlos. Al instalar, actualizar o cambiar de origen, muestra el autor y el repositorio si están disponibles, y advierte si un plugin habilitado puede ejecutar código nuevo de inmediato. (#3879)",
     new_0_8_29_3: "Person reanuda la entrega de resultados de tareas en segundo plano cuando terminan las tareas de las que dependen. Los resultados pendientes se conservan al reiniciar Studio y los reintentos evitan entregas duplicadas. (#3869)",

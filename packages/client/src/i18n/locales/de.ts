@@ -3544,6 +3544,12 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_8_30_1: "Plugins können Zusammenfassungen für die automatische und manuelle Kontextkomprimierung in regulären Einzelchats mit Hermes und Ekko erstellen. Liefert das Plugin keine gültige Zusammenfassung, verwendet Studio die integrierte Zusammenfassung. (#3891)",
+    new_0_8_30_2: "Wenn ein Gruppenchat im Hintergrund eine fortlaufende Zusammenfassung ohne zugeordnetes Konto für die Anfrage erzeugt, ermittelt Studio den Anbieter anhand des berechtigten Kontos des Rauminhabers. Modelleinstellungen anderer Konten bleiben getrennt. (#3885)",
+    new_0_8_30_3: "Bei Anfragen mit offiziellem Codex OAuth trennt das Gateway Sitzungskennungen und Prompt-Cache-Schlüssel nach Konto, Profil und Sitzung. Die ausgehende Anfrage-ID entspricht dem endgültigen Cache-Schlüssel. (#3892)",
+    new_0_8_30_4: "Bei der Umwandlung einer Responses-Anfrage in Chat Completions übernimmt Studio eine gültige Einstellung zur Schlussfolgerungsintensität aus der Anfrage, falls die Route keinen Wert vorgibt. Explizite Routeneinstellungen haben Vorrang. (#3884)",
+    new_0_8_30_5: "Ein Formatproblem wurde behoben, das Codex beim Fortsetzen nach einem Toolaufruf daran hindern konnte, verschlüsselte Schlussfolgerungsdaten über die Responses-API von Grok wiederzugeben. (#3895)",
+    new_0_8_30_6: "Studio erkennt die Python-Umgebung für Git-basierte Hermes-Installationen unter Unix auch bei mehrstufigen Startskripten, damit Hermes Bridge starten kann. (#3897)",
     new_0_8_29_1: "Für Freigaben und Antworten auf Rückfragen im Chat erscheint jetzt eine Bestätigung. Über das Fenster oben rechts lassen sich Chat- und Workflow-Freigaben sowie Rückfragen für alle verknüpften Profile bearbeiten. Nach dem Wiederverbinden wird die Liste aktualisiert. (#3886)",
     new_0_8_29_2: "Das Plugin-Center weist auf Risiken von Drittanbieter-Plugins hin. Vor dem Aktivieren wird eine Bestätigung angefordert. Beim Installieren, Aktualisieren oder Wechseln der Quelle werden verfügbare Angaben zu Autor und Repository angezeigt. Aktivierte Plugins können neuen Code sofort ausführen. (#3879)",
     new_0_8_29_3: "Person liefert Ergebnisse von Hintergrundaufgaben weiter aus, sobald abhängige Aufgaben fertig sind. Ausstehende Ergebnisse bleiben nach einem Studio-Neustart erhalten. Wiederholungsversuche vermeiden doppelte Zustellungen. (#3869)",

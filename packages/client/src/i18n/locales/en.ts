@@ -3961,6 +3961,12 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_30_1: "Plugins can generate context compression summaries for standard Hermes and Ekko one-to-one chats, during both automatic and manual compression. Studio uses its built-in summarizer when the plugin provides no valid summary. (#3891)",
+    new_0_8_30_2: "When a group chat generates a rolling summary in the background without a request account, it uses the authorized room owner’s account to resolve the provider and keeps other accounts’ model settings separate. (#3885)",
+    new_0_8_30_3: "For requests using official Codex OAuth, the gateway isolates session identifiers and prompt cache keys by account, profile, and session, and aligns the outgoing request ID with the final cache key. (#3892)",
+    new_0_8_30_4: "When converting a Responses request to Chat Completions, Studio preserves a valid reasoning effort from the request if the route does not specify one. Explicit route settings still take precedence. (#3884)",
+    new_0_8_30_5: "Fixed a format compatibility issue that could prevent Codex from replaying encrypted reasoning through Grok’s Responses API when continuing after a tool call. (#3895)",
+    new_0_8_30_6: "Fixed a startup issue where Studio could not locate the Python environment for a Git-based Hermes install on Unix that forwards through multiple launch scripts, leaving Hermes Bridge unavailable. (#3897)",
     new_0_8_29_1: "Chat approvals and clarification answers now receive confirmation. Use the popup in the upper-right corner to handle chat and workflow approvals and clarification requests across the profiles linked to your account. Pending requests refresh after reconnecting. (#3886)",
     new_0_8_29_2: "The Plugin Center now warns about third-party plugins. It asks for confirmation before enabling one and shows available author and repository details when installing, updating, or switching sources. It also warns when an enabled plugin may run new code immediately. (#3879)",
     new_0_8_29_3: "Person resumes delivering background task results after the tasks they depend on finish. Pending results survive a Studio restart, and retries avoid duplicate delivery. (#3869)",

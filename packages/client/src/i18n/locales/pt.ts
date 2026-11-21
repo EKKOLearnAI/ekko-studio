@@ -3544,6 +3544,12 @@ jobTriggered: 'Job acionado',
   },
 
   changelog: {
+    new_0_8_30_1: "Plugins podem gerar resumos de compactação de contexto em chats individuais padrão do Hermes e do Ekko, tanto na compactação automática quanto na manual. O Studio usa o resumidor integrado quando o plugin não fornece um resumo válido. (#3891)",
+    new_0_8_30_2: "Quando um chat em grupo gera um resumo contínuo em segundo plano sem uma conta associada à solicitação, o Studio usa a conta autorizada do proprietário da sala para localizar o provedor e mantém separadas as configurações de outras contas. (#3885)",
+    new_0_8_30_3: "Nas solicitações com OAuth oficial do Codex, o gateway isola identificadores de sessão e chaves de cache de prompts por conta, perfil e sessão. O ID da solicitação de saída corresponde à chave final do cache. (#3892)",
+    new_0_8_30_4: "Ao converter uma solicitação de Responses em Chat Completions, o Studio preserva o nível de raciocínio válido da solicitação quando a rota não especifica um. As configurações explícitas da rota continuam tendo prioridade. (#3884)",
+    new_0_8_30_5: "Foi corrigido um problema de formato que podia impedir o Codex de reproduzir o raciocínio criptografado pela API Responses do Grok ao continuar após uma chamada de ferramenta. (#3895)",
+    new_0_8_30_6: "Foi corrigido um problema em que o Studio não encontrava o ambiente Python nem iniciava o Hermes Bridge no Unix quando uma instalação do Hermes via Git passava por vários scripts de inicialização. (#3897)",
     new_0_8_29_1: "As aprovações e respostas a pedidos de esclarecimento no chat agora recebem confirmação. No painel no canto superior direito, é possível atender aprovações de chat e de fluxos de trabalho e pedidos de esclarecimento dos perfis vinculados à conta. As solicitações pendentes são atualizadas ao reconectar. (#3886)",
     new_0_8_29_2: "A Central de Plugins avisa sobre riscos de plugins de terceiros e pede confirmação para ativá-los. Ao instalar, atualizar ou trocar de origem, ela mostra o autor e o repositório, quando disponíveis, e avisa se um plugin ativo pode executar o novo código de imediato. (#3879)",
     new_0_8_29_3: "O Person retoma a entrega de resultados de tarefas em segundo plano depois que as tarefas das quais dependem são concluídas. Os resultados pendentes são preservados após reiniciar o Studio, e novas tentativas evitam entregas duplicadas. (#3869)",
