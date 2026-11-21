@@ -165,6 +165,45 @@ it('accepts native Responses fields rather than applying the former restricted s
   expect(ctx.body.model).toBe('deepseek/family/model')
 })
 
+it.each([
+  { provider: 'xai-oauth', model: 'grok-4.7', stream: true, grok: true },
+  { provider: 'custom:relay', model: 'x-ai/grok-4.7', stream: false, grok: true },
+  { provider: 'openai', model: 'gpt-6.1-sol', stream: false, grok: false },
+])('formats encrypted reasoning replay for $provider/$model (stream=$stream)', async ({ provider, model, stream, grok }) => {
+  const compaction = { type: 'compaction', id: 'cmp-1', encrypted_content: 'opaque-compaction' }
+  const reasoning = { type: 'reasoning', id: 'rs-1', summary: [], encrypted_content: 'opaque-reasoning' }
+  const replay = { ...reasoning, content: null }
+  const textReasoning = { ...reasoning, id: 'rs-2', content: [{ type: 'reasoning_text', text: 'think' }] }
+  const message = { type: 'message', role: 'user', content: 'continue' }
+  const output = { id: 'response-1', model, status: 'completed', output: [] }
+  fixtures.respond = ({ body }: any) => {
+    if (grok && body.input[1].content === null) {
+      return Response.json({ code: 'invalid-argument', error: 'Could not decode the compaction blob' }, { status: 400 })
+    }
+    if (!stream) return Response.json(output)
+    return new Response(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: output })}\n\n`,
+      { headers: { 'content-type': 'text/event-stream' } })
+  }
+  const target = registerCodexProxyTarget({ profile: 'default', ownerUserId: 1, provider, model,
+    baseUrl: fixtures.baseUrl, apiKey: 'synthetic-key', apiMode: 'codex_responses', agentId: 'codex' })
+  try {
+    const request = context({ input: [compaction, replay, textReasoning, message], stream })
+    contextHeaders(request, { authorization: `Bearer ${target.token}` })
+    await codexProxyResponses(request)
+    expect(request.status).toBe(200)
+    expect(fixtures.calls).toHaveLength(1)
+    expect(fixtures.calls[0].body.input).toEqual([compaction, grok ? reasoning : replay, textReasoning, message])
+    expect(request.request.body.input[1]).toEqual(replay)
+    if (stream) {
+      let text = ''
+      for await (const chunk of request.body) text += String(chunk)
+      expect(text).toContain('event: response.completed')
+    } else {
+      expect(request.body).toMatchObject(output)
+    }
+  } finally { revokeCodexProxyTarget(target.routeKey) }
+})
+
 it('preserves a Messages tool-call round trip when translating to Chat', async () => {
   const ctx = context({ model: 'deepseek/family/model', max_tokens: 64, tools: [{ name: 'read', input_schema: { type: 'object', properties: { path: { type: 'string' } } } }], messages: [
     { role: 'user', content: 'read this file' },
