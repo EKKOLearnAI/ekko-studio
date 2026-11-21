@@ -3544,6 +3544,12 @@ jobTriggered: 'Job declenche',
   },
 
   changelog: {
+    new_0_8_30_1: "Les plugins peuvent produire les résumés de compression du contexte pour les chats individuels standard de Hermes et Ekko, en mode automatique ou manuel. Studio utilise son moteur intégré si le plugin ne fournit aucun résumé valide. (#3891)",
+    new_0_8_30_2: "Lorsqu’un chat de groupe génère un résumé continu en arrière-plan sans compte associé à la requête, Studio sélectionne le fournisseur via le compte autorisé du propriétaire du salon. Les réglages des autres comptes restent séparés. (#3885)",
+    new_0_8_30_3: "Pour les requêtes avec OAuth officiel de Codex, la passerelle isole les identifiants de session et les clés de cache des invites par compte, profil et session. L’identifiant de la requête sortante correspond à la clé de cache finale. (#3892)",
+    new_0_8_30_4: "Lors de la conversion d’une requête Responses en Chat Completions, Studio reprend le niveau de raisonnement valide de la requête si la route ne le spécifie pas. Les réglages explicites de la route restent prioritaires. (#3884)",
+    new_0_8_30_5: "Correction d’un problème de format qui pouvait empêcher Codex de réutiliser le raisonnement chiffré via l’API Responses de Grok en reprenant après un appel d’outil. (#3895)",
+    new_0_8_30_6: "Correction d’un problème qui empêchait Studio de trouver l’environnement Python et de démarrer Hermes Bridge sous Unix lorsque Hermes, installé via Git, était lancé par plusieurs scripts successifs. (#3897)",
     new_0_8_29_1: "Les approbations et les réponses aux demandes de précision dans le chat reçoivent désormais une confirmation. Le panneau en haut à droite permet de traiter les demandes des profils associés à votre compte, y compris les approbations de workflows. Les demandes en attente sont actualisées après reconnexion. (#3886)",
     new_0_8_29_2: "Le centre de plugins signale les risques liés aux plugins tiers et demande une confirmation avant leur activation. Lors d’une installation, d’une mise à jour ou d’un changement de source, il affiche les informations disponibles sur l’auteur et le dépôt, et indique si un plugin actif peut exécuter immédiatement le nouveau code. (#3879)",
     new_0_8_29_3: "Person reprend la livraison des résultats des tâches en arrière-plan lorsque les tâches dont elles dépendent sont terminées. Les résultats en attente sont conservés après un redémarrage de Studio et les nouvelles tentatives évitent les doublons. (#3869)",
