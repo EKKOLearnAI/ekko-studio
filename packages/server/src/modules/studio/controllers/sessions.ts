@@ -38,6 +38,7 @@ import {
   getSessionDetail as localGetSessionDetail,
   deleteSession as localDeleteSession,
   renameSession as localRenameSession,
+  getStoredSessionTitles,
   setSessionArchived as localSetSessionArchived,
   setSessionPushEnabled as localSetSessionPushEnabled,
   setSessionPinned as localSetSessionPinned,
@@ -213,8 +214,8 @@ function mergeHermesHistorySessions(
   const importedIds = new Set(localSessions.map(session => session.id))
   const historySessionsById = new Map<string, any>()
   // Keep Hermes Agent state.db as the canonical summary when both stores have
-  // the same id. Ekko Studio contributes import/archive state and local-only
-  // coding-agent sessions without replacing the Agent-owned session fields.
+  // the same id. Ekko Studio contributes explicit title overrides, import/archive
+  // state and local-only coding-agent sessions; other Agent-owned fields stay native.
   for (const session of hermesSessions) {
     historySessionsById.set(session.id, {
       ...(profile ? { ...session, profile } : session),
@@ -223,8 +224,10 @@ function mergeHermesHistorySessions(
   }
 
   const localSessionsById = new Map(localSessions.map(session => [session.id, session]))
+  const storedTitles = getStoredSessionTitles([...historySessionsById.keys()].filter(id => localSessionsById.has(id)))
   for (const [id, session] of historySessionsById) {
     const localSession = localSessionsById.get(id)
+    if (storedTitles.has(id) && (!session.profile || session.profile === localSession?.profile)) session.title = storedTitles.get(id)
     if (localSession?.is_archived != null) session.is_archived = localSession.is_archived
     session.is_pinned = Number(localSession?.is_pinned || 0)
     session.push_enabled = Number(localSession?.push_enabled || 0) !== 0 ? 1 : 0

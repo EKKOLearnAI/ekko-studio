@@ -212,6 +212,7 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   api_mode: 'TEXT NOT NULL DEFAULT \'\'',
   reasoning_effort: 'TEXT NOT NULL DEFAULT \'\'',
   title: 'TEXT',
+  title_origin: "TEXT NOT NULL DEFAULT ''",
   parent_session_id: 'TEXT',
   fork_point_message_id: 'TEXT',
   started_at: 'INTEGER NOT NULL',
