@@ -113,9 +113,23 @@ function needsPortableResponses(target: CodexProxyTarget): boolean {
   return target.provider === 'xai-oauth' || /^https:\/\/api\.x\.ai(?:\/|$)/i.test(target.baseUrl)
 }
 
+function withoutNullReasoningContent(body: any): any {
+  if (!Array.isArray(body?.input)) return body
+  const input = body.input.map((item: any) => {
+    if (item?.type !== 'reasoning' || item.content !== null) return item
+    // Grok rejects encrypted reasoning replay when the optional content field is null.
+    const { content: _content, ...reasoning } = item
+    return reasoning
+  })
+  return { ...body, input }
+}
+
 function nativeResponsesBody(target: CodexProxyTarget, body: any, stream?: boolean): any {
   const original = target.agentId === 'grok' ? normalizeGrokResponsesRequest(body) : body
-  const normalized = needsPortableResponses(target) ? portableResponsesRequest(original) : original
+  const portable = needsPortableResponses(target)
+  const grok = portable || target.provider === 'xai' || /(?:^|\/)grok-[^/]+$/i.test(target.model)
+  const upstreamBody = grok ? withoutNullReasoningContent(original) : original
+  const normalized = portable ? portableResponsesRequest(upstreamBody) : upstreamBody
   const reasoningEffort = targetReasoningEffort(target)
   const routed = {
     ...normalized,
