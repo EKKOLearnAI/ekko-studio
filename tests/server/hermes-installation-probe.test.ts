@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { probeHermesCliVersion } from '../../packages/server/src/modules/hermes/services/runtime/discovery'
+import { resolveHermesInstallationEnvironment } from '../../packages/server/src/modules/hermes/services/runtime/installation'
 import { resolveDesktopHermesSelection } from '../../packages/desktop/src/main/hermes-environment-selection'
 
 // Use real Python imports: mocking stdout cannot catch missing source paths.
@@ -138,10 +139,22 @@ describe('Hermes installation version probes', () => {
   })
 })
 
-describe.skipIf(process.platform === 'win32')('Desktop Unix PM launcher discovery', () => {
+describe('Legacy Hermes installations', () => {
+  it('finds Python in the checkout virtual environment', () => {
+    const fixture = installation()
+    const interpreter = process.platform === 'win32' ? 'venv/Scripts/python.exe' : 'venv/bin/python3'
+    fixture.write('bin/hermes', '')
+    fixture.write(interpreter, '')
+    expect(resolveHermesInstallationEnvironment(fixture.path, fixture.env.HERMES_HOME, fixture.env))
+      .toMatchObject({ python: join(fixture.root, interpreter), agentRoot: fixture.root })
+  })
+})
+
+describe.skipIf(process.platform === 'win32')('Unix PM launcher discovery', () => {
   it('locates an unquoted store interpreter before probing the source root', async () => {
     const fixture = installation()
     fixture.write('bin/hermes', `#!/bin/sh\nexec ${python} -I -c 'bootstrap' "$@"\n`)
+    expect(await probeHermesCliVersion(fixture.path, fixture.env)).toEqual({ version: '0.23.1+3685.gb03df8f', error: '' })
     expect(await fixture.desktop()).toMatchObject({
       source: 'user-cli', pythonPath: python, agentRoot: fixture.root, version: '0.23.1+3685.gb03df8f',
     })
@@ -159,6 +172,7 @@ describe.skipIf(process.platform === 'win32')('Desktop Unix PM launcher discover
       ? `'${inner.replaceAll("'", "'\"'\"'")}'`
       : `"${inner}"`
     writeFileSync(outer, `#!/bin/sh\nexec ${quotedInner} "$@"\n`)
+    expect(await probeHermesCliVersion(outer, fixture.env)).toEqual({ version: '0.23.1+3685.gb03df8f', error: '' })
     expect(await resolveDesktopHermesSelection({
       env: { ...fixture.env, HERMES_BIN: outer }, searchPath: '', hermesHome: fixture.env.HERMES_HOME,
     })).toMatchObject({ source: 'user-cli', pythonPath: python, agentRoot: fixture.root })
@@ -169,6 +183,7 @@ describe.skipIf(process.platform === 'win32')('Desktop Unix PM launcher discover
     const other = join(fixture.root, 'bin', 'other-hermes')
     fixture.write('bin/hermes', `#!/bin/sh\nexec "${other}" "$@"\n`)
     fixture.write('bin/other-hermes', `#!/bin/sh\nexec "${fixture.path}" "$@"\n`)
+    expect((await probeHermesCliVersion(fixture.path, fixture.env)).version).toBe('')
     expect(await fixture.desktop()).toMatchObject({ source: 'none' })
   })
 

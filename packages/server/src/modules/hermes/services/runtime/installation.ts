@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'fs'
 import { basename, dirname, isAbsolute, join, resolve } from 'path'
 
 export interface HermesInstallationEnvironment {
@@ -21,22 +21,69 @@ function isPythonExecutable(command: string): boolean {
   return /^(?:python|pypy)(?:\d+(?:\.\d+)*)?(?:\.exe)?$/i.test(basename(command))
 }
 
-function launcherContents(hermesBin: string): string[] {
-  const candidates = [hermesBin]
-  try {
-    const real = realpathSync(hermesBin)
-    if (real !== hermesBin) candidates.push(real)
-  } catch {}
+function shellExecTarget(contents: string): string | undefined {
+  if (!/^#![^\r\n]*\b(?:sh|bash|dash|ksh|zsh)(?:\s|$)/.test(contents)) return undefined
+  // Read the executable token without evaluating shell or bootstrap code.
+  for (const line of contents.split(/\r?\n/)) {
+    const command = line.match(/^\s*exec\s+(.+)$/)?.[1]
+    if (!command) continue
+    let target = ''
+    let quote = ''
+    for (let index = 0; index < command.length; index += 1) {
+      const char = command[index]
+      if (quote === "'") {
+        if (char === "'") quote = ''
+        else target += char
+      } else if (char === quote) {
+        quote = ''
+      } else if (char === '\\' && (!quote || /["\\$\x60]/.test(command[index + 1] || ''))) {
+        target += command[++index] || ''
+      } else if (!quote && (char === '"' || char === "'")) {
+        quote = char
+      } else if (!quote && /\s/.test(char)) {
+        break
+      } else {
+        target += char
+      }
+    }
+    if (!quote && isAbsolute(target)) return target
+  }
+  return undefined
+}
 
-  const contents: string[] = []
-  for (const candidate of candidates) {
+interface LauncherScript {
+  path: string
+  contents: string
+  execTarget?: string
+}
+
+function launcherScripts(hermesBin: string): LauncherScript[] {
+  const scripts: LauncherScript[] = []
+  const seen = new Set<string>()
+  const followShellWrappers = process.platform !== 'win32'
+  let next: string | undefined = hermesBin
+  // A user-bin wrapper may forward to a launcher inside the checkout.
+  for (let depth = 0; next && depth < 4; depth += 1) {
+    let path: string = next
     try {
-      contents.push(readFileSync(candidate, 'utf8'))
+      path = realpathSync(path)
+    } catch {}
+    if (seen.has(path)) break
+    seen.add(path)
+    try {
+      if (followShellWrappers) {
+        const stat = statSync(path)
+        if (!stat.isFile() || stat.size > 1024 * 1024) break
+      }
+      const contents = readFileSync(path, 'utf8')
+      const execTarget = followShellWrappers ? shellExecTarget(contents) : undefined
+      scripts.push({ path, contents, execTarget })
+      next = execTarget && !isPythonExecutable(execTarget) ? execTarget : undefined
     } catch {
-      // Native launchers are expected to be unreadable as text.
+      break
     }
   }
-  return contents
+  return scripts
 }
 
 function resolveFromPath(command: string, env: NodeJS.ProcessEnv): string | undefined {
@@ -55,8 +102,8 @@ function resolveFromPath(command: string, env: NodeJS.ProcessEnv): string | unde
   return undefined
 }
 
-function pythonFromLauncher(hermesBin: string, env: NodeJS.ProcessEnv): string | undefined {
-  for (const contents of launcherContents(hermesBin)) {
+function pythonFromLauncher(scripts: LauncherScript[], env: NodeJS.ProcessEnv): string | undefined {
+  for (const { contents, execTarget } of scripts) {
     const firstLine = contents.split(/\r?\n/, 1)[0] || ''
     const shebang = firstLine.match(/^#!\s*(.+)$/)?.[1]?.trim() || ''
     const shebangParts = shebang.split(/\s+/).filter(Boolean)
@@ -74,8 +121,8 @@ function pythonFromLauncher(hermesBin: string, env: NodeJS.ProcessEnv): string |
       }
     }
 
-    // The standard Unix installer writes a shell wrapper whose exec target is
-    // the selected Hermes virtualenv's absolute Python path.
+    if (execTarget && isPythonExecutable(execTarget) && existsSync(execTarget)) return execTarget
+
     for (const match of contents.matchAll(/["']([^"'\r\n]+)["']/g)) {
       const candidate = match[1]
       if (isAbsolute(candidate) && isPythonExecutable(candidate) && existsSync(candidate)) {
@@ -86,12 +133,13 @@ function pythonFromLauncher(hermesBin: string, env: NodeJS.ProcessEnv): string |
   return undefined
 }
 
-function agentRootCandidates(hermesBin: string, hermesHome: string): string[] {
+function agentRootCandidates(hermesBin: string, hermesHome: string, scripts: LauncherScript[]): string[] {
   const binCandidates = [hermesBin]
   try {
     const real = realpathSync(hermesBin)
     if (real !== hermesBin) binCandidates.push(real)
   } catch {}
+  binCandidates.push(...scripts.map(script => script.path))
 
   const candidates: string[] = []
   for (const candidate of binCandidates) {
@@ -111,14 +159,9 @@ function agentRootCandidates(hermesBin: string, hermesHome: string): string[] {
   return [...new Set(candidates)]
 }
 
-function pythonCandidates(
-  agentRoot: string | undefined,
-  hermesBin: string,
-  env: NodeJS.ProcessEnv,
-): string[] {
+function pythonCandidates(agentRoot: string | undefined, hermesBin: string): string[] {
   const binDir = dirname(hermesBin)
   const candidates: string[] = [
-    pythonFromLauncher(hermesBin, env) || '',
     ...(process.platform === 'win32'
       ? [join(binDir, 'python.exe'), join(binDir, 'python3.exe'), join(binDir, '..', 'python.exe')]
       : [join(binDir, 'python3'), join(binDir, 'python')]),
@@ -162,17 +205,18 @@ export function resolveHermesInstallationEnvironment(
   hermesHome: string,
   env: NodeJS.ProcessEnv = process.env,
 ): HermesInstallationEnvironment {
-  const launcherPython = firstExisting(pythonCandidates(undefined, hermesBin, env))
+  const scripts = launcherScripts(hermesBin)
+  const launcherPython = pythonFromLauncher(scripts, env) || firstExisting(pythonCandidates(undefined, hermesBin))
   const pythonEnvironmentRoot = environmentRootFromPython(launcherPython)
   const pythonRoot = pythonEnvironmentRoot && /^(?:venv|\.venv)$/i.test(basename(pythonEnvironmentRoot))
     ? dirname(pythonEnvironmentRoot)
     : undefined
   const agentRoot = [
     ...(pythonRoot ? [pythonRoot] : []),
-    ...agentRootCandidates(hermesBin, hermesHome),
+    ...agentRootCandidates(hermesBin, hermesHome, scripts),
   ]
     .find(candidate => existsSync(join(candidate, 'run_agent.py')))
-  const python = launcherPython || firstExisting(pythonCandidates(agentRoot, hermesBin, env))
+  const python = launcherPython || firstExisting(pythonCandidates(agentRoot, hermesBin))
   return {
     ...(python ? { python, environmentRoot: environmentRootFromPython(python) } : {}),
     ...(agentRoot ? { agentRoot } : {}),
