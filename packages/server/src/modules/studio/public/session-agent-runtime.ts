@@ -1,3 +1,14 @@
+interface HermesSessionSummaryPage {
+  profile: string
+  sessions: any[]
+}
+
+interface HermesSessionSummaryGroups {
+  profile: string
+  groups: Array<{ source: string; sessions: any[]; hasMore: boolean }>
+  included: any[]
+}
+
 export interface SessionAgentRuntimeDependencies {
   getAvailableModelGroups?: (profile: string) => Promise<any[]>
   deleteHermesSessionForProfile: (...args: any[]) => Promise<boolean>
@@ -8,8 +19,8 @@ export interface SessionAgentRuntimeDependencies {
   getHermesSessionDetailPaginatedForProfile: (...args: any[]) => Promise<any>
   getExactHermesSessionDetailForProfile: (...args: any[]) => Promise<any>
   getHermesUsageStats: (...args: any[]) => Promise<any>
-  listHermesSessionSummaries: (...args: any[]) => Promise<any[]>
-  listHermesSessionSummaryGroups: (...args: any[]) => Promise<any>
+  listHermesSessionSummaries: (source?: string, limit?: number, profile?: string) => Promise<HermesSessionSummaryPage>
+  listHermesSessionSummaryGroups: (limit?: number, profile?: string, includedIds?: string[]) => Promise<HermesSessionSummaryGroups>
   notifyHermesSessionModelChanged: (...args: any[]) => Promise<void>
   stopCodingAgentSessionRun: (...args: any[]) => any
   invalidateCodingAgentSessionRuntime: (...args: any[]) => any
@@ -35,8 +46,8 @@ export const getHermesSessionDetailForProfile = (...args: any[]): Promise<any> =
 export const getHermesSessionDetailPaginatedForProfile = (...args: any[]): Promise<any> => configured().getHermesSessionDetailPaginatedForProfile(...args)
 export const getExactHermesSessionDetailForProfile = (...args: any[]): Promise<any> => configured().getExactHermesSessionDetailForProfile(...args)
 export const getHermesUsageStats = (...args: any[]): Promise<any> => configured().getHermesUsageStats(...args)
-export const listHermesSessionSummaries = (...args: any[]): Promise<any[]> => configured().listHermesSessionSummaries(...args)
-export const listHermesSessionSummaryGroups = (...args: any[]): Promise<any> => configured().listHermesSessionSummaryGroups(...args)
+export const listHermesSessionSummaries: SessionAgentRuntimeDependencies['listHermesSessionSummaries'] = (...args) => configured().listHermesSessionSummaries(...args)
+export const listHermesSessionSummaryGroups: SessionAgentRuntimeDependencies['listHermesSessionSummaryGroups'] = (...args) => configured().listHermesSessionSummaryGroups(...args)
 export const notifyHermesSessionModelChanged = (...args: any[]): Promise<void> => configured().notifyHermesSessionModelChanged(...args)
 export const stopCodingAgentSessionRun = (...args: any[]) => configured().stopCodingAgentSessionRun(...args)
 export const invalidateCodingAgentSessionRuntime = (...args: any[]) => configured().invalidateCodingAgentSessionRuntime(...args)

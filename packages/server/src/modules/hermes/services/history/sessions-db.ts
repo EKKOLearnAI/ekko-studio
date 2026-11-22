@@ -1,4 +1,4 @@
-import { getActiveProfileDir, getHermesBaseDir } from '../profiles/profile'
+import { getActiveProfileLocation, getHermesBaseDir } from '../profiles/profile'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import type { LocalUsageStats, UsageStatsFilters } from '../../../studio/contracts/runs/usage'
@@ -85,6 +85,7 @@ export interface HermesSessionSummaryGroupPage {
 }
 
 export interface HermesSessionSummaryGroupsResult {
+  profile: string
   groups: HermesSessionSummaryGroupPage[]
   included: HermesSessionRow[]
 }
@@ -94,14 +95,22 @@ interface HermesSessionInternalRow extends HermesSessionRow {
 }
 
 function sessionDbPath(): string {
-  return join(getActiveProfileDir(), 'state.db')
+  return sessionDbTarget().path
 }
 
 function sessionDbPathForProfile(profile?: string): string {
+  return sessionDbTarget(profile).path
+}
+
+function sessionDbTarget(profile?: string): { profile: string; path: string } {
   const name = String(profile || '').trim()
-  if (!name) return sessionDbPath()
-  if (name === 'default') return join(getHermesBaseDir(), 'state.db')
-  return join(getHermesBaseDir(), 'profiles', name, 'state.db')
+  if (!name) {
+    const active = getActiveProfileLocation()
+    return { profile: active.name, path: join(active.dir, 'state.db') }
+  }
+  const base = getHermesBaseDir()
+  const dir = name === 'default' ? base : join(base, 'profiles', name)
+  return { profile: name, path: join(dir, 'state.db') }
 }
 
 function normalizeNumber(value: unknown, fallback = 0): number {
@@ -690,12 +699,15 @@ function chainOrderSql(ids: string[]): string {
   return ids.map((_, index) => `WHEN ? THEN ${index}`).join(' ')
 }
 
-async function openSessionDb(profile?: string) {
+function openSessionDb(profile?: string) {
+  return openSessionDbFile(sessionDbPathForProfile(profile))
+}
+
+async function openSessionDbFile(dbPath: string) {
   if (!SQLITE_AVAILABLE) {
     throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
   }
   const { DatabaseSync } = await import('node:sqlite')
-  const dbPath = profile ? sessionDbPathForProfile(profile) : sessionDbPath()
   try {
     return new DatabaseSync(dbPath, { open: true, readOnly: true })
   } catch (err: any) {
@@ -1625,23 +1637,22 @@ export async function getUsageStatsFromDb(
   }
 }
 
-export async function listSessionSummaries(source?: string, limit = 2000, profile?: string): Promise<HermesSessionRow[]> {
-  if (!SQLITE_AVAILABLE) {
-    throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
-  }
-
-  const { DatabaseSync } = await import('node:sqlite')
-  const dbPath = profile ? sessionDbPathForProfile(profile) : sessionDbPath()
-  const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+export async function listSessionSummaries(source?: string, limit = 2000, profile?: string): Promise<{
+  profile: string
+  sessions: HermesSessionRow[]
+}> {
+  const target = sessionDbTarget(profile)
+  const db = await openSessionDbFile(target.path)
 
   try {
     const idx = loadAllSessions(db)
-    return [...idx.byId.values()]
+    const sessions = [...idx.byId.values()]
       .filter(session => !source || session.source === source)
       .filter(session => !isCompressionContinuationChild(session, idx))
       .map(session => projectSessionSummary(session, collectSessionChain(session, idx)))
       .sort(compareSessionSummariesNewestFirst)
       .slice(0, limit)
+    return { profile: target.profile, sessions }
   } finally {
     db.close()
   }
@@ -1652,11 +1663,8 @@ export async function listSessionSummaryGroups(
   profile?: string,
   includedSessionIds: string[] = [],
 ): Promise<HermesSessionSummaryGroupsResult> {
-  if (!SQLITE_AVAILABLE) {
-    throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
-  }
-
-  const db = await openSessionDb(profile)
+  const target = sessionDbTarget(profile)
+  const db = await openSessionDbFile(target.path)
   try {
     const idx = loadAllSessions(db)
     const grouped = new Map<string, HermesSessionRow[]>()
@@ -1683,7 +1691,7 @@ export async function listSessionSummaryGroups(
       }
     })
 
-    return { groups, included: [...included.values()] }
+    return { profile: target.profile, groups, included: [...included.values()] }
   } finally {
     db.close()
   }
@@ -1801,7 +1809,7 @@ export async function searchSessionSummaries(
 
   const trimmed = query.trim()
   if (!trimmed) {
-    const recent = await listSessionSummaries(source, limit)
+    const { sessions: recent } = await listSessionSummaries(source, limit)
     return recent.map(row => ({
       ...row,
       matched_message_id: null,

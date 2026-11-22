@@ -556,7 +556,7 @@ export function clearSessionMessages(id: string): number {
 }
 
 /** Only explicit renames override Agent-owned history titles. */
-export function getStoredSessionTitles(ids: string[]): Map<string, string> {
+export function getStoredSessionTitles(profile: string, ids: string[]): Map<string, string> {
   if (!isSqliteAvailable() || ids.length === 0) return new Map()
   const titles = new Map<string, string>()
   // History page limits are caller-controlled; keep each query below SQLite's
@@ -565,8 +565,10 @@ export function getStoredSessionTitles(ids: string[]): Map<string, string> {
     const batch = ids.slice(offset, offset + 500)
     const placeholders = batch.map(() => '?').join(',')
     const rows = getDb()!.prepare(
-      `SELECT id, title FROM ${SESSIONS_TABLE} WHERE id IN (${placeholders}) AND title_origin = 'manual' AND title IS NOT NULL AND TRIM(title) != ''`,
-    ).all(...batch) as Array<{ id: string; title: string }>
+      `SELECT id, title FROM ${SESSIONS_TABLE}
+       WHERE profile = ? AND id IN (${placeholders})
+         AND title_origin = 'manual' AND title IS NOT NULL AND TRIM(title) != ''`,
+    ).all(profile, ...batch) as Array<{ id: string; title: string }>
     for (const row of rows) titles.set(row.id, row.title)
   }
   return titles
