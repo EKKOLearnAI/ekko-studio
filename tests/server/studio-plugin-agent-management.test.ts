@@ -44,6 +44,19 @@ async function fixture() {
   }
 }
 
+it('publishes the validated optional install guide in the Agent descriptor', async () => {
+  const { agent, runtime, definition } = await fixture()
+  expect(agent.descriptor()).not.toHaveProperty('installGuideUrl')
+  const guide = 'https://example.com/install'
+  definition.management.installGuideUrl = guide
+  const external = new PluginAgentRuntime(runtime, definition)
+  for (const invalid of ['file:///tmp/guide', 'javascript:void(0)', 'https://user:pass@example.com/guide', '/guide']) {
+    definition.management.installGuideUrl = invalid
+    expect(() => new PluginAgentRuntime(runtime, definition)).toThrow(/URL/)
+  }
+  expect(external.descriptor().installGuideUrl).toBe(guide)
+})
+
 it('removes the engine with an exact version, disables auto-update and retains settings and registration', async () => {
   const f = await fixture(), who = { userId: 2, profile: 'work' }
   await f.runtime.context().state.plugin.set('saved', 'keep')

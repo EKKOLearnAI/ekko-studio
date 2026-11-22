@@ -5,6 +5,7 @@ import { PluginError } from '../plugins/errors'
 
 export { isPluginAgentId } from '../plugins/agent-runtime'
 export interface AgentDescriptor {
+  installGuideUrl?: string
   id: string; name: string; vendor: string; description: string; icon: string; origin: 'builtin' | 'plugin'; pluginId?: string
   modes: AgentMode[]; surfaces: string[]; actions: { settings: boolean; checkUpdate: boolean; upgrade: boolean; remove?: boolean; autoUpdate?: boolean }
 }

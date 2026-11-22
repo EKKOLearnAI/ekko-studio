@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises'
 import type { AgentDefinition, AgentEvent, AgentManagementContext, AgentMode, AgentRunContext, AgentRunInput, AgentRunResult, AgentScopedModel, AgentSession, PluginIdentity } from '../../contracts/plugins'
 import { PluginEffects } from './effects'
 import { PluginError } from './errors'
+import { validatePluginLink } from './manifest-details'
 import { identifier, json } from './schema'
 import { agentStatus, agentSettings, agentUpdate, agentUpgrade, agentModels, agentCheckpoint, agentResult, agentEvent } from './agent-contracts'
 import type { PluginRuntime } from './runtime'
@@ -39,6 +40,7 @@ async function closeEffects(effects: PluginEffects): Promise<void> {
 }
 export class PluginAgentRuntime {
   readonly id: `plugin:${string}/${string}`
+  private readonly installGuideUrl?: string
   private sessions = new Map<string, Entry>()
   private updating = false
   private activity = ++activitySequence
@@ -46,12 +48,18 @@ export class PluginAgentRuntime {
   activityRevision() { return this.activity }
   constructor(readonly owner: PluginRuntime, readonly definition: AgentDefinition) {
     validateAgent(definition)
+    const guide = definition.management.installGuideUrl
+    if (guide !== undefined) {
+      validatePluginLink(guide, 'install guide')
+      this.installGuideUrl = guide
+    }
     this.id = pluginAgentId(owner.record.manifest.id, definition.id)
   }
   descriptor() {
     const d = this.definition
     return { id: this.id, pluginId: this.owner.record.manifest.id, name: d.name, vendor: d.vendor, description: d.description || '',
       icon: d.icon || this.owner.record.manifest.icon || '', origin: 'plugin' as const,
+      ...(this.installGuideUrl ? { installGuideUrl: this.installGuideUrl } : {}),
       modes: Object.keys(d.modes) as AgentMode[], surfaces: d.features.surfaces,
       actions: { settings: !!d.management.settings, checkUpdate: !!d.management.checkUpdate, upgrade: !!d.management.upgrade, remove: !!d.management.remove, autoUpdate: !!d.management.supportsAutoUpdate } }
   }

@@ -59,6 +59,8 @@ return { ok: false, content: '无法保存', error: '目标记录不存在' }
 | checkpoint | `{ schemaVersion: 正整数, data: Json }`，变更格式需要兼容或迁移说明。 |
 | session.dispose | void/Promise<void>，释放引擎进程、监听、连接和缓存句柄。 |
 
+外部安装的引擎可声明 `management.installGuideUrl`。CLI 缺失时，返回 `installed: false` 和 `source: 'not-installed'`，卡片即可直接打开安装指引。返回列表或点击卡片上的「刷新」会重新检测。旧宿主忽略此可选字段。
+
 ## Agent 运行的事件与最终结果
 
 `run(input, ctx)` 的 input 含本轮 input、历史 history（不含本轮）、instructions、options。

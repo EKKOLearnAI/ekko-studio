@@ -4,7 +4,7 @@ import { PluginError } from './errors'
 function text(value: unknown, label: string, max = 200): asserts value is string {
   if (typeof value !== 'string' || !value.trim() || value.length > max) throw new PluginError(`Invalid plugin ${label}`)
 }
-function link(value: unknown, label: string): void {
+export function validatePluginLink(value: unknown, label: string): void {
   text(value, label, 2048)
   let url: URL
   try { url = new URL(value) } catch { throw new PluginError(`Invalid plugin ${label} URL`) }
@@ -20,9 +20,9 @@ export function validateDetails(m: PluginManifest): void {
   if (m.author !== undefined) {
     if (!m.author || typeof m.author !== 'object' || Array.isArray(m.author)) throw new PluginError('Invalid plugin author')
     text(m.author.name, 'author name')
-    if (m.author.url !== undefined) link(m.author.url, 'author')
+    if (m.author.url !== undefined) validatePluginLink(m.author.url, 'author')
   }
-  for (const field of ['repository', 'homepage', 'documentation', 'issues', 'changelog'] as const) if (m[field] !== undefined) link(m[field], field)
+  for (const field of ['repository', 'homepage', 'documentation', 'issues', 'changelog'] as const) if (m[field] !== undefined) validatePluginLink(m[field], field)
   if (m.license !== undefined) text(m.license, 'license')
   if (m.keywords !== undefined) {
     if (!Array.isArray(m.keywords) || m.keywords.length > 20) throw new PluginError('Invalid plugin keywords')

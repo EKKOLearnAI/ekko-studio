@@ -100,6 +100,8 @@ export interface AgentDefinition {
   id: string; name: string; vendor: string; description?: string; icon?: string; agentApiVersion: 1
   getStatus(ctx: AgentManagementContext): Promise<AgentStatus>
   management: {
+    /** HTTP(S) documentation for a manually installed engine. Use status source 'not-installed' when it is missing. */
+    installGuideUrl?: string
     settings?(ctx: AgentManagementContext): AgentSettingsTarget | Promise<AgentSettingsTarget>
     checkUpdate?(ctx: AgentManagementContext): Promise<AgentUpdateInfo>
     upgrade?(input: AgentUpgradeRequest, ctx: AgentManagementContext): Promise<{ installedVersion: string; message?: string }>

@@ -16,6 +16,7 @@ const agents = ref<StudioAgent[]>([]), error = ref(''), busy = ref('')
 const busyAction = ref('')
 const updates = ref<Record<string, AgentUpdate>>({})
 const policies = ref<Record<string, AgentUpdatePolicyState>>({})
+const rechecking = ref(false)
 const policyChanging = ref(false)
 let policySequence = 0
 function formatVersion(version: string) {
@@ -46,6 +47,15 @@ async function refreshPolicies() {
     catch { return [agent.id, { autoUpdate: false, autoUpdateSupported: false, status: 'unknown', currentVersion: agent.status.version, latestVersion: '', checkedAt: '' }] as const }
   }))
   if (alive && current === policySequence) policies.value = Object.fromEntries(result)
+}
+function needsInstallGuide(agent: StudioAgent) {
+  return !agent.status.installed && agent.status.source === 'not-installed' && Boolean(agent.installGuideUrl)
+}
+async function recheckInstallation() {
+  if (document.hidden || rechecking.value || busy.value || !agents.value.some(needsInstallGuide)) return
+  rechecking.value = true
+  try { await refresh() }
+  finally { rechecking.value = false }
 }
 async function toggleAutoUpdate(agent: StudioAgent, enabled: boolean) {
   if (policyChanging.value) return
@@ -88,8 +98,21 @@ async function action(agent: StudioAgent, kind: 'settings' | 'check-update' | 'u
   finally { busy.value = ''; busyAction.value = '' }
 }
 let policyTimer: ReturnType<typeof setInterval> | undefined
-onMounted(() => { void refresh(); window.addEventListener('studio.plugins.changed', refresh); policyTimer = setInterval(() => { if (isStoredSuperAdmin()) void refreshPolicies() }, 15000) })
-onBeforeUnmount(() => { alive = false; sequence++; if (policyTimer) clearInterval(policyTimer); window.removeEventListener('studio.plugins.changed', refresh) })
+onMounted(() => {
+  void refresh()
+  window.addEventListener('studio.plugins.changed', refresh)
+  window.addEventListener('focus', recheckInstallation)
+  document.addEventListener('visibilitychange', recheckInstallation)
+  policyTimer = setInterval(() => { if (isStoredSuperAdmin()) void refreshPolicies() }, 15000)
+})
+onBeforeUnmount(() => {
+  alive = false
+  sequence++
+  if (policyTimer) clearInterval(policyTimer)
+  window.removeEventListener('studio.plugins.changed', refresh)
+  window.removeEventListener('focus', recheckInstallation)
+  document.removeEventListener('visibilitychange', recheckInstallation)
+})
 </script>
 
 <template>
@@ -108,7 +131,11 @@ onBeforeUnmount(() => { alive = false; sequence++; if (policyTimer) clearInterva
     </template>
     <template #actions>
       <NButton v-if="agent.actions.settings" size="small" secondary :loading="busy === agent.id && busyAction === 'settings'" :disabled="Boolean(busy)" @click="action(agent, 'settings')">{{ t('sidebar.settings') }}</NButton>
-      <NButton v-if="!agent.status.installed && agent.actions.upgrade && agent.actions.checkUpdate && isStoredSuperAdmin()" size="small" type="primary" secondary :loading="busy === agent.id && busyAction === 'install'" :disabled="Boolean(busy)" @click="action(agent, 'install')">{{ t('codingAgents.installNow') }}</NButton>
+      <template v-if="needsInstallGuide(agent)">
+        <NButton tag="a" :href="agent.installGuideUrl" target="_blank" rel="noopener noreferrer" size="small" type="primary" secondary>{{ t('codingAgents.cursorInstallGuide') }}</NButton>
+        <NButton size="small" secondary :loading="rechecking" :disabled="Boolean(busy)" @click="recheckInstallation">{{ t('codingAgents.refresh') }}</NButton>
+      </template>
+      <NButton v-else-if="!agent.status.installed && agent.actions.upgrade && agent.actions.checkUpdate && isStoredSuperAdmin()" size="small" type="primary" secondary :loading="busy === agent.id && busyAction === 'install'" :disabled="Boolean(busy)" @click="action(agent, 'install')">{{ t('codingAgents.installNow') }}</NButton>
       <NButton v-if="agent.actions.checkUpdate && (agent.status.installed || !agent.actions.upgrade) && !(agent.actions.upgrade && updates[agent.id]?.updateAvailable) && isStoredSuperAdmin()" size="small" secondary :loading="busy === agent.id && busyAction === 'check-update'" :disabled="Boolean(busy)" @click="action(agent, 'check-update')">{{ t('codingAgents.checkUpdate') }}</NButton>
       <NButton v-if="agent.status.installed && agent.actions.upgrade && updates[agent.id]?.updateAvailable && isStoredSuperAdmin()" size="small" type="primary" secondary :loading="busy === agent.id && busyAction === 'upgrade'" :disabled="Boolean(busy)" @click="action(agent, 'upgrade')">{{ t('agentManager.updateToVersion', { version: formatVersion(updates[agent.id]!.latestVersion) }) }}</NButton>
       <NPopconfirm v-if="agent.status.installed && agent.actions.remove && isStoredSuperAdmin()" :positive-text="t('common.confirm')" :negative-text="t('common.cancel')" @positive-click="action(agent, 'remove')">
