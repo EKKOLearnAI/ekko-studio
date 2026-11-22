@@ -594,6 +594,7 @@ export function apply(ctx) {
 
 `getStatus` 返回 `{installed, version, source?, path?, error?}`。普通目录不暴露安装路径。
 管理页的操作绑定 `management.settings/checkUpdate/upgrade/remove`；未提供的操作不显示。
+外部安装的引擎可声明 `management.installGuideUrl`。状态为 `installed:false`、`source:'not-installed'` 时，Agent 卡片提供直达安装文档的链接。
 同时提供 `checkUpdate/upgrade` 的插件 Agent，在 `installed:false` 时显示“安装”。点击后宿主先调用 `checkUpdate` 获取准确版本，再调用 `upgrade` 完成首次安装；安装期间禁用重复操作，成功后刷新状态。已安装时显示“检查更新”及可用的版本升级操作。
 设置回调返回本插件清单中 `slot: 'agent-settings'`的 `viewId` 和可选查询参数；宿主拒绝跨插件页面。该回调与两类全局导航独立，三个 Agent 页面可只声明 agent-settings 与命名 icon，不注册 navigation。
 页面继续通过 `client.mjs` 的 `mount(root, ctx)` 和服务端 `ctx.extensions.rpc.register` 实现。

@@ -160,6 +160,7 @@ secret=true 从前端配置移除；前端未提交该字段时保存旧密钥�
 | --- | --- |
 | AgentDefinition | id（局部标识符）、name/vendor（非空，最多 160）、agentApiVersion:1、getStatus、management、modes、features、runtime 必填；description/icon 可选字符串 |
 | management | settings/checkUpdate/upgrade/remove/supportsAutoUpdate 均可选；upgrade 要求 checkUpdate，supportsAutoUpdate 要求两者；无支持函数默认 false |
+| management.installGuideUrl | 可选的 HTTP(S) 文档地址，最多 2048 字符，禁止 URL 内嵌账号或密码。外部引擎缺失时 getStatus 返回 installed:false、source:'not-installed'，宿主在 Agent 卡片显示安装指引 |
 | modes | global/scoped 至少一个；global.listModels 必需；scoped.protocols 是非空数组，只能含 chat_completions/codex_responses/anthropic_messages |
 | features | surfaces 非空数组，只能含 chat/group-chat/workflow/api；streaming/resume 为必填 boolean；图片文件不是开关 |
 | runtime.createSession | 返回含 run、dispose 的实例；resume=true 时 checkpoint 必需；同实例串行运行 |

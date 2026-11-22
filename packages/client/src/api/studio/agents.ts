@@ -2,10 +2,11 @@ import { request } from '@/api/client'
 
 export type PluginAgentId = `plugin:${string}/${string}`
 export interface StudioAgent {
+  installGuideUrl?: string
   id: string; name: string; vendor: string; description: string; icon: string; origin: 'builtin' | 'plugin'; pluginId?: string
   modes: Array<'scoped' | 'global'>; surfaces: string[]
   actions: { settings: boolean; checkUpdate: boolean; upgrade: boolean; remove?: boolean; autoUpdate?: boolean }
-  status: { installed: boolean; version: string; error?: string }
+  status: { installed: boolean; version: string; source?: string; error?: string }
 }
 export interface AgentUpdate { currentVersion: string; latestVersion: string; updateAvailable: boolean; message?: string }
 export const listStudioAgents = () => request<{ agents: StudioAgent[] }>('/api/studio/agents')
