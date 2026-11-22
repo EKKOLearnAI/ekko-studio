@@ -153,7 +153,8 @@ export class BrowserManager {
   private activeProfileId = ''
   private activeTabId: string | undefined
   private visible = false
-  private bounds: BrowserBounds = { x: 0, y: 0, width: 800, height: 600 }
+  private automationSize = { width: 800, height: 600 }
+  private panelBounds: BrowserBounds = { x: 0, y: 0, ...this.automationSize }
 
   constructor(private readonly window: BrowserWindow, stateRoot: string, private readonly options?: BrowserManagerOptions) {
     this.profileStore = new BrowserProfileStore(stateRoot)
@@ -197,12 +198,15 @@ export class BrowserManager {
   }
 
   setViewport(bounds: BrowserBounds, visible: boolean): DesktopBrowserState {
-    this.bounds = {
+    this.panelBounds = {
       x: Math.max(0, Math.round(bounds.x)),
       y: Math.max(0, Math.round(bounds.y)),
       width: Math.max(1, Math.round(bounds.width)),
       height: Math.max(1, Math.round(bounds.height)),
     }
+    const { width, height } = this.panelBounds
+    // A hidden or collapsed panel can report a 1×1 placeholder.
+    if (visible && width > 1 && height > 1) this.automationSize = { width, height }
     this.visible = visible
     this.syncViews()
     this.emitState()
@@ -1436,6 +1440,8 @@ export class BrowserManager {
   }
 
   private syncViews(): void {
+    const { width, height } = this.automationSize
+    const automationBounds = { x: 0, y: 0, width, height }
     for (const [id, record] of this.records) {
       const userVisible = this.visible && id === this.activeTabId
       // Attaching a WebContentsView can make it the native first responder on
@@ -1452,15 +1458,15 @@ export class BrowserManager {
         if (!host) {
           host = new BrowserWindow({
             show: false, focusable: false, skipTaskbar: true,
-            width: this.bounds.width, height: this.bounds.height,
+            width, height,
             webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false },
           })
           this.automationHosts.set(id, host)
         }
-        host.setSize(this.bounds.width, this.bounds.height)
+        host.setSize(width, height)
         host.contentView.addChildView(record.view)
       }
-      record.view.setBounds(userVisible ? this.bounds : { x: 0, y: 0, width: this.bounds.width, height: this.bounds.height })
+      record.view.setBounds(userVisible ? this.panelBounds : automationBounds)
       record.view.setVisible(userVisible || this.automationVisibleTabs.has(id))
     }
   }
