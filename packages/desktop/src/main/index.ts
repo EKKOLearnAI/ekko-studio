@@ -1154,12 +1154,19 @@ async function loadServiceFailurePage(error: unknown, title = t('desktop.failedS
   if (!mainWindow || mainWindow.isDestroyed()) return
   const msg = escapeHtml(String(error instanceof Error ? error.message : error))
   const pageBackground = process.platform === 'win32' ? 'transparent' : '#1a1a1a'
-  const html = `<html><body style="margin:0;font-family:system-ui;background:${pageBackground};color:#eee">
+  // Electron can retain the splash screen's drag region across navigation.
+  const html = `<html><head><style>
+    button {
+      padding: 8px 14px;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+    }
+  </style></head><body style="margin:0;font-family:system-ui;background:${pageBackground};color:#eee">
     <main style="min-height:100vh;padding:32px;background:#1a1a1a;box-sizing:border-box">
       <h2>${escapeHtml(title)}</h2>
       <pre style="white-space:pre-wrap;color:#f88">${msg}</pre>
-      <button id="retry" style="padding:8px 14px;cursor:pointer">Retry</button>
-      ${activeRemoteServerUrl ? `<button id="return-local" style="padding:8px 14px;cursor:pointer">${escapeHtml(t('desktop.returnLocal'))}</button><p id="switch-error"></p>` : ''}
+      <button id="retry">Retry</button>
+      ${activeRemoteServerUrl ? `<button id="return-local">${escapeHtml(t('desktop.returnLocal'))}</button><p id="switch-error"></p>` : ''}
       <script>
         document.getElementById('retry').addEventListener('click', async function () {
           this.disabled = true
