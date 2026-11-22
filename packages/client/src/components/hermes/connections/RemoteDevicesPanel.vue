@@ -56,7 +56,7 @@ async function add() {
 }
 
 function remove(device: DesktopRemoteDevice) {
-  dialog.warning({
+  dialog.create({
     title: t('remoteDevices.deleteTitle'),
     content: t('remoteDevices.deleteConfirm', { name: device.name }),
     positiveText: t('common.delete'), negativeText: t('common.cancel'),
@@ -71,7 +71,7 @@ function remove(device: DesktopRemoteDevice) {
 }
 
 function switchTo(device: DesktopRemoteDevice | null) {
-  dialog.warning({
+  dialog.create({
     title: t('remoteDevices.switchTitle', { name: device?.name || t('remoteDevices.local') }),
     content: t('remoteDevices.switchHint'),
     positiveText: t('remoteDevices.restart'), negativeText: t('common.cancel'),
@@ -127,12 +127,20 @@ onMounted(load)
         <div class="remote-actions">
           <NTag v-if="state.activeDeviceId === device.id" type="success" :bordered="false">{{ t('remoteDevices.current') }}</NTag>
           <NButton v-else :disabled="disabled" @click="switchTo(device)">{{ t('remoteDevices.connect') }}</NButton>
-          <NButton :disabled="disabled || state.activeDeviceId === device.id" :aria-label="t('remoteDevices.deleteTitle') + ' ' + device.name" @click="remove(device)">{{ t('common.delete') }}</NButton>
+          <NButton type="primary" secondary :disabled="disabled || state.activeDeviceId === device.id" :aria-label="t('remoteDevices.deleteTitle') + ' ' + device.name" @click="remove(device)">{{ t('common.delete') }}</NButton>
         </div>
       </article>
     </template>
 
-    <NModal v-model:show="showAdd" preset="card" :title="t('remoteDevices.add')" class="remote-device-modal" :mask-closable="!busy" :close-on-esc="!busy" :closable="!busy">
+    <NModal
+      v-model:show="showAdd"
+      preset="card"
+      :title="t('remoteDevices.add')"
+      style="width: 480px; max-width: calc(100vw - 32px)"
+      :mask-closable="!busy"
+      :close-on-esc="!busy"
+      :closable="!busy"
+    >
       <NForm @submit.prevent="add">
         <NFormItem :label="t('remoteDevices.name')" :label-props="{ for: 'remote-device-name' }">
           <NInput v-model:value="form.name" :input-props="{ id: 'remote-device-name' }" :placeholder="t('remoteDevices.namePlaceholder')" :maxlength="80" :disabled="busy" autofocus />
@@ -184,7 +192,6 @@ onMounted(load)
 .remote-hint, .remote-url { margin: 6px 0 0; color: $text-secondary; line-height: 1.6; overflow-wrap: anywhere; }
 .remote-actions { flex-shrink: 0; flex-wrap: wrap; }
 .remote-empty { padding: 32px 0; }
-.remote-device-modal { width: min(480px, calc(100vw - 32px)); }
 .remote-form-actions { justify-content: flex-end; margin-top: 20px; }
 
 @media (max-width: $breakpoint-mobile) {
