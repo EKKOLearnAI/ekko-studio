@@ -7,7 +7,7 @@ import { PluginStore } from '../../packages/server/src/modules/studio/services/p
 import type { AgentSession } from '../../packages/plugin-sdk/src'
 import type { PluginPermission } from '../../packages/plugin-sdk/src'
 
-const fixture = vi.hoisted(() => ({ home: '', sessions: new Map<string, any>(), rows: [] as any[], agents: new Map<string, any>(), lease: vi.fn(), revoked: vi.fn(), stop: vi.fn(), usage: vi.fn() }))
+const fixture = vi.hoisted(() => ({ home: '', sessions: new Map<string, any>(), rows: [] as any[], agents: new Map<string, any>(), lease: vi.fn(), revoked: vi.fn(), stop: vi.fn(), usage: vi.fn(), totals: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ config: { get appHome() { return fixture.home } } }))
 vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({ logger: { info() {}, warn() {}, debug() {} } }))
 vi.mock('../../packages/server/src/modules/studio/public/runs/prompt', () => ({ getSystemPrompt: () => 'Studio instructions' }))
@@ -30,7 +30,10 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/compression'
   replaceState() {},
 }))
 vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', () => ({ chatCodingAgentRunManager: { hasSession: () => false, stop: (...args: any[]) => fixture.stop(...args) }, hasChatEkkoBackgroundTasks: () => false, abortChatEkkoBackgroundTasks: async () => {} }))
-vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () => ({ calcAndUpdateUsage: async () => ({}) }))
+vi.mock('../../packages/server/src/modules/studio/services/chat-run/usage', () => ({
+  calcAndUpdateUsage: async (...args: unknown[]) => fixture.totals(...args) ?? {},
+  estimateUsageTokensFromMessages: () => ({ inputTokens: 2, outputTokens: 3 }),
+}))
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/terminal-usage', () => ({ finalizeAbortedRunUsage: () => undefined }))
 vi.mock('../../packages/server/src/modules/studio/services/plugins/event-source', () => ({ publishPluginObservation() {} }))
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/response-stream', () => ({ flushResponseRunToDb() {} }))
@@ -69,6 +72,7 @@ it('runs a global native model with text, image and file inputs and persists eac
     return { content: [{ type: 'text', text: 'Native reply' }], finishReason: 'stop', usage: { inputTokens: 20, outputTokens: 8, isEstimated: false } }
   })
   const image = join(f.workspace, 'image.png'), file = join(f.workspace, 'file.txt')
+  fixture.totals.mockReturnValueOnce({ nativeUsageAvailable: true, inputTokens: 42, outputTokens: 16, cacheReadTokens: 9, cacheWriteTokens: 3 })
   await writeFile(image, new Uint8Array([1, 2, 3])); await writeFile(file, 'file text')
   await f.run({ input: [{ type: 'text', text: 'hello' }, { type: 'image', path: image, name: 'image.png', media_type: 'image/png' }, { type: 'file', path: file, name: 'file.txt', media_type: 'text/plain' }] })
   expect(received.input.history).toEqual([]); expect(received.input.input.map((part: any) => part.type)).toEqual(['text', 'image', 'file'])
@@ -76,17 +80,28 @@ it('runs a global native model with text, image and file inputs and persists eac
   expect(fixture.lease).not.toHaveBeenCalled(); expect(fixture.rows.map(message => message.role)).toEqual(['user', 'assistant'])
   expect(f.events.filter(event => event.event === 'run.completed')).toHaveLength(1)
   expect(f.events.find(event => event.event === 'run.completed').output).toBe('Native reply'); expect(f.states.get('session').isWorking).toBe(false)
+  expect(f.events.find(event => event.event === 'run.completed')).toMatchObject({ inputTokens: 42, outputTokens: 16, cacheReadTokens: 9, cacheWriteTokens: 3 })
   expect(fixture.usage).toHaveBeenCalledWith(expect.objectContaining({ agent: 'plugin:example/assistant', usageScope: 'run', usage: { inputTokens: 20, outputTokens: 8, isEstimated: false } }))
 })
 
 it('injects only the Studio scoped proxy binding and revokes it after a workflow turn', async () => {
   let binding: any
   const f = await setup(async (_input, run) => { binding = run.model; return { content: [{ type: 'text', text: 'Scoped reply' }], finishReason: 'stop' } })
+  fixture.totals.mockReturnValueOnce({ nativeUsageAvailable: true, inputTokens: 14, outputTokens: 6, cacheReadTokens: 0, cacheWriteTokens: 0 })
   await f.run({ mode: 'scoped', model: 'selected', provider: 'custom:test', apiMode: 'chat_completions', source: 'workflow' })
   expect(fixture.lease).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'plugin:example/assistant', provider: 'custom:test', model: 'selected', identity: expect.objectContaining({ userId: 2, surface: 'workflow' }) }))
   expect(binding).toMatchObject({ baseUrl: 'http://studio-proxy/v1', token: 'run-proxy-token' }); expect(binding).not.toHaveProperty('apiKey')
   expect(fixture.revoked).toHaveBeenCalledTimes(1); expect(fixture.sessions.get('session')).toMatchObject({ source: 'workflow', agent_mode: 'scoped', provider: 'custom:test' })
   expect(fixture.usage).not.toHaveBeenCalled()
+  expect(f.events.find(event => event.event === 'run.completed')).toMatchObject({ inputTokens: 14, outputTokens: 6 })
+})
+
+it('records a per-turn estimate when a global engine provides no counters', async () => {
+  const f = await setup(async () => ({ content: [{ type: 'text', text: 'Native reply' }], finishReason: 'stop' }))
+  await f.run()
+  expect(fixture.usage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    usage: { inputTokens: 2, outputTokens: 3, isEstimated: true }, isEstimated: true,
+  }))
 })
 
 it('binds SDK workspace reads and writes to the current persisted workspace on new and resumed runs', async () => {
