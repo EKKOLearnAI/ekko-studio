@@ -16,6 +16,7 @@ import { isSessionUploadAttachment, recordSessionUploadAttachments } from '../fi
 import { getOrCreateSession } from './compression'
 import { persistRunMessages } from './message-persistence'
 import { contentBlocksToString } from './content-blocks'
+import { calcAndUpdateUsage, estimateUsageTokensFromMessages } from './usage'
 import { getSystemPrompt } from '../../public/runs/prompt'
 import type { CodingAgentRunSocketData } from './handle-coding-agent-run'
 import type { ContentBlock, SessionState } from './types'
@@ -200,14 +201,31 @@ export async function handlePluginAgentRun(
       ? outputParts.map(part => part.type === 'text' ? part.text : '').join('') : JSON.stringify(outputParts)
     const assistant = persistRunMessages(state, { sessionId, runMarker: runId, appendToState: true, messages: [{ role: 'assistant', content: output, reasoning: reasoning || null, finish_reason: result.finishReason }] }).messages[0]
     finalized = true
-    // Scoped requests are recorded by the Studio proxy. Native usage is supplied by the plugin.
-    if (mode === 'global' && result.usage?.inputTokens != null && result.usage.outputTokens != null) {
+    // Scoped requests are recorded by the Studio proxy. Never count them again here.
+    if (mode === 'global') {
+      const native = result.usage
+      const usage = native?.inputTokens != null && native.outputTokens != null ? native : {
+        ...estimateUsageTokensFromMessages([
+          { role: 'user', content: input },
+          { role: 'assistant', content: output, reasoning },
+        ]),
+        isEstimated: true,
+      }
       recordSessionUsage({ sessionId, parentRunId: runId, runId, source: 'coding_agent', agent: id as `plugin:${string}/${string}`,
-        usageScope: 'run', profile, model: model.model, usage: result.usage, isEstimated: result.usage.isEstimated,
-        ...(result.usage.costUsd != null ? { cost: { costUsd: result.usage.costUsd, costSource: 'reported' as const } } : {}) })
+        usageScope: 'run', profile, model: model.model, usage, isEstimated: usage.isEstimated,
+        ...(native?.costUsd != null ? { cost: { costUsd: native.costUsd, costSource: 'reported' as const } } : {}) })
     }
     const usage = completeRunUsage(sessionId, runId, assistant.id, (Date.now() - startedAt) / 1000)
-    emit('run.completed', { output, parsed_content: output, parsed_reasoning: reasoning, message_id: assistant.id, run_usage: usage, finish_reason: result.finishReason })
+    const totals = await calcAndUpdateUsage(sessionId, state, emit, { nativeSource: 'coding_agent' })
+    if (!current()) return
+    emit('run.completed', {
+      output, parsed_content: output, parsed_reasoning: reasoning, message_id: assistant.id,
+      run_usage: usage, finish_reason: result.finishReason,
+      ...(totals.nativeUsageAvailable ? {
+        inputTokens: totals.inputTokens, outputTokens: totals.outputTokens,
+        cacheReadTokens: totals.cacheReadTokens, cacheWriteTokens: totals.cacheWriteTokens,
+      } : {}),
+    })
     updateSession(sessionId, { ended_at: Math.floor(Date.now() / 1000), end_reason: 'completed' })
   } catch (error) {
     if (state.activeRunMarker === runId && !state.isAborting) {
