@@ -18,7 +18,6 @@ import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import ExternalLinkIcon from '@/components/common/ExternalLinkIcon.vue'
 import ChevronRightIcon from '@/components/common/ChevronRightIcon.vue'
 import { pluginLinks, safePluginLink } from '@/plugins/navigation'
-import { installedIntegrationBrand, pluginIntegrationBrand } from '@/plugins/integration-brand'
 import { usePluginUpdates } from '@/composables/usePluginUpdates'
 import { usePluginMarket } from '@/composables/usePluginMarket'
 import type { MarketPlugin } from '@/api/studio/plugin-market'
@@ -47,8 +46,6 @@ const search = ref(''), category = ref<PluginCategory>('all'), state = ref('all'
 watch(scope, value => { if (value !== 'all' && ['installed', 'notInstalled'].includes(state.value)) state.value = 'all' })
 const selectedMarketId = ref('')
 const selectedMarket = computed({ get: () => marketEntries.value.find(plugin => plugin.id === selectedMarketId.value), set: (plugin: MarketPlugin | undefined) => { selectedMarketId.value = plugin?.id || '' } })
-const marketBrand = (plugin: MarketPlugin) => pluginIntegrationBrand(plugin.manifestId, plugin.repository)
-const selectedMarketBrand = computed(() => selectedMarket.value && marketBrand(selectedMarket.value))
 const showSubmission = ref(false)
 const developmentGuide = ref<'create' | 'link' | null>(null)
 const selectedId = ref(''), detailTab = ref('overview')
@@ -87,7 +84,6 @@ const developmentCatalog = computed<CatalogPlugin[]>(() => projects.value.map(pr
     }
 }))
 const selected = computed(() => (selectedDevelopment.value ? developmentCatalog.value : catalog.value).find(plugin => plugin.manifest.id === selectedId.value))
-const selectedBrand = computed(() => selected.value && installedIntegrationBrand(selected.value))
 const activeCount = computed(() => snapshot.value.plugins.filter(plugin => plugin.status === 'active').length)
 const localEntries = computed(() => scope.value === 'development' ? developmentCatalog.value : catalog.value)
 const filtered = computed(() => localEntries.value.filter(plugin => matchesPluginCategory(plugin.manifest.permissions, category.value)
@@ -364,15 +360,14 @@ async function logs(id: string) {
         <div v-else-if="!filteredMarket.length && !marketFailed" class="catalog-empty"><NEmpty :description="t(marketEntries.length ? 'studioPlugins.noResults' : 'studioPlugins.marketEmpty')" /></div>
         <div v-else class="plugin-grid" :aria-busy="marketLoading">
           <article v-for="plugin in filteredMarket" :key="plugin.id" class="plugin-card" data-theme-surface="card" :data-testid="`market-plugin-${plugin.manifestId || plugin.id}`">
-            <PluginIcon class="card-icon" :plugin="{ manifest: { name: plugin.name } }" :icon-url="plugin.iconUrl" :integration="marketBrand(plugin)" />
+            <PluginIcon class="card-icon" :plugin="{ manifest: { name: plugin.name } }" :icon-url="plugin.iconUrl" />
             <div class="card-copy">
               <div class="card-heading">
-                <button type="button" class="card-title" @click="selectedMarket = plugin">{{ marketBrand(plugin)?.title || plugin.name }}</button>
+                <button type="button" class="card-title" @click="selectedMarket = plugin">{{ plugin.name }}</button>
                 <NTag v-if="marketInstalled(plugin)" size="small" :bordered="false">{{ installationLabel(marketInstalled(plugin)!) }}</NTag>
                 <span class="status" :class="{ running: marketStatus(plugin) === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + marketStatus(plugin)) }}</span>
               </div>
               <p class="card-description">{{ plugin.description }}</p>
-              <p v-if="marketBrand(plugin)" class="brand-attribution">{{ marketBrand(plugin)?.attribution }}</p>
               <PluginCardMetadata compact :author="plugin.author?.name" :repository="plugin.repository" :stars="plugin.repositoryStars"
                 :version="marketInstalled(plugin)?.manifest.version || plugin.version" :installed="Boolean(marketInstalled(plugin))"
                 :published-version="plugin.version" :update-state="marketUpdateState(plugin)">
@@ -397,14 +392,13 @@ async function logs(id: string) {
       <div v-else-if="!filtered.length" class="catalog-empty"><NEmpty :description="t(localEntries.length || search || category !== 'all' || state !== 'all' ? 'studioPlugins.noResults' : 'studioPlugins.empty')" /></div>
       <div v-else class="plugin-grid">
         <article v-for="plugin in filtered" :key="plugin.manifest.id" class="plugin-card" data-theme-surface="card" :data-testid="`plugin-card-${plugin.manifest.id}`">
-          <PluginIcon class="card-icon" :plugin="plugin" :integration="installedIntegrationBrand(plugin)" />
+          <PluginIcon class="card-icon" :plugin="plugin" />
           <div class="card-copy">
             <div class="card-heading">
-              <button type="button" class="card-title" @click="details(plugin)">{{ installedIntegrationBrand(plugin)?.title || plugin.manifest.name }}</button>
+              <button type="button" class="card-title" @click="details(plugin)">{{ plugin.manifest.name }}</button>
               <NTag v-if="plugin.developmentEntry || pluginInstallationKind(plugin) !== 'package'" size="small" :bordered="false">{{ plugin.developmentEntry || plugin.developmentDirectory ? t('studioPlugins.devLabel') : t('studioPlugins.localVersion') }}</NTag><span class="status" :class="{ running: plugin.status === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + plugin.status) }}</span>
             </div>
             <p class="card-description">{{ plugin.manifest.description || plugin.manifest.id }}</p>
-            <p v-if="installedIntegrationBrand(plugin)" class="brand-attribution">{{ installedIntegrationBrand(plugin)?.attribution }}</p>
             <PluginCardMetadata compact :author="plugin.manifest.author?.name" :repository="pluginRepository(plugin)" :stars="localRelease(plugin)?.repositoryStars"
               :version="plugin.manifest.version" :installed="plugin.installed" :published-version="localPublishedVersion(plugin)" :update-state="localUpdateState(plugin)">
               <div class="card-features"><span v-for="item in categories.slice(1).filter(value => matchesPluginCategory(plugin.manifest.permissions, value))" :key="item">{{ t('studioPlugins.' + item) }}</span></div>
@@ -442,14 +436,13 @@ async function logs(id: string) {
     </NModal>
 
     <NDrawer :show="Boolean(selectedMarket)" :width="'min(560px, 100vw)'" @update:show="value => { if (!value) selectedMarket = undefined }">
-      <NDrawerContent v-if="selectedMarket" :title="selectedMarketBrand?.title || selectedMarket.name" closable>
+      <NDrawerContent v-if="selectedMarket" :title="selectedMarket.name" closable>
         <div class="detail-stack">
           <div class="detail-identity">
-            <PluginIcon :plugin="{ manifest: { name: selectedMarket.name } }" :icon-url="selectedMarket.iconUrl" :integration="selectedMarketBrand" /><span>{{ selectedMarket.version ? 'v' + selectedMarket.version : '' }}</span>
+            <PluginIcon :plugin="{ manifest: { name: selectedMarket.name } }" :icon-url="selectedMarket.iconUrl" /><span>{{ selectedMarket.version ? 'v' + selectedMarket.version : '' }}</span>
             <NTag v-if="marketInstalled(selectedMarket)">{{ installationLabel(marketInstalled(selectedMarket)!) }}</NTag>
             <span class="status" :class="{ running: marketStatus(selectedMarket) === 'active' }"><i aria-hidden="true" />{{ t('studioPlugins.' + marketStatus(selectedMarket)) }}</span>
           </div>
-          <p v-if="selectedMarketBrand" class="brand-attribution">{{ selectedMarketBrand.attribution }}</p>
           <PluginCardMetadata :author="selectedMarket.author?.name" :repository="selectedMarket.repository" :stars="selectedMarket.repositoryStars"
             :version="marketInstalled(selectedMarket)?.manifest.version || selectedMarket.version" :installed="Boolean(marketInstalled(selectedMarket))"
             :published-version="selectedMarket.version" :update-state="marketUpdateState(selectedMarket)" />
@@ -470,14 +463,9 @@ async function logs(id: string) {
     </NDrawer>
 
     <NDrawer :show="Boolean(selected)" :width="'min(560px, 100vw)'" :mask-closable="!installing" :close-on-esc="!installing" @update:show="value => { if (!value) closeDetails() }">
-      <NDrawerContent v-if="selected" :title="selectedBrand?.title || selected.manifest.name" :closable="!installing">
+      <NDrawerContent v-if="selected" :title="selected.manifest.name" :closable="!installing">
         <div class="detail-stack">
-          <div class="detail-identity">
-            <PluginIcon :plugin="selected" :integration="selectedBrand" />
-            <div class="identity-copy"><h3 v-if="!selectedBrand">{{ selected.manifest.name }}</h3><span class="eyebrow">{{ selected.manifest.id }} · v{{ selected.manifest.version }}</span></div>
-            <NTag size="small" :bordered="false">{{ t('studioPlugins.' + selected.status) }}</NTag>
-          </div>
-          <p v-if="selectedBrand" class="brand-attribution">{{ selectedBrand.attribution }}</p>
+          <div class="detail-identity"><PluginIcon :plugin="selected" /><div class="identity-copy"><h3>{{ selected.manifest.name }}</h3><span class="eyebrow">{{ selected.manifest.id }} · v{{ selected.manifest.version }}</span></div><NTag size="small" :bordered="false">{{ t('studioPlugins.' + selected.status) }}</NTag></div>
           <p class="detail-description">{{ selected.manifest.description }}</p>
           <PluginInstallFeedback v-if="installing && installingId === selected.manifest.id && !installConfirmationOpen" loading />
           <NAlert v-if="selected.installed && !selected.developmentEntry && availableUpdates[selected.manifest.id]" type="info">
@@ -605,7 +593,6 @@ p { margin: 0; color: $text-secondary; line-height: 1.7; }
 .status i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status.running { color: $text-secondary; }
 .card-copy { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.brand-attribution { margin: 0; color: $text-secondary; font-size: var(--font-size-sm, 12px); overflow-wrap: anywhere; }
 .card-title { padding: 0; margin: 0; border: 0; background: transparent; color: $text-primary; text-align: start; font: inherit; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; cursor: pointer; }
 .card-title:hover { text-decoration: underline; text-underline-offset: 4px; }
 .card-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 13px; }

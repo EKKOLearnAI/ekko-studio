@@ -1,24 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { pluginIcon, safePluginLink } from '@/plugins/navigation'
-import type { IntegrationBrand } from '@/plugins/integration-brand'
-import IntegrationProductIcon from './IntegrationProductIcon.vue'
-const props = defineProps<{ plugin: { manifest: { name: string; icon?: string } }; compact?: boolean; icon?: string; iconUrl?: string; title?: string; integration?: Readonly<IntegrationBrand> }>()
+const props = defineProps<{ plugin: { manifest: { name: string; icon?: string } }; compact?: boolean; icon?: string; iconUrl?: string; title?: string }>()
 const failed = ref(false)
 const source = computed(() => pluginIcon(props.icon || props.plugin.manifest.icon) || pluginIcon(props.iconUrl) || safePluginLink(props.iconUrl))
-const initial = computed(() => Array.from((props.title || props.plugin.manifest.name).trim())[0]?.toLocaleUpperCase() || '+')
 watch(source, () => { failed.value = false })
 </script>
 
 <template>
-  <span class="plugin-icon" :class="{ compact }" :aria-hidden="integration ? undefined : 'true'">
-    <IntegrationProductIcon v-if="integration" :key="integration.image" :brand="integration">
-      <img v-if="source && !failed" :src="source" alt="" crossorigin="anonymous" referrerpolicy="no-referrer" loading="lazy" @error="failed = true" />
-      <span v-else aria-hidden="true">{{ initial }}</span>
-    </IntegrationProductIcon>
-    <img v-else-if="source && !failed" :src="source" alt="" crossorigin="anonymous" referrerpolicy="no-referrer" loading="lazy" @error="failed = true" />
-    <template v-else>{{ initial }}</template>
-  </span>
+  <span class="plugin-icon" :class="{ compact }" aria-hidden="true"><img v-if="source && !failed" :src="source" alt="" crossorigin="anonymous" referrerpolicy="no-referrer" loading="lazy" @error="failed = true" /><template v-else>{{ Array.from((title || plugin.manifest.name).trim())[0]?.toLocaleUpperCase() || '+' }}</template></span>
 </template>
 
 <style scoped lang="scss">
