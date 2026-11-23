@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { NAlert, NButton, NTag, NPopconfirm, useMessage } from 'naive-ui'
@@ -10,9 +10,12 @@ import { syncPluginAgentOptions } from '@/utils/agent-options'
 import { chatSessionAgentAvatar } from '@/utils/chat-agent-avatar'
 import AgentManagerCard from '@/components/coding-agents/AgentManagerCard.vue'
 import AgentAutoUpdateControl from '@/components/coding-agents/AgentAutoUpdateControl.vue'
+import { usePluginCatalog } from '@/composables/usePluginCatalog'
+import { agentIntegrationBrand } from '@/plugins/integration-brand'
 
 const router = useRouter(), { t } = useI18n(), message = useMessage()
 const agents = ref<StudioAgent[]>([]), error = ref(''), busy = ref('')
+const { snapshot } = usePluginCatalog(computed(() => agents.value.some(agent => agent.id === 'plugin:junie/junie')))
 const busyAction = ref('')
 const updates = ref<Record<string, AgentUpdate>>({})
 const policies = ref<Record<string, AgentUpdatePolicyState>>({})
@@ -122,6 +125,7 @@ onBeforeUnmount(() => {
     :key="agent.id"
     :name="agent.name"
     :logo="chatSessionAgentAvatar({ agent: agent.id }).src"
+    :integration="agentIntegrationBrand(agent.id, snapshot.plugins)"
     :version="agent.status.installed ? formatVersion(agent.status.version) : undefined"
     :data-testid="`agent-card-${agent.id}`"
   >
