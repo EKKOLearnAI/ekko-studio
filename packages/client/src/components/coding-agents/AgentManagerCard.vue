@@ -1,19 +1,26 @@
 <script setup lang="ts">
-defineProps<{ name: string; logo: string; version?: string; description?: string }>()
+import IntegrationProductIcon from '@/components/plugins/IntegrationProductIcon.vue'
+import type { IntegrationBrand } from '@/plugins/integration-brand'
+
+defineProps<{ name: string; logo: string; version?: string; description?: string; integration?: Readonly<IntegrationBrand> }>()
 </script>
 
 <template>
   <section class="agent-card coding-agent-card" data-theme-surface="card">
     <header class="agent-card-header">
       <div class="agent-identity">
-        <img :src="logo" alt="" class="agent-logo" />
+        <IntegrationProductIcon v-if="integration" :key="integration.image" :brand="integration">
+          <img :src="logo" alt="" class="agent-logo" />
+        </IntegrationProductIcon>
+        <img v-else :src="logo" alt="" class="agent-logo" />
         <div class="agent-identity-text">
           <div class="agent-name-row">
-            <h3>{{ name }}</h3>
+            <h3>{{ integration?.title || name }}</h3>
             <slot name="badges" />
           </div>
           <p v-if="version" class="agent-version">{{ version }}</p>
           <p v-else-if="description">{{ description }}</p>
+          <p v-if="integration" class="integration-attribution">{{ integration.attribution }}</p>
           <slot name="summary" />
         </div>
       </div>
