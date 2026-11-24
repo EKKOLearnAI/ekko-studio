@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { CodexRequestAffinity } from '../../public/provider-http'
+import type { ProviderRequestAffinity } from '../../public/provider-http'
 
 /** ChatGPT subscription inference differs from the public OpenAI API. */
 export function withoutUnsupportedReasoning(body: Record<string, any>, reasoning: boolean): Record<string, any> {
@@ -29,18 +29,18 @@ function affinityHash(parts: unknown[]): string {
 
 /** Set both identifiers after applying all body and header overrides. */
 export function applyCodexAffinity(
-  input: { ownerUserId?: number; profile?: string; provider?: string; model?: string; codexAffinity?: CodexRequestAffinity },
+  input: { ownerUserId?: number; profile?: string; provider?: string; model?: string; affinity?: ProviderRequestAffinity },
   body: Record<string, unknown>,
   headers: Record<string, string>,
 ): void {
   for (const name of Object.keys(headers)) {
     if (['session_id', 'session-id', 'x-client-request-id'].includes(name.toLowerCase())) delete headers[name]
   }
-  const { codexAffinity } = input
-  if (!input.ownerUserId || !codexAffinity) return
+  const { affinity } = input
+  if (!input.ownerUserId || !affinity) return
 
-  const scope = [input.ownerUserId, input.profile || 'default', input.provider, codexAffinity.scope]
-  const session = codexAffinity.sessionId
+  const scope = [input.ownerUserId, input.profile || 'default', input.provider, affinity.scope]
+  const session = affinity.sessionId
   if (session) headers.session_id = `studio_s_${affinityHash([...scope, session])}`
 
   const configuredKey = typeof body.prompt_cache_key === 'string' ? body.prompt_cache_key.trim() : ''

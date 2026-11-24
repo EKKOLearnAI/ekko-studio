@@ -93,7 +93,7 @@ interface OpenAIResponsesResponse {
     input_tokens?: number
     output_tokens?: number
     total_tokens?: number
-    input_tokens_details?: { cached_tokens?: number }
+    input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number }
     output_tokens_details?: { reasoning_tokens?: number }
   }
   status?: string
@@ -498,13 +498,15 @@ function normalizeToolCall(id: string, name: string, argumentsText: string): Age
 
 function normalizeUsage(usage: NonNullable<OpenAIResponsesResponse['usage']>): ModelUsage {
   const cacheReadTokens = usage.input_tokens_details?.cached_tokens ?? 0
+  const cacheWriteTokens = usage.input_tokens_details?.cache_write_tokens
   const inputTokens = usage.input_tokens ?? 0
   return {
     ...(typeof usage.cost === 'number' && Number.isFinite(usage.cost) && usage.cost >= 0 ? { costUsd: usage.cost } : {}),
-    inputTokens: Math.max(0, inputTokens - cacheReadTokens),
+    inputTokens: Math.max(0, inputTokens - cacheReadTokens - (cacheWriteTokens ?? 0)),
     outputTokens: usage.output_tokens,
     totalTokens: usage.total_tokens,
     cacheReadTokens,
+    ...(cacheWriteTokens != null ? { cacheWriteTokens } : {}),
     reasoningTokens: usage.output_tokens_details?.reasoning_tokens,
   }
 }

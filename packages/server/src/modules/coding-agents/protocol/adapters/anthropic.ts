@@ -1,4 +1,5 @@
 // Shared Anthropic payload translation for Coding Agent provider proxies.
+import { normalizeTokenUsage } from '../../../studio/public/usage'
 import { anthropicImageSourceToUrl } from './multimodal'
 
 export interface AnthropicAdapterTarget {
@@ -448,6 +449,16 @@ export function mapStopReason(reason: string | null | undefined, hasTools: boole
   return 'end_turn'
 }
 
+/** Messages counts ordinary input, cache reads and cache writes in separate buckets. */
+export function openAiUsageToAnthropic(usage: unknown) {
+  const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = normalizeTokenUsage(usage, {}, { inputIncludesCache: true })
+  return {
+    input_tokens: inputTokens, output_tokens: outputTokens,
+    ...(cacheReadTokens ? { cache_read_input_tokens: cacheReadTokens } : {}),
+    ...(cacheWriteTokens ? { cache_creation_input_tokens: cacheWriteTokens } : {}),
+  }
+}
+
 export function openAiToAnthropicMessage(data: any, target: AnthropicAdapterTarget): any {
   const choice = data?.choices?.[0] || {}
   const message = choice.message || {}
@@ -474,10 +485,7 @@ export function openAiToAnthropicMessage(data: any, target: AnthropicAdapterTarg
     content,
     stop_reason: mapStopReason(choice.finish_reason, hasTools),
     stop_sequence: null,
-    usage: {
-      input_tokens: Number(data?.usage?.prompt_tokens || 0),
-      output_tokens: Number(data?.usage?.completion_tokens || 0),
-    },
+    usage: openAiUsageToAnthropic(data?.usage),
   }
 }
 
@@ -535,9 +543,6 @@ export function openAiResponsesToAnthropicMessage(
     content,
     stop_reason: hasTools ? 'tool_use' : (data?.status === 'incomplete' ? 'max_tokens' : 'end_turn'),
     stop_sequence: null,
-    usage: {
-      input_tokens: Number(data?.usage?.input_tokens || 0),
-      output_tokens: Number(data?.usage?.output_tokens || 0),
-    },
+    usage: openAiUsageToAnthropic(data?.usage),
   }
 }

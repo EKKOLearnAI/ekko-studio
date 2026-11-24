@@ -7,15 +7,17 @@ import { Readable } from 'node:stream'
 import { createModelClient } from '../../packages/ekko-agent/src/model/registry'
 import { resolveAgentGatewayModelConfigs } from '../../packages/server/src/bootstrap/provider-gateway-client'
 
-const fixtures = vi.hoisted(() => ({ home: '', targets: [] as string[], provider: 'deepseek', baseUrl: 'https://upstream.invalid/v1', model: 'family/model', mode: 'chat_completions', calls: [] as any[], respond: undefined as any, providerConfig: {} as Record<string, unknown> }))
+const fixtures = vi.hoisted(() => ({ home: '', targets: [] as string[], provider: 'deepseek', baseUrl: 'https://upstream.invalid/v1', model: 'family/model', mode: 'chat_completions', calls: [] as any[], respond: undefined as any, providerConfig: {} as Record<string, unknown>, cacheConfig: {} as Record<string, unknown> }))
 vi.mock('../../packages/server/src/modules/studio/public/config', () => ({ config: { port: 18648, get appHome() { return fixtures.home } } }))
 vi.mock('../../packages/server/src/modules/studio/public/provider-account', () => ({ providerAccountId: () => 1, providerRequestProfile: () => 'default', withProviderAccount: (_id: unknown, task: any) => task() }))
 vi.mock('../../packages/server/src/modules/studio/public/model-routing', () => ({ canonicalModelRoute: async (value: string) => value, providerRouteNamespace: async (_profile: string, provider: string) => provider, qualifyModelRoute: (provider: string, model: string) => `${provider}/${model}` }))
 vi.mock('../../packages/server/src/modules/studio/public/provider-upstream', () => ({ resolveProviderUpstream: async () => ({ provider: fixtures.provider, baseUrl: fixtures.baseUrl, apiKey: 'server-side-secret', apiMode: fixtures.mode }) }))
-vi.mock('../../packages/server/src/modules/studio/public/provider-config', () => ({ readConfigYamlForProfile: async () => ({ providers: { [fixtures.provider]: fixtures.providerConfig } }) }))
+vi.mock('../../packages/server/src/modules/studio/public/provider-config', () => ({ readConfigYamlForProfile: async () => ({ providers: { [fixtures.provider]: fixtures.providerConfig }, prompt_caching: fixtures.cacheConfig }) }))
 vi.mock('../../packages/server/src/modules/studio/public/provider-runtime', () => ({ getModelRuntimeCapabilities: () => undefined }))
 vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime', () => ({ getSessionAvailableModelGroups: async () => [{ provider: fixtures.provider, models: [fixtures.model], api_mode: fixtures.mode, api_key: '', base_url: fixtures.baseUrl }] }))
-vi.mock('../../packages/server/src/modules/studio/public/usage', () => ({ normalizeTokenUsage: (usage: any) => ({ inputTokens: usage.input_tokens ?? usage.prompt_tokens ?? 0, outputTokens: usage.output_tokens ?? usage.completion_tokens ?? 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0, isEstimated: false }), normalizeUsageCost: () => undefined, recordSessionUsage: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/public/usage', async importOriginal => ({
+  ...await importOriginal<typeof import('../../packages/server/src/modules/studio/public/usage')>(), recordSessionUsage: vi.fn(),
+}))
 vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({ codingAgentRunManager: { handleProxyUsageEvent: vi.fn() } }))
 vi.mock('../../packages/server/src/modules/coding-agents/services/context-policy', () => ({ codingAgentOutputLimit: () => 8192 }))
 
@@ -35,6 +37,7 @@ beforeEach(async () => {
   fixtures.mode = 'chat_completions'
   fixtures.calls = []
   fixtures.providerConfig = {}
+  fixtures.cacheConfig = {}
   fixtures.respond = () => Response.json({ id: 'chat-1', model: 'family/model', choices: [{ index: 0, message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } })
   configureProviderHttp(async input => { fixtures.calls.push(input); return fixtures.respond(input) })
   configureModelGatewayAdapters({
@@ -666,4 +669,155 @@ it.each([false, true].flatMap(stream => [undefined, 'low', 'none'].map(reasoning
   expect(request.status).toBe(200)
   expect(fixtures.calls).toHaveLength(1)
   expect(fixtures.calls[0].body).toMatchObject({ model: 'gemini-4-argon', reasoning_effort: reasoningEffort || 'high', stream })
+})
+
+/** Capture the final HTTP request after provider and model overrides. */
+function captureCacheRequests() {
+  const wire: { body: any; headers: Headers }[] = []
+  configureProviderHttp(createProviderHttpTransport({
+    headers: () => ({}),
+    createFetch: () => async (_url, init) => {
+      wire.push({ body: JSON.parse(String(init?.body)), headers: new Headers(init?.headers) })
+      return fixtures.respond()
+    },
+  }))
+  return wire
+}
+
+it('restores Claude cache breakpoints across turns and respects profile and model settings', async () => {
+  fixtures.provider = 'anthropic'
+  fixtures.mode = 'anthropic_messages'
+  fixtures.model = 'claude-sonnet-4-6'
+  fixtures.baseUrl = 'https://api.anthropic.com'
+  fixtures.respond = () => Response.json({ type: 'message', content: [], usage: { input_tokens: 1, output_tokens: 1 } })
+  const wire = captureCacheRequests()
+  const input = [{ role: 'user', content: 'first' }]
+  const send = async (overrides: Record<string, unknown> = {}) => {
+    const ctx = context({ model: fixtures.provider + '/' + fixtures.model, instructions: 'Stable prefix', input, ...overrides })
+    await serveModelGateway(ctx, 'codex_responses', ['default'])
+    expect(ctx.status).toBe(200)
+  }
+  fixtures.cacheConfig = { cache_ttl: '1h' }
+  await send()
+  input.push({ role: 'assistant', content: 'OK' }, { role: 'user', content: 'next' })
+  await send()
+  const marker = { type: 'ephemeral', ttl: '1h' }
+  expect(wire[0].body.system).toEqual([{ type: 'text', text: 'Stable prefix', cache_control: marker }])
+  expect(wire[1].body.system).toEqual(wire[0].body.system)
+  expect(wire[1].body.messages.at(-1).content[0].cache_control).toEqual(marker)
+  fixtures.cacheConfig = { cache_ttl: 'off' }
+  await send()
+  expect(JSON.stringify(wire[2].body)).not.toContain('cache_control')
+  fixtures.cacheConfig = {}
+  fixtures.providerConfig = { models: { [fixtures.model]: { prompt_caching: false } } }
+  await send()
+  expect(JSON.stringify(wire[3].body)).not.toContain('cache_control')
+  fixtures.providerConfig = { extra_body: { cache_control: marker } }
+  await send()
+  expect(wire[4].body.cache_control).toEqual(marker)
+  expect(wire[4].body.system).toBe('Stable prefix')
+  await send({ cache_control: { type: 'ephemeral' } })
+  expect(wire[5].body.cache_control).toEqual({ type: 'ephemeral' })
+  expect(wire[5].body.system).toBe('Stable prefix')
+  fixtures.providerConfig = {}
+  fixtures.provider = 'custom:compatible'
+  fixtures.model = 'third-party-model'
+  fixtures.baseUrl = 'https://upstream.invalid/'
+  await send()
+  expect(JSON.stringify(wire[6].body)).not.toContain('cache_control')
+})
+
+it('restores the Qwen OAuth system marker only on the translated Chat request', async () => {
+  fixtures.provider = 'qwen-oauth'
+  const wire = captureCacheRequests()
+  const model = 'qwen-oauth/family/model'
+  await serveModelGateway(context({ model, instructions: 'Stable prefix', input: 'Hi' }), 'codex_responses', ['default'])
+  await serveModelGateway(context({ model, messages: [{ role: 'system', content: 'Native prompt' }, { role: 'user', content: 'Hi' }] }), 'chat_completions', ['default'])
+  expect(wire[0].body.messages[0].content).toEqual([{ type: 'text', text: 'Stable prefix', cache_control: { type: 'ephemeral' } }])
+  expect(wire[1].body.messages[0].content).toBe('Native prompt')
+})
+
+it('forwards requested Chat cache options on supported endpoints and keeps strict providers compatible', async () => {
+  const wire = captureCacheRequests()
+  const options = { prompt_cache_key: 'stable-client-key', prompt_cache_retention: '24h' }
+  const send = () => serveModelGateway(context({ model: 'deepseek/family/model', input: 'Hello', ...options }), 'codex_responses', ['default'])
+  fixtures.baseUrl = 'https://api.openai.com/v1'
+  await send()
+  expect(wire[0].body).toMatchObject(options)
+  fixtures.baseUrl = 'https://upstream.invalid/v1'
+  await send()
+  expect(wire[1].body).not.toHaveProperty('prompt_cache_key')
+  expect(wire[1].body).not.toHaveProperty('prompt_cache_retention')
+  fixtures.providerConfig = { extra_body: { prompt_cache_key: 'default' } }
+  await send()
+  expect(wire[2].body.prompt_cache_key).toBe('stable-client-key')
+  expect(wire[2].body).not.toHaveProperty('prompt_cache_retention')
+})
+
+it('keeps OpenCode affinity across calls and separates accounts and sessions', async () => {
+  fixtures.provider = 'opencode-go'
+  const wire = captureCacheRequests()
+  for (const [owner, session] of [[1, 'same'], [1, 'same'], [1, 'other'], [2, 'same']] as const) {
+    const ctx = context({ model: 'opencode-go/family/model', input: 'hello' })
+    ctx.state.user.id = owner
+    ctx.state.modelGateway.sessionId = session
+    await serveModelGateway(ctx, 'codex_responses', ['default'])
+    expect(ctx.status).toBe(200)
+  }
+  const ids = wire.map(call => call.headers.get('x-opencode-session'))
+  expect(ids[0]).toMatch(/^[a-f0-9]{64}$/)
+  expect(ids[1]).toBe(ids[0])
+  expect(new Set(ids).size).toBe(3)
+})
+
+it.each([false, true])('returns Moonshot cache usage in Responses and Messages (stream=%s)', async stream => {
+  fixtures.provider = 'moonshot'
+  const usage = { prompt_tokens: 4096, cached_tokens: 3072, completion_tokens: 12, ...(stream && { prompt_tokens_details: { cached_tokens: 0 } }) }
+  fixtures.respond = () => stream
+    ? new Response('data: ' + JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] }) + '\n\ndata: '
+      + JSON.stringify({ choices: [], usage }) + '\n\ndata: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })
+    : Response.json({ id: 'chat', choices: [{ message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }], usage })
+  const model = 'moonshot/family/model'
+  for (const protocol of ['codex_responses', 'anthropic_messages'] as const) {
+    const ctx = context(protocol === 'codex_responses' ? { model, input: 'Hi', stream }
+      : { model, messages: [{ role: 'user', content: 'Hi' }], stream })
+    await serveModelGateway(ctx, protocol, ['default'])
+    expect(ctx.status).toBe(200)
+    let actual = ctx.body.usage
+    if (stream) {
+      const text = await readGatewayBody(ctx)
+      const events = text.split('\n').filter(line => line.startsWith('data: {')).map(line => JSON.parse(line.slice(6)))
+      actual = protocol === 'codex_responses' ? events.find(e => e.type === 'response.completed').response.usage
+        : events.find(e => e.type === 'message_delta').usage
+    }
+    expect(actual).toMatchObject(protocol === 'codex_responses'
+      ? { input_tokens: 4096, input_tokens_details: { cached_tokens: 3072 }, output_tokens: 12 }
+      : { input_tokens: 1024, cache_read_input_tokens: 3072, output_tokens: 12 })
+  }
+})
+
+it('caches Claude tool history and delivers distinct read/write buckets to the Ekko client', async () => {
+  fixtures.provider = 'anthropic'
+  fixtures.model = 'claude-sonnet-4-6'
+  fixtures.mode = 'anthropic_messages'
+  fixtures.respond = () => Response.json({ type: 'message', content: [{ type: 'text', text: 'OK' }],
+    usage: { input_tokens: 32, cache_read_input_tokens: 3072, cache_creation_input_tokens: 512, output_tokens: 12 } })
+  const wire = captureCacheRequests()
+  const { providerConfig } = resolveAgentGatewayModelConfigs({ provider: fixtures.provider, model: fixtures.model,
+    baseUrl: 'http://127.0.0.1:18648/api/ekko-studio/models/v1', apiKey: 'studio_model_fixture' })
+  const client = createModelClient(providerConfig, { fetch: async (url, init) => {
+    const ctx = context(JSON.parse(String(init?.body)), new URL(url).pathname)
+    const headers = new Headers(init?.headers)
+    ctx.get = (name: string) => headers.get(name) || ''
+    await serveModelGateway(ctx, 'codex_responses', ['default'])
+    expect(ctx.status).toBe(200)
+    return Response.json(ctx.body)
+  } })
+  const reply = await client.create({ messages: [{ role: 'user', content: 'Read the file' },
+    { role: 'assistant', content: '', toolCalls: [{ name: 'read', id: 'call1', arguments: {} }] },
+    { role: 'tool', toolCallId: 'call1', name: 'read', content: 'file contents' }],
+    tools: [{ name: 'read', description: 'Read file', parameters: { type: 'object', properties: {} } }] })
+  expect(wire[0].body.tools.at(-1).cache_control).toEqual({ type: 'ephemeral' })
+  expect(wire[0].body.messages.at(-1).content.at(-1)).toMatchObject({ type: 'tool_result', cache_control: { type: 'ephemeral' } })
+  expect(reply.usage).toMatchObject({ inputTokens: 32, cacheReadTokens: 3072, cacheWriteTokens: 512, outputTokens: 12 })
 })
