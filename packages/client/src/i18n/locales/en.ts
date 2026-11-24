@@ -3958,6 +3958,12 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_31_1: "Some plugin Agents that need external command-line tools show an installation guide in the Agent list when the tool is missing. Studio checks the installation again when you return or click Refresh. (#3902)",
+    new_0_8_31_2: "The chat composer refreshes cumulative token usage as soon as a plugin Agent finishes a turn. Global mode uses usage reported by the Agent when available and estimates it otherwise. (#3905)",
+    new_0_8_31_3: "Removed the retirement and migration notice that appeared when opening Studio group chats. (#3899)",
+    new_0_8_31_4: "The Add Remote Device dialog now fits narrow windows. The Delete button and the delete and switch confirmation dialogs use the Studio theme’s primary color. (#3900)",
+    new_0_8_31_5: "Fixed an issue on macOS that could make the Retry and Switch to this computer (restart) buttons unclickable after a desktop service connection failed. (#3901)",
+    new_0_8_31_6: "Fixed tiny or blank background screenshots when the desktop browser panel is hidden. Studio and plugin screenshots now reuse the last valid viewport size. (#3904)",
     new_0_8_30_1: "Plugins can generate context compression summaries for standard Hermes and Ekko one-to-one chats, during both automatic and manual compression. Studio uses its built-in summarizer when the plugin provides no valid summary. (#3891)",
     new_0_8_30_2: "When a group chat generates a rolling summary in the background without a request account, it uses the authorized room owner’s account to resolve the provider and keeps other accounts’ model settings separate. (#3885)",
     new_0_8_30_3: "For requests using official Codex OAuth, the gateway isolates session identifiers and prompt cache keys by account, profile, and session, and aligns the outgoing request ID with the final cache key. (#3892)",

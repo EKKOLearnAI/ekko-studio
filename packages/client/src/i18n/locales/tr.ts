@@ -168,6 +168,12 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_31_1: "Gerekli haricî komut satırı aracı kurulu değilse bazı eklenti ajanları listede bir kurulum kılavuzu gösterir. Studio’ya dönüldüğünde veya Yenile’ye tıklandığında kurulum durumu tekrar kontrol edilir. (#3902)",
+    new_0_8_31_2: "Bir eklenti ajanı turunu tamamladığında sohbet girişindeki toplam token kullanımı hemen güncellenir. Genel mod, varsa ajanın bildirdiği kullanımı, yoksa tahmini değeri kullanır. (#3905)",
+    new_0_8_31_3: "Studio grup sohbetleri açılırken gösterilen sonlandırma ve geçiş bildirimi kaldırıldı. (#3899)",
+    new_0_8_31_4: "Uzak cihaz ekleme penceresi dar ekranlara uyum sağlar. Sil düğmesi ve cihaz silme ya da değiştirme onayları Studio temasının ana rengini kullanır. (#3900)",
+    new_0_8_31_5: "macOS’te hizmete bağlanılamadığında kurtarma ekranındaki Yeniden dene ve bu bilgisayara geçip yeniden başlatma düğmelerinin tıklanamaması sorunu düzeltildi. (#3901)",
+    new_0_8_31_6: "Masaüstü tarayıcı paneli gizliyken arka plan ekran görüntülerinin çok küçük veya boş çıkması düzeltildi. Studio ve eklentiler son geçerli görüntü alanı boyutunu kullanır. (#3904)",
     new_0_8_30_1: "Eklentiler, standart Hermes ve Ekko bire bir sohbetlerinde otomatik veya elle bağlam sıkıştırma sırasında özet oluşturabilir. Eklenti geçerli bir özet sunmazsa Studio yerleşik özetleyiciyi kullanır. (#3891)",
     new_0_8_30_2: "Grup sohbeti, istek hesabı olmadan arka planda güncellenen bir özet oluşturduğunda Studio, sağlayıcıyı yetkili oda sahibinin hesabıyla bulur. Diğer hesapların model ayarları ayrı kalır. (#3885)",
     new_0_8_30_3: "Resmî Codex OAuth kullanılan isteklerde ağ geçidi, oturum tanımlayıcılarını ve istem önbelleği anahtarlarını hesap, profil ve oturum bazında ayırır. Giden istek kimliği son önbellek anahtarıyla eşleşir. (#3892)",

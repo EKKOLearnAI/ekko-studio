@@ -3541,6 +3541,12 @@ jobTriggered: 'Job declenche',
   },
 
   changelog: {
+    new_0_8_31_1: "Si l’outil en ligne de commande requis est absent, certains agents de plugins proposent un guide d’installation dans la liste des agents. Studio vérifie à nouveau l’installation au retour ou après un clic sur Actualiser. (#3902)",
+    new_0_8_31_2: "La zone de saisie du chat actualise l’utilisation cumulée des jetons dès qu’un agent de plugin termine son tour. Le mode global privilégie les valeurs fournies par l’agent et les estime si elles sont absentes. (#3905)",
+    new_0_8_31_3: "L’avis de retrait et de migration qui s’affichait à l’ouverture des chats de groupe de Studio a été supprimé. (#3899)",
+    new_0_8_31_4: "La fenêtre d’ajout d’un appareil distant s’adapte aux fenêtres étroites. Le bouton de suppression et les confirmations de suppression ou de changement d’appareil reprennent la couleur principale du thème Studio. (#3900)",
+    new_0_8_31_5: "Correction d’un problème sous macOS qui pouvait rendre les boutons Réessayer et Passer à cet ordinateur (redémarrer) inaccessibles après un échec de connexion au service. (#3901)",
+    new_0_8_31_6: "Correction des captures en arrière-plan minuscules ou vides quand le panneau du navigateur de bureau est masqué. Studio et les plugins réutilisent la dernière taille d’affichage valide. (#3904)",
     new_0_8_30_1: "Les plugins peuvent produire les résumés de compression du contexte pour les chats individuels standard de Hermes et Ekko, en mode automatique ou manuel. Studio utilise son moteur intégré si le plugin ne fournit aucun résumé valide. (#3891)",
     new_0_8_30_2: "Lorsqu’un chat de groupe génère un résumé continu en arrière-plan sans compte associé à la requête, Studio sélectionne le fournisseur via le compte autorisé du propriétaire du salon. Les réglages des autres comptes restent séparés. (#3885)",
     new_0_8_30_3: "Pour les requêtes avec OAuth officiel de Codex, la passerelle isole les identifiants de session et les clés de cache des invites par compte, profil et session. L’identifiant de la requête sortante correspond à la clé de cache finale. (#3892)",

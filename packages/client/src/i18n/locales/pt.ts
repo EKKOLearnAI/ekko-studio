@@ -3541,6 +3541,12 @@ jobTriggered: 'Job acionado',
   },
 
   changelog: {
+    new_0_8_31_1: "Quando a ferramenta externa de linha de comando está ausente, alguns agentes de plugins mostram um guia de instalação na lista de agentes. O Studio verifica a instalação novamente ao retornar ou clicar em Atualizar. (#3902)",
+    new_0_8_31_2: "O campo de chat atualiza o uso acumulado de tokens assim que um agente de plugin termina um turno. O modo global usa os valores informados pelo agente quando disponíveis e uma estimativa nos demais casos. (#3905)",
+    new_0_8_31_3: "Foi removido o aviso de descontinuação e migração exibido ao abrir chats em grupo do Studio. (#3899)",
+    new_0_8_31_4: "A janela para adicionar um dispositivo remoto se adapta a janelas estreitas. O botão de exclusão e as confirmações de exclusão e troca de dispositivo usam a cor principal do tema do Studio. (#3900)",
+    new_0_8_31_5: "Foi corrigido um problema no macOS que podia impedir o uso dos botões Tentar novamente e Mudar para este computador (reiniciar) após falhar a conexão com o serviço. (#3901)",
+    new_0_8_31_6: "Foram corrigidas capturas em segundo plano muito pequenas ou vazias quando o painel do navegador para desktop está oculto. O Studio e os plugins usam o último tamanho de visualização válido. (#3904)",
     new_0_8_30_1: "Plugins podem gerar resumos de compactação de contexto em chats individuais padrão do Hermes e do Ekko, tanto na compactação automática quanto na manual. O Studio usa o resumidor integrado quando o plugin não fornece um resumo válido. (#3891)",
     new_0_8_30_2: "Quando um chat em grupo gera um resumo contínuo em segundo plano sem uma conta associada à solicitação, o Studio usa a conta autorizada do proprietário da sala para localizar o provedor e mantém separadas as configurações de outras contas. (#3885)",
     new_0_8_30_3: "Nas solicitações com OAuth oficial do Codex, o gateway isola identificadores de sessão e chaves de cache de prompts por conta, perfil e sessão. O ID da solicitação de saída corresponde à chave final do cache. (#3892)",
