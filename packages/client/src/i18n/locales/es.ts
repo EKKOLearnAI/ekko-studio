@@ -3541,6 +3541,12 @@ jobTriggered: 'Job ejecutado',
   },
 
   changelog: {
+    new_0_8_31_1: "Algunos agentes de plugins muestran una guía en la lista de agentes cuando falta la herramienta de línea de comandos que necesitan. Studio vuelve a comprobar la instalación al regresar o pulsar Actualizar. (#3902)",
+    new_0_8_31_2: "El cuadro de chat actualiza el uso acumulado de tokens al terminar cada turno de un agente de plugin. En modo global se usa el consumo informado por el agente cuando está disponible y se estima en los demás casos. (#3905)",
+    new_0_8_31_3: "Se eliminó el aviso de retirada y migración que aparecía al abrir los chats grupales de Studio. (#3899)",
+    new_0_8_31_4: "El cuadro para añadir un dispositivo remoto se adapta a ventanas estrechas. El botón Eliminar y las confirmaciones para eliminar y cambiar de dispositivo usan el color principal del tema de Studio. (#3900)",
+    new_0_8_31_5: "Se corrigió un problema de macOS que podía impedir pulsar Reintentar o Cambiar a este equipo (reiniciar) después de fallar la conexión con el servicio de escritorio. (#3901)",
+    new_0_8_31_6: "Se corrigieron las capturas en segundo plano diminutas o vacías cuando se oculta el panel del navegador de escritorio. Studio y los plugins reutilizan el último tamaño de vista válido. (#3904)",
     new_0_8_30_1: "Los plugins pueden generar resúmenes de compresión de contexto para chats individuales normales de Hermes y Ekko, tanto en la compresión automática como en la manual. Studio usa el generador integrado cuando el plugin no proporciona un resumen válido. (#3891)",
     new_0_8_30_2: "Cuando un chat grupal genera un resumen acumulativo en segundo plano sin una cuenta asociada a la solicitud, Studio usa la cuenta autorizada del propietario de la sala para buscar el proveedor y mantiene separada la configuración de otras cuentas. (#3885)",
     new_0_8_30_3: "Para las solicitudes con OAuth oficial de Codex, la pasarela aísla los identificadores de sesión y las claves de caché de prompts por cuenta, perfil y sesión. El ID de la solicitud saliente coincide con la clave de caché final. (#3892)",

@@ -3541,6 +3541,12 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_8_31_1: "Bei manchen Plugin-Agents zeigt die Agent-Liste eine Anleitung an, wenn das benötigte Kommandozeilenwerkzeug fehlt. Studio prüft die Installation bei der Rückkehr oder beim Aktualisieren erneut. (#3902)",
+    new_0_8_31_2: "Das Chat-Eingabefeld aktualisiert den kumulierten Tokenverbrauch, sobald ein Plugin-Agent einen Zug beendet. Im globalen Modus verwendet Studio gemeldete Werte, sofern vorhanden, und sonst Schätzwerte. (#3905)",
+    new_0_8_31_3: "Der Hinweis zur Einstellung und Migration wurde beim Öffnen der Studio-Gruppenchats entfernt. (#3899)",
+    new_0_8_31_4: "Der Dialog zum Hinzufügen eines Remote-Geräts passt sich schmalen Fenstern an. Die Löschen-Schaltfläche und die Bestätigungsdialoge zum Löschen und Wechseln von Geräten verwenden die Primärfarbe des Studio-Designs. (#3900)",
+    new_0_8_31_5: "Ein Problem unter macOS wurde behoben, durch das nach einer fehlgeschlagenen Dienstverbindung die Schaltflächen zum Wiederholen und zum Wechsel auf diesen Computer mit Neustart nicht anklickbar sein konnten. (#3901)",
+    new_0_8_31_6: "Winzige oder leere Hintergrund-Screenshots bei ausgeblendetem Desktop-Browserbereich wurden korrigiert. Studio und Plugins verwenden die letzte gültige Ansichtsgröße. (#3904)",
     new_0_8_30_1: "Plugins können Zusammenfassungen für die automatische und manuelle Kontextkomprimierung in regulären Einzelchats mit Hermes und Ekko erstellen. Liefert das Plugin keine gültige Zusammenfassung, verwendet Studio die integrierte Zusammenfassung. (#3891)",
     new_0_8_30_2: "Wenn ein Gruppenchat im Hintergrund eine fortlaufende Zusammenfassung ohne zugeordnetes Konto für die Anfrage erzeugt, ermittelt Studio den Anbieter anhand des berechtigten Kontos des Rauminhabers. Modelleinstellungen anderer Konten bleiben getrennt. (#3885)",
     new_0_8_30_3: "Bei Anfragen mit offiziellem Codex OAuth trennt das Gateway Sitzungskennungen und Prompt-Cache-Schlüssel nach Konto, Profil und Sitzung. Die ausgehende Anfrage-ID entspricht dem endgültigen Cache-Schlüssel. (#3892)",
