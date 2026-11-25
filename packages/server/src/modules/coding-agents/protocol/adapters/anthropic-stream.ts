@@ -3,6 +3,7 @@ import { readSseFrameTexts } from '../sse'
 import {
   createAnthropicToolInputSchemas,
   mapStopReason,
+  openAiUsageToAnthropic,
   normalizeAnthropicToolArguments,
   shouldPreserveReasoningContent,
   type AnthropicAdapterTarget,
@@ -51,7 +52,7 @@ export async function* openAiChatSseToAnthropicEvents(
   let textBlockIndex: number | null = null
   let nextIndex = 0
   let stopReason: string | null = null
-  let outputTokens = 0
+  let usage: Record<string, unknown> | undefined
   const toolBlocks = new Map<number, { blockIndex: number; id: string; name: string; started: boolean }>()
 
   yield {
@@ -150,9 +151,7 @@ export async function* openAiChatSseToAnthropicEvents(
       for (const dataLine of extractSseData(event)) {
         if (!dataLine || dataLine === '[DONE]') continue
         const data = safeJsonParse(dataLine)
-        if (data?.usage?.completion_tokens != null) {
-          outputTokens = Number(data.usage.completion_tokens)
-        }
+        if (data?.usage) usage = { ...usage, ...data.usage }
         const choice = data?.choices?.[0]
         if (!choice) continue
 
@@ -235,7 +234,7 @@ export async function* openAiChatSseToAnthropicEvents(
     data: {
       type: 'message_delta',
       delta: { stop_reason: openAiFinishToAnthropic(stopReason, toolBlocks.size > 0), stop_sequence: null },
-      usage: { output_tokens: outputTokens },
+      usage: usage ? openAiUsageToAnthropic(usage) : { output_tokens: 0 },
     },
   }
   yield { type: 'message_stop', data: { type: 'message_stop' } }
@@ -252,7 +251,7 @@ export async function* openAiResponsesSseToAnthropicEvents(
   let textBlockStopped = false
   let nextIndex = 0
   let stopReason: string | null = null
-  let outputTokens = 0
+  let usage: Record<string, unknown> | undefined
   const toolInputSchemas = createAnthropicToolInputSchemas(anthropicTools)
   type ToolBlock = {
     blockIndex: number
@@ -450,9 +449,9 @@ export async function* openAiResponsesSseToAnthropicEvents(
           }
         }
 
-        if (eventType === 'response.completed') {
+        if (eventType === 'response.completed' || eventType === 'response.incomplete') {
           const response = data?.response || data
-          outputTokens = Number(response?.usage?.output_tokens || outputTokens)
+          usage = response?.usage
           stopReason = response?.status === 'incomplete' ? 'length' : 'stop'
         }
       }
@@ -473,7 +472,7 @@ export async function* openAiResponsesSseToAnthropicEvents(
     data: {
       type: 'message_delta',
       delta: { stop_reason: openAiFinishToAnthropic(stopReason, toolBlocks.length > 0), stop_sequence: null },
-      usage: { output_tokens: outputTokens },
+      usage: usage ? openAiUsageToAnthropic(usage) : { output_tokens: 0 },
     },
   }
   yield { type: 'message_stop', data: { type: 'message_stop' } }

@@ -1,5 +1,5 @@
 import type { Context } from 'koa'
-import { fetchProviderHttp, isCodexInferenceRequest, type ProviderHttpRequest, type CodexRequestAffinity } from '../../studio/public/provider-http'
+import { fetchProviderHttp, isCodexInferenceRequest, type ProviderHttpRequest, type ProviderRequestAffinity } from '../../studio/public/provider-http'
 import { openAiResponsesSseToResponsesEvents } from './adapters/responses-stream'
 import { providerAccountId, providerRequestProfile } from '../../studio/public/provider-account'
 
@@ -7,7 +7,7 @@ import { providerAccountId, providerRequestProfile } from '../../studio/public/p
 export type AgentGatewayRequest = ProviderHttpRequest
 
 /** Call after target authorization. A routeKey and a requestId identify requests, not sessions. */
-export function codexRequestAffinity(ctx: Context, target: { chatSessionId?: string; agentSessionId?: string; agentId?: string }): CodexRequestAffinity {
+export function providerRequestAffinity(ctx: Context, target: { chatSessionId?: string; agentSessionId?: string; agentId?: string }): ProviderRequestAffinity {
   const promptCacheKey = (ctx.request.body as { prompt_cache_key?: unknown } | undefined)?.prompt_cache_key
   const boundSession = ctx.state.modelGateway?.sessionId
   if (boundSession) return { scope: 'bridge', sessionId: boundSession, promptCacheKey }

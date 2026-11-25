@@ -91,6 +91,7 @@ export function normalizeTokenUsage(
 
   const rawInput = finiteToken(usage.input_tokens, usage.inputTokens, usage.prompt_tokens, usage.promptTokens)
   const rawOutput = finiteToken(usage.output_tokens, usage.outputTokens, usage.completion_tokens, usage.completionTokens)
+  const detailedCacheRead = finiteToken(inputDetails.cached_tokens, inputDetails.cachedTokens)
   const rawCacheRead = finiteToken(
     usage.cache_read_tokens,
     usage.cacheReadTokens,
@@ -98,13 +99,17 @@ export function normalizeTokenUsage(
     usage.cached_input_tokens,
     usage.prompt_cache_hit_tokens,
     usage.cache_hit_tokens,
-    inputDetails.cached_tokens,
-    inputDetails.cachedTokens,
+    // Some Chat relays supply a zero-filled details object alongside Moonshot's actual count.
+    detailedCacheRead || finiteToken(usage.cached_tokens),
+    detailedCacheRead,
   )
   const rawCacheWrite = finiteToken(
     usage.cache_write_tokens,
     usage.cacheWriteTokens,
     usage.cache_creation_input_tokens,
+    inputDetails.cache_write_tokens,
+    inputDetails.cache_creation_input_tokens,
+    inputDetails.cache_creation_tokens,
   )
   const rawReasoning = finiteToken(
     usage.reasoning_tokens,

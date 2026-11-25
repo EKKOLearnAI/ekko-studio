@@ -786,6 +786,8 @@ export function responsesToOpenAiChat(body: any, target: ResponsesAdapterTarget,
   return {
     model: target.model,
     messages: responsesInputToChatMessages(body, target),
+    ...(typeof body?.prompt_cache_key === 'string' ? { prompt_cache_key: body.prompt_cache_key } : {}),
+    ...(typeof body?.prompt_cache_retention === 'string' ? { prompt_cache_retention: body.prompt_cache_retention } : {}),
     ...(typeof body?.max_output_tokens === 'number' ? { max_tokens: body.max_output_tokens } : {}),
     ...(typeof body?.temperature === 'number' ? { temperature: body.temperature } : {}),
     ...(typeof body?.top_p === 'number' ? { top_p: body.top_p } : {}),
@@ -917,6 +919,7 @@ export function responsesToAnthropicMessages(body: any, target: ResponsesAdapter
   return {
     model: target.model,
     messages: responsesInputToAnthropicMessages({ ...body, input }, target),
+    ...(body?.cache_control !== undefined ? { cache_control: body.cache_control } : {}),
     ...(system ? { system } : {}),
     max_tokens: typeof body?.max_output_tokens === 'number'
       ? body.max_output_tokens

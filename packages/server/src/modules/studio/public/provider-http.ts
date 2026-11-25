@@ -2,7 +2,7 @@ import { codexInferenceBody, isCodexInferenceRequest } from '../services/provide
 export { createProviderHttpTransport } from '../services/providers/http-transport'
 export { codexInferenceBody, isCodexInferenceRequest, withoutUnsupportedReasoning } from '../services/providers/codex-requests'
 
-export interface CodexRequestAffinity {
+export interface ProviderRequestAffinity {
   scope: string
   sessionId?: string
   promptCacheKey?: unknown
@@ -15,8 +15,8 @@ export interface ProviderHttpRequest {
   ownerUserId?: number
   provider?: string
   model?: string
-  sessionId?: string
-  codexAffinity?: CodexRequestAffinity
+  translatedTo?: 'chat_completions' | 'anthropic_messages'
+  affinity?: ProviderRequestAffinity
   body: unknown
   headers?: Record<string, string>
   signal?: AbortSignal
