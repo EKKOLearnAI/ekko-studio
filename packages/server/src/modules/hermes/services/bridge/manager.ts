@@ -7,7 +7,7 @@ import { config } from '../../../studio/public/config'
 import { OPENROUTER_APP_HEADERS } from '../../../studio/public/openrouter-attribution'
 import { resolveHermesInstallationEnvironment } from '../runtime/installation'
 import { detectHermesHome, getHermesBin } from '../runtime/path'
-import { AgentBridgeClient, DEFAULT_AGENT_BRIDGE_ENDPOINT } from './client'
+import { AgentBridgeClient, DEFAULT_AGENT_BRIDGE_ENDPOINT, type AgentBridgeResponse } from './client'
 import { prepareConfiguredCopilotRuntime } from '../providers/copilot-runtime'
 
 const DEFAULT_AGENT_BRIDGE_STARTUP_TIMEOUT_MS = 120000
@@ -114,7 +114,20 @@ export function buildAgentBridgeProcessEnv(endpoint: string, hermesHome: string 
     ...(agentRoot ? { HERMES_AGENT_ROOT: agentRoot } : {}),
   }
   delete env.ANTHROPIC_AUTH_TOKEN
+  // This child is the broker; only its own worker launches may set these.
+  delete env.HERMES_AGENT_BRIDGE_WORKER_PROFILE
+  delete env.HERMES_AGENT_BRIDGE_BROKER_PID
   return env
+}
+
+function isWorkerBridge(response: AgentBridgeResponse): boolean {
+  return response.mode !== 'broker' && typeof response.profile === 'string'
+}
+
+class WorkerBridgeEndpointError extends Error {
+  constructor(endpoint: string) {
+    super(`Agent Bridge endpoint ${endpoint} is a worker; a broker endpoint is required`)
+  }
 }
 
 function pathCandidates(agentRoot?: string): string[] {
@@ -543,7 +556,8 @@ function forceKillBridgeEndpointProcesses(endpoint: string): void {
 export class AgentBridgeManager {
   endpoint: string
   private readonly options: AgentBridgeManagerOptions
-  private readonly explicitEndpoint: boolean
+  private explicitEndpoint: boolean
+  private readonly inheritedWorkerEndpoint: boolean
   private child: ChildProcess | null = null
   private attached = false
   private starting: Promise<void> | null = null
@@ -558,6 +572,10 @@ export class AgentBridgeManager {
     this.options = options
     this.explicitEndpoint = Boolean(options.endpoint || process.env.HERMES_AGENT_BRIDGE_ENDPOINT)
     this.endpoint = options.endpoint || process.env.HERMES_AGENT_BRIDGE_ENDPOINT || DEFAULT_AGENT_BRIDGE_ENDPOINT
+    this.inheritedWorkerEndpoint = !options.endpoint && Boolean(
+      process.env.HERMES_AGENT_BRIDGE_ENDPOINT &&
+      (process.env.HERMES_AGENT_BRIDGE_WORKER_PROFILE || process.env.HERMES_AGENT_BRIDGE_BROKER_PID),
+    )
   }
 
   get running(): boolean {
@@ -733,7 +751,7 @@ export class AgentBridgeManager {
         timeoutMs: options.timeoutMs ?? 1000,
         connectRetryMs: options.connectRetryMs ?? 0,
       })
-      await client.ping()
+      if (isWorkerBridge(await client.ping())) throw new WorkerBridgeEndpointError(endpoint)
       return {
         ...readiness,
         status: 'ready',
@@ -1089,7 +1107,7 @@ export class AgentBridgeManager {
         })
         while (!startupSettled && !child.killed) {
           try {
-            await client.ping()
+            if (isWorkerBridge(await client.ping())) throw new WorkerBridgeEndpointError(this.endpoint)
             markReady()
             return
           } catch {
@@ -1113,14 +1131,28 @@ export class AgentBridgeManager {
         timeoutMs: envPositiveInt('HERMES_AGENT_BRIDGE_ATTACH_TIMEOUT_MS') ?? 5000,
         connectRetryMs: envPositiveInt('HERMES_AGENT_BRIDGE_ATTACH_RETRY_MS') ?? 5000,
       })
-      await client.ping()
+      if (isWorkerBridge(await client.ping())) {
+        if (!this.inheritedWorkerEndpoint || this.endpoint === DEFAULT_AGENT_BRIDGE_ENDPOINT) {
+          throw new WorkerBridgeEndpointError(this.endpoint)
+        }
+        // A worker shell exports its own socket. Do not override an explicit
+        // option or a verified broker configured through the environment.
+        this.endpoint = DEFAULT_AGENT_BRIDGE_ENDPOINT
+        this.explicitEndpoint = false
+        process.env.HERMES_AGENT_BRIDGE_ENDPOINT = this.endpoint
+        return this.attachExistingBridge()
+      }
       this.child = null
       this.attached = true
       this.ready = true
       this.restartAttempts = 0
+      // Match prepareEndpoint's spawn path so subsequent default clients use
+      // the same broker even when startup only attached to an existing one.
+      process.env.HERMES_AGENT_BRIDGE_ENDPOINT = this.endpoint
       logger.info('[agent-bridge] attached to existing bridge at %s', this.endpoint)
       return true
     } catch (err) {
+      if (err instanceof WorkerBridgeEndpointError) throw err
       logger.debug(err, '[agent-bridge] no reusable bridge at %s', this.endpoint)
       this.attached = false
       this.ready = false

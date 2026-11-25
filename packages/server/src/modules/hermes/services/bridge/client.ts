@@ -261,13 +261,18 @@ export class AgentBridgeError extends Error {
 }
 
 export class AgentBridgeClient {
-  readonly endpoint: string
+  private readonly configuredEndpoint?: string
+  get endpoint(): string {
+    return this.configuredEndpoint || process.env.HERMES_AGENT_BRIDGE_ENDPOINT || DEFAULT_AGENT_BRIDGE_ENDPOINT
+  }
   readonly timeoutMs: number
   readonly connectRetryMs: number
   private lock: Promise<unknown> = Promise.resolve()
 
   constructor(options: AgentBridgeOptions = {}) {
-    this.endpoint = options.endpoint || process.env.HERMES_AGENT_BRIDGE_ENDPOINT || DEFAULT_AGENT_BRIDGE_ENDPOINT
+    // Desktop creates chat clients before the manager selects its broker.
+    // Explicit endpoints stay pinned; default clients follow that selection.
+    this.configuredEndpoint = options.endpoint
     this.timeoutMs = options.timeoutMs ?? envPositiveInt('HERMES_AGENT_BRIDGE_TIMEOUT_MS') ?? DEFAULT_AGENT_BRIDGE_TIMEOUT_MS
     this.connectRetryMs = options.connectRetryMs ?? envPositiveInt('HERMES_AGENT_BRIDGE_CONNECT_RETRY_MS') ?? 5000
   }
