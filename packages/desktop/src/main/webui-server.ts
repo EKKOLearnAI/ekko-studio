@@ -730,6 +730,10 @@ export async function startWebUiServer(port = DEFAULT_PORT): Promise<string> {
     // available after selection without influencing which Hermes wins.
     PATH: runtimePath,
   }, hermesSelection)
+  // Desktop launches a dedicated Studio server with its own broker endpoint.
+  // Clear inherited worker identity vars if Desktop was started from a worker shell.
+  delete env.HERMES_AGENT_BRIDGE_WORKER_PROFILE
+  delete env.HERMES_AGENT_BRIDGE_BROKER_PID
 
   const released = port > 0 && await releaseOccupiedWebUiPort(port, token)
   if (released) {

@@ -5,6 +5,7 @@ const fs = require('node:fs')
 require.extensions['.py'] = () => {
   const endpoint = process.argv[process.argv.indexOf('--endpoint') + 1]
   const profile = process.env.HERMES_AGENT_BRIDGE_WORKER_PROFILE
+  const respondAsWorker = Boolean(profile || process.env.STUDIO_TEST_FORCE_WORKER_PING === '1')
   fs.writeFileSync(process.env.STUDIO_TEST_BRIDGE_ENV_FILE, JSON.stringify({
     endpoint: process.env.HERMES_AGENT_BRIDGE_ENDPOINT,
     profile,
@@ -18,8 +19,8 @@ require.extensions['.py'] = () => {
       if (!buffer.includes('\n')) return
       const request = JSON.parse(buffer.split('\n')[0])
       const response = request.action === 'ping'
-        ? { ok: true, pong: true, ...(profile ? { profile } : { mode: 'broker' }) }
-        : profile && request.action === 'status_if_loaded'
+        ? { ok: true, pong: true, ...(respondAsWorker ? { profile: profile || 'forced-worker' } : { mode: 'broker' }) }
+        : respondAsWorker && request.action === 'status_if_loaded'
           ? { ok: false, error: 'unknown action: status_if_loaded' }
           : { ok: true, exists: false }
       peer.end(JSON.stringify(response) + '\n')
