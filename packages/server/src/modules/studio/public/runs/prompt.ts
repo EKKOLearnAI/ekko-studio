@@ -18,6 +18,7 @@ export const AI_OUTPUT_FORMAT_GUIDELINES = `
 
 ## 路径规则
 
+- 所有本地文件链接都直接使用绝对路径，省略 \`file://\` 前缀。列出改动或评审代码时引用的源码文件也遵循这条规则。
 - Unix/macOS/WSL：使用 \`/path/to/file\`，例如 \`/tmp/screenshot.png\`
 - Windows：使用盘符绝对路径，并把反斜杠 \`\\\` 转成正斜杠 \`/\`，例如 \`C:/Users/Administrator/Desktop/screenshot.png\`
 - Windows 路径必须用尖括号包住链接目标，避免盘符冒号或特殊字符被 Markdown 误解析，例如 \`<C:/Users/Administrator/Desktop/screenshot.png>\`
@@ -57,6 +58,7 @@ export const AI_OUTPUT_FORMAT_GUIDELINES = `
 使用 Markdown 链接语法：
 
 \`\`\`
+[src/app.ts](/workspace/src/app.ts)
 [下载报告](/tmp/monthly-report.pdf)
 [下载报告](<C:/Users/Administrator/Desktop/monthly-report.pdf>)
 \`\`\`
@@ -82,6 +84,7 @@ When your response includes an image, video, or file reference, use Markdown and
 
 ## Path rules
 
+- Use the absolute path directly in every local file link and omit the \`file://\` prefix. This includes source files linked in change summaries and code reviews.
 - Unix/macOS/WSL: use \`/path/to/file\`, for example \`/tmp/screenshot.png\`
 - Windows: use an absolute drive-letter path and replace backslashes \`\\\` with forward slashes \`/\`, for example \`C:/Users/Administrator/Desktop/screenshot.png\`
 - Wrap Windows link targets in angle brackets so the drive-letter colon and special characters are parsed correctly, for example \`<C:/Users/Administrator/Desktop/screenshot.png>\`
@@ -121,6 +124,7 @@ Incorrect examples:
 Use Markdown link syntax:
 
 \`\`\`
+[src/app.ts](/workspace/src/app.ts)
 [Download report](/tmp/monthly-report.pdf)
 [Download report](<C:/Users/Administrator/Desktop/monthly-report.pdf>)
 \`\`\`
