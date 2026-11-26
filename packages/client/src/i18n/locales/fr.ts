@@ -3541,6 +3541,10 @@ jobTriggered: 'Job declenche',
   },
 
   changelog: {
+    new_0_8_32_1: "Les réglages du cache des invites sont conservés lors de la conversion de protocole dans la passerelle de modèles pour Claude, Qwen OAuth et le service officiel OpenAI Chat. Les requêtes OpenCode Go et Zen successives peuvent réutiliser le même identifiant de session. (#3913)",
+    new_0_8_32_2: "Correction d’un problème qui pouvait compter à zéro les accès au cache de Moonshot. Les réponses avec ou sans streaming et les statistiques d’Ekko distinguent les entrées ordinaires, les lectures du cache et les écritures dans le cache. (#3913)",
+    new_0_8_32_3: "Les consignes de sortie de Studio en chinois et en anglais demandent aux agents d’utiliser des chemins absolus pour les liens de fichiers locaux dans les résumés de modifications et les revues de code. (#3919)",
+    new_0_8_32_4: "Correction d’un échec de reprise de session lorsque Studio démarre depuis un processus de travail Hermes et se connecte au mauvais Bridge. Studio détecte les points d’accès hérités des processus de travail et utilise le broker par défaut. (#3915)",
     new_0_8_31_1: "Si l’outil en ligne de commande requis est absent, certains agents de plugins proposent un guide d’installation dans la liste des agents. Studio vérifie à nouveau l’installation au retour ou après un clic sur Actualiser. (#3902)",
     new_0_8_31_2: "La zone de saisie du chat actualise l’utilisation cumulée des jetons dès qu’un agent de plugin termine son tour. Le mode global privilégie les valeurs fournies par l’agent et les estime si elles sont absentes. (#3905)",
     new_0_8_31_3: "L’avis de retrait et de migration qui s’affichait à l’ouverture des chats de groupe de Studio a été supprimé. (#3899)",

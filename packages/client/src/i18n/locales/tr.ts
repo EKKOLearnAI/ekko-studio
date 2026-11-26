@@ -168,6 +168,10 @@ export default {
     computerUseTimeoutMs: 'Masaüstü işlemi zaman aşımı (ms)',
   },
   changelog: {
+    new_0_8_32_1: "Model ağ geçidinde protokol dönüştürülürken Claude, Qwen OAuth ve resmî OpenAI Chat istem önbelleği ayarlarının kaybolması düzeltildi. Ardışık OpenCode Go ve Zen istekleri aynı oturum kimliğini kullanabilir. (#3913)",
+    new_0_8_32_2: "Moonshot önbellek isabetlerinin sıfır sayılabilmesi düzeltildi. Akışlı ve akışsız yanıtlar ile Ekko kullanım istatistiklerinde normal girdi, önbellek okuma ve yazma ayrı gösterilir. (#3913)",
+    new_0_8_32_3: "Studio’nun Çince ve İngilizce çıktı yönergeleri, değişiklik özetleri ve kod incelemelerinde tıklanabilir yerel dosya bağlantıları için ajanlara mutlak yol kullanmalarını söylüyor. (#3919)",
+    new_0_8_32_4: "Studio, Hermes işçi işleminin ortamından başlatıldığında yanlış Bridge’e bağlanıp oturumu sürdüremeyebiliyordu. Studio, devralınan işçi uç noktalarını algılayıp varsayılan aracıyı kullanır. (#3915)",
     new_0_8_31_1: "Gerekli haricî komut satırı aracı kurulu değilse bazı eklenti ajanları listede bir kurulum kılavuzu gösterir. Studio’ya dönüldüğünde veya Yenile’ye tıklandığında kurulum durumu tekrar kontrol edilir. (#3902)",
     new_0_8_31_2: "Bir eklenti ajanı turunu tamamladığında sohbet girişindeki toplam token kullanımı hemen güncellenir. Genel mod, varsa ajanın bildirdiği kullanımı, yoksa tahmini değeri kullanır. (#3905)",
     new_0_8_31_3: "Studio grup sohbetleri açılırken gösterilen sonlandırma ve geçiş bildirimi kaldırıldı. (#3899)",
