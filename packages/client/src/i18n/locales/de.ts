@@ -3541,6 +3541,10 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_8_32_1: "Die Prompt-Cache-Einstellungen bleiben bei der Protokollumwandlung im Modell-Gateway für Claude, Qwen OAuth und den offiziellen OpenAI-Chat erhalten. Aufeinanderfolgende Anfragen für OpenCode Go und Zen können dieselbe Sitzungs-ID verwenden. (#3913)",
+    new_0_8_32_2: "Ein Fehler wurde behoben, bei dem Cache-Treffer von Moonshot als null gezählt werden konnten. Antworten mit und ohne Streaming sowie die Nutzungsstatistik von Ekko unterscheiden reguläre Eingaben, Cache-Lesezugriffe und Cache-Schreibzugriffe. (#3913)",
+    new_0_8_32_3: "Die chinesischen und englischen Ausgabehinweise von Studio geben Agents vor, in Änderungsübersichten und Code-Reviews anklickbare lokale Dateilinks mit absoluten Pfaden zu erstellen. (#3919)",
+    new_0_8_32_4: "Ein Fehler wurde behoben, bei dem Studio aus einer Hermes-Worker-Umgebung die falsche Bridge verwenden und Sitzungen nicht fortsetzen konnte. Studio erkennt geerbte Worker-Endpunkte und verwendet den Standard-Broker. (#3915)",
     new_0_8_31_1: "Bei manchen Plugin-Agents zeigt die Agent-Liste eine Anleitung an, wenn das benötigte Kommandozeilenwerkzeug fehlt. Studio prüft die Installation bei der Rückkehr oder beim Aktualisieren erneut. (#3902)",
     new_0_8_31_2: "Das Chat-Eingabefeld aktualisiert den kumulierten Tokenverbrauch, sobald ein Plugin-Agent einen Zug beendet. Im globalen Modus verwendet Studio gemeldete Werte, sofern vorhanden, und sonst Schätzwerte. (#3905)",
     new_0_8_31_3: "Der Hinweis zur Einstellung und Migration wurde beim Öffnen der Studio-Gruppenchats entfernt. (#3899)",

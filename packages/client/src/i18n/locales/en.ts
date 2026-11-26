@@ -3958,6 +3958,10 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_8_32_1: "Fixed lost prompt cache settings during model gateway protocol conversion for Claude, Qwen OAuth, and official OpenAI Chat. Consecutive OpenCode Go and Zen requests can reuse the same session ID. (#3913)",
+    new_0_8_32_2: "Fixed Moonshot cache hits sometimes being counted as zero. Streaming and non-streaming responses and Ekko usage reports distinguish regular input, cache reads, and cache writes. (#3913)",
+    new_0_8_32_3: "Studio’s Chinese and English output guidelines now tell agents to use absolute paths for clickable local file links in change summaries and code reviews. (#3919)",
+    new_0_8_32_4: "Fixed failed session resumes when Studio starts from a Hermes worker environment and connects to the wrong Bridge. Studio detects inherited worker endpoints and uses the default broker. (#3915)",
     new_0_8_31_1: "Some plugin Agents that need external command-line tools show an installation guide in the Agent list when the tool is missing. Studio checks the installation again when you return or click Refresh. (#3902)",
     new_0_8_31_2: "The chat composer refreshes cumulative token usage as soon as a plugin Agent finishes a turn. Global mode uses usage reported by the Agent when available and estimates it otherwise. (#3905)",
     new_0_8_31_3: "Removed the retirement and migration notice that appeared when opening Studio group chats. (#3899)",
