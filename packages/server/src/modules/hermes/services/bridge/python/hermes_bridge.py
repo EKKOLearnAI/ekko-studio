@@ -268,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--endpoint", default=os.environ.get("HERMES_AGENT_BRIDGE_ENDPOINT", DEFAULT_ENDPOINT))
     parser.add_argument("--agent-root", default=os.environ.get("HERMES_AGENT_ROOT", DEFAULT_AGENT_ROOT))
     parser.add_argument("--hermes-home", default=os.environ.get("HERMES_HOME", DEFAULT_HERMES_HOME))
-    parser.add_argument("--worker-profile", default=os.environ.get("HERMES_AGENT_BRIDGE_WORKER_PROFILE"))
+    parser.add_argument("--worker-profile", default=None)
     args = parser.parse_args(argv)
 
     _set_path_env(args.agent_root, args.hermes_home)
@@ -280,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
         _log_worker_startup_context(str(args.worker_profile or "default"))
         BridgeServer(args.endpoint).serve_forever()
     else:
+        os.environ.pop("HERMES_AGENT_BRIDGE_WORKER_PROFILE", None)
+        os.environ.pop("HERMES_AGENT_BRIDGE_BROKER_PID", None)
         BridgeBroker(args.endpoint, args.agent_root, args.hermes_home).serve_forever()
     return 0
 
