@@ -609,7 +609,7 @@ export class ChatRunSocket {
     return this.taskPlanRuns.begin(sessionId, profile, () => this.sessionMap.get(sessionId), undefined, sessionTasksEnabled)
   }
 
-  private finishTaskPlanRun(sessionId: string, event: string, payload?: any, contextId?: string) {
+  private finishTaskPlanRun(sessionId: string, event: string, payload?: any, contextId?: string, runId?: string) {
     if (!['run.completed', 'run.failed', 'abort.completed'].includes(event)) return
     runMcpCredentials.revoke(sessionId, contextId)
     this.clarificationRuns.finishSession(sessionId, contextId)
@@ -617,8 +617,10 @@ export class ChatRunSocket {
     // interrupt flags alone do not mean the user pressed Stop.
     const interrupted = event === 'abort.completed' || this.sessionMap.get(sessionId)?.isAborting
     const executionState = interrupted ? 'interrupted' : event === 'run.failed' ? 'failed' : 'ended'
+    const eventRunId = runId || (typeof payload?.run_id === 'string' ? payload.run_id : '')
     try {
       if (contextId) this.taskPlanRuns.finish(contextId, executionState)
+      else if (eventRunId) this.taskPlanRuns.finishRun(sessionId, eventRunId, executionState)
       else this.taskPlanRuns.finishSession(sessionId, executionState)
     } catch (err) {
       // Keep terminal run delivery working even if persistence fails; startup recovery settles the stored plan.
@@ -2522,7 +2524,9 @@ export class ChatRunSocket {
           source,
           onEvent: (event, payload) => {
             this.observeQueueInsertionRunEvent(sid, event, payload)
-            this.finishTaskPlanRun(sid, event, payload)
+            // This polled run may have been superseded by a newer turn while it
+            // was attaching; scope the terminal event to the run it belongs to.
+            this.finishTaskPlanRun(sid, event, payload, undefined, runId)
             observeChatRunWebhookEvent({
               event,
               sessionId: sid,
