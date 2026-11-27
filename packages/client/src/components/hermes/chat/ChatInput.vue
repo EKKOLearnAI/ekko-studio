@@ -21,6 +21,7 @@ import VoiceDialogueControls from './VoiceDialogueControls.vue'
 import BundleCreateModal from './BundleCreateModal.vue'
 import { BRIDGE_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
 import { clampChatInputHeight, isMobileChatInputViewport } from '@/utils/chat-input-height'
+import { enterShouldSendMessage } from '@/utils/device'
 import { normalizeComposerVoiceTranscript, useComposerVoiceInput } from '@/composables/useComposerVoiceInput'
 import { extractRepresentativeVideoFrames, isVideoFile } from '@/utils/video-frame-extraction'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
@@ -1144,8 +1145,10 @@ function handleKeydown(e: KeyboardEvent) {
     }
   }
 
-  if (e.key !== 'Enter' || e.shiftKey) return
   if (isImeEnter(e)) return
+  // Soft keyboards cannot send Shift+Enter (W3C uievents#542), so on touch
+  // devices Enter inserts a newline and the send button submits instead.
+  if (!enterShouldSendMessage(e)) return
 
   e.preventDefault()
   handleSend()
@@ -1330,6 +1333,7 @@ function openAttachmentPreview(attachment: Attachment) {
         :style="textareaHeight ? { height: textareaHeight + 'px' } : {}"
         :placeholder="t('chat.inputPlaceholder')"
         rows="1"
+        :enterkeyhint="isMobileViewport ? 'enter' : 'send'"
         @keydown="handleKeydown"
         @compositionstart="handleCompositionStart"
         @compositionend="handleCompositionEnd"
