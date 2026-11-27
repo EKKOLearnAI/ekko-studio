@@ -12,6 +12,21 @@ import { getSessionContextUsageEstimate } from '../../repositories/session-conte
 import type { ChatRunSource, SessionState } from './types'
 import { historySessionSource, isBuiltinEkkoAgent } from '../../contracts/history-source'
 
+/** Map a persisted display_content payload to a terminal background-delegation status. */
+export function backgroundDelegationTerminalStatus(displayContent: unknown): 'completed' | 'failed' | 'interrupted' | null {
+  if (!displayContent) return null
+  try {
+    const display = typeof displayContent === 'string' ? JSON.parse(displayContent) : (displayContent as Record<string, unknown>)
+    const displayStatus = String(display?.status || '').toLowerCase()
+    if (displayStatus === 'completed') return 'completed'
+    if (displayStatus === 'failed' || displayStatus === 'error') return 'failed'
+    if (displayStatus === 'interrupted' || displayStatus === 'cancelled' || displayStatus === 'canceled') return 'interrupted'
+  } catch {
+    // Non-JSON display content is not a terminal record.
+  }
+  return null
+}
+
 function restoreBackgroundDelegations(messages: any[]): SessionState['backgroundDelegations'] {
   const delegations: NonNullable<SessionState['backgroundDelegations']> = {}
   for (const message of messages) {
@@ -21,13 +36,8 @@ function restoreBackgroundDelegations(messages: any[]): SessionState['background
       const delegationId = String(payload.delegation_id || '').trim()
       if (payload.runtime === 'ekko' || payload.mode !== 'background' || !delegationId) continue
       let status: 'running' | 'completed' | 'failed' | 'interrupted' = 'running'
-      if (message.display_content) {
-        const display = JSON.parse(String(message.display_content)) as Record<string, unknown>
-        const displayStatus = String(display.status || '').toLowerCase()
-        if (displayStatus === 'completed') status = 'completed'
-        else if (displayStatus === 'failed' || displayStatus === 'error') status = 'failed'
-        else if (displayStatus === 'interrupted' || displayStatus === 'cancelled') status = 'interrupted'
-      }
+      const terminal = backgroundDelegationTerminalStatus(message.display_content)
+      if (terminal) status = terminal
       delegations[delegationId] = {
         delegationId,
         status,
