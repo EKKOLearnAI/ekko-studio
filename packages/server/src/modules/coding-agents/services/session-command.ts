@@ -50,6 +50,7 @@ export interface CodingAgentSessionCommandData {
   model?: string
   provider?: string
   mode?: 'scoped' | 'global'
+  onEvent?: (event: string, payload: Record<string, unknown>) => void
 }
 
 export async function handleCodingAgentSessionCommand(
@@ -71,14 +72,27 @@ export async function handleCodingAgentSessionCommand(
     emitToSession(nsp, socket, sessionId, event, { ...payload })
   }
 
+  const codexCompact = command.name === 'compact' && (getSession(sessionId)?.agent || codingAgentRunManager.getRunInfo(sessionId)?.agentId) === 'codex'
+  let compactController: AbortController | undefined
   const emitCommand = (payload: Record<string, unknown>) => {
-    emitToSession(nsp, socket, sessionId, 'session.command', {
+    if (codexCompact && payload.action === 'compact' && payload.started === true) state.isWorking = true
+    if (codexCompact && payload.action === 'compact' && payload.terminal === true) {
+      // Stop may already have released this operation and started the next queued turn.
+      if (compactController && state.abortController !== compactController) return
+      state.isWorking = false
+      state.runStartedAt = undefined
+      state.abortController = undefined
+      if (typeof payload.message === 'string') persistCommandMessage(sessionId, state, payload.message)
+    }
+    const tagged = {
       event: 'session.command',
       session_id: sessionId,
       command: command.rawName,
       ok: true,
       ...payload,
-    })
+    }
+    data.onEvent?.('session.command', tagged)
+    emitToSession(nsp, socket, sessionId, 'session.command', tagged)
   }
 
   if (command.name === 'context' || command.name === 'usage') {
@@ -258,6 +272,10 @@ export async function handleCodingAgentSessionCommand(
     const compactRow = getSession(sessionId)
     const compactInfo = codingAgentRunManager.getRunInfo(sessionId)
     const compactAgentId = compactRow?.agent || compactInfo?.agentId || ''
+    if (compactAgentId === 'codex' && (state.isWorking || compactInfo?.running)) {
+      emitCommand({ ok: false, action: 'compact', terminal: false, message: 'Codex is still processing the previous input', compacted: false })
+      return
+    }
     if (compactAgentId === 'opencode') {
       emitCommand({
         ok: false,
@@ -286,6 +304,11 @@ export async function handleCodingAgentSessionCommand(
         : compactAgentId === 'grok'
           ? 'Grok'
           : 'Claude Code'
+    if (codexCompact) {
+      compactController = new AbortController()
+      state.abortController = compactController
+    }
+    const compactSignal = codexCompact ? state.abortController?.signal : undefined
     emitCommand({
       action: 'compact',
       terminal: false,
@@ -300,12 +323,12 @@ export async function handleCodingAgentSessionCommand(
             codingAgentRunManager.compact(sessionId, command.args)
           ))
         } else {
-          result = await codingAgentRunManager.compact(sessionId, command.args)
+          result = await codingAgentRunManager.compact(sessionId, command.args, { signal: compactSignal })
         }
       } catch (err) {
         if (compactAgentId === 'pi') throw err
         if (!(err instanceof Error) || !err.message.includes('Coding agent session not found')) throw err
-        result = await restartCodingAgentRunForCompact(sessionId, profile, state, command.args)
+        result = await restartCodingAgentRunForCompact(sessionId, profile, state, command.args, compactSignal)
       }
       if ('started' in result) {
         return
@@ -317,13 +340,15 @@ export async function handleCodingAgentSessionCommand(
         compacted: result.compacted,
       })
     } catch (err) {
+      // A stopped command must not recover/reset a newer queued run's native thread.
+      if (compactController && state.abortController !== compactController) return
       if (isContextWindowExceededError(err)) {
         const recovery = resetNativeSessionAfterContextOverflow(sessionId, compactAgentId)
         if (recovery.reset) {
           codingAgentRunManager.stop(sessionId, { reportClosed: false })
           state.isWorking = false
           state.runId = undefined
-          state.abortController = undefined
+          if (!compactController) state.abortController = undefined
           state.activeRunMarker = undefined
           emitCommand({
             action: 'compact',
@@ -352,6 +377,7 @@ async function restartCodingAgentRunForCompact(
   profile: string,
   state: SessionState,
   args = '',
+  signal?: AbortSignal,
 ): Promise<{ started: boolean } | {
   compacted: boolean
   beforeTokens?: number | null
@@ -365,7 +391,7 @@ async function restartCodingAgentRunForCompact(
     if (String(args || '').trim()) {
       throw new Error('Codex native compaction does not accept arguments')
     }
-    return compactStoredCodingAgentSession(sessionId, profile)
+    return compactStoredCodingAgentSession(sessionId, profile, { signal })
   }
   const agentId = row.agent === 'grok' ? 'grok' : 'claude-code'
   await startCodingAgentRun(agentId, {

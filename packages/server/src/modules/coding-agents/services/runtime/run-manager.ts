@@ -977,7 +977,7 @@ export class CodingAgentRunManager {
     }
   }
 
-  compact(sessionId: string, args = ''): { started: boolean } | Promise<{
+  compact(sessionId: string, args = '', options: { signal?: AbortSignal } = {}): { started: boolean } | Promise<{
     compacted: boolean
     beforeTokens?: number | null
     afterTokens?: number | null
@@ -1016,7 +1016,7 @@ export class CodingAgentRunManager {
           ...(run.launch.env || {}),
         },
         workspaceDir: run.launch.workspaceDir,
-      }, nativeSessionId)
+      }, nativeSessionId, options)
     }
     if (run.launch.agentId === 'grok') {
       if (!nativeSessionId) throw new Error('Grok session has no native session to compact')
