@@ -1,0 +1,73 @@
+{
+  "name": "M5Stack StackChan (CoreS3) — Ekko Studio companion firmware",
+  "firmwareVersion": "2.9-lively.1-dir.1-voice.3",
+  "version": "2.9.1-voice.3",
+  "releaseStage": "development-preview",
+  "chip": "esp32s3",
+  "flashSize": "16MB",
+  "flashMode": "dio",
+  "flashFrequency": "80m",
+  "hardware": {
+    "manufacturer": "M5Stack",
+    "board": "M5Stack StackChan K151 / CoreS3",
+    "soc": "ESP32-S3",
+    "psram": true,
+    "camera": "GC0308",
+    "servos": "SCS0009 x2 (pan/tilt)"
+  },
+  "artifacts": [
+    {
+      "path": "release/stackchan-cores3-2.9.1-voice.3-app-0x10000.bin",
+      "kind": "application-update-only",
+      "offset": 65536,
+      "bytes": 3074592,
+      "sha256": "f18fd07e1d170bcf2c9d7de545aae722e74aeb23508f6ce39c9bf66a1560d822",
+      "preservesSettings": true,
+      "hardwareFlashedAndBooted": true
+    },
+    {
+      "path": "release/stackchan-cores3-2.9.1-voice.3-full-0x0.bin",
+      "kind": "full-flash-image",
+      "offset": 0,
+      "bytes": 3140128,
+      "sha256": "c7ee62bded852d1e183df00f8b3ecbfb017ceb2d5c47034b07de914518fe200d",
+      "preservesSettings": false,
+      "nvsBlank": true,
+      "hardwareFlashedAndBooted": false
+    }
+  ],
+  "installation": {
+    "manualOnly": true,
+    "partitionScheme": "default_16MB.csv",
+    "partitionTableOffset": 32768,
+    "partitionTableBytes": 3072,
+    "partitionTableSha256": "bd0f7954aca2ef7d925ee21aaa1f3dc8822d1d6ce5cbbd26a135e5886bfff6ce",
+    "applicationOffset": 65536,
+    "applicationPartitionBytes": 6553600
+  },
+  "compatibility": {
+    "transport": "lan-standard",
+    "studioRuntime": "hermes",
+    "studioProfile": "stackchan",
+    "remoteSupported": false,
+    "studioOtaSupported": false,
+    "voice": {
+      "halfDuplex": true,
+      "aec": false,
+      "bargeIn": false,
+      "wakeWord": false,
+      "touchWake": true,
+      "headTapWake": true,
+      "bootAutoListen": true
+    }
+  },
+  "validation": {
+    "hostTestsPassed": "28/29 (test_care fails to compile under clang -Warray-compare on the unmodified baseline too)",
+    "bridgeUnitTestsPassed": 132,
+    "voiceTurnsTranscribedOnDevice": 5,
+    "renderingFpsMeasured": "12.1-13.2 (baseline 6.8-7.4)",
+    "headTapWakeHumanTested": false,
+    "longDurationStabilityTested": false,
+    "fullFlashImageTestedOnHardware": false
+  }
+}
