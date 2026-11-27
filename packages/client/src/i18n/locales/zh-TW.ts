@@ -1084,7 +1084,8 @@ export default {
   subagent: {
     title: '背景子任務', noGoal: '未命名背景子任務', open: '開啟背景子任務即時輸出', close: '關閉背景子任務輸出',
     waiting: '正在等待即時輸出…', tool: '工具', tools: '{count} 次工具呼叫', tokens: '輸入 {input} · 輸出 {output}',
-    started: '已啟動', running: '執行中', completed: '已完成', failed: '執行失敗', cancelled: '已取消', interrupted: '已停止',
+    started: '已啟動', running: '執行中', completed: '已完成', failed: '執行失敗', cancelled: '已取消', interrupted: '已停止',    summaryTotal: '個子任務', resultRecycled: '結論已回貼', autoRecycle: '結果自動回貼', noResult: '暫無結果摘要', expandOutput: '展開執行過程', collapseOutput: '收起執行過程', batch: '批次 {n}', abort: '中止',
+
   },
 
   realtimeVoice: {

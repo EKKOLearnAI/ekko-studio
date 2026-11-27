@@ -1091,7 +1091,8 @@ export default {
   subagent: {
     title: '后台子任务', noGoal: '未命名后台子任务', open: '打开后台子任务实时输出', close: '关闭后台子任务输出',
     waiting: '正在等待实时输出…', tool: '工具', tools: '{count} 次工具调用', tokens: '输入 {input} · 输出 {output}',
-    started: '已启动', running: '执行中', completed: '已完成', failed: '执行失败', cancelled: '已取消', interrupted: '已停止',
+    started: '已启动', running: '执行中', completed: '已完成', failed: '执行失败', cancelled: '已取消', interrupted: '已停止',    summaryTotal: '个子任务', resultRecycled: '结论已回贴', autoRecycle: '结果自动回贴', noResult: '暂无结果摘要', expandOutput: '展开执行过程', collapseOutput: '收起执行过程', batch: '批次 {n}', abort: '中止',
+
   },
 
   realtimeVoice: {
