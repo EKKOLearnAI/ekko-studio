@@ -634,18 +634,25 @@ function responsesInputToChatMessages(body: any, target: ResponsesAdapterTarget)
     const outputs = pendingToolCalls.map(call => pendingToolOutputs.get(call.id))
     if (outputs.every(Boolean)) {
       const imageMessageContent: any[] = []
-      messages.push({
-        role: 'assistant',
-        content: null,
-        // Older/replayed tool calls may have no reasoning item. DeepSeek
-        // rejects an empty string, so retain its non-empty history fallback.
-        ...(preserveReasoningContent
-          ? { reasoning_content: pendingReasoning || ' ' }
-          : {}),
-        tool_calls: pendingToolCalls,
-      })
+      // Emit one assistant message per tool call instead of one merged
+      // message with several tool_calls. Small local chat-completions models
+      // (e.g. qwen3 hybrid) degrade on merged tool_calls history and end
+      // turns with plain text instead of tool calls; one call per assistant
+      // turn keeps replayed history in the shape those models expect.
+      // Providers that reject consecutive assistant messages would need an
+      // opt-out here.
       for (let index = 0; index < pendingToolCalls.length; index += 1) {
         const call = pendingToolCalls[index]
+        messages.push({
+          role: 'assistant',
+          content: null,
+          // Older/replayed tool calls may have no reasoning item. DeepSeek
+          // rejects an empty string, so retain its non-empty history fallback.
+          ...(preserveReasoningContent
+            ? { reasoning_content: pendingReasoning || ' ' }
+            : {}),
+          tool_calls: [call],
+        })
         const converted = responseToolOutputToOpenAiChat(
           outputs[index].output,
           call.function.name,
