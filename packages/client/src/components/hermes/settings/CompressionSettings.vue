@@ -1,12 +1,55 @@
 <script setup lang="ts">
+import { ref, onMounted } from 'vue'
 import { NInputNumber, NSwitch, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useSettingsStore } from '@/stores/hermes/settings'
+import { fetchConfig, updateConfigSection } from '@/api/hermes/config'
+import { syncProfileCompression } from '@/api/hermes/profiles'
 import SettingRow from './SettingRow.vue'
 
 const settingsStore = useSettingsStore()
 const message = useMessage()
 const { t } = useI18n()
+
+const microCompactDefault = ref(false)
+
+async function loadMicroCompactDefault() {
+  try {
+    const data = await fetchConfig(['microCompactDefault'])
+    microCompactDefault.value = data.microCompactDefault?.microCompactDefault === true
+  } catch {
+    /* best-effort: leave the default off if the read fails */
+  }
+}
+
+// 开关切换：设全局默认 + 立即应用到所有现有 profile（消化已有的；未来新建自动遵循该值）
+async function setMicroCompactDefault(v: boolean) {
+  try {
+    await updateConfigSection('microCompactDefault', { microCompactDefault: v })
+    microCompactDefault.value = v
+  } catch {
+    message.error(t('settings.compression.microCompactFailed'))
+    return
+  }
+  try {
+    const r = await syncProfileCompression()
+    if (r.skipped && r.skipped.length) {
+      message.warning(
+        t('settings.compression.microCompactApplied', { count: r.count }) +
+        ' · ' +
+        t('settings.compression.microCompactSkipped', { count: r.skipped.length, list: r.skipped.join(', ') }),
+      )
+    } else {
+      message.success(t('settings.compression.microCompactApplied', { count: r.count }))
+    }
+  } catch {
+    message.error(t('settings.compression.microCompactFailed'))
+  }
+}
+
+onMounted(() => {
+  void loadMicroCompactDefault()
+})
 
 const defaults = {
   enabled: true,
@@ -43,6 +86,19 @@ function debouncedSave(key: string, value: any) {
 
 <template>
   <section class="settings-section">
+    <div class="global-default-block">
+      <div class="gd-row">
+        <div class="gd-text">
+          <div class="gd-title">{{ t('settings.compression.microCompactDefault') }}</div>
+          <div class="gd-hint">{{ t('settings.compression.microCompactDefaultHint') }}</div>
+        </div>
+        <NSwitch
+          :value="microCompactDefault"
+          size="small"
+          @update:value="(v: boolean) => setMicroCompactDefault(v)"
+        />
+      </div>
+    </div>
     <SettingRow :label="t('settings.compression.enabled')" :hint="t('settings.compression.enabledHint')">
       <NSwitch
         :value="settingsStore.compression.enabled ?? defaults.enabled"
@@ -102,5 +158,31 @@ function debouncedSave(key: string, value: any) {
 
 .settings-section {
   margin-top: 16px;
+}
+
+.global-default-block {
+  margin-bottom: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--theme-card-bg);
+}
+
+.gd-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gd-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gd-hint {
+  font-size: 12px;
+  opacity: 0.65;
+  margin-top: 2px;
+  line-height: 1.5;
 }
 </style>

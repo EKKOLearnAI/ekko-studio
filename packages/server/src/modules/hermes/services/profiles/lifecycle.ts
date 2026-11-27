@@ -3,6 +3,9 @@ import { existsSync } from 'fs'
 import { chmod, cp, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import { detectHermesRootHome, isPathWithin, isRealPathWithin } from '../runtime/path'
+import { parseDocument } from 'yaml'
+import { readAppConfig } from '../../../studio/public/app-config'
+import { safeFileStore } from '../../../studio/public/safe-file-store'
 
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
@@ -222,6 +225,44 @@ export interface NativeProfileCreateResult {
   name: string
   path: string
   clonedFrom?: string
+}
+
+/**
+ * Apply the Studio-level `microCompactDefault` to a freshly created profile's
+ * config.yaml (`compression.micro_compact`). Best-effort: the profile already
+ * exists when this runs (commit succeeded), so any failure is logged and
+ * swallowed rather than failing the whole profile creation.
+ */
+export async function applyMicroCompactDefault(name: string): Promise<boolean> {
+  try {
+    const root = detectHermesRootHome()
+    const dir = name === 'default' ? root : join(root, 'profiles', name)
+    const configPath = join(dir, 'config.yaml')
+    if (!existsSync(configPath)) return false
+    const appConfig = await readAppConfig()
+    const enabled = appConfig.microCompactDefault === true
+    // Comment-preserving, targeted edit: parse with eemeli/yaml (round-trips
+    // comments + untouched scalars such as dates), change only
+    // compression.micro_compact, write back. Deliberately NOT
+    // safeFileStore.updateYaml — that does a js-yaml full dump which strips
+    // every comment and rewrites date scalars to ISO form.
+    await safeFileStore.updateText(configPath, (raw) => {
+      const doc = parseDocument(raw)
+      const existing = doc.get('compression') as
+        | { type?: string; set?: (key: string, value: unknown) => void }
+        | undefined
+      if (existing?.type === 'MAP' && typeof existing.set === 'function') {
+        existing.set('micro_compact', enabled)
+      } else {
+        doc.set('compression', { micro_compact: enabled })
+      }
+      return doc.toString()
+    }, { backup: true })
+    return true
+  } catch (err) {
+    console.warn('[profile] failed to apply microCompactDefault:', err)
+    return false
+  }
 }
 
 async function commitStagedProfile(

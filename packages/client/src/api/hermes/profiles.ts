@@ -145,6 +145,17 @@ export async function createProfile(name: string, clone?: boolean): Promise<Crea
   }
 }
 
+export interface SyncCompressionResult {
+  success: boolean
+  synced: string[]
+  skipped: string[]
+  count: number
+}
+
+export async function syncProfileCompression(): Promise<SyncCompressionResult> {
+  return request<SyncCompressionResult>('/api/hermes/profiles/compression/sync', { method: 'POST' })
+}
+
 export async function deleteProfile(name: string): Promise<boolean> {
   try {
     await request(`/api/hermes/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' })
