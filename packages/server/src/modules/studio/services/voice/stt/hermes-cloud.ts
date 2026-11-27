@@ -55,32 +55,35 @@ async function checkedJson(
   response: Response,
   provider: string,
   apiKey: string,
-): Promise<Record<string, unknown>> {
+): Promise<unknown> {
   if (!response.ok) {
     const detail = (await response.text().catch(() => response.statusText || ''))
       .replaceAll(apiKey, '[redacted]')
       .slice(0, 500)
     throw new Error(`${provider} STT returned HTTP ${response.status}${detail ? `: ${detail}` : ''}`)
   }
-  return await response.json() as Record<string, unknown>
+  return await response.json()
 }
 
 function textResult(
   input: SttTranscribeInput,
   startedAt: number,
-  payload: Record<string, unknown>,
+  payload: unknown,
   model: string,
 ): SttTranscribeResult {
-  if (typeof payload.text !== 'string') {
+  const record = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : null
+  if (typeof record?.text !== 'string') {
     throw new Error(`${input.provider} STT response text is missing or invalid`)
   }
-  const text = payload.text.trim()
+  const text = record.text.trim()
   return {
     text,
     provider: input.provider,
     model,
-    language: typeof payload.language === 'string'
-      ? payload.language
+    language: typeof record.language === 'string'
+      ? record.language
       : String(input.settings.language || '').trim() || undefined,
     durationMs: Date.now() - startedAt,
   }

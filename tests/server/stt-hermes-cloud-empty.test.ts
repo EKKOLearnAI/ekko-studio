@@ -48,7 +48,7 @@ it.each(cases(['  Fixture transcript.  ']))('$provider keeps normal transcript t
   await expect(transcribe(input(provider))).resolves.toMatchObject({ text: 'Fixture transcript.' })
 })
 
-it.each(cases(['{}', '{"text":null}', '{"text":12}']))('$provider rejects a missing or invalid transcript $value', async ({ provider, transcribe, value }) => {
+it.each(cases(['{}', '{"text":null}', '{"text":12}', 'null', '[]']))('$provider rejects a missing or invalid transcript $value', async ({ provider, transcribe, value }) => {
   upstream(value)
-  await expect(transcribe(input(provider))).rejects.toThrow(`${provider} STT response text`)
+  await expect(transcribe(input(provider))).rejects.toThrow(`${provider} STT response text is missing or invalid`)
 })
