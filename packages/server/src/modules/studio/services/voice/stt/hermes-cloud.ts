@@ -71,8 +71,10 @@ function textResult(
   payload: Record<string, unknown>,
   model: string,
 ): SttTranscribeResult {
-  const text = typeof payload.text === 'string' ? payload.text.trim() : ''
-  if (!text) throw new Error(`${input.provider} STT response text is empty`)
+  if (typeof payload.text !== 'string') {
+    throw new Error(`${input.provider} STT response text is missing or invalid`)
+  }
+  const text = payload.text.trim()
   return {
     text,
     provider: input.provider,
