@@ -38,6 +38,7 @@ import {
   getSessionDetail as localGetSessionDetail,
   deleteSession as localDeleteSession,
   renameSession as localRenameSession,
+  getStoredSessionTitles,
   setSessionArchived as localSetSessionArchived,
   setSessionPushEnabled as localSetSessionPushEnabled,
   setSessionPinned as localSetSessionPinned,
@@ -204,7 +205,7 @@ function compareSessionsNewestFirst(a: any, b: any): number {
 
 function mergeHermesHistorySessions(
   ctx: any,
-  profile: string | undefined,
+  nativeProfile: string | undefined,
   hermesSessions: any[],
   localSessions: any[],
   source?: string,
@@ -213,18 +214,24 @@ function mergeHermesHistorySessions(
   const importedIds = new Set(localSessions.map(session => session.id))
   const historySessionsById = new Map<string, any>()
   // Keep Hermes Agent state.db as the canonical summary when both stores have
-  // the same id. Ekko Studio contributes import/archive state and local-only
-  // coding-agent sessions without replacing the Agent-owned session fields.
+  // the same id. Ekko Studio contributes explicit title overrides, import/archive
+  // state and local-only coding-agent sessions; other Agent-owned fields stay native.
   for (const session of hermesSessions) {
     historySessionsById.set(session.id, {
-      ...(profile ? { ...session, profile } : session),
+      ...session,
+      profile: nativeProfile,
       webui_imported: importedIds.has(session.id),
     })
   }
 
   const localSessionsById = new Map(localSessions.map(session => [session.id, session]))
+  const storedTitles = nativeProfile
+    ? getStoredSessionTitles(nativeProfile, [...historySessionsById.keys()].filter(id => localSessionsById.has(id)))
+    : undefined
   for (const [id, session] of historySessionsById) {
     const localSession = localSessionsById.get(id)
+    const manualTitle = storedTitles?.get(id)
+    if (manualTitle !== undefined) session.title = manualTitle
     if (localSession?.is_archived != null) session.is_archived = localSession.is_archived
     session.is_pinned = Number(localSession?.is_pinned || 0)
     session.push_enabled = Number(localSession?.push_enabled || 0) !== 0 ? 1 : 0
@@ -657,16 +664,16 @@ export async function listHermesSessions(ctx: any) {
         ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
       })
     : localListSessions(profile, source, candidateLimit)
-  const allSessions = isHermesAgentAvailable() && !(agentGroups && source === 'builtin_agent')
+  const { sessions: allSessions, profile: nativeProfile } = isHermesAgentAvailable() && !(agentGroups && source === 'builtin_agent')
     ? await listHermesSessionSummaries(source, candidateLimit, profile)
-    : []
+    : { sessions: [], profile: undefined }
   if (agentGroups && allSessions.length) {
     localSessions.push(...localListSessions(profile, undefined, allSessions.length, {
       includeSessionIds: allSessions.map(session => session.id),
       ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}),
     }))
   }
-  const merged = mergeHermesHistorySessions(ctx, profile, allSessions, localSessions, source, agentGroups)
+  const merged = mergeHermesHistorySessions(ctx, nativeProfile, allSessions, localSessions, source, agentGroups)
 
   if (paginated) {
     const sorted = [...merged].sort(compareSessionsNewestFirst)
@@ -704,10 +711,8 @@ export async function listHermesSessionGroups(ctx: any) {
   const localSessions = localListSessions(profile, undefined, 2000)
   const hermesResult = isHermesAgentAvailable()
     ? await listHermesSessionSummaryGroups(limit, profile, includedIds)
-    : { groups: [], included: [] }
-  const hermesGroups = new Map<string, { source: string; sessions: any[]; hasMore: boolean }>(
-    hermesResult.groups.map((group: any) => [group.source, group]),
-  )
+    : { groups: [], included: [], profile: undefined }
+  const hermesGroups = new Map(hermesResult.groups.map(group => [group.source, group]))
   const sources = new Set<string>([
     ...hermesGroups.keys(),
     ...localSessions
@@ -733,7 +738,7 @@ export async function listHermesSessionGroups(ctx: any) {
     }
     const merged = mergeHermesHistorySessions(
       ctx,
-      profile,
+      hermesResult.profile,
       hermesGroup?.sessions || [],
       localSourceSessions,
       source,
@@ -754,7 +759,7 @@ export async function listHermesSessionGroups(ctx: any) {
         ...(includedIds.length ? localListSessions(profile, undefined, includedIds.length, { includeSessionIds: includedIds, ...(allowedProfiles ? { profiles: [...allowedProfiles] } : {}) }) : []),
       ]
     : localSessions.filter(session => session.is_pinned || includedIds.includes(session.id))
-  const included = mergeHermesHistorySessions(ctx, profile, hermesResult.included, localIncluded)
+  const included = mergeHermesHistorySessions(ctx, hermesResult.profile, hermesResult.included, localIncluded)
   ctx.body = { groups, included }
 }
 

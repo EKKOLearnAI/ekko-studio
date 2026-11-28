@@ -12,16 +12,20 @@ export function getHermesBaseDir(): string {
  * other   → ~/.hermes/profiles/{name}/
  */
 export function getActiveProfileDir(): string {
+  return getActiveProfileLocation().dir
+}
+
+export function getActiveProfileLocation(): { name: string; dir: string } {
   const hermesBase = getHermesBaseDir()
   const activeFile = join(hermesBase, 'active_profile')
   try {
     const name = readFileSync(activeFile, 'utf-8').trim()
     if (name && name !== 'default') {
       const dir = join(hermesBase, 'profiles', name)
-      if (existsSync(dir)) return dir
+      if (existsSync(dir)) return { name, dir }
     }
   } catch { }
-  return hermesBase
+  return { name: 'default', dir: hermesBase }
 }
 
 /**

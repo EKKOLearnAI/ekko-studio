@@ -555,10 +555,29 @@ export function clearSessionMessages(id: string): number {
   }
 }
 
+/** Only explicit renames override Agent-owned history titles. */
+export function getStoredSessionTitles(profile: string, ids: string[]): Map<string, string> {
+  if (!isSqliteAvailable() || ids.length === 0) return new Map()
+  const titles = new Map<string, string>()
+  // History page limits are caller-controlled; keep each query below SQLite's
+  // parameter limit even when a large local history is requested.
+  for (let offset = 0; offset < ids.length; offset += 500) {
+    const batch = ids.slice(offset, offset + 500)
+    const placeholders = batch.map(() => '?').join(',')
+    const rows = getDb()!.prepare(
+      `SELECT id, title FROM ${SESSIONS_TABLE}
+       WHERE profile = ? AND id IN (${placeholders})
+         AND title_origin = 'manual' AND title IS NOT NULL AND TRIM(title) != ''`,
+    ).all(profile, ...batch) as Array<{ id: string; title: string }>
+    for (const row of rows) titles.set(row.id, row.title)
+  }
+  return titles
+}
+
 export function renameSession(id: string, title: string): boolean {
   if (!isSqliteAvailable()) return false
   const db = getDb()!
-  const result = db.prepare(`UPDATE ${SESSIONS_TABLE} SET title = ? WHERE id = ?`).run(title, id)
+  const result = db.prepare(`UPDATE ${SESSIONS_TABLE} SET title = ?, title_origin = 'manual' WHERE id = ?`).run(title, id)
   return result.changes > 0
 }
 
