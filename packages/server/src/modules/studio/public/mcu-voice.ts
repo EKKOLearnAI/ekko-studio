@@ -9,6 +9,8 @@ export interface McuVoiceChatTurnInput {
   transcript: string
   clientId?: string
   agentRuntime?: McuAgentRuntime
+  /** Server-issued lease; never accepted from device input. */
+  routeLeaseId?: string
 }
 
 export interface McuVoiceDependencies {
@@ -29,6 +31,8 @@ export function emitMcuVoiceEvent(
   return dependencies?.emitEvent(payload, options) ?? false
 }
 
-export function startMcuVoiceChatTurn(input: McuVoiceChatTurnInput): void {
-  dependencies?.startChatTurn(input)
+export function startMcuVoiceChatTurn(input: McuVoiceChatTurnInput): boolean {
+  if (!dependencies) return false
+  dependencies.startChatTurn(input)
+  return true
 }

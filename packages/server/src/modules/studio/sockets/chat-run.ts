@@ -459,6 +459,8 @@ function boundedMobileCalendarTimeout(value: unknown): number {
   if (value == null || !Number.isFinite(numeric) || numeric <= 0) return MOBILE_CALENDAR_DEFAULT_TIMEOUT_MS
   return Math.max(MOBILE_CALENDAR_MIN_TIMEOUT_MS, Math.min(MOBILE_CALENDAR_MAX_TIMEOUT_MS, numeric))
 }
+class QueuedSessionAccessError extends Error {}
+
 export class ChatRunSocket {
   private nsp: ReturnType<Server['of']>
   private bridge = createPrimaryAgentBridge()
@@ -480,6 +482,7 @@ export class ChatRunSocket {
   private bridgeResumePolls = new Set<string>()
   private readonly runWaiters = new Map<string, Set<(event: string, payload: any) => void>>()
   private readonly runHandlers = new Map<string, Set<Promise<void>>>()
+  private readonly runExecutionReceipts = new Map<string, { terminal: boolean; finishedAt: number; confirmed: boolean; done: Promise<void> }>()
   private readonly pendingMobileLocations = new Map<string, PendingMobileLocationRequest>()
   private readonly mobileRunTargets = new Map<string, MobileDeviceTarget>()
   private readonly pendingMobileCalendar = new Map<string, PendingMobileCalendarRequest>()
@@ -1061,6 +1064,8 @@ export class ChatRunSocket {
       display_role?: 'user' | 'command'
       storage_message?: string
       session_id?: string
+      /** Safe admission for callers that selected a previously existing target. */
+      require_existing_session?: boolean
       model?: string
       instructions?: string
       group_system_prompt?: string
@@ -1108,6 +1113,10 @@ export class ChatRunSocket {
         let runProfile: string
         try {
           runProfile = resolveRunProfile(data.session_id, data.profile)
+          if (data.require_existing_session) {
+            if (!data.session_id) throw new Error('Session not found')
+            requireSocketSessionAccess(data.session_id, runProfile)
+          }
           if (isPersonSession(data.session_id)) {
             requirePersonAgents(socketUser!.id)
             const { session, settings } = await ensurePersonSession(socketUser!.id, data.session_id!)
@@ -1212,6 +1221,8 @@ export class ChatRunSocket {
           }
           if (state.isWorking) {
             const queueId = data.queue_id || `queue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+            const queuedSessionId = data.session_id
+            const requireExistingSession = data.require_existing_session === true
             state.queue.push({
               queue_id: queueId,
               input: data.input,
@@ -1245,7 +1256,21 @@ export class ChatRunSocket {
               commandPassthrough: data.allow_command_passthrough,
               reasoningEffort: data.reasoning_effort,
               originSocketId: socket.id,
-              authorize: shared ? async () => { await refreshSessionShare(shared, 'input', data.session_id) } : undefined,
+              // Recheck the admitting account/Profile, never the connection
+              // that happens to drain the preceding run's queue.
+              authorize: shared || requireExistingSession ? async () => {
+                if (shared) await refreshSessionShare(shared, 'input', queuedSessionId)
+                if (requireExistingSession) {
+                  try {
+                    if (!shared && socketUser) {
+                      const user = findUserById(socketUser.id)
+                      if (!user || user.status !== 'active' || !this.canAccessProfile(user, runProfile)) throw new Error('Account access denied')
+                    }
+                    requireSocketSessionAccess(queuedSessionId, runProfile)
+                  }
+                  catch { throw new QueuedSessionAccessError('existing_session_unavailable') }
+                }
+              } : undefined,
               pushTargetId,
             })
             const queuedPayload = {
@@ -1327,35 +1352,39 @@ export class ChatRunSocket {
       void this.requestQueuedRunInsertion(data.session_id, data.queue_id)
     })
 
-    socket.on('cancel_queued_run', (data: { session_id?: string; queue_id?: string }) => {
-      if (!data.session_id || !data.queue_id) return
+    socket.on('cancel_queued_run', async (data: { session_id?: string; queue_id?: string }, ack?: (result: Record<string, unknown>) => void) => {
+      const reply = (settled: boolean, reason?: string) => { if (typeof ack === 'function') ack({ session_id: data?.session_id, queue_id: data?.queue_id, settled, ...(reason ? { reason } : {}) }) }
+      if (typeof data?.session_id !== 'string' || !data.session_id || typeof data.queue_id !== 'string' || !data.queue_id) { reply(false, 'invalid_input'); return }
+      const release = await this.acquireRunAdmission(data.session_id)
       try {
-        requireSocketSessionAccess(data.session_id)
-      } catch {
-        return
-      }
-      const state = this.sessionMap.get(data.session_id)
-      if (!state?.queue.length) return
-      const before = state.queue.length
-      state.queue = state.queue.filter(item => item.queue_id !== data.queue_id)
-      if (state.queue.length === before) return
-      if (state.queueInsertion?.queueId === data.queue_id) {
-        const nextVisible = state.queue.find(item => this.isQueueInsertionCandidate(item))
-        if (nextVisible) {
-          state.queueInsertion.queueId = nextVisible.queue_id
-          this.emitQueueInsertionUpdate(data.session_id, state.queueInsertion)
-        } else {
-          this.clearQueueInsertion(data.session_id, state, 'queued_message_removed')
+        try { requireSocketSessionAccess(data.session_id) } catch { reply(false, 'access_denied'); return }
+        const state = this.sessionMap.get(data.session_id)
+        if (!state?.queue.length) { reply(false, 'not_found'); return }
+        const before = state.queue.length
+        state.queue = state.queue.filter(item => item.queue_id !== data.queue_id)
+        if (state.queue.length === before) { reply(false, 'not_found'); return }
+        if (state.queueInsertion?.queueId === data.queue_id) {
+          const nextVisible = state.queue.find(item => this.isQueueInsertionCandidate(item))
+          if (nextVisible) {
+            state.queueInsertion.queueId = nextVisible.queue_id
+            this.emitQueueInsertionUpdate(data.session_id, state.queueInsertion)
+          } else {
+            this.clearQueueInsertion(data.session_id, state, 'queued_message_removed')
+          }
         }
-      }
-      this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
-        event: 'run.queued',
-        session_id: data.session_id,
-        queue_length: state.queue.length,
-        queued_messages: this.serializeQueuedMessages(state.queue),
-      })
-      logger.info('[chat-run-socket] cancelled queued run %s for session %s (queue: %d)',
-        data.queue_id, data.session_id, state.queue.length)
+        this.nsp.to(`session:${data.session_id}`).emit('run.queued', {
+          event: 'run.queued',
+          session_id: data.session_id,
+          queue_length: state.queue.length,
+          queued_messages: this.serializeQueuedMessages(state.queue),
+        })
+        logger.info('[chat-run-socket] cancelled queued run %s for session %s (queue: %d)',
+          data.queue_id, data.session_id, state.queue.length)
+        reply(true)
+      } catch (err) {
+        logger.warn(err, '[chat-run-socket] queue cancellation failed')
+        reply(false, 'stop_unconfirmed')
+      } finally { release() }
     })
 
     socket.on('resume', async (data: { session_id?: string }) => {
@@ -1392,29 +1421,71 @@ export class ChatRunSocket {
       await this.resumeSession(socket, sid, { event: 'app.resumed', cachedId: data.id, timeline: data.timeline === true })
     })
 
-    socket.on('abort', (data: { session_id?: string }) => {
-      if (data.session_id) {
+    socket.on('abort', async (data: { session_id?: string; run_id?: string }, ack?: (result: Record<string, unknown>) => void) => {
+      const reply = (settled: boolean, reason?: string) => { if (typeof ack === 'function') ack({ session_id: data?.session_id, ...(data?.run_id !== undefined ? { run_id: data.run_id } : {}), settled, ...(reason ? { reason } : {}) }) }
+      if (typeof data?.session_id === 'string' && data.session_id) {
         const sessionId = data.session_id
-        let profile: string
+        const release = await this.acquireRunAdmission(sessionId)
         try {
-          profile = requireSocketSessionAccess(sessionId)
-        } catch {
-          return
-        }
-        this.finishTaskPlanRun(sessionId, 'abort.completed')
-        void handleAbort(
-          this.nsp,
-          socket,
-          sessionId,
-          this.sessionMap,
-          this.bridge,
-          this.runQueuedItem.bind(this),
-        ).then(() => {
+          let profile: string
+          try {
+            profile = requireSocketSessionAccess(sessionId)
+          } catch {
+            reply(false, 'access_denied'); return
+          }
+          if (data.run_id !== undefined && (typeof data.run_id !== 'string' || !data.run_id.trim())) { reply(false, 'invalid_input'); return }
+          const expectedRunId = data.run_id
           const state = this.sessionMap.get(sessionId)
-          this.emitSessionActivity(profile, state?.isWorking ? 'run.started' : 'abort.completed', {
-            session_id: sessionId,
-          })
-        }).catch(err => logger.warn(err, '[chat-run-socket] abort failed for session %s', sessionId))
+          // Coding Agent managers outlive a response. Compare the published turn
+          // identity, not that manager's durable session/run identifier.
+          const activeRunId = state?.responseRun?.responseId || state?.runId
+          const receipt = expectedRunId ? this.runExecutionReceipts.get(JSON.stringify([sessionId, expectedRunId])) : undefined
+          if (receipt?.terminal) {
+            await receipt.done
+            reply(receipt.confirmed, receipt.confirmed ? undefined : 'stop_unconfirmed')
+            return
+          }
+          if (expectedRunId && activeRunId !== expectedRunId) {
+            reply(false, 'run_mismatch')
+            return
+          }
+          const ownHandler = receipt?.done
+          const hasNativeProcess = Boolean(expectedRunId && codingAgentRunManager.hasSession(sessionId))
+          // A prior foreground may have finished while its goal evaluation is
+          // still running. Wait only for this turn's receipt and native handle.
+          const termination = expectedRunId ? Promise.all([
+            ...(ownHandler ? [ownHandler] : []), ...(hasNativeProcess ? [codingAgentRunManager.waitForSessionExit(sessionId)] : []),
+          ]) : Promise.resolve([])
+          void termination.catch(() => {})
+          this.finishTaskPlanRun(sessionId, 'abort.completed')
+          const result = await handleAbort(
+            this.nsp,
+            socket,
+            sessionId,
+            this.sessionMap,
+            this.bridge,
+            this.runQueuedItem.bind(this),
+          )
+          {
+            const state = this.sessionMap.get(sessionId)
+            this.emitSessionActivity(profile, state?.isWorking ? 'run.started' : 'abort.completed', {
+              session_id: sessionId,
+            })
+          }
+          if (!expectedRunId) { reply(false, 'expected_run_required'); return }
+          if (!result?.dispatched || result.runtime === 'bridge' && !result.synced
+            || result.runtime !== 'bridge' && !hasNativeProcess && !ownHandler) {
+            if (receipt) receipt.confirmed = false
+            reply(false, 'stop_unconfirmed'); return
+          }
+          await termination
+          reply(true)
+        } catch (err) {
+          logger.warn(err, '[chat-run-socket] abort failed for session %s', sessionId)
+          reply(false, 'stop_unconfirmed')
+        } finally { release() }
+      } else {
+        reply(false, 'invalid_input')
       }
     })
 
@@ -1732,7 +1803,41 @@ export class ChatRunSocket {
 
   // --- Run dispatcher ---
 
-  private async executeRun(...args: Parameters<ChatRunSocket['handleRun']>): Promise<void> {
+  private executeRun(...args: Parameters<ChatRunSocket['handleRun']>): Promise<void> {
+    const [socket, data, ...rest] = args
+    const sessionId = data.session_id
+    if (!sessionId) return this.executeOwnedRun(...args)
+    let finish!: () => void
+    const receipt = { terminal: false, finishedAt: 0, confirmed: true, done: new Promise<void>(resolve => { finish = resolve }) }
+    let runId = ''
+    const observed = { ...data, onEvent: (event: string, payload: any) => {
+      if (event === 'run.started' && typeof payload?.run_id === 'string' && payload.run_id) {
+        runId = payload.run_id
+        for (const [key, old] of this.runExecutionReceipts) if (old.finishedAt && Date.now() - old.finishedAt > 300_000) this.runExecutionReceipts.delete(key)
+        if (this.runExecutionReceipts.size >= 256) for (const [key, old] of this.runExecutionReceipts) {
+          if (old.finishedAt) this.runExecutionReceipts.delete(key)
+          if (this.runExecutionReceipts.size < 256) break
+        }
+        this.runExecutionReceipts.set(JSON.stringify([sessionId, runId]), receipt)
+      }
+      if (runId && payload?.run_id === runId && ['run.completed', 'run.failed'].includes(event)) receipt.terminal = true
+      data.onEvent?.(event, payload)
+    } }
+    const handlers = this.runHandlers.get(sessionId) || new Set<Promise<void>>()
+    this.runHandlers.set(sessionId, handlers)
+    const handler = this.executeOwnedRun(socket, observed, ...rest).catch(error => {
+      receipt.confirmed = false
+      throw error
+    }).finally(() => {
+      receipt.finishedAt = Date.now(); finish()
+      handlers.delete(handler)
+      if (!handlers.size && this.runHandlers.get(sessionId) === handlers) this.runHandlers.delete(sessionId)
+    })
+    handlers.add(handler)
+    return handler
+  }
+
+  private async executeOwnedRun(...args: Parameters<ChatRunSocket['handleRun']>): Promise<void> {
     const [socket, data, profile, , , pushTargetId] = args
     const sessionId = data.session_id
     if (!sessionId) return this.handleRun(...args)
@@ -2919,10 +3024,11 @@ export class ChatRunSocket {
     }
     if (next.authorize) {
       const authorize = next.authorize
-      void authorize().then(() => this.runQueuedItem(socket, sessionId, { ...next, authorize: undefined }, fallbackProfile)).catch(() => {
+      void authorize().then(() => this.runQueuedItem(socket, sessionId, { ...next, authorize: undefined }, fallbackProfile)).catch(error => {
         const state = this.sessionMap.get(sessionId)
         if (state) state.isWorking = false
-        this.nsp.to(`session:${sessionId}`).emit('run.failed', { event: 'run.failed', session_id: sessionId, queue_id: next.queue_id, error: 'share_access_denied' })
+        this.nsp.to(`session:${sessionId}`).emit('run.failed', { event: 'run.failed', session_id: sessionId, queue_id: next.queue_id,
+          error: error instanceof QueuedSessionAccessError ? 'existing_session_unavailable' : 'share_access_denied' })
         this.dequeueNextQueuedRun(socket, sessionId, fallbackProfile)
       })
       return

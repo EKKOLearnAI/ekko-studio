@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { transcodeToWav } from './audio-convert'
 import { SttProviderConfigError } from './openai'
-import { SttNoSpeechDetectedError, type SttTranscribeInput, type SttTranscribeResult } from './types'
+import { SttNoSpeechDetectedError, SttProviderHttpError, type SttTranscribeInput, type SttTranscribeResult } from './types'
 
 const DEFAULT_BASE_URL = 'https://openspeech.bytedance.com/api/v3/auc/bigmodel'
 const DEFAULT_RESOURCE_ID = 'volc.seedasr.auc'
@@ -213,7 +213,7 @@ export async function transcribeDoubaoFile(input: SttTranscribeInput): Promise<S
   const submitStatus = getHeader(submit.headers, 'X-Api-Status-Code')
   if (!submit.ok || (submitStatus && submitStatus !== DONE_STATUS)) {
     const detail = safeDetail(await responseText(submit), apiKey)
-    throw new Error(`Doubao STT submit failed${submitStatus ? ` (${submitStatus})` : ` HTTP ${submit.status}`}${detail ? `: ${detail}` : ''}`)
+    throw new SttProviderHttpError(`Doubao STT submit failed${submitStatus ? ` (${submitStatus})` : ` HTTP ${submit.status}`}${detail ? `: ${detail}` : ''}`, submit.status)
   }
 
   while (Date.now() - startedAt < MAX_WAIT_MS) {
@@ -223,7 +223,7 @@ export async function transcribeDoubaoFile(input: SttTranscribeInput): Promise<S
 
     if (!query.ok) {
       const detail = safeDetail(bodyText, apiKey)
-      throw new Error(`Doubao STT query failed HTTP ${query.status}${detail ? `: ${detail}` : ''}`)
+      throw new SttProviderHttpError(`Doubao STT query failed HTTP ${query.status}${detail ? `: ${detail}` : ''}`, query.status)
     }
 
     if (status === DONE_STATUS) {

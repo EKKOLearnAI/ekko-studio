@@ -712,6 +712,21 @@ export const MCU_DEVICES_INDEXES = {
   idx_mcu_devices_created_at: 'CREATE INDEX IF NOT EXISTS idx_mcu_devices_created_at ON mcu_devices(created_at)',
 }
 
+export const MCU_SESSION_BINDINGS_TABLE = 'mcu_session_bindings'
+export const MCU_SESSION_BINDINGS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  user_id: 'INTEGER NOT NULL',
+  profile: 'TEXT NOT NULL',
+  device_code: 'TEXT NOT NULL',
+  session_id: 'TEXT',
+  kind: 'TEXT',
+  revision: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+export const MCU_SESSION_BINDINGS_INDEXES = {
+  uniq_mcu_session_bindings_owner: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_mcu_session_bindings_owner ON mcu_session_bindings(user_id,profile,device_code)',
+}
+
 // ============================================================================
 // App Connections
 // ============================================================================
@@ -1866,6 +1881,7 @@ export function initAllHermesTables(): void {
     syncTable(MCU_DEVICES_TABLE, MCU_DEVICES_SCHEMA, {
       indexes: MCU_DEVICES_INDEXES,
     })
+    syncTable(MCU_SESSION_BINDINGS_TABLE, MCU_SESSION_BINDINGS_SCHEMA, { indexes: MCU_SESSION_BINDINGS_INDEXES })
 
     // App authorization codes and connected mobile devices
     syncTable(SESSION_SHARES_TABLE, SESSION_SHARES_SCHEMA, { indexes: SESSION_SHARES_INDEXES })

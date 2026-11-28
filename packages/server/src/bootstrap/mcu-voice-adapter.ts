@@ -6,6 +6,8 @@ configureMcuVoice({
     getActiveGlobalAgentServer()?.emitMcuEvent(payload, options) ?? false
   ),
   startChatTurn: input => {
-    getActiveGlobalAgentServer()?.startMcuVoiceChatTurn(input)
+    const server = getActiveGlobalAgentServer()
+    if (!server) throw new Error('MCU transport is unavailable')
+    server.startMcuVoiceChatTurn(input)
   },
 })

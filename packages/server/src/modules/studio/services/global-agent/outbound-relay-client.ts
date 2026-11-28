@@ -6,10 +6,14 @@ import { config } from '../../public/config'
 import { clearSessionMessages } from '../../repositories/session-store'
 import { getChatRunServer } from '../../public/chat-run'
 import { logger } from '../../public/logging'
+import { authenticateUserToken, inspectAppUserToken } from '../../public/auth'
+import { userCanAccessProfile } from '../../public/users'
 import { transcodeToPcmS16le } from '../voice/stt/audio-convert'
 import { encodeMcuImaAdpcm } from '../voice/mcu/adpcm'
 import { MCU_TTS_SAMPLE_RATE, mcuPromptText, mcuPromptUrl } from '../voice/mcu/prompts'
 import { createMcuSpeechSegmenter, normalizeMcuSpeechText } from './mcu-speech-segmenter'
+import { createMcuHumanInteractionWait } from './mcu-human-interaction'
+import { createMcuNativeCancellation, emitMcuSettledTurn, type McuTurnOutcome } from './mcu-turn-settlement'
 import {
   DEFAULT_MCU_AGENT_RUNTIME,
   mcuChatRunFields,
@@ -113,15 +117,6 @@ function resolveGlobalAgentSocketIoUrl(input: string): string {
     url.pathname = `${path}${GLOBAL_AGENT_NAMESPACE}`
   }
   return url.toString()
-}
-
-function chooseMcuApprovalChoice(event: Record<string, unknown>): 'once' | 'session' | 'always' | null {
-  const rawChoices = Array.isArray(event.choices) ? event.choices.map(choice => String(choice)) : []
-  const choices = rawChoices.length > 0 ? rawChoices : ['once', 'session', 'deny']
-  if (choices.includes('session')) return 'session'
-  if (choices.includes('once')) return 'once'
-  if (choices.includes('always')) return 'always'
-  return null
 }
 
 export interface RelayHttpRequest {
@@ -247,8 +242,8 @@ class McuSocketIoRelayClient {
     chunks: Buffer[]
   }) | null = null
   private localMcuForwardQueue = Promise.resolve()
-  private readonly audioWaiters = new Map<string, { resolve: () => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>()
-  private readonly activeRuns = new Map<string, { socket: Socket; sessionId: string }>()
+  private readonly audioWaiters = new Map<string, { interactionId: string; resolve: () => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>()
+  private readonly activeRuns = new Map<string, { socket: Socket; sessionId: string; cancel: () => void }>()
   private readonly sessionRuns = new Map<string, { interactionId: string; socket: Socket }>()
   private readonly backgroundListeners = new Map<string, RelayMcuBackgroundListener>()
   private readonly pendingBackgroundSpeech = new Map<string, PendingRelayMcuBackgroundSpeech[]>()
@@ -260,6 +255,11 @@ class McuSocketIoRelayClient {
   private audioUploadToken = ''
   private audioUploadPath = '/global-agent/audio'
   private remoteMcuUserToken = ''
+  private localAgentToken = ''
+  private localAgentProfile = 'default'
+  private localAgentOpening: Promise<boolean> | null = null
+  private localAgentRuntime: McuAgentRuntime = DEFAULT_MCU_AGENT_RUNTIME
+  private localAgentKey = ''
   private mcuWebhookSubscription: Record<string, unknown> | null = null
 
   constructor(private readonly options: OutboundRelayClientOptions) {}
@@ -281,6 +281,8 @@ class McuSocketIoRelayClient {
     this.socket = null
     this.localAgentSocket?.disconnect()
     this.localAgentSocket = null
+    this.remoteMcuUserToken = ''
+    this.localAgentToken = ''
     this.cancelPendingInterrupts()
     this.rejectAudioWaiters(new Error('MCU Socket.IO relay stopped'))
   }
@@ -445,66 +447,112 @@ class McuSocketIoRelayClient {
     this.socket?.emit('http.response', response)
   }
 
-  private connectLocalAgentSocket(): void {
-    const userToken = this.options.userToken || ''
-    if (this.localAgentSocket || !userToken) return
-    const localBaseUrl = this.options.localBaseUrl.replace(/\/$/, '')
-    const socket: Socket = io(`${localBaseUrl}/global-agent`, {
-      auth: {
-        token: userToken,
-        role: 'hermes-studio',
-        instanceId: this.options.instanceId || this.options.deviceCode || undefined,
-      },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 30_000,
-      timeout: 30_000,
-    })
-    this.localAgentSocket = socket
-    socket.on('connect', () => {
-      logger.info({
-        relayUrl: this.redactedRelayUrl(),
-        localBaseUrl,
-        instanceId: this.options.instanceId || this.options.deviceCode || undefined,
-      }, '[outbound-relay:mcu-sio] local global-agent bridge connected')
-      if (this.mcuWebhookSubscription) socket.emit('mcu.events.subscribe', this.mcuWebhookSubscription)
-    })
-    socket.on('connect_error', (err: Error) => {
-      logger.warn({ err, localBaseUrl }, '[outbound-relay:mcu-sio] local global-agent bridge connection failed')
-    })
-    socket.on('disconnect', (reason: string) => {
-      logger.info({ reason, localBaseUrl }, '[outbound-relay:mcu-sio] local global-agent bridge disconnected')
-    })
-    socket.onAny((eventName: string, payload: unknown) => {
-      if (SOCKET_IO_RESERVED_EVENTS.has(eventName)) return
-      if (['mcu.webhook.event', 'mcu.events.subscribed', 'mcu.events.unsubscribed'].includes(eventName) && isRecord(payload)) {
-        if (this.localAgentSocket !== socket || eventName === 'mcu.webhook.event' && !this.mcuWebhookSubscription) return
-        this.sendJson(payload)
-        return
+  private async connectLocalAgentSocket(profile = this.localAgentProfile, agentRuntime = this.localAgentRuntime): Promise<boolean> {
+    const userToken = this.remoteMcuUserToken
+    if (!userToken || !this.options.userToken || !this.options.deviceCode || this.stopped || !this.socket?.connected) return false
+    this.localAgentProfile = profile
+    this.localAgentRuntime = agentRuntime
+    const key = JSON.stringify([userToken, profile, agentRuntime])
+    try {
+      const [app, manager] = await Promise.all([inspectAppUserToken(userToken), authenticateUserToken(this.options.userToken)])
+      if (app?.status !== 'active' || !app.user || !manager || app.user.id !== manager.id || app.deviceCode !== this.options.deviceCode
+        || app.user.role !== 'super_admin' && !userCanAccessProfile(app.user.id, profile)
+        || this.remoteMcuUserToken !== userToken || this.stopped || !this.socket?.connected) {
+        this.localAgentSocket?.disconnect(); this.localAgentSocket = null
+        return false
       }
-      this.localMcuForwardQueue = this.localMcuForwardQueue
-        .then(() => this.forwardLocalMcuEventToRelay(eventName, payload))
-        .catch((err) => {
-          logger.warn({
-            err,
-            relayUrl: this.redactedRelayUrl(),
-            eventName,
-          }, '[outbound-relay:mcu-sio] failed to forward local MCU event to relay')
-        })
-    })
+      if (this.localAgentProfile !== profile || this.localAgentRuntime !== agentRuntime) return false
+      if (this.localAgentKey === key) {
+        if (this.localAgentSocket?.connected) return true
+        if (this.localAgentOpening) return await this.localAgentOpening
+      }
+      this.localAgentSocket?.disconnect()
+      this.localAgentToken = userToken
+      this.localAgentKey = key
+      this.localAgentProfile = profile
+      this.localAgentRuntime = agentRuntime
+      const localBaseUrl = this.options.localBaseUrl.replace(/\/$/, '')
+      const socket: Socket = io(`${localBaseUrl}/global-agent`, {
+        auth: {
+          token: userToken,
+          role: 'hermes-studio',
+          instanceId: this.options.instanceId || this.options.deviceCode || undefined,
+          deviceCode: app.deviceCode,
+          profile,
+          agentRuntime,
+        },
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 30_000,
+        timeout: 30_000,
+      })
+      this.localAgentSocket = socket
+      socket.on('connect', () => {
+        logger.info({
+          relayUrl: this.redactedRelayUrl(),
+          localBaseUrl,
+          instanceId: this.options.instanceId || this.options.deviceCode || undefined,
+        }, '[outbound-relay:mcu-sio] local global-agent bridge connected')
+        if (this.mcuWebhookSubscription) socket.emit('mcu.events.subscribe', this.mcuWebhookSubscription)
+      })
+      socket.on('connect_error', (err: Error) => {
+        logger.warn({ err, localBaseUrl }, '[outbound-relay:mcu-sio] local global-agent bridge connection failed')
+      })
+      socket.on('disconnect', (reason: string) => {
+        logger.info({ reason, localBaseUrl }, '[outbound-relay:mcu-sio] local global-agent bridge disconnected')
+      })
+      socket.onAny((eventName: string, payload: unknown) => {
+        if (this.localAgentSocket !== socket || this.remoteMcuUserToken !== userToken) return
+        if (SOCKET_IO_RESERVED_EVENTS.has(eventName)) return
+        if (['mcu.webhook.event', 'mcu.events.subscribed', 'mcu.events.unsubscribed'].includes(eventName) && isRecord(payload)) {
+          if (this.localAgentSocket !== socket || eventName === 'mcu.webhook.event' && !this.mcuWebhookSubscription) return
+          this.sendJson(payload)
+          return
+        }
+        this.localMcuForwardQueue = this.localMcuForwardQueue
+          .then(() => this.forwardLocalMcuEventToRelay(eventName, payload, userToken))
+          .catch((err) => {
+            logger.warn({
+              err,
+              relayUrl: this.redactedRelayUrl(),
+              eventName,
+            }, '[outbound-relay:mcu-sio] failed to forward local MCU event to relay')
+          })
+      })
+      const opening = new Promise<boolean>(resolve => {
+        const finish = (ready: boolean) => {
+          clearTimeout(timer); socket.off('connect', connected); socket.off('connect_error', failed); socket.off('disconnect', failed)
+          resolve(ready)
+        }
+        const connected = () => finish(true), failed = () => finish(false)
+        const timer = setTimeout(() => { socket.disconnect(); finish(false) }, 8000)
+        socket.once('connect', connected); socket.once('connect_error', failed); socket.once('disconnect', failed)
+        if (socket.connected) finish(true)
+      })
+      this.localAgentOpening = opening
+      const ready = await opening
+      if (this.localAgentOpening === opening) this.localAgentOpening = null
+      return ready && this.localAgentSocket === socket && this.remoteMcuUserToken === userToken && socket.connected
+    } catch {
+      this.localAgentSocket?.disconnect(); this.localAgentSocket = null
+      logger.warn('[outbound-relay:mcu-sio] device authorization or local bridge unavailable')
+      return false
+    }
   }
 
   private emitLocalMcuEvent(eventName: string, payload: Record<string, unknown>): void {
-    this.connectLocalAgentSocket()
-    this.localAgentSocket?.emit(eventName, this.payloadForLocalMcuSocket(payload))
+    const token = this.remoteMcuUserToken
+    const profile = typeof payload.profile === 'string' && payload.profile.trim() ? payload.profile.trim() : this.localAgentProfile
+    void this.connectLocalAgentSocket(profile).then(ready => {
+      if (ready && token === this.remoteMcuUserToken) this.localAgentSocket?.emit(eventName, this.payloadForLocalMcuSocket(payload))
+    })
   }
 
   private payloadForLocalMcuSocket(payload: Record<string, unknown>): Record<string, unknown> {
-    const userToken = this.options.userToken || ''
-    if (!this.remoteMcuUserToken || !userToken) return payload
-    const next: Record<string, unknown> = { ...payload, apiToken: userToken }
+    if (!this.remoteMcuUserToken) return payload
+    const next: Record<string, unknown> = { ...payload, apiToken: this.remoteMcuUserToken }
     delete next.api_token
     delete next.authorization
     return next
@@ -519,22 +567,21 @@ class McuSocketIoRelayClient {
       return
     }
     if (!token || token === this.remoteMcuUserToken) return
-    if (this.mcuWebhookSubscription) {
-      this.mcuWebhookSubscription = null
-      // Close the old recipient's channel, including events already in flight.
-      this.localAgentSocket?.disconnect()
-      this.localAgentSocket = null
-    }
+    this.mcuWebhookSubscription = null
+    // Close the old recipient's channel, including events already in flight.
+    this.localAgentSocket?.disconnect()
+    this.localAgentSocket = null
+    this.localAgentToken = ''
     this.remoteMcuUserToken = token
   }
 
-  private async forwardLocalMcuEventToRelay(eventName: string, payload: unknown): Promise<void> {
-    if (this.stopped) return
+  private async forwardLocalMcuEventToRelay(eventName: string, payload: unknown, token: string): Promise<void> {
+    if (this.stopped || this.remoteMcuUserToken !== token || !await this.connectLocalAgentSocket()) return
     const body = isRecord(payload)
       ? { ...payload, type: typeof payload.type === 'string' && payload.type ? payload.type : eventName }
       : { type: eventName, payload }
     const out = await this.prepareMcuRelayPayload(body)
-    this.sendJson(out)
+    if (!this.stopped && this.remoteMcuUserToken === token && await this.connectLocalAgentSocket()) this.sendJson(out)
   }
 
   private async prepareMcuRelayPayload(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -582,7 +629,7 @@ class McuSocketIoRelayClient {
   }
 
   private authorizeRemoteMcuEvent(event: Record<string, unknown>): boolean {
-    const expectedToken = this.remoteMcuUserToken || this.options.userToken || ''
+    const expectedToken = this.remoteMcuUserToken
     const providedToken = this.remoteMcuApiToken(event)
     if (!expectedToken || !providedToken || providedToken !== expectedToken) {
       logger.warn({
@@ -829,7 +876,8 @@ class McuSocketIoRelayClient {
       this.sendJson({ type: 'interaction.status', status: 'failed', text: 'missing voice metadata' })
       return
     }
-    if (!this.options.userToken) {
+    const userToken = this.remoteMcuUserToken
+    if (!userToken || !await this.connectLocalAgentSocket(voice.profile, voice.agentRuntime) || userToken !== this.remoteMcuUserToken) {
       this.sendJson({
         type: 'interaction.status',
         interactionId: voice.interactionId,
@@ -839,20 +887,26 @@ class McuSocketIoRelayClient {
       return
     }
 
+    const ownsResponse = async () => userToken === this.remoteMcuUserToken
+      && await this.connectLocalAgentSocket(voice.profile, voice.agentRuntime)
+      && userToken === this.remoteMcuUserToken
     this.sendJson({ type: 'interaction.status', interactionId: voice.interactionId, status: 'transcribing' })
     try {
       const response = await this.options.fetchImpl(`${this.options.localBaseUrl.replace(/\/$/, '')}/api/studio/mcu/voice-turn`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${this.options.userToken}`,
+          Authorization: `Bearer ${userToken}`,
           'Content-Type': voice.mimeType,
           'X-Hermes-Mcu-Interaction-Id': voice.interactionId,
           'X-Hermes-Mcu-Agent-Runtime': voice.agentRuntime,
+          'X-Hermes-Mcu-Device-Id': this.options.instanceId || this.options.deviceCode,
           'X-Hermes-Profile': voice.profile,
         },
         body: new Uint8Array(audio),
       })
       const text = await response.text()
+      // HTTP completion may outlive the original paired recipient.
+      if (!await ownsResponse()) return
       let payload: Record<string, unknown> = {}
       try {
         payload = text ? JSON.parse(text) as Record<string, unknown> : {}
@@ -885,6 +939,7 @@ class McuSocketIoRelayClient {
       this.sendJson({ type: 'interaction.status', interactionId: voice.interactionId, status: 'thinking', text: transcript })
       await this.runChatFromTranscript(voice, transcript)
     } catch (err) {
+      if (!await ownsResponse()) return
       this.sendJson({
         type: 'interaction.status',
         interactionId: voice.interactionId,
@@ -898,12 +953,13 @@ class McuSocketIoRelayClient {
     voice: { interactionId: string; profile: string; agentRuntime: McuAgentRuntime },
     transcript: string,
   ): Promise<void> {
+    const recipientToken = this.remoteMcuUserToken
     await new Promise<void>((resolve) => {
       const sessionId = this.mcuSessionId(voice.profile, voice.agentRuntime)
       const primaryQueueId = `mcu_${randomUUID()}`
       this.interruptedInteractions.delete(voice.interactionId)
       const socket: Socket = io(`${this.options.localBaseUrl.replace(/\/$/, '')}/chat-run`, {
-        auth: this.options.userToken ? { token: this.options.userToken } : {},
+        auth: this.remoteMcuUserToken ? { token: this.remoteMcuUserToken } : {},
         query: { profile: voice.profile },
         transports: ['websocket', 'polling'],
         reconnection: false,
@@ -915,11 +971,17 @@ class McuSocketIoRelayClient {
       const playbackQueue: Promise<void>[] = []
       let previousPlaybackDone = Promise.resolve()
       let settled = false
+      let cancelled = false
+      const turnCancellation = new AbortController()
       let primaryFinished = false
       let primaryResolved = false
       let primaryTerminalReceived = false
       let currentRunPrimary = false
       let currentRunAutonomous = false
+      let currentRunId = ''
+      let primaryQueuePending = true
+      let runSent = false
+      let cancellationOutcome: McuTurnOutcome = 'cancelled'
       let currentDelegationId: string | undefined
       let backgroundOutput = ''
       let backgroundPending = 0
@@ -928,8 +990,27 @@ class McuSocketIoRelayClient {
         const listener = this.backgroundListeners.get(sessionId)
         return primaryTerminalReceived || listener?.socket === socket
       }
+      const ownsSessionEvent = (event: Record<string, unknown>) => event.session_id === sessionId
+      const ownsRunEvent = (event: Record<string, unknown>) => (
+        ownsSessionEvent(event) && (!currentRunId || event.run_id === undefined || event.run_id === currentRunId)
+      )
+      const ownsTerminalEvent = (event: Record<string, unknown>) => (
+        ownsRunEvent(event) && (typeof event.queue_id !== 'string' || !event.queue_id
+          || event.queue_id === primaryQueueId || event.autonomous === true
+          || currentRunAutonomous && event.run_id === currentRunId)
+      )
+      const ownsHumanEvent = (event: Record<string, unknown>, requireRunId: boolean) => (
+        ownsSessionEvent(event) && Boolean(currentRunId)
+        && (requireRunId ? event.run_id === currentRunId : event.run_id === undefined || event.run_id === currentRunId)
+      )
+      const humanWait = createMcuHumanInteractionWait(
+        () => !settled && !this.stopped && socket.connected && !this.interruptedInteractions.has(voice.interactionId)
+          && (currentRunPrimary || currentRunAutonomous),
+        () => this.sendJson({ type: 'interaction.status', interactionId: voice.interactionId, status: 'working' }),
+        () => fail('chat-run timed out'),
+      )
       const enqueueSpeech = (text: string) => {
-        if (this.interruptedInteractions.has(voice.interactionId)) return
+        if (cancelled || this.interruptedInteractions.has(voice.interactionId)) return
         const segmentText = normalizeMcuSpeechText(text)
         if (!segmentText) return
         const segmentId = `${voice.interactionId}-tts-${++segmentIndex}`
@@ -952,11 +1033,13 @@ class McuSocketIoRelayClient {
           })
         ttsQueue = ttsQueue.then(async () => {
           await previousPlaybackDone
-          const audio = await this.enqueueMcuSpeechSegment(voice.interactionId, segmentId, segmentText, audioResult)
+          if (cancelled) return
+          const audio = await this.enqueueMcuSpeechSegment(voice.interactionId, segmentId, segmentText, audioResult, turnCancellation.signal)
           previousPlaybackDone = audio.playbackDone
           playbackQueue.push(audio.playbackDone)
         })
           .catch((err) => {
+            if (cancelled) return
             if (err instanceof Error && err.message === 'audio.interrupted') {
               this.interruptedInteractions.add(voice.interactionId)
               logger.info({
@@ -1006,12 +1089,15 @@ class McuSocketIoRelayClient {
         if (sessionRun?.socket === socket) this.sessionRuns.delete(sessionId)
         this.interruptedInteractions.delete(voice.interactionId)
         clearTimeout(timer)
+        humanWait.clear()
         resolvePrimary()
         void this.flushBackgroundSpeech(sessionId)
       }
       const finish = () => {
         if (settled) return
         settled = true
+        nativeCancellation.dispose()
+        humanWait.clear()
         releasePrimaryRun()
         const listener = this.backgroundListeners.get(sessionId)
         if (listener?.socket === socket) this.backgroundListeners.delete(sessionId)
@@ -1034,15 +1120,43 @@ class McuSocketIoRelayClient {
         if (backgroundPending > 0) keepBackgroundListener()
         else finish()
       }
-      const fail = (message: string) => {
-        this.sendJson({
-          type: 'interaction.status',
-          interactionId: voice.interactionId,
-          status: 'failed',
-          text: message,
-        })
-        finish()
+      const cancel = (outcome: McuTurnOutcome = 'cancelled') => {
+        if (settled || cancelled) return
+        cancelled = true
+        cancellationOutcome = outcome
+        turnCancellation.abort()
+        clearTimeout(timer)
+        humanWait.clear()
+        this.interruptedInteractions.add(voice.interactionId)
+        this.abortTts(voice.interactionId)
+        for (const [segmentId, waiter] of this.audioWaiters) if (waiter.interactionId === voice.interactionId) {
+          clearTimeout(waiter.timer)
+          this.audioWaiters.delete(segmentId)
+          waiter.reject(new Error('audio.interrupted'))
+        }
+        nativeCancellation.request()
       }
+      const fail = (_message: string) => { if (!settled) cancel('failed') }
+      const nativeCancellation = createMcuNativeCancellation({ sessionId, queueId: primaryQueueId,
+        state: () => ({ sent: runSent, queuePending: primaryQueuePending, runId: currentRunId,
+          terminalWithoutRun: primaryTerminalReceived && !currentRunId }),
+        emit: (event, payload, ack) => {
+          if (!socket.connected) { nativeCancellation.disconnect(); return }
+          socket.emit(event, payload, ack)
+        },
+        settled: () => {
+          finish()
+          void this.notifyMcuCancellation(voice.interactionId, voice.profile, recipientToken, cancellationOutcome)
+        },
+        unconfirmed: reason => {
+          logger.warn({ interactionId: voice.interactionId, sessionId, reason }, '[outbound-relay:ws] MCU cancellation not confirmed')
+          void this.connectLocalAgentSocket(voice.profile).then(connected => {
+            if (connected && recipientToken && recipientToken === this.remoteMcuUserToken) this.sendJson({
+              type: 'interaction.status', interactionId: voice.interactionId, status: 'failed', reason: 'cancel_unconfirmed',
+            })
+          }).catch(() => {})
+        },
+      })
       const timer = setTimeout(() => {
         fail('chat-run timed out')
       }, 300_000)
@@ -1052,6 +1166,14 @@ class McuSocketIoRelayClient {
       })
       socket.on('disconnect', (reason: string) => {
         if (settled) return
+        if (cancelled) {
+          nativeCancellation.disconnect()
+          socket.removeAllListeners()
+          this.activeRuns.delete(voice.interactionId)
+          if (this.sessionRuns.get(sessionId)?.socket === socket) this.sessionRuns.delete(sessionId)
+          resolvePrimary()
+          return
+        }
         if (primaryFinished) {
           logger.warn({ sessionId, reason }, '[outbound-relay:ws] MCU background session listener disconnected')
           finish()
@@ -1060,13 +1182,14 @@ class McuSocketIoRelayClient {
         fail(`chat-run disconnected: ${reason}`)
       })
       socket.on('connect', () => {
+        if (settled || cancelled) return
         logger.info({
           interactionId: voice.interactionId,
           sessionId,
           profile: voice.profile,
           transcriptLength: transcript.length,
         }, '[outbound-relay:ws] starting chat-run')
-        this.activeRuns.set(voice.interactionId, { socket, sessionId })
+        this.activeRuns.set(voice.interactionId, { socket, sessionId, cancel })
         this.sessionRuns.set(sessionId, { interactionId: voice.interactionId, socket })
         const runPayload = {
           input: transcript,
@@ -1075,45 +1198,51 @@ class McuSocketIoRelayClient {
           profile: voice.profile,
           ...mcuChatRunFields(voice.agentRuntime),
         }
-        const interruptedAt = this.recentlyInterruptedSessions.get(sessionId) || 0
-        if (Date.now() - interruptedAt < 10_000) {
-          socket.emit('abort', { session_id: sessionId })
-          setTimeout(() => socket.emit('run', runPayload), 800)
-          this.recentlyInterruptedSessions.delete(sessionId)
-          return
-        }
+        runSent = true
         socket.emit('run', runPayload)
       })
       socket.on('run.started', (event: Record<string, unknown> = {}) => {
+        if (!ownsSessionEvent(event)) return
+        if (currentRunId && event.run_id === currentRunId) return
         const queueId = typeof event.queue_id === 'string' ? event.queue_id : undefined
         const autonomous = event.autonomous === true
+        if (cancelled && queueId !== primaryQueueId) return
+        humanWait.clear()
         currentRunPrimary = !autonomous && queueId === primaryQueueId
         currentRunAutonomous = autonomous && ownsBackgroundEvents()
+        currentRunId = currentRunPrimary || currentRunAutonomous ? String(event.run_id || '') : ''
+        if (currentRunPrimary) primaryQueuePending = false
         currentDelegationId = currentRunAutonomous && typeof event.delegation_id === 'string' && event.delegation_id.trim()
           ? event.delegation_id.trim()
           : undefined
         backgroundOutput = ''
+        if (cancelled) { nativeCancellation.request(); return }
         if (!currentRunPrimary) return
         this.sendJson({ type: 'interaction.status', interactionId: voice.interactionId, status: 'thinking' })
       })
       socket.on('run.queued', (event: Record<string, unknown> = {}) => {
+        if (!ownsSessionEvent(event) || !primaryQueuePending) return
         const queuedMessages = Array.isArray(event.queued_messages) ? event.queued_messages : []
         const ownsQueueEvent = event.dequeued_queue_id === primaryQueueId || queuedMessages.some((message) => (
           typeof message === 'object' && message !== null && (message as Record<string, unknown>).id === primaryQueueId
         ))
         if (!ownsQueueEvent) return
-        currentRunPrimary = false
+        currentRunPrimary = event.dequeued_queue_id === primaryQueueId
+        primaryQueuePending = !currentRunPrimary
+        currentRunId = ''
+        humanWait.clear()
+        if (cancelled) { nativeCancellation.request(); return }
         this.sendJson({ type: 'interaction.status', interactionId: voice.interactionId, status: 'thinking' })
       })
       socket.on('tool.started', (event: Record<string, unknown> = {}) => {
-        if (!currentRunPrimary) return
+        if (cancelled || !ownsRunEvent(event) || !currentRunPrimary) return
         flushCompletedAssistantMessage()
         output = ''
         const tool = typeof event.tool === 'string' ? event.tool : typeof event.name === 'string' ? event.name : 'tool'
         this.sendJson({ type: 'tool.started', interactionId: voice.interactionId, tool })
       })
       const handleToolFinished = (event: Record<string, unknown> = {}, failed = false) => {
-        if (!currentRunPrimary) return
+        if (cancelled || !ownsRunEvent(event) || !currentRunPrimary) return
         const tool = typeof event.tool === 'string' ? event.tool : typeof event.name === 'string' ? event.name : 'tool'
         const error = failed ? 'tool.failed' : undefined
         this.sendJson({ type: 'tool.completed', interactionId: voice.interactionId, tool, error })
@@ -1121,6 +1250,7 @@ class McuSocketIoRelayClient {
       socket.on('tool.completed', (event: Record<string, unknown> = {}) => handleToolFinished(event))
       socket.on('tool.failed', (event: Record<string, unknown> = {}) => handleToolFinished(event, true))
       socket.on('message.delta', (event: Record<string, unknown> = {}) => {
+        if (cancelled || !ownsRunEvent(event)) return
         if (typeof event.delta === 'string') {
           if (currentRunAutonomous) {
             backgroundOutput += event.delta
@@ -1134,9 +1264,15 @@ class McuSocketIoRelayClient {
         }
       })
       socket.on('run.completed', (event: Record<string, unknown> = {}) => {
+        if (!ownsTerminalEvent(event)) return
+        if (cancelled) {
+          if (currentRunPrimary || event.queue_id === primaryQueueId) primaryTerminalReceived = true
+          nativeCancellation.request(); return
+        }
         backgroundPending = Math.max(0, Number(event.background_pending) || 0)
         const autonomous = event.autonomous === true || currentRunAutonomous
         if (autonomous) {
+          humanWait.clear()
           const text = typeof event.output === 'string' && event.output.trim()
             ? event.output
             : backgroundOutput
@@ -1163,6 +1299,7 @@ class McuSocketIoRelayClient {
           return
         }
         primaryTerminalReceived = true
+        humanWait.clear()
         currentRunPrimary = false
         if (typeof event.output === 'string' && event.output.trim()) {
           if (!output) {
@@ -1182,6 +1319,7 @@ class McuSocketIoRelayClient {
         ttsQueue
           .then(async () => {
             await Promise.all(playbackQueue)
+            if (cancelled) return
             if (this.interruptedInteractions.has(voice.interactionId)) {
               finish()
               return
@@ -1194,6 +1332,7 @@ class McuSocketIoRelayClient {
             finishPrimaryRun()
           })
           .catch((err) => {
+            if (cancelled) return
             if (this.interruptedInteractions.has(voice.interactionId) || (err instanceof Error && err.message === 'audio.interrupted')) {
               finish()
               return
@@ -1202,10 +1341,16 @@ class McuSocketIoRelayClient {
           })
       })
       socket.on('run.failed', (event: Record<string, unknown> = {}) => {
+        if (!ownsTerminalEvent(event)) return
+        if (cancelled) {
+          if (currentRunPrimary || event.queue_id === primaryQueueId) primaryTerminalReceived = true
+          nativeCancellation.request(); return
+        }
         backgroundPending = Math.max(0, Number(event.background_pending) || 0)
         const autonomous = event.autonomous === true || currentRunAutonomous
         const queueId = typeof event.queue_id === 'string' ? event.queue_id : undefined
         const isPrimary = currentRunPrimary || queueId === primaryQueueId
+        if (autonomous || isPrimary) humanWait.clear()
         currentRunAutonomous = false
         currentRunPrimary = false
         currentDelegationId = undefined
@@ -1215,33 +1360,21 @@ class McuSocketIoRelayClient {
           return
         }
         primaryTerminalReceived = true
-        this.sendJson({
-          type: 'interaction.status',
-          interactionId: voice.interactionId,
-          status: 'failed',
-          text: typeof event.error === 'string' ? event.error : 'chat-run failed',
-        })
-        finishPrimaryRun()
+        cancel('failed')
       })
       socket.on('delegation.updated', (event: Record<string, unknown> = {}) => {
+        if (cancelled) return
+        if (!ownsSessionEvent(event)) return
         if (event.background_pending == null) return
         backgroundPending = Math.max(0, Number(event.background_pending) || 0)
         if (primaryFinished && backgroundPending === 0) finish()
       })
       socket.on('approval.requested', (event: Record<string, unknown> = {}) => {
-        if (!currentRunPrimary && !currentRunAutonomous) return
-        const approvalId = typeof event.approval_id === 'string' ? event.approval_id : ''
-        const choice = chooseMcuApprovalChoice(event)
-        if (!approvalId || !choice) {
+        if (!ownsHumanEvent(event, true) || !humanWait.active()) return
+        if (!humanWait.request('approval', event.approval_id)) {
           fail('approval required')
           return
         }
-        logger.info({
-          interactionId: voice.interactionId,
-          sessionId,
-          approvalId,
-          choice,
-        }, '[outbound-relay:ws] auto-approving MCU chat-run approval')
         if (!currentRunAutonomous) {
           this.sendJson({
             type: 'tool.started',
@@ -1249,15 +1382,11 @@ class McuSocketIoRelayClient {
             tool: 'approval',
           })
         }
-        socket.emit('approval.respond', {
-          session_id: sessionId,
-          approval_id: approvalId,
-          choice,
-        })
       })
       socket.on('approval.resolved', (event: Record<string, unknown> = {}) => {
-        if (!currentRunPrimary) return
-        const resolved = event.resolved !== false
+        if (!ownsHumanEvent(event, false) || event.resolved === false) return
+        if (!humanWait.resolve('approval', event.approval_id) || !humanWait.active() || !currentRunPrimary) return
+        const resolved = event.resolved !== false && event.choice !== 'deny'
         this.sendJson({
           type: 'tool.completed',
           interactionId: voice.interactionId,
@@ -1265,9 +1394,19 @@ class McuSocketIoRelayClient {
           error: resolved ? undefined : 'approval failed',
         })
       })
-      socket.on('clarify.requested', () => {
-        if (!currentRunPrimary) return
-        fail('clarification required')
+      socket.on('clarify.requested', (event: Record<string, unknown> = {}) => {
+        if (!ownsHumanEvent(event, true) || !humanWait.active()) return
+        if (!humanWait.request('clarify', event.clarify_id)) fail('clarification required')
+      })
+      socket.on('clarify.resolved', (event: Record<string, unknown> = {}) => {
+        if (!ownsHumanEvent(event, false) || event.resolved === false) return
+        humanWait.resolve('clarify', event.clarify_id)
+      })
+      socket.on('abort.started', (event: Record<string, unknown> = {}) => {
+        if (!ownsRunEvent(event)) return
+        if (!currentRunPrimary && !currentRunAutonomous) return
+        this.interruptedInteractions.add(voice.interactionId)
+        humanWait.clear()
       })
     })
   }
@@ -1366,7 +1505,7 @@ class McuSocketIoRelayClient {
     const segmentId = `${interactionId}-prompt`
 
     this.sendJson({ type: 'interaction.status', interactionId, status: 'speaking', text })
-    const waitForDone = this.waitForMcuAudioDone(segmentId, Math.max(30_000, durationMs + 20_000))
+    const waitForDone = this.waitForMcuAudioDone(segmentId, Math.max(30_000, durationMs + 20_000), interactionId)
       .catch((err) => {
         logger.warn({
           err,
@@ -1391,14 +1530,17 @@ class McuSocketIoRelayClient {
   }
 
   private abortActiveRun(interactionId: string): void {
-    this.interruptedInteractions.add(interactionId)
-    this.abortTts(interactionId)
     const active = this.activeRuns.get(interactionId)
     if (!active) return
+    this.interruptedInteractions.add(interactionId)
+    this.abortTts(interactionId)
     logger.info({ interactionId, sessionId: active.sessionId }, '[outbound-relay:ws] aborting chat-run after MCU audio interrupt')
-    active.socket.emit('abort', { session_id: active.sessionId })
-    this.activeRuns.delete(interactionId)
-    this.sessionRuns.delete(active.sessionId)
+    active.cancel()
+  }
+
+  private async notifyMcuCancellation(interactionId: string, profile: string, token: string, outcome: McuTurnOutcome = 'cancelled'): Promise<void> {
+    if (!token || token !== this.remoteMcuUserToken || !await this.connectLocalAgentSocket(profile) || token !== this.remoteMcuUserToken) return
+    emitMcuSettledTurn(interactionId, outcome, payload => { this.sendJson(payload); return true })
   }
 
   private scheduleMcuInterrupt(profile: string, interactionId: string): void {
@@ -1447,30 +1589,28 @@ class McuSocketIoRelayClient {
   }
 
   private interruptMcuSession(profile: string, interactionId?: string): void {
-    const sessionId = this.mcuSessionId(profile)
+    const turnId = interactionId?.trim()
+    if (!turnId) return
+    const active = this.activeRuns.get(turnId)
+    const activeSessionBelongsToDevice = active && (
+      active.sessionId === this.mcuSessionId(profile, 'ekko')
+      || active.sessionId === this.mcuSessionId(profile, 'hermes')
+    )
+    const sessionId = activeSessionBelongsToDevice ? active.sessionId : this.mcuSessionId(profile)
     const sessionRun = this.sessionRuns.get(sessionId)
-    const active = interactionId ? this.activeRuns.get(interactionId) : undefined
-    const hasActiveTts = interactionId ? this.ttsAbortControllers.has(interactionId) : false
-    if (interactionId && (sessionRun || active || hasActiveTts)) {
-      this.interruptedInteractions.add(interactionId)
-      this.abortTts(interactionId)
-    }
-    if (sessionRun) {
-      this.recentlyInterruptedSessions.set(sessionId, Date.now())
+    if (sessionRun?.interactionId === turnId && activeSessionBelongsToDevice) {
       this.interruptedInteractions.add(sessionRun.interactionId)
       this.abortTts(sessionRun.interactionId)
       logger.info({
         interactionId: sessionRun.interactionId,
         sessionId,
       }, '[outbound-relay:ws] aborting chat-run after MCU interrupt')
-      sessionRun.socket.emit('abort', { session_id: sessionId })
-      this.activeRuns.delete(sessionRun.interactionId)
-      this.sessionRuns.delete(sessionId)
+      this.activeRuns.get(sessionRun.interactionId)?.cancel()
       return
     }
-    if (interactionId && active?.sessionId === sessionId) {
+    if (activeSessionBelongsToDevice && active?.sessionId === sessionId) {
       this.recentlyInterruptedSessions.set(sessionId, Date.now())
-      this.abortActiveRun(interactionId)
+      this.abortActiveRun(turnId)
     }
   }
 
@@ -1539,8 +1679,9 @@ class McuSocketIoRelayClient {
     segmentId: string,
     text: string,
     audioResult: Promise<McuSpeechSynthesisResult>,
+    signal?: AbortSignal,
   ): Promise<EnqueuedMcuSpeechSegment> {
-    if (this.interruptedInteractions.has(interactionId)) {
+    if (signal?.aborted || this.interruptedInteractions.has(interactionId)) {
       return { playbackDone: Promise.resolve() }
     }
     const result = await audioResult
@@ -1548,10 +1689,10 @@ class McuSocketIoRelayClient {
       if (result.aborted) throw new Error('audio.interrupted')
       throw result.err
     }
-    if (this.interruptedInteractions.has(interactionId)) {
+    if (signal?.aborted || this.interruptedInteractions.has(interactionId)) {
       return { playbackDone: Promise.resolve() }
     }
-    const waitForDone = this.waitForMcuAudioDone(segmentId, Math.max(90_000, Math.min(text.length * 1200, 300_000)))
+    const waitForDone = this.waitForMcuAudioDone(segmentId, Math.max(90_000, Math.min(text.length * 1200, 300_000)), interactionId)
     waitForDone.catch(() => undefined)
     this.sendJson({
       type: 'audio.enqueue',
@@ -1568,24 +1709,25 @@ class McuSocketIoRelayClient {
     return { playbackDone: waitForDone }
   }
 
-  private waitForMcuAudioDone(segmentId: string, timeoutMs: number): Promise<void> {
+  private waitForMcuAudioDone(segmentId: string, timeoutMs: number, interactionId: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.audioWaiters.delete(segmentId)
         reject(new Error(`MCU audio playback timed out: ${segmentId}`))
       }, timeoutMs)
-      this.audioWaiters.set(segmentId, { resolve, reject, timer })
+      this.audioWaiters.set(segmentId, { resolve, reject, timer, interactionId })
     })
   }
 
   private async synthesizeMcuSpeech(text: string, profile: string, signal?: AbortSignal): Promise<{ url: string; mimeType: string }> {
-    if (!this.options.userToken) {
+    const userToken = this.remoteMcuUserToken
+    if (!userToken || !await this.connectLocalAgentSocket(profile) || userToken !== this.remoteMcuUserToken) {
       throw new Error('missing Web UI auth token')
     }
 
     const baseUrl = this.options.localBaseUrl.replace(/\/$/, '')
     const headers = {
-      Authorization: `Bearer ${this.options.userToken}`,
+      Authorization: `Bearer ${userToken}`,
       'Content-Type': 'application/json',
       'X-Hermes-Profile': profile || 'default',
     }
@@ -1742,9 +1884,12 @@ class McuSocketIoRelayClient {
   private async uploadMcuAudioUrlToRelay(url: string): Promise<string> {
     if (!this.audioUploadToken || !this.options.deviceCode) return ''
     const localUrl = this.resolveLocalAudioUrl(url)
+    const userToken = this.remoteMcuUserToken
+    if (new URL(localUrl).origin !== new URL(this.options.localBaseUrl).origin) throw new Error('MCU audio URL must use the authenticated local Studio origin')
+    if (!userToken || !await this.connectLocalAgentSocket() || this.remoteMcuUserToken !== userToken) throw new Error('MCU device authorization is unavailable')
     const response = await this.options.fetchImpl(localUrl, {
       method: 'GET',
-      headers: this.options.userToken ? { Authorization: `Bearer ${this.options.userToken}` } : undefined,
+      headers: { Authorization: `Bearer ${userToken}` },
     })
     if (!response.ok) {
       const detail = await response.text().catch(() => '')

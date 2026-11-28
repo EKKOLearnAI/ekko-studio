@@ -34,6 +34,7 @@ import { uploadRoutes } from '../modules/studio/routes/upload'
 import { appUploadRoutes } from '../modules/studio/routes/app-upload'
 import { authPublicRoutes, authProtectedRoutes } from '../modules/studio/routes/auth'
 import { mcuDevicePublicRoutes, mcuDeviceRoutes } from '../modules/studio/routes/mcu-devices'
+import { mcuSessionBindingRoutes } from '../modules/studio/routes/mcu-session-bindings'
 
 import { sessionRoutes } from '../modules/studio/routes/sessions'
 import { modelApiRoutes } from '../modules/studio/routes/model-api'
@@ -114,6 +115,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(studioPluginRoutes.routes())
   app.use(desktopBrowserRoutes.routes())
   app.use(mcuDeviceRoutes.routes())
+  app.use(mcuSessionBindingRoutes.routes())
   app.use(appConnectionRoutes.routes())
   app.use(uploadRoutes.routes())
   app.use(appUploadRoutes.routes())

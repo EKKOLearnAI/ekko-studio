@@ -23,3 +23,11 @@ export interface SttTranscribeResult {
 }
 
 export class SttNoSpeechDetectedError extends Error {}
+
+/** Provider HTTP failures retain status without parsing a human-facing message. */
+export class SttProviderHttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = 'SttProviderHttpError'
+  }
+}

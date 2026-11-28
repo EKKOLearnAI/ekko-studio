@@ -5,7 +5,7 @@ import { personNotificationRoom } from '../contracts/person-session'
 import type { Server, Socket } from 'socket.io'
 import { io as createClientSocket, type Socket as ClientSocket } from 'socket.io-client'
 import { logger } from '../public/logging'
-import { authenticateUserToken, type AuthenticatedUser } from '../public/auth'
+import { authenticateUserToken, inspectAppUserToken, type AuthenticatedUser } from '../public/auth'
 import { userCanAccessProfile } from '../public/users'
 import { config } from '../public/config'
 import { getChatRunServer } from '../public/chat-run'
@@ -14,6 +14,11 @@ import { decodeMcuImaAdpcm, encodeMcuImaAdpcm } from '../services/voice/mcu/adpc
 import { MCU_TTS_SAMPLE_RATE, mcuPromptText, mcuPromptUrl } from '../services/voice/mcu/prompts'
 import { createMcuSpeechSegmenter, normalizeMcuSpeechText } from '../services/global-agent/mcu-speech-segmenter'
 import { bindMcuWebhookEvents } from '../services/global-agent/mcu-webhook-events'
+import { createMcuHumanInteractionWait } from '../services/global-agent/mcu-human-interaction'
+import { activeMcuVoiceRoute, cancelMcuVoiceRoute, getMcuVoiceRoute, legacyMcuSessionId, releaseMcuVoiceForeground, releaseMcuVoiceRoute, releaseMcuVoiceRoutesForClient, validateMcuVoiceDelivery, validateMcuVoiceRecipient, validateMcuVoiceRoute, type McuVoiceRoute } from '../services/devices/mcu-session-bindings'
+import { createMcuNativeCancellation, emitMcuSettledTurn, type McuTurnOutcome } from '../services/global-agent/mcu-turn-settlement'
+import { getMcuSessionBinding } from '../repositories/mcu-session-bindings'
+import type { McuBindingOwner, OwnedMcuDevice } from '../contracts/mcu-session-bindings'
 import {
   mcuChatRunFields,
   normalizeMcuAgentRuntime,
@@ -164,9 +169,12 @@ interface McuVoiceChatTurnOptions {
   transcript: string
   clientId?: string
   agentRuntime?: McuAgentRuntime
+  routeLeaseId?: string
 }
 
 interface McuAudioWaiter {
+  clientId?: string
+  interactionId: string
   resolve: () => void
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout>
@@ -317,15 +325,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function chooseMcuApprovalChoice(event: Record<string, unknown>): 'once' | 'session' | 'always' | null {
-  const rawChoices = Array.isArray(event.choices) ? event.choices.map(choice => String(choice)) : []
-  const choices = rawChoices.length > 0 ? rawChoices : ['once', 'session', 'deny']
-  if (choices.includes('session')) return 'session'
-  if (choices.includes('once')) return 'once'
-  if (choices.includes('always')) return 'always'
-  return null
-}
-
 function normalizeHeaders(headers?: RelayHttpRequest['headers']): Headers {
   const normalized = new Headers()
   for (const [name, value] of Object.entries(headers || {})) {
@@ -436,7 +435,9 @@ export class GlobalAgentServer {
   private readonly frontendClients = new Map<string, Socket>()
   private readonly bridgeOwners = new Map<string, string>()
   private readonly localSocketBridges = new Map<string, LocalSocketBridge>()
-  private readonly activeMcuRuns = new Map<string, { socket: ClientSocket; sessionId: string }>()
+  private readonly activeMcuRuns = new Map<string, { socket: ClientSocket; sessionId: string; clientId?: string; profile: string; cancel: () => void }>()
+  private readonly terminalMcuRoutes = new WeakSet<McuVoiceRoute>()
+  private readonly pendingMcuCancellations = new WeakSet<McuVoiceRoute>()
   private readonly mcuSessionRuns = new Map<string, { interactionId: string; socket: ClientSocket }>()
   private readonly mcuBackgroundListeners = new Map<string, McuBackgroundListener>()
   private readonly pendingMcuBackgroundSpeech = new Map<string, PendingMcuBackgroundSpeech[]>()
@@ -485,6 +486,8 @@ export class GlobalAgentServer {
       socket.data.user = user
       socket.data.userToken = token
       socket.data.profile = profile
+      const app = await inspectAppUserToken(token)
+      if (app?.status === 'active' && app.user?.id === user.id) socket.data.mcuDeviceCode = app.deviceCode
       next()
     })
     this.nsp.on('connection', this.onConnection.bind(this))
@@ -516,6 +519,22 @@ export class GlobalAgentServer {
       if (raw.trim() === expected) return true
     }
     return false
+  }
+
+  /** Pairing identity comes from the active App credential, never handshake deviceCode. */
+  async getOwnedMcuDevice(owner: McuBindingOwner, clientId?: string): Promise<OwnedMcuDevice | null> {
+    for (const [id, socket] of this.clients) {
+      if (clientId && id !== clientId || !socket.connected || (socket.data.profile || 'default') !== owner.profile) continue
+      const token = String(socket.data.userToken || '')
+      const app = await inspectAppUserToken(token)
+      if (app?.status !== 'active' || app.user?.id !== owner.userId || app.deviceCode !== owner.deviceCode
+        || this.clients.get(id) !== socket || !socket.connected || socket.data.userToken !== token
+        || (socket.data.profile || 'default') !== owner.profile
+        || socket.data.user?.id !== owner.userId || !this.canAccessProfile(app.user, owner.profile)) continue
+      return { deviceCode: app.deviceCode, clientId: id, profile: owner.profile,
+        agentRuntime: normalizeMcuAgentRuntime(socket.handshake.auth?.agentRuntime), online: true }
+    }
+    return null
   }
 
   async httpRequest(request: RelayHttpRequest, options: GlobalAgentRequestOptions = {}): Promise<RelayHttpResponse> {
@@ -554,14 +573,30 @@ export class GlobalAgentServer {
 
   startMcuVoiceChatTurn(options: McuVoiceChatTurnOptions): void {
     const agentRuntime = normalizeMcuAgentRuntime(options.agentRuntime)
-    const sessionId = this.mcuSessionId(options.clientId, options.profile, agentRuntime)
+    const route = options.routeLeaseId ? getMcuVoiceRoute(options.routeLeaseId) : undefined
+    const sessionId = route?.sessionId || this.mcuSessionId(options.clientId, options.profile, agentRuntime)
+    let cancelled = false
+    const turnCancellation = new AbortController()
+    let eventDelivery = Promise.resolve()
+    const emitTurnEvent = (payload: Record<string, unknown>) => {
+      if (cancelled) return false
+      if (!route) return this.emitMcuEvent(payload, { clientId: options.clientId })
+      eventDelivery = eventDelivery.then(async () => {
+        await validateMcuVoiceDelivery(route, options.userToken)
+        if (cancelled) return
+        const terminal = payload.type === 'interaction.status' && payload.status === 'completed'
+        if (terminal && this.terminalMcuRoutes.has(route)) return
+        if (this.emitMcuEvent(payload, { clientId: options.clientId }) && terminal) this.terminalMcuRoutes.add(route)
+      }).catch(() => cancel())
+      return true
+    }
     const primaryQueueId = `mcu_${randomUUID()}`
-    this.emitMcuEvent({
+    emitTurnEvent({
       type: 'interaction.status',
       interactionId: options.interactionId,
       status: 'thinking',
       text: options.transcript,
-    }, { clientId: options.clientId })
+    })
 
     const socket: ClientSocket = createClientSocket(`${this.localBaseUrl}/chat-run`, {
       auth: { token: options.userToken },
@@ -579,6 +614,10 @@ export class GlobalAgentServer {
     let primaryTerminalReceived = false
     let currentRunPrimary = false
     let currentRunAutonomous = false
+    let currentRunId = ''
+    let primaryQueuePending = true
+    let runSent = false
+    let cancellationOutcome: McuTurnOutcome = 'cancelled'
     let currentDelegationId: string | undefined
     let backgroundOutput = ''
     let backgroundPending = 0
@@ -588,20 +627,45 @@ export class GlobalAgentServer {
       const listener = this.mcuBackgroundListeners.get(sessionId)
       return primaryTerminalReceived || listener?.socket === socket
     }
+    const ownsSessionEvent = (event: Record<string, unknown>) => event.session_id === sessionId
+    const ownsRunEvent = (event: Record<string, unknown>) => (
+      ownsSessionEvent(event) && (!currentRunId || event.run_id === undefined || event.run_id === currentRunId)
+    )
+    const ownsTerminalEvent = (event: Record<string, unknown>) => (
+      ownsRunEvent(event) && (typeof event.queue_id !== 'string' || !event.queue_id
+        || event.queue_id === primaryQueueId || event.autonomous === true
+        || currentRunAutonomous && event.run_id === currentRunId)
+    )
+    const ownsHumanEvent = (event: Record<string, unknown>, requireRunId: boolean) => (
+      ownsSessionEvent(event) && Boolean(currentRunId)
+      && (requireRunId ? event.run_id === currentRunId : event.run_id === undefined || event.run_id === currentRunId)
+    )
+    const humanWait = createMcuHumanInteractionWait(
+      () => !settled && socket.connected && !this.interruptedMcuInteractions.has(options.interactionId)
+        && (currentRunPrimary || currentRunAutonomous),
+      () => emitTurnEvent({ type: 'interaction.status', interactionId: options.interactionId, status: 'working' }),
+      () => fail('chat-run timed out'),
+    )
 
     const releasePrimaryRun = () => {
       if (primaryFinished) return
       primaryFinished = true
+      releaseMcuVoiceForeground(options.routeLeaseId)
       this.activeMcuRuns.delete(options.interactionId)
       const sessionRun = this.mcuSessionRuns.get(sessionId)
       if (sessionRun?.socket === socket) this.mcuSessionRuns.delete(sessionId)
       this.interruptedMcuInteractions.delete(options.interactionId)
       clearTimeout(timer)
+      humanWait.clear()
       void this.flushMcuBackgroundSpeech(sessionId)
     }
     const finish = () => {
       if (settled) return
       settled = true
+      nativeCancellation.dispose()
+      route?.signal.removeEventListener('abort', onRouteAbort)
+      releaseMcuVoiceRoute(options.routeLeaseId)
+      humanWait.clear()
       releasePrimaryRun()
       const listener = this.mcuBackgroundListeners.get(sessionId)
       if (listener?.socket === socket) this.mcuBackgroundListeners.delete(sessionId)
@@ -624,26 +688,60 @@ export class GlobalAgentServer {
       if (backgroundPending > 0) keepBackgroundListener()
       else finish()
     }
-    const fail = (message: string) => {
-      this.emitMcuEvent({
-        type: 'interaction.status',
-        interactionId: options.interactionId,
-        status: 'failed',
-        text: message,
-      }, { clientId: options.clientId })
-      finish()
+    const cancel = (outcome: McuTurnOutcome = 'cancelled') => {
+      if (cancelled) return
+      cancelled = true
+      cancellationOutcome = outcome
+      turnCancellation.abort()
+      if (settled) { void this.notifyMcuCancellation(options, route, outcome); return }
+      clearTimeout(timer)
+      humanWait.clear()
+      this.interruptedMcuInteractions.add(options.interactionId)
+      this.abortMcuTts(options.interactionId)
+      for (const [segmentId, waiter] of this.mcuAudioWaiters) if (waiter.interactionId === options.interactionId && waiter.clientId === options.clientId) {
+        clearTimeout(waiter.timer)
+        this.mcuAudioWaiters.delete(segmentId)
+        waiter.reject(new Error('audio.interrupted'))
+      }
+      nativeCancellation.request()
     }
+    const onRouteAbort = () => cancel()
+    const fail = (_message: string) => {
+      if (settled) return
+      logger.warn({ interactionId: options.interactionId, sessionId, reason: 'whole_turn_failure' }, '[global-agent] MCU whole turn failed; awaiting settlement')
+      cancel('failed')
+    }
+    const nativeCancellation = createMcuNativeCancellation({ sessionId, queueId: primaryQueueId,
+      state: () => ({ sent: runSent, queuePending: primaryQueuePending, runId: currentRunId,
+        terminalWithoutRun: primaryTerminalReceived && !currentRunId }),
+      emit: (event, payload, ack) => {
+        if (!socket.connected) { nativeCancellation.disconnect(); return }
+        socket.emit(event, payload, ack)
+      },
+      settled: () => {
+        logger.info({ interactionId: options.interactionId, sessionId, outcome: cancellationOutcome }, '[global-agent] MCU cancellation settled')
+        finish()
+        void this.notifyMcuCancellation(options, route, cancellationOutcome)
+      },
+      unconfirmed: reason => {
+        logger.warn({ interactionId: options.interactionId, sessionId, reason }, '[global-agent] MCU cancellation not confirmed')
+        void this.isMcuTurnRecipient(options, route).then(allowed => {
+          if (allowed) this.emitMcuEvent({ type: 'interaction.status', interactionId: options.interactionId,
+            status: 'failed', reason: 'cancel_unconfirmed' }, { clientId: options.clientId })
+        }).catch(() => {})
+      },
+    })
     const enqueueSpeech = (text: string) => {
       if (this.interruptedMcuInteractions.has(options.interactionId)) return
       const segmentText = normalizeMcuSpeechText(text)
       if (!segmentText) return
       const segmentId = `${options.interactionId}-tts-${++segmentIndex}`
-      this.emitMcuEvent({
+      emitTurnEvent({
         type: 'interaction.status',
         interactionId: options.interactionId,
         status: 'speaking',
         text: segmentText,
-      }, { clientId: options.clientId })
+      })
       const controller = this.registerMcuTtsAbortController(options.interactionId)
       const audioResult: Promise<McuSpeechSynthesisResult> = this.synthesizeMcuSpeech(
         segmentText,
@@ -659,7 +757,7 @@ export class GlobalAgentServer {
       ttsQueue = ttsQueue
         .then(async () => {
           await previousPlaybackDone
-          const audio = await this.enqueueMcuSpeechSegment(options, segmentId, segmentText, audioResult)
+          const audio = await this.enqueueMcuSpeechSegment(options, segmentId, segmentText, audioResult, turnCancellation.signal)
           previousPlaybackDone = audio.playbackDone
           playbackQueue.push(audio.playbackDone)
         })
@@ -670,13 +768,13 @@ export class GlobalAgentServer {
             return
           }
           logger.warn({ err, interactionId: options.interactionId, segmentId }, '[global-agent] failed to enqueue MCU speech')
-          this.emitMcuEvent({
+          emitTurnEvent({
             type: 'interaction.status',
             interactionId: options.interactionId,
             status: 'failed',
             text: err instanceof Error ? err.message : String(err),
-          }, { clientId: options.clientId })
-          this.emitMcuEvent({
+          })
+          emitTurnEvent({
             type: 'audio.enqueue',
             interactionId: options.interactionId,
             segmentId: `${segmentId}-failed-prompt`,
@@ -686,7 +784,7 @@ export class GlobalAgentServer {
             format: 's16le',
             channels: 1,
             sampleRate: MCU_TTS_SAMPLE_RATE,
-          }, { clientId: options.clientId })
+          })
         })
     }
     const flushCompletedAssistantMessage = () => {
@@ -696,12 +794,21 @@ export class GlobalAgentServer {
     const timer = setTimeout(() => {
       fail('chat-run timed out')
     }, 300_000)
+    route?.signal.addEventListener('abort', onRouteAbort, { once: true })
+    if (route?.signal.aborted) { cancel(); return }
 
     socket.on('connect_error', (err: Error) => {
       fail(err.message || 'chat-run connection failed')
     })
     socket.on('disconnect', (reason: string) => {
       if (settled) return
+      if (cancelled) {
+        nativeCancellation.disconnect()
+        socket.removeAllListeners()
+        this.activeMcuRuns.delete(options.interactionId)
+        if (this.mcuSessionRuns.get(sessionId)?.socket === socket) this.mcuSessionRuns.delete(sessionId)
+        return
+      }
       if (primaryFinished) {
         logger.warn({ sessionId, reason }, '[global-agent] MCU background session listener disconnected')
         finish()
@@ -710,67 +817,83 @@ export class GlobalAgentServer {
       fail(`chat-run disconnected: ${reason}`)
     })
     socket.on('connect', () => {
+      if (settled) return
       logger.info({
         interactionId: options.interactionId,
         sessionId,
         profile: options.profile,
         transcriptLength: options.transcript.length,
       }, '[global-agent] starting MCU chat-run')
-      this.activeMcuRuns.set(options.interactionId, { socket, sessionId })
+      this.activeMcuRuns.set(options.interactionId, { socket, sessionId, clientId: options.clientId, profile: options.profile, cancel })
       this.mcuSessionRuns.set(sessionId, { interactionId: options.interactionId, socket })
       const runPayload = {
         input: options.transcript,
         session_id: sessionId,
         queue_id: primaryQueueId,
         profile: options.profile,
-        ...mcuChatRunFields(agentRuntime),
+        ...(route?.bound ? { require_existing_session: true } : {}),
+        ...(route?.runFields || mcuChatRunFields(agentRuntime)),
       }
-      const interruptedAt = this.recentlyInterruptedMcuSessions.get(sessionId) || 0
-      if (Date.now() - interruptedAt < 10_000) {
-        socket.emit('abort', { session_id: sessionId })
-        setTimeout(() => socket.emit('run', runPayload), 800)
-        this.recentlyInterruptedMcuSessions.delete(sessionId)
-        return
-      }
-      socket.emit('run', runPayload)
+      const sendRun = () => { if (!settled && !cancelled) { runSent = true; socket.emit('run', runPayload) } }
+      if (options.routeLeaseId) {
+        void validateMcuVoiceRoute(options.routeLeaseId, options.userToken)
+          .then(sendRun)
+          .catch(() => fail('Device authorization or selected conversation changed'))
+      } else sendRun()
     })
     socket.on('run.started', (event: Record<string, unknown> = {}) => {
+      if (!ownsSessionEvent(event)) return
+      if (currentRunId && event.run_id === currentRunId) return
       const queueId = typeof event.queue_id === 'string' ? event.queue_id : undefined
       const autonomous = event.autonomous === true
+      if (cancelled && queueId !== primaryQueueId) return
+      humanWait.clear()
       currentRunPrimary = !autonomous && queueId === primaryQueueId
       currentRunAutonomous = autonomous && ownsBackgroundEvents()
+      currentRunId = currentRunPrimary || currentRunAutonomous ? String(event.run_id || '') : ''
+      if (currentRunPrimary) primaryQueuePending = false
       currentDelegationId = currentRunAutonomous && typeof event.delegation_id === 'string' && event.delegation_id.trim()
         ? event.delegation_id.trim()
         : undefined
       backgroundOutput = ''
+      if (cancelled) { nativeCancellation.request(); return }
       if (!currentRunPrimary) return
-      this.emitMcuEvent({ type: 'interaction.status', interactionId: options.interactionId, status: 'thinking' }, { clientId: options.clientId })
+      emitTurnEvent({ type: 'interaction.status', interactionId: options.interactionId, status: 'thinking' })
     })
     socket.on('run.queued', (event: Record<string, unknown> = {}) => {
+      if (!ownsSessionEvent(event) || !primaryQueuePending) return
       const queuedMessages = Array.isArray(event.queued_messages) ? event.queued_messages : []
       const ownsQueueEvent = event.dequeued_queue_id === primaryQueueId || queuedMessages.some((message) => (
         typeof message === 'object' && message !== null && (message as Record<string, unknown>).id === primaryQueueId
       ))
       if (!ownsQueueEvent) return
-      currentRunPrimary = false
-      this.emitMcuEvent({ type: 'interaction.status', interactionId: options.interactionId, status: 'thinking' }, { clientId: options.clientId })
+      // Dequeue proves that this request now owns the session's active slot.
+      // Before that point timeout may only remove our queue item, never abort
+      // the other request currently running in the same session.
+      currentRunPrimary = event.dequeued_queue_id === primaryQueueId
+      primaryQueuePending = !currentRunPrimary
+      currentRunId = ''
+      humanWait.clear()
+      if (cancelled) { nativeCancellation.request(); return }
+      emitTurnEvent({ type: 'interaction.status', interactionId: options.interactionId, status: 'thinking' })
     })
     socket.on('tool.started', (event: Record<string, unknown> = {}) => {
-      if (!currentRunPrimary) return
+      if (!ownsRunEvent(event) || !currentRunPrimary) return
       flushCompletedAssistantMessage()
       output = ''
       const tool = typeof event.tool === 'string' ? event.tool : typeof event.name === 'string' ? event.name : 'tool'
-      this.emitMcuEvent({ type: 'tool.started', interactionId: options.interactionId, tool }, { clientId: options.clientId })
+      emitTurnEvent({ type: 'tool.started', interactionId: options.interactionId, tool })
     })
     const handleToolFinished = (event: Record<string, unknown> = {}, failed = false) => {
-      if (!currentRunPrimary) return
+      if (!ownsRunEvent(event) || !currentRunPrimary) return
       const tool = typeof event.tool === 'string' ? event.tool : typeof event.name === 'string' ? event.name : 'tool'
       const error = failed ? 'tool.failed' : undefined
-      this.emitMcuEvent({ type: 'tool.completed', interactionId: options.interactionId, tool, error }, { clientId: options.clientId })
+      emitTurnEvent({ type: 'tool.completed', interactionId: options.interactionId, tool, error })
     }
     socket.on('tool.completed', (event: Record<string, unknown> = {}) => handleToolFinished(event))
     socket.on('tool.failed', (event: Record<string, unknown> = {}) => handleToolFinished(event, true))
     socket.on('message.delta', (event: Record<string, unknown> = {}) => {
+      if (!ownsRunEvent(event)) return
       if (typeof event.delta !== 'string') return
       if (currentRunAutonomous) {
         backgroundOutput += event.delta
@@ -783,9 +906,16 @@ export class GlobalAgentServer {
       }
     })
     socket.on('run.completed', (event: Record<string, unknown> = {}) => {
+      if (!ownsTerminalEvent(event)) return
+      if (cancelled) {
+        if (currentRunPrimary || event.queue_id === primaryQueueId) primaryTerminalReceived = true
+        nativeCancellation.request()
+        return
+      }
       backgroundPending = Math.max(0, Number(event.background_pending) || 0)
       const autonomous = event.autonomous === true || currentRunAutonomous
       if (autonomous) {
+        humanWait.clear()
         const text = typeof event.output === 'string' && event.output.trim()
           ? event.output
           : backgroundOutput
@@ -812,6 +942,7 @@ export class GlobalAgentServer {
         return
       }
       primaryTerminalReceived = true
+      humanWait.clear()
       currentRunPrimary = false
       if (typeof event.output === 'string' && event.output.trim()) {
         if (!output) {
@@ -831,14 +962,16 @@ export class GlobalAgentServer {
       ttsQueue
         .then(async () => {
           await Promise.all(playbackQueue)
+          if (cancelled) return
           if (this.interruptedMcuInteractions.has(options.interactionId)) {
             finish()
             return
           }
-          this.emitMcuEvent({ type: 'interaction.status', interactionId: options.interactionId, status: 'completed' }, { clientId: options.clientId })
+          emitTurnEvent({ type: 'interaction.status', interactionId: options.interactionId, status: 'completed' })
           finishPrimaryRun()
         })
         .catch((err) => {
+          if (cancelled) return
           if (this.interruptedMcuInteractions.has(options.interactionId) || (err instanceof Error && err.message === 'audio.interrupted')) {
             finish()
             return
@@ -847,10 +980,16 @@ export class GlobalAgentServer {
         })
     })
     socket.on('run.failed', (event: Record<string, unknown> = {}) => {
+      if (!ownsTerminalEvent(event)) return
+      if (cancelled) {
+        if (currentRunPrimary || event.queue_id === primaryQueueId) primaryTerminalReceived = true
+        nativeCancellation.request(); return
+      }
       backgroundPending = Math.max(0, Number(event.background_pending) || 0)
       const autonomous = event.autonomous === true || currentRunAutonomous
       const queueId = typeof event.queue_id === 'string' ? event.queue_id : undefined
       const isPrimary = currentRunPrimary || queueId === primaryQueueId
+      if (autonomous || isPrimary) humanWait.clear()
       currentRunAutonomous = false
       currentRunPrimary = false
       currentDelegationId = undefined
@@ -860,49 +999,49 @@ export class GlobalAgentServer {
         return
       }
       primaryTerminalReceived = true
-      this.emitMcuEvent({
-        type: 'interaction.status',
-        interactionId: options.interactionId,
-        status: 'failed',
-        text: typeof event.error === 'string' ? event.error : 'chat-run failed',
-      }, { clientId: options.clientId })
-      finishPrimaryRun()
+      cancel('failed')
     })
     socket.on('delegation.updated', (event: Record<string, unknown> = {}) => {
+      if (cancelled) return
+      if (!ownsSessionEvent(event)) return
       if (event.background_pending == null) return
       backgroundPending = Math.max(0, Number(event.background_pending) || 0)
       if (primaryFinished && backgroundPending === 0) finish()
     })
     socket.on('approval.requested', (event: Record<string, unknown> = {}) => {
-      if (!currentRunPrimary && !currentRunAutonomous) return
-      const approvalId = typeof event.approval_id === 'string' ? event.approval_id : ''
-      const choice = chooseMcuApprovalChoice(event)
-      if (!approvalId || !choice) {
+      if (!ownsHumanEvent(event, true) || !humanWait.active()) return
+      if (!humanWait.request('approval', event.approval_id)) {
         fail('approval required')
         return
       }
       if (!currentRunAutonomous) {
-        this.emitMcuEvent({ type: 'tool.started', interactionId: options.interactionId, tool: 'approval' }, { clientId: options.clientId })
+        emitTurnEvent({ type: 'tool.started', interactionId: options.interactionId, tool: 'approval' })
       }
-      socket.emit('approval.respond', {
-        session_id: sessionId,
-        approval_id: approvalId,
-        choice,
-      })
     })
     socket.on('approval.resolved', (event: Record<string, unknown> = {}) => {
-      if (!currentRunPrimary) return
-      const resolved = event.resolved !== false
-      this.emitMcuEvent({
+      if (!ownsHumanEvent(event, false) || event.resolved === false) return
+      if (!humanWait.resolve('approval', event.approval_id) || !humanWait.active() || !currentRunPrimary) return
+      const resolved = event.resolved !== false && event.choice !== 'deny'
+      emitTurnEvent({
         type: 'tool.completed',
         interactionId: options.interactionId,
         tool: 'approval',
         error: resolved ? undefined : 'approval failed',
-      }, { clientId: options.clientId })
+      })
     })
-    socket.on('clarify.requested', () => {
-      if (!currentRunPrimary) return
-      fail('clarification required')
+    socket.on('clarify.requested', (event: Record<string, unknown> = {}) => {
+      if (!ownsHumanEvent(event, true) || !humanWait.active()) return
+      if (!humanWait.request('clarify', event.clarify_id)) fail('clarification required')
+    })
+    socket.on('clarify.resolved', (event: Record<string, unknown> = {}) => {
+      if (!ownsHumanEvent(event, false) || event.resolved === false) return
+      humanWait.resolve('clarify', event.clarify_id)
+    })
+    socket.on('abort.started', (event: Record<string, unknown> = {}) => {
+      if (!ownsRunEvent(event)) return
+      if (!currentRunPrimary && !currentRunAutonomous) return
+      this.interruptedMcuInteractions.add(options.interactionId)
+      humanWait.clear()
     })
   }
 
@@ -994,6 +1133,12 @@ export class GlobalAgentServer {
     const clientId = String(socket.handshake.auth?.instanceId || socket.id)
     const existing = this.clients.get(clientId)
     if (existing && existing.id !== socket.id) {
+      if (existing.data.user?.id !== socket.data.user?.id
+        || existing.data.mcuDeviceCode !== socket.data.mcuDeviceCode) {
+        socket.emit('relay.error', { code: 'client_identity_conflict' })
+        socket.disconnect(true)
+        return
+      }
       this.closeInboundSocketsForOwner(existing.id)
       existing.disconnect(true)
       logger.info('[global-agent] replaced existing client id=%s old_socket=%s new_socket=%s', clientId, existing.id, socket.id)
@@ -1008,6 +1153,13 @@ export class GlobalAgentServer {
     socket.on('disconnect', () => {
       if (this.clients.get(clientId)?.id === socket.id) {
         this.clients.delete(clientId)
+        releaseMcuVoiceRoutesForClient(clientId)
+        for (const active of this.activeMcuRuns.values()) if (active.clientId === clientId) active.cancel()
+        for (const [segmentId, waiter] of this.mcuAudioWaiters) if (waiter.clientId === clientId) {
+          clearTimeout(waiter.timer)
+          this.mcuAudioWaiters.delete(segmentId)
+          waiter.reject(new Error('MCU client disconnected before audio completion'))
+        }
       }
       this.cancelPendingMcuInterruptsForClient(clientId)
       this.closeInboundSocketsForOwner(socket.id)
@@ -1429,17 +1581,15 @@ export class GlobalAgentServer {
   }
 
   private mcuSessionId(clientId: string | undefined, profile: string, agentRuntime: McuAgentRuntime): string {
-    const instance = (clientId || 'device')
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 64) || 'device'
-    const profileId = (profile || 'default')
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 64) || 'default'
-    return `mcu-${instance}-${profileId}-${agentRuntime}`
+    const active = clientId ? activeMcuVoiceRoute(clientId, profile) : undefined
+    if (active) return active.sessionId
+    const socket = clientId ? this.clients.get(clientId) : undefined
+    const userId = socket?.data.user?.id, deviceCode = socket?.data.mcuDeviceCode
+    if (typeof userId === 'number' && typeof deviceCode === 'string' && (socket?.data.profile || 'default') === profile) {
+      const binding = getMcuSessionBinding({ userId, profile, deviceCode })
+      if (binding?.sessionId) return binding.sessionId
+    }
+    return legacyMcuSessionId(clientId, profile, agentRuntime)
   }
 
   private async synthesizeMcuSpeech(text: string, userToken: string, profile: string, signal?: AbortSignal): Promise<{ url: string; mimeType: string }> {
@@ -1534,8 +1684,9 @@ export class GlobalAgentServer {
     segmentId: string,
     text: string,
     audioResult: Promise<McuSpeechSynthesisResult>,
+    signal?: AbortSignal,
   ): Promise<EnqueuedMcuSpeechSegment> {
-    if (this.interruptedMcuInteractions.has(options.interactionId)) {
+    if (signal?.aborted || this.interruptedMcuInteractions.has(options.interactionId)) {
       return { playbackDone: Promise.resolve() }
     }
     const result = await audioResult
@@ -1543,10 +1694,15 @@ export class GlobalAgentServer {
       if (result.aborted) throw new Error('audio.interrupted')
       throw result.err
     }
-    if (this.interruptedMcuInteractions.has(options.interactionId)) {
+    if (signal?.aborted || this.interruptedMcuInteractions.has(options.interactionId)) {
       return { playbackDone: Promise.resolve() }
     }
-    const waitForDone = this.waitForMcuAudioDone(segmentId, Math.max(90_000, Math.min(text.length * 1200, 300_000)))
+    if (options.routeLeaseId) await validateMcuVoiceRoute(options.routeLeaseId, options.userToken)
+    // Ownership validation can yield while Stop cancels this exact turn.
+    if (signal?.aborted || this.interruptedMcuInteractions.has(options.interactionId)) {
+      return { playbackDone: Promise.resolve() }
+    }
+    const waitForDone = this.waitForMcuAudioDone(segmentId, Math.max(90_000, Math.min(text.length * 1200, 300_000)), options.interactionId, options.clientId)
     waitForDone.catch(() => undefined)
     const emitted = this.emitMcuEvent({
       type: 'audio.enqueue',
@@ -1572,25 +1728,49 @@ export class GlobalAgentServer {
     return { playbackDone: waitForDone }
   }
 
-  private waitForMcuAudioDone(segmentId: string, timeoutMs: number): Promise<void> {
+  private waitForMcuAudioDone(segmentId: string, timeoutMs: number, interactionId: string, clientId?: string): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.mcuAudioWaiters.delete(segmentId)
         reject(new Error(`MCU audio playback timed out: ${segmentId}`))
       }, timeoutMs)
-      this.mcuAudioWaiters.set(segmentId, { resolve, reject, timer })
+      this.mcuAudioWaiters.set(segmentId, { resolve, reject, timer, clientId, interactionId })
     })
   }
 
-  private abortActiveMcuRun(interactionId: string): void {
+  private abortActiveMcuRun(interactionId: string, clientId?: string): void {
+    const active = this.activeMcuRuns.get(interactionId)
+    if (!active || active.clientId !== clientId) return
     this.interruptedMcuInteractions.add(interactionId)
     this.abortMcuTts(interactionId)
-    const active = this.activeMcuRuns.get(interactionId)
-    if (!active) return
     logger.info({ interactionId, sessionId: active.sessionId }, '[global-agent] aborting MCU chat-run after audio interrupt')
-    active.socket.emit('abort', { session_id: active.sessionId })
-    this.activeMcuRuns.delete(interactionId)
-    this.mcuSessionRuns.delete(active.sessionId)
+    active.cancel()
+  }
+
+  private async isMcuTurnRecipient(options: Pick<McuVoiceChatTurnOptions, 'clientId' | 'profile' | 'userToken'>, route?: McuVoiceRoute): Promise<boolean> {
+    if (route) { await validateMcuVoiceRecipient(route, options.userToken); return true }
+    const app = await inspectAppUserToken(options.userToken)
+    if (!app || app.status !== 'active' || !app.user || !options.clientId) return false
+    return Boolean(await this.getOwnedMcuDevice({ userId: app.user.id, deviceCode: app.deviceCode, profile: options.profile }, options.clientId))
+  }
+
+  private async notifyMcuCancellation(options: Pick<McuVoiceChatTurnOptions, 'clientId' | 'profile' | 'userToken' | 'interactionId'>, route?: McuVoiceRoute, outcome: McuTurnOutcome = 'cancelled'): Promise<void> {
+    if (route) {
+      if (this.terminalMcuRoutes.has(route) || this.pendingMcuCancellations.has(route)) return
+      this.pendingMcuCancellations.add(route)
+    }
+    try {
+      await route?.settlement
+      if (!await this.isMcuTurnRecipient(options, route)) return
+      if (route && this.terminalMcuRoutes.has(route)) return
+      const delivered = emitMcuSettledTurn(options.interactionId, outcome, payload => this.emitMcuEvent(payload, { clientId: options.clientId }))
+      if (delivered && route) this.terminalMcuRoutes.add(route)
+      logger.info({ interactionId: options.interactionId, clientId: options.clientId, profile: options.profile, outcome, delivered }, '[global-agent] MCU settled terminal delivery')
+    } catch {
+      // Never disclose a former turn to an offline, replaced or revoked recipient.
+    } finally {
+      if (route) this.pendingMcuCancellations.delete(route)
+    }
   }
 
   private scheduleMcuInterrupt(clientId: string, profile: string, agentRuntime: McuAgentRuntime, interactionId: string): void {
@@ -1640,32 +1820,28 @@ export class GlobalAgentServer {
   }
 
   private interruptMcuSession(clientId: string, profile: string, agentRuntime: McuAgentRuntime, interactionId?: string): void {
-    const active = interactionId ? this.activeMcuRuns.get(interactionId) : undefined
+    const turnId = interactionId?.trim()
+    if (!turnId) return
+    const lease = activeMcuVoiceRoute(clientId, profile)
+    const active = this.activeMcuRuns.get(turnId)
     const requestedSessionId = this.mcuSessionId(clientId, profile, agentRuntime)
-    const activeSessionBelongsToDevice = active && (
-      active.sessionId === this.mcuSessionId(clientId, profile, 'ekko')
-      || active.sessionId === this.mcuSessionId(clientId, profile, 'hermes')
-    )
+    const activeSessionBelongsToDevice = active?.clientId === clientId && active.profile === profile
     const sessionId = activeSessionBelongsToDevice ? active.sessionId : requestedSessionId
     const sessionRun = this.mcuSessionRuns.get(sessionId)
-    const hasActiveTts = interactionId ? this.mcuTtsAbortControllers.has(interactionId) : false
-    if (interactionId && (sessionRun || active || hasActiveTts)) {
-      this.interruptedMcuInteractions.add(interactionId)
-      this.abortMcuTts(interactionId)
+    logger.info({ clientId, profile, interactionId: turnId, leaseInteractionId: lease?.interactionId,
+      matchedLease: lease?.clientId === clientId && lease.profile === profile && lease.interactionId === turnId,
+      matchedRun: activeSessionBelongsToDevice || sessionRun?.interactionId === turnId }, '[global-agent] MCU interrupt target checked')
+    if (lease?.clientId === clientId && lease.profile === profile && lease.interactionId === turnId) {
+      void this.notifyMcuCancellation({ clientId, profile, userToken: String(this.clients.get(clientId)?.data.userToken || ''), interactionId: lease.interactionId }, lease)
+      cancelMcuVoiceRoute(lease.leaseId)
     }
-    if (sessionRun) {
-      this.recentlyInterruptedMcuSessions.set(sessionId, Date.now())
-      this.interruptedMcuInteractions.add(sessionRun.interactionId)
-      this.abortMcuTts(sessionRun.interactionId)
-      logger.info({ interactionId: sessionRun.interactionId, sessionId }, '[global-agent] aborting MCU chat-run after interrupt')
-      sessionRun.socket.emit('abort', { session_id: sessionId })
-      this.activeMcuRuns.delete(sessionRun.interactionId)
-      this.mcuSessionRuns.delete(sessionId)
+    if (sessionRun?.interactionId === turnId) {
+      const ownedRun = this.activeMcuRuns.get(sessionRun.interactionId)
+      if (ownedRun?.clientId === clientId && ownedRun.profile === profile) ownedRun.cancel()
       return
     }
-    if (interactionId && active?.sessionId === sessionId) {
-      this.recentlyInterruptedMcuSessions.set(sessionId, Date.now())
-      this.abortActiveMcuRun(interactionId)
+    if (activeSessionBelongsToDevice && active?.sessionId === sessionId) {
+      this.abortActiveMcuRun(turnId, clientId)
     }
   }
 
@@ -1699,6 +1875,14 @@ export class GlobalAgentServer {
 
   private clearMcuSession(clientId: string, profile: string, agentRuntime: McuAgentRuntime, interactionId?: string): void {
     const sessionId = this.mcuSessionId(clientId, profile, agentRuntime)
+    const socket = this.clients.get(clientId), userId = socket?.data.user?.id, deviceCode = socket?.data.mcuDeviceCode
+    const bound = activeMcuVoiceRoute(clientId, profile)?.bound || typeof userId === 'number' && typeof deviceCode === 'string'
+      && Boolean(getMcuSessionBinding({ userId, profile, deviceCode })?.sessionId)
+    if (bound) {
+      this.emitMcuEvent({ type: 'mcu.session.cleared', interactionId, profile, agentRuntime, sessionId,
+        ok: false, error: 'bound_session_history_preserved' }, { clientId })
+      return
+    }
     this.cancelPendingMcuInterrupt(sessionId)
     this.forgetMcuSessionRun(sessionId, interactionId)
     const chatRunServer = getChatRunServer()
@@ -1770,12 +1954,12 @@ export class GlobalAgentServer {
 
     if (event === 'audio.done' || event === 'audio.interrupted' || event === 'audio.dropped') {
       if (event === 'audio.interrupted' && typeof payload.interactionId === 'string') {
-        this.abortActiveMcuRun(payload.interactionId)
+        this.abortActiveMcuRun(payload.interactionId, clientId)
       }
       const segmentId = typeof payload.segmentId === 'string' ? payload.segmentId : ''
       if (!segmentId) return
       const waiter = this.mcuAudioWaiters.get(segmentId)
-      if (!waiter) return
+      if (!waiter || waiter.clientId !== clientId) return
       clearTimeout(waiter.timer)
       this.mcuAudioWaiters.delete(segmentId)
       if (event === 'audio.done') {
@@ -1790,6 +1974,7 @@ export class GlobalAgentServer {
       const interactionId = typeof payload.interactionId === 'string' ? payload.interactionId.trim() : ''
       const profile = typeof payload.profile === 'string' && payload.profile.trim() ? payload.profile.trim() : 'default'
       const agentRuntime = normalizeMcuAgentRuntime(payload.agentRuntime)
+      logger.info({ clientId, profile, interactionId, agentRuntime }, '[global-agent] MCU interrupt received')
       this.scheduleMcuInterrupt(clientId, profile, agentRuntime, interactionId)
       this.emitMcuEvent({ type: 'mcu.interrupt.ack', interactionId, profile, agentRuntime }, { clientId })
       return
