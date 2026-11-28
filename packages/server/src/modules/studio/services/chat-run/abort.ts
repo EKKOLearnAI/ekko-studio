@@ -24,6 +24,14 @@ const ABORT_BRIDGE_SYNC_TIMEOUT_MESSAGE = 'Hermes Agent did not confirm stop bef
 const abortCompletions = new WeakMap<SessionState, { runId: string; runMarker?: string }>()
 const abortRequests = new WeakMap<SessionState, Promise<void>>()
 
+export interface AbortDispatchResult {
+  runId?: string
+  dispatched: boolean
+  runtime: 'bridge' | 'native' | 'none'
+  /** Bridge confirmation only; native handlers/processes must also be awaited. */
+  synced: boolean
+}
+
 function isBridgeRunSource(source?: string): boolean {
   return source === 'cli' || source === 'global_agent' || source === 'workflow' || source === 'group_chat'
 }
@@ -59,7 +67,7 @@ export async function handleAbort(
   sessionMap: Map<string, SessionState>,
   bridge: any,
   runQueuedItem: (socket: Socket, sessionId: string, next: QueuedRun, fallbackProfile?: string) => void,
-) {
+): Promise<AbortDispatchResult> {
   let state = sessionMap.get(sessionId)
   const hasCodingAgentRun = codingAgentRunManager.hasSession(sessionId)
   const hasEkkoBackgroundTasks = hasGlobalEkkoBackgroundTasks(sessionId)
@@ -116,12 +124,11 @@ export async function handleAbort(
       synced: false,
       ignored: true,
     })
-    return
+    return { dispatched: false, runtime: 'none', synced: false }
   }
 
   const activeState = state
-  if (!activeState) return
-  if (activeState.isAborting) return
+  if (!activeState || activeState.isAborting) return { runId: activeState?.runId, dispatched: false, runtime: 'none', synced: false }
   abortCompletions.delete(activeState)
 
   if (activeState.queueInsertion) {
@@ -161,6 +168,7 @@ export async function handleAbort(
   // bridge.interrupt returns "unknown session" while the coding agent keeps
   // running.
   const shouldAbortThroughBridge = isBridgeRunSource(activeState.source) && !isCodingAgentRun
+  const result: AbortDispatchResult = { runId, dispatched: true, runtime: shouldAbortThroughBridge ? 'bridge' : 'native', synced: !shouldAbortThroughBridge }
 
   // Flush in-memory assistant text to DB before aborting the stream.
   activeState.pluginAgent?.flushPartial()
@@ -183,7 +191,8 @@ export async function handleAbort(
       let interruptResult: any = null
       try {
         interruptResult = await bridge.interrupt(sessionId, 'Aborted by user', activeState.profile)
-        if (!isCurrentAbort()) return
+        result.synced = interruptResult?.synced === true
+        if (!isCurrentAbort()) return result
         const interruptedDelegationIds = Array.isArray(interruptResult?.background_delegation_ids)
           ? interruptResult.background_delegation_ids.map((value: unknown) => String(value || '').trim()).filter(Boolean)
           : []
@@ -209,13 +218,13 @@ export async function handleAbort(
       } catch (err) {
         logger.warn(err, '[chat-run-socket][abort] failed to interrupt CLI bridge for session %s', sessionId)
       }
-      if (!isCurrentAbort()) return
+      if (!isCurrentAbort()) return result
       try {
         await bridge.goalPause?.(sessionId, 'user-interrupted', activeState.profile)
       } catch (err) {
         logger.debug(err, '[chat-run-socket][abort] goal pause-on-interrupt skipped for session %s', sessionId)
       }
-      if (!isCurrentAbort()) return
+      if (!isCurrentAbort()) return result
       if (interruptResult?.synced === false) {
         replaceState(sessionMap, sessionId, 'abort.timeout', {
           event: 'abort.timeout',
@@ -235,10 +244,10 @@ export async function handleAbort(
         } catch (err) {
           logger.warn(err, '[chat-run-socket][abort] failed to destroy timed-out CLI bridge session %s', sessionId)
         }
-        if (!isCurrentAbort()) return
+        if (!isCurrentAbort()) return result
         finishRequest()
         await markAbortCompleted(nsp, socket, sessionId, runId || 'bridge_abort_timeout', sessionMap, runQueuedItem, false, runMarker)
-        return
+        return result
       }
     } finally {
       // The terminal poll must not dequeue a new run while goalPause/destroy
@@ -258,8 +267,9 @@ export async function handleAbort(
     activeState.abortController.abort()
   }
 
-  if (!isCurrentAbort()) return
+  if (!isCurrentAbort()) return result
   await markAbortCompleted(nsp, socket, sessionId, runId || 'response_stream', sessionMap, runQueuedItem, true, runMarker)
+  return result
 }
 
 export async function markAbortCompleted(

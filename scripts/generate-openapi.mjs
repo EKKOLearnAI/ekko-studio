@@ -100,6 +100,7 @@ const tagMappings = {
   'modules/studio/routes/app-connections.ts': { name: 'App Connections', description: 'Mobile App authorization and connection management' },
   'modules/studio/routes/app-relay.ts': { name: 'App Relay', description: 'Mobile App cloud relay route and connection management' },
   'modules/studio/routes/mcu-devices.ts': { name: 'MCU Devices', description: 'Microcontroller device management' },
+  'modules/studio/routes/mcu-session-bindings.ts': { name: 'MCU Voice Bindings', description: 'Owned device voice conversation bindings and safety capabilities' },
   'modules/studio/routes/mcu-firmware.ts': { name: 'MCU Firmware', description: 'Microcontroller firmware distribution' },
   'modules/studio/routes/theme.ts': { name: 'Theme', description: 'Per-user appearance settings and background image' },
   'modules/studio/routes/navigation.ts': { name: 'Navigation', description: 'Per-user navigation entries, ordering and explicit plugin opt-in' },
@@ -2239,6 +2240,44 @@ for (const base of [
   schema.properties.createOnly = { type: 'boolean', default: false, description: 'Reject an existing destination instead of editing it.' }
   write.responses['409'] = { description: 'A file or directory already exists at this path.' }
   openapi.paths[base + '/rename'].post.responses['409'] = { description: 'The destination already exists.' }
+}
+// These inputs are validated through shared helpers, beyond the route scanner's
+// local controller inference. Keep the published contract explicit.
+const mcuDeviceCode = { type: 'string', minLength: 1, maxLength: 255 }
+const mcuRevision = { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER }
+const mcuKind = { type: 'string', enum: ['chat', 'bot'] }
+const mcuBindingSnapshot = {
+  type: 'object', required: ['capabilities', 'device', 'binding', 'revision'], properties: {
+    capabilities: { type: 'object', required: ['version', 'manualApprovals', 'clarificationWait'], properties: {
+      version: { type: 'integer', enum: [1] }, manualApprovals: { type: 'boolean', enum: [true] }, clarificationWait: { type: 'boolean', enum: [true] },
+    } },
+    device: { type: 'object', required: ['deviceCode', 'clientId', 'profile', 'agentRuntime', 'online'], properties: {
+      deviceCode: mcuDeviceCode, clientId: { type: 'string' }, profile: { type: 'string' }, agentRuntime: { type: 'string' }, online: { type: 'boolean' },
+    } },
+    binding: { type: 'object', nullable: true, required: ['sessionId', 'kind', 'revision'], properties: {
+      sessionId: { type: 'string', minLength: 1, maxLength: 256 }, kind: mcuKind, revision: mcuRevision,
+    } },
+    revision: mcuRevision,
+  },
+}
+for (const method of ['get', 'put', 'delete']) {
+  const operation = openapi.paths['/api/studio/mcu/session-bindings'][method]
+  operation.parameters = method === 'get' ? [{ name: 'device_code', in: 'query', required: true, schema: mcuDeviceCode }] : []
+  if (method !== 'get') operation.requestBody = { required: true, content: { 'application/json': { schema: {
+    type: 'object', additionalProperties: false,
+    required: ['device_code', 'expected_revision', ...(method === 'put' ? ['session_id', 'kind'] : [])],
+    properties: { device_code: mcuDeviceCode, expected_revision: mcuRevision,
+      ...(method === 'put' ? { session_id: { type: 'string', minLength: 1, maxLength: 256 }, kind: mcuKind } : {}),
+    },
+  } } } }
+  operation.responses = {
+    200: { description: 'Owned device binding snapshot; unbinding retains a revision tombstone', content: { 'application/json': { schema: mcuBindingSnapshot } } },
+    400: { description: 'Invalid device code, revision or binding fields' },
+    401: { description: 'Studio login required' },
+    403: { description: 'Device, Profile or target conversation is not owned by this account; shared-session access is denied' },
+    404: { description: 'Target conversation unavailable' },
+    409: { description: 'Binding revision changed, device offline, or device/target busy; read the latest snapshot before deciding to retry' },
+  }
 }
 writeFileSync(outputPath, JSON.stringify(openapi, null, 2))
 

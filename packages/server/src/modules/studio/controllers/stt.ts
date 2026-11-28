@@ -26,6 +26,10 @@ import { SttNoSpeechDetectedError } from '../services/voice/stt/types'
 import { logger } from '../public/logging'
 import { emitMcuVoiceEvent, startMcuVoiceChatTurn } from '../public/mcu-voice'
 import { normalizeMcuAgentRuntime } from '../services/global-agent/mcu-agent-runtime'
+import { McuBindingError } from '../contracts/mcu-session-bindings'
+import { reserveMcuVoiceRoute, validateMcuVoiceRoute, validateMcuVoiceRecipient, releaseMcuVoiceRoute, type McuVoiceRoute } from '../services/devices/mcu-session-bindings'
+import { getMcuSttFallbackStatus, transcribeMcuWithFallback } from '../services/voice/stt/mcu-fallback'
+import { emitMcuSettledTurn } from '../services/global-agent/mcu-turn-settlement'
 import { MCU_TTS_SAMPLE_RATE, mcuPromptText, mcuPromptUrl } from '../services/voice/mcu/prompts'
 import { syncVoiceConfigToHermesProfile } from '../services/voice/config-sync'
 import { listProfileNames } from '../public/profile-config'
@@ -236,24 +240,36 @@ async function readMultipartBody(ctx: Context): Promise<ParsedMultipartBody | { 
   return { fields, files }
 }
 
-async function readRawAudioBody(ctx: Context): Promise<Buffer | { error: string; status: number }> {
+async function readRawAudioBody(ctx: Context, signal?: AbortSignal): Promise<Buffer | { error: string; status: number }> {
   const chunks: Buffer[] = []
   let totalSize = 0
-
-  for await (const chunk of ctx.req) {
-    const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    totalSize += bufferChunk.length
-    if (totalSize > MAX_STT_UPLOAD_SIZE) {
-      return { error: `Upload too large (max ${MAX_STT_UPLOAD_SIZE / 1024 / 1024}MB)`, status: 413 }
+  const abort = () => ctx.req.destroy(new DOMException('MCU voice upload cancelled', 'AbortError'))
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    if (signal?.aborted) abort()
+    // Let the iterator observe the actual stream exit before releasing the
+    // caller's lease; an abort request alone is not completed upload work.
+    for await (const chunk of ctx.req) {
+      signal?.throwIfAborted()
+      const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      totalSize += bufferChunk.length
+      if (totalSize > MAX_STT_UPLOAD_SIZE) {
+        return { error: `Upload too large (max ${MAX_STT_UPLOAD_SIZE / 1024 / 1024}MB)`, status: 413 }
+      }
+      chunks.push(bufferChunk)
     }
-    chunks.push(bufferChunk)
+    signal?.throwIfAborted()
+    const audio = Buffer.concat(chunks)
+    if (audio.length === 0) {
+      return { error: 'audio body is required', status: 400 }
+    }
+    return audio
+  } catch (error) {
+    if (signal?.aborted) return { error: 'MCU voice upload cancelled', status: 499 }
+    throw error
+  } finally {
+    signal?.removeEventListener('abort', abort)
   }
-
-  const audio = Buffer.concat(chunks)
-  if (audio.length === 0) {
-    return { error: 'audio body is required', status: 400 }
-  }
-  return audio
 }
 
 function findAudioPart(files: ParsedPart[]): ParsedPart | null {
@@ -299,6 +315,7 @@ async function saveMcuSttDebugAudio(input: {
   contentType: string
   audio: Buffer
 }): Promise<{ audioPath: string; metadataPath: string }> {
+  if (process.env.HERMES_MCU_STT_DEBUG_AUDIO !== '1') return { audioPath: '', metadataPath: '' }
   const dir = join(config.appHome, 'debug', 'mcu-stt')
   await mkdir(dir, { recursive: true })
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -338,7 +355,8 @@ export async function profileStatus(ctx: Context) {
   const userId = authUserId(ctx)
   if (!userId) return
 
-  ctx.body = resolveSttProfileStatus(requestedProfile(ctx))
+  const profile = requestedProfile(ctx)
+  ctx.body = { ...resolveSttProfileStatus(profile), mcuFallback: getMcuSttFallbackStatus(profile) }
 }
 
 export async function missingProfileAudio(ctx: Context) {
@@ -781,206 +799,209 @@ export async function mcuVoiceTurn(ctx: Context) {
   if (!userId) return
 
   const profile = requestedProfile(ctx)
-  const status = resolveSttProfileStatus(profile)
-  if (!status.configured || !status.activeProvider || status.activeProvider === 'browser' || !isStoredSttProvider(status.activeProvider)) {
-    ctx.body = {
-      ok: false,
-      profile,
-      reason: status.reason || 'stt_not_configured',
-      audio: {
-        text: mcuPromptText('missing-stt'),
-        url: mcuPromptUrl('missing-stt'),
-        mimeType: 'audio/x-pcm',
-        format: 's16le',
-        sampleRate: MCU_TTS_SAMPLE_RATE,
-        channels: 1,
-      },
-    }
-    return
-  }
-
-  const audio = await readRawAudioBody(ctx)
-  if ('error' in audio) {
-    ctx.status = audio.status
-    ctx.body = { error: audio.error }
-    return
-  }
-
-  const persistedSetting = getSttProviderSetting(profile, status.activeProvider, { includeSecrets: true })
-  const storedSetting = persistedSetting || (status.activeProvider === 'local' && getLocalSttModelStatus().usable
-    ? localRuntimeSetting()
-    : null)
-  if (!storedSetting || (status.activeProvider !== 'local' && !storedSetting.secrets.apiKey)) {
-    ctx.body = {
-      ok: false,
-      profile,
-      reason: 'active_stt_provider_secret_missing',
-      audio: {
-        text: mcuPromptText('missing-stt'),
-        url: mcuPromptUrl('missing-stt'),
-        mimeType: 'audio/x-pcm',
-        format: 's16le',
-        sampleRate: MCU_TTS_SAMPLE_RATE,
-        channels: 1,
-      },
-    }
-    return
-  }
-
-  const contentType = ctx.get('content-type') || 'audio/wav'
-  const isWavUpload = contentType.toLowerCase().includes('wav')
-  const forceFfmpeg = status.activeProvider === 'doubao' && !isWavUpload
   const interactionId = ctx.get('x-hermes-mcu-interaction-id') || `mcu-voice-${Date.now()}`
   const token = bearerToken(ctx)
   const clientId = ctx.get('x-hermes-mcu-device-id') || undefined
   const agentRuntime = normalizeMcuAgentRuntime(ctx.get('x-hermes-mcu-agent-runtime'))
-  let debugAudioPath = ''
-  let debugMetadataPath = ''
+  let route: McuVoiceRoute
+  try { route = await reserveMcuVoiceRoute({ userId, profile, userToken: token, clientId, interactionId, agentRuntime }) }
+  catch (error) {
+    if (!(error instanceof McuBindingError)) throw error
+    ctx.status = error.status; ctx.body = { error: error.message, code: error.code }; return
+  }
+  let backgroundOwnsLease = false
   try {
-    const saved = await saveMcuSttDebugAudio({
+    const status = resolveSttProfileStatus(profile)
+    if (!status.configured || !status.activeProvider || status.activeProvider === 'browser' || !isStoredSttProvider(status.activeProvider)) {
+      ctx.body = {
+        ok: false,
+        profile,
+        reason: status.reason || 'stt_not_configured',
+        audio: {
+          text: mcuPromptText('missing-stt'),
+          url: mcuPromptUrl('missing-stt'),
+          mimeType: 'audio/x-pcm',
+          format: 's16le',
+          sampleRate: MCU_TTS_SAMPLE_RATE,
+          channels: 1,
+        },
+      }
+      return
+    }
+
+    const audio = await readRawAudioBody(ctx, route.signal)
+    if ('error' in audio) {
+      ctx.status = audio.status
+      ctx.body = { error: audio.error }
+      return
+    }
+
+    const persistedSetting = getSttProviderSetting(profile, status.activeProvider, { includeSecrets: true })
+    const storedSetting = persistedSetting || (status.activeProvider === 'local' && getLocalSttModelStatus().usable
+      ? localRuntimeSetting()
+      : null)
+    if (!storedSetting || (status.activeProvider !== 'local' && !storedSetting.secrets.apiKey)) {
+      ctx.body = {
+        ok: false,
+        profile,
+        reason: 'active_stt_provider_secret_missing',
+        audio: {
+          text: mcuPromptText('missing-stt'),
+          url: mcuPromptUrl('missing-stt'),
+          mimeType: 'audio/x-pcm',
+          format: 's16le',
+          sampleRate: MCU_TTS_SAMPLE_RATE,
+          channels: 1,
+        },
+      }
+      return
+    }
+
+    const contentType = ctx.get('content-type') || 'audio/wav'
+    const isWavUpload = contentType.toLowerCase().includes('wav')
+    const forceFfmpeg = status.activeProvider === 'doubao' && !isWavUpload
+    let debugAudioPath = ''
+    let debugMetadataPath = ''
+    try {
+      const saved = await saveMcuSttDebugAudio({
+        userId,
+        profile,
+        provider: status.activeProvider,
+        contentType,
+        audio,
+      })
+      debugAudioPath = saved.audioPath
+      debugMetadataPath = saved.metadataPath
+    } catch (error) {
+      logger.warn({
+        err: error,
+        userId,
+        profile,
+        provider: status.activeProvider,
+        audioBytes: audio.length,
+      }, '[mcu-stt] failed to save debug audio')
+    }
+
+    logger.info({
       userId,
       profile,
       provider: status.activeProvider,
       contentType,
-      audio,
-    })
-    debugAudioPath = saved.audioPath
-    debugMetadataPath = saved.metadataPath
-  } catch (error) {
-    logger.warn({
-      err: error,
-      userId,
-      profile,
-      provider: status.activeProvider,
       audioBytes: audio.length,
-    }, '[mcu-stt] failed to save debug audio')
-  }
+      forceFfmpeg,
+      debugAudioPath,
+      debugMetadataPath,
+    }, '[mcu-stt] voice turn upload received')
 
-  logger.info({
-    userId,
-    profile,
-    provider: status.activeProvider,
-    contentType,
-    audioBytes: audio.length,
-    forceFfmpeg,
-    debugAudioPath,
-    debugMetadataPath,
-  }, '[mcu-stt] voice turn upload received')
+    ctx.body = {
+      ok: true,
+      profile,
+      accepted: true,
+      interactionId,
+    }
 
-  ctx.body = {
-    ok: true,
-    profile,
-    accepted: true,
-    interactionId,
-  }
+    const controller = new AbortController()
+    const cancelWithLease = () => controller.abort()
+    route.signal.addEventListener('abort', cancelWithLease, { once: true })
+    if (route.signal.aborted) controller.abort()
+    const timer = setTimeout(() => controller.abort(), MCU_STT_TIMEOUT_MS)
+    const provider = status.activeProvider
+    const settings = {
+      ...storedSetting.settings,
+      audioTranscode: forceFfmpeg ? 'ffmpeg' : storedSetting.settings.audioTranscode,
+    }
+    const secrets = storedSetting.secrets
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), MCU_STT_TIMEOUT_MS)
-  const provider = status.activeProvider
-  const settings = {
-    ...storedSetting.settings,
-    audioTranscode: forceFfmpeg ? 'ffmpeg' : storedSetting.settings.audioTranscode,
-  }
-  const secrets = storedSetting.secrets
+    backgroundOwnsLease = true
+    void (async () => {
+      let chatOwnsLease = false
+      let wholeFailure = false
+      try {
+        if (controller.signal.aborted) return
+        emitMcuVoiceEvent({ type: 'interaction.status', interactionId, status: 'transcribing' }, { clientId })
+        const result = await transcribeMcuWithFallback({
+          provider,
+          audio,
+          fileName: 'mcu-voice.wav',
+          mimeType: contentType,
+          settings,
+          secrets,
+          signal: controller.signal,
+        }, profile)
 
-  void (async () => {
-    emitMcuVoiceEvent({ type: 'interaction.status', interactionId, status: 'transcribing' }, { clientId })
-    try {
-      const result = await transcribeWithProvider({
-        provider,
-        audio,
-        fileName: 'mcu-voice.wav',
-        mimeType: contentType,
-        settings,
-        secrets,
-        signal: controller.signal,
-      })
-
-      logger.info({
-        userId,
-        profile,
-        provider: result.provider,
-        model: result.model,
-        transcriptLength: result.text.length,
-        durationMs: result.durationMs,
-      }, '[mcu-stt] voice turn transcribed')
-
-      const transcript = result.text.trim()
-      if (!transcript) {
-        emitMcuVoiceEvent({ type: 'interaction.status', interactionId, status: 'completed', text: '' }, { clientId })
-        return
-      }
-      if (!token) {
-        emitMcuVoiceEvent({
-          type: 'interaction.status',
-          interactionId,
-          status: 'failed',
-          text: 'missing Web UI auth token',
-        }, { clientId })
-        return
-      }
-
-      startMcuVoiceChatTurn({
-        userToken: token,
-        profile,
-        interactionId,
-        transcript,
-        clientId,
-        agentRuntime,
-      })
-    } catch (error) {
-      if (error instanceof SttNoSpeechDetectedError) {
         logger.info({
           userId,
           profile,
-          provider,
-          audioBytes: audio.length,
-          contentType,
-          debugAudioPath,
-        }, '[mcu-stt] voice turn completed without detected speech')
-        emitMcuVoiceEvent({
-          type: 'interaction.status',
-          interactionId,
-          status: 'completed',
-          text: '',
-        }, { clientId })
-        return
-      }
+          provider: result.provider,
+          model: result.model,
+          transcriptLength: result.text.length,
+          durationMs: result.durationMs,
+        }, '[mcu-stt] voice turn transcribed')
 
-      const detail = error instanceof Error ? error.message : String(error)
-      const text = isAbortError(error)
-        ? 'STT request timed out'
-        : error instanceof SttProviderConfigError
-          ? error.message
-          : detail || 'MCU voice turn failed'
-      logger.warn({
-        userId,
-        profile,
-        provider,
-        audioBytes: audio.length,
-        contentType,
-        debugAudioPath,
-        error: detail,
-      }, '[mcu-stt] voice turn failed')
-      emitMcuVoiceEvent({
-        type: 'interaction.status',
-        interactionId,
-        status: 'failed',
-        text,
-      }, { clientId })
-      emitMcuVoiceEvent({
-        type: 'audio.enqueue',
-        interactionId,
-        segmentId: `${interactionId}-stt-failed`,
-        text: mcuPromptText('stt-failed'),
-        url: mcuPromptUrl('stt-failed'),
-        mimeType: 'audio/x-pcm',
-        format: 's16le',
-        sampleRate: MCU_TTS_SAMPLE_RATE,
-        channels: 1,
-      }, { clientId })
-    } finally {
-      clearTimeout(timer)
-    }
-  })()
+        const transcript = result.text.trim()
+        await validateMcuVoiceRoute(route.leaseId, token)
+        if (!transcript) {
+          emitMcuVoiceEvent({ type: 'interaction.status', interactionId, status: 'completed', text: '' }, { clientId })
+          return
+        }
+        if (!token) {
+          wholeFailure = true
+          return
+        }
+
+        await validateMcuVoiceRoute(route.leaseId, token)
+        chatOwnsLease = startMcuVoiceChatTurn({
+          userToken: token,
+          profile,
+          interactionId,
+          transcript,
+          clientId,
+          agentRuntime,
+          routeLeaseId: route.leaseId,
+        })
+        if (!chatOwnsLease) wholeFailure = true
+      } catch (error) {
+        if (route.signal.aborted) return
+        // A changed device connection or revoked target must not receive this
+        // turn's transcript, error detail, or fallback audio via a reused ID.
+        try { await validateMcuVoiceRoute(route.leaseId, token) } catch { return }
+        if (error instanceof SttNoSpeechDetectedError) {
+          logger.info({
+            userId,
+            profile,
+            provider,
+            audioBytes: audio.length,
+            contentType,
+            debugAudioPath,
+          }, '[mcu-stt] voice turn completed without detected speech')
+          emitMcuVoiceEvent({
+            type: 'interaction.status',
+            interactionId,
+            status: 'completed',
+            text: '',
+          }, { clientId })
+          return
+        }
+
+        wholeFailure = true
+        logger.warn({ userId, profile, interactionId, provider,
+          reason: isAbortError(error) ? 'stt_timeout' : 'stt_failure' }, '[mcu-stt] whole turn failed; transcription settled')
+      } finally {
+        clearTimeout(timer)
+        route.signal.removeEventListener('abort', cancelWithLease)
+        if (!chatOwnsLease) {
+          releaseMcuVoiceRoute(route.leaseId)
+          if (wholeFailure) {
+            try {
+              await validateMcuVoiceRecipient(route, token)
+              const delivered = emitMcuSettledTurn(interactionId, 'failed', payload => emitMcuVoiceEvent(payload, { clientId }))
+              logger.info({ interactionId, profile, outcome: 'failed', delivered }, '[mcu-stt] settled terminal delivery')
+            } catch { /* Revoked/replaced recipients must not receive former turn metadata. */ }
+          }
+        }
+      }
+    })()
+  } finally {
+    if (!backgroundOwnsLease) releaseMcuVoiceRoute(route.leaseId)
+  }
 }

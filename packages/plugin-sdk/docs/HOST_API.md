@@ -48,6 +48,8 @@ apiMode、reasoningEffort、上下文容量应使用目录返回值，不在插�
 | remove(id) | 会话 ID | 删除结果，仍执行会话归属与运行状态校验 |
 | rename(id,title) | title 字符串 | 更新标题结果 |
 | archive(id,archived=true) | archived boolean | 归档/取消归档结果 |
+
+sessions.list 的 search 在数据库分页前按已存储标题执行完整字面子串匹配；首尾空白忽略，空串不筛选，ASCII 大小写忽略，中文原文匹配，`%`、`_`、反斜杠按普通字符处理。它不搜索消息正文或自动预览，也不做分词；与全文检索入口不同。提供 offset 时，total/hasMore 使用相同标题及原有 Profile、来源、归档和私密会话权限过滤，不是取首页后在插件本地筛选。
 | setModel(id,model) | provider/model 字符串及可选 reasoning_effort、模型分组等宿主模型选择字段；不提供密钥 | 模型选择更新结果，仍校验 Profile 和模型可用性 |
 | setWorkspace(id,workspace) | workspace 为宿主允许访问的目录字符串 | 绑定工作区结果，宿主执行路径及运行状态检查 |
 | messages(id,query?) | limit/offset 分页；其他查询保留原会话历史语义 | session、messages、total、offset、limit、hasMore，并可能有 taskPlans/workspaceRunChanges 等扩展 |
@@ -219,3 +221,38 @@ cdp.release(tabId) 返回 {ok:boolean}，只释放自己的控制租约。
 浏览器无授权共享 Desktop 或共享撤销时明确失败；不会另起浏览器 Profile，也不开放调试端口或 token。
 本地 Desktop 与连接远程 Studio 的 Desktop 使用同一账号/Profile 绑定通道，由已登录主窗口建立。
 两种模式下 tabs 和 CDP 的参数及返回不变；退出登录或切换 Profile 后旧连接及调用失效。
+
+## MCU / StackChan 的对话绑定
+
+具有 `api.read` / `api.write` 的设备插件可通过正式 `host.request` JSON 入口，将实际已配对设备
+连接到当前 Profile 的已有单聊，或当前账号拥有的 BOT。此入口不授予设备新的工具权限；模型、
+Agent、审批、澄清与 BOT 执行策略仍由宿主管理，不提供通用管理员 token 或固件传入的 session 覆盖。
+
+| 请求 | 参数 | 返回 / 约束 |
+| --- | --- | --- |
+| GET `/api/studio/mcu/session-bindings` | query `{device_code:string}` | 下方快照；读取需要 `api.read` |
+| PUT 同一路径 | body `{device_code:string,session_id:string,kind:'chat'\|'bot',expected_revision:number}` | 保存后的快照；需要 `api.write`，设备在线且真实 App 配对凭据仍有效 |
+| DELETE 同一路径 | body `{device_code:string,expected_revision:number}` | 解除绑定后的快照；需要 `api.write`，同样要求设备在线且无活跃工作 |
+
+快照为 `{capabilities:{version:1,manualApprovals:true,clarificationWait:true},
+device:{deviceCode,clientId,profile,agentRuntime,online},binding,revision}`。
+`binding` 为 `null` 或 `{sessionId,kind,revision}`。所有 ID 使用宿主返回的原值。
+设备不在线或不属于当前账号/Profile 时，`device.online=false`，`clientId` 和 `agentRuntime` 为 `''`；
+空字符串表示没有在线值，不能作为连接 ID 使用。仅返回当前账号/Profile 自己的持久绑定，
+不会显示其他账号的在线元数据。已删除或无权访问的目标返回 `binding:null`，顶层 `revision` 仍保留。
+
+版本从 0 开始，成功写入或解除绑定递增；解除保留版本墓碑，旧 revision 不能重新覆盖。
+409 包括版本冲突、设备离线和设备/目标会话忙碌；重新读取快照并由用户决定，不能盲目重试。
+其他账号或 Profile、伪造 owner/clientId、无效或已撤销的配对凭据均不能建立绑定。
+BOT 可使用其已授权模型 Profile，但设备本身始终属于插件当前 Profile。
+
+MCU 语音上传必须以实际设备 App JWT 配合在线逻辑 clientId，宿主根据真实配对记录验证物理设备，
+不相信固件提供的 sessionId。每轮在识别前获取不可变对话租约，转写后及打开 chat-run 前重新校验，
+输出前再检查设备、目标与版本；普通单聊使用存储的 Agent/mode/model，BOT 使用原生 chat-run 策略。
+正在识别、排队、运行、播放或等待人工审批/澄清的设备不可重新绑定；目标会话有其他活跃任务也返回忙碌。
+断开设备、取消或终态会释放租约；排队取消只移除该设备的队列项，不中断其他桌面任务。
+前台回复和播放完成后可继续说下一句；后台任务保留独立输出授权与绑定忙碌保护，不占用下一轮语音。
+人工审批和澄清在 Studio 中处理，设备不会自动批准或代答；拒绝不重试。
+
+固件“清空会话”不会清除已绑定桌面单聊/BOT 的历史，而返回 `bound_session_history_preserved`。
+插件的新对话操作应创建新单聊，再携带最新 revision 重新绑定；不要调用清空 BOT/旧会话历史来模拟新对话。
