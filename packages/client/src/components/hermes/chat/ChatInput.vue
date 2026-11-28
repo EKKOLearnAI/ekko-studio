@@ -79,7 +79,7 @@ const emit = defineEmits<{
 }>()
 
 const reasoningSession = computed(() => props.draft ? props.draftConfig : composerSession.value)
-const defaultReasoningEffortLabel = computed(() => t(props.reasoningEffortDisabled && isHermesSession(reasoningSession.value)
+const defaultReasoningEffortLabel = computed(() => t(isHermesSession(reasoningSession.value)
   ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'))
 const isMoaSession = computed(() => reasoningSession.value?.provider === 'moa')
 const isGlobalCodingAgentSession = computed(() => reasoningSession.value?.codingAgentMode === 'global')
